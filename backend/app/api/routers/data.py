@@ -129,6 +129,7 @@ def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user))
 
     return {
         "me": UserOut.model_validate(user).model_dump(by_alias=True, mode="json"),
+        "ingestionRevision": snapshot["ingestionRevision"],
         "users": [UserOut.model_validate(u).model_dump(by_alias=True, mode="json") for u in snapshot["users"]],
         "clients": [ClientOut.model_validate(c).model_dump(by_alias=True, mode="json") for c in snapshot["clients"]],
         "companies": [company_out(c) for c in snapshot["companies"]],

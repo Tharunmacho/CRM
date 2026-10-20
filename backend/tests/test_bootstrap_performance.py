@@ -29,7 +29,7 @@ from app.db.models import (
 )
 from app.services.desk_snapshot import read_snapshot, snapshot_statement
 from test_database_naming import (
-    PREVIOUS, RENAMED, _migrate, _seed_previous_schema, schema_database,
+    PREVIOUS, _migrate, _seed_previous_schema, schema_database,
 )
 
 
@@ -72,7 +72,7 @@ def test_snapshot_compilation_uses_an_explicit_public_projection():
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)
 
-    assert set(statement.selected_columns.keys()) == SNAPSHOT_COLLECTIONS
+    assert set(statement.selected_columns.keys()) == SNAPSHOT_COLLECTIONS | {"ingestionRevision"}
     assert "projection-only-user" not in sql
     assert "projection-only-user" in compiled.params.values()
     assert "SELECT *" not in sql.upper()
@@ -85,6 +85,8 @@ def test_snapshot_compilation_uses_an_explicit_public_projection():
         assert private_table not in sql
     assert "personal_todos.owner_id =" in sql
     assert "system_notifications.user_id =" in sql
+    assert "email_ingestion_jobs.updated_at" in sql
+    assert "email_ingestion_jobs.state" not in sql
     # Large raw OCR/search columns are omitted while the supported resume and
     # workflow draft fields remain available to the existing desk.
     assert "crm_candidates.resume_text" in sql
@@ -225,7 +227,7 @@ def enrich_fixture(engine):
 def desk_engine(schema_database):
     _migrate(schema_database, PREVIOUS)
     _seed_previous_schema(schema_database)
-    _migrate(schema_database, RENAMED)
+    _migrate(schema_database, "head")
     enrich_fixture(schema_database)
     return schema_database
 
@@ -290,7 +292,8 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
     assert response.status_code == 200
     assert_select_budget(statements, 2)
     body = response.json()
-    assert set(body) == WIRE_COLLECTIONS | {"me"}
+    assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision"}
+    assert body["ingestionRevision"] == "0:0"
     assert_no_private_data(body)
 
     # Compare all existing direct fields against the previous ORM/schema path,
@@ -414,12 +417,12 @@ def test_bootstrap_isolates_personal_data_for_each_current_user(desk_engine, des
 
 
 def test_empty_snapshot_returns_arrays_with_one_query(schema_database):
-    _migrate(schema_database, RENAMED)
+    _migrate(schema_database, "head")
     with Session(schema_database) as db:
         with recorded_statements(schema_database) as statements:
             snapshot = read_snapshot(db, "no-account")
     assert_select_budget(statements, 1)
-    assert snapshot == {key: [] for key in SNAPSHOT_COLLECTIONS}
+    assert snapshot == {**{key: [] for key in SNAPSHOT_COLLECTIONS}, "ingestionRevision": "0:0"}
 
 
 def test_snapshot_query_count_stays_constant_and_committed_changes_are_visible(desk_engine):

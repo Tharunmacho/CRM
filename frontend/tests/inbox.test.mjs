@@ -92,3 +92,13 @@ test('dashboard source health uses the small health endpoint', async () => {
   }
   assert.equal((await api.inbox.health()).worker.enabled, false)
 })
+
+test('all-screen ingestion revision probe uses only the lightweight authenticated endpoint', async () => {
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/inbox/revision')
+    assert.equal(options.method, 'GET')
+    assert.equal(options.credentials, 'include')
+    return Response.json({ revision: 'completion-token' })
+  }
+  assert.deepEqual(await api.inbox.revision(), { revision: 'completion-token' })
+})

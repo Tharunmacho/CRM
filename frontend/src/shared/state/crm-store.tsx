@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { ApiError, api } from '@/shared/api/client'
 import { createLatestRequest } from '@/shared/api/latest-request'
+import { createIngestionRefresh } from '@/shared/api/ingestion-refresh'
 import { isSameDay } from '@/shared/lib/format'
 import type {
   Application,
@@ -38,6 +39,7 @@ import type {
  */
 
 interface Data {
+  ingestionRevision?: string
   users: User[]
   clients: Client[]
   companies: Company[]
@@ -174,13 +176,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const authVersion = useRef(0)
   const authQueue = useRef<Promise<void>>(Promise.resolve())
   const pendingAuthWrites = useRef(0)
+  const currentData = useRef(data)
+  currentData.current = data
 
   const notify = useCallback((message: string, tone: 'ok' | 'warn' = 'ok') => {
     setToast({ id: Date.now(), message, tone })
   }, [])
 
   const loadWorkspace = useCallback(
-    (checkSession: boolean, replace = false) =>
+    (checkSession: boolean, replace = false, background = false) =>
       (replace ? requests.replace : requests.run)(
         async (signal) => {
           // A logged-out visit needs only a small session response, not CRM data.
@@ -213,7 +217,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             setMe(null)
             setData(EMPTY)
             setLoadError(null)
-          } else {
+          } else if (!background) {
             setLoadError(
               error instanceof Error ? error.message : 'The workspace could not be loaded.',
             )
@@ -257,6 +261,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       })
     }
   }, [loadWorkspace, requests])
+
+  // Email intake can finish while any authenticated screen is open. The small
+  // revision probe avoids repeatedly downloading the full recruitment snapshot.
+  useEffect(() => {
+    if (!ready || !me || loadError) return
+    const version = authVersion.current
+    const observer = createIngestionRefresh({
+      currentRevision: () => currentData.current.ingestionRevision,
+      readRevision: (signal) => api.inbox.revision({ signal }),
+      refresh: () => loadWorkspace(false, false, true),
+      isCurrentSession: () =>
+        mounted.current && version === authVersion.current && pendingAuthWrites.current === 0,
+    })
+    const read = () => {
+      if (document.visibilityState === 'visible') {
+        // Retain usable data and retry next time if the probe/refresh fails.
+        void observer.check().catch(() => {})
+      }
+    }
+    read()
+    const timer = window.setInterval(read, 10_000)
+    document.addEventListener('visibilitychange', read)
+    return () => {
+      observer.dispose()
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', read)
+    }
+  }, [me?.id, ready, loadError, loadWorkspace])
 
   const queueAuthWrite = useCallback((write: () => Promise<unknown>) => {
     pendingAuthWrites.current += 1

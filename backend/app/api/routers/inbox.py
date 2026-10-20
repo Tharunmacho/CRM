@@ -17,6 +17,7 @@ from app.integrations.mail.imap import (
 )
 from app.services.mail_config import configured_mailboxes
 from app.services.document_extraction import request_extraction_retry
+from app.services.ingestion_revision import read_revision
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
 admin = require_role(Role.admin)
@@ -105,6 +106,12 @@ def health(db: Session = Depends(get_db), user: User = Depends(admin)):
             "lastHeartbeat": max((a.worker_seen_at for a in accounts if a.worker_seen_at), default=None),
         },
     }
+
+
+@router.get("/revision")
+def revision(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Let every signed-in desk detect completed intake without loading mail."""
+    return {"revision": read_revision(db)}
 
 
 @router.post("/connect")

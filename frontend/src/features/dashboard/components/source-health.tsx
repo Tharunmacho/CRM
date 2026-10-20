@@ -17,7 +17,6 @@ export function SourceHealth() {
   useEffect(() => {
     let live = true
     let pending: AbortController | null = null
-    let completed: number | null = null
     const read = async () => {
       const session = current.current
       if (!live || pending || document.visibilityState !== 'visible' || !session.isCurrentSession()) return
@@ -28,13 +27,6 @@ export function SourceHealth() {
         if (!live || !session.isCurrentSession()) return
         setData(next)
         setError('')
-        if (completed !== null && next.counts.completed > completed) {
-          // Hold the read guard until recruitment figures catch up. Failed
-          // refreshes leave the previous count so the next poll can retry.
-          await session.refresh()
-          if (!live || !session.isCurrentSession()) return
-        }
-        completed = next.counts.completed
       } catch (failure) {
         if (live && session.isCurrentSession() && !controller.signal.aborted) {
           setError(failure instanceof Error ? failure.message : 'Source status is unavailable.')

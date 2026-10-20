@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ChevronDown, CornerUpLeft, FileText, Image as ImageIcon, Mail, MailOpen, Paperclip, Plus, Settings2, Sparkles, UserPlus } from 'lucide-react'
 import { api, fileHref, type InboxAccount, type InboxJob, type InboxSnapshot } from '@/shared/api/client'
@@ -33,18 +33,7 @@ export default function InboxPage() {
   const [connectAddress, setConnectAddress] = useState('')
   const [mailFilter, setMailFilter] = useState('all')
   const [openingCandidate, setOpeningCandidate] = useState<string | null>(null)
-  const refreshedJobs = useRef(new Set<string>())
   const availableAccounts = inbox.data?.availableAccounts ?? []
-  useEffect(() => {
-    const completed = (inbox.data?.jobs ?? []).filter((job) => job.status === 'completed' && job.candidateId && !refreshedJobs.current.has(job.id))
-    if (!completed.length) return
-    for (const job of completed) refreshedJobs.current.add(job.id)
-    if (completed.every((job) => store.candidates.some((candidate) => candidate.id === job.candidateId))) return
-    // Refresh other CRM screens once for newly created records, not on each poll.
-    void store.refresh().catch(() => {
-      for (const job of completed) refreshedJobs.current.delete(job.id)
-    })
-  }, [inbox.data?.jobs, store.candidates, store.refresh])
   const messages = useMemo(() => {
     const q = query.trim().toLowerCase()
     return allMessages

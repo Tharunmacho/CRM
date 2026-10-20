@@ -424,7 +424,9 @@ def test_existing_login_session_bootstrap_and_health_work_after_rename(
     engine = schema_database
     _migrate(engine, PREVIOUS)
     _seed_previous_schema(engine)
-    _migrate(engine, RENAMED)
+    # Runtime routes use the current schema, including the ingestion revision.
+    # The separate rename-only cases continue to target revision 0006 exactly.
+    _migrate(engine, "head")
     settings = SimpleNamespace(
         database_url=engine.url.render_as_string(hide_password=False),
         cors_origin_list=["https://testserver"],
@@ -432,6 +434,8 @@ def test_existing_login_session_bootstrap_and_health_work_after_rename(
         storage_dir=str(Path(__file__) / "no-upload-files"),
         veris_ocr_base_url=None,
         veris_ocr_api_key=None,
+        tesseract_cmd=None,
+        ocr_languages="eng",
     )
     with patch("app.core.config.get_settings", return_value=settings):
         from app import main
@@ -439,6 +443,8 @@ def test_existing_login_session_bootstrap_and_health_work_after_rename(
         from app.services import bootstrap
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "find_tesseract", lambda command=None: None)
     monkeypatch.setattr(main, "engine", engine)
     monkeypatch.setattr(main, "SessionLocal", factory)
     monkeypatch.setattr(

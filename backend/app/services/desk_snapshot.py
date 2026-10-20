@@ -18,6 +18,7 @@ from app.db.models import (
     Application, ApplicationStage, Attachment, Candidate, Client, Company,
     Designation, Notification, Order, Remark, Task, TodoItem, User,
 )
+from app.services.ingestion_revision import revision_expression
 
 
 def _fields(model, schema, *extra):
@@ -52,6 +53,9 @@ def snapshot_statement(user_id: str) -> Select:
         .order_by(Attachment.entity_id, Attachment.version.desc())
     )
     return select(
+        # Use the candidates' SQL snapshot, so a completion between bootstrap
+        # and the first browser poll cannot be mistaken for an initial baseline.
+        revision_expression().label("ingestionRevision"),
         _rows("users", _fields(User, UserOut)),
         _rows("clients", _fields(Client, ClientOut)),
         _rows("companies", _fields(Company, CompanyOut)),
@@ -81,5 +85,5 @@ def snapshot_statement(user_id: str) -> Select:
     )
 
 
-def read_snapshot(db: Session, user_id: str) -> dict[str, list[dict]]:
+def read_snapshot(db: Session, user_id: str) -> dict[str, list[dict] | str]:
     return {name: rows or [] for name, rows in db.execute(snapshot_statement(user_id)).mappings().one().items()}

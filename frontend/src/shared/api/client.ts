@@ -296,6 +296,7 @@ export const api = {
   ocr,
   inbox: {
     get: (options?: RequestOptions) => request<InboxSnapshot>('GET', '/inbox', undefined, options),
+    revision: (options?: RequestOptions) => request<{ revision?: string }>('GET', '/inbox/revision', undefined, options),
     health: (options?: RequestOptions) => request<InboxHealth>('GET', '/inbox/health', undefined, options),
     connect: (autoIngest: boolean, address?: string) => request<InboxAccount>('POST', '/inbox/connect', {
       auto_ingest: autoIngest, ...(address ? { address } : {}),
