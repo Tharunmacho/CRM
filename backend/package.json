@@ -1,0 +1,10 @@
+{
+  "name": "@care-india/backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Terminal shortcuts for the Python CRM backend",
+  "scripts": {
+    "dev": "node ../scripts/backend.mjs dev",
+    "start": "node ../scripts/backend.mjs start"
+  }
+}

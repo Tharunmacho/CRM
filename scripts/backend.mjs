@@ -13,12 +13,13 @@ const virtualPython = path.join(
 const python = process.env.CRM_PYTHON || (existsSync(virtualPython) ? virtualPython : 'python')
 const commands = {
   dev: ['-m', 'uvicorn', 'app.main:app', '--reload', '--reload-dir', 'app', '--host', '127.0.0.1', '--port', '8000'],
+  start: ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'],
   test: ['-m', 'pytest'],
   migrate: ['-m', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head'],
 }
 const [task, ...extra] = process.argv.slice(2)
 if (!Object.hasOwn(commands, task)) {
-  console.error('Choose a backend task: dev, test, or migrate.')
+  console.error('Choose a backend task: dev, start, test, or migrate.')
   process.exit(1)
 }
 

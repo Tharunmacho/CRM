@@ -84,17 +84,28 @@ npm.cmd run db:migrate
 
 Copy the examples only during initial setup; keep any existing local configuration. The local Python database URL uses host port **5433**, matching Compose. If database credentials change, update `POSTGRES_*` and the complete `DATABASE_URL` in the root `.env`, plus the URL in `backend/.env`. The Compose app URL uses `db:5432`; the host Python URL uses `localhost:5433`. Percent-encode reserved characters in URL usernames/passwords; keep `POSTGRES_PASSWORD` as the actual unencoded password. Existing database volumes retain the credentials with which they were initialized.
 
-Start the API in one terminal:
+Start the API in a terminal opened in `backend/`:
 
 ```powershell
-npm.cmd run dev:backend
-```
-
-Start the frontend in another terminal:
-
-```powershell
+Set-Location M:\crm\backend
 npm.cmd run dev
 ```
+
+This runs the Python API on port **8000** with automatic reload and live logs in
+that terminal. `npm.cmd start` runs the same API without automatic reload. These
+scripts use `backend/.venv`; the backend still uses Python dependencies from its
+requirements files, so no separate backend npm installation is needed.
+From the repository root, `npm.cmd run dev:backend` remains available.
+
+Start the frontend in another terminal opened in `frontend/`:
+
+```powershell
+Set-Location M:\crm\frontend
+npm.cmd run dev
+```
+
+Keep both terminals open; press **Ctrl+C** in a terminal to stop its service.
+Only one backend should use port 8000 at a time.
 
 Open `http://localhost:5173`. Vite forwards `/api` requests and session cookies to `http://127.0.0.1:8000`; no separate API origin is needed. API documentation is at `http://127.0.0.1:8000/api/docs`.
 
