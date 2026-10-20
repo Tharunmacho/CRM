@@ -27,37 +27,69 @@ export class ApiError extends Error {
 }
 
 /** Same origin in production, where one container serves the API and the SPA. */
-const BASE = import.meta.env.VITE_API_URL ?? ''
+const BASE = import.meta.env?.VITE_API_URL ?? ''
 
 /** Where a stored file (`/api/files/:id`) opens: the API's own origin, so the session cookie goes with it. */
 export function fileHref(url: string) {
   return `${BASE}${url}`
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  let res: Response
+interface RequestOptions {
+  signal?: AbortSignal
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  const controller = new AbortController()
+  const cancel = () => controller.abort()
+  if (options.signal?.aborted) cancel()
+  else options.signal?.addEventListener('abort', cancel, { once: true })
+  let timedOut = false
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, 30_000)
+
   try {
-    res = await fetch(`${BASE}/api${path}`, {
+    const res = await fetch(`${BASE}/api${path}`, {
       method,
       credentials: 'include',
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
     })
-  } catch {
-    throw new ApiError(0, 'Cannot reach the server. Check your connection and try again.')
+
+    if (res.status === 204) return undefined as T
+
+    const text = await res.text()
+    const payload = text ? safeParse(text) : null
+
+    if (!res.ok) {
+      const detail = (payload as { detail?: unknown } | null)?.detail
+      throw new ApiError(res.status, messageFrom(detail) ?? res.statusText, detail)
+    }
+
+    if (typeof payload === 'string') {
+      throw new ApiError(502, 'The server returned an unexpected response. Please try again.')
+    }
+    return payload as T
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    if (options.signal?.aborted) throw error
+    throw new ApiError(
+      0,
+      timedOut
+        ? 'The server took too long to respond. Please try again.'
+        : 'Cannot reach the server. Check your connection and try again.',
+    )
+  } finally {
+    clearTimeout(timeout)
+    options.signal?.removeEventListener('abort', cancel)
   }
-
-  if (res.status === 204) return undefined as T
-
-  const text = await res.text()
-  const payload = text ? safeParse(text) : null
-
-  if (!res.ok) {
-    const detail = (payload as { detail?: unknown } | null)?.detail
-    throw new ApiError(res.status, messageFrom(detail) ?? res.statusText, detail)
-  }
-
-  return payload as T
 }
 
 function safeParse(text: string): unknown {
@@ -157,7 +189,7 @@ async function ocr(kind: 'resume' | 'passport', file: File): Promise<OcrScan> {
 export const api = {
   upload,
   ocr,
-  get: <T>(path: string) => request<T>('GET', path),
+  get: <T>(path: string, options?: RequestOptions) => request<T>('GET', path, undefined, options),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),

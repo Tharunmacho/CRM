@@ -190,13 +190,14 @@ export default function AddCandidatePage() {
     // Upload after the record exists. A failure here is reported but does not undo the
     // candidate — better a saved candidate missing a scan than a lost entry.
     for (const [slot, file] of Object.entries(pending)) {
+      if (!store.isCurrentSession()) return
       try {
         await api.upload('candidate', created.id, slot, file)
       } catch {
         store.notify(`${file.name} could not be uploaded`, 'warn')
       }
     }
-    navigate(`/candidates/${created.id}`)
+    if (store.isCurrentSession()) navigate(`/candidates/${created.id}`)
   }
 
   return (

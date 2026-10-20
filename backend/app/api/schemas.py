@@ -113,7 +113,7 @@ class CallOutcomeOut(Wire):
     called: bool
     interested: str
     remarks: str | None = None
-    recorded_at: datetime
+    recorded_at: datetime | None = None
 
 
 class CandidateOut(Wire):

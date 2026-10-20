@@ -10,6 +10,10 @@ export default defineConfig(({ mode }) => {
     resolve: { alias: { '@': path.resolve(__dirname, './src') } },
     server: {
       port: 5173,
+      // Prepare the small login entry during startup instead of on its first visit.
+      warmup: {
+        clientFiles: ['./index.html', './src/main.tsx', './src/features/auth/pages/login.tsx'],
+      },
       proxy: {
         '/api': {
           target: env.API_PROXY_TARGET || 'http://127.0.0.1:8000',

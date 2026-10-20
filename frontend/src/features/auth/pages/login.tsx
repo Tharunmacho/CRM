@@ -8,7 +8,7 @@ import { Button, Input } from '@/shared/ui/primitives'
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { signIn, authenticated } = useStore()
+  const { signIn, authenticated, loadError, ready, retryStartup } = useStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -87,6 +87,20 @@ export default function LoginPage() {
         <form onSubmit={submit} className="w-full max-w-sm">
           <h1 className="text-h1 font-semibold text-ink">Sign in</h1>
           <p className="mt-1 text-sm text-ink-500">Use your agency email address.</p>
+
+          {loadError && !error && (
+            <div role="alert" className="mt-4 rounded-control border border-stamp-100 bg-stamp-50 px-3 py-2 text-xs text-stamp-700">
+              <p>Your session could not be restored. {loadError}</p>
+              <button
+                type="button"
+                disabled={!ready || busy}
+                onClick={() => void retryStartup()}
+                className="mt-1 font-medium underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              >
+                Try again
+              </button>
+            </div>
+          )}
 
           <div className="mt-6 space-y-4">
             <div className="ui-field block">

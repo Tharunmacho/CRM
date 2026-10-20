@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Suspense, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
@@ -28,6 +28,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { agency } from '@/app/config/agency'
 import { Dropdown, MenuItem, Toast } from '@/shared/ui/overlay'
 import { IconButton } from '@/shared/ui/primitives'
+import { PageLoading } from '@/shared/ui/page-loading'
 import type { Capability } from '@/shared/state/crm-store'
 
 interface NavItem {
@@ -160,7 +161,9 @@ export function AppShell() {
         <Topbar onMenu={() => setMobileOpen(true)} />
         <main className="shell-main flex-1">
           <div className={cn('mx-auto max-w-[1440px]', location.pathname !== '/' && 'workspace-page')}>
-            <Outlet />
+            <Suspense fallback={<PageLoading />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>

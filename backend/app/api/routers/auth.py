@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from app.api.schemas import UserOut
 from app.db.session import get_db
 from app.core.deps import current_user
 from app.db.models import Role, Session as SessionRow, User
@@ -36,6 +37,25 @@ class Me(BaseModel):
     email: str
     role: Role
     active: bool
+
+
+@router.get("/session")
+def session_state(
+    response: Response,
+    db: DbSession = Depends(get_db),
+    crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> dict[str, UserOut | None]:
+    """Return the current account, or an anonymous state without an auth error."""
+    response.headers["Cache-Control"] = "no-store"
+    if not crm_session:
+        return {"me": None}
+    try:
+        user = current_user(db=db, crm_session=crm_session)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return {"me": None}
+        raise
+    return {"me": UserOut.model_validate(user)}
 
 
 @router.post("/login", response_model=Me)

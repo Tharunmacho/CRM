@@ -57,7 +57,7 @@ def _safe_name(name: str) -> str:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def upload(
+def upload(
     entity_type: str = Form(...),
     entity_id: str = Form(...),
     slot: str = Form(...),
@@ -68,7 +68,10 @@ async def upload(
     if entity_type not in ENTITIES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown entity type {entity_type!r}")
 
-    payload = await file.read()
+    # FastAPI runs this synchronous handler in its worker pool, including the
+    # database and filesystem work below. Read one extra byte to detect oversized
+    # files without loading their entire contents into application memory.
+    payload = file.file.read(MAX_BYTES + 1)
     if not payload:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file is empty.")
     if len(payload) > MAX_BYTES:

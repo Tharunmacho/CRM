@@ -6,13 +6,13 @@ checks are invoked explicitly with the isolated database; other request tests us
 auth-only application. PostgreSQL migrations are outside the scope of these tests.
 """
 
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import sessionmaker
@@ -115,6 +115,159 @@ def account_snapshot(database):
             dict(row._mapping)
             for row in db.execute(select(User.__table__).order_by(User.email))
         ]
+
+
+def add_session(database, user_id, *, expired=False):
+    with database() as db:
+        row = SessionRow(
+            user_id=user_id,
+            expires_at=(
+                datetime.now(timezone.utc) - timedelta(minutes=1)
+                if expired else session_expiry()
+            ),
+        )
+        db.add(row)
+        db.commit()
+        return row.id
+
+
+@pytest.fixture
+def statements(database):
+    recorded = []
+    engine = database.kw["bind"]
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        recorded.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        yield recorded
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+
+
+@pytest.mark.parametrize("endpoint", ["/api/auth/me", "/api/auth/session"])
+def test_session_check_reads_persisted_account_in_one_query(
+    client, database, password_hash, statements, endpoint
+):
+    user_id = add_user(database, password_hash, role=Role.manager)
+    client.cookies.set(SESSION_COOKIE, add_session(database, user_id))
+    statements.clear()
+
+    response = client.get(endpoint)
+
+    assert response.status_code == 200
+    payload = response.json()
+    if endpoint == "/api/auth/session":
+        assert payload == {
+            "me": {
+                "id": user_id,
+                "name": "Persisted account",
+                "email": "saved-account@example.test",
+                "phone": None,
+                "role": "manager",
+                "active": True,
+                "receivesAutoAssign": False,
+                "onLeave": True,
+            }
+        }
+    else:
+        assert payload["id"] == user_id
+        assert payload["role"] == "manager"
+    assert len(statements) == 1
+    assert statements[0].lstrip().upper().startswith("SELECT")
+
+
+def test_session_probe_without_cookie_uses_no_database_queries(client, statements):
+    response = client.get("/api/auth/session")
+
+    assert response.status_code == 200
+    assert response.json() == {"me": None}
+    assert statements == []
+    assert client.get("/api/auth/me").status_code == 401
+    assert statements == []
+
+
+@pytest.mark.parametrize("endpoint", ["/api/auth/me", "/api/auth/session"])
+@pytest.mark.parametrize(
+    "state,reason",
+    [
+        ("missing", "Session not found"),
+        ("expired", "Session expired"),
+        ("orphaned", "Account is not active"),
+        ("inactive", "Account is not active"),
+    ],
+)
+def test_session_probe_is_anonymous_when_protected_session_check_rejects(
+    client, database, password_hash, endpoint, state, reason
+):
+    if state == "missing":
+        token = "not-a-persisted-session"
+    else:
+        # SQLite permits a deliberately orphaned session so the outer join's
+        # missing-account behavior is covered as well as an inactive account.
+        user_id = (
+            "removed-account"
+            if state == "orphaned"
+            else add_user(database, password_hash, active=(state != "inactive"))
+        )
+        token = add_session(database, user_id, expired=(state == "expired"))
+    client.cookies.set(SESSION_COOKIE, token)
+
+    response = client.get(endpoint)
+
+    if endpoint == "/api/auth/session":
+        assert response.status_code == 200
+        assert response.json() == {"me": None}
+    else:
+        assert response.status_code == 401
+        assert response.json() == {"detail": reason}
+    if state == "expired":
+        with database() as db:
+            assert db.get(SessionRow, token) is None
+
+
+def test_session_probe_observes_revocation_on_the_next_request(
+    client, database, password_hash
+):
+    user_id = add_user(database, password_hash)
+    token = add_session(database, user_id)
+    client.cookies.set(SESSION_COOKIE, token)
+    assert client.get("/api/auth/session").json()["me"]["id"] == user_id
+
+    with database() as db:
+        db.delete(db.get(SessionRow, token))
+        db.commit()
+
+    response = client.get("/api/auth/session")
+    assert response.status_code == 200
+    assert response.json() == {"me": None}
+    assert client.get("/api/auth/me").status_code == 401
+
+
+@pytest.mark.parametrize("code", [403, 503])
+def test_session_probe_preserves_non_authentication_http_errors(
+    client, monkeypatch, code
+):
+    def fail(**kwargs):
+        raise HTTPException(code, "Synthetic request failure")
+
+    monkeypatch.setattr(auth, "current_user", fail)
+    client.cookies.set(SESSION_COOKIE, "test-session")
+
+    response = client.get("/api/auth/session")
+
+    assert response.status_code == code
+    assert response.json() == {"detail": "Synthetic request failure"}
+
+
+def test_session_probe_does_not_hide_database_failures(client, database):
+    client.cookies.set(SESSION_COOKIE, "test-session")
+    with patch.object(
+        database.class_, "execute", side_effect=RuntimeError("Synthetic database failure")
+    ):
+        with pytest.raises(RuntimeError, match="Synthetic database failure"):
+            client.get("/api/auth/session")
 
 
 def restart_bootstrap(database, monkeypatch):
@@ -391,17 +544,20 @@ def test_existing_session_observes_database_role_changes_and_deactivation(
     )
     assert response.status_code == 200
     assert client.get("/admin-only").status_code == 200
+    assert client.get("/api/auth/session").json()["me"]["role"] == "admin"
 
     with database() as db:
         db.get(User, user_id).role = Role.staff
         db.commit()
     assert client.get("/api/auth/me").json()["role"] == "staff"
+    assert client.get("/api/auth/session").json()["me"]["role"] == "staff"
     assert client.get("/admin-only").status_code == 403
 
     with database() as db:
         db.get(User, user_id).active = False
         db.commit()
     assert client.get("/api/auth/me").status_code == 401
+    assert client.get("/api/auth/session").json() == {"me": None}
     assert client.get("/admin-only").status_code == 401
 
 

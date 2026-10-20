@@ -19,13 +19,12 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.core.deps import current_user, require_role
+from app.services.desk_snapshot import read_snapshot
 from app.db.models import (
     Application,
-    ApplicationStage,
     ApplicationStatus,
     AuditEntry,
     Candidate,
-    Attachment,
     Client,
     Company,
     Designation,
@@ -66,86 +65,79 @@ DOCUMENT_SLOTS = [
 ]
 
 
-def _candidate_out(c: Candidate, files: dict[tuple[str, str], list[Attachment]]) -> CandidateOut:
-    out = CandidateOut.model_validate(c)
-    out.added_at = c.created_at
-    out.documents = [
+def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]]) -> CandidateOut:
+    documents = [
         {
             "key": key,
             "label": label,
             "versions": [
                 {
-                    "id": f.id,
-                    "name": f.file_name,
-                    "sizeKb": f.size_kb,
-                    "version": f.version,
-                    "url": f"/api/files/{f.id}",
-                    "uploadedBy": f.uploaded_by,
-                    "uploadedAt": f.uploaded_at,
+                    "id": f["id"],
+                    "name": f["file_name"],
+                    "sizeKb": f["size_kb"],
+                    "version": f["version"],
+                    "url": f"/api/files/{f['id']}",
+                    "uploadedBy": f["uploaded_by"],
+                    "uploadedAt": datetime.fromisoformat(f["uploaded_at"]),
                 }
-                for f in sorted(files.get((c.id, key), []), key=lambda f: f.version)
+                for f in files.get((c["id"], key), [])
             ],
         }
         for key, label in DOCUMENT_SLOTS
     ]
-    if c.call_interested:
-        out.call_outcome = {
-            "called": bool(c.call_called),
-            "interested": c.call_interested,
-            "remarks": c.call_remarks,
-            "recordedAt": c.call_recorded_at,
+    outcome = None
+    if c["call_interested"]:
+        outcome = {
+            "called": bool(c["call_called"]),
+            "interested": c["call_interested"],
+            "remarks": c["call_remarks"],
+            "recordedAt": c["call_recorded_at"],
         }
-    return out
+    return CandidateOut.model_validate({
+        **c, "added_at": c["created_at"], "documents": documents, "call_outcome": outcome,
+    })
 
 
 @router.get("/bootstrap")
 def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict[str, Any]:
-    """Everything the store needs, in one round trip."""
-    candidates = list(db.scalars(select(Candidate).order_by(Candidate.created_at.desc())))
+    """A fresh desk snapshot with one data query after the session check."""
+    snapshot = read_snapshot(db, user.id)
 
-    files: dict[tuple[str, str], list[Attachment]] = {}
-    for f in db.scalars(select(Attachment).where(Attachment.entity_type == "candidate")):
-        files.setdefault((f.entity_id, f.slot), []).append(f)
+    files: dict[tuple[str, str], list[dict]] = {}
+    for f in snapshot["files"]:
+        files.setdefault((f["entity_id"], f["slot"]), []).append(f)
 
-    # Ordered by version, so the one left standing per company is the latest.
-    agreements: dict[str, Attachment] = {}
-    for f in db.scalars(
-        select(Attachment)
-        .where(Attachment.entity_type == "company", Attachment.slot == "agreement")
-        .order_by(Attachment.version)
-    ):
-        agreements[f.entity_id] = f
+    agreements = {f["entity_id"]: f for f in snapshot["agreements"]}
 
-    def company_out(co: Company) -> dict[str, Any]:
+    def company_out(co: dict) -> dict[str, Any]:
         out = CompanyOut.model_validate(co)
-        if (a := agreements.get(co.id)) is not None:
-            out.agreement = FileRefOut(id=a.id, name=a.file_name, url=f"/api/files/{a.id}")
+        if (a := agreements.get(co["id"])) is not None:
+            out.agreement = FileRefOut(id=a["id"], name=a["file_name"], url=f"/api/files/{a['id']}")
         return out.model_dump(by_alias=True, mode="json")
 
-    applications = list(db.scalars(select(Application)))
-    stages: dict[str, list[ApplicationStage]] = {}
-    for srow in db.scalars(select(ApplicationStage).order_by(ApplicationStage.stage)):
-        stages.setdefault(srow.application_id, []).append(srow)
+    stages: dict[str, list[dict]] = {}
+    for srow in snapshot["stages"]:
+        stages.setdefault(srow["application_id"], []).append(srow)
 
     apps_out = []
-    for a in applications:
+    for a in snapshot["applications"]:
         item = ApplicationOut.model_validate(a)
-        item.stages = [StageRecordOut.model_validate(s) for s in stages.get(a.id, [])]
+        item.stages = [StageRecordOut.model_validate(s) for s in stages.get(a["id"], [])]
         apps_out.append(item)
 
     return {
         "me": UserOut.model_validate(user).model_dump(by_alias=True, mode="json"),
-        "users": [UserOut.model_validate(u).model_dump(by_alias=True, mode="json") for u in db.scalars(select(User))],
-        "clients": [ClientOut.model_validate(c).model_dump(by_alias=True, mode="json") for c in db.scalars(select(Client))],
-        "companies": [company_out(c) for c in db.scalars(select(Company))],
-        "designations": [DesignationOut.model_validate(d).model_dump(by_alias=True, mode="json") for d in db.scalars(select(Designation))],
-        "orders": [OrderOut.model_validate(o).model_dump(by_alias=True, mode="json") for o in db.scalars(select(Order))],
-        "candidates": [_candidate_out(c, files).model_dump(by_alias=True, mode="json") for c in candidates],
+        "users": [UserOut.model_validate(u).model_dump(by_alias=True, mode="json") for u in snapshot["users"]],
+        "clients": [ClientOut.model_validate(c).model_dump(by_alias=True, mode="json") for c in snapshot["clients"]],
+        "companies": [company_out(c) for c in snapshot["companies"]],
+        "designations": [DesignationOut.model_validate(d).model_dump(by_alias=True, mode="json") for d in snapshot["designations"]],
+        "orders": [OrderOut.model_validate(o).model_dump(by_alias=True, mode="json") for o in snapshot["orders"]],
+        "candidates": [_candidate_out(c, files).model_dump(by_alias=True, mode="json") for c in snapshot["candidates"]],
         "applications": [a.model_dump(by_alias=True, mode="json") for a in apps_out],
-        "tasks": [TaskOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in db.scalars(select(Task))],
-        "remarks": [RemarkOut.model_validate(r).model_dump(by_alias=True, mode="json") for r in db.scalars(select(Remark))],
-        "todos": [TodoOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in db.scalars(select(TodoItem).where(TodoItem.owner_id == user.id))],
-        "notifications": [NotificationOut.model_validate(n).model_dump(by_alias=True, mode="json") for n in db.scalars(select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc()))],
+        "tasks": [TaskOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in snapshot["tasks"]],
+        "remarks": [RemarkOut.model_validate(r).model_dump(by_alias=True, mode="json") for r in snapshot["remarks"]],
+        "todos": [TodoOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in snapshot["todos"]],
+        "notifications": [NotificationOut.model_validate(n).model_dump(by_alias=True, mode="json") for n in snapshot["notifications"]],
     }
 
 

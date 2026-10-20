@@ -20,16 +20,20 @@ def current_user(
     if not crm_session:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not signed in")
 
-    row = db.scalar(select(SessionRow).where(SessionRow.id == crm_session))
-    if row is None:
+    result = db.execute(
+        select(SessionRow, User)
+        .outerjoin(User, User.id == SessionRow.user_id)
+        .where(SessionRow.id == crm_session)
+    ).one_or_none()
+    if result is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session not found")
 
+    row, user = result
     if row.expires_at <= datetime.now(timezone.utc):
         db.delete(row)
         db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired")
 
-    user = db.get(User, row.user_id)
     if user is None or not user.active:
         # Deactivating an account takes effect immediately, including for anyone
         # already holding a session.

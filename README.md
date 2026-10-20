@@ -10,6 +10,7 @@ A recruitment CRM with a React/TypeScript frontend, a FastAPI backend, and Postg
 - [Database table dictionary, pgAdmin guide and migration plan](docs/database-design.md)
 - [Implementation phases and acceptance criteria](docs/implementation-phases.md)
 - [Screen-by-screen integration order](docs/screen-integration-plan.md)
+- [Loading performance, measurements and regression checks](docs/performance.md)
 - [PRD requirements mapped to current code and phases](docs/requirements-matrix.md)
 
 The structural foundation is implemented. The later phases are a development plan, not a claim that every PRD feature is complete. The requirements matrix also records differences between the existing implementation and the specification, including employer modelling and duplicate handling.
@@ -92,7 +93,10 @@ npm.cmd run dev
 ```
 
 This runs the Python API on port **8000** with automatic reload and live logs in
-that terminal. `npm.cmd start` runs the same API without automatic reload. These
+that terminal. Startup reports PostgreSQL and Redis connection status. Requests
+taking at least one second produce a `Slow API` log with their route and duration;
+API responses also include a `Server-Timing` header for browser Network timing.
+`npm.cmd start` runs the same API without automatic reload. These
 scripts use `backend/.venv`; the backend still uses Python dependencies from its
 requirements files, so no separate backend npm installation is needed.
 From the repository root, `npm.cmd run dev:backend` remains available.
@@ -122,6 +126,9 @@ should be `ok`. The Redis service stores data in the `redisdata` volume and bind
 only to this computer. For the API running inside Compose, use
 `redis://:<URL-encoded-password>@redis:6379/0` in the root `.env` instead.
 These settings do not create or configure a Redis service in Dokploy.
+Redis currently provides connection/readiness support; CRM records and permissions
+are still read freshly from PostgreSQL. Enabling Redis alone does not cache queries
+or start background workers.
 
 On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The root backend commands select the correct virtual environment automatically. `CRM_PYTHON` can override the interpreter for a managed environment or CI.
 
@@ -162,6 +169,7 @@ Apply the naming migration in a coordinated release: stop API writers, back up t
 ```powershell
 npm.cmd run typecheck
 npm.cmd run build
+npm.cmd test --workspace frontend
 npm.cmd run test:backend -- -q
 ```
 

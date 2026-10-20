@@ -4,10 +4,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import { ApiError, api } from '@/shared/api/client'
+import { createLatestRequest } from '@/shared/api/latest-request'
 import { isSameDay } from '@/shared/lib/format'
 import type {
   Application,
@@ -50,6 +52,8 @@ interface Data {
   mailMessages: MailMessage[]
   notifications: Notification[]
 }
+
+type Bootstrap = Data & { me: User }
 
 const EMPTY: Data = {
   users: [],
@@ -106,6 +110,10 @@ interface StoreValue extends Data {
   me: User
   ready: boolean
   authenticated: boolean
+  loadError: string | null
+  retryStartup: () => Promise<void>
+  /** Whether a pending UI operation still belongs to this signed-in account. */
+  isCurrentSession: () => boolean
   toast: Toast
 
   signIn: (email: string, password: string) => Promise<void>
@@ -159,47 +167,121 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<Data>(EMPTY)
   const [me, setMe] = useState<User | null>(null)
   const [ready, setReady] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast>(null)
+  const requests = useRef(createLatestRequest<Bootstrap | null>()).current
+  const mounted = useRef(false)
+  const authVersion = useRef(0)
+  const authQueue = useRef<Promise<void>>(Promise.resolve())
+  const pendingAuthWrites = useRef(0)
 
   const notify = useCallback((message: string, tone: 'ok' | 'warn' = 'ok') => {
     setToast({ id: Date.now(), message, tone })
   }, [])
 
-  const refresh = useCallback(async () => {
-    const payload = await api.get<Data & { me: User }>('/bootstrap')
-    const { me: who, ...rest } = payload
-    setMe(who)
-    setData({ ...EMPTY, ...rest })
-  }, [])
+  const loadWorkspace = useCallback(
+    (checkSession: boolean, replace = false) =>
+      (replace ? requests.replace : requests.run)(
+        async (signal) => {
+          // A logged-out visit needs only a small session response, not CRM data.
+          if (checkSession) {
+            const session = await api.get<{ me: User | null }>('/auth/session', { signal })
+            if (session?.me === null) return null
+            if (!session?.me?.id) {
+              throw new ApiError(502, 'The server returned an invalid session response.')
+            }
+          }
+          const payload = await api.get<Bootstrap>('/bootstrap', { signal })
+          if (!payload?.me?.id) {
+            throw new ApiError(502, 'The server returned an invalid workspace response.')
+          }
+          return payload
+        },
+        (payload) => {
+          setMe(payload?.me ?? null)
+          if (payload) {
+            const { me: _who, ...rest } = payload
+            setData({ ...EMPTY, ...rest })
+          } else {
+            setData(EMPTY)
+          }
+          setLoadError(null)
+          setReady(true)
+        },
+        (error) => {
+          if (error instanceof ApiError && error.isUnauthorised) {
+            setMe(null)
+            setData(EMPTY)
+            setLoadError(null)
+          } else {
+            setLoadError(
+              error instanceof Error ? error.message : 'The workspace could not be loaded.',
+            )
+          }
+          setReady(true)
+        },
+      ),
+    [requests],
+  )
 
-  // Restore the session on load, so a refresh does not sign you out.
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        await refresh()
-      } catch {
-        if (!cancelled) setMe(null)
-      } finally {
-        if (!cancelled) setReady(true)
-      }
-    })()
-    return () => {
-      cancelled = true
+  const refresh = useCallback(() => {
+    // This can follow a write outside the store too (for example a file upload).
+    // A read that started before that write must not supply the refreshed snapshot.
+    return loadWorkspace(false, true)
+  }, [loadWorkspace])
+
+  const retryStartup = useCallback(async () => {
+    requests.invalidate()
+    setReady(false)
+    setLoadError(null)
+    try {
+      await loadWorkspace(true)
+    } catch {
+      // loadWorkspace renders the failure and leaves retry available.
     }
-  }, [refresh])
+  }, [loadWorkspace, requests])
+
+  // StrictMode replays this effect in development. Both setups share one request.
+  useEffect(() => {
+    mounted.current = true
+    void loadWorkspace(true).catch(() => {
+      // The failure is displayed by the route/login screen.
+    })
+    return () => {
+      mounted.current = false
+      queueMicrotask(() => {
+        if (!mounted.current) {
+          requests.invalidate()
+          authVersion.current += 1
+        }
+      })
+    }
+  }, [loadWorkspace, requests])
+
+  const queueAuthWrite = useCallback((write: () => Promise<unknown>) => {
+    pendingAuthWrites.current += 1
+    const result = authQueue.current.then(write).finally(() => {
+      pendingAuthWrites.current -= 1
+    })
+    // Serialize cookie changes, including a sign-in started while logout is pending.
+    authQueue.current = result.then(() => undefined, () => undefined)
+    return result
+  }, [])
 
   /** Run a write, reload, and turn a failure into something the user can read. */
   const run = useCallback(
     async <T,>(work: () => Promise<T>, success?: string): Promise<T | null> => {
+      const version = authVersion.current
       try {
         const result = await work()
+        if (version !== authVersion.current) return null
         await refresh()
+        if (version !== authVersion.current) return null
         if (success) notify(success)
         return result
       } catch (err) {
         const e = err as ApiError
-        notify(e.message || 'Something went wrong', 'warn')
+        if (version === authVersion.current) notify(e.message || 'Something went wrong', 'warn')
         throw e
       }
     },
@@ -208,25 +290,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(
     async (email: string, password: string) => {
-      await api.post('/auth/login', { email, password })
-      await refresh()
+      const version = ++authVersion.current
+      requests.invalidate()
+      setMe(null)
+      setData(EMPTY)
+      setLoadError(null)
+      setReady(false)
+      try {
+        await queueAuthWrite(() => api.post('/auth/login', { email, password }))
+        if (version === authVersion.current) await refresh()
+      } catch (error) {
+        if (version === authVersion.current) setReady(true)
+        throw error
+      }
     },
-    [refresh],
+    [queueAuthWrite, refresh, requests],
   )
 
   const signOut = useCallback(async () => {
+    const version = ++authVersion.current
+    requests.invalidate()
+    setReady(false)
+    setLoadError(null)
     try {
-      await api.post('/auth/logout')
+      await queueAuthWrite(() => api.post('/auth/logout'))
     } catch {
       // The cookie may already be gone; clearing local state still signs you out here.
     } finally {
-      setMe(null)
-      setData(EMPTY)
-      setToast(null)
+      if (version === authVersion.current) {
+        setMe(null)
+        setData(EMPTY)
+        setToast(null)
+        setReady(true)
+      }
     }
-  }, [])
+  }, [queueAuthWrite, requests])
 
   const value = useMemo<StoreValue>(() => {
+    const version = authVersion.current
+    const isCurrentSession = () =>
+      me !== null && version === authVersion.current && pendingAuthWrites.current === 0
     const openTasks = data.tasks.filter((t) => !t.completedAt && !t.cancelledAt)
     const can = (c: Capability) => (me ? MATRIX[c].includes(me.role) : false)
 
@@ -235,11 +338,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       me: me as User,
       ready,
       authenticated: me !== null,
+      loadError,
+      retryStartup,
+      isCurrentSession,
       toast,
       signIn,
       signOut,
-      refresh,
-      notify,
+      // Callbacks retained by an upload/dialog from an old session must not
+      // refresh or show notifications in the account that signed in afterward.
+      refresh: () => (isCurrentSession() ? refresh() : Promise.resolve()),
+      notify: (message, tone) => {
+        if (version === authVersion.current) notify(message, tone)
+      },
       dismissToast: () => setToast(null),
       can,
 
@@ -337,7 +447,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await run(() => api.post('/candidates/reassign', { candidateIds, toUserId }), 'Reassigned')
       },
     }
-  }, [data, me, ready, toast, signIn, signOut, refresh, notify, run])
+  }, [data, me, ready, loadError, retryStartup, toast, signIn, signOut, refresh, notify, run])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

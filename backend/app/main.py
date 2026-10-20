@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Response
@@ -8,12 +9,14 @@ from sqlalchemy import func, select, text
 
 from app.api.routers import applications, auth, candidates, data, files, ocr
 from app.core.config import get_settings
+from app.core.timing import ApiTimingMiddleware
 from app.db.models import User
 from app.db.session import SessionLocal, engine
 from app.integrations.redis import close_redis, redis_health
 from app.services.bootstrap import bootstrap_state, ensure_bootstrap
 
 settings = get_settings()
+log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(
     title="Care India Overseas CRM",
@@ -21,6 +24,7 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+app.add_middleware(ApiTimingMiddleware)
 
 # Only needed when the SPA is served from a different origin, i.e. `npm run dev`.
 app.add_middleware(
@@ -39,9 +43,17 @@ def on_startup() -> None:
         with SessionLocal() as db:
             ensure_bootstrap(db)
     except Exception:  # reported by /api/health; account login never seeds data
-        import logging
+        log.error("Application state initialization failed.")
+    else:
+        log.info("PostgreSQL connected; application state ready.")
 
-        logging.getLogger("startup").error("Application state initialization failed.")
+    state = redis_health()
+    if state["status"] == "ok":
+        log.info("Redis connected.")
+    elif state["status"] == "disabled":
+        log.info("Redis disabled (REDIS_URL is not set).")
+    else:
+        log.warning("Redis unavailable. Check REDIS_URL and the Redis service.")
 
 
 app.include_router(auth.router)
@@ -60,16 +72,21 @@ def on_shutdown() -> None:
 @app.get("/api/health")
 def health(response: Response = None) -> dict:
     """Readiness probe: return 503 when a required dependency is unavailable."""
+    accounts = None
     try:
         with engine.connect() as conn:
             conn.execute(text("select 1"))
+            try:
+                accounts = conn.execute(select(func.count()).select_from(User)).scalar()
+            except Exception:
+                # Connectivity is reported independently of schema readiness.
+                accounts = None
         db_ok = True
         db_error = None
     except Exception as exc:  # surfaced so a bad DATABASE_URL is obvious in Dokploy logs
         db_ok = False
         db_error = str(exc)[:300]
 
-    accounts = None
     if db_ok:
         # Retry after a transient database outage during process startup.
         # Initialization only ensures the assignment cursor; it never touches users.
@@ -79,11 +96,6 @@ def health(response: Response = None) -> dict:
                     ensure_bootstrap(db)
             except Exception:
                 pass  # bootstrap_state exposes the failed readiness condition
-        try:
-            with engine.connect() as conn:
-                accounts = conn.execute(select(func.count()).select_from(User)).scalar()
-        except Exception:
-            accounts = None
 
     redis_state = redis_health()
     redis_ready = redis_state["status"] in {"disabled", "ok"}
