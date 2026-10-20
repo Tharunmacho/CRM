@@ -1,0 +1,22 @@
+{
+  "name": "recruitment-crm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Care India Overseas recruitment CRM workspace",
+  "workspaces": ["frontend"],
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @care-india/frontend",
+    "dev:frontend": "npm run dev --workspace @care-india/frontend",
+    "dev:backend": "node scripts/backend.mjs dev",
+    "build": "npm run build --workspace @care-india/frontend",
+    "typecheck": "npm run typecheck --workspace @care-india/frontend",
+    "preview": "npm run preview --workspace @care-india/frontend",
+    "test:backend": "node scripts/backend.mjs test",
+    "db:migrate": "node scripts/backend.mjs migrate",
+    "check": "npm run typecheck && npm run test:backend"
+  }
+}

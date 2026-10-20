@@ -1,1 +1,164 @@
-# CRM
+# Care India Overseas — Recruitment CRM
+
+A recruitment CRM with a React/TypeScript frontend, a FastAPI backend, and PostgreSQL. The existing application covers candidate entry, employers and orders, candidate mapping, the eleven recruitment stages, documents, tasks, and reporting screens. Several PRD features still need implementation; the phase plan distinguishes working code from planned work.
+
+## Requirements and implementation plan
+
+- [Developer specification — original 12-page PDF](docs/requirements/recruitment-crm-developer-specification.pdf)
+- [Architecture and module boundaries](docs/architecture.md)
+- [Email/Gmail automation references and adopted design decisions](docs/reference-architecture-review.md)
+- [Database table dictionary, pgAdmin guide and migration plan](docs/database-design.md)
+- [Implementation phases and acceptance criteria](docs/implementation-phases.md)
+- [Screen-by-screen integration order](docs/screen-integration-plan.md)
+- [PRD requirements mapped to current code and phases](docs/requirements-matrix.md)
+
+The structural foundation is implemented. The later phases are a development plan, not a claim that every PRD feature is complete. The requirements matrix also records differences between the existing implementation and the specification, including employer modelling and duplicate handling.
+
+## Project layout
+
+```text
+crm/
+├── frontend/
+│   ├── src/
+│   │   ├── app/                 # Composition, routing, providers, layout, agency config
+│   │   ├── features/            # Screens and components grouped by business area
+│   │   ├── shared/              # API, models, state, UI, workflow rules, utilities
+│   │   ├── styles/              # Global styles and fonts
+│   │   ├── mocks/               # Existing fixtures; not the live data store
+│   │   └── main.tsx
+│   ├── public/                  # All local fonts, flags, and asset licences
+│   ├── package.json             # All frontend dependencies and scripts
+│   └── .env.example
+├── backend/
+│   ├── app/
+│   │   ├── api/                 # Request/response schemas and API routes
+│   │   ├── core/                # Settings, authentication, request dependencies
+│   │   ├── db/                  # Database session and SQLAlchemy models
+│   │   ├── domain/              # Recruitment stage rules and currencies
+│   │   ├── integrations/ocr/    # OCR provider client and field mapping
+│   │   ├── services/            # Existing bootstrap service; more services in later phases
+│   │   ├── main.py              # FastAPI composition and static frontend serving
+│   │   └── cli.py               # Existing operational commands
+│   ├── alembic/                 # Schema history through 0006_domain_table_names
+│   ├── tests/                   # Existing OCR tests
+│   ├── requirements.txt         # Pinned production Python dependencies
+│   ├── requirements-dev.txt     # Production dependencies plus test dependencies
+│   └── .env.example
+├── docs/                        # Architecture, database, phases, screen plan and original PRD
+├── scripts/                     # Cross-platform workspace command runner
+├── package.json                 # npm workspace and convenient root commands
+├── package-lock.json            # Single JavaScript dependency lock for the workspace
+├── Dockerfile                   # Frontend build + Python runtime
+├── docker-compose.yml           # Local PostgreSQL/app services and persistent volumes
+└── .env.example                 # Local Docker Compose settings
+```
+
+Frontend feature areas are `auth`, `dashboard`, `clients`, `companies`, `jobs`, `candidates`, `workflow`, `tasks`, `todos`, `reports`, `users`, and `inbox`. All 16 existing screens are under `frontend/`. Shared code should not import feature pages. Route composition lives in `app/`; business-specific screens and components live with their feature.
+
+The backend is a modular monolith. Existing request handlers retain their behaviour; extracting the remaining business operations from routes into domain services is scheduled in the phase plan. Do not create separate services or duplicate models just to add another screen.
+
+## Dependencies
+
+Use Node.js 22+, npm 10+, Python 3.12, and PostgreSQL. Docker Compose supplies PostgreSQL 16 for local development; the configured Dokploy database reports PostgreSQL 18.6. Keep these environments distinct when verifying migrations.
+
+Run `npm ci` at the repository root. npm workspaces installs every dependency declared by `frontend/package.json` using the root lockfile. A root `node_modules/` directory is expected: npm shares installed packages across workspaces. Do not create a second frontend lockfile or install packages manually into unrelated folders.
+
+Production Python packages remain pinned in `backend/requirements.txt`. Development installs use `backend/requirements-dev.txt`, which includes the production file. Keep Python dependencies in `backend/.venv`; this is ignored by Git and Docker.
+
+## Local development on Windows
+
+Run these commands from `M:\crm` in PowerShell. `npm.cmd` also works when PowerShell blocks the `npm.ps1` launcher.
+
+```powershell
+npm.cmd ci
+python -m venv backend/.venv
+.\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
+
+Copy-Item .env.example .env
+Copy-Item backend/.env.example backend/.env
+Copy-Item frontend/.env.example frontend/.env.local
+
+docker compose up -d db
+npm.cmd run db:migrate
+```
+
+Copy the examples only during initial setup; keep any existing local configuration. The local Python database URL uses host port **5433**, matching Compose. If database credentials change, update `POSTGRES_*` and the complete `DATABASE_URL` in the root `.env`, plus the URL in `backend/.env`. The Compose app URL uses `db:5432`; the host Python URL uses `localhost:5433`. Percent-encode reserved characters in URL usernames/passwords; keep `POSTGRES_PASSWORD` as the actual unencoded password. Existing database volumes retain the credentials with which they were initialized.
+
+Start the API in one terminal:
+
+```powershell
+npm.cmd run dev:backend
+```
+
+Start the frontend in another terminal:
+
+```powershell
+npm.cmd run dev
+```
+
+Open `http://localhost:5173`. Vite forwards `/api` requests and session cookies to `http://127.0.0.1:8000`; no separate API origin is needed. API documentation is at `http://127.0.0.1:8000/api/docs`.
+
+On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The root backend commands select the correct virtual environment automatically. `CRM_PYTHON` can override the interpreter for a managed environment or CI.
+
+## Configuration ownership
+
+| File or setting | Purpose |
+| --- | --- |
+| Root `.env` | Docker Compose interpolation only |
+| `backend/.env` | FastAPI settings, read independently of the command's working directory |
+| `frontend/.env.local` | Vite configuration; only `VITE_` variables are exposed to browser code |
+| `API_PROXY_TARGET` | Development proxy target; defaults to `http://127.0.0.1:8000` |
+| `VITE_API_URL` | Leave empty for the local proxy and same-origin production hosting |
+| `VERIS_OCR_BASE_URL`, `VERIS_OCR_API_KEY` | Optional backend OCR connection; manual entry works without it |
+| `STORAGE_DIR` | Backend file storage; defaults to `backend/data/uploads` locally |
+| `STATIC_DIR` | Built frontend location; defaults to `backend/static` locally |
+
+After revision `0006_domain_table_names`, accounts, assigned roles, activation status and Argon2id password hashes live in PostgreSQL's `auth_users` table, and sign-ins live in `auth_sessions`. Login reads the saved account and creates a database session; it has no default-account fallback. Startup initializes only `workflow_assignment_cursor`, preserving existing users and its current position. Deleted accounts stay deleted, disabled accounts stay disabled, and changed passwords survive restarts. The former account seed, seed-password environment overrides, legacy account SQL and unused frontend demo accounts have been removed.
+
+For a new empty database, create accounts explicitly from `backend/` after migrations. The role must be one of the CRM's supported roles (`admin`, `manager`, `staff`); each account's assigned role is stored in the database.
+
+```powershell
+Set-Location M:\crm\backend
+.\.venv\Scripts\python.exe -m app.cli create-user you@example.com --name "Your Name" --role admin
+.\.venv\Scripts\python.exe -m app.cli list-users
+```
+
+Account creation prompts for a password twice without displaying or logging it and refuses to overwrite an existing email. For an existing account, use `python -m app.cli set-password EMAIL` with the same interpreter. This also prompts securely, revokes that user's sessions and preserves their activation status. In a deployed container, run these commands with `docker exec -it <container> python -m app.cli ...`. Updating local source does not update an already deployed container.
+
+Existing accounts need no recreation. The earlier account-persistence correction required no schema migration; the table-naming update requires `0006_domain_table_names` and the matching backend. In pgAdmin, refresh **care_india → Schemas → public → Tables**, then open `auth_users` for accounts or `crm_candidates` for candidate records. The [database guide](docs/database-design.md#inspect-accounts-and-records-in-pgadmin) includes account/session queries that omit password hashes and session tokens. Password hashes are not recoverable plaintext passwords. Full user-management screen mutations and the remaining access/audit policies are still assigned to the implementation phases.
+
+The [table dictionary](docs/database-design.md#table-dictionary) maps every old name to its new name, purpose and key relationships. Revision `0006` renames existing tables and adds descriptions without adding another schema or deleting feature tables. The API paths, JSON collection keys and entity-type values remain unchanged. The existing contact/employer hierarchy is preserved for Phase 2 reconciliation; the naming update does not complete model normalization or Phase 1 business rules.
+
+Apply the naming migration in a coordinated release: stop API writers, back up the database, run migrations, then restart the compatible API and verify the revision/readiness. Its downgrade restores the earlier names and must be paired with the earlier backend version. See [migration and maintenance rules](docs/database-design.md#migration-and-maintenance-rules). Documentation of `0006` is not evidence that a particular live database has been upgraded.
+
+## Build and verification
+
+```powershell
+npm.cmd run typecheck
+npm.cmd run build
+npm.cmd run test:backend -- -q
+```
+
+`npm run check` combines TypeScript checking and backend tests. The production frontend is emitted to `frontend/dist/`. The Python suite covers OCR mapping/provider polling plus account persistence, database-backed login/roles, explicit CLI provisioning, session revocation and startup recovery. The authentication regression tests use isolated SQLite identity tables; they do not replace PostgreSQL concurrency, full permissions, eleven-stage workflow or live provider acceptance tests assigned to later phases.
+
+Phase 0 verification on 19 October 2026 passed: frontend type checking and production build; all 41 existing Python tests in `backend/.venv`; Python dependency consistency; API/OpenAPI import with 20 model tables; unauthenticated API guard, SPA and original static assets; development proxy/cookie forwarding; and offline SQL generation through all five migrations, including percent-encoded connection credentials. All existing direct dependencies and locked JavaScript dependency versions were retained. The frontend build still reports its existing large-bundle warning. No live database was created, migrated or connected during Phase 0, and no Docker image/provider integration was exercised.
+
+Account persistence verification on 20 October 2026 passed: all 56 backend tests, frontend type checking/build, and live login, current-user lookup, bootstrap and logout for the three existing roles through the updated local API against the configured Dokploy PostgreSQL database. At that check the database was at `0005_candidate_ocr_data` and stored Argon2id hashes. A checksum of all user columns before startup and after these checks confirmed the accounts were unchanged. Test login sessions were logged out. No migration or account recreation was required for that account-persistence correction; a separately deployed backend must receive the source update to stop the old automatic resets. This historical check does not verify the later `0006` naming migration.
+
+Naming verification on 20 October 2026 passed all 73 backend tests, including six migration integration scenarios on an isolated PostgreSQL 17 database: preserved rows/relationships, existing sessions, fresh installation, downgrade/re-upgrade, collision rollback and caller-controlled transaction rollback. The live Care India database remains at `0005_candidate_ocr_data`: rollout was held before any schema change because another client inside the Dokploy network is still issuing requests. Identify and coordinate that backend before applying `0006` and starting this prepared mapping. The local API was restored with the previous mapping while coordination is pending; the prepared source expects the new names after migration.
+
+The Docker image builds the same npm workspace, includes all `frontend/public/` assets, installs pinned production Python packages, and serves the built frontend with FastAPI. Local full-stack startup is:
+
+```powershell
+docker compose up --build
+```
+
+Open `http://localhost:8000`. Compose stores PostgreSQL data in `pgdata` and uploaded documents in `uploads`. Its ports bind to localhost for local development. In hosted deployment, configure HTTPS, environment variables, and persistent database/upload volumes. The container runs migrations before starting the API; review migrations before deploying them to an existing database.
+
+## Current implementation boundaries
+
+Candidate creation, automatic assignment, client/company/order creation, mapping, stage drafts and completion, file versions, task remarks, reassignment, and personal to-dos have backend implementations. Dashboard and report screens compute results from the bootstrap payload. Dashboard CSV export is implemented.
+
+Inbox connection/sending/ingestion, WhatsApp automation, user administration actions, notification delivery, scheduled escalation jobs, stage reopening, and Excel/PDF export remain incomplete. Ordinary record editing and full PRD duplicate merging are also outstanding. Backend audit writes exist for some operations, but the current audit viewer still reads an empty legacy fixture.
+
+The phased plan records these gaps, role enforcement and concurrency issues, reporting scope fixes, and the acceptance tests required before release. Implement each phase against the original PRD and its traceability rows, and update the matrix when behaviour is verified.

@@ -1,0 +1,33 @@
+# JavaScript dependencies and generated builds, at any workspace depth.
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python environments, bytecode, and test caches.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local settings and credentials. Examples are part of the project.
+.env
+.env.*
+!.env.example
+*.local
+
+# Runtime data and generated verification output.
+backend/data/
+backend/static/
+artifacts/
+
+# Operating system and editor files.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Original local upload; canonical specification is under docs/requirements/.
+/Recruitment CRM — Developer Specification.pdf

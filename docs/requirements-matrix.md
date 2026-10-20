@@ -1,0 +1,96 @@
+# Recruitment CRM requirements and implementation matrix
+
+Source of truth: [Recruitment CRM — Developer Specification](requirements/recruitment-crm-developer-specification.pdf), 14 October 2026, 12 pages. Assessment date: 19 October 2026. The [architecture](architecture.md) defines boundaries and invariants; the [phase plan](implementation-phases.md) defines acceptance criteria.
+
+**Implemented path** means a UI/API/code path exists in the inspected source; it does not imply production validation. **Partial** means behavior exists but does not satisfy the entire requirement. **Placeholder** means presentation or schema exists without the corresponding working workflow. **Missing** means no implementing path was found. **Divergence** means existing behavior differs from the PDF. Phase numbers describe where remaining work belongs, not the date a capability was originally written.
+
+Schema naming note: revision `0006_domain_table_names` maps the same existing records to domain-prefixed tables such as `auth_users`, `crm_candidates` and `system_audit_log`. The [database dictionary](database-design.md#table-dictionary) records every old/new name and relationship. HTTP routes, JSON keys and model/business concepts retain their existing names. This revision does not change any requirement's completion state, implement role permissions or resolve the client/contact/employer divergence; live migration application must be verified separately.
+
+## Requirements coverage
+
+| ID | PRD reference | Requirement | Current evidence and gap | State | Phase |
+| --- | --- | --- | --- | --- | --- |
+| NAV-01 | pp. 1–2, roles/navigation | Admin, Manager and Staff; role-appropriate sidebar and capabilities | Role enums, frontend capability matrix, auth/session API and some backend guards exist; API ownership enforcement is inconsistent. | Partial | 1 |
+| NAV-02 | p. 2, navigation | Ten navigation items in specified order, private To-do and Admin-only User Management | Existing app has those areas plus Companies and Mapped candidates routes; reconcile extra top-level navigation with employer/client model. | Partial / extension | 2, 6 |
+| AUD-01 | p. 2 | Every create/edit/stage/reassignment/upload has user/time audit | Audit model and several write events exist; file uploads, call outcomes and other mutations lack complete coverage; user audit screen uses an empty fixture. | Partial | 1, 6 |
+| DASH-01 | pp. 2–3 | Logged-in-user dashboard; Admin team/staff filter; today intake by email/WhatsApp, open/due/overdue/escalated tasks | Dashboard derives data from bootstrap; not all prescribed metrics/scopes are implemented and live ingestion events are absent. | Partial | 7 |
+| DASH-02 | pp. 2–3 | Eleven-stage clickable pipeline, active order openings/matched/selected/deployed, due-sorted personal tasks | Charts/order/task UI exists; verify exact metrics/drill-downs and overdue ordering against backend queries. | Partial | 7 |
+| DASH-03 | p. 3 | Admin source health, last sync and OCR failures/retry | UI source card and schema groundwork exist; bootstrap supplies no live mail source data and there is no ingestion worker. | Placeholder | 5, 7 |
+| INBOX-01 | p. 3 | Multiple Gmail OAuth, Microsoft 365 OAuth and IMAP/SMTP accounts; Admin connect/remove | Inbox and account controls exist but no provider routers, OAuth/sync or working account mutations. | Placeholder | 5 |
+| INBOX-02 | p. 3 | Unified mail search/account filter/unread/attachment state; preview and reply from same account | Inbox UI expects data; store defaults mail collections to empty and API bootstrap does not return them; reply is a warning. | Placeholder | 5 |
+| INBOX-03 | p. 3 | Per-account auto-ingest toggle, manual attachment-to-candidate, candidate badge/link | UI/schema fields exist; toggle/manual ingestion do not call a working ingestion service. | Placeholder | 5 |
+| CLIENT-01 | p. 3 | Employer clients with company/country/city/industry/contact/email/phone/WhatsApp/address/agreement/notes/status | Company form carries employer fields; `Client` is currently a person above `Company`. Create/list/detail and agreement uploads exist, but full edit/status and PRD semantics need reconciliation. | Partial / divergence | 2 |
+| CLIENT-02 | p. 3 | Client detail shows orders and their candidates | Connected client/company/order views exist under the extended hierarchy. Preserve coverage while aligning employer identity. | Implemented path / divergence | 2 |
+| JOB-01 | p. 3 | Designation title/category/description/skills/minimum experience; client order openings/location/salary/currency/benefits/contract/interview/deadline/status | Models, create endpoints and Jobs/order screens exist. Orders reference company; complete editing/status validation and lifecycle. | Partial | 2 |
+| MAP-01 | p. 4 | Search within order by designation/experience/skills/location/passport/staff; create candidate×order application | Mapping UI/API exists with designation/experience/passport/owner filters and text search. Dedicated skills/location filters and a shared bounded search API need completion. | Partial | 2, 3 |
+| MAP-02 | p. 4 | One active order; unmap closes with Unmapped and cancels tasks; remap starts stage 1 | Partial unique index and map/unmap APIs implement core rule. Concurrency/idempotency and stale candidate status need validation. | Implemented path, validation incomplete | 3 |
+| MAP-03 | pp. 4, 7–8 | Unmatched profile has no stage modal; order list shows stage/owner/last update | Profile/order/modal paths exist; verify fields and task navigation consistently. | Partial | 3 |
+| CAND-01 | p. 4 | Manual entry: basic details, passport fields, resume/photo/education/experience docs, work profile and source | Connected form and save API, OCR-prefill, document uploads and profile exist; field/edit completeness requires acceptance checks. | Partial | 2 |
+| CAND-02 | p. 4 | Duplicate phone OR email OR passport shows existing record with merge/cancel | Current API checks phone AND DOB, or passport, rejects without merge and ignores email duplicates. | Divergence | 2 |
+| BANK-01 | pp. 4–5 | All candidates visible to Staff, specified columns/filters, resume full-text search, Not interested pool | Connected Data Bank filters/search and pool exist. Search runs in browser over bootstrap; PostgreSQL text index exists but no bounded search API; verify filters for every column. | Partial | 2, 7 |
+| BANK-02 | p. 4 | Admin-only Excel export | Data Bank Export button lacks an action. Dashboard CSV helper is a separate limited export and not Excel. | Placeholder | 7 |
+| TASK-01 | p. 5 | Open/Due today/Overdue/Completed tabs, Admin Escalated/staff filter; candidate/order/stage/owner/creation/due/time left | Task screen is connected and derives 48h due state; escalation data is not generated by a scheduler. | Partial | 3, 4 |
+| TASK-02 | pp. 5, 11 | System-generated task per assignment/mapping/stage, auto-close only from matching action | Initial-call and ordinary stage tasks are created and closed by APIs; re-medical event task and admin SLA reset are absent. | Partial | 3, 4 |
+| TODO-01 | p. 5 | Private Admin/Manager to-do list with title/notes/date-time/priority/optional record link and manual completion | Persistent create/toggle/delete, owner filtering and dashboard card exist. Link picker currently offers clients and only the first ten orders, with no candidate option; complete role consistency. | Partial | 6 |
+| TODO-02 | p. 5 | Today/Upcoming/Overdue/Done and due-time bell reminder | To-do views exist; no reminder scheduler/producer. | Partial | 4, 6 |
+| REPORT-01 | pp. 5–6 | Pipeline/drop-off, staff performance, source/account, order status, rejection/reason, advance reports | Six chart/report views exist; calculations are browser-side and some metrics/event histories are missing. | Partial | 7 |
+| REPORT-02 | p. 5 and p. 2 roles | Every report filters date range/client/order/designation/staff; Staff own numbers | Existing report filters affect only some panels and staff scoping is inconsistent; backend returns all underlying task/application collections. | Divergence / partial | 1, 7 |
+| REPORT-03 | p. 5 | Report Excel/PDF export | Buttons render without implementation. | Placeholder | 7 |
+| USER-01 | p. 6 | Admin user create/edit/deactivate, name/email/phone/role/active | Account records use `auth_users` after `0006`; models and UI exist, but admin screen actions explicitly show not-connected warnings. | Placeholder | 6 |
+| USER-02 | p. 6 | Auto-assignment eligibility/leave toggles; deactivation prompts candidate/task reassignment | Assignment algorithm reads flags and reassignment API exists, but administration/deactivation workflow is not connected. | Partial | 2, 6 |
+| USER-03 | p. 6 | Reset password, force logout and user's audit log | Explicit CLI reset persists a password hash in `auth_users` and revokes that account's `auth_sessions` while preserving activation. Startup/login no longer reset accounts. Admin screen actions remain warnings and audit view uses an empty fixture. | Partial / UI placeholder | 1, 6 |
+| INGEST-01 | p. 6 | Background queued intake; email push/IDLE or 2-minute poll; WhatsApp documents/images | No provider receiver/worker/scheduler implementation found. Manual OCR request is implemented but is not automatic intake. | Missing | 4, 5 |
+| INGEST-02 | p. 6 | PDF/DOC/DOCX/JPG/PNG; object storage, source/message/time provenance, content-hash deduplication | Upload/OCR validation and attachment schema exist; storage is local disk, and file hash fields are not a working deduplication pipeline. | Partial | 5 |
+| INGEST-03 | p. 6 | Veriis extraction of identity/location/designation/experience/skills/education; passport classification | Manual resume/passport OCR adapter and mapping are implemented and unit-tested; automated classification/intake remains absent. | Partial | 2, 5 |
+| INGEST-04 | p. 6 | Automated duplicate attaches latest file, fills empty fields only, preserves owner | No automated merge path; candidate entry rejects its narrower duplicate matches. | Missing / divergence | 2, 5 |
+| INGEST-05 | pp. 6–7 | Same CRM DB; New candidate; Needs review for missing name/phone or low confidence | Same DB and status fields exist. Review classification and handling incomplete OCR identity in automated creation are not implemented. | Partial | 5 |
+| INGEST-06 | p. 7 | Three OCR retries with backoff, failed list, Admin manual retry | Failure model exists, but no durable ingestion job, retry worker or working retry API/UI. | Placeholder | 4, 5 |
+| INGEST-07 | p. 7, explicitly optional | Automatic same-channel acknowledgement | No implementation found; optional and separate from mandatory intake. | Optional / missing | 5, optional |
+| ASSIGN-01 | p. 7 | Strict locked round-robin among active, opted-in Staff not on leave; no load balancing | `next_owner` locks pointer and rotates eligible users; first-row creation/concurrent initialization and no-eligible fallback require work. | Implemented path / partial | 1, 2 |
+| ASSIGN-02 | p. 7 | New manual/ingested candidate assigned immediately; duplicates keep owner | Manual creation assigns and creates initial task if staff eligible; no automated intake and can silently save unassigned. | Partial | 2, 5 |
+| ASSIGN-03 | p. 7 | Admin/Manager bulk reassignment moves all open tasks and logs change | Connected reassignment endpoint preserves task creation time; validate target eligibility and improve per-entity audit. | Implemented path / partial | 1, 2 |
+| ASSIGN-04 | p. 7 | Initial call Called yes/no, Interested yes/no/not reachable, remarks; not-interested closes task and stays in pool | Profile call API saves outcome and closes tasks; UI helper always submits called=true and server ownership/enum validation needs completion. | Partial | 1, 2 |
+| NOTIFY-01 | p. 7 | Owner and Admin notified for every new assignment | Notification model/bootstrap reads and bell exist; assignment creates no notification events. | Placeholder | 4 |
+| STAGE-01 | pp. 7–9 | Per-application scrolling 11-stage modal, complete header, completed collapsed/read-only, current editable, future hidden | Modal and server rules exist; verify layout/visibility and cross-role behavior for all entry points. | Implemented path, validation incomplete | 3 |
+| STAGE-02 | p. 9 | Admin can reopen any completed stage with mandatory audited reason | UI shows reason controls but action warns unavailable; no reopen endpoint. Existing copy limits to closed applications although PRD does not. | Placeholder / divergence | 3 |
+| STAGE-03 | p. 9 | Stage completion validates, saves history, closes task, creates next task | Core completion transaction exists; version check is not an atomic compare-and-swap and payload validation accepts arbitrary dict values in some branches. | Partial | 1, 3 |
+| STAGE-04 | pp. 8–10 | Only 1/2/4/6 negative exits; others keep stage/task | Core rule exists. Stage-2 resume-not-received branch does not set candidate Not interested as the table requires. | Partial / divergence | 3 |
+| FILE-01 | p. 9 | Every upload preserves version history | Versioned attachment metadata and local file storage exist; concurrent version allocation, record ownership and audit need completion. | Partial | 1, 5 |
+| STAGE-05 | p. 9, stages 1–5 | Prescreen; forward; schedule; result+required remarks; offer+upload | Frontend/server definitions and stage inputs exist; strict enum checks and required-field reconciliation are needed. | Partial | 3 |
+| STAGE-06 | p. 10, stage 6 | Repeating medical dates/results, latest Fit advances; Unfit/no reapply closes | Medical UI/rules support waiting and closure, but dedicated repeat-attempt history/task workflow is not complete. | Partial | 3 |
+| STAGE-07 | p. 10, stages 7–8 | Passport copy/collection/custodian; variable advance amount/date/mode/receipt | Stage forms/rules exist; enforce real file associations and reconcile completion policy; currency support is an existing extension. | Partial | 3 |
+| STAGE-08 | p. 10, stages 9–11 | Visa arrival/review, stamping+file, air-ticket fields+required copy | Forms/rules exist; keep Google review nonblocking unless PRD changes; ticket rule currently also requires booking/travel date. | Partial / stricter policy | 3 |
+| DEPLOY-01 | p. 10 | Stage 11 deploys and increases order count; filled when deployed equals openings | Completion code sets deployed/filled; order lock/concurrent completion and capacity policy require verification. | Implemented path / partial | 3 |
+| SLA-01 | p. 11 | Every event task due 48h; waiting never pauses; stage 11 no task; closure cancels | Ordinary event tasks use creation time and UI derives 48h deadline; re-medical event and reset history absent. | Partial | 3, 4 |
+| SLA-02 | p. 11 | Scan every 15m, escalate after 48h, Admin/Manager bell detail, one initial event + configurable 24h repeat | Escalation flags and overdue UI exist; there is no actual scheduler/escalation producer. | Placeholder | 4 |
+| SLA-03 | p. 11 | Reassign from escalation; preserve clock unless Admin resets; count all escalations in performance | General candidate reassignment exists. Notification workflow, explicit reset and escalation event history do not. | Partial | 4, 7 |
+| DAILY-01 | pp. 5, 12 | Owner adds required nonempty daily remark in Tasks and modal; immutable timestamped history | Remark endpoint/history and entry boxes in both Tasks and stage modal exist; the API lacks owner checks and nonempty enforcement after trimming. | Partial | 1, 4 |
+| DAILY-02 | p. 12 | Not updated today in Tasks/Dashboard; end-of-day grouped Admin/Manager alert; completed-day exemption; staff metric | Some client-side today badges exist; no timezone policy, end-of-day job, persisted missed-update metric or complete dashboard coverage. | Partial | 4, 7 |
+
+## Known source differences to resolve before feature implementation
+
+1. **Employer hierarchy:** the PDF's client is an employer. Existing code adds a person/contact layer above companies. This can be retained as an explicit extension only after deciding how PRD fields and navigation map to it.
+2. **Duplicate identity:** phone+DOB/passport rejection is not the PDF's phone/email/passport merge workflow. Do not describe current validation as PRD-complete.
+3. **Stage closures:** use four exit stages despite page 8's “3 exits” caption typo. Both stage-2 negative reasons enter the table's Not interested pool.
+4. **Completion fields:** the PDF distinguishes recorded fields from the completion column. Extra existing blockers for stages 2, 3, 7 and 11 need an explicit policy decision.
+5. **Account lifecycle:** automatic account creation/reset was removed on 20 October 2026. Database-backed credentials, role assignments and activation persist across startup/login; explicit CLI account creation/reset is available. Complete admin UI and remaining lifecycle policies in the assigned phases.
+6. **Scope and concurrency:** frontend filters/role labels do not enforce API authorization, and version fields alone do not prevent simultaneous transitions. Cover these in Phase 1 before adding automation.
+7. **No operational automation yet:** task age badges, notification tables, ingestion-failure tables and mailbox UI do not constitute functioning schedulers, notifications or provider integrations.
+
+## Source map for continuing implementation
+
+| Area | Primary source after Phase 0 organization |
+| --- | --- |
+| Routes, shell, feature screens | `frontend/src/app/`, `frontend/src/features/` |
+| Frontend API and bootstrap state | `frontend/src/shared/api/client.ts`, `frontend/src/shared/state/crm-store.tsx` |
+| Frontend stage definitions/modal | `frontend/src/shared/workflow/stages.ts`, `frontend/src/features/workflow/components/stage-modal.tsx` |
+| HTTP contracts/endpoints | `backend/app/api/schemas.py`, `backend/app/api/routers/` |
+| Identity and account provisioning | `backend/app/core/`, `backend/app/api/routers/auth.py`, `backend/app/services/bootstrap.py` |
+| Candidate duplicates/assignment | `backend/app/api/routers/candidates.py` |
+| Core records/calls/remarks/to-dos/reassignment | `backend/app/api/routers/data.py` |
+| Stage transitions/validation | `backend/app/api/routers/applications.py`, `backend/app/domain/stages.py` |
+| File storage/manual OCR | `backend/app/api/routers/files.py`, `backend/app/api/routers/ocr.py`, `backend/app/integrations/ocr/` |
+| PostgreSQL models/schema history | `backend/app/db/models.py`, `backend/alembic/versions/` |
+| Existing automated tests | `backend/tests/test_ocr_mapping.py`, `backend/tests/test_veris.py` |
+
+Current verification is concentrated on OCR mapping/client tests and frontend compilation. Full PostgreSQL transaction tests, scheduler/provider tests and browser end-to-end acceptance remain part of the phase plan. No percentage-complete claim is made from the number of screens or tables.

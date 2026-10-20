@@ -1,0 +1,42 @@
+# Local development only. In Dokploy the database is its own service and this file
+# is not used — the app there reads DATABASE_URL from the service environment.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-care_india}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      # Override the complete URL when changing credentials; URL-encode its user/password.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/care_india}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      AGENCY_TIMEZONE: ${AGENCY_TIMEZONE:-Asia/Kolkata}
+      STATIC_DIR: /app/static
+      STORAGE_DIR: /app/data/uploads
+      # Resume and passport OCR on the add-candidate form. Unset, the form is filled by hand.
+      VERIS_OCR_BASE_URL: ${VERIS_OCR_BASE_URL:-}
+      VERIS_OCR_API_KEY: ${VERIS_OCR_API_KEY:-}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    volumes:
+      - uploads:/app/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  uploads:
