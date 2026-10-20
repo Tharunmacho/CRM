@@ -5,6 +5,7 @@
   "description": "Terminal shortcuts for the Python CRM backend",
   "scripts": {
     "dev": "node ../scripts/backend.mjs dev",
-    "start": "node ../scripts/backend.mjs start"
+    "start": "node ../scripts/backend.mjs start",
+    "worker": "node ../scripts/backend.mjs worker"
   }
 }

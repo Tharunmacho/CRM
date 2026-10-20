@@ -40,7 +40,7 @@ crm/
 │   │   ├── services/            # Existing bootstrap service; more services in later phases
 │   │   ├── main.py              # FastAPI composition and static frontend serving
 │   │   └── cli.py               # Existing operational commands
-│   ├── alembic/                 # Schema history through 0006_domain_table_names
+│   ├── alembic/                 # Schema history through 0007_email_intake
 │   ├── tests/                   # Existing OCR tests
 │   ├── requirements.txt         # Pinned production Python dependencies
 │   ├── requirements-dev.txt     # Production dependencies plus test dependencies
@@ -141,7 +141,9 @@ On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The ro
 | `frontend/.env.local` | Vite configuration; only `VITE_` variables are exposed to browser code |
 | `API_PROXY_TARGET` | Development proxy target; defaults to `http://127.0.0.1:8000` |
 | `VITE_API_URL` | Leave empty for the local proxy and same-origin production hosting |
-| `VERIS_OCR_BASE_URL`, `VERIS_OCR_API_KEY` | Optional backend OCR connection; manual entry works without it |
+| `VERIS_OCR_BASE_URL`, `VERIS_OCR_API_KEY` | Optional backend extraction connection; local inspection precedes extraction and manual entry works without it |
+| `TESSERACT_CMD`, `OCR_LANGUAGES`, `OCR_MAX_PAGES`, `OCR_PAGE_TIMEOUT_SECONDS`, `OCR_DOCUMENT_TIMEOUT_SECONDS` | Local document reader configuration; see the first OCR stage below |
+| `EMAIL_INGESTION_ENABLED`, `EMAIL_POLL_SECONDS`, `IMAP_*`, `EMAIL_ACCOUNTS_JSON` | Incoming-mail worker and server-only mailbox configuration; see connected email intake below |
 | `STORAGE_DIR` | Backend file storage; defaults to `backend/data/uploads` locally |
 | `STATIC_DIR` | Built frontend location; defaults to `backend/static` locally |
 | `REDIS_URL` | Optional backend Redis connection; use a local URL for development and Dokploy's internal URL in production |
@@ -163,6 +165,94 @@ Existing accounts need no recreation. The earlier account-persistence correction
 The [table dictionary](docs/database-design.md#table-dictionary) maps every old name to its new name, purpose and key relationships. Revision `0006` renames existing tables and adds descriptions without adding another schema or deleting feature tables. The API paths, JSON collection keys and entity-type values remain unchanged. The existing contact/employer hierarchy is preserved for Phase 2 reconciliation; the naming update does not complete model normalization or Phase 1 business rules.
 
 Apply the naming migration in a coordinated release: stop API writers, back up the database, run migrations, then restart the compatible API and verify the revision/readiness. Its downgrade restores the earlier names and must be paired with the earlier backend version. See [migration and maintenance rules](docs/database-design.md#migration-and-maintenance-rules). Documentation of `0006` is not evidence that a particular live database has been upgraded.
+
+## First OCR stage: manual document inspection
+
+The Add candidate **Read documents** action now inspects document content locally before calling Veris. Native PDF text is used where available; scanned pages and images use Tesseract, including bounded rotation attempts. Each page is accounted for as read, blank or unread, with a content classification of resume, passport, other or unknown. Only the pages matching the selected resume/passport mode are sent for extraction, in their original order. Unread or uncertain pages prevent submission; a resume input without resume pages returns a report without extraction.
+
+PDF, DOC/DOCX converted once to PDF, and supported single-frame Pillow images are accepted. Word conversion requires LibreOffice. HEIC and multi-frame images are not supported by this OCR path; general attachment upload is separate. The original document's page numbers remain visible in the report and extracted evidence.
+
+### Local setup and limits
+
+1. Update the backend environment with `backend/requirements-dev.txt` as described above.
+2. Install Tesseract with English and orientation data (`eng`, `osd`). The reader checks `PATH` and the usual Windows location, `C:\Program Files\Tesseract-OCR\tesseract.exe`; use `TESSERACT_CMD` for another location. Tesseract is installed in the current development environment.
+3. Configure the backend OCR provider URL/key for field extraction. Keep these values server-side. Local inspection still returns actionable review information when provider configuration or extraction fails.
+4. For Word documents, install LibreOffice and make its executable discoverable. It is not installed in the current local environment, so export Word documents to PDF there. Both Docker and Nixpacks install Tesseract (`eng`/`osd`) and LibreOffice Writer.
+5. Restart the API after configuration changes.
+
+The public settings are documented in `backend/.env.example`:
+
+```dotenv
+TESSERACT_CMD=
+OCR_LANGUAGES=eng
+OCR_MAX_PAGES=300
+OCR_PAGE_TIMEOUT_SECONDS=20
+OCR_DOCUMENT_TIMEOUT_SECONDS=600
+```
+
+The upload limit remains **25 MB**. The local reader defaults to **300 pages**, **20 seconds per OCR page**, and a **600-second document budget**; the reader limits and languages are configurable above. Pages skipped after a limit/deadline are shown as unread and are not counted as inspected. English is the default; install the corresponding Tesseract language data before changing it. Long documents can take several minutes. The browser allows up to **20 minutes** for an OCR request; the normal JSON API deadline remains 30 seconds.
+
+### Local verification flow and remaining boundary
+
+1. Open **Add candidate**, choose a resume or passport, and select **Read documents**.
+2. Review the actual inspected count, selected page numbers, unread/uncertain pages and individual-page reasons. A review report is retained even when no fields were extracted or the provider failed after inspection.
+3. Correct the suggested fields. Edits made before or during a scan, including intentionally cleared fields, survive rescans. Passport values take precedence only for fields the recruiter has not edited. Replacing a file clears that file's stale report and automatic values.
+4. Enter required name/phone manually when extraction cannot proceed. **Continue manually** stops the browser waiting and enables saving; it does not cancel an already-running server/provider job.
+5. **Save and assign** saves the candidate and valid extraction evidence, then uploads the selected originals. Empty or review-only OCR output is not saved as a successful scan; upload failures are shown separately.
+
+This remains a request-bound manual flow. Reading alone does not persist a candidate, original file, job or review report, and refreshing/leaving the page loses the draft. Stable selected-page PDF bytes and submission keys reduce duplicate provider submissions, and returned page coverage is checked before fields are applied. This form does not use the separate durable email queue described below.
+
+Verification on 20 October 2026 covered local inspection/classification, API behavior with synthetic provider results, **23 frontend tests**, the production build and isolated mobile Chrome checks. A synthetic 100-page scanned PDF was processed with **99 real Tesseract calls in 127.61 seconds**: all 100 pages were accounted for, only resume pages 77–78 were selected, passport page 100 was classified separately, page 10 was blank and rotated page 5 was read. No paid provider or database call was made in that smoke check. These results verify this manual stage, not connected-email or production end-to-end acceptance.
+
+## Connected email intake
+
+The incoming IMAP path now has a PostgreSQL queue, a separate worker, Inbox controls and dashboard source health. It stores original attachments before advancing the mailbox cursor, inspects their pages, and separately extracts resume, passport and Aadhaar content. Candidate links retain the original source bundle and generated document slots. Accepted provider job IDs and results are checkpointed before candidate writes; retries resume saved work instead of launching a synchronous fallback. Completed extraction can be reused for matching attachment bytes.
+
+### Setup
+
+1. Back up PostgreSQL and uploaded files, stop older API/worker processes, and apply `0007_email_intake` with the coordinated migration procedure below. Restart compatible code afterward. The migration adds account cursor/health state and `email_ingestion_jobs`; it does not recreate users. Downgrading to `0006_domain_table_names` removes the new job ledger and account checkpoint columns, so preserve the backup and reconcile intake before rollback.
+2. Add the following settings to `backend/.env` locally, or the Backend application's environment in Dokploy. Fill credentials privately; they never belong in a `VITE_` variable or an Inbox form.
+
+   ```dotenv
+   EMAIL_INGESTION_ENABLED=true
+   EMAIL_POLL_SECONDS=120
+   IMAP_SERVER=YOUR_IMAP_HOST
+   IMAP_PORT=993
+   IMAP_USERNAME=YOUR_MAILBOX_ADDRESS
+   IMAP_PASSWORD=YOUR_MAILBOX_APP_PASSWORD
+   IMAP_USE_SSL=true
+   IMAP_FOLDER=INBOX
+   ```
+
+   Configure Veris and the local document tools as described above. For multiple mailboxes, `EMAIL_ACCOUNTS_JSON` replaces the single `IMAP_*` account; its object format is in `backend/.env.example`. Only configured addresses are exposed to Admin, never credentials.
+3. For local development, keep the API and frontend running and start a third terminal:
+
+   ```powershell
+   Set-Location M:\crm\backend
+   npm.cmd run worker
+   ```
+
+   The Nixpacks production launcher starts a supervised API and separate worker when ingestion is enabled. The Docker runtime uses the same supervisor. Both processes must share the persistent `STORAGE_DIR` volume. The queue is PostgreSQL-backed and does not require Redis.
+
+   The worker pins each account to the storage identity in `STORAGE_DIR/.email-storage-id`. When handing processing between local development and Dokploy against the same database, stop the old worker and mount or copy the complete storage directory, **including this marker and all original/selected documents**, before starting the replacement. A different directory/marker blocks processing with a visible storage-mismatch error. Do not delete or regenerate the marker to bypass that guard. Starting a local worker against a production database with unrelated local storage is not a valid handoff.
+4. Sign in as Admin, open **Inbox → Connect account**, select the configured address, choose auto-ingest and connect. The connection establishes a cursor at the current mailbox end: **only mail arriving after connection is imported**. Send new test mail afterward; historical mail is not backfilled.
+5. Leave the worker running: connected mailboxes sync automatically, every two minutes by default. No manual sync action is needed or exposed. Check the heartbeat and last-sync time; an enabled setting alone does not establish that the worker is running. Inbox status updates automatically while the page is visible.
+
+### Review and verification
+
+Inbox shows queued, reading, retry, needs-review, completed, ignored and failed outcomes, with attachment page classifications and candidate links. Auto-ingest controls attachment processing only: switching it off still imports new messages automatically, and **Create candidate from attachments** queues manual intake. Admin can retry a failed/review/ignored job after correcting its cause. Pending provider jobs retain their ID and are revisited; processing failures use backoff for the initial attempt plus up to three retries. Failed provider executions retain their history when a new retry generation is submitted.
+
+Conflicting identities or unread/unknown pages enter review without silently changing a candidate. A recognized new person with missing details or no eligible owner is visibly marked for review. An existing match by normalized phone, email or passport receives document evidence and empty-field updates while keeping populated fields and ownership. This email policy does not finish the manual merge/cancel workflow.
+
+Completed intake refreshes Data Bank state, and Admin's dashboard shows source sync, worker heartbeat, queued/reading/review/failure counts and links back to Inbox. Inbox loads up to 200 messages and 100 jobs and polls every five seconds while visible; the dashboard uses a smaller health endpoint. Attachment previews, OAuth/Graph connections, account removal, SMTP replies/acknowledgements, WhatsApp and S3 storage remain open work. **Send reply** is disabled. The adapter does not send, move, delete or mark messages read.
+
+Verification on 20 October 2026 covered **379 backend tests**, including the opt-in PostgreSQL migration/intake cases, plus **30 frontend tests** and the production build. The full backend run passed 378 cases; its one timestamp-format failure was resolved by pinning the disposable test connections to UTC, and all seven bootstrap tests then passed. No application timestamp behavior changed.
+
+Isolated mobile Chrome checks used synthetic API responses for connection, processing, candidate links, page summaries, dashboard health, review/retry and role controls. After removing manual sync controls, the automatic-arrival path through candidate creation was also verified; later navigation checks encountered browser-harness interception/time-out errors, which are recorded in the ignored verification artifacts. No browser fixture accessed a real mailbox, provider or database.
+
+The configured PostgreSQL database was backed up, restore-tested and upgraded to `0007_email_intake`, with the existing contents of all 20 application tables unchanged. A separate read-only login to the configured IMAP mailbox passed without fetching messages. A real Veris job extracted a synthetic résumé and resumed from its saved job ID; it wrote no candidate into the CRM. Passport/Aadhaar routing and response validation have fixture-based coverage, while a new-email test through the running deployment and live identity-document extraction remain acceptance steps. This slice does not complete Phase 5.
+
+The updated Nixpacks 1.41 Linux image also built successfully. Using its normal login-shell entrypoint, an offline container read a native PDF, ran real Tesseract on a scanned image and converted a real DOCX through LibreOffice; all three selected the expected résumé page. Keep the generated Nixpacks entrypoint: it initializes the library paths needed by the Nix Python runtime. This image check used synthetic documents with networking disabled and made no provider or database calls.
 
 ## Build and verification
 
@@ -269,13 +359,14 @@ becomes `degraded` with HTTP 503. Healthy readiness returns HTTP 200. Errors omi
 credentials and connection URLs. Connections close on application shutdown.
 
 This integration provides Redis connectivity and readiness checks. It does not
-yet add caching, move login sessions out of PostgreSQL, or implement the queued
-email/OCR jobs, worker and scheduler planned in Phases 4–5.
+add query caching or move login sessions out of PostgreSQL. The incoming email
+worker uses its own PostgreSQL-backed queue; task escalation and reminder
+schedulers remain future work.
 
 ## Current implementation boundaries
 
-Candidate creation, automatic assignment, client/company/order creation, mapping, stage drafts and completion, file versions, task remarks, reassignment, and personal to-dos have backend implementations. Dashboard and report screens compute results from the bootstrap payload. Dashboard CSV export is implemented.
+Candidate creation, automatic assignment, client/company/order creation, mapping, stage drafts and completion, file versions, task remarks, reassignment, and personal to-dos have backend implementations. Manual OCR now includes local page/content inspection, selected-page extraction, review reports and protection of recruiter edits. Dashboard and report screens compute results from the bootstrap payload. Dashboard CSV export is implemented.
 
-Inbox connection/sending/ingestion, WhatsApp automation, user administration actions, notification delivery, scheduled escalation jobs, stage reopening, and Excel/PDF export remain incomplete. Ordinary record editing and full PRD duplicate merging are also outstanding. Backend audit writes exist for some operations, but the current audit viewer still reads an empty legacy fixture.
+Incoming IMAP connection, durable document intake, Inbox job controls and dashboard source health are implemented. OAuth/Graph, SMTP sending, attachment preview, account removal, WhatsApp automation, S3 storage, user administration actions, complete notification delivery, scheduled escalation jobs, stage reopening, and Excel/PDF export remain incomplete. Ordinary record editing and full PRD duplicate merging are also outstanding. Backend audit writes exist for some operations, but the current audit viewer still reads an empty legacy fixture.
 
 The phased plan records these gaps, role enforcement and concurrency issues, reporting scope fixes, and the acceptance tests required before release. Implement each phase against the original PRD and its traceability rows, and update the matrix when behaviour is verified.

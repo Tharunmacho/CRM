@@ -1,0 +1,113 @@
+"""Run with npm run worker. A DB-backed queue survives process restarts."""
+import logging
+import signal
+import threading
+from datetime import timedelta
+
+from sqlalchemy import select, text
+
+from app.core.config import get_settings
+from app.db.models import EmailIngestionJob, MailAccount, MailMessage
+from app.db.session import SessionLocal, engine
+from app.services.email_intake import now, process_job, receive_account
+from app.services.mail_storage import STORAGE_MISMATCH, storage_identity
+
+log = logging.getLogger("email_worker")
+STOP = threading.Event()
+# Database-wide identity; never derive this from a process-local hash.
+LOCK = 724681930117
+
+
+def run_cycle(*, sessions=SessionLocal, settings=None):
+    settings = settings or get_settings()
+    if not settings.email_ingestion_enabled:
+        return
+    volume_id = storage_identity(settings.storage_dir)
+    with sessions() as db:
+        accounts = list(db.scalars(select(MailAccount)))
+        due, eligible = [], []
+        for account in accounts:
+            cursor = dict(account.sync_state or {})
+            bound_volume = cursor.get("storage_id")
+            if bound_volume is None:
+                account.sync_state = {**cursor, "storage_id": volume_id}
+            elif bound_volume != volume_id:
+                account.last_error = STORAGE_MISMATCH
+                continue
+            eligible.append(account.id)
+            if account.last_error == STORAGE_MISMATCH:
+                account.last_error = None
+            account.worker_seen_at = now()
+            if (account.sync_requested or account.last_sync_at is None
+                    or account.last_sync_at <= now() - timedelta(seconds=settings.email_poll_seconds)):
+                due.append(account.id)
+        db.commit()
+    if not eligible:
+        return
+    for account_id in due:
+        if STOP.is_set():
+            return
+        try:
+            receive_account(account_id, sessions=sessions, settings=settings)
+        except Exception as exc:
+            from app.integrations.mail.imap import MailAdapterError
+            message = str(exc) if isinstance(exc, MailAdapterError) else "Mailbox sync failed. Check connection settings and worker logs."
+            log.warning("Mailbox %s sync failed (%s)", account_id, type(exc).__name__)
+            with sessions() as db:
+                account = db.get(MailAccount, account_id)
+                if account is not None:
+                    account.last_error, account.last_sync_at, account.sync_requested = message[:500], now(), False
+                    db.commit()
+    with sessions() as db:
+        ready = list(db.scalars(select(EmailIngestionJob.id).join(
+            MailMessage, MailMessage.id == EmailIngestionJob.message_id,
+        ).where(
+            MailMessage.account_id.in_(eligible),
+            EmailIngestionJob.status.in_(["pending", "processing", "retry"]),
+            EmailIngestionJob.next_attempt_at <= now(),
+        ).order_by(EmailIngestionJob.next_attempt_at).limit(10)))
+    for job_id in ready:
+        if STOP.is_set():
+            return
+        try:
+            process_job(job_id, sessions=sessions, settings=settings)
+        except Exception as exc:
+            # A failure outside process_job's own recovery path must not block
+            # unrelated messages or print exception text/SQL parameters.
+            log.error("Ingestion job %s failed (%s); queued work is retained.", job_id, type(exc).__name__)
+            with sessions() as db:
+                job = db.get(EmailIngestionJob, job_id)
+                if job is not None and job.status in {"pending", "processing", "retry"}:
+                    job.attempts += 1
+                    job.status = "failed" if job.attempts >= 4 else "retry"
+                    job.next_attempt_at = now() + timedelta(seconds=90 * 2 ** (job.attempts - 1))
+                    job.last_error = "Document processing failed. Retry after checking worker configuration."
+                    db.commit()
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    settings = get_settings()
+    if not settings.email_ingestion_enabled:
+        raise SystemExit("Set EMAIL_INGESTION_ENABLED=true to run the incoming-mail worker.")
+    for name in ("SIGINT", "SIGTERM"):
+        signal.signal(getattr(signal, name), lambda *_: STOP.set())
+    log.info("Email intake worker started; polling every %ss. Auto-replies are disabled.", settings.email_poll_seconds)
+    while not STOP.is_set():
+        try:
+            # A dedicated autocommit connection holds a session lock, not a long
+            # transaction. Another instance can take over immediately after exit.
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as lock:
+                if lock.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": LOCK}):
+                    try:
+                        run_cycle(settings=settings)
+                    finally:
+                        lock.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": LOCK})
+        except Exception as exc:
+            log.error("Worker cycle failed (%s); queued work is retained.", type(exc).__name__)
+        STOP.wait(5)
+    log.info("Email intake worker stopped.")
+
+
+if __name__ == "__main__":
+    main()

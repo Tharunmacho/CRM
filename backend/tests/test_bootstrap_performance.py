@@ -326,7 +326,7 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
             "recordedAt": "2026-01-10T09:30:00Z",
         }
         slots = {slot["key"]: slot for slot in candidate["documents"]}
-        assert list(slots) == ["resume", "passport", "photo", "education", "experience"]
+        assert list(slots) == ["resume", "passport", "aadhaar", "source_bundle", "photo", "education", "experience"]
         assert slots["resume"]["label"] == "Resume"
         assert slots["resume"]["versions"] == [
             {
@@ -338,7 +338,7 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
             for version in (1, 2)
         ]
         assert slots["passport"]["versions"][0]["id"] == "candidate-passport"
-        assert all(slots[key]["versions"] == [] for key in ("photo", "education", "experience"))
+        assert all(slots[key]["versions"] == [] for key in ("aadhaar", "source_bundle", "photo", "education", "experience"))
 
         company = body["companies"][0]
         expected_company = wire(db.get(Company, "schema-company"), CompanyOut)

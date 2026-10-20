@@ -11,6 +11,7 @@ PORT = "8000"
 
 [phases.setup]
 nixPkgs = ["...", "nodejs_22"]
+aptPkgs = ["...", "tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-osd", "libreoffice-writer"]
 
 [phases.install]
 dependsOn = ["setup"]

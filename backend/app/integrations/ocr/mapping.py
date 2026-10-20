@@ -12,7 +12,7 @@ import re
 from datetime import date, datetime
 from typing import Any
 
-from veriis.models import PassportResponse, ResumeResponse
+from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 
 from app.api.schemas import Wire
 
@@ -181,6 +181,25 @@ def passport_fields(p: PassportResponse) -> tuple[OcrFields, list[str]]:
             "The passport's check digits do not add up, so the number or a date may be "
             "misread. Compare them against the scan."
         )
+    return fields, warnings
+
+
+def aadhaar_fields(response: AadhaarResponse) -> tuple[OcrFields, list[str]]:
+    """Only stated candidate details; retain Aadhaar identifiers in raw output."""
+    identity = response.aadhaar
+    fields = OcrFields(
+        name=_person_name(identity.name),
+        phone=_text(identity.mobile_number),
+        dob=identity.date_of_birth,
+        gender=identity.gender,
+    )
+    warnings = list(response.warnings)
+    if identity.year_of_birth and not identity.date_of_birth:
+        warnings.append("Only a birth year was read from Aadhaar. Enter the full date of birth manually.")
+    if identity.aadhaar_number_valid is False:
+        warnings.append("The Aadhaar number did not pass validation. Compare it against the original document.")
+    # A full address does not establish a separate city, and the issuer does
+    # not establish citizenship. Neither field is inferred from the card.
     return fields, warnings
 
 

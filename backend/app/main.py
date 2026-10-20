@@ -7,12 +7,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
 
-from app.api.routers import applications, auth, candidates, data, files, ocr
+from app.api.routers import applications, auth, candidates, data, files, ocr, inbox
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
 from app.db.models import User
 from app.db.session import SessionLocal, engine
 from app.integrations.redis import close_redis, redis_health
+from app.integrations.ocr.inspection import find_tesseract
 from app.services.bootstrap import bootstrap_state, ensure_bootstrap
 
 settings = get_settings()
@@ -55,6 +56,11 @@ def on_startup() -> None:
     else:
         log.warning("Redis unavailable. Check REDIS_URL and the Redis service.")
 
+    if find_tesseract(settings.tesseract_cmd):
+        log.info("Local OCR: Tesseract available; languages=%s. Documents are inspected before Veris.", settings.ocr_languages)
+    else:
+        log.warning("Local OCR: Tesseract unavailable. Scanned pages will need review; install it or set TESSERACT_CMD.")
+
 
 app.include_router(auth.router)
 app.include_router(applications.router)
@@ -62,6 +68,7 @@ app.include_router(candidates.router)
 app.include_router(data.router)
 app.include_router(files.router)
 app.include_router(ocr.router)
+app.include_router(inbox.router)
 
 
 @app.on_event("shutdown")

@@ -1,4 +1,4 @@
-"""Exercise the production launcher without importing settings or contacting a DB.
+"""Exercise the production launcher without reading .env or contacting a DB.
 
 Only a temporary SQLite alembic_version table is used. Subprocesses and API exec
 are intercepted, and the database module is replaced before running the launcher.
@@ -15,6 +15,8 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 import pytest
 from sqlalchemy import create_engine, event, inspect, text
+
+from app.core import config
 
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -41,9 +43,12 @@ def launch(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher, "BACKEND", BACKEND)
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(sys, "path", list(sys.path))
-    for key in ("DATABASE_URL", "PORT", "STATIC_DIR", "STORAGE_DIR", "RUN_MIGRATIONS_ON_START"):
+    for key in ("DATABASE_URL", "PORT", "STATIC_DIR", "STORAGE_DIR", "RUN_MIGRATIONS_ON_START", "EMAIL_INGESTION_ENABLED"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://unused@127.0.0.1:1/unused")
+    # Use the real boolean parser on each call, without the application cache or
+    # backend/.env. The engine below is independently replaced with local SQLite.
+    monkeypatch.setattr(config, "get_settings", lambda: config.Settings(_env_file=None))
 
     heads = set(ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_heads())
     assert len(heads) == 1, "The launcher fixtures expect one current migration head"
@@ -159,6 +164,34 @@ def test_matching_schema_execs_api_with_correct_paths_and_port(launch, monkeypat
     assert launch.schema_state() == before
     assert launch.observed.index("read-revision") < launch.observed.index("dispose")
     assert launch.observed.index("dispose") < launch.observed.index("api")
+
+
+@pytest.mark.parametrize("value", ["true", "1", "on", "y", "t", "YES"])
+def test_enabled_email_uses_supervisor_after_schema_validation(launch, monkeypatch, value):
+    monkeypatch.setenv("EMAIL_INGESTION_ENABLED", value)
+    with pytest.raises(ApiStarted):
+        launch.main()
+    assert launch.calls[0]["arguments"] == [sys.executable, "-m", "app.runtime"]
+    assert launch.observed.index("read-revision") < launch.observed.index("api")
+
+
+@pytest.mark.parametrize("value", ["false", "0", "off", "n", "f", "NO"])
+def test_disabled_email_uses_api_only_for_all_supported_false_values(launch, monkeypatch, value):
+    monkeypatch.setenv("EMAIL_INGESTION_ENABLED", value)
+
+    with pytest.raises(ApiStarted):
+        launch.main()
+
+    assert launch.calls[0]["arguments"][1:4] == ["-m", "uvicorn", "app.main:app"]
+
+
+def test_launcher_uses_parsed_settings_when_flag_is_not_in_process_environment(launch, monkeypatch):
+    monkeypatch.setattr(config, "get_settings", lambda: SimpleNamespace(email_ingestion_enabled=True))
+
+    with pytest.raises(ApiStarted):
+        launch.main()
+
+    assert launch.calls[0]["arguments"] == [sys.executable, "-m", "app.runtime"]
 
 
 @pytest.mark.parametrize("state", ["old", "empty-version", "unversioned"])

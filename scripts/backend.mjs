@@ -16,10 +16,11 @@ const commands = {
   start: ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'],
   test: ['-m', 'pytest'],
   migrate: ['-m', 'alembic', '-c', 'alembic.ini', 'upgrade', 'head'],
+  worker: ['-m', 'app.email_worker'],
 }
 const [task, ...extra] = process.argv.slice(2)
 if (!Object.hasOwn(commands, task)) {
-  console.error('Choose a backend task: dev, start, test, or migrate.')
+  console.error('Choose a backend task: dev, start, worker, test, or migrate.')
   process.exit(1)
 }
 

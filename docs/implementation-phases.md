@@ -14,8 +14,8 @@ Physical table references below use the names introduced by `0006_domain_table_n
 | 1 | Safe identity lifecycle, permissions, audit and concurrency foundation | 0 | Database-backed account correction delivered; remaining work is planned below |
 | 2 | PRD-aligned employer/order/candidate data and assignment | 1 | Core create flows exist; gaps and policy differences remain |
 | 3 | Reliable matching, complete 11-stage workflow and task transitions | 2 | Core stage flow exists; important missing branches remain |
-| 4 | Durable worker, notification, escalation and daily-update engine | 1, 3 | Models/UI exist; runtime automation is missing |
-| 5 | Production document ingestion and unified inbox | 2, 4 | Manual OCR exists; provider ingestion is missing |
+| 4 | Durable worker, notification, escalation and daily-update engine | 1, 3 | Incoming-mail worker/queue implemented; general notifications, escalation and daily-update runtime remain open |
+| 5 | Production document ingestion and unified inbox | 2, 4 | Manual selective OCR and durable IMAP intake/Inbox/source health implemented; remaining providers, sending, object storage and release acceptance are open |
 | 6 | User administration and complete private to-dos | 1, 2, 4 | To-do CRUD partly connected; user admin is a placeholder |
 | 7 | Correct dashboard, six reports, filters and exports | 2–6 | Charts exist; scope/filter/export work remains |
 | 8 | End-to-end validation, migration rehearsal and release readiness | 1–7 | Not established by current OCR tests |
@@ -117,7 +117,7 @@ Do not delay the foundation for later business decisions. Resolve employer hiera
 Work:
 
 - Resolve employer-as-client versus the existing client-person/company extension. Keep existing history and define a reversible migration if changing the hierarchy. Finish create/edit/status operations and all PRD fields for clients, designations and orders.
-- Finish candidate create/edit/profile fields, document slots and resume-prefill behavior. Validate OCR data before committing user-corrected values.
+- Retain the 20 October manual OCR stage: content/page inspection, selected-page extraction, review reports and protection of edits made before/during rescans. Finish remaining candidate create/edit/profile fields and document slots, and validate accepted OCR data before committing corrected values.
 - Add the incomplete-identity Needs review contract described in the database design: provisional OCR records may omit name/phone, manual entry still requires them, and first-call review validates corrections before clearing the corresponding review reasons. Keep original documents and never fabricate identity values.
 - Replace the current phone+DOB duplicate policy with normalized phone OR email OR passport matching. Manual entry offers merge/cancel; automation fills empty fields and attaches files without changing the existing owner. Conflicting identity matches require review.
 - Centralize strict round-robin assignment and initial-call task creation. Respect Staff role, active state, auto-assign toggle and leave flag. Define and expose the no-eligible-staff fallback.
@@ -186,16 +186,28 @@ Acceptance:
 
 **PRD:** Inbox, p. 3; automation, pp. 6–7; version history, p. 9. **Depends on:** Phases 2 and 4.
 
+**Delivered manual slice, 20 October 2026:** native PDF text/Tesseract inspection accounts for pages, identifies resume/passport content, blocks unread/unknown pages, and sends only the selected mode's pages to Veris with stable PDF bytes/submission keys and returned-page coverage validation. The form shows inspection/error reports and preserves human edits; empty or incomplete raw output is not saved as a successful scan. PDF, Word via LibreOffice and supported single-frame images are handled within the documented limits. See the [setup and verification guide](../README.md#first-ocr-stage-manual-document-inspection).
+
+The manual form remains request-bound. Its originals and accepted results persist only through explicit save/upload; Continue manually stops the browser wait without cancelling server/provider work.
+
+**Implemented email extension, 20 October 2026:** environment-configured IMAP accounts now connect through an Admin API/UI and establish a new-mail cursor. A separate worker polls accounts, stores originals and durable message/attachment/hash checkpoints, and processes the PostgreSQL queue added by `0007_email_intake`. Resume, passport and explicitly requested Aadhaar pages are extracted separately. Stable keys, saved provider IDs and result checkpoints allow resumed processing before an atomic candidate/document/outcome commit. Identity conflicts enter review; matching existing candidates retain ownership and populated fields. The queue has backoff/failure/review/manual retry behavior, auto-ingest toggles and authenticated manual intake. Inbox displays job/page outcomes and linked candidates, and the dashboard uses a small source/worker health endpoint. No sending, moving, deletion or mailbox read-flag changes are performed.
+
+The UI extension passed 30 frontend tests, production build and isolated mobile Chrome checks with synthetic API responses. This verifies the controls and UI state transitions, not a deployed mailbox/provider pipeline. See [email setup and verification](../README.md#connected-email-intake). Apply the migration with a database/files backup and compatible API/worker restart; downgrading removes the new job/checkpoint state. Phase 5 remains incomplete.
+
+The worker binds an account to the persistent `.email-storage-id` marker under `STORAGE_DIR`. A local/Dokploy handoff using the same database must stop the old worker and share or copy the complete volume, including the marker and documents. A mismatched volume blocks processing visibly; it must not be bypassed by replacing the marker.
+
+Mailbox synchronization is automatic after one-time connection, every 120 seconds by default, with no manual sync control. Auto-ingest toggles only attachment processing; new mail still arrives automatically when it is off. Manual attachment intake and explicit failure/review retries remain available.
+
 Work:
 
 - Implement the object-storage adapter, versioned document writes and source provenance. Keep development local storage supported behind the same interface.
-- Connect Gmail OAuth, Microsoft 365 OAuth and IMAP/SMTP with admin-only lifecycle operations, encrypted credentials, refresh handling and health timestamps. No artificial per-account count limit.
-- Implement unified account-filtered/searchable mail, unread state, attachment indicators/preview, reply from the receiving account, auto-ingest toggles, manual attachment ingestion and candidate badges/links.
+- Extend the implemented server-configured IMAP connection with Gmail OAuth, Microsoft 365 OAuth/Graph, account removal and SMTP sending, including token/credential lifecycle and health. No artificial per-account count limit.
+- Complete attachment previews, scalable pagination/search and originating-account replies around the working account/unread filters, message details, auto-ingest toggles, manual intake and candidate links. Keep Send reply disabled until it sends through a validated backend action.
 - Implement verified WhatsApp Business webhook reception for documents/images and persist sender WhatsApp number. Protect receipt handling against duplicate deliveries.
-- Support PDF/DOC/DOCX/JPG/PNG, content hashes and provider-message identity, worker-based Veriis calls, passport classification, duplicate reconciliation and Needs review outcomes.
-- Use per-account source receipts and attachment/mode job state with persisted provider job IDs and stable submission keys. Keep unread state separate from intake checkpoints, include IMAP folder/UIDVALIDITY in receipt identity, and reconcile submitted jobs before retrying extraction.
-- Share the candidate contract across all channels and test persisted fields/provenance. Manual corrections and existing owners must survive later OCR results; one attachment's failure must not discard successful siblings.
-- Implement the agreed three-retry policy with backoff and admin failure/retry views. Feed source sync/failure health into the dashboard.
+- Extend the implemented email page reader, per-mode extraction, receipts/hashes and result persistence to other channels. Preserve the original and selected document links with visible Needs review outcomes.
+- Verify the implemented per-account folder/UIDVALIDITY/UID receipts, saved provider IDs/keys and restart recovery against real provider behavior. The queue currently uses a PostgreSQL advisory lock to select one worker and does not require a Redis broker/outbox.
+- Unify the email duplicate/correction policy with manual entry and future channels. Preserve recruiter changes and owners, and verify that retry reuses successful attachment/mode checkpoints.
+- Accept the three-retry/backoff/manual-retry behavior and source-health reporting under failure/restart scenarios; complete operator repair workflows and stale-heartbeat recovery guidance.
 - Optional acknowledgement messages can be a separate toggle after mandatory intake is reliable; they do not block v1 acceptance.
 
 Acceptance:

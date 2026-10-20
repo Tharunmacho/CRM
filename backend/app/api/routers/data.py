@@ -59,6 +59,8 @@ router = APIRouter(prefix="/api", tags=["data"])
 DOCUMENT_SLOTS = [
     ("resume", "Resume"),
     ("passport", "Passport copy"),
+    ("aadhaar", "Aadhaar copy"),
+    ("source_bundle", "Original email document bundle"),
     ("photo", "Photograph"),
     ("education", "Education certificates"),
     ("experience", "Experience certificates"),

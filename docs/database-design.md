@@ -2,13 +2,15 @@
 
 This document is the table dictionary and maintenance guide for the database behind the [PRD architecture](architecture.md). It describes the physical names introduced by revision `0006_domain_table_names` and separates that naming change from the business-model work still needed in the [implementation phases](implementation-phases.md). Check each database's Alembic revision before using the new names; the dated rollout verification below applies to the configured Care India database.
 
-**Rollout status, 20 October 2026:** Care India's live PostgreSQL 18.6 database is now at `0006_domain_table_names`. After coordinating the old backend shutdown, the database backup was restored into an isolated PostgreSQL 18 container and all 20 business-table counts and fingerprints matched. The live migration verified unchanged contents and table object identities before committing; its revision and new names were then checked through a separate connection. The normal local API and frontend proxy report healthy PostgreSQL and Redis. Backup and verification artifacts remain outside Git. The existing attachment was not present in local upload storage: retain the old application's storage until its file is located and made available through the new deployment. Production HTTP readiness and upload availability still need deployment acceptance checks. This naming rollout does not complete the remaining CRM model or business-rule phases.
+**Naming rollout, 20 October 2026:** Care India's live PostgreSQL 18.6 database was upgraded to `0006_domain_table_names`. After coordinating the old backend shutdown, the database backup was restored into an isolated PostgreSQL 18 container and all 20 business-table counts and fingerprints matched. The live migration verified unchanged contents and table object identities before committing; its revision and new names were then checked through a separate connection. The normal local API and frontend proxy reported healthy PostgreSQL and Redis. Backup and verification artifacts remain outside Git. The existing attachment was not present in local upload storage: retain the old application's storage until its file is located and made available through the new deployment. Production HTTP readiness and upload availability still need deployment acceptance checks. This naming rollout does not complete the remaining CRM model or business-rule phases.
+
+**Email rollout, 20 October 2026:** The configured database is now at `0007_email_intake`. Before this additive migration, a new PostgreSQL 18 backup was restored and verified in an isolated container. The migration preserved the existing columns and contents of all 20 application tables, verified with row fingerprints. No mailbox account or ingestion job was created during migration. Real mailbox login and a synthetic résumé extraction through Veris passed separately; receiving a new test email through the deployed worker remains an acceptance step. The backup, restore report and migration report are stored outside Git.
 
 The backend uses SQLAlchemy 2, psycopg 3 and Alembic. Local Docker Compose specifies PostgreSQL 16; the configured Dokploy database reports PostgreSQL 18.6. These are separate environments, not a claim that the live server runs the Compose image.
 
 ## Ownership and source of truth
 
-- [SQLAlchemy models](../backend/app/db/models.py) define 20 application tables. Alembic maintains a separate `alembic_version` metadata table, so pgAdmin normally shows 21 tables.
+- [SQLAlchemy models](../backend/app/db/models.py) define 21 application tables after `0007_email_intake`. Alembic maintains a separate `alembic_version` metadata table, so pgAdmin shows 22 tables at that revision. Revision `0006` has 20 application tables plus the migration marker.
 - [Database sessions](../backend/app/db/session.py) own connection pooling and request session lifecycle.
 - [Alembic revisions](../backend/alembic/versions/) define schema history. Revisions `0001`–`0005` remain unchanged; `0006_domain_table_names` supplies the reversible naming and description update.
 - [API schemas](../backend/app/api/schemas.py) define HTTP response shapes, not database tables.
@@ -37,9 +39,10 @@ The old-name column identifies tables through revision `0005_candidate_ocr_data`
 | Workflow | `remarks` | `workflow_task_remarks` | Timestamped task updates | `task_id` → `workflow_tasks.id`; `author_id` → `auth_users.id` |
 | Workflow | `assignment_pointer` | `workflow_assignment_cursor` | Single persisted position for staff round-robin assignment | Optional `last_user_id` → `auth_users.id`; singleton row `id = 1` |
 | Personal | `todo_items` | `personal_todos` | Private reminders with manual completion | `owner_id` → `auth_users.id`; optional UI link is a string, not a record foreign key |
-| Email | `mail_accounts` | `email_accounts` | Mailbox/provider configuration and synchronization metadata | Parent of `email_messages`; provider integration remains planned |
+| Email | `mail_accounts` | `email_accounts` | Connected mailbox, IMAP cursor, auto-ingest setting and worker health | Parent of `email_messages`; credentials remain in server environment settings |
 | Email | `mail_messages` | `email_messages` | Mailbox messages and optional candidate association | `account_id` → `email_accounts.id`; optional `candidate_id` → `crm_candidates.id` |
 | Email | `mail_attachments` | `email_attachments` | Source-message file metadata and content hashes | `message_id` → `email_messages.id` |
+| Email | Added in `0007` | `email_ingestion_jobs` | Durable intake queue, per-document OCR checkpoints, retries and candidate outcome | Unique `message_id` → `email_messages.id`; optional `candidate_id` → `crm_candidates.id` |
 | Intake | `ingestion_failures` | `ingestion_failures` (unchanged) | Failed intake attempts, reason and resolution state | Existing source/file descriptors; no message/job foreign key yet |
 | Documents | `attachments` | `document_attachments` | Versioned document metadata, owner/slot and storage key | Optional `uploaded_by` → `auth_users.id`; record owner uses `entity_type` + `entity_id` |
 | System | `notifications` | `system_notifications` | Recipient-specific bell messages and read state | `user_id` → `auth_users.id`; optional UI link |
@@ -134,13 +137,29 @@ Python/FastAPI remains the backend. The existing OCR integration is separated in
 
 For manual entry, extraction prefills the form; saving the candidate commits the reviewed values. `ocr_data` is source evidence, not permission to overwrite user corrections. The existing raw response is deferred from the bootstrap query and fetched separately for the profile.
 
-**Incomplete OCR identity decision:** the current database and candidate input schema require both name and phone, while PRD p. 7 requires incomplete extraction to survive as Needs review. In Phase 2, introduce an explicit review state and permit missing identity fields only for those provisional records; retain required fields in the manual-entry contract. Backfill the review state from existing data and validate the missing fields before clearing their review reasons. Phase 5 intake uses this contract to save the original document, assign the review candidate and create its task without invented names or phone numbers. Staff corrections update the same record during the first-call review. This is a planned schema/API change, not current behavior.
+**Incomplete OCR identity:** automatic intake marks a candidate Needs review when a verified extraction lacks name/phone or needs correction. The existing non-null columns currently use the explicit display label `Name needs review` and an empty phone, never an inferred filename or email sender as identity. A future nullable provisional-identity contract and complete correction workflow remain Phase 2 work. Unread/unknown pages and conflicting people keep the durable job in Needs review without changing a candidate.
 
-Phase 5 will reuse these components behind a durable ingestion service. Persist source identity, file hash, processing status, attempts, errors and provenance before acknowledging intake. A worker performs OCR outside the request, resolves duplicates, assigns only new candidates and creates tasks once. Provider adapters should return an internal extraction result so replacing an OCR provider does not require rewriting candidate screens or database workflows.
+Revision `0007_email_intake` adds the durable email path. Originals and mailbox receipts are saved before advancing the cursor. A separate worker performs local OCR and Veris work outside database transactions; the candidate, versioned document links, assignment, initial-call task, notifications and successful job outcome commit together. Existing candidates retain their owner and populated fields.
 
 The [email automation reference review](reference-architecture-review.md) adds a concrete persistence boundary: source receipts are unique per provider/account/message/attachment; OCR executions add extraction mode and retain provider job IDs, attempt history and stable submission keys. File hashes and person identity matching are separate from delivery deduplication. Commit pending work/outbox before dispatch, and make partial-attachment retries recoverable without reassigning candidates or duplicating tasks. Use PostgreSQL migrations for these concepts rather than importing the references' MongoDB collections or startup repairs.
 
-The backend calls an external OCR provider today; it does not contain a self-hosted OCR model. Worker infrastructure and an object-storage adapter are planned, not installed by this reorganization.
+Local native-text/Tesseract inspection precedes Veris extraction. Each mode receives only its selected pages. The original attachment and separate résumé/passport/Aadhaar PDFs remain in persistent storage. `crm_candidates.ocr_data` stores structured results under `resume`, `passport` and `aadhaar`; additional evidence is retained without replacing human corrections. Full extraction data is deferred from dashboard/bootstrap reads.
+
+`email_accounts.sync_state` stores the folder's UIDVALIDITY, last committed UID, a source fingerprint and uploads-volume identity. The source fingerprint binds the cursor to its server, port, login, folder and TLS mode; changing them blocks receipt instead of applying an old cursor to another mailbox. Password rotation preserves this binding. The worker also binds each mailbox to `STORAGE_DIR/.email-storage-id` and refuses to process it from unrelated storage. Moving processing between local development and production requires copying or mounting the whole uploads volume, including this marker and every source/selected file. `last_error`, `sync_requested` and `worker_seen_at` support operational status. IMAP passwords are resolved from server environment settings; they are not written into the existing `secrets` column or returned by the API. The optional `EMAIL_ACCOUNTS_JSON` setting supplies multiple accounts.
+
+`email_ingestion_jobs.state` holds per-attachment SHA-256, inspection, stable provider submission keys, accepted job IDs, returned results and retry history. Its compact `inspection` column supports the inbox without loading raw identity documents. Status is `pending`, `processing`, `retry`, `needs_review`, `completed`, `ignored` or `failed`. Pending remote jobs resume without spending a failed-attempt budget. Confirmed failures receive three retry attempts after the initial attempt; manual retry is an Admin action.
+
+In pgAdmin, inspect the intake without exposing identity-document payloads:
+
+```sql
+SELECT m.subject, j.status, j.attempts, j.last_error, j.candidate_id,
+       j.inspection, j.updated_at
+FROM email_ingestion_jobs j
+JOIN email_messages m ON m.id = j.message_id
+ORDER BY j.updated_at DESC;
+```
+
+Persistent local/shared-volume storage is implemented. An S3-compatible adapter and WhatsApp ingestion remain separate work.
 
 ## Planned schema work by phase
 
@@ -158,7 +177,9 @@ The exact new table/column names are decided in each implementation phase. The a
 
 ## Migration and maintenance rules
 
-Keep the revision chain `0001_initial → 0002_advance_currency → 0003_attachments → 0004_companies → 0005_candidate_ocr_data → 0006_domain_table_names`. The first five revisions remain unchanged. Add future revisions rather than rewriting applied history.
+Keep the revision chain `0001_initial → 0002_advance_currency → 0003_attachments → 0004_companies → 0005_candidate_ocr_data → 0006_domain_table_names → 0007_email_intake`. Existing revisions remain unchanged. Add future revisions rather than rewriting applied history.
+
+Revision `0007_email_intake` adds the ingestion job ledger and mailbox checkpoint/health columns. Its downgrade removes that ledger and the new account columns, including cursor and storage binding state. Stop intake workers and preserve a database/file backup before considering rollback; reconcile already processed messages before reconnecting an account. A downgrade does not delete source documents from storage.
 
 Revision `0006_domain_table_names` renames 19 tables and 30 indexes, describes all 20 application tables and adds five identity-column descriptions. `ingestion_failures` and `alembic_version` retain their names. Existing constraint names, their backing indexes and the descriptive one-active-application index remain unchanged; an earlier label does not change what a constraint enforces. The revision preserves records, IDs, password hashes, account roles/status, session rows and relationships. Its downgrade restores the previous table/index names and removes the descriptions introduced by this revision. It creates no default accounts and requires no account recreation. PostgreSQL supports table renaming through [`ALTER TABLE ... RENAME TO`](https://www.postgresql.org/docs/18/sql-altertable.html) and stores object descriptions using [`COMMENT`](https://www.postgresql.org/docs/18/sql-comment.html).
 

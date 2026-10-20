@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.schemas import Wire
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -43,6 +44,7 @@ class OcrDataIn(BaseModel):
 
     resume: dict[str, Any] | None = None
     passport: dict[str, Any] | None = None
+    aadhaar: dict[str, Any] | None = None
 
 
 class CandidateIn(BaseModel):
@@ -126,16 +128,19 @@ def find_duplicate(db: Session, phone: str, dob: date | None, passport_no: str |
     return None
 
 
-def next_owner(db: Session) -> User | None:
+def lock_assignment_cursor(db: Session) -> AssignmentPointer:
+    """Serialize candidate identity, reference and assignment decisions together."""
+    db.execute(insert(AssignmentPointer).values(id=1).on_conflict_do_nothing(index_elements=["id"]))
+    return db.scalar(select(AssignmentPointer).where(AssignmentPointer.id == 1).with_for_update())
+
+
+def next_owner(db: Session, *, pointer: AssignmentPointer | None = None) -> User | None:
     """
     Strict round-robin across eligible staff. The pointer row is taken FOR UPDATE so two
     candidates arriving in the same moment cannot be handed to the same recruiter.
     """
-    pointer = db.scalar(select(AssignmentPointer).where(AssignmentPointer.id == 1).with_for_update())
     if pointer is None:
-        pointer = AssignmentPointer(id=1)
-        db.add(pointer)
-        db.flush()
+        pointer = lock_assignment_cursor(db)
 
     eligible = list(
         db.scalars(
@@ -168,6 +173,7 @@ def create_candidate(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> CandidateOut:
+    pointer = lock_assignment_cursor(db)
     match = find_duplicate(db, body.phone, body.dob, body.passport_no)
     if match is not None:
         existing, fields = match
@@ -189,7 +195,7 @@ def create_candidate(
         )
 
     count = db.scalar(select(func.count()).select_from(Candidate)) or 0
-    owner = next_owner(db)
+    owner = next_owner(db, pointer=pointer)
 
     ocr_data = body.ocr_data.model_dump(exclude_none=True) if body.ocr_data else {}
 

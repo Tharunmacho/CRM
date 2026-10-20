@@ -23,6 +23,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Local page inspection and Word-to-PDF conversion before specialist OCR.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd libreoffice-writer \
+    && rm -rf /var/lib/apt/lists/*
+
 # psycopg[binary] ships its own libpq, so no build toolchain is needed here.
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
@@ -51,4 +56,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import json,urllib.request,sys; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)); sys.exit(0 if r.get('status') == 'ok' else 1)"
 
 # Migrations run on boot so a Dokploy redeploy always lands on the right schema.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic upgrade head && exec python -m app.runtime"]

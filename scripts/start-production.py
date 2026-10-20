@@ -44,6 +44,7 @@ def main() -> None:
     from alembic.config import Config
     from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
+    from app.core.config import get_settings
     from app.db.session import engine
 
     expected = set(ScriptDirectory.from_config(Config("alembic.ini")).get_heads())
@@ -61,6 +62,12 @@ def main() -> None:
             "deployment. Remove that setting afterward. No schema changes were "
             "made by this startup check."
         )
+
+    # When enabled, the supervisor owns a separate mail worker process. Both use
+    # the same persistent upload volume; no OCR work runs in an API request.
+    if get_settings().email_ingestion_enabled:
+        os.execv(sys.executable, [sys.executable, "-m", "app.runtime"])
+        return
 
     # Replace the launcher so the API receives container shutdown signals directly.
     os.execv(

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, Check, FileText, ScanLine, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
-import { api, type OcrFields, type OcrScan } from '@/shared/api/client'
+import { api, ApiError, type OcrInspection, type OcrScan } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
 import { Badge, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
@@ -10,6 +10,7 @@ import { FileDrop } from '@/shared/ui/file-drop'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { Dialog } from '@/shared/ui/overlay'
 import { RecordIdentity } from '@/shared/ui/workspace'
+import { hasOcrExtraction, inspectedPageCount, mergeOcrForm, scanWarnings, type DocumentScans, type ScanKind } from '../ocr-form'
 
 const EMPTY = {
   name: '',
@@ -34,15 +35,68 @@ const EMPTY = {
 }
 
 type FormKey = keyof typeof EMPTY
-type Scan = 'resume' | 'passport'
+const SCAN_KINDS: ScanKind[] = ['resume', 'passport']
 
-function toFormValues(fields: OcrFields): Partial<Record<FormKey, string>> {
-  const out: Partial<Record<FormKey, string>> = {}
-  for (const [k, v] of Object.entries(fields)) {
-    if (!(k in EMPTY) || v == null) continue
-    out[k as FormKey] = Array.isArray(v) ? v.join(', ') : String(v)
-  }
-  return out
+function DocumentReadReport({ kind, scan }: { kind: ScanKind; scan: OcrScan }) {
+  const inspection = scan.inspection
+  const extracted = hasOcrExtraction(scan)
+  const warnings = scanWarnings(scan)
+  const selected = inspection?.selected_pages
+    ?? (kind === 'resume' ? inspection?.resume_pages : inspection?.passport_pages)
+  const list = (pages: number[] | undefined) => pages?.length ? pages.join(', ') : 'None'
+  const title = scan.extraction_status === 'no_resume'
+    ? 'No resume identified'
+    : !extracted ? 'Needs review' : 'Extraction returned'
+
+  return (
+    <section
+      aria-label={`${kind === 'resume' ? 'Resume' : 'Passport'} reading result`}
+      className={`rounded-control border px-3 py-3 text-xs ${extracted ? 'border-navy-100 bg-navy-50 text-navy-700' : 'border-amber-200 bg-amber-50 text-amber-900'}`}
+    >
+      <p className="font-semibold">{kind === 'resume' ? 'Resume' : 'Passport'}: {title}</p>
+      <p className="mt-1">
+        {extracted
+          ? 'Review the suggested details before saving. Fields you edited have been kept.'
+          : 'No extracted details were applied from this document. Review the report, try a clearer file, or enter the details manually.'}
+      </p>
+      {inspection && (
+        <>
+          <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+            <div><dt className="font-medium">Pages inspected</dt><dd>{inspectedPageCount(inspection)} of {inspection.page_count}</dd></div>
+            <div><dt className="font-medium">Pages selected for {kind} extraction</dt><dd className="break-words">{list(selected)}</dd></div>
+            <div><dt className="font-medium">Resume pages identified</dt><dd className="break-words">{list(inspection.resume_pages)}</dd></div>
+            <div><dt className="font-medium">Unread pages</dt><dd className="break-words">{list(inspection.unread_pages)}</dd></div>
+            <div><dt className="font-medium">Uncertain page types</dt><dd className="break-words">{list(inspection.unknown_pages)}</dd></div>
+          </dl>
+          <p className="mt-2">Page numbers refer to the original document. Inspected pages can still be unread or uncertain.</p>
+          {inspection.pages.length > 0 && (
+            <details className="mt-3">
+              <summary className="cursor-pointer font-medium">Review individual pages</summary>
+              <ol className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-2">
+                {inspection.pages.map((page) => (
+                  <li key={page.page_number} className="rounded border border-current/10 bg-white/60 px-2 py-1.5">
+                    <span className="font-medium">Page {page.page_number}</span>
+                    {' — '}{page.status}; {page.document_type === 'unknown' ? 'uncertain type' : page.document_type}
+                    {page.reason && <p className="mt-1">{page.reason}</p>}
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
+        </>
+      )}
+      {warnings.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {warnings.map((warning, index) => (
+            <li key={index} className="flex items-start gap-2 text-amber-900">
+              <AlertTriangle aria-hidden className="mt-px h-3.5 w-3.5 shrink-0 text-amber-700" />
+              <span>{warning}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
 }
 
 export default function AddCandidatePage() {
@@ -53,57 +107,93 @@ export default function AddCandidatePage() {
   const [pending, setPending] = useState<Record<string, File>>({})
   const [saving, setSaving] = useState(false)
 
-  const hold = (slot: string) => (f: File) => setPending((p) => ({ ...p, [slot]: f }))
   const [duplicate, setDuplicate] = useState<{ candidate: Candidate; matchedOn: string[] } | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  // The Veris output for each document read, saved on the candidate with the form.
-  const [ocr, setOcr] = useState<Partial<Record<Scan, Record<string, unknown>>>>({})
-  const [warnings, setWarnings] = useState<Partial<Record<Scan, string[]>>>({})
+  // Inspection can succeed without extraction, so it has its own visible result.
+  const [scans, setScans] = useState<DocumentScans>({})
+  const scansRef = useRef<DocumentScans>({})
+  const edited = useRef(new Set<FormKey>())
+  const readController = useRef<AbortController | null>(null)
+  const [readErrors, setReadErrors] = useState<Partial<Record<ScanKind, string>>>({})
+  const [readMessage, setReadMessage] = useState('')
   const [reading, setReading] = useState(false)
 
+  useEffect(() => () => {
+    readController.current?.abort()
+    readController.current = null
+  }, [])
+
   const set = (k: FormKey, v: string) => {
+    // A ref also catches changes made after a scan starts but before it returns.
+    edited.current.add(k)
     setForm((f) => ({ ...f, [k]: v }))
     setErrors((e) => ({ ...e, [k]: '' }))
   }
 
   /** A replacement file makes the last reading of that document stale until read again. */
-  const choose = (kind: Scan) => (file: File) => {
-    hold(kind)(file)
-    setOcr(({ [kind]: _, ...rest }) => rest)
-    setWarnings(({ [kind]: _, ...rest }) => rest)
+  const choose = (kind: ScanKind) => (file: File) => {
+    if (readController.current || saving) return
+    setPending((p) => ({ ...p, [kind]: file }))
+    const { [kind]: _, ...remaining } = scansRef.current
+    scansRef.current = remaining
+    setScans(remaining)
+    setForm((prev) => mergeOcrForm(prev, EMPTY, remaining, edited.current))
+    setReadErrors(({ [kind]: _, ...rest }) => rest)
+    setReadMessage('')
   }
 
-  const chosen = (['resume', 'passport'] as Scan[]).filter((k) => pending[k])
+  const chosen = SCAN_KINDS.filter((k) => pending[k])
 
-  /**
-   * Reads every chosen document and fills what it can. The passport is laid over the
-   * resume, so its name, date of birth, gender and nationality win: the passport is
-   * what the visa is issued against.
-   */
   const readDocuments = async () => {
+    if (readController.current || saving || chosen.length === 0) return
+    const controller = new AbortController()
+    readController.current = controller
     setReading(true)
-    const results = await Promise.allSettled(chosen.map((k) => api.ocr(k, pending[k])))
-    const read: Partial<Record<Scan, OcrScan>> = {}
+    setReadErrors({})
+    setReadMessage('')
+    // A retry must not show the previous attempt as its successful result.
+    scansRef.current = {}
+    setScans({})
+    const results = await Promise.allSettled(chosen.map((k) => api.ocr(k, pending[k], { signal: controller.signal })))
+    if (readController.current !== controller || !store.isCurrentSession()) return
+    const read: DocumentScans = {}
+    const failures: Partial<Record<ScanKind, string>> = {}
     results.forEach((r, i) => {
       const kind = chosen[i]
       if (r.status === 'fulfilled') read[kind] = r.value
-      else store.notify(`${pending[kind].name}: ${(r.reason as Error).message}`, 'warn')
+      else {
+        const message = r.reason instanceof Error ? r.reason.message : 'The document could not be read. Please try again.'
+        const detail = r.reason instanceof ApiError
+          ? r.reason.detail as { inspection?: OcrInspection } | undefined
+          : undefined
+        if (detail?.inspection) {
+          read[kind] = {
+            fields: {}, raw: {}, warnings: [message],
+            inspection: detail.inspection, extraction_status: 'needs_review',
+          }
+        } else failures[kind] = message
+      }
     })
-
-    const values = {
-      ...toFormValues(read.resume?.fields ?? {}),
-      ...toFormValues(read.passport?.fields ?? {}),
-    }
-    setForm((prev) => ({ ...prev, ...values }))
-    setErrors((e) => ({ ...e, ...Object.fromEntries(Object.keys(values).map((k) => [k, ''])) }))
-    setOcr(Object.fromEntries(chosen.filter((k) => read[k]).map((k) => [k, read[k]!.raw])))
-    setWarnings(Object.fromEntries(chosen.filter((k) => read[k]).map((k) => [k, read[k]!.warnings])))
+    scansRef.current = read
+    setScans(read)
+    setReadErrors(failures)
+    setForm((prev) => mergeOcrForm(prev, EMPTY, read, edited.current))
+    setErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => edited.current.has(key as FormKey))))
+    readController.current = null
     setReading(false)
   }
 
-  const scanned = (Object.keys(ocr) as Scan[]).filter((k) => ocr[k])
-  const ocrWarnings = scanned.flatMap((k) => warnings[k] ?? [])
+  const cancelReading = () => {
+    readController.current?.abort()
+    readController.current = null
+    setReading(false)
+    setForm((prev) => mergeOcrForm(prev, EMPTY, scansRef.current, edited.current))
+    setReadMessage('Stopped waiting for document reading. Enter the details manually or read the documents again.')
+  }
+
+  const scanned = SCAN_KINDS.filter((kind) => hasOcrExtraction(scans[kind]))
+  const ocr = Object.fromEntries(scanned.map((kind) => [kind, scans[kind]!.raw]))
 
   /**
    * The last ten digits, so "+91 98400 11111", "098400 11111" and "9840011111" are
@@ -234,42 +324,34 @@ export default function AddCandidatePage() {
           <Panel flush id="candidate-documents" className="candidate-form-section">
             <PanelHeader title={<span className="form-section-title"><span>01</span>Documents</span>} meta="Upload first. Let document reading do the heavy lifting." />
             <div className="grid gap-4 px-5 py-5 sm:grid-cols-2">
-              <FileDrop label="Resume" onFile={choose('resume')} disabled={reading} busy={reading && !!pending.resume} busyLabel="reading…" />
-              <FileDrop label="Passport copy" onFile={choose('passport')} disabled={reading} busy={reading && !!pending.passport} busyLabel="reading…" />
+              <FileDrop label="Resume" onFile={choose('resume')} disabled={reading || saving} busy={reading && !!pending.resume} busyLabel="reading…" />
+              <FileDrop label="Passport copy" onFile={choose('passport')} disabled={reading || saving} busy={reading && !!pending.passport} busyLabel="reading…" />
             </div>
-            <div className="document-read-actions flex items-center gap-3 px-5 pb-5">
+            <div className="document-read-actions flex flex-wrap items-center gap-3 px-5 pb-5">
               <Button
                 onClick={readDocuments}
-                disabled={reading || chosen.length === 0}
+                disabled={reading || saving || chosen.length === 0}
                 icon={<Sparkles className="h-4 w-4" />}
               >
                 {reading ? 'Reading…' : 'Read documents'}
               </Button>
+              {reading && <Button variant="ghost" onClick={cancelReading}>Continue manually</Button>}
               <span className="text-xs text-ink-400">
                 {reading
-                  ? 'This takes 10–20 seconds.'
-                  : 'Where both are read, the passport decides the name and date of birth.'}
+                  ? 'Keep this page open. Long documents can take several minutes. Choose Continue manually to stop waiting.'
+                  : 'Your edits are kept on every read. For unedited identity fields, passport details take priority.'}
               </span>
             </div>
-            {scanned.length > 0 && (
-              <div className="mx-5 mb-5 rounded-control border border-navy-100 bg-navy-50 px-3 py-2.5 text-xs text-navy-700">
-                <p className="flex items-start gap-2">
-                  <Sparkles className="mt-px h-3.5 w-3.5 shrink-0" />
-                  The OCR filled what it could read from the {scanned.join(' and ')}. Check every
-                  field before saving — anything it was unsure of is left blank.
-                </p>
-                {ocrWarnings.length > 0 && (
-                  <ul className="mt-2 space-y-1 pl-5">
-                    {ocrWarnings.map((w, i) => (
-                      <li key={i} className="flex items-start gap-2 text-amber-800">
-                        <AlertTriangle className="mt-px h-3 w-3 shrink-0 text-amber-600" />
-                        {w}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            <div aria-live="polite" aria-atomic="false" className="mx-5 mb-5 space-y-3">
+              {readMessage && <p className="text-xs text-ink-500">{readMessage}</p>}
+              {SCAN_KINDS.map((kind) => (
+                readErrors[kind] ? (
+                  <p key={kind} role="alert" className="rounded-control border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+                    <strong>{kind === 'resume' ? 'Resume' : 'Passport'}:</strong> {readErrors[kind]} You can enter the details and save manually.
+                  </p>
+                ) : scans[kind] ? <DocumentReadReport key={kind} kind={kind} scan={scans[kind]!} /> : null
+              ))}
+            </div>
           </Panel>
 
           <Panel flush id="candidate-basic" className="candidate-form-section">

@@ -84,6 +84,7 @@ export function FileDrop({
   const shown = value !== undefined ? value : picked
 
   const take = (files: FileList | null) => {
+    if (disabled) return
     const f = files?.[0]
     if (!f) return
     const chosen: StoredFile = { name: f.name, sizeKb: Math.max(1, Math.round(f.size / 1024)) }
@@ -175,6 +176,7 @@ export function FileDrop({
         ref={inputRef}
         type="file"
         className="sr-only"
+        disabled={disabled}
         onChange={(e) => take(e.target.files)}
         tabIndex={-1}
       />

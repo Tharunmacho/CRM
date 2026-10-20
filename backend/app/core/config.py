@@ -41,6 +41,26 @@ class Settings(BaseSettings):
     veris_ocr_base_url: str | None = None
     veris_ocr_api_key: str | None = None
 
+    # Local inspection always runs before a specialist Veris extraction.
+    # A blank command discovers Tesseract from PATH or its usual Windows location.
+    tesseract_cmd: str | None = None
+    ocr_languages: str = "eng"
+    ocr_max_pages: int = Field(default=300, ge=1, le=1000)
+    ocr_page_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
+    ocr_document_timeout_seconds: float = Field(default=600.0, ge=10, le=1800)
+
+    # Incoming mail only. Credentials remain in the environment, never API output.
+    email_ingestion_enabled: bool = False
+    email_poll_seconds: int = Field(default=120, ge=30, le=3600)
+    imap_server: str | None = None
+    imap_port: int = Field(default=993, ge=1, le=65535)
+    imap_username: str | None = None
+    imap_password: str | None = Field(default=None, repr=False)
+    imap_use_ssl: bool = True
+    imap_folder: str = "INBOX"
+    # Optional multiple accounts using the same keys as the single IMAP settings.
+    email_accounts_json: str | None = Field(default=None, repr=False)
+
     @field_validator("database_url")
     @classmethod
     def _use_psycopg3(cls, v: str) -> str:

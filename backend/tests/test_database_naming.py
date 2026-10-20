@@ -54,13 +54,14 @@ TEST_EMAIL = "schema-migration@example.test"
 BACKEND = Path(__file__).resolve().parents[1]
 
 
-def test_domain_names_cover_existing_models_without_extra_business_tables():
-    assert set(Base.metadata.tables) == set(TABLE_NAMES.values())
-    assert len(Base.metadata.tables) == 20
+def test_domain_names_cover_renamed_models_and_documented_intake_extension():
+    expected = set(TABLE_NAMES.values()) | {"email_ingestion_jobs"}
+    assert set(Base.metadata.tables) == expected
+    assert len(Base.metadata.tables) == 21
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
-            assert foreign_key.column.table.name in TABLE_NAMES.values()
+            assert foreign_key.column.table.name in expected
 
 
 def _guard_test_url(raw):
@@ -99,7 +100,9 @@ def schema_database():
     if not raw:
         pytest.skip("Set TEST_DATABASE_URL to an isolated loopback crm_schema_test* DB")
     url = _guard_test_url(raw)
-    engine = create_engine(url, connect_args={"connect_timeout": 5})
+    # Timestamp wire assertions use UTC; native test servers may inherit the
+    # developer machine's timezone. Set this connection only, not server config.
+    engine = create_engine(url, connect_args={"connect_timeout": 5, "options": "-c timezone=UTC"})
     with engine.connect() as connection:
         database, server = connection.execute(
             text("SELECT current_database(), host(inet_server_addr())")
@@ -323,6 +326,8 @@ def _assert_renamed_schema(engine):
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == RENAMED
         for table in Base.metadata.tables.values():
+            if table.name not in TABLE_NAMES.values():
+                continue  # This test verifies revision 0006, before intake jobs.
             assert inspect(connection).get_table_comment(table.name, schema="public")["text"]
             actual_indexes = {
                 index["name"] for index in inspect(connection).get_indexes(table.name, schema="public")
@@ -358,6 +363,8 @@ def test_rename_preserves_all_rows_relations_indexes_and_downgrade(schema_databa
         assert _catalog_snapshot(connection) == catalog
     with Session(engine) as db:
         for mapper in Base.registry.mappers:
+            if mapper.local_table.name not in TABLE_NAMES.values():
+                continue
             assert db.scalar(select(func.count()).select_from(mapper.class_)) > 0
 
     _migrate(engine, PREVIOUS, downgrade=True)
@@ -482,6 +489,8 @@ def test_fresh_database_upgrades_to_exactly_the_documented_tables(schema_databas
     _assert_renamed_schema(engine)
     with Session(engine) as db:
         for mapper in Base.registry.mappers:
+            if mapper.local_table.name not in TABLE_NAMES.values():
+                continue
             assert db.scalar(select(func.count()).select_from(mapper.class_)) == 0
 
 

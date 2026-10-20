@@ -52,9 +52,24 @@ services:
       AGENCY_TIMEZONE: ${AGENCY_TIMEZONE:-Asia/Kolkata}
       STATIC_DIR: /app/static
       STORAGE_DIR: /app/data/uploads
-      # Resume and passport OCR on the add-candidate form. Unset, the form is filled by hand.
+      # Content inspection and specialist resume/passport/Aadhaar extraction.
       VERIS_OCR_BASE_URL: ${VERIS_OCR_BASE_URL:-}
       VERIS_OCR_API_KEY: ${VERIS_OCR_API_KEY:-}
+      TESSERACT_CMD: ${TESSERACT_CMD:-}
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}
+      OCR_MAX_PAGES: ${OCR_MAX_PAGES:-300}
+      OCR_PAGE_TIMEOUT_SECONDS: ${OCR_PAGE_TIMEOUT_SECONDS:-20}
+      OCR_DOCUMENT_TIMEOUT_SECONDS: ${OCR_DOCUMENT_TIMEOUT_SECONDS:-600}
+      # The supervisor starts a separate worker only when explicitly enabled.
+      EMAIL_INGESTION_ENABLED: ${EMAIL_INGESTION_ENABLED:-false}
+      EMAIL_POLL_SECONDS: ${EMAIL_POLL_SECONDS:-120}
+      IMAP_SERVER: ${IMAP_SERVER:-}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_USERNAME: ${IMAP_USERNAME:-}
+      IMAP_PASSWORD: ${IMAP_PASSWORD:-}
+      IMAP_USE_SSL: ${IMAP_USE_SSL:-true}
+      IMAP_FOLDER: ${IMAP_FOLDER:-INBOX}
+      EMAIL_ACCOUNTS_JSON: ${EMAIL_ACCOUNTS_JSON:-}
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     volumes:

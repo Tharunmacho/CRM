@@ -1,10 +1,9 @@
 """
 Veris OCR, through its job queue.
 
-The deployment has synchronous OCR switched off ("submit the file to /v1/jobs"), so a
-scan is submitted as a job and polled until it finishes. A resume takes 15–20 seconds
-on an idle queue; the deadline leaves room for a busy one without holding the request
-open indefinitely.
+Submit selected document pages as a job and poll for a bounded time. Retries
+use a stable idempotency key; a slow job never falls through to a second,
+synchronous extraction endpoint.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from collections.abc import Callable
 from typing import Literal, Protocol
 
 from veriis import FileDescriptor, VerisOCR
-from veriis.models import JobResponse, PassportResponse, ResumeResponse
+from veriis.models import AadhaarResponse, JobResponse, PassportResponse, ResumeResponse
 
 DEADLINE_SECONDS = 150.0
 POLL_SECONDS = 1.5
@@ -55,15 +54,18 @@ def wait_for_job(
 
 
 def scan(
-    kind: Literal["resume", "passport"],
+    kind: Literal["resume", "passport", "aadhaar"],
     doc: FileDescriptor,
     *,
     base_url: str,
     api_key: str,
-) -> ResumeResponse | PassportResponse:
-    with VerisOCR(base_url=base_url, api_key=api_key) as client:
-        accepted = client.jobs.submit(doc, mode=kind)
+    idempotency_key: str | None = None,
+) -> ResumeResponse | PassportResponse | AadhaarResponse:
+    # The SDK otherwise permits 120 seconds per request plus automatic retries,
+    # which could exceed the polling budget by several minutes.
+    with VerisOCR(base_url=base_url, api_key=api_key, timeout=30.0, max_retries=0) as client:
+        accepted = client.jobs.submit(doc, mode=kind, idempotency_key=idempotency_key)
         job = wait_for_job(client.jobs, accepted.job_id)
 
-    model = ResumeResponse if kind == "resume" else PassportResponse
+    model = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}[kind]
     return model.model_validate(job.result or {})

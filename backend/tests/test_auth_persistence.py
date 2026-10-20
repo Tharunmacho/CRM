@@ -354,6 +354,8 @@ def test_health_recovers_from_failed_startup_without_modifying_accounts(
             storage_dir=str(Path(__file__) / "no-uploads"),
             veris_ocr_base_url=None,
             veris_ocr_api_key=None,
+            tesseract_cmd=None,
+            ocr_languages="eng",
         ),
     ):
         from app import main

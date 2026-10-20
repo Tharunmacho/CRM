@@ -40,6 +40,7 @@ import { cn } from '@/shared/lib/cn'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { CheckboxInput, Select } from '@/shared/ui/primitives'
 import { DatePicker } from '@/shared/ui/date-picker'
+import { SourceHealth } from '../components/source-health'
 
 const STATUS_LABELS: Record<string, string> = {
   new: 'New',
@@ -1101,42 +1102,7 @@ export default function DashboardPage() {
             )}
           </section>
         )}
-        {store.can('connect_sources') && (
-          <section className="analytics-card" aria-labelledby="sources-title">
-            <CardHeading id="sources-title" title="Connected sources">
-              <button
-                className="dashboard-icon-link"
-                aria-label="Open inbox"
-                onClick={() => navigate('/inbox')}
-              >
-                <ArrowUpRight size={14} />
-              </button>
-            </CardHeading>
-            {store.mailAccounts.length ? (
-              <ul className="operational-list source-list">
-                {store.mailAccounts.map((account) => (
-                  <li key={account.id}>
-                    <i className={cn(account.autoIngest && 'is-connected')} />
-                    <span>
-                      <strong>{account.address}</strong>
-                      <span>
-                        {account.failedCount
-                          ? `${account.failedCount} files need review`
-                          : `Synced ${ago(account.lastSyncAt)}`}
-                      </span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <CompactEmpty
-                icon={Mail}
-                title="Connect your inbox"
-                detail="Bring candidate applications together."
-              />
-            )}
-          </section>
-        )}
+        {store.can('connect_sources') && <SourceHealth />}
       </div>
       <div className="dashboard-footer">
         <span>Care India Overseas · Recruitment workspace</span>

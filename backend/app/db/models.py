@@ -550,6 +550,10 @@ class MailAccount(Base, PkMixin, TimestampMixin):
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # OAuth tokens / IMAP credentials, encrypted at rest. Never returned by the API.
     secrets: Mapped[dict | None] = mapped_column(JSONB)
+    sync_state: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    sync_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    worker_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class MailMessage(Base, PkMixin):
@@ -594,6 +598,31 @@ class MailAttachment(Base, PkMixin):
     object_key: Mapped[str | None] = mapped_column(String(500))
     # Skip a file whose hash has already been processed.
     content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+
+
+class EmailIngestionJob(Base, PkMixin, TimestampMixin):
+    """Durable message receipt, OCR checkpoints and candidate commit outcome."""
+
+    __tablename__ = "email_ingestion_jobs"
+    message_id: Mapped[str] = mapped_column(
+        ForeignKey("email_messages.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_error: Mapped[str | None] = mapped_column(Text)
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"))
+    # Per attachment hash: inspection, provider job IDs and saved structured results.
+    # Deferred: mailbox lists must not transfer extracted identity documents.
+    state: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True)
+    inspection: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','processing','retry','needs_review','completed','ignored','failed')",
+                        name="ck_email_ingestion_jobs_status"),
+        Index("ix_email_ingestion_jobs_ready", "next_attempt_at",
+              postgresql_where=text("status IN ('pending','processing','retry')")),
+        {"comment": "Durable email intake queue and per-document OCR checkpoints; links source messages to candidate outcomes."},
+    )
 
 
 class IngestionFailure(Base, PkMixin):
