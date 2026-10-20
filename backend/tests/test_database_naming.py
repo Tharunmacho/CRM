@@ -434,6 +434,10 @@ def test_existing_login_session_bootstrap_and_health_work_after_rename(
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     monkeypatch.setattr(main, "engine", engine)
     monkeypatch.setattr(main, "SessionLocal", factory)
+    monkeypatch.setattr(
+        main, "redis_health",
+        lambda: {"enabled": False, "status": "disabled", "error": None},
+    )
     monkeypatch.setattr(bootstrap, "_done", False)
     monkeypatch.setattr(bootstrap, "_last_error", None)
 

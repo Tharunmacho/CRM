@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +10,7 @@ from app.api.routers import applications, auth, candidates, data, files, ocr
 from app.core.config import get_settings
 from app.db.models import User
 from app.db.session import SessionLocal, engine
+from app.integrations.redis import close_redis, redis_health
 from app.services.bootstrap import bootstrap_state, ensure_bootstrap
 
 settings = get_settings()
@@ -51,9 +52,14 @@ app.include_router(files.router)
 app.include_router(ocr.router)
 
 
+@app.on_event("shutdown")
+def on_shutdown() -> None:
+    close_redis()
+
+
 @app.get("/api/health")
-def health() -> dict:
-    """Readiness probe: reports whether the database is actually reachable."""
+def health(response: Response = None) -> dict:
+    """Readiness probe: return 503 when a required dependency is unavailable."""
     try:
         with engine.connect() as conn:
             conn.execute(text("select 1"))
@@ -79,12 +85,20 @@ def health() -> dict:
         except Exception:
             accounts = None
 
+    redis_state = redis_health()
+    redis_ready = redis_state["status"] in {"disabled", "ok"}
+    ready = db_ok and bootstrap_state()["seeded"] and redis_ready
+    # FastAPI injects the response; direct internal callers can still read the
+    # readiness dictionary without constructing an HTTP response.
+    if response is not None:
+        response.status_code = 200 if ready else 503
     return {
-        "status": "ok" if db_ok and bootstrap_state()["seeded"] else "degraded",
+        "status": "ok" if ready else "degraded",
         "database": db_ok,
         "error": db_error,
         "build": BUILD,
         "accounts": accounts,
+        "redis": redis_state,
         **bootstrap_state(),
     }
 

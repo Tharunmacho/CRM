@@ -17,11 +17,37 @@ services:
       timeout: 3s
       retries: 10
 
+  redis:
+    image: redis:8-alpine
+    profiles: ["redis"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ -z "$$REDIS_PASSWORD" ]; then
+          echo "REDIS_PASSWORD must be set before starting the Redis service." >&2
+          exit 1
+        fi
+        exec docker-entrypoint.sh redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli --raw ping 2>/dev/null | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   app:
     build: .
     environment:
       # Override the complete URL when changing credentials; URL-encode its user/password.
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@db:5432/care_india}
+      REDIS_URL: ${REDIS_URL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       AGENCY_TIMEZONE: ${AGENCY_TIMEZONE:-Asia/Kolkata}
       STATIC_DIR: /app/static
@@ -39,4 +65,5 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
   uploads:

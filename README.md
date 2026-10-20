@@ -98,6 +98,20 @@ npm.cmd run dev
 
 Open `http://localhost:5173`. Vite forwards `/api` requests and session cookies to `http://127.0.0.1:8000`; no separate API origin is needed. API documentation is at `http://127.0.0.1:8000/api/docs`.
 
+To enable local Redis, set a generated `REDIS_PASSWORD` in the root `.env`
+and leave `REDIS_PORT=6380`. Set `REDIS_URL` in `backend/.env` to
+`redis://:<URL-encoded-password>@127.0.0.1:6380/0`, then run:
+
+```powershell
+docker compose --profile redis up -d redis
+```
+
+Restart the API and open `http://127.0.0.1:8000/api/health`; its `redis.status`
+should be `ok`. The Redis service stores data in the `redisdata` volume and binds
+only to this computer. For the API running inside Compose, use
+`redis://:<URL-encoded-password>@redis:6379/0` in the root `.env` instead.
+These settings do not create or configure a Redis service in Dokploy.
+
 On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The root backend commands select the correct virtual environment automatically. `CRM_PYTHON` can override the interpreter for a managed environment or CI.
 
 ## Configuration ownership
@@ -112,6 +126,7 @@ On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The ro
 | `VERIS_OCR_BASE_URL`, `VERIS_OCR_API_KEY` | Optional backend OCR connection; manual entry works without it |
 | `STORAGE_DIR` | Backend file storage; defaults to `backend/data/uploads` locally |
 | `STATIC_DIR` | Built frontend location; defaults to `backend/static` locally |
+| `REDIS_URL` | Optional backend Redis connection; use a local URL for development and Dokploy's internal URL in production |
 
 After revision `0006_domain_table_names`, accounts, assigned roles, activation status and Argon2id password hashes live in PostgreSQL's `auth_users` table, and sign-ins live in `auth_sessions`. Login reads the saved account and creates a database session; it has no default-account fallback. Startup initializes only `workflow_assignment_cursor`, preserving existing users and its current position. Deleted accounts stay deleted, disabled accounts stay disabled, and changed passwords survive restarts. The former account seed, seed-password environment overrides, legacy account SQL and unused frontend demo accounts have been removed.
 
@@ -154,6 +169,85 @@ docker compose up --build
 ```
 
 Open `http://localhost:8000`. Compose stores PostgreSQL data in `pgdata` and uploaded documents in `uploads`. Its ports bind to localhost for local development. In hosted deployment, configure HTTPS, environment variables, and persistent database/upload volumes. The container runs migrations before starting the API; review migrations before deploying them to an existing database.
+
+## Dokploy deployment with Nixpacks
+
+Select repository `Tharunmacho/CRM`, branch `main`, build path `/`, and build type
+**Nixpacks**. Leave Publish Directory empty and static-site serving disabled.
+Remove any custom `NIXPACKS_INSTALL_CMD`, `NIXPACKS_BUILD_CMD` or
+`NIXPACKS_START_CMD` overrides so the root `nixpacks.toml` controls the build.
+
+The plan explicitly installs Python 3.12 and Node.js 22, creates `/opt/venv`,
+installs the pinned backend requirements and frontend workspace dependencies,
+builds the frontend, and copies its complete output to `/app/static`. Node is
+used to build the website; FastAPI serves both the website and API at runtime.
+No database connection or migration runs during the build.
+
+Set these service environment variables, retaining any configured OCR settings:
+
+```dotenv
+DATABASE_URL=YOUR_EXISTING_POSTGRESQL_INTERNAL_CONNECTION_URL
+AGENCY_TIMEZONE=Asia/Kolkata
+STATIC_DIR=/app/static
+STORAGE_DIR=/app/data/uploads
+PORT=8000
+```
+
+Replace the database placeholder with the existing database's internal URL in
+Dokploy; never commit it. Route the domain to container port **8000**. Mount
+persistent uploads at `/app/data/uploads`. When reusing a database, attach its
+existing uploads volume or copy the files before switching traffic; a new empty
+volume does not contain the files referenced by existing records.
+
+The Nixpacks start command uses `scripts/start-production.py`. It verifies that
+the frontend exists and the database revision matches this release before
+starting Uvicorn. By default it does **not** change the database. This prevents
+an automatic GitHub deployment from silently renaming tables while the older
+CRM application still uses them.
+
+For the first coordinated deployment to the existing database:
+
+1. Back up PostgreSQL and uploaded files.
+2. Stop every older CRM backend using this database, including local development
+   backends; keep PostgreSQL running.
+3. Either run `python -m alembic -c backend/alembic.ini upgrade head` from the
+   repository root with the deployment environment, or temporarily add
+   `RUN_MIGRATIONS_ON_START=1` in Dokploy and deploy.
+4. Confirm `/api/health` reports ready, verify sign-in and an existing uploaded
+   document, then remove `RUN_MIGRATIONS_ON_START`. Later schema updates also
+   require an explicit migration step.
+
+A failed migration stops startup. Database migrations remain reversible as
+documented in the database guide; code and schema versions must match when
+rolling back. The Dockerfile deployment path retains its existing automatic
+migration command; the explicit migration control above is for Nixpacks.
+
+### Optional Redis connection
+
+Create a Redis service on the same Dokploy server/network as the CRM and set a
+unique password. Keep it internal; no external Redis port is needed for the
+deployed application. Copy that service's **Internal Connection URL** into the
+Backend service environment:
+
+```dotenv
+REDIS_URL=YOUR_DOKPLOY_REDIS_INTERNAL_CONNECTION_URL
+```
+
+Keep `DATABASE_URL` pointing to PostgreSQL. `REDIS_URL` is a separate connection;
+Redis does not replace the CRM's relational database. A Redis container running
+in Docker Desktop on a developer's computer is not the Redis service available
+inside Dokploy.
+
+The backend creates a shared Redis connection pool when needed and reports its
+connection status under `redis` in `/api/health`. An unset or empty `REDIS_URL`
+reports `disabled`; a working authenticated connection reports `ok`; a configured
+but unreachable or invalid connection reports `unavailable` and overall readiness
+becomes `degraded` with HTTP 503. Healthy readiness returns HTTP 200. Errors omit
+credentials and connection URLs. Connections close on application shutdown.
+
+This integration provides Redis connectivity and readiness checks. It does not
+yet add caching, move login sessions out of PostgreSQL, or implement the queued
+email/OCR jobs, worker and scheduler planned in Phases 4–5.
 
 ## Current implementation boundaries
 

@@ -207,6 +207,10 @@ def test_health_recovers_from_failed_startup_without_modifying_accounts(
 
     monkeypatch.setattr(main, "engine", database.kw["bind"])
     monkeypatch.setattr(main, "SessionLocal", database)
+    monkeypatch.setattr(
+        main, "redis_health",
+        lambda: {"enabled": False, "status": "disabled", "error": None},
+    )
     monkeypatch.setattr(bootstrap, "_done", False)
     monkeypatch.setattr(bootstrap, "_last_error", None)
     add_user(

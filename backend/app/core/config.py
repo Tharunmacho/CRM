@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     storage_dir: str = str(BACKEND_ROOT / "data" / "uploads")
 
     cors_origins: str = "http://localhost:5173"
+
+    # Optional Redis connection. Blank leaves Redis disabled; credentials stay
+    # out of Settings repr and are never included in the health response.
+    redis_url: str | None = Field(default=None, repr=False)
 
     # Veris OCR, which reads resumes and passports on the add-candidate form. Left
     # unset, the form is simply filled by hand. Same names the veriis SDK reads.

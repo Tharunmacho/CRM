@@ -1,0 +1,34 @@
+# Dokploy builds from the repository root. Explicitly select Python because its
+# requirements live in backend/, then add Node for the frontend build.
+providers = ["python"]
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.12"
+NODE_ENV = "production"
+STATIC_DIR = "/app/static"
+STORAGE_DIR = "/app/data/uploads"
+PORT = "8000"
+
+[phases.setup]
+nixPkgs = ["...", "nodejs_22"]
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+  "node --version && npm --version",
+  "python -m venv --copies /opt/venv",
+  "/opt/venv/bin/python -m pip install -r backend/requirements.txt",
+  "npm ci --include=dev",
+]
+paths = ["/opt/venv/bin"]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = [
+  "npm run build",
+  "mkdir -p /app/static && cp -R frontend/dist/. /app/static/",
+  "date -u +%Y-%m-%dT%H:%M:%SZ > /app/BUILD",
+]
+
+[start]
+cmd = "/opt/venv/bin/python scripts/start-production.py"

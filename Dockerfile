@@ -48,7 +48,7 @@ VOLUME ["/app/data/uploads"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import json,urllib.request,sys; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)); sys.exit(0 if r.get('database') and r.get('seeded') and not r.get('seedError') else 1)"
+  CMD python -c "import json,urllib.request,sys; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)); sys.exit(0 if r.get('status') == 'ok' else 1)"
 
 # Migrations run on boot so a Dokploy redeploy always lands on the right schema.
 CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
