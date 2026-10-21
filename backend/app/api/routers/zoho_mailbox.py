@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, MailAccount, MailMessage, Role, User
 from app.db.session import get_db
-from app.integrations.mail.imap import mailbox_source_id, provider_message_id, require_cursor_source
+from app.integrations.mail.imap import UIDVALIDITY_RECOVERY_REQUIRED, mailbox_source_id, provider_message_id, require_cursor_source
 from app.integrations.mail.mailbox import WritableMailbox, MailAdapterError, MailMutationError
 from app.integrations.mail.smtp import address as email_address
 from app.services import zoho_mail
@@ -78,7 +78,7 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
         except MailAdapterError as exc:
             raise HTTPException(409, str(exc)) from None
         if str(row.sync_state.get("uid_validity")) != cursor.uid_validity:
-            raise HTTPException(409, "Zoho mailbox identifiers changed. Review the retained history before reconnecting.")
+            raise HTTPException(409, UIDVALIDITY_RECOVERY_REQUIRED)
     else:
         row = MailAccount(address=address, provider="zoho", sync_state={"source_id": mailbox_source_id(config),
             "last_uid": cursor.last_uid, "uid_validity": cursor.uid_validity, "storage_id": storage_identity(settings.storage_dir, settings)})

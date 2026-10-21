@@ -108,6 +108,49 @@ def test_retired_oauth_providers_never_start_or_exchange_grants(mailbox, monkeyp
         assert db.scalar(select(MailOAuthState)) is None
 
 
+@pytest.mark.parametrize("provider, disconnected", [
+    ("zoho", True), ("imap", True), ("gmail", False),
+    ("microsoft", False), ("unsupported", False),
+])
+def test_unavailable_sources_reject_intake_and_retry_but_keep_evidence_and_review(mailbox, provider, disconnected):
+    env = mailbox
+    with env.sessions() as db:
+        account = db.get(MailAccount, "account")
+        account.provider = provider
+        account.disconnected_at = datetime.now(timezone.utc) if disconnected else None
+        db.commit()
+
+    response = env.client.post("/api/inbox/messages/message-0/ingest")
+    assert response.status_code == 409, response.text
+    assert ("Reconnect" if disconnected else "archived") in response.json()["detail"]
+    checkpoint = {"attachment": {"provider_jobs": {"resume": {
+        "job_id": "accepted-unknown", "status": "unknown", "idempotency_key": "retained-key",
+    }}}}
+    with env.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(EmailIngestionJob)) == 0
+        db.add(EmailIngestionJob(id="retained-job", message_id="message-0", status="failed",
+            attempts=3, last_error="Retained provider result", state=checkpoint))
+        db.commit()
+
+    retry = env.client.post("/api/inbox/jobs/retained-job/retry")
+    assert retry.status_code == 409, retry.text
+    with env.sessions() as db:
+        receipt = db.get(EmailIngestionJob, "retained-job")
+        assert receipt.status == "failed" and receipt.attempts == 3
+        assert receipt.last_error == "Retained provider result" and receipt.state == checkpoint
+        assert db.get(MailAttachment, "attachment").object_key == "original.pdf"
+    history = env.client.get("/api/inbox?message_id=message-0").json()
+    assert history["messages"][0]["body"] == "Message 0"
+    assert history["jobs"][0]["status"] == "failed"
+    assert env.client.get("/api/inbox/attachments/attachment?download=true").content == b"%PDF-1.7 test"
+    review = env.client.post("/api/inbox/jobs/retained-job/review", json={
+        "decision": "ignore", "reason": "Reviewed retained evidence without provider processing",
+    })
+    assert review.status_code == 200 and review.json()["status"] == "ignored"
+    with env.sessions() as db:
+        assert db.get(EmailIngestionJob, "retained-job").state["attachment"] == checkpoint["attachment"]
+
+
 def test_reply_uses_origin_account_idempotency_and_retains_unknown_result(mailbox, monkeypatch):
     env = mailbox
     calls = []

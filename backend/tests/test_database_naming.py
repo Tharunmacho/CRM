@@ -57,8 +57,11 @@ BACKEND = Path(__file__).resolve().parents[1]
 def test_domain_names_cover_renamed_models_and_documented_intake_extension():
     expected = set(TABLE_NAMES.values()) | {"email_ingestion_jobs", "workflow_task_events", "workflow_settings", "email_oauth_states", "email_replies", "whatsapp_channels", "whatsapp_messages", "document_extraction_jobs", "email_drafts", "email_draft_attachments", "email_send_attempts", "staff_attendance_sessions", "staff_presence_intervals"}
     expected |= {"staff_attendance_requests", "staff_presence_clients"}
+    expected |= {"staff_attendance_hr_requests", "staff_attendance_weekly_off", "staff_attendance_work_timings",
+                 "staff_attendance_duty_plans", "staff_attendance_calendar", "staff_attendance_adjustments",
+                 "staff_attendance_cover_items"}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 35
+    assert len(Base.metadata.tables) == 42
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
@@ -573,3 +576,35 @@ def test_head_schema_matches_models_and_new_revisions_round_trip(schema_database
     _migrate(engine, "0007_email_intake", downgrade=True)
     _migrate(engine, "head")
     assert set(inspect(engine).get_table_names(schema="public")) == {*Base.metadata.tables, "alembic_version"}
+
+
+def test_attendance_policy_upgrade_preserves_existing_clocks_and_presence(schema_database):
+    from app.db.models import Candidate, Source, StaffAttendanceSession, StaffAttendanceRequest, StaffPresenceInterval, StaffPresenceClient
+
+    engine = schema_database
+    _migrate(engine, "0014_attendance_ordering")
+    moment = datetime(2026, 10, 21, 4, 30, tzinfo=timezone.utc)
+    with Session(engine) as db:
+        db.add(User(id="retained-staff", name="Retained staff", email="retained@example.test", role=Role.staff))
+        db.flush()
+        db.add(SessionRow(id="retained-login", user_id="retained-staff", expires_at=moment + timedelta(days=1)))
+        db.add(Candidate(id="retained-candidate", ref="CND-KEEP", name="Retained candidate", phone="9000000001", source=Source.walk_in, owner_id="retained-staff"))
+        db.add(StaffAttendanceSession(id="retained-clock", user_id="retained-staff", checked_in_at=moment, checkin_request_key="retained-key"))
+        db.flush()
+        db.add(StaffAttendanceRequest(kind="check_in", request_key="retained-key", user_id="retained-staff", attendance_id="retained-clock"))
+        db.add(StaffPresenceInterval(id="retained-presence", user_id="retained-staff", client_id="retained-tab", auth_session_id="retained-login", state="online", started_at=moment, last_seen_at=moment))
+        db.add(StaffPresenceClient(user_id="retained-staff", client_id="retained-tab", auth_session_id="retained-login", last_sequence=7))
+        db.commit()
+    retained = ("auth_users", "auth_sessions", "crm_candidates", "staff_attendance_sessions", "staff_attendance_requests", "staff_presence_intervals", "staff_presence_clients")
+    def snapshot():
+        with engine.connect() as connection:
+            return {name: connection.execute(text(f'SELECT * FROM {name}')).mappings().all() for name in retained}
+    before = snapshot()
+    _migrate(engine, "head")
+    assert snapshot() == before
+    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 42
+    _migrate(engine, "0014_attendance_ordering", downgrade=True)
+    assert snapshot() == before
+    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 35
+    _migrate(engine, "head")
+    assert snapshot() == before

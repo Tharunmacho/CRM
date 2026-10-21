@@ -13,7 +13,7 @@ from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import parse_loose_date, resume_text_from
 from app.integrations.whatsapp import download_media, WhatsAppError
 from app.services.candidate_identity import enrich_empty, identity_matches, normalize_candidate_values
-from app.services.document_extraction import extract_attachment, ExtractionPending
+from app.services.document_extraction import extract_attachment, ExtractionPending, request_extraction_retry
 from app.services.document_storage import put_bytes, read_bytes
 
 log = logging.getLogger(__name__)
@@ -259,6 +259,12 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             row.attempts += 1
             review = isinstance(exc, IntakeReviewError) or isinstance(exc, WhatsAppError) and any(word in str(exc).lower() for word in ("review", "checksum", "format", "limit"))
             row.status = "needs_review" if review else "failed" if row.attempts >= 4 else "retry"
+            if row.status == "retry":
+                saved = deepcopy(row.processing_state or {})
+                # Only a confirmed failed provider job may start a new paid
+                # generation. Pending/uncertain accepted jobs keep their ID.
+                request_extraction_retry(saved.setdefault("extraction", {}), automatic=True)
+                row.processing_state = saved
             row.next_attempt_at = utcnow() + timedelta(seconds=90 * 2 ** min(row.attempts - 1, 4))
             row.last_error = str(exc)[:500] if isinstance(exc, (WhatsAppError, IntakeReviewError)) else "Document processing failed. Check worker configuration and retry."
             db.commit()

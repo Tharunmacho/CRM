@@ -5,8 +5,9 @@ import { Button } from '@/shared/ui/primitives'
 import { canRetryJob, JOB_LABEL } from './inbox-status'
 import { ReceiptReview, type ReceiptDecision } from './receipt-review'
 
-export function JobReport({ job, busy, canRetry, opening, onOpen, onRetry, onReview }: {
+export function JobReport({ job, busy, canRetry, retryUnavailable, opening, onOpen, onRetry, onReview }: {
   job: InboxJob; busy: boolean; canRetry: boolean; opening: boolean
+  retryUnavailable?: string | null
   onOpen: (id: string) => Promise<void>; onRetry: () => Promise<boolean>
   onReview: (body: ReceiptDecision) => Promise<boolean>
 }) {
@@ -21,6 +22,6 @@ export function JobReport({ job, busy, canRetry, opening, onOpen, onRetry, onRev
         <div><dt>Unread pages</dt><dd>{pages(report.unreadPages)}</dd></div><div><dt>Uncertain pages</dt><dd>{pages(report.unknownPages)}</dd></div>
       </dl>
     </details>)}
-    <div className="mt-3 flex flex-wrap gap-2">{job.candidateId && <Button size="sm" disabled={opening} onClick={() => void onOpen(job.candidateId!)}>Open candidate</Button>}{canRetry && canRetryJob(job) && <><Button size="sm" disabled={busy} onClick={() => void onRetry()}>Retry processing</Button><ReceiptReview busy={busy} submit={onReview} /></>}</div>
+    <div className="mt-3 flex flex-wrap gap-2">{job.candidateId && <Button size="sm" disabled={opening} onClick={() => void onOpen(job.candidateId!)}>Open candidate</Button>}{canRetry && canRetryJob(job) && <><Button size="sm" disabled={busy || !!retryUnavailable} title={retryUnavailable ?? undefined} onClick={() => void onRetry()}>Retry processing</Button><ReceiptReview busy={busy} submit={onReview} /></>}</div>
   </section>
 }

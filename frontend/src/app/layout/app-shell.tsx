@@ -42,25 +42,27 @@ interface NavItem {
   icon: typeof LayoutDashboard
   capability?: Capability
   count?: 'inbox' | 'tasks'
+  group: 'Overview' | 'Recruitment' | 'Workspace'
 }
 
-/** The client's ten items, in the order they specified. */
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/inbox', label: 'Inbox', icon: Inbox, count: 'inbox' },
-  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle },
-  { to: '/clients', label: 'Clients', icon: Building2 },
-  { to: '/companies', label: 'Companies', icon: Factory },
-  { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase },
-  { to: '/add-candidate', label: 'Add Candidate', icon: UserPlus },
-  { to: '/data-bank', label: 'Data Bank', icon: Database },
-  { to: '/mapped', label: 'Mapped Candidates', icon: GitBranch },
-  { to: '/tasks', label: 'Tasks', icon: ListChecks, count: 'tasks' },
-  { to: '/attendance', label: 'Attendance', icon: Clock3 },
-  { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list' },
-  { to: '/reports', label: 'Reports', icon: FileBarChart },
-  { to: '/users', label: 'User Management', icon: Users, capability: 'user_management' },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, group: 'Overview' },
+  { to: '/inbox', label: 'Inbox', icon: Inbox, count: 'inbox', group: 'Overview' },
+  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, group: 'Overview' },
+  { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
+  { to: '/companies', label: 'Companies', icon: Factory, group: 'Recruitment' },
+  { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, group: 'Recruitment' },
+  { to: '/add-candidate', label: 'Add Candidate', icon: UserPlus, group: 'Recruitment' },
+  { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
+  { to: '/mapped', label: 'Mapped Candidates', icon: GitBranch, group: 'Recruitment' },
+  { to: '/tasks', label: 'Tasks', icon: ListChecks, count: 'tasks', group: 'Workspace' },
+  { to: '/attendance', label: 'Attendance', icon: Clock3, group: 'Workspace' },
+  { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list', group: 'Workspace' },
+  { to: '/reports', label: 'Reports', icon: FileBarChart, group: 'Workspace' },
+  { to: '/users', label: 'User Management', icon: Users, capability: 'user_management', group: 'Workspace' },
 ]
+
+const NAV_GROUPS = ['Overview', 'Recruitment', 'Workspace'] as const
 
 export function AppShell() {
   const store = useStore()
@@ -81,7 +83,7 @@ export function AppShell() {
   const items = NAV.filter((n) => !n.capability || can(n.capability))
 
   return (
-    <AttendanceProvider key={store.me.id}><div className="app-shell flex min-h-screen bg-canvas">
+    <AttendanceProvider key={store.me.id}><div className={cn('app-shell flex min-h-screen bg-canvas', location.pathname === '/' && 'is-dashboard-view')}>
       {/* Sidebar */}
       <aside
         className={cn(
@@ -92,13 +94,12 @@ export function AppShell() {
         )}
       >
         <div className="shell-brand flex shrink-0 items-center justify-between gap-2">
-          <div className="min-w-0" aria-label={agency.name}>
-            <p className="shell-wordmark">
-              <Layers2 size={25} strokeWidth={3} /> CARE INDIA
-            </p>
-          </div>
+          <NavLink to="/" className="shell-wordmark" aria-label={`${agency.name} dashboard`} onClick={() => setMobileOpen(false)}>
+            <Layers2 size={25} strokeWidth={2.6} />
+            <span>Care India<span className="shell-brand-caption">Recruitment workspace</span></span>
+          </NavLink>
           <button
-            className="text-ink-400 hover:text-ink lg:hidden"
+            className="shell-menu-close text-ink-400 hover:text-ink lg:hidden"
             onClick={() => setMobileOpen(false)}
             aria-label="Close navigation"
           >
@@ -106,34 +107,33 @@ export function AppShell() {
           </button>
         </div>
 
-        <SidebarAccount />
-
-        <nav className="shell-nav scrollbar-thin flex-1 overflow-y-auto">
-          {items.map((item) => {
-            const badge =
-              item.count === 'inbox'
-                ? counts.inbox
-                : item.count === 'tasks'
-                  ? counts.tasks
-                  : undefined
-            const danger = item.count === 'tasks' && counts.overdue > 0
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                onClick={() => setMobileOpen(false)}
-                className={({ isActive }) =>
-                  cn(
-                    'shell-nav-item relative mb-0.5 flex items-center gap-2.5 rounded-control px-2.5 py-2 text-sm transition-colors',
-                    isActive ? 'is-active' : 'text-ink-600',
-                  )
-                }
-              >
-                {() => (
-                  <>
+        <nav className="shell-nav scrollbar-thin flex-1 overflow-y-auto" aria-label="Main navigation">
+          {NAV_GROUPS.map((group) => (
+            <div className="shell-nav-group" key={group}>
+              <p className="shell-nav-group-label">{group}</p>
+              {items.filter((item) => item.group === group).map((item) => {
+                const badge =
+                  item.count === 'inbox'
+                    ? counts.inbox
+                    : item.count === 'tasks'
+                      ? counts.tasks
+                      : undefined
+                const danger = item.count === 'tasks' && counts.overdue > 0
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    onClick={() => setMobileOpen(false)}
+                    className={({ isActive }) =>
+                      cn(
+                        'shell-nav-item relative flex items-center transition-colors',
+                        isActive ? 'is-active' : 'text-ink-600',
+                      )
+                    }
+                  >
                     <item.icon className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 truncate">{item.label}</span>
+                    <span className="shell-nav-label flex-1">{item.label}</span>
                     {badge != null && badge > 0 && (
                       <span
                         className={cn('shell-nav-count shrink-0 tnum', danger && 'has-overdue')}
@@ -141,16 +141,17 @@ export function AppShell() {
                         {danger ? `${counts.overdue} late` : badge}
                       </span>
                     )}
-                  </>
-                )}
-              </NavLink>
-            )
-          })}
+                  </NavLink>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         <footer className="shell-sidebar-footer">
-          <button className="shell-logout-button" onClick={() => void store.signOut()}>
-            <LogOut size={16} /> Log out
+          <AccountMenu />
+          <button className="shell-logout-button" onClick={() => void store.signOut()} aria-label="Log out" title="Log out">
+            <LogOut size={16} />
           </button>
         </footer>
       </aside>
@@ -167,7 +168,7 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenu={() => setMobileOpen(true)} />
         <main className="shell-main flex-1">
-          <div className={cn('mx-auto max-w-[1440px]', location.pathname !== '/' && 'workspace-page')}>
+          <div className={cn('mx-auto max-w-[1600px]', location.pathname !== '/' && 'workspace-page')}>
             <Suspense fallback={<PageLoading />}>
               <Outlet />
             </Suspense>
@@ -180,21 +181,23 @@ export function AppShell() {
   )
 }
 
-function SidebarAccount() {
+function AccountMenu({ compact = false }: { compact?: boolean }) {
   const { me, signOut } = useStore()
   return (
-    <div className="shell-sidebar-account">
+    <div className={compact ? 'shell-topbar-account' : 'shell-sidebar-account'}>
       <Dropdown
-        align="left"
+        align={compact ? 'right' : 'left'}
         width="w-[min(19rem,calc(100vw-2rem))]"
-        trigger={({ toggle }) => (
-          <button className="shell-account-trigger" onClick={toggle} aria-label="Account menu">
+        trigger={({ open, toggle }) => (
+          <button className={cn('shell-account-trigger', compact && 'is-compact')} onClick={toggle} aria-label={`Account menu for ${me.name}`} aria-expanded={open}>
             <span className="shell-profile-avatar">{initials(me.name)}</span>
-            <span>
-              <strong>{me.name}</strong>
-              <span>{me.role}</span>
-            </span>
-            <ChevronDown size={13} />
+            {!compact && <>
+              <span>
+                <strong>{me.name}</strong>
+                <span>{me.role}</span>
+              </span>
+              <ChevronDown size={13} />
+            </>}
           </button>
         )}
       >
@@ -242,20 +245,19 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
         location.pathname !== '/' && 'is-workspace',
       )}
     >
-      <button className="text-ink-500 lg:hidden" onClick={onMenu} aria-label="Open navigation">
+      <button className="shell-menu-toggle text-ink-500 lg:hidden" onClick={onMenu} aria-label="Open navigation">
         <Menu className="h-5 w-5" />
       </button>
 
-      <div className="shell-page-heading">
-        {location.pathname === '/' && <h1>{currentPage}</h1>}
+      <GlobalSearch />
+      {location.pathname !== '/' && <div className="shell-page-heading">
         <p>
-          <span>Workspace</span> / {location.pathname === '/' ? 'Overview' : currentPage}
+          <span>Workspace</span> / {currentPage}
         </p>
-      </div>
+      </div>}
 
       <div className="shell-topbar-actions ml-auto flex items-center">
         <AttendanceClock compact />
-        <GlobalSearch />
         <button
           className="shell-icon-button"
           aria-label="Open messages"
@@ -265,7 +267,7 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
           {mailMessages.some((message) => message.unread) && <span className="shell-unread-dot" />}
         </button>
         <Dropdown
-          width="w-[min(22rem,calc(100vw-2rem))] max-sm:fixed max-sm:left-4 max-sm:right-4 max-sm:top-[61px] max-sm:w-auto"
+          width="w-[min(22rem,calc(100vw-2rem))] max-sm:fixed max-sm:left-4 max-sm:right-4 max-sm:top-[82px] max-sm:w-auto"
           trigger={({ toggle }) => (
             <IconButton
               className="shell-icon-button"
@@ -342,6 +344,7 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
             </>
           )}
         </Dropdown>
+        <AccountMenu compact />
       </div>
     </header>
   )

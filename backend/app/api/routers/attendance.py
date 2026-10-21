@@ -14,6 +14,7 @@ from app.services import staff_activity as activity
 
 router = APIRouter(prefix="/api", tags=["attendance"])
 staff = require_role(Role.staff)
+employee = require_role(Role.staff, Role.manager)
 
 
 class CheckIn(BaseModel):
@@ -67,14 +68,14 @@ def report(response: Response, date: date | None = None, staffId: str | None = N
 
 
 @router.post("/attendance/check-in")
-def check_in(body: CheckIn, db: Session = Depends(get_db), user: User = Depends(staff),
+def check_in(body: CheckIn, db: Session = Depends(get_db), user: User = Depends(employee),
              crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
     activity.check_in(db, user, str(body.requestKey), auth_session_id=crm_session); db.commit()
     return own_summary(db, user)
 
 
 @router.post("/attendance/check-out")
-def check_out(body: CheckOut, db: Session = Depends(get_db), user: User = Depends(staff),
+def check_out(body: CheckOut, db: Session = Depends(get_db), user: User = Depends(employee),
               crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
     activity.check_out(db, user, body.sessionId, str(body.requestKey), auth_session_id=crm_session); db.commit()
     return own_summary(db, user)
@@ -101,3 +102,7 @@ def leave(body: Leave, db: Session = Depends(get_db), user: User = Depends(staff
     activity.heartbeat(db, user, str(body.clientId), crm_session, False, None, sequence=body.sequence)
     db.commit()
     return {"ok": True}
+
+
+from app.api.routers.attendance_hr import router as policy_router
+router.include_router(policy_router)

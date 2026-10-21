@@ -674,14 +674,19 @@ def delete_todo(todo_id: str, db: Session = Depends(get_db), user: User = Depend
 class ReassignIn(BaseModel):
     candidateIds: list[str]
     toUserId: str
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 @router.post("/candidates/reassign")
 def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(422, "Explain why these candidates are being reassigned")
     from app.api.routers.candidates import lock_assignment_cursor
     lock_assignment_cursor(db)
     target = db.get(User, body.toUserId)
-    if target is None or target.role != Role.staff or not target.active or target.on_leave:
+    from app.services.attendance_availability import unavailable_staff_ids
+    if target is None or target.role != Role.staff or not target.active or target.on_leave or target.id in unavailable_staff_ids(db):
         raise HTTPException(422, "Choose an active Staff account that is not on leave")
     ids = sorted(set(body.candidateIds))
     if not ids:
@@ -692,7 +697,12 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
 
     now = datetime.now(timezone.utc)
     for c in candidates:
+        previous_owner = c.owner_id
         c.owner_id = target.id
+        if previous_owner != target.id:
+            db.add(AuditEntry(actor_id=user.id, action="Candidate reassigned", target=c.name,
+                entity_type="candidate", entity_id=c.id, at=now,
+                meta={"fromUserId": previous_owner, "toUserId": target.id, "reason": reason}))
         if c.intake_owner_id is None:
             c.intake_owner_id = target.id
         if not db.scalar(select(Task.id).where(Task.candidate_id == c.id).limit(1)) and not c.call_recorded_at:
@@ -712,7 +722,7 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
     ):
         if t.owner_id != target.id:
             add_event(db, t, "assignment", f"assignment:{t.id}:{now.isoformat()}", now,
-                      {"fromOwnerId": t.owner_id, "toOwnerId": target.id, "actorId": user.id})
+                      {"fromOwnerId": t.owner_id, "toOwnerId": target.id, "actorId": user.id, "reason": reason})
             t.owner_id = target.id
 
     db.add(
@@ -721,7 +731,7 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
             action="Reassigned candidates",
             target=f"{len(ids)} to {target.name}",
             entity_type="candidate",
-            meta={"candidateIds": ids, "toUserId": target.id},
+            meta={"candidateIds": ids, "toUserId": target.id, "reason": reason},
         )
     )
     db.commit()

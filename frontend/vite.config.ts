@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       // Prepare the small login entry during startup instead of on its first visit.
       warmup: {
-        clientFiles: ['./index.html', './src/main.tsx', './src/features/auth/pages/login.tsx'],
+        clientFiles: ['./index.html', './src/main.tsx', './src/screens/auth/login.tsx'],
       },
       proxy: {
         '/api': {

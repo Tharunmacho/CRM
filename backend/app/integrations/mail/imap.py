@@ -15,6 +15,13 @@ from .base import InboundMessage, MailAdapterError, MailMessageError
 from .mime import parse_message
 
 
+UIDVALIDITY_RECOVERY_REQUIRED = (
+    "Mailbox identifiers changed. Incoming sync is paused to protect retained history. "
+    "Reconnecting alone cannot restore sync; contact your administrator for mailbox recovery. "
+    "Existing messages and original files remain available."
+)
+
+
 @dataclass(frozen=True)
 class MailConfig:
     host: str
@@ -170,7 +177,7 @@ class IMAPMailbox:
             if int(validity) <= 0:
                 raise ValueError
             if expected is not None and validity != str(expected):
-                raise MailAdapterError("uidvalidity_changed", "The mailbox UIDVALIDITY changed. Review and reconnect the source before resuming.")
+                raise MailAdapterError("uidvalidity_changed", UIDVALIDITY_RECOVERY_REQUIRED)
             _, next_values = self._connection.response("UIDNEXT")
             if not next_values or next_values[0] is None:
                 status, rows = self._connection.uid("SEARCH", None, "ALL")

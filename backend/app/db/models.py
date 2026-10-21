@@ -986,3 +986,108 @@ class StaffPresenceClient(Base):
         CheckConstraint("last_sequence >= 1", name="ck_staff_presence_client_sequence"),
         {"comment": "Per-page ordering checkpoint and login binding. Leave requests persist even before the first heartbeat, rejecting delayed older updates."},
     )
+
+
+class AttendanceHRRequest(Base, PkMixin, TimestampMixin):
+    __tablename__ = "staff_attendance_hr_requests"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    request_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    attendance_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, server_default=text("'pending'"))
+    approvals: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    emergency_override: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    cover_user_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"), index=True)
+    cover_status: Mapped[str | None] = mapped_column(String(20))
+    cover_note: Mapped[str | None] = mapped_column(Text)
+    cover_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cover_settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    converted_from_paid_leave: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    __table_args__ = (
+        CheckConstraint("minutes BETWEEN 0 AND 1440", name="ck_attendance_hr_request_minutes"),
+        CheckConstraint("kind IN ('late','early_exit','early_check_in','official_duty','work_from_home','paid_leave','unpaid_leave','weekly_off','extra_ot')", name="ck_attendance_hr_request_kind"),
+        CheckConstraint("status IN ('awaiting_cover','pending','approved','rejected')", name="ck_attendance_hr_request_status"),
+        {"comment": "Attendance permissions, leave and overtime with durable request keys, staged approvals and accepted cover lifecycle."},
+    )
+
+
+class AttendanceWeeklyOff(Base, PkMixin, TimestampMixin):
+    __tablename__ = "staff_attendance_weekly_off"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    day: Mapped[str] = mapped_column(String(12), nullable=False)
+    approved_request_id: Mapped[str | None] = mapped_column(ForeignKey("staff_attendance_hr_requests.id"))
+    __table_args__ = (UniqueConstraint("user_id", "week_start", name="uq_attendance_weekly_off"),
+        CheckConstraint("day IN ('monday','tuesday','wednesday','thursday','friday','saturday','sunday')", name="ck_attendance_weekly_off_day"),
+        {"comment": "One weekly off per employee and Monday-based week, optionally fixed by an approved rotation request."})
+
+
+class AttendanceWorkTiming(Base, PkMixin, TimestampMixin):
+    __tablename__ = "staff_attendance_work_timings"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    shift: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    __table_args__ = (UniqueConstraint("user_id", "effective_from", name="uq_attendance_work_timing"),
+        {"comment": "Effective-dated recurring shift hours; independent from one-date duty plans."})
+
+
+class AttendanceDutyPlan(Base, PkMixin, TimestampMixin):
+    __tablename__ = "staff_attendance_duty_plans"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    attendance_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    shift: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    __table_args__ = (UniqueConstraint("user_id", "attendance_date", name="uq_attendance_duty_plan"),
+        {"comment": "Explicit single-date working roster overriding a weekly off or holiday, never approved leave."})
+
+
+class AttendanceCalendarDay(Base, PkMixin, TimestampMixin):
+    __tablename__ = "staff_attendance_calendar"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    attendance_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(4), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    request_id: Mapped[str | None] = mapped_column(ForeignKey("staff_attendance_hr_requests.id"))
+    converted_from_paid_leave: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    __table_args__ = (UniqueConstraint("user_id", "attendance_date", name="uq_attendance_calendar_day"),
+        CheckConstraint("status IN ('WO','H','PL','UL')", name="ck_attendance_calendar_status"),
+        {"comment": "Explicit holiday, weekly-off and approved paid/unpaid leave calendar. One paid leave day per month is serialized by the employee lock."})
+
+
+class AttendanceAdjustment(Base, PkMixin):
+    __tablename__ = "staff_attendance_adjustments"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    attendance_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    status: Mapped[str | None] = mapped_column(String(4))
+    minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    action: Mapped[str | None] = mapped_column(String(12))
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        CheckConstraint("kind IN ('add_punch','time_recovery','status_override')", name="ck_attendance_adjustment_kind"),
+        CheckConstraint("minutes BETWEEN 0 AND 1440", name="ck_attendance_adjustment_minutes"),
+        {"comment": "Append-only attendance regularisation and reasoned status overrides; raw attendance sessions remain intact."},
+    )
+
+
+class AttendanceCoverItem(Base, PkMixin):
+    __tablename__ = "staff_attendance_cover_items"
+    request_id: Mapped[str] = mapped_column(ForeignKey("staff_attendance_hr_requests.id"), nullable=False, index=True)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("crm_candidates.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    to_user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    task_ids: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[str | None] = mapped_column(String(20))
+    __table_args__ = (UniqueConstraint("request_id", "candidate_id", name="uq_attendance_cover_item"),
+        {"comment": "Durable temporary leave-cover ownership ledger. Completed or subsequently reassigned work is not returned."})

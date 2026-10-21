@@ -146,14 +146,21 @@ def require_current_schema():
 
 
 def main(*, host="0.0.0.0", port=None, reload_api=False):
+    print("[crm] Checking database schema before starting services...", flush=True)
     require_current_schema()
+    print("[crm] Database schema is ready.", flush=True)
     stop = threading.Event()
     children = []
     for name in ("SIGINT", "SIGTERM"):
         signal.signal(getattr(signal, name), lambda *_: stop.set())
-    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    # CREATE_NO_WINDOW keeps workers hidden on Windows; pass the supervisor's
+    # handles explicitly so their logs still reach the npm terminal.
+    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+               "stdout": sys.stdout, "stderr": sys.stderr,
+               "env": {**os.environ, "PYTHONUNBUFFERED": "1"}}
+    listen_port = str(port or os.environ.get("PORT", "8000"))
     api_command = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", host,
-                   "--port", str(port or os.environ.get("PORT", "8000"))]
+                   "--port", listen_port]
     if reload_api:
         api_command.extend(["--reload", "--reload-dir", "app"])
     commands = [
@@ -170,10 +177,17 @@ def main(*, host="0.0.0.0", port=None, reload_api=False):
     job = _new_process_job()
     try:
         for command in commands:
+            service = "API" if command is api_command else command[2]
+            target = f" at http://{host}:{listen_port}" if command is api_command else ""
+            print(f"[crm] Starting {service}{target}...", flush=True)
             children.append(_start_child(command, options, job))
         while not stop.wait(0.5):
             exited = next((child for child in children if child.poll() is not None), None)
             if exited:
+                command = commands[children.index(exited)]
+                service = "API" if command is api_command else command[2]
+                print(f"[crm] {service} exited (code {exited.returncode}); stopping remaining services.",
+                      file=sys.stderr, flush=True)
                 raise SystemExit(exited.returncode or 1)
     finally:
         if job is not None:

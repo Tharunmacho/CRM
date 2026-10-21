@@ -11,7 +11,7 @@ async function loadSource(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 }
 const { api, ApiError } = await loadSource('../src/shared/api/client.ts')
-const { workerHealth, canRetryJob, isJobPending } = await loadSource('../src/features/inbox/inbox-status.ts')
+const { workerHealth, canRetryJob, isJobPending, intakeUnavailable } = await loadSource('../src/features/inbox/inbox-status.ts')
 const realFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = realFetch })
 
@@ -29,6 +29,19 @@ test('manual retry follows the backend state machine without resubmitting active
   for (const status of ['failed', 'needs_review', 'ignored']) assert.equal(canRetryJob({ status }), true)
   for (const status of ['pending', 'processing', 'retry']) assert.equal(isJobPending({ status }), true)
   for (const status of ['completed', 'failed', 'needs_review', 'ignored']) assert.equal(isJobPending({ status }), false)
+})
+
+test('candidate intake follows the connected source eligibility without requiring auto-ingest', () => {
+  for (const provider of ['zoho', 'imap']) {
+    const account = { provider, autoIngest: false, connectionStatus: 'connected', disconnectedAt: null }
+    assert.equal(intakeUnavailable(account), null)
+    assert.match(intakeUnavailable({ ...account, connectionStatus: 'disconnected' }), /reconnect/i)
+    assert.match(intakeUnavailable({ ...account, disconnectedAt: '2026-10-21T12:00:00Z' }), /reconnect/i)
+  }
+  for (const provider of ['gmail', 'microsoft', 'unsupported']) {
+    assert.match(intakeUnavailable({ provider, connectionStatus: 'connected' }), /archived.*history is read only/)
+  }
+  assert.match(intakeUnavailable(undefined), /Refresh before processing/)
 })
 
 test('Inbox gets a dedicated snapshot with cookies and preserves attachment names and inspection summaries', async () => {

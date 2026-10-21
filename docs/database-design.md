@@ -1,6 +1,6 @@
 # CRM database and document storage
 
-The CRM uses PostgreSQL, SQLAlchemy models and an ordered Alembic migration chain. The current head is `0014_attendance_ordering`; it contains **35 application tables** plus `alembic_version`. File bytes live in private local/shared-volume or S3-compatible storage. No MongoDB collections are required.
+The CRM uses PostgreSQL, SQLAlchemy models and an ordered Alembic migration chain. The current head is `0015_attendance_hr`; it contains **42 application tables** plus `alembic_version`. File bytes live in private local/shared-volume or S3-compatible storage. No MongoDB collections are required.
 
 ## Find the right table
 
@@ -34,6 +34,13 @@ The CRM uses PostgreSQL, SQLAlchemy models and an ordered Alembic migration chai
 | Staff | `staff_presence_intervals` | Online/idle intervals per browser client and login session, server timestamps and heartbeat expiry. Offline time is derived within checked-in time. |
 | Staff | `staff_attendance_requests` | Accepted clock request identifiers linked to their session; retries from another tab cannot accidentally open a new shift after checkout. |
 | Staff | `staff_presence_clients` | Per-browser login binding and last accepted sequence; delayed heartbeat/leave requests cannot reverse newer activity state. |
+| Staff | `staff_attendance_hr_requests` | Durable permission, leave and OT requests, staged decisions, cover acceptance and handover checkpoints. |
+| Staff | `staff_attendance_weekly_off` | One choice per employee/week, with approved rotational-off linkage. |
+| Staff | `staff_attendance_work_timings` | Effective-dated recurring shifts and reason/actor. |
+| Staff | `staff_attendance_duty_plans` | Single-date duty shifts, separate from recurring timings. |
+| Staff | `staff_attendance_calendar` | Explicit holiday, weekly-off and paid/unpaid leave markers; leave approval linkage. |
+| Staff | `staff_attendance_adjustments` | Append-only reasoned added punches, time recovery and status-label overrides. |
+| Staff | `staff_attendance_cover_items` | Temporary candidate/task ownership ledger; safe retry and return without overwriting later assignments. |
 | WhatsApp | `whatsapp_channels` | Configured Business phone, intake setting and reception/worker health. Credentials stay in server secrets. |
 | WhatsApp | `whatsapp_messages` | Deduplicated signed webhook receipts, sender provenance, original media, extraction checkpoints, review and linked candidate. |
 | Documents | `document_attachments` | Versioned candidate, company and application documents. Owner is `entity_type` + `entity_id`; the file service validates owner/access. |
@@ -111,7 +118,7 @@ Avoid exporting password hashes, session IDs, OAuth secrets or raw identity-docu
 
 ## Migration policy
 
-The chain is `0001` through `0014`. Revisions `0001` through `0007` are retained; this integration adds:
+The chain is `0001` through `0015`. Revisions `0001` through `0007` are retained; this integration adds:
 
 - `0008_workflow_history`: ownership snapshots, persisted SLA timing, task history/settings and personal reminder delivery state.
 - `0009_communication_channels`: encrypted OAuth handshake/reply metadata, WhatsApp receipts, separate mail-worker heartbeat, atomic reference sequences and maintained resume full-text search.
@@ -120,7 +127,8 @@ The chain is `0001` through `0014`. Revisions `0001` through `0007` are retained
 - `0012_zoho_mailbox`: folder/UID state, recoverable drafts, immutable attachments and explicit send-attempt history.
 - `0013_staff_attendance`: staff check-in/out, corrections and browser activity intervals with partial uniqueness indexes.
 - `0014_attendance_ordering`: durable clock-request ledger and browser-presence sequencing, including earlier request-key backfill.
+- `0015_attendance_hr`: seven monthly-policy, approval, weekly-off, roster, calendar, adjustment and leave-cover tables. Existing clocks and recruitment data remain unchanged.
 
 Migrations and model parity, fresh upgrade, earlier-record preservation and rollback/upgrade are checked against disposable PostgreSQL. This is not evidence that a production migration has been run. Apply the schema once during a coordinated release with the matching API; stop older writers first. Do not rewrite an applied migration. A future change must add a new revision.
 
-Downgrading removes the new feature ledgers/settings. `0014` removes clock-request and presence-ordering ledgers; `0013` removes attendance/activity history; `0012` removes drafts/send attempts and mailbox action state; `0011` removes employer WhatsApp. `0010` downgrade removes manual extraction jobs and assignment events; `0009` removes channel/OAuth/reply data; `0008` removes workflow history/snapshots. Preserve a database plus document backup before rollback. Prefer a forward correction after real intake has begun. No downgrade deletes stored document bytes, and no migration recreates default accounts.
+Downgrading removes the new feature ledgers/settings. `0015` removes monthly-policy requests, calendar, schedules, adjustments and cover ledgers; `0014` removes clock-request and presence-ordering ledgers; `0013` removes attendance/activity history; `0012` removes drafts/send attempts and mailbox action state; `0011` removes employer WhatsApp. `0010` downgrade removes manual extraction jobs and assignment events; `0009` removes channel/OAuth/reply data; `0008` removes workflow history/snapshots. Preserve a database plus document backup before rollback. Prefer a forward correction after real intake has begun. No downgrade deletes stored document bytes, and no migration recreates default accounts.

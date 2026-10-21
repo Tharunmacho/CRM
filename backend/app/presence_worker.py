@@ -1,9 +1,10 @@
-﻿"""Close expired browser intervals without changing explicit attendance."""
+"""Expire browser presence and process approved attendance leave cover."""
 import logging
 import signal
 import threading
 from app.db.session import SessionLocal
 from app.services.staff_activity import close_stale_presence
+from app.services.attendance_hr import run_cover_sweep
 
 
 def main():
@@ -16,8 +17,13 @@ def main():
             with SessionLocal() as db:
                 close_stale_presence(db)
                 db.commit()
+            # Own transaction: cover failures cannot roll back presence expiry.
+            # The cursor lock and durable ledger make parallel workers safe.
+            with SessionLocal() as db:
+                run_cover_sweep(db)
+                db.commit()
         except Exception as exc:
-            logging.getLogger(__name__).error("Presence update failed (%s); will retry", type(exc).__name__)
+            logging.getLogger(__name__).error("Presence or attendance-cover update failed (%s); will retry", type(exc).__name__)
         stop.wait(30)
 
 

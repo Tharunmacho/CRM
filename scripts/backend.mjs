@@ -24,10 +24,11 @@ if (!Object.hasOwn(commands, task)) {
   process.exit(1)
 }
 
+console.log(`[crm] Starting backend ${task}...`)
 const child = spawn(python, [...commands[task], ...extra], {
   cwd: backend,
   stdio: 'inherit',
-  env: { ...process.env, PYTHONUTF8: '1' },
+  env: { ...process.env, PYTHONUTF8: '1', PYTHONUNBUFFERED: '1' },
 })
 child.once('error', (error) => {
   console.error(`Could not start Python: ${error.message}`)

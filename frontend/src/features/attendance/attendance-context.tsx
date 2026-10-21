@@ -38,7 +38,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
   const lifecycleVersion = useRef(0)
 
   const refresh = useCallback(async () => {
-    if (me.role !== 'staff') { setLoading(false); return }
+    if (me.role === 'admin') { setLoading(false); return }
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller

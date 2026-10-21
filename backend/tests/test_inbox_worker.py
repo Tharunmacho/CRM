@@ -286,9 +286,10 @@ def test_invalid_configuration_fails_without_returning_credential_values(environ
     assert environment.probes == []
 
 
-def test_manual_ingest_is_idempotent_even_when_auto_ingestion_is_disabled(environment):
+@pytest.mark.parametrize("provider", ["zoho", "imap"])
+def test_manual_ingest_is_idempotent_even_when_auto_ingestion_is_disabled(environment, provider):
     database = environment.database
-    database.accounts.append(account(auto_ingest=False))
+    database.accounts.append(account(provider=provider, auto_ingest=False))
     database.messages.append(message())
     database.attachments.append(SimpleNamespace(id="attachment-1", message_id="message-1"))
     environment.user.role = environment.Role.staff
@@ -302,6 +303,7 @@ def test_manual_ingest_is_idempotent_even_when_auto_ingestion_is_disabled(enviro
 
 def test_concurrent_enqueue_unique_collision_returns_existing_job(environment):
     database = environment.database
+    database.accounts.append(account())
     database.messages.append(message())
     database.attachments.append(SimpleNamespace(id="attachment-1", message_id="message-1"))
     database.collision = lambda: database.jobs.append(job(status="processing"))
@@ -313,6 +315,8 @@ def test_concurrent_enqueue_unique_collision_returns_existing_job(environment):
 
 
 def test_retry_rechecks_local_inspection_but_preserves_paid_job_ids_and_results(environment):
+    environment.database.accounts.append(account())
+    environment.database.messages.append(message())
     provider = {"resume": {"job_id": "accepted-job", "result": {"name": "Synthetic"}, "status": "succeeded"}}
     item = job(status="needs_review", attempts=2, state={"attachment-1": {
         "source_sha256": "synthetic-hash", "provider_jobs": deepcopy(provider),
@@ -328,6 +332,8 @@ def test_retry_rechecks_local_inspection_but_preserves_paid_job_ids_and_results(
 
 
 def test_explicit_retry_restarts_only_confirmed_failed_provider_jobs(environment):
+    environment.database.accounts.append(account())
+    environment.database.messages.append(message())
     failed = {"job_id": "failed-job", "status": "failed", "idempotency_key": "old-key"}
     pending = {"job_id": "running-job", "status": "running", "idempotency_key": "same-key"}
     item = job(status="failed", state={"attachment-1": {

@@ -1,4 +1,4 @@
-import type { InboxJob, InboxSnapshot } from '@/shared/api/client'
+import type { InboxAccount, InboxJob, InboxSnapshot } from '@/shared/api/client'
 
 export const JOB_LABEL: Record<InboxJob['status'], string> = {
   pending: 'Queued',
@@ -16,6 +16,17 @@ export function canRetryJob(job: InboxJob): boolean {
 
 export function isJobPending(job: InboxJob): boolean {
   return ['pending', 'processing', 'retry'].includes(job.status)
+}
+
+export function intakeUnavailable(account: InboxAccount | undefined): string | null {
+  if (!account) return 'Mailbox details are unavailable. Refresh before processing these attachments.'
+  if (!['zoho', 'imap'].includes(account.provider)) {
+    return 'This provider is archived. Stored history is read only; connect Zoho Mail for new candidate intake. Original attachments remain available to download.'
+  }
+  if (account.connectionStatus === 'disconnected' || account.disconnectedAt) {
+    return 'An administrator must reconnect this mailbox before creating or retrying candidate processing. Stored messages, processing results and downloads remain available.'
+  }
+  return null
 }
 
 export function workerHealth(worker: InboxSnapshot['worker'], now = Date.now()) {

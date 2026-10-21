@@ -4,7 +4,7 @@ Updated 21 October 2026 after the authorized workflow implementation. Source of 
 
 **Implemented path** means source/UI/API is connected, not production accepted. **Isolated tests** means targeted automated tests exercised the described contract; it does not mean every possible path passed. **Partial/divergence/limit** identifies retained product or scale differences. **Live pending** requires configured test accounts/providers/deployment. Historical workstream numbers retain links to the original phase plan; they are not a percentage-complete measure. No row means the production environment was migrated or deployed.
 
-Schema additions through revision 0014 introduce owner/event history, communication receipts, durable manual document jobs, independent company WhatsApp contact, Zoho mailbox/draft state, attendance and ordered presence. Current schema has 35 tables. Later user instructions explicitly replace the original Gmail/Microsoft connection requirement with Zoho-only mail and add attendance; those changes are recorded below without rewriting the original PRD requirements. See [database design](database-design.md) and migration source for exact contracts. Isolated migration parity and upgrade/downgrade tests are separate from production migration approval.
+Schema additions through revision 0015 introduce owner/event history, communication receipts, durable manual document jobs, independent company WhatsApp contact, Zoho mailbox/draft state, attendance, ordered presence and the confirmed reference attendance policy. Current schema has 42 tables. Later user instructions explicitly replace the original Gmail/Microsoft connection requirement with Zoho-only mail and add attendance; those changes are recorded below without rewriting the original PRD requirements. See [database design](database-design.md) and migration source for exact contracts. Isolated migration parity and upgrade/downgrade tests are separate from production migration approval.
 
 ## Requirements coverage
 
@@ -79,6 +79,17 @@ These are additions or explicit overrides from the conversation, not requirement
 | MAIL-04 | Existing mail visible without unsafe live-cursor rewind | Admin explicit since-date historical import, 1–500 per batch, separate durable UID checkpoints, pause/resume/next batch and OCR off by default. Incoming receiver cursor is independent. | Implemented / isolated tests; live pending |
 | ATT-01 | Staff attendance inside CRM | Staff intentional check-in/check-out, own sessions/durations and date filters; Admin/Manager team views; Admin reason-required corrections with audit. Durable idempotent clock intents prevent duplicate or reversed changes after response loss. | Implemented / isolated tests |
 | ATT-02 | Visible work presence alongside attendance | Visible foreground trusted interaction, monotonic activity age, per-page ordered/coalesced heartbeats and higher-sequence leave; stale responses ignored, server checkpoints reject reordered events and expiry closes presence. Presence never automatically changes the attendance clock and is not evidence of productivity. | Implemented / isolated tests; deployed time/browser acceptance pending |
+
+## Confirmed reference attendance extension
+
+The user subsequently confirmed **“Use the same reference attendance rules.”** The following additions close the previously omitted monthly workflow. Details and role adaptations are in [attendance policy](attendance.md), with comparison evidence in [reference workflow follow-up](audit/reference-workflow-followup.md).
+
+| ID | Confirmed addition | Implemented behavior | State |
+| --- | --- | --- | --- |
+| ATT-03 | Reference monthly calculation | Eight payable hours plus one-hour break by default, flex window, chronological monthly grace, permission occasions, missing-punch deadline and explicit OT offset limited to partial-day unpaid time. | Implemented; isolated validation recorded in audit |
+| ATT-04 | Requests and approvals | Durable permission/leave/OT requests, reasoned managerial/Admin stages, no self-approval, one paid leave per month and visible conversion to unpaid leave. Admin fills financial approval in the existing three-role CRM. | Implemented; isolated validation recorded in audit |
+| ATT-05 | Weekly off, roster and regularisation | Sunday/Friday choice with Thursday deadline, approved rotation, effective-dated work timings, one-date duty plans, calendar, added punches, time recovery and audited label overrides. | Implemented; isolated validation recorded in audit |
+| ATT-06 | Leave cover connected to recruitment | Staff cover acceptance/decline/renomination, scheduled handover and return, preserved SLA deadlines and completed/manual assignments, history per candidate. Approved leave excludes new assignment. | Implemented; isolated validation recorded in audit |
 
 ## Remaining product and acceptance boundaries
 

@@ -14,7 +14,7 @@ Task escalation and daily-update checks run every 15 minutes. Personal to-do rem
 
 1. Back up the existing PostgreSQL database and all documents; retain the current release and environment configuration, especially the token-encryption key.
 2. Stop older API instances and workers that write to this database. Confirm the deployment points to the intended database and persistent storage.
-3. From the repository root, run `python -m alembic -c backend/alembic.ini upgrade head` in the configured deployment environment. The expected head is `0014_attendance_ordering`.
+3. From the repository root, run `python -m alembic -c backend/alembic.ini upgrade head` in the configured deployment environment. The expected head is `0015_attendance_hr`.
 4. Start the matching release. Verify `/api/health`, existing account login, an old uploaded document, a new upload, task-monitoring heartbeat and ingestion source health.
 5. Configure the selected services below, then run live acceptance with dedicated test records. Keep synthetic tests separate from production candidate data.
 
@@ -58,9 +58,9 @@ Live acceptance, after the account owner connects a test mailbox, should cover f
 
 ## Staff attendance and activity
 
-Staff check in/out from the shell or Attendance screen. Admin and Manager can view team attendance; only Admin can correct a session with a recorded reason. The presence worker closes stale activity intervals every 30 seconds. Its omission does not inflate report totals, which independently cap stale intervals, but the complete runtime should always run it.
+Staff and Manager use the shell shortcut to reach Attendance check-in/out controls. Admin views all employee records; Manager views their own and Staff records. Only Admin can correct a raw session with a recorded reason. The presence/attendance worker closes stale activity intervals and processes approved leave-cover handover/return every 30 seconds in separate transactions. Presence reports independently cap stale intervals, but cover requires this worker; run the complete supervised runtime.
 
-Use [the attendance guide](attendance.md) for timezone, idle/offline rules and role behavior. Verify check-in survives reload, duplicate requests do not create shifts, checkout persists, and logout ends presence while retaining an open attendance session. Activity is limited to CRM browser interaction; no background device surveillance is collected.
+Use [the attendance guide](attendance.md) for timezone, monthly policy and role behavior. Verify check-in survives reload, duplicate requests do not create shifts, checkout persists, and logout ends presence while retaining an open attendance session. After `0015`, also verify a Staff request, cover acceptance, Manager/Admin decisions, monthly leave/OT figures, weekly-off cutoff and worker handover/return. Activity remains limited to CRM browser interaction.
 
 ## WhatsApp Business
 

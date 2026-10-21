@@ -162,7 +162,7 @@ interface StoreValue extends Data {
   addTodo: (payload: Record<string, unknown>) => Promise<void>
   toggleTodo: (id: string) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
-  reassign: (candidateIds: string[], toUserId: string) => Promise<void>
+  reassign: (candidateIds: string[], toUserId: string, reason: string) => Promise<void>
 }
 
 const Ctx = createContext<StoreValue | null>(null)
@@ -526,8 +526,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteTodo: async (id) => {
         await run(() => api.del(`/todos/${id}`))
       },
-      reassign: async (candidateIds, toUserId) => {
-        await run(() => api.post('/candidates/reassign', { candidateIds, toUserId }), 'Reassigned')
+      reassign: async (candidateIds, toUserId, reason) => {
+        await run(() => api.post('/candidates/reassign', { candidateIds, toUserId, reason }), 'Reassigned')
       },
     }
   }, [data, me, ready, loadError, retryStartup, toast, signIn, signOut, refresh, notify, run])

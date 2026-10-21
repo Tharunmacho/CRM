@@ -80,6 +80,20 @@ def test_no_eligible_manual_candidate_is_persisted_for_review(db):
     assert db.scalar(select(m.Notification.title)) == 'Candidate needs assignment'
 
 
+def test_approved_leave_excludes_round_robin_without_changing_manual_leave(db):
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from app.core.config import get_settings
+    today = datetime.now(timezone.utc).astimezone(ZoneInfo(get_settings().agency_timezone)).date()
+    db.add(m.AttendanceCalendarDay(user_id='a', attendance_date=today, status='PL', reason='Approved leave', actor_id='admin'))
+    db.add(m.AttendanceCalendarDay(user_id='b', attendance_date=today + timedelta(days=1), status='UL', reason='Tomorrow only', actor_id='admin'))
+    db.commit()
+    candidate = db.get(m.Candidate, create(db).id)
+    assert candidate.owner_id == 'b'
+    assert db.get(m.User, 'a').on_leave is False
+    assert db.get(m.User, 'b').on_leave is False
+
+
 @pytest.mark.parametrize('fields', [{'phone': '+91 90000 00001'}, {'phone': '9000000009', 'email': ' PERSON@EXAMPLE.TEST '}, {'phone': '9000000009', 'passport_no': ' p 123 4567 '}])
 def test_duplicate_or_identity_without_date_of_birth(db, fields):
     original = create(db, email='person@example.test', passport_no='P1234567')

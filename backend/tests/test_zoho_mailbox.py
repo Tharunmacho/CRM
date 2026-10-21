@@ -148,6 +148,27 @@ def save(env, draft, **overrides):
     return response.json()
 
 
+def test_zoho_reconnect_after_uid_reset_keeps_cursor_and_history_for_explicit_recovery(zoho):
+    env = zoho
+    with env.sessions() as db:
+        account = db.get(MailAccount, "account")
+        account.disconnected_at = datetime.now(timezone.utc)
+        account.sync_state = {**account.sync_state, "uid_validity": "old-generation"}
+        retained_cursor, retained_secrets = dict(account.sync_state), dict(account.secrets)
+        db.commit()
+    response = env.client.post("/api/inbox/accounts/zoho", json={
+        "address": "inbox@example.test", "password": "new-synthetic-password", "region": "in",
+    })
+    assert response.status_code == 409
+    assert "Reconnecting alone cannot restore sync" in response.json()["detail"]
+    with env.sessions() as db:
+        account = db.get(MailAccount, "account")
+        assert account.disconnected_at and account.sync_state == retained_cursor
+        assert account.secrets == retained_secrets
+        assert db.get(MailMessage, "message-0").uid_validity == "101"
+        assert db.get(MailAttachment, "attachment").object_key == "original.pdf"
+
+
 def test_zoho_connection_encrypts_credentials_and_legacy_oauth_disabled(zoho):
     env = zoho
     response = env.client.post("/api/inbox/accounts/zoho", json={"address": "new@example.test", "password": "synthetic-private-value", "region": "in"})

@@ -145,6 +145,18 @@ def test_dashboard_current_ownership_deadlines_and_roles(dataset):
     assert admin["taskCounts"]["escalated"] == 1
 
 
+def test_late_stage_labels_identify_work_still_due_not_deployment(dataset):
+    dataset["applications"][0]["current_stage"] = 10
+    dataset["applications"][0]["created_at"] = NOW
+    dashboard = dashboard_data(dataset, ADMIN, now=NOW)
+    report = report_data(dataset, ADMIN, FILTERS, now=NOW)
+    expected = ["Visa arrival", "Visa stamping", "Air ticket"]
+    assert [row["label"] for row in dashboard["pipeline"][8:]] == expected
+    assert [row["label"] for row in report["pipeline"][8:]] == expected
+    assert dashboard["pipeline"][9]["count"] == 1
+    assert report["pipeline"][9]["active"] == 1
+
+
 def make_client(data, user=STAFF):
     app = FastAPI()
     app.include_router(reports.router); app.include_router(reports.dashboard_router)

@@ -20,9 +20,10 @@ Use the current integration audit and requirement matrix for implementation stat
 
 ```text
 frontend/src/app/          Routing, providers and application shell
-frontend/src/features/     Screens grouped by business area, including inbox and attendance
+frontend/src/screens/      All routed screens, grouped by business area
+frontend/src/features/     Business helpers, hooks and screen-specific components
 frontend/src/shared/       API, models, reusable UI and workflow rules
-frontend/src/styles/       Poppins typography and responsive styling
+frontend/src/styles/       Local Poppins typography and responsive styling
 frontend/tests/            Frontend behavior and domain checks
 backend/app/api/           Request schemas and role-protected routes
 backend/app/db/            SQLAlchemy models and database sessions
@@ -30,13 +31,15 @@ backend/app/domain/        Recruitment stage rules
 backend/app/integrations/  Mail, WhatsApp and OCR adapters
 backend/app/services/      Business operations and durable workflows
 backend/app/runtime.py     API and worker supervisor
-backend/alembic/           Ordered schema history through 0014_attendance_ordering
+backend/alembic/           Ordered schema history through 0015_attendance_hr
 backend/tests/             Unit, API, migration and PostgreSQL integration checks
 docs/                     PRD, requirements, database dictionary and operations
 scripts/                  Workspace commands and production launcher
 ```
 
-The backend is a modular monolith. Keep API contracts, domain services and provider adapters separate. Shared frontend code should not import feature pages. PostgreSQL owns application state; file bytes live in private persistent storage.
+Open `frontend/src/screens/` to find every screen implementation, including login, dashboard, inbox, candidates, clients, companies, jobs, tasks, attendance, reports and users. The shared sidebar and top bar live in `frontend/src/app/layout/app-shell.tsx`; routes live in `frontend/src/app/routes.tsx`. Edit source files here, rather than generated files in `frontend/dist/`.
+
+The backend is a modular monolith. Keep API contracts, domain services and provider adapters separate. Shared frontend code should not import screens. PostgreSQL owns application state; file bytes live in private persistent storage.
 
 ## Dependencies
 
@@ -146,7 +149,7 @@ Account creation prompts for a password twice without displaying or logging it a
 
 Existing accounts need no recreation. Admin User Management supports creation, editing, roles, activation, assignment eligibility, leave, password reset, session revocation and audit history. Deactivation transfers open work as required and protects the final active Admin. Password hashes are not recoverable plaintext passwords.
 
-The [database dictionary](docs/database-design.md) maps the 35 application tables to their purpose and relationships. It includes safe inspection queries and migration policy. Existing client/contact and employer-company relationships are preserved. Apply migrations in a coordinated release: back up the database/documents, stop older writers, migrate, then restart the matching code. Local verification is not evidence that production has been upgraded.
+The [database dictionary](docs/database-design.md) maps the 42 application tables to their purpose and relationships. It includes safe inspection queries and migration policy. Existing client/contact and employer-company relationships are preserved. Apply migrations in a coordinated release: back up the database/documents, stop older writers, migrate, then restart the matching code. Local verification is not evidence that production has been upgraded.
 
 ## First OCR stage: manual document inspection
 
@@ -192,7 +195,7 @@ Run the complete backend from `backend/` with `python -m app.runtime`. It always
 
 ## Staff attendance and activity
 
-Staff can check in/out from the application shell and Attendance page. The database retains sessions, browser activity intervals and Admin corrections. Admin/Manager see team records; Staff see their own. Online, idle and offline totals cover checked-in time, merge overlapping browser tabs and use the agency timezone. Logout stops presence without silently checking out. See [attendance policy](docs/attendance.md) for exact timing and permissions.
+Staff and Manager can check in/out from the shell and Attendance page. The monthly workspace adds the confirmed reference rules for duty hours, grace, paid leave, weekly offs, permissions, staged approvals, extra OT, roster and durable leave cover. Admin handles financial approval in the existing three-role model. Raw clock records and Staff browser presence remain separate. Logout stops presence without silently checking out. See [attendance policy](docs/attendance.md) for calculations, permissions and explicit limits.
 
 ## Build and verification
 

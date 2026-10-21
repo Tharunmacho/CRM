@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 
 from app.db.models import Attachment, Candidate, Task, User, WhatsAppChannel, WhatsAppMessage
 from app.integrations.whatsapp import download_media, verify_signature, WhatsAppError
-from app.services.document_extraction import ExtractionPending
+from app.services.document_extraction import ExtractionFailure, ExtractionPending
 from app.services.whatsapp_intake import process_message, receive_payload
 from app.services.document_storage import _local
 from test_workflow_scheduler import workspace
@@ -140,6 +140,70 @@ def test_existing_candidate_identity_is_enriched_without_reassignment(setup):
         assert row.status == "completed" and row.candidate_id == candidate.id
         assert candidate.name == "Human correction" and candidate.skills == ["Human skill"] and candidate.total_experience == 0
         assert db.scalar(select(func.count()).select_from(Task)) == 0
+
+
+@pytest.mark.parametrize("provider_status", ["failed", "queued", "running", "submitting", "unknown", "succeeded"])
+def test_automatic_retry_restarts_only_confirmed_failed_provider_jobs(setup, provider_status):
+    sessions, settings = setup
+    message_id = receipt(sessions, settings)
+    provider_record = {"job_id": "accepted-job", "status": provider_status,
+                       "idempotency_key": "saved-submission-key", "selected_pages": [1]}
+    if provider_status == "succeeded":
+        provider_record["coverage_status"] = "needs_review"
+
+    def interrupted(data, *, state, save, **kwargs):
+        state["source_sha256"] = hashlib.sha256(data).hexdigest()
+        state["provider_jobs"] = {"resume": deepcopy(provider_record)}
+        save(state)
+        raise ExtractionFailure("Synthetic provider processing failure")
+
+    process_message(message_id, sessions=sessions, settings=settings,
+                    fetch_media=lambda *_: (ORIGINAL, "application/pdf"), extract=interrupted)
+    with sessions() as db:
+        row = db.get(WhatsAppMessage, message_id)
+        state = row.processing_state["extraction"]
+        assert row.status == "retry" and row.attempts == 1
+        assert row.processing_state["originalHash"] == hashlib.sha256(ORIGINAL).hexdigest()
+        if provider_status == "failed":
+            assert state["provider_jobs"] == {}
+            assert state["provider_generations"] == {"resume": 1}
+            assert state["provider_job_history"]["resume"] == [provider_record]
+        else:
+            assert state["provider_jobs"]["resume"] == provider_record
+            assert not state.get("provider_generations")
+
+
+def test_confirmed_provider_failure_gets_three_retries_then_preserves_exhausted_job(setup):
+    sessions, settings = setup
+    message_id = receipt(sessions, settings)
+    submissions = []
+
+    def failed_job(data, *, state, save, **kwargs):
+        jobs = state.setdefault("provider_jobs", {})
+        if "resume" not in jobs:
+            generation = state.get("provider_generations", {}).get("resume", 0)
+            submissions.append(generation)
+            jobs["resume"] = {"job_id": f"failed-job-{generation}", "status": "failed"}
+        save(state)
+        raise ExtractionFailure("The accepted resume job failed")
+
+    for attempt in range(1, 5):
+        process_message(message_id, sessions=sessions, settings=settings,
+                        fetch_media=lambda *_: (ORIGINAL, "application/pdf"), extract=failed_job)
+        with sessions() as db:
+            row = db.get(WhatsAppMessage, message_id)
+            assert row.attempts == attempt
+            assert row.status == ("retry" if attempt < 4 else "failed")
+            assert row.candidate_id is None
+            assert db.scalar(select(func.count()).select_from(Task)) == 0
+
+    assert submissions == [0, 1, 2, 3]
+    with sessions() as db:
+        state = db.get(WhatsAppMessage, message_id).processing_state["extraction"]
+        assert state["provider_jobs"]["resume"]["job_id"] == "failed-job-3"
+        assert len(state["provider_job_history"]["resume"]) == 3
+    process_message(message_id, sessions=sessions, settings=settings,
+                    extract=lambda *_, **__: pytest.fail("Exhausted work requires an explicit retry"))
 
 
 def test_media_fetch_keeps_bearer_token_on_meta_hosts_and_checks_hash():

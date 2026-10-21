@@ -83,7 +83,8 @@ def _transfer(db: Session, actor: User, user: User, users: list[User], target_id
     if not target_id:
         raise HTTPException(422, 'Choose a staff member to receive all owned candidates and open tasks.')
     target = _find(users, target_id)
-    if target.id == user.id or not target.active or target.role != Role.staff or target.on_leave:
+    from app.services.attendance_availability import unavailable_staff_ids
+    if target.id == user.id or not target.active or target.role != Role.staff or target.on_leave or target.id in unavailable_staff_ids(db):
         raise HTTPException(422, 'Choose another active staff member who is not on leave.')
     ids = [candidate.id for candidate in candidates]
     for candidate in candidates:

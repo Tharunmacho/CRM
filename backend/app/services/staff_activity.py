@@ -21,16 +21,17 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
-def lock_staff(db, user_id):
+def lock_staff(db, user_id, *, clock=False):
     user = db.scalar(select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True))
-    if user is None or not user.active or user.role != Role.staff:
-        raise HTTPException(403, "Only active staff accounts can record attendance and presence")
+    allowed = (Role.staff, Role.manager) if clock else (Role.staff,)
+    if user is None or not user.active or user.role not in allowed:
+        raise HTTPException(403, "Only eligible active employee accounts can record this activity")
     return user
 
 
-def lock_staff_login(db, user, session_id, *, at=None):
+def lock_staff_login(db, user, session_id, *, at=None, clock=False):
     """Mutations, logout and revocation share User → Login → presence locks."""
-    lock_staff(db, user.id)
+    lock_staff(db, user.id, clock=clock)
     now = at or utcnow()
     login = db.scalar(select(LoginSession).where(
         LoginSession.id == session_id, LoginSession.user_id == user.id,
@@ -113,7 +114,13 @@ def attendance_report(db, user, day, agency_timezone, staff_id=None, *, at=None)
     team = user.role in (Role.admin, Role.manager)
     if not team and staff_id and staff_id != user.id:
         raise HTTPException(403, "You can view only your own attendance")
-    people = select(User).where(or_(User.role == Role.staff, User.id.in_(select(Attendance.user_id))))
+    people = select(User).where(or_(User.role.in_([Role.staff, Role.manager]), User.id.in_(select(Attendance.user_id))))
+    if user.role == Role.manager:
+        people = people.where(or_(User.role == Role.staff, User.id == user.id))
+        if staff_id and staff_id != user.id:
+            target = db.get(User, staff_id)
+            if target is None or target.role != Role.staff:
+                raise HTTPException(403, "Managers can view Staff and their own attendance")
     if not team: people = people.where(User.id == user.id)
     elif staff_id: people = people.where(User.id == staff_id)
     users = list(db.scalars(people.order_by(User.name, User.id)))
@@ -150,7 +157,7 @@ def _remember_request(db, user, kind, request_key, row, at):
 
 
 def check_in(db, user, request_key, *, auth_session_id, at=None):
-    at = lock_staff_login(db, user, auth_session_id, at=at)
+    at = lock_staff_login(db, user, auth_session_id, at=at, clock=True)
     replay = _request_session(db, user, "check_in", request_key)
     if replay is not None: return replay
     existing = db.scalar(select(Attendance).where(Attendance.user_id == user.id, Attendance.checked_out_at.is_(None)))
@@ -164,7 +171,7 @@ def check_in(db, user, request_key, *, auth_session_id, at=None):
 
 
 def check_out(db, user, session_id, request_key, *, auth_session_id, at=None):
-    at = lock_staff_login(db, user, auth_session_id, at=at)
+    at = lock_staff_login(db, user, session_id=auth_session_id, at=at, clock=True)
     replay = _request_session(db, user, "check_out", request_key, session_id)
     if replay is not None: return replay
     row = db.scalar(select(Attendance).where(Attendance.id == session_id, Attendance.user_id == user.id).with_for_update())

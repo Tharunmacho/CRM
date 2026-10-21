@@ -17,11 +17,10 @@ from fastapi import HTTPException
 from sqlalchemy import JSON, func, select
 
 from app.db import models as m
+from app.domain.stages import STAGES as WORKFLOW_STAGES
 
 
-STAGES = ["Prescreening", "Resume forwarding", "Interview scheduling", "Interview result",
-          "Offer letter", "Medical", "Original passport", "Advance payment", "Visa",
-          "Ticket", "Deployment"]
+STAGES = [stage.title for stage in WORKFLOW_STAGES]
 REASONS = {"prescreen_failed": "Prescreen failed", "not_interested": "Not interested",
            "resume_not_received": "Resume not received", "interview_rejected": "Interview rejected",
            "medical_unfit": "Medical unfit", "unmapped": "Unmapped"}

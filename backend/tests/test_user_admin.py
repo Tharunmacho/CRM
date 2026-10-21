@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from test_database_naming import schema_database
 
 from app.core.security import SESSION_COOKIE, hash_password, verify_password
-from app.db.models import AssignmentPointer, AuditEntry, Base, Candidate, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, User, StaffPresenceInterval
+from app.db.models import AssignmentPointer, AttendanceHRRequest, AttendanceCalendarDay, AuditEntry, Base, Candidate, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, User, StaffPresenceInterval
 
 with patch('app.core.config.get_settings', return_value=SimpleNamespace(database_url='postgresql+psycopg://unused@127.0.0.1:1/user_admin_tests')):
     from app.api.routers import users
@@ -26,7 +26,7 @@ def env(request):
     metadata = MetaData()
     for table in Base.metadata.sorted_tables:
         table.to_metadata(metadata)
-    models = [User, LoginSession, AssignmentPointer, Candidate, Task, TaskEvent, AuditEntry, StaffPresenceInterval]
+    models = [User, LoginSession, AssignmentPointer, Candidate, Task, TaskEvent, AuditEntry, StaffPresenceInterval, AttendanceHRRequest, AttendanceCalendarDay]
     for model in models:
         for column in metadata.tables[model.__tablename__].columns:
             if isinstance(column.type, JSONB): column.type = JSON()

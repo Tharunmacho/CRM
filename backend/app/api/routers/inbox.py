@@ -14,7 +14,7 @@ from app.core.deps import current_user, require_role
 from app.db.models import EmailIngestionJob, MailAccount, MailAttachment, MailMessage, Role, User
 from app.db.session import get_db
 from app.integrations.mail.imap import (
-    IMAPMailbox, MailAdapterError, mailbox_source_id, require_cursor_source,
+    IMAPMailbox, MailAdapterError, UIDVALIDITY_RECOVERY_REQUIRED, mailbox_source_id, require_cursor_source,
 )
 from app.services.mail_config import configured_mailboxes
 from app.services.document_extraction import request_extraction_retry
@@ -57,6 +57,18 @@ def account_out(account, configured):
         "disconnectedAt": account.disconnected_at,
         "lastError": account.last_error,
     }
+
+
+def require_intake_account(db: Session, account_id: str) -> None:
+    account = db.get(MailAccount, account_id)
+    if not account:
+        raise HTTPException(404, "Mailbox not found")
+    # Match the receiving/extraction worker's supported source set. Retained
+    # historical receipts can still be read and reviewed without queueing work.
+    if account.provider not in {"zoho", "imap"}:
+        raise HTTPException(409, "This provider is archived. Stored history is read only; connect Zoho Mail for new candidate intake. Original attachments remain available to download.")
+    if account.disconnected_at:
+        raise HTTPException(409, "Reconnect this mailbox before creating or retrying candidate processing. Stored messages, processing results and downloads remain available.")
 
 
 @router.get("")
@@ -167,7 +179,8 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
     existing = db.scalar(select(MailAccount).where(MailAccount.address == address))
     if existing:
         if existing.provider != "imap":
-            raise HTTPException(409, "Reconnect this account using its original Gmail or Microsoft provider.")
+            detail = "Use the Zoho Mail connection form to reconnect this account." if existing.provider == "zoho" else "This provider is archived. Its history remains readable; connect a different Zoho Mail account for new intake."
+            raise HTTPException(409, detail)
         try:
             require_cursor_source(existing.sync_state or {}, available[address])
         except MailAdapterError as exc:
@@ -181,7 +194,7 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
                 with IMAPMailbox(available[address]) as mailbox:
                     current_cursor = mailbox.probe()
                 if current_cursor.uid_validity != str(saved_cursor.get("uid_validity")):
-                    raise MailAdapterError("uidvalidity_changed", "The mailbox identifiers changed. Restore the original mailbox before reconnecting.")
+                    raise MailAdapterError("uidvalidity_changed", UIDVALIDITY_RECOVERY_REQUIRED)
             except MailAdapterError as exc:
                 raise HTTPException(502, str(exc)) from None
             existing = db.scalar(select(MailAccount).where(MailAccount.id == saved_id).with_for_update())
@@ -236,6 +249,7 @@ def ingest(message_id: str, db: Session = Depends(get_db), user: User = Depends(
     job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.message_id == message_id))
     if job:
         return {"status": job.status}
+    require_intake_account(db, message.account_id)
     if not db.scalar(select(MailAttachment.id).where(MailAttachment.message_id == message_id).limit(1)):
         raise HTTPException(422, "This message has no imported attachments.")
     db.add(EmailIngestionJob(message_id=message_id, state={}))
@@ -257,6 +271,10 @@ def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(admin
         raise HTTPException(404, "Ingestion job not found")
     if job.status not in {"failed", "needs_review", "ignored"}:
         raise HTTPException(409, "This job is already queued, running or complete.")
+    message = db.get(MailMessage, job.message_id)
+    if not message:
+        raise HTTPException(404, "Source message not found")
+    require_intake_account(db, message.account_id)
     state = deepcopy(job.state or {})
     if state.get("receive_error"):
         raise HTTPException(422, "The source message could not be imported. Correct or resend the attachment.")

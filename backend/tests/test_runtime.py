@@ -24,7 +24,7 @@ def isolated_schema_check(monkeypatch):
 
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("whatsapp", [False, True])
-def test_supervisor_starts_worker_only_when_enabled_and_stops_children(monkeypatch, enabled, whatsapp):
+def test_supervisor_starts_worker_only_when_enabled_and_stops_children(monkeypatch, enabled, whatsapp, capsys):
     children = []
     calls = []
 
@@ -42,6 +42,9 @@ def test_supervisor_starts_worker_only_when_enabled_and_stops_children(monkeypat
             return self.returncode
 
     def spawn(command, **options):
+        assert options["stdout"] is sys.stdout
+        assert options["stderr"] is sys.stderr
+        assert options["env"]["PYTHONUNBUFFERED"] == "1"
         calls.append(command)
         child = Child()
         children.append(child)
@@ -63,9 +66,11 @@ def test_supervisor_starts_worker_only_when_enabled_and_stops_children(monkeypat
     if whatsapp:
         assert calls[-1][1:] == ["-m", "app.whatsapp_worker"]
     assert all(child.returncode == -15 for child in children)
+    output = capsys.readouterr().out
+    assert output.index("Checking database schema") < output.index("Database schema is ready") < output.index("Starting API")
 
 
-def test_worker_exit_stops_api_and_fails_container(monkeypatch):
+def test_worker_exit_stops_api_and_fails_container(monkeypatch, capsys):
     children = []
 
     class Child:
@@ -91,9 +96,10 @@ def test_worker_exit_stops_api_and_fails_container(monkeypatch):
         runtime.main()
     assert stopped.value.code == 7
     assert children[0].returncode == -15
+    assert "app.email_worker exited (code 7); stopping remaining services" in capsys.readouterr().err
 
 
-def test_schema_mismatch_prevents_every_child_from_starting(monkeypatch):
+def test_schema_mismatch_prevents_every_child_from_starting(monkeypatch, capsys):
     def mismatch():
         raise SystemExit("Database migration required")
     monkeypatch.setattr(runtime, "require_current_schema", mismatch)
@@ -102,9 +108,12 @@ def test_schema_mismatch_prevents_every_child_from_starting(monkeypatch):
     monkeypatch.setattr(runtime.subprocess, "Popen", unexpected)
     with pytest.raises(SystemExit, match="Database migration required"):
         runtime.main()
+    output = capsys.readouterr().out
+    assert "Checking database schema" in output
+    assert "Starting API" not in output and "Database schema is ready" not in output
 
 
-def test_development_reload_keeps_required_workers_and_loopback_binding(monkeypatch):
+def test_development_reload_keeps_required_workers_and_loopback_binding(monkeypatch, capsys):
     commands = []
     class Child:
         returncode = None
@@ -121,6 +130,40 @@ def test_development_reload_keeps_required_workers_and_loopback_binding(monkeypa
     runtime.main(host="127.0.0.1", port=8123, reload_api=True)
     assert commands[0][4:] == ["--host", "127.0.0.1", "--port", "8123", "--reload", "--reload-dir", "app"]
     assert [command[-1] for command in commands[1:]] == ["app.workflow_worker", "app.presence_worker", "app.document_extraction_worker"]
+    assert "Starting API at http://127.0.0.1:8123" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows hidden-child output regression")
+def test_hidden_windows_children_forward_logs_through_the_supervisor():
+    """Replace every service with a harmless printer; never load CRM data."""
+    script = '''
+import sys
+from types import SimpleNamespace
+from app import runtime
+
+runtime.require_current_schema = lambda: None
+runtime.get_settings = lambda: SimpleNamespace(email_ingestion_enabled=False, whatsapp_enabled=False)
+start_child = runtime._start_child
+def start_printer(command, options, job):
+    code = "import os, sys; print('child stdout ' + os.environ.get('PYTHONUNBUFFERED', ''), flush=True); print('child stderr', file=sys.stderr, flush=True)"
+    return start_child([sys.executable, '-c', code], options, job)
+runtime._start_child = start_printer
+runtime.main(host='127.0.0.1', port=8123)
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=os.path.dirname(os.path.dirname(__file__)),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 1  # A child exit stops its supervisor, even at zero.
+    assert "Checking database schema" in result.stdout
+    assert "Starting API at http://127.0.0.1:8123" in result.stdout
+    assert "child stdout 1" in result.stdout
+    assert "child stderr" in result.stderr
+    assert "exited (code 0); stopping remaining services" in result.stderr
 
 
 def test_supervisor_closes_owned_job_after_worker_exit(monkeypatch):

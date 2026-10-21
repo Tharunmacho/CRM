@@ -5,28 +5,29 @@ import { EmptyState } from '@/shared/ui/display'
 import { Button } from '@/shared/ui/primitives'
 import { PageBoundary, PageLoading } from '@/shared/ui/page-loading'
 
-import LoginPage from '@/features/auth/pages/login'
+import LoginPage from '@/screens/auth/login'
+import NotFoundPage from '@/screens/not-found/not-found'
 
 const AppShell = lazy(() =>
   import('@/app/layout/app-shell').then((module) => ({ default: module.AppShell })),
 )
-const DashboardPage = lazy(() => import('@/features/dashboard/pages/dashboard'))
-const InboxPage = lazy(() => import('@/features/inbox/pages/inbox'))
-const WhatsAppPage = lazy(() => import('@/features/inbox/pages/whatsapp'))
-const ClientsPage = lazy(() => import('@/features/clients/pages/clients'))
-const ClientDetailPage = lazy(() => import('@/features/clients/pages/client-detail'))
-const CompaniesPage = lazy(() => import('@/features/companies/pages/companies'))
-const JobsPage = lazy(() => import('@/features/jobs/pages/jobs'))
-const OrderDetailPage = lazy(() => import('@/features/jobs/pages/order-detail'))
-const AddCandidatePage = lazy(() => import('@/features/candidates/pages/add-candidate'))
-const DataBankPage = lazy(() => import('@/features/candidates/pages/data-bank'))
-const MappedCandidatesPage = lazy(() => import('@/features/workflow/pages/mapped-candidates'))
-const CandidateProfilePage = lazy(() => import('@/features/candidates/pages/candidate-profile'))
-const TasksPage = lazy(() => import('@/features/tasks/pages/tasks'))
-const AttendancePage = lazy(() => import('@/features/attendance/pages/attendance'))
-const TodoPage = lazy(() => import('@/features/todos/pages/todo'))
-const ReportsPage = lazy(() => import('@/features/reports/pages/reports'))
-const UsersPage = lazy(() => import('@/features/users/pages/users'))
+const DashboardPage = lazy(() => import('@/screens/dashboard/dashboard'))
+const InboxPage = lazy(() => import('@/screens/inbox/inbox'))
+const WhatsAppPage = lazy(() => import('@/screens/inbox/whatsapp'))
+const ClientsPage = lazy(() => import('@/screens/clients/clients'))
+const ClientDetailPage = lazy(() => import('@/screens/clients/client-detail'))
+const CompaniesPage = lazy(() => import('@/screens/companies/companies'))
+const JobsPage = lazy(() => import('@/screens/jobs/jobs'))
+const OrderDetailPage = lazy(() => import('@/screens/jobs/order-detail'))
+const AddCandidatePage = lazy(() => import('@/screens/candidates/add-candidate'))
+const DataBankPage = lazy(() => import('@/screens/candidates/data-bank'))
+const MappedCandidatesPage = lazy(() => import('@/screens/workflow/mapped-candidates'))
+const CandidateProfilePage = lazy(() => import('@/screens/candidates/candidate-profile'))
+const TasksPage = lazy(() => import('@/screens/tasks/tasks'))
+const AttendancePage = lazy(() => import('@/screens/attendance/attendance'))
+const TodoPage = lazy(() => import('@/screens/todos/todo'))
+const ReportsPage = lazy(() => import('@/screens/reports/reports'))
+const UsersPage = lazy(() => import('@/screens/users/users'))
 
 /**
  * Nothing renders until the session has been checked, so a refresh does not flash the
@@ -103,15 +104,7 @@ export default function AppRoutes() {
                 </Require>
               }
             />
-            <Route
-              path="*"
-              element={
-                <EmptyState
-                  title="That page does not exist"
-                  description="Check the address, or pick a section from the sidebar."
-                />
-              }
-            />
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

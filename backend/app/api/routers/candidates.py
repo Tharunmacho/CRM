@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.schemas import Wire
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -52,6 +52,39 @@ def candidate_list(filters: Search = Depends(candidate_filters), page: int = Que
 def candidate_export(filters: Search = Depends(candidate_filters), db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
     return Response(export_candidates(db, filters), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": 'attachment; filename="candidate-data-bank.xlsx"', "Cache-Control": "private, no-store"})
+
+
+@router.get("/{candidate_id}/assignment-history")
+def assignment_history(candidate_id: str, response: Response, limit: int = Query(20, ge=1, le=100),
+                       before: str | None = Query(None, max_length=150),
+                       db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(404, "Candidate not found")
+    statement = select(AuditEntry).where(AuditEntry.entity_type == 'candidate', AuditEntry.entity_id == candidate_id,
+        or_(AuditEntry.meta.has_key('fromUserId'), AuditEntry.meta.has_key('fromOwnerId')))
+    if before:
+        try:
+            timestamp, identifier = before.rsplit('|', 1)
+            moment = datetime.fromisoformat(timestamp)
+            if moment.tzinfo is None or not identifier or len(identifier) > 36:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise HTTPException(422, "Invalid history cursor. Reload ownership history.")
+        statement = statement.where(or_(AuditEntry.at < moment, (AuditEntry.at == moment) & (AuditEntry.id < identifier)))
+    rows = list(db.scalars(statement.order_by(AuditEntry.at.desc(), AuditEntry.id.desc()).limit(limit + 1)))
+    user_ids = {uid for row in rows[:limit] for uid in (row.actor_id, row.meta.get('fromUserId', row.meta.get('fromOwnerId')), row.meta.get('toUserId', row.meta.get('toOwnerId'))) if uid}
+    names = dict(db.execute(select(User.id, User.name).where(User.id.in_(user_ids))).all()) if user_ids else {}
+    response.headers['Cache-Control'] = 'private, no-store'
+    items = []
+    for row in rows[:limit]:
+        previous = row.meta.get('fromUserId', row.meta.get('fromOwnerId'))
+        target = row.meta.get('toUserId', row.meta.get('toOwnerId'))
+        items.append({'id': row.id, 'at': row.at, 'action': row.action, 'actorId': row.actor_id,
+            'actorName': names.get(row.actor_id, 'Former team member') if row.actor_id else 'System', 'fromUserId': previous,
+            'fromName': names.get(previous, 'Former team member') if previous else 'Unassigned',
+            'toUserId': target, 'toName': names.get(target, 'Former team member') if target else 'Unassigned',
+            'reason': row.meta.get('reason')})
+    return {'items': items, 'nextBefore': f'{rows[limit-1].at.isoformat()}|{rows[limit-1].id}' if len(rows) > limit else None}
 
 
 class OcrDataIn(BaseModel):
@@ -181,6 +214,9 @@ def next_owner(db: Session, *, pointer: AssignmentPointer | None = None) -> User
     if pointer is None:
         pointer = lock_assignment_cursor(db)
 
+    from app.services.attendance_availability import unavailable_staff_ids
+    absent = unavailable_staff_ids(db)
+
     eligible = list(
         db.scalars(
             select(User)
@@ -189,6 +225,7 @@ def next_owner(db: Session, *, pointer: AssignmentPointer | None = None) -> User
                 User.active.is_(True),
                 User.receives_auto_assign.is_(True),
                 User.on_leave.is_(False),
+                User.id.not_in(absent),
             )
             .order_by(User.created_at, User.id)
         )

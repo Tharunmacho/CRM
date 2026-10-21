@@ -111,7 +111,7 @@ def test_staff_scope_and_admin_reasoned_correction(workspace):
         activity.check_out(db,user,first.id,'correct-out',auth_session_id='login-owner',at=START+timedelta(hours=1));db.commit()
         second=activity.check_in(db,user,'correct2',auth_session_id='login-owner',at=START+timedelta(hours=2));db.commit()
         assert len(activity.attendance_report(db,user,START.date(),'UTC',at=START+timedelta(hours=3))['staff'])==1
-        assert len(activity.attendance_report(db,manager,START.date(),'UTC',at=START+timedelta(hours=3))['staff'])==2
+        assert {row['userId'] for row in activity.attendance_report(db,manager,START.date(),'UTC',at=START+timedelta(hours=3))['staff']} == {'owner', 'other', 'manager'}
         with pytest.raises(HTTPException) as forbidden:
             activity.attendance_report(db,user,START.date(),'UTC','other',at=START)
         assert forbidden.value.status_code==403
@@ -169,8 +169,11 @@ def test_api_clock_validation_permissions_and_database_roundtrip(workspace,monke
         assert client.post('/api/presence/heartbeat', json={**pulse, 'interactionAgeSeconds': 86401}).status_code == 422
         assert client.post('/api/attendance/check-out',json={'sessionId':identifier,'requestKey':str(uuid4())}).json()['attendance']['status']=='checked_out'
         role['id']='manager'
-        assert client.post('/api/attendance/check-in',json={'requestKey':str(uuid4())}).status_code==403
-        assert len(client.get('/api/attendance').json()['staff'])==2
+        # The stale Staff login must not authorize the newly selected Manager.
+        assert client.post('/api/attendance/check-in',json={'requestKey':str(uuid4())}).status_code==401
+        client.cookies.set(SESSION_COOKIE, 'login-manager')
+        assert client.post('/api/attendance/check-in',json={'requestKey':str(uuid4())}).status_code==200
+        assert {row['userId'] for row in client.get('/api/attendance').json()['staff']} == {'owner', 'other', 'manager'}
 
 
 def test_every_accepted_checkin_key_replays_original_shift_after_checkout(workspace):
