@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   BookUser,
@@ -18,9 +18,11 @@ import {
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
+import { applicationFileSlot, applicationFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { api } from '@/shared/api/client'
+import { ApiError, api } from '@/shared/api/client'
+import { taskClockStart } from '@/shared/lib/task-time'
 import {
   STAGES,
   closureLabels,
@@ -31,7 +33,7 @@ import {
   type StageField,
   type UserRef,
 } from '@/shared/workflow/stages'
-import type { Application, StageRecord } from '@/shared/model/types'
+import type { Application, FileVersion, StageRecord } from '@/shared/model/types'
 import { Dialog } from '@/shared/ui/overlay'
 import { Badge, StatusPill, TimeBar } from '@/shared/ui/display'
 import {
@@ -43,12 +45,11 @@ import {
   Select,
   Textarea,
 } from '@/shared/ui/primitives'
-import { FileDrop, FileLink, type StoredFile } from '@/shared/ui/file-drop'
+import { DocumentSlotRow, FileDrop, type StoredFile } from '@/shared/ui/file-drop'
 
 /**
- * The stage editor. Opens centred, with the eleven stages as a horizontal strip you
- * move along as the candidate progresses. Completed stages stay readable but locked;
- * stages beyond the current one are not reachable.
+ * One scrolling application: completed sections are collapsed, the current stage
+ * is editable, and later stages stay hidden until the workflow advances.
  */
 export function StageModal({
   applicationId,
@@ -61,27 +62,39 @@ export function StageModal({
 }) {
   const store = useStore()
   const app = store.applications.find((a) => a.id === applicationId)
-  const [viewing, setViewing] = useState<number | null>(null)
+  const [files, setFiles] = useState<ApplicationFile[]>([])
+  const [fileError, setFileError] = useState(false)
+  const [fileRetry, setFileRetry] = useState(0)
+  const [dirty, setDirty] = useState(false)
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => {
+    if (!open || !applicationId) return
+    let live = true
+    setFiles([])
+    setFileError(false)
+    api.get<ApplicationFile[]>(`/files?entity_type=application&entity_id=${encodeURIComponent(applicationId)}`)
+      .then((rows) => { if (live) setFiles((current) => [...rows, ...current.filter((file) => !rows.some((row) => row.id === file.id))]) })
+      .catch(() => { if (live) setFileError(true) })
+    return () => { live = false }
+  }, [applicationId, open, fileRetry])
 
   if (!app) return null
   const cand = store.candidate(app.candidateId)!
   const order = store.order(app.orderId)!
   const client = store.company(order.companyId)!
   const designation = store.designation(order.designationId)!
-  const owner = store.user(cand.ownerId)!
+  const owner = store.user(cand.ownerId)
 
   const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
-  const done = new Map(app.stages.map((r) => [r.stage, r]))
+  const effective = app.stages.filter((record) => !record.reopenedReason)
+  const superseded = app.stages.filter((record) => record.reopenedReason)
   const live = app.status === 'active' ? app.currentStage : null
-
-  // Default to the stage being worked; a completed tab can be opened to read it back.
-  const active = viewing ?? live ?? app.stages[app.stages.length - 1]?.stage ?? 1
-  const activeRecord = done.get(active)
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!pending && (!dirty || window.confirm('Discard unsaved stage changes?'))) onClose() }}
       width="full"
       title={cand.name}
       description={`${designation.title} · ${client.name} · ${order.ref}`}
@@ -92,71 +105,55 @@ export function StageModal({
         {!canWork && (
           <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-6 py-3 text-xs text-amber-700">
             <Lock className="h-3.5 w-3.5 shrink-0" />
-            This candidate belongs to {owner.name}. You can read the record but not record
+            This candidate belongs to {owner?.name ?? 'an unassigned recruiter'}. You can read the record but not record
             stages.
           </div>
         )}
 
-        {/* The eleven stages, left to right */}
-        <nav
-          aria-label="Stages"
-          className="flex flex-wrap gap-1 border-b border-rule-soft bg-field/30 px-6 py-3"
-        >
-          {STAGES.map((def) => {
-            const isDone = done.has(def.no)
-            const isLive = live === def.no
-            const reachable = isDone || isLive
-            const on = active === def.no
-            return (
-              <button
-                key={def.no}
-                disabled={!reachable}
-                onClick={() => setViewing(def.no)}
-                title={reachable ? def.title : 'Complete the earlier stages first'}
-                className={cn(
-                  'flex shrink-0 items-center gap-2 rounded-control px-3 py-2 text-xs font-medium transition-colors',
-                  on
-                    ? 'bg-navy-600 text-white'
-                    : reachable
-                      ? 'text-ink-600 hover:bg-white hover:text-ink'
-                      : 'cursor-not-allowed text-ink-300',
-                )}
-              >
-                <span
-                  className={cn(
-                    'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] tnum',
-                    on
-                      ? 'bg-white/25 text-white'
-                      : isDone
-                        ? 'bg-navy-100 text-navy-700'
-                        : isLive
-                          ? 'bg-navy-600 text-white'
-                          : 'bg-field text-ink-300',
-                  )}
-                >
-                  {isDone && !on ? <Check className="h-3 w-3" /> : def.no}
-                </span>
-                <span className="whitespace-nowrap">{def.title}</span>
-              </button>
-            )
+        <div className="space-y-4 px-4 py-5 sm:px-6" aria-label="Application stage history">
+          {fileError && <p role="alert" className="mb-3 text-xs text-stamp-700">File history could not be loaded. <button type="button" className="underline" onClick={() => setFileRetry((v) => v + 1)}>Retry</button></p>}
+          {STAGES.filter((definition) => effective.some((record) => record.stage === definition.no) && definition.no !== live).map((definition) => {
+            const records = effective.filter((record) => record.stage === definition.no)
+            const latest = records[records.length - 1]
+            return <details key={`${definition.no}-${latest.attempt}`} className="group rounded-panel border border-rule bg-white">
+              <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 px-4 py-4">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-50 text-sm font-semibold text-navy-700">{definition.no}</span>
+                <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{definition.title}</span><span className="text-xs text-ink-500">{store.user(latest.completedBy)?.name ?? 'Former team member'} · {dateTimeLabel(latest.completedAt)}</span></span>
+                <Badge tone="navy">{latest.outcome}</Badge>
+                <ChevronDown className="h-4 w-4 text-ink-400 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="space-y-5 border-t border-rule px-4 py-4">{records.map((record) => <CompletedStage key={`${record.stage}-${record.attempt}`} record={record} files={files} app={app} />)}
+                <ReopenStage app={app} stage={definition.no} />
+              </div>
+            </details>
           })}
-        </nav>
-
-        <div className="px-6 py-5">
-          {activeRecord && active !== live ? (
-            <CompletedStage record={activeRecord} />
-          ) : app.status === 'active' ? (
+          {live === 6 && effective.some((record) => record.stage === 6) && <details className="rounded-panel border border-amber-200 bg-amber-50/40 p-4">
+            <summary className="cursor-pointer text-sm font-semibold">Previous medical attempts ({effective.filter((record) => record.stage === 6).length})</summary>
+            <div className="mt-4 space-y-5">{effective.filter((record) => record.stage === 6).map((record) => <CompletedStage key={record.attempt} record={record} files={files} app={app} />)}</div>
+          </details>}
+          {app.status === 'active' ? (
             <CurrentStage
-              key={`${app.currentStage}-${app.stages.length}`}
+              key={`${app.id}-${app.currentStage}-${app.stages.length}`}
               app={app}
               canWork={canWork}
-              onClosed={onClose}
+              onDirtyChange={setDirty}
+              onBusyChange={setPending}
+              files={files}
+              onUploaded={(file) => setFiles((current) => [...current.filter((item) => item.id !== file.id), file])}
             />
           ) : app.status === 'deployed' ? (
             <DeployedRow />
           ) : (
             <ClosedRow app={app} />
           )}
+          {superseded.length > 0 && <details className="rounded-panel border border-rule bg-field/30 p-4">
+            <summary className="cursor-pointer text-sm font-medium text-ink-600">History retained after reopening ({superseded.length} attempts)</summary>
+            <p className="mt-2 text-xs text-ink-500">These earlier attempts remain on record. They are excluded from the current application progress.</p>
+            <div className="mt-4 space-y-6">{superseded.map((record) => <div key={`${record.stage}-${record.attempt}`}>
+              <p className="mb-2 text-xs text-amber-700">Reopened: {record.reopenedReason}</p>
+              <CompletedStage record={record} files={files} app={app} />
+            </div>)}</div>
+          </details>}
         </div>
       </div>
     </Dialog>
@@ -329,25 +326,9 @@ function CandidateDetails({ app }: { app: Application }) {
             title="Documents"
             subtitle="Nothing is overwritten — replacing a file adds a version"
           >
-            {cand.documents.map((d) => {
-              const latest = d.versions[d.versions.length - 1]
-              return (
-                <Fact
-                  key={d.key}
-                  label={d.label}
-                  value={
-                    latest ? (
-                      <FileLink url={latest.url} title={`Open ${latest.name}`}>
-                        {latest.name}
-                        {d.versions.length > 1 ? ` · v${d.versions.length}` : ''}
-                      </FileLink>
-                    ) : (
-                      'Not uploaded'
-                    )
-                  }
-                />
-              )
-            })}
+            <div className="sm:col-span-2 lg:col-span-4">
+              {cand.documents.map((d) => <DocumentSlotRow key={d.key} label={d.label} versions={d.versions} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />)}
+            </div>
           </Segment>
         </div>
       )}
@@ -420,7 +401,7 @@ function Cell({ label, value, ident }: { label: string; value: string; ident?: b
 
 /* -------------------------------------------------------- Completed stage */
 
-function CompletedStage({ record }: { record: StageRecord }) {
+function CompletedStage({ record, files, app }: { record: StageRecord; files: ApplicationFile[]; app: Application }) {
   const store = useStore()
   const def = stageByNo(record.stage)
   const by = store.user(record.completedBy)
@@ -432,7 +413,7 @@ function CompletedStage({ record }: { record: StageRecord }) {
         <div>
           <h3 className="text-h3 font-semibold text-ink">{def.title}</h3>
           <p className="mt-0.5 text-xs text-ink-500">
-            Completed by {by?.name} on {dateTimeLabel(record.completedAt)}
+            Attempt {record.attempt} · Recorded by {by?.name ?? 'Former team member'} on {dateTimeLabel(record.completedAt)}
           </p>
         </div>
         <Badge tone={negative ? 'stamp' : 'navy'}>{record.outcome}</Badge>
@@ -446,9 +427,7 @@ function CompletedStage({ record }: { record: StageRecord }) {
               <dt className="text-micro text-ink-400">{f.label}</dt>
               <dd className={cn('mt-0.5 text-sm text-ink-700', f.ident && 'ident')}>
                 {f.type === 'file' && (record.data[f.name] as StoredFile).url ? (
-                  <FileLink url={(record.data[f.name] as StoredFile).url!}>
-                    {(record.data[f.name] as StoredFile).name ?? 'Open file'}
-                  </FileLink>
+                  <FileDrop value={record.data[f.name] as StoredFile} versions={applicationFileVersions(files, app, record.stage, f.name)} disabled uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
                 ) : (
                   readValue(f, record.data[f.name], record.data)
                 )}
@@ -457,12 +436,42 @@ function CompletedStage({ record }: { record: StageRecord }) {
           ))}
       </dl>
 
-      <p className="mt-3 text-micro text-ink-400">
-        Completed stages are read-only. Only an admin can reopen one, and only from a closed
-        application.
-      </p>
+      <p className="mt-3 text-micro text-ink-400">Recorded attempts are read-only. Reopening retains their evidence and audit history.</p>
     </section>
   )
+}
+
+function ReopenStage({ app, stage }: { app: Application; stage: number }) {
+  const store = useStore()
+  const [editing, setEditing] = useState(false)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  if (!store.can('reopen_stage')) return null
+  const reopen = async () => {
+    if (!reason.trim() || busy || saved) return
+    setBusy(true); setError('')
+    try {
+      await api.post(`/applications/${app.id}/reopen`, { stage, reason: reason.trim(), lock_version: app.lockVersion })
+      if (!store.isCurrentSession()) return
+      setSaved(true)
+      store.notify(`Stage ${stage} reopened. Earlier attempts remain in history.`)
+      try { await store.refresh({ keepCurrent: true }) }
+      catch { setError('Reopening was saved. Refresh the application to load the current stage.') }
+    } catch (cause) {
+      if (store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'The stage could not be reopened.')
+    } finally { setBusy(false) }
+  }
+  return <div className="border-t border-rule pt-4">
+    {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
+    {saved ? <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(() => setError('The application could not refresh. Please try again.'))}>Refresh saved application</Button>
+      : editing ? <div className="space-y-3">
+        <p className="text-xs text-ink-600">This restarts stage {stage}, supersedes later completed stages and replaces the current open task. Original records and files remain in history. Reopening a deployment also updates the order count.</p>
+        <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy} placeholder="Describe the correction needed" /></Field>
+        <div className="flex flex-wrap gap-2"><Button variant="primary" disabled={busy || !reason.trim()} onClick={() => void reopen()}>{busy ? 'Reopening…' : `Reopen stage ${stage}`}</Button><Button disabled={busy} onClick={() => { setEditing(false); setError('') }}>Cancel</Button></div>
+      </div> : <Button variant="secondary" size="sm" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setEditing(true)}>Reopen stage {stage}</Button>}
+  </div>
 }
 
 function readValue(f: StageField, raw: unknown, row: Record<string, unknown> = {}): string {
@@ -485,23 +494,46 @@ function readValue(f: StageField, raw: unknown, row: Record<string, unknown> = {
 function CurrentStage({
   app,
   canWork,
-  onClosed,
+  onDirtyChange,
+  onBusyChange,
+  files,
+  onUploaded,
 }: {
   app: Application
   canWork: boolean
-  onClosed: () => void
+  onDirtyChange: (dirty: boolean) => void
+  onBusyChange: (busy: boolean) => void
+  files: ApplicationFile[]
+  onUploaded: (file: ApplicationFile) => void
 }) {
   const store = useStore()
-  const { addRemark, saveDraft, completeStage } = store
+  const { addRemark } = store
   const def = stageByNo(app.currentStage)
 
   // Edits are held locally until Save. Nothing is written as you type, so the form has
   // a dirty state and leaving with unsaved work is a deliberate act, not an accident.
   const [data, setData] = useState<Record<string, unknown>>(app.draft ?? {})
+  const [lockVersion, setLockVersion] = useState(app.lockVersion ?? 0)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [uploadingFields, setUploadingFields] = useState<string[]>([])
+  const uploading = uploadingFields.length > 0
   const result = useMemo(() => def.evaluate(data), [def, data])
   const [attempted, setAttempted] = useState(false)
+  const [error, setError] = useState('')
+  const [conflict, setConflict] = useState<{ draft?: Record<string, unknown>; lock_version?: number; current_stage?: number; status?: string } | null>(null)
+  const [completed, setCompleted] = useState(false)
+  const [remarkBusy, setRemarkBusy] = useState(false)
+
+  useEffect(() => { onDirtyChange(dirty); return () => onDirtyChange(false) }, [dirty, onDirtyChange])
+  useEffect(() => {
+    onBusyChange(busy || uploading || remarkBusy)
+    return () => onBusyChange(false)
+  }, [busy, uploading, remarkBusy, onBusyChange])
+
+  useEffect(() => {
+    if (!dirty) { setData(app.draft ?? {}); setLockVersion(app.lockVersion ?? 0) }
+  }, [app.lockVersion, app.currentStage])
 
   const task = store.tasks.find(
     (t) => t.applicationId === app.id && t.stage === app.currentStage && !t.completedAt && !t.cancelledAt,
@@ -514,39 +546,64 @@ function CurrentStage({
     setDirty(true)
   }
 
+  const reportFailure = (cause: unknown) => {
+    if (!store.isCurrentSession()) return
+    const details = cause instanceof ApiError && cause.detail && typeof cause.detail === 'object'
+      ? cause.detail as { missing?: string[]; draft?: Record<string, unknown>; lock_version?: number; current_stage?: number; status?: string } : null
+    setError([cause instanceof Error ? cause.message : 'This change could not be saved.', ...(details?.missing ?? [])].join(' '))
+    if (cause instanceof ApiError && cause.isConflict) setConflict(details)
+  }
+
+  const refreshAfterWrite = async () => {
+    try { await store.refresh({ keepCurrent: true }) }
+    catch { if (store.isCurrentSession()) setError('Your change was saved. Refresh the application to load the latest history.') }
+  }
+
   const save = async () => {
+    if (uploading || busy) return
     setBusy(true)
+    setError(''); setConflict(null)
     try {
-      await saveDraft(app.id, data, app.lockVersion ?? 0)
+      const saved = await api.put<{ draft: Record<string, unknown>; lockVersion: number }>(`/applications/${app.id}/draft`, { data, lock_version: lockVersion })
+      if (!store.isCurrentSession()) return
+      setData(saved.draft); setLockVersion(saved.lockVersion)
       setDirty(false)
-    } catch {
-      // The store has already surfaced the reason; a conflict keeps the dirty flag so
-      // the work in the form is not thrown away.
-    } finally {
+      store.notify('Stage draft saved')
+      await refreshAfterWrite()
+    } catch (cause) { reportFailure(cause) } finally {
       setBusy(false)
     }
   }
 
   const complete = async () => {
+    if (uploading || busy || completed) return
     setAttempted(true)
     if (!result.canComplete) return
     setBusy(true)
+    setError(''); setConflict(null)
     try {
-      // Save first, so completion always commits exactly what is on screen.
-      if (dirty) await saveDraft(app.id, data, app.lockVersion ?? 0)
-      await completeStage(app.id, (app.lockVersion ?? 0) + (dirty ? 1 : 0))
+      // The server validates and records exactly these values in one transaction.
+      await api.post(`/applications/${app.id}/complete`, { data, lock_version: lockVersion })
+      if (!store.isCurrentSession()) return
       setDirty(false)
-      if (result.closes) onClosed()
-    } catch {
-      /* reported by the store */
-    } finally {
+      setCompleted(true)
+      store.notify(result.repeats ? 'Medical attempt recorded. Follow-up task created.' : result.closes ? 'Application closed; history retained.' : 'Stage completed')
+      await refreshAfterWrite()
+    } catch (cause) { reportFailure(cause) } finally {
       setBusy(false)
     }
   }
 
   return (
     <section>
-
+      {error && <div role="alert" className="mb-3 rounded-control border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <p>{error}</p>
+        {conflict && <div className="mt-3 flex flex-wrap gap-2">
+          {conflict.current_stage === app.currentStage && conflict.status === 'active' && <Button size="sm" onClick={() => { setData(conflict.draft ?? {}); setLockVersion(conflict.lock_version ?? lockVersion); setDirty(false); setConflict(null); setError('') }}>Load saved values</Button>}
+          <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(reportFailure)}>Refresh application</Button>
+        </div>}
+      </div>}
+      {completed && <div role="status" className="mb-3 rounded-control border border-navy-100 bg-navy-50 p-3 text-sm text-navy-800">This result was saved. <button className="underline" onClick={() => void refreshAfterWrite()}>Refresh history</button></div>}
       <div className="rounded-panel border border-ink-300 bg-white">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rule-soft px-4 py-3">
           <div className="min-w-0">
@@ -555,7 +612,7 @@ function CurrentStage({
           </div>
           {task && (
             <div className="w-40 shrink-0">
-              <TimeBar createdAt={task.createdAt} />
+              <TimeBar createdAt={taskClockStart(task)} />
               <p className="mt-1 text-right text-micro text-ink-400">48-hour limit</p>
             </div>
           )}
@@ -568,8 +625,12 @@ function CurrentStage({
                 field={f}
                 value={data[f.name]}
                 onChange={(v) => set(f.name, v)}
-                disabled={!canWork}
+                disabled={!canWork || busy || completed}
                 applicationId={app.id}
+                versions={applicationFileVersions(files, app, app.currentStage, f.name)}
+                stage={app.currentStage}
+                onUploaded={onUploaded}
+                onUploading={(active) => setUploadingFields((current) => active ? [...new Set([...current, f.name])] : current.filter((name) => name !== f.name))}
               />
             </div>
           ))}
@@ -594,18 +655,18 @@ function CurrentStage({
             Stage {def.no} of {STAGES.length}
             {def.repeatable && ' · can repeat'}
           </span>
-          <div className="flex items-center gap-2">
-            {dirty && <span className="text-micro text-amber-700">Unsaved changes</span>}
-            <Button variant="secondary" onClick={save} disabled={!canWork || !dirty || busy}>
+          <div className="flex flex-wrap items-center gap-2">
+            {uploading ? <span role="status" className="text-micro text-amber-700">Uploading documents…</span> : dirty && <span className="text-micro text-amber-700">Unsaved changes</span>}
+            <Button variant="secondary" onClick={save} disabled={!canWork || !dirty || busy || uploading || completed}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
           <Button
             variant={result.closes ? 'danger' : 'primary'}
             onClick={complete}
-            disabled={!canWork || busy}
+            disabled={!canWork || busy || uploading || completed}
             icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
           >
-            {result.closes ? `Complete and close — ${result.closes.label}` : 'Complete stage'}
+            {result.repeats ? 'Record attempt and schedule re-medical' : result.closes ? `Complete and close — ${result.closes.label}` : 'Complete stage'}
           </Button>
           </div>
         </footer>
@@ -629,20 +690,23 @@ function CurrentStage({
                 value={remark}
                 onChange={(e) => setRemark(e.target.value)}
                 placeholder="What happened today? e.g. Waiting for client feedback"
-                disabled={!canWork}
+                maxLength={10000}
+                disabled={!canWork || remarkBusy || completed}
               />
               <Button
                 variant="secondary"
-                onClick={() => {
-                  if (!remark.trim()) return
-                  void addRemark(task.id, remark.trim())
-                  setRemark('')
+                onClick={async () => {
+                  if (!remark.trim() || remarkBusy) return
+                  setRemarkBusy(true)
+                  try { await addRemark(task.id, remark.trim()); if (store.isCurrentSession()) setRemark('') }
+                  catch (cause) { reportFailure(cause) }
+                  finally { setRemarkBusy(false) }
                 }}
-                disabled={!canWork || !remark.trim()}
+                disabled={!canWork || !remark.trim() || remarkBusy || completed}
                 icon={<MessageSquarePlus className="h-4 w-4" />}
                 className="shrink-0 self-start"
               >
-                Add
+                {remarkBusy ? 'Saving…' : 'Add'}
               </Button>
             </div>
 
@@ -673,12 +737,20 @@ function StageFieldInput({
   onChange,
   disabled,
   applicationId,
+  stage,
+  versions,
+  onUploaded,
+  onUploading,
 }: {
   field: StageField
   value: unknown
   onChange: (v: unknown) => void
   disabled?: boolean
   applicationId?: string
+  stage: number
+  versions: FileVersion[]
+  onUploaded: (file: ApplicationFile) => void
+  onUploading: (active: boolean) => void
 }) {
   const store = useStore()
   const [uploading, setUploading] = useState(false)
@@ -753,22 +825,24 @@ function StageFieldInput({
           label={field.label}
           help={field.help}
           value={value as StoredFile | null}
-          onChange={onChange}
+          versions={versions}
+          uploaderName={(id) => store.user(id)?.name || 'Former team member'}
           busy={uploading}
           disabled={disabled}
           onFile={async (f) => {
             if (!applicationId) return
             setUploading(true)
+            onUploading(true)
             try {
-              const up = await api.upload('application', applicationId, field.name, f)
+              const slot = applicationFileSlot(stage, field.name)
+              const up = await api.upload('application', applicationId, slot, f)
               // Keep the identifier in the draft, not the bytes, so saving the stage
               // never re-sends the file.
               onChange({ name: up.name, sizeKb: up.sizeKb, id: up.id, url: up.url, version: up.version })
-            } catch (err) {
-              store.notify((err as Error).message || 'Upload failed', 'warn')
-              onChange(null)
+              onUploaded({ ...up, slot, uploadedBy: store.me.id })
             } finally {
               setUploading(false)
+              onUploading(false)
             }
           }}
         />
@@ -825,62 +899,8 @@ function DeployedRow() {
 }
 
 function ClosedRow({ app }: { app: Application }) {
-  const store = useStore()
-  const [confirming, setConfirming] = useState(false)
-  const [reason, setReason] = useState('')
-  const lastStage = app.stages[app.stages.length - 1]?.stage ?? app.currentStage
-
-  return (
-    <section>
-      <div className="rounded-panel border border-stamp-100 bg-stamp-50 px-4 py-3">
-        <p className="text-sm font-semibold text-stamp-700">
-          Application closed — {app.closureReason ? closureLabels[app.closureReason] : 'Closed'}
-        </p>
-        <p className="mt-0.5 text-xs text-stamp-700/80">
-          The candidate is unmapped and back in the Data Bank, ready to be offered another order.
-        </p>
-
-        {store.can('reopen_stage') && (
-          <div className="mt-3 border-t border-stamp-100 pt-3">
-            {confirming ? (
-              <div className="space-y-2">
-                <Field label="Reason for reopening" required>
-                  <Input
-                    value={reason}
-                    autoFocus
-                    placeholder="Why is this being reopened?"
-                    onChange={(e) => setReason(e.target.value)}
-                  />
-                </Field>
-                <div className="flex gap-2">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={!reason.trim()}
-                    onClick={() =>
-    store.notify('Reopening a stage is not available yet', 'warn')
-                    }
-                  >
-                    Reopen stage {lastStage}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setConfirming(true)}
-                icon={<RotateCcw className="h-3.5 w-3.5" />}
-              >
-                Reopen stage {lastStage}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
-  )
+  return <section className="rounded-panel border border-stamp-100 bg-stamp-50 px-4 py-3">
+    <p className="text-sm font-semibold text-stamp-700">Application closed: {app.closureReason ? closureLabels[app.closureReason] : 'Closed'}</p>
+    <p className="mt-1 text-xs text-stamp-700/80">The candidate is back in the Data Bank. Completed stages and files remain available above; an administrator can reopen a completed stage with a reason.</p>
+  </section>
 }

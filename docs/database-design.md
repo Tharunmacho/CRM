@@ -1,192 +1,126 @@
-# Recruitment CRM database design
+# CRM database and document storage
 
-This document is the table dictionary and maintenance guide for the database behind the [PRD architecture](architecture.md). It describes the physical names introduced by revision `0006_domain_table_names` and separates that naming change from the business-model work still needed in the [implementation phases](implementation-phases.md). Check each database's Alembic revision before using the new names; the dated rollout verification below applies to the configured Care India database.
+The CRM uses PostgreSQL, SQLAlchemy models and an ordered Alembic migration chain. The current head is `0014_attendance_ordering`; it contains **35 application tables** plus `alembic_version`. File bytes live in private local/shared-volume or S3-compatible storage. No MongoDB collections are required.
 
-**Naming rollout, 20 October 2026:** Care India's live PostgreSQL 18.6 database was upgraded to `0006_domain_table_names`. After coordinating the old backend shutdown, the database backup was restored into an isolated PostgreSQL 18 container and all 20 business-table counts and fingerprints matched. The live migration verified unchanged contents and table object identities before committing; its revision and new names were then checked through a separate connection. The normal local API and frontend proxy reported healthy PostgreSQL and Redis. Backup and verification artifacts remain outside Git. The existing attachment was not present in local upload storage: retain the old application's storage until its file is located and made available through the new deployment. Production HTTP readiness and upload availability still need deployment acceptance checks. This naming rollout does not complete the remaining CRM model or business-rule phases.
+## Find the right table
 
-**Email rollout, 20 October 2026:** The configured database is now at `0007_email_intake`. Before this additive migration, a new PostgreSQL 18 backup was restored and verified in an isolated container. The migration preserved the existing columns and contents of all 20 application tables, verified with row fingerprints. No mailbox account or ingestion job was created during migration. Real mailbox login and a synthetic résumé extraction through Veris passed separately; receiving a new test email through the deployed worker remains an acceptance step. The backup, restore report and migration report are stored outside Git.
+| Domain | Table | Meaning and important relationships |
+| --- | --- | --- |
+| Sign-in | `auth_users` | CRM accounts: name, sign-in email, role, activation, assignment eligibility and leave. Passwords are one-way Argon2id hashes. |
+| Sign-in | `auth_sessions` | Revocable sign-in sessions linked to `auth_users`; expiry is UTC. |
+| Recruitment | `crm_client_contacts` | Agency contact people. A contact can represent several employer companies. |
+| Recruitment | `crm_employer_companies` | Employer details, country, industry, contact and address; belongs to a client contact. Agreements use `document_attachments`. |
+| Recruitment | `crm_job_designations` | Job titles, required skills and minimum experience. |
+| Recruitment | `crm_job_orders` | Employer recruitment orders: designation, openings, salary/currency, benefits, dates and status. |
+| Recruitment | `crm_candidates` | Current candidate profile, skills, source, current recruiter, intake recruiter, manual creator, review state and searchable resume text. |
+| Recruitment | `crm_applications` | A candidate's placement against an order; current stage, status, draft, optimistic lock version and mapping-time recruiter. |
+| Recruitment | `crm_application_stages` | Completed stage attempts, outcomes, fields, referenced documents, completing actor and responsible recruiter. Reopened attempts remain history. |
+| Assignment | `workflow_assignment_cursor` | Singleton round-robin cursor, serialized with candidate creation/transfers and account eligibility changes. |
+| Workflow | `workflow_tasks` | Initial call, stage or re-medical work; current owner, opening/closing times, persisted 48-hour deadline and escalation state. |
+| Workflow | `workflow_task_remarks` | Permanent task notes with author and timestamp. Only the responsible recruiter's daily update satisfies their obligation. |
+| Workflow | `workflow_task_events` | Durable escalation, reminder, SLA-reset, missed-update and assignment history; unique event key prevents repeated delivery. |
+| Workflow | `workflow_settings` | Singleton monitoring settings and daily/periodic worker checkpoints; repeats disabled by default or every 24 hours. |
+| Personal | `personal_todos` | Private Admin/Manager reminders, due time, completion and delivered-reminder timestamp. |
+| Email | `email_accounts` | Zoho mailbox configuration, encrypted credentials, cursor, auto-ingest, connection state and worker heartbeats. Legacy provider records remain historical; new connections and live operations are Zoho-only. |
+| Email | `email_oauth_states` | Legacy authorization handshakes retained for migration/history. New OAuth connections are disabled by the Zoho-only policy. |
+| Email | `email_messages` | Mirrored messages, folder and UID/UIDVALIDITY identity, recipients, thread headers, read/star state, remote operation reconciliation and optional linked candidate. |
+| Email | `email_attachments` | Original message file metadata, immutable object key and SHA-256. |
+| Email | `email_ingestion_jobs` | Durable attachment inspection, OCR submission IDs/results, attempts, review state and candidate outcome. |
+| Email | `email_replies` | Explicit human-requested replies from the originating mailbox, idempotency key and delivery outcome. Unknown outcomes are never automatically resent. |
+| Email | `email_drafts` | Actor-owned compose/reply/reply-all/forward/edit-draft state; recipients, body, version, remote draft identity and synchronization outcome. |
+| Email | `email_draft_attachments` | Immutable draft file metadata, storage key, size and SHA-256; linked to its draft. |
+| Email | `email_send_attempts` | Immutable message/attachment snapshot, unique request key, delivery outcome and refused recipients. Unknown or partial sends require review. |
+| Staff | `staff_attendance_sessions` | Explicit check-in/out, idempotency keys and Admin correction reason/actor. One open session per staff account. |
+| Staff | `staff_presence_intervals` | Online/idle intervals per browser client and login session, server timestamps and heartbeat expiry. Offline time is derived within checked-in time. |
+| Staff | `staff_attendance_requests` | Accepted clock request identifiers linked to their session; retries from another tab cannot accidentally open a new shift after checkout. |
+| Staff | `staff_presence_clients` | Per-browser login binding and last accepted sequence; delayed heartbeat/leave requests cannot reverse newer activity state. |
+| WhatsApp | `whatsapp_channels` | Configured Business phone, intake setting and reception/worker health. Credentials stay in server secrets. |
+| WhatsApp | `whatsapp_messages` | Deduplicated signed webhook receipts, sender provenance, original media, extraction checkpoints, review and linked candidate. |
+| Documents | `document_attachments` | Versioned candidate, company and application documents. Owner is `entity_type` + `entity_id`; the file service validates owner/access. |
+| Documents | `document_extraction_jobs` | Owner-scoped manual uploads grouped by an intake session, original bytes, OCR state, saved human form edits and idempotent candidate attachment. |
+| Intake | `ingestion_failures` | Retained failed-intake records and resolution details; inspect alongside each channel's durable job ledger. |
+| System | `system_notifications` | Recipient-owned notification bell items and persisted read state. |
+| System | `system_audit_log` | Recorded actor, action, affected entity, timestamp and structured context. User Management reads this history. |
 
-The backend uses SQLAlchemy 2, psycopg 3 and Alembic. Local Docker Compose specifies PostgreSQL 16; the configured Dokploy database reports PostgreSQL 18.6. These are separate environments, not a claim that the live server runs the Compose image.
+The contact-to-company hierarchy preserves this project's existing business records. The PRD calls the employer a client; employer fields, agreements and orders live on Companies. This terminology difference is explicit rather than silently merging existing contacts/employers.
 
-## Ownership and source of truth
+## Relationships and ownership
 
-- [SQLAlchemy models](../backend/app/db/models.py) define 21 application tables after `0007_email_intake`. Alembic maintains a separate `alembic_version` metadata table, so pgAdmin shows 22 tables at that revision. Revision `0006` has 20 application tables plus the migration marker.
-- [Database sessions](../backend/app/db/session.py) own connection pooling and request session lifecycle.
-- [Alembic revisions](../backend/alembic/versions/) define schema history. Revisions `0001`–`0005` remain unchanged; `0006_domain_table_names` supplies the reversible naming and description update.
-- [API schemas](../backend/app/api/schemas.py) define HTTP response shapes, not database tables.
-- Frontend types and cached state are consumers of the API. Screens never connect directly to PostgreSQL or allocate durable record IDs.
+`client contact -> employer company -> job order -> application -> candidate` is the placement chain. Applications own stage history and stage tasks. Candidate ownership is mutable, while `intake_owner_id`, application mapping owner, stage completion owner and task events preserve historical attribution. Reassignment moves open tasks without restarting their deadlines. Assignment events reconstruct the responsible recruiter for a past agency day, even when the worker catches up after downtime.
 
-Use one CRM database. A candidate is a reusable person record, an application is the candidate's recruitment history for one order, and a task is the action currently due. A personal to-do is independent of the recruitment task lifecycle. These distinctions come from PRD pp. 4–7 and 11–12.
+The `0008` backfill uses the existing current recruiter where older records contain no historical owner. That legacy attribution is inferred; migrations cannot recover unrecorded past transfers. New events retain actual ownership at the time of the action.
 
-Prefixes group existing tables by responsibility within the `public` schema: `auth_` for identity, `crm_` for recruitment records, `workflow_` for assigned work, `email_` for mailbox records, `document_` for uploaded documents, `personal_` for private reminders and `system_` for notification/audit records. `ingestion_failures` keeps its already descriptive name. This does not introduce duplicate tables, separate databases, extra schemas or replacement accounts.
+All timestamps are UTC. `AGENCY_TIMEZONE` (default `Asia/Kolkata`) defines dashboard/report day boundaries and daily-update checks. Store date-only employment fields as dates. Salary and advances keep their currency; reports do not add unlike currencies into one misleading total.
 
-## Table dictionary
+Database guarantees include unique sign-in email/references, one active placement per candidate, unique stage attempts, unique document versions, unique provider receipts, unique OCR sources and unique workflow event keys. Candidate and order references use sequences, not counts. Application commands validate lock versions under row locks. Stage completion, next task, closure/deployment and audit commit together.
 
-The old-name column identifies tables through revision `0005_candidate_ocr_data`. The new-name column identifies the same records after `0006_domain_table_names`; primary keys, column names, foreign-key relationships and existing records remain intact.
+Candidate identity matching uses normalized phone **OR** email **OR** passport. Different matches require human review. Empty values never count as identity. Skills use normalized exact matching with ALL/ANY controls. `crm_refresh_resume_search` maintains the GIN-indexed resume search vector, including a migration backfill.
 
-| Group | Old name | Name after `0006` | Purpose | Key relationships |
-| --- | --- | --- | --- | --- |
-| Identity | `users` | `auth_users` | Accounts, Argon2id password hashes, assigned roles, activation and assignment eligibility | Referenced by sessions, candidate/task owners, authors and recipients |
-| Identity | `sessions` | `auth_sessions` | Revocable sign-in sessions and expiry | `user_id` → `auth_users.id` |
-| CRM | `clients` | `crm_client_contacts` | Existing client/contact records | Parent of `crm_employer_companies` |
-| CRM | `companies` | `crm_employer_companies` | Employer company details and location | `client_id` → `crm_client_contacts.id`; parent of job orders |
-| CRM | `designations` | `crm_job_designations` | Job titles, categories and requirements | Referenced by `crm_job_orders.designation_id` |
-| CRM | `orders` | `crm_job_orders` | Recruitment openings, employer, designation and order status | `company_id` → `crm_employer_companies.id`; `designation_id` → `crm_job_designations.id` |
-| CRM | `candidates` | `crm_candidates` | Candidate profile, owner, source, call outcome, resume text and raw OCR evidence | Optional `owner_id` → `auth_users.id`; parent of applications and tasks |
-| CRM | `applications` | `crm_applications` | Candidate-to-order mapping, current stage/draft and closure history | `candidate_id` → `crm_candidates.id`; `order_id` → `crm_job_orders.id`; optional draft author → `auth_users.id` |
-| CRM | `application_stages` | `crm_application_stages` | Stage attempts, outcomes, submitted fields and completion history | `application_id` → `crm_applications.id`; optional `completed_by` → `auth_users.id` |
-| Workflow | `tasks` | `workflow_tasks` | System-created recruitment work, owner and completion/escalation state | `candidate_id` → `crm_candidates.id`; optional `application_id` → `crm_applications.id`; `owner_id` → `auth_users.id` |
-| Workflow | `remarks` | `workflow_task_remarks` | Timestamped task updates | `task_id` → `workflow_tasks.id`; `author_id` → `auth_users.id` |
-| Workflow | `assignment_pointer` | `workflow_assignment_cursor` | Single persisted position for staff round-robin assignment | Optional `last_user_id` → `auth_users.id`; singleton row `id = 1` |
-| Personal | `todo_items` | `personal_todos` | Private reminders with manual completion | `owner_id` → `auth_users.id`; optional UI link is a string, not a record foreign key |
-| Email | `mail_accounts` | `email_accounts` | Connected mailbox, IMAP cursor, auto-ingest setting and worker health | Parent of `email_messages`; credentials remain in server environment settings |
-| Email | `mail_messages` | `email_messages` | Mailbox messages and optional candidate association | `account_id` → `email_accounts.id`; optional `candidate_id` → `crm_candidates.id` |
-| Email | `mail_attachments` | `email_attachments` | Source-message file metadata and content hashes | `message_id` → `email_messages.id` |
-| Email | Added in `0007` | `email_ingestion_jobs` | Durable intake queue, per-document OCR checkpoints, retries and candidate outcome | Unique `message_id` → `email_messages.id`; optional `candidate_id` → `crm_candidates.id` |
-| Intake | `ingestion_failures` | `ingestion_failures` (unchanged) | Failed intake attempts, reason and resolution state | Existing source/file descriptors; no message/job foreign key yet |
-| Documents | `attachments` | `document_attachments` | Versioned document metadata, owner/slot and storage key | Optional `uploaded_by` → `auth_users.id`; record owner uses `entity_type` + `entity_id` |
-| System | `notifications` | `system_notifications` | Recipient-specific bell messages and read state | `user_id` → `auth_users.id`; optional UI link |
-| System | `audit_log` | `system_audit_log` | Recorded actions, actor, time and affected entity | Optional `actor_id` → `auth_users.id`; affected record uses `entity_type` + `entity_id` |
+## Documents and recovery
 
-`alembic_version` is required migration metadata, not a CRM record collection. Its name is unchanged. Empty email/intake/notification tables remain schema groundwork for the PRD; an empty table does not prove a feature works or make that table safe to delete. Future additions must be justified by the owning phase rather than created speculatively.
+Original documents are retained separately from selected resume/passport/Aadhaar PDFs. Uploads are immutable: replacing a slot creates another version. Manual document jobs persist the original before the user requests OCR, retain provider job IDs and recover the saved form after a reload. Human-edited values take precedence over extraction. Candidate attachment is idempotent, including retry after a committed candidate save.
 
-Physical table names are separate from HTTP routes, frontend collection keys and entity-type values. `/api/candidates`, bootstrap keys such as `users` and `applications`, model classes such as `User`, and document/audit owner types such as `candidate` remain unchanged. Backend authentication, authorization, assignment, workflow transitions and validation determine how stored data is used; naming tables does not implement those rules.
+Slow OCR/provider work runs outside ordinary record-change transactions. Email reception, email extraction, manual document extraction, WhatsApp extraction, presence expiry and task monitoring are separately supervised processes. Durable PostgreSQL checkpoints survive restart; locks prevent duplicate workers from processing the same queue. User-facing pending, failed and needs-review states distinguish an accepted remote job from a confirmed failure.
 
-## Core relationships after `0006`
+Local storage requires a persistent `STORAGE_DIR` shared by the API and workers. Mailbox state binds to `.email-storage-id`; copy the entire uploads volume including that marker when moving a local installation. S3 objects use explicit `s3://bucket/prefix/key` references; mailbox identity binds to endpoint/bucket/prefix rather than a particular local directory. Changing `STORAGE_BACKEND` does not migrate old objects automatically.
 
-```mermaid
-erDiagram
-    auth_users ||--o{ auth_sessions : authenticates
-    auth_users o|--o{ crm_candidates : owns
-    crm_client_contacts ||--o{ crm_employer_companies : owns
-    crm_employer_companies ||--o{ crm_job_orders : places
-    crm_job_designations ||--o{ crm_job_orders : categorizes
-    crm_candidates ||--o{ crm_applications : has
-    crm_job_orders ||--o{ crm_applications : receives
-    crm_applications ||--o{ crm_application_stages : records
-    crm_candidates ||--o{ workflow_tasks : generates
-    crm_applications o|--o{ workflow_tasks : coordinates
-    auth_users ||--o{ workflow_tasks : assigned
-    workflow_tasks ||--o{ workflow_task_remarks : has
-    auth_users ||--o{ workflow_task_remarks : authors
-    auth_users ||--o{ personal_todos : owns
-    auth_users ||--o{ system_notifications : receives
-```
+The authenticated file endpoint serves local and S3 documents with private/no-store responses. Originals and historical versions remain available; automatic orphan deletion is deliberately absent. See [storage and release operations](operations.md) for checksum audit, migration and backup/restore procedures, and [mail connections](email-connections.md) for encrypted mailbox credential management.
 
-The `crm_client_contacts → crm_employer_companies → crm_job_orders` chain preserves the **existing implementation**, where a client is a contact who owns companies. The PRD calls the employer itself a client (p. 3). Phase 2 must reconcile the UI and model with that requirement while retaining existing records and placement history. Revision `0006` clarifies existing table responsibilities; it does not merge contacts with employers, normalize the whole model or complete that reconciliation.
+## Mail and staff persistence
 
-`document_attachments` associates records through `entity_type` and `entity_id`, rather than a foreign key to each possible owner table. The file service must validate record existence and access. File bytes remain in storage, separate from metadata. Preserve old file versions and avoid orphan cleanup that deletes documents still referenced by historical stages.
+Draft edits use optimistic versions to protect against another tab overwriting newer work. A send attempt stores its own recipient/body/attachment snapshot before SMTP dispatch. A repeated request key refers to that same attempt. Partial or uncertain delivery is shown for review and is never automatically resent. Folder and message actions retain the remote operation until synchronization confirms the result. Disconnecting a mailbox preserves existing messages, documents and delivery history.
 
-## Inspect accounts and records in pgAdmin
+Attendance is an explicit clock: hiding the tab or logging out ends activity tracking, not the checked-in shift. The server timestamps check-in/out and serializes competing requests per staff account. Presence reports union overlapping browser intervals, so multiple tabs cannot multiply time. The report splits time at agency-day boundaries and shows online, idle and offline durations only during checked-in periods. These are browser activity estimates, not proof of work. See [attendance policy](attendance.md).
 
-After applying `0006` with the matching backend version, refresh **Care India Dokploy → Databases → care_india → Schemas → public → Tables**. Start with `auth_users` for accounts and `auth_sessions` for sign-ins. The `auth_` names appear together near the top; `alembic_version` is the migration marker.
+## Inspect records in pgAdmin
 
-For an account overview without displaying password hashes, open the database's Query Tool and run:
+Refresh **Schemas > public > Tables** after applying migrations. The domain prefixes group related tables. Table comments explain their purpose. `auth_users` holds CRM login accounts; `email_accounts` holds external mailboxes.
 
 ```sql
 SELECT id, name, email, role, active, receives_auto_assign, on_leave,
        (password_hash IS NOT NULL AND password_hash <> '') AS password_set
-FROM public.auth_users
-ORDER BY role, email;
-```
+FROM auth_users ORDER BY role, email;
 
-The assigned role and activation are saved values. Passwords are Argon2id hashes, not recoverable plaintext. Use the account CLI for provisioning/reset instead of typing plaintext into `password_hash`. Startup and login do not create default accounts or restore deleted accounts.
+SELECT c.ref, c.name, u.name AS recruiter, c.status, c.source
+FROM crm_candidates c LEFT JOIN auth_users u ON u.id = c.owner_id
+ORDER BY c.created_at DESC;
 
-To check active sessions without displaying their bearer-token IDs:
+SELECT t.title, c.ref, u.name AS recruiter, t.due_at,
+       t.escalated, t.completed_at, t.cancelled_at
+FROM workflow_tasks t
+JOIN crm_candidates c ON c.id = t.candidate_id
+JOIN auth_users u ON u.id = t.owner_id
+ORDER BY t.created_at DESC;
 
-```sql
-SELECT u.email, count(s.id) AS active_sessions
-FROM public.auth_users AS u
-LEFT JOIN public.auth_sessions AS s
-  ON s.user_id = u.id AND s.expires_at > CURRENT_TIMESTAMP
-GROUP BY u.id, u.email
-ORDER BY u.email;
-```
-
-Login creates a session, logout removes the current session, and a password reset revokes that account's sessions. Refresh or rerun the query to see committed changes; pgAdmin does not automatically stream every application write.
-
-For candidate records, right-click `crm_candidates` → **View/Edit Data → First 100 Rows**. Use the dictionary to locate other business tables. Table/column descriptions supplied by the migration are available through their pgAdmin properties. If old names still appear after refresh, check `SELECT version_num FROM public.alembic_version;` before assuming the naming migration ran.
-
-## Existing constraints and required guarantees
-
-The models/migrations already include unique user email and candidate/order reference fields; a partial unique index allowing only one active application per candidate; unique stage attempt numbers; unique file versions per owner/slot; a singleton assignment pointer; and stage range checks. Open-task and candidate-search indexes also exist.
-
-These constraints are useful safeguards, but do not complete the business rules:
-
-1. **References:** replace `count + 1` allocation with a sequence or another atomic allocator. Deletions and concurrent requests must not reuse visible references.
-2. **Application changes:** check the expected version inside the SQL update or hold the application row lock through validation and commit. A separate Python version comparison is not sufficient.
-3. **Mapping:** keep the one-active-application constraint and translate conflicts into a meaningful response. Verify order status and candidate eligibility inside the command.
-4. **Assignment:** candidate ownership and initial task creation belong to one successful transaction. Reassignment moves open tasks without changing their due time. Startup initializes the singleton cursor using `INSERT ... ON CONFLICT DO NOTHING`, preserving an existing position and avoiding concurrent duplicate inserts. Account provisioning is separate.
-5. **Stage transitions:** stage history, task completion/cancellation, next task, candidate deployment, order counts and audit must commit together.
-6. **Files:** allocate versions atomically. Handle failed storage/database writes with recoverable pending state or cleanup; a stored filename alone does not prove a stage document exists.
-7. **Identity matches:** implement the PRD's normalized phone OR email OR passport duplicate policy. A blind unique constraint is not a substitute for merge/review rules, especially where identity fields point at different candidates.
-8. **Search:** the existing `resume_tsv` GIN index is not enough; the application does not yet maintain the indexed value. Phase 2 must populate and refresh the search vector when accepted resume text changes, backfill existing rows, and verify that search returns those records.
-9. **Historical ownership:** record the owner at candidate assignment/reassignment, stage outcome and task/escalation events during Phases 2–4. Phase 7 reports query those events; joining only to today's candidate owner would incorrectly move past performance between staff.
-
-Keep transactions short. Slow OCR, mail provider calls and storage transfers must not hold application/task/assignment row locks. Add indexes for actual joins and filters, including ownership, order/application links and pending work; use representative query plans before introducing extra indexes or partitioning.
-
-## OCR and document persistence
-
-Python/FastAPI remains the backend. The existing OCR integration is separated into:
-
-- [OCR API adapter](../backend/app/api/routers/ocr.py): authenticated file input and HTTP errors.
-- [Provider client](../backend/app/integrations/ocr/client.py): submits and polls Veriis jobs.
-- [Field mapping](../backend/app/integrations/ocr/mapping.py): converts provider output into candidate form fields and warnings.
-- Candidate creation: stores reviewed fields plus `crm_candidates.ocr_data`; resume text supports searching and profile display.
-- File endpoints: persist document metadata and versions while storing bytes under the configured storage location.
-
-For manual entry, extraction prefills the form; saving the candidate commits the reviewed values. `ocr_data` is source evidence, not permission to overwrite user corrections. The existing raw response is deferred from the bootstrap query and fetched separately for the profile.
-
-**Incomplete OCR identity:** automatic intake marks a candidate Needs review when a verified extraction lacks name/phone or needs correction. The existing non-null columns currently use the explicit display label `Name needs review` and an empty phone, never an inferred filename or email sender as identity. A future nullable provisional-identity contract and complete correction workflow remain Phase 2 work. Unread/unknown pages and conflicting people keep the durable job in Needs review without changing a candidate.
-
-Revision `0007_email_intake` adds the durable email path. Originals and mailbox receipts are saved before advancing the cursor. A separate worker performs local OCR and Veris work outside database transactions; the candidate, versioned document links, assignment, initial-call task, notifications and successful job outcome commit together. Existing candidates retain their owner and populated fields.
-
-The [email automation reference review](reference-architecture-review.md) adds a concrete persistence boundary: source receipts are unique per provider/account/message/attachment; OCR executions add extraction mode and retain provider job IDs, attempt history and stable submission keys. File hashes and person identity matching are separate from delivery deduplication. Commit pending work/outbox before dispatch, and make partial-attachment retries recoverable without reassigning candidates or duplicating tasks. Use PostgreSQL migrations for these concepts rather than importing the references' MongoDB collections or startup repairs.
-
-Local native-text/Tesseract inspection precedes Veris extraction. Each mode receives only its selected pages. The original attachment and separate résumé/passport/Aadhaar PDFs remain in persistent storage. `crm_candidates.ocr_data` stores structured results under `resume`, `passport` and `aadhaar`; additional evidence is retained without replacing human corrections. Full extraction data is deferred from dashboard/bootstrap reads.
-
-`email_accounts.sync_state` stores the folder's UIDVALIDITY, last committed UID, a source fingerprint and uploads-volume identity. The source fingerprint binds the cursor to its server, port, login, folder and TLS mode; changing them blocks receipt instead of applying an old cursor to another mailbox. Password rotation preserves this binding. The worker also binds each mailbox to `STORAGE_DIR/.email-storage-id` and refuses to process it from unrelated storage. Moving processing between local development and production requires copying or mounting the whole uploads volume, including this marker and every source/selected file. `last_error`, `sync_requested` and `worker_seen_at` support operational status. IMAP passwords are resolved from server environment settings; they are not written into the existing `secrets` column or returned by the API. The optional `EMAIL_ACCOUNTS_JSON` setting supplies multiple accounts.
-
-`email_ingestion_jobs.state` holds per-attachment SHA-256, inspection, stable provider submission keys, accepted job IDs, returned results and retry history. Its compact `inspection` column supports the inbox without loading raw identity documents. Status is `pending`, `processing`, `retry`, `needs_review`, `completed`, `ignored` or `failed`. Pending remote jobs resume without spending a failed-attempt budget. Confirmed failures receive three retry attempts after the initial attempt; manual retry is an Admin action.
-
-In pgAdmin, inspect the intake without exposing identity-document payloads:
-
-```sql
-SELECT m.subject, j.status, j.attempts, j.last_error, j.candidate_id,
-       j.inspection, j.updated_at
-FROM email_ingestion_jobs j
-JOIN email_messages m ON m.id = j.message_id
+SELECT m.subject, j.status, j.attempts, j.last_error, j.candidate_id, j.updated_at
+FROM email_ingestion_jobs j JOIN email_messages m ON m.id = j.message_id
 ORDER BY j.updated_at DESC;
+
+SELECT d.id, d.subject, d.status, a.status AS delivery_status, a.created_at
+FROM email_drafts d LEFT JOIN email_send_attempts a ON a.draft_id = d.id
+ORDER BY d.updated_at DESC;
+
+SELECT u.name, s.checked_in_at, s.checked_out_at, s.correction_reason
+FROM staff_attendance_sessions s JOIN auth_users u ON u.id = s.user_id
+ORDER BY s.checked_in_at DESC;
+
+SELECT version_num FROM alembic_version;
 ```
 
-Persistent local/shared-volume storage is implemented. An S3-compatible adapter and WhatsApp ingestion remain separate work.
+Avoid exporting password hashes, session IDs, OAuth secrets or raw identity-document OCR into support logs. Provision/reset accounts through User Management or the account CLI. Startup creates only required system state, never default login accounts. Deactivation/password changes revoke sessions; the last active Admin cannot be removed.
 
-## Planned schema work by phase
+## Migration policy
 
-| Phase | Database work to design and migrate | Completion evidence |
-| --- | --- | --- |
-| 1 | Safe provisioning, reference allocation, atomic versioning, complete audit references and required constraints | Restart/role/concurrency tests against PostgreSQL |
-| 2 | Employer reconciliation, normalized identities, incomplete-identity review state, merge/provenance and assignment history, maintained/backfilled resume search | Existing rows preserved; incomplete OCR, duplicate/merge, search and assignment tests |
-| 3 | Repeat medical attempts, reopening history, event-time stage ownership and downstream state rules | All stage transitions and negative/remap/reopen branches tested |
-| 4 | Durable jobs/outbox, task due/reset and owner history, escalation events, missed-update records and deduplicated notifications | Controlled-clock and worker retry/restart tests |
-| 5 | Provider receipts/checkpoints, ingestion attempts, encrypted credential storage and storage-object references | Provider replay and recovery tests without duplicate candidates/tasks |
-| 6 | Session revocation/account changes and private to-do reminder delivery | Deactivation and recipient/owner isolation tests |
-| 7 | Scoped reports over the history captured in Phases 2–4, with indexes justified by actual queries | Independently checked filtered totals and exports |
+The chain is `0001` through `0014`. Revisions `0001` through `0007` are retained; this integration adds:
 
-The exact new table/column names are decided in each implementation phase. The above is a migration plan, not a second schema to apply on top of the current models manually.
+- `0008_workflow_history`: ownership snapshots, persisted SLA timing, task history/settings and personal reminder delivery state.
+- `0009_communication_channels`: encrypted OAuth handshake/reply metadata, WhatsApp receipts, separate mail-worker heartbeat, atomic reference sequences and maintained resume full-text search.
+- `0010_manual_document_jobs`: recoverable manual uploads/OCR/drafts and task-assignment events.
+- `0011_company_whatsapp`: distinct employer WhatsApp contact without rewriting client/contact relationships.
+- `0012_zoho_mailbox`: folder/UID state, recoverable drafts, immutable attachments and explicit send-attempt history.
+- `0013_staff_attendance`: staff check-in/out, corrections and browser activity intervals with partial uniqueness indexes.
+- `0014_attendance_ordering`: durable clock-request ledger and browser-presence sequencing, including earlier request-key backfill.
 
-## Migration and maintenance rules
+Migrations and model parity, fresh upgrade, earlier-record preservation and rollback/upgrade are checked against disposable PostgreSQL. This is not evidence that a production migration has been run. Apply the schema once during a coordinated release with the matching API; stop older writers first. Do not rewrite an applied migration. A future change must add a new revision.
 
-Keep the revision chain `0001_initial → 0002_advance_currency → 0003_attachments → 0004_companies → 0005_candidate_ocr_data → 0006_domain_table_names → 0007_email_intake`. Existing revisions remain unchanged. Add future revisions rather than rewriting applied history.
-
-Revision `0007_email_intake` adds the ingestion job ledger and mailbox checkpoint/health columns. Its downgrade removes that ledger and the new account columns, including cursor and storage binding state. Stop intake workers and preserve a database/file backup before considering rollback; reconcile already processed messages before reconnecting an account. A downgrade does not delete source documents from storage.
-
-Revision `0006_domain_table_names` renames 19 tables and 30 indexes, describes all 20 application tables and adds five identity-column descriptions. `ingestion_failures` and `alembic_version` retain their names. Existing constraint names, their backing indexes and the descriptive one-active-application index remain unchanged; an earlier label does not change what a constraint enforces. The revision preserves records, IDs, password hashes, account roles/status, session rows and relationships. Its downgrade restores the previous table/index names and removes the descriptions introduced by this revision. It creates no default accounts and requires no account recreation. PostgreSQL supports table renaming through [`ALTER TABLE ... RENAME TO`](https://www.postgresql.org/docs/18/sql-altertable.html) and stores object descriptions using [`COMMENT`](https://www.postgresql.org/docs/18/sql-comment.html).
-
-Coordinate the migration with the API release: old code queries the old physical names and new code queries the new names. Stop API writers, take a database backup, apply the reviewed migration once, then start the matching API version and verify readiness, revision and representative reads. Refresh saved pgAdmin queries and any external SQL consumers. Do not run old and new backend mappings simultaneously against one renamed database. For rollback, stop the new API, downgrade to `0005_candidate_ocr_data`, then start the matching earlier backend; rehearse this on a disposable PostgreSQL database first. The table-rename step requires database locks, so use a release window rather than promising zero downtime.
-
-For each schema change, review the generated SQL, test from an empty database and the previous revision, check existing records, and document any data backfill or recovery step. Keep stable primary keys during employer/identity reconciliation. Avoid deleting deployed placement history to simplify a screen.
-
-The current Docker entrypoint applies migrations on boot. For later deployments with several API/worker instances, use one controlled migration step before starting the compatible application version. Database and file backups must be restored together and checked against attachment references.
-
-Before phase integration tests, use a dedicated local/test PostgreSQL database, configure its connection, apply revisions through `0006_domain_table_names` and verify the revision. Establish test accounts explicitly using the CLI in the [README](../README.md). The earlier 20 October account-persistence correction required no schema change; the subsequent table-naming change does require `0006` and a coordinated backend restart. Live application of this revision must be verified separately. Remaining identity/access/concurrency policies stay in Phase 1, and employer reconciliation stays in Phase 2.
+Downgrading removes the new feature ledgers/settings. `0014` removes clock-request and presence-ordering ledgers; `0013` removes attendance/activity history; `0012` removes drafts/send attempts and mailbox action state; `0011` removes employer WhatsApp. `0010` downgrade removes manual extraction jobs and assignment events; `0009` removes channel/OAuth/reply data; `0008` removes workflow history/snapshots. Preserve a database plus document backup before rollback. Prefer a forward correction after real intake has begun. No downgrade deletes stored document bytes, and no migration recreates default accounts.

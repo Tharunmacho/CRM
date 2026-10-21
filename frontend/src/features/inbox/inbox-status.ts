@@ -24,5 +24,9 @@ export function workerHealth(worker: InboxSnapshot['worker'], now = Date.now()) 
   if (!Number.isFinite(heartbeat) || now - heartbeat > 15 * 60_000) {
     return { healthy: false, label: 'Processing is enabled; a recent worker check-in is not confirmed' }
   }
+  if ('extractionHeartbeat' in worker) {
+    const extracted = worker.extractionHeartbeat ? Date.parse(worker.extractionHeartbeat) : NaN
+    if (!Number.isFinite(extracted) || now - extracted > 15 * 60_000) return { healthy: false, label: 'Mail receiver is active; document worker check-in is overdue' }
+  }
   return { healthy: true, label: 'Attachment worker checked in recently' }
 }

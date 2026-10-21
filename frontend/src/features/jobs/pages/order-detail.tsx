@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Link2, Trash2, Unlink } from 'lucide-react'
+import { ArrowLeft, History, Link2, Pencil, Trash2, Unlink } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
@@ -18,11 +18,15 @@ import {
   StageDot,
   StatusPill,
 } from '@/shared/ui/display'
-import { Button, Checkbox, SearchInput, Select } from '@/shared/ui/primitives'
+import { Button, CheckboxInput, Field, Input, SearchInput, Select } from '@/shared/ui/primitives'
 import { Dialog, Sheet } from '@/shared/ui/overlay'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
+import { normalizedSkills, skillFacets, skillKey } from '@/features/candidates/candidate-skills'
+import { matchesCandidate, type CandidateMatchFilters } from '../candidate-matching'
+import { OrderDialog } from '../components/job-dialogs'
+import { RecordAudit } from '@/features/master-data/components/record-audit'
 
 export default function OrderDetailPage() {
   const { id } = useParams()
@@ -33,7 +37,11 @@ export default function OrderDetailPage() {
   const [matching, setMatching] = useState(false)
   const [openApp, setOpenApp] = useState<string | null>(null)
   const [unmapping, setUnmapping] = useState<string | null>(null)
+  const [unmapSaving, setUnmapSaving] = useState(false)
+  const [unmapError, setUnmapError] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [history, setHistory] = useState(false)
 
   if (!order) {
     return (
@@ -121,6 +129,7 @@ export default function OrderDetailPage() {
             onClick={(e) => {
               e.stopPropagation()
               setUnmapping(a.id)
+              setUnmapError('')
             }}
             aria-label={`Unmap ${store.candidate(a.candidateId)?.name}`}
             title="Unmap"
@@ -144,12 +153,14 @@ export default function OrderDetailPage() {
         description={`${client.name} · ${order.city}, ${order.country} · ${order.ref}`}
         actions={
           <>
+            <Button icon={<History className="h-4 w-4" />} onClick={() => setHistory(true)}>Activity</Button>
+            <Button icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit order</Button>
             {store.can('delete_records') && (
               <Button variant="dangerGhost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>
                 Delete order
               </Button>
             )}
-            <Button variant="primary" icon={<Link2 className="h-4 w-4" />} onClick={() => setMatching(true)}>
+            <Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={order.status !== 'open'} onClick={() => setMatching(true)}>
               Match candidates
             </Button>
           </>
@@ -213,7 +224,7 @@ export default function OrderDetailPage() {
           <EmptyState
             title="No candidates matched yet"
             description="Search the Data Bank and match candidates. Matching is what unlocks their stage modal."
-            action={<Button variant="primary" onClick={() => setMatching(true)}>Match candidates</Button>}
+            action={<Button variant="primary" disabled={order.status !== 'open'} onClick={() => setMatching(true)}>Match candidates</Button>}
           />
         ) : (
           <DataTable
@@ -226,26 +237,30 @@ export default function OrderDetailPage() {
         )}
       </Panel>
 
-      <MatchDrawer open={matching} onClose={() => setMatching(false)} orderId={order.id} />
+      {matching && <MatchDrawer key={order.id} open onClose={() => setMatching(false)} orderId={order.id} />}
 
       <Dialog
         open={!!unmapping}
-        onClose={() => setUnmapping(null)}
+        onClose={() => { if (!unmapSaving) setUnmapping(null) }}
         title="Unmap this candidate?"
         description="The application closes with reason Unmapped and its open tasks are cancelled. The candidate returns to the Data Bank and can be mapped to another order."
         footer={
           <>
-            <Button variant="ghost" onClick={() => setUnmapping(null)}>
+            <Button variant="ghost" disabled={unmapSaving} onClick={() => setUnmapping(null)}>
               Keep the mapping
             </Button>
             <Button
               variant="danger"
-              onClick={() => {
-                void store.unmap(unmapping!)
-                setUnmapping(null)
+              disabled={unmapSaving}
+              onClick={async () => {
+                if (!unmapping || unmapSaving) return
+                setUnmapSaving(true); setUnmapError('')
+                try { await store.unmap(unmapping); setUnmapping(null) }
+                catch (error) { setUnmapError(error instanceof Error ? error.message : 'The candidate could not be unmapped. Please try again.') }
+                finally { setUnmapSaving(false) }
               }}
             >
-              Unmap
+              {unmapSaving ? 'Unmapping…' : 'Unmap'}
             </Button>
           </>
         }
@@ -254,15 +269,19 @@ export default function OrderDetailPage() {
           Stages already completed stay on the closed application as a record. Remapping starts a
           fresh application at stage 1.
         </p>
+        {unmapError && <p role="alert" className="mt-3 text-sm text-stamp-700">{unmapError}</p>}
       </Dialog>
 
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
+      {editing && <OrderDialog order={order} onClose={() => setEditing(false)} />}
+      {history && <RecordAudit kind="order" id={order.id} onClose={() => setHistory(false)} />}
       <DeleteRecordDialog
         kind="order"
         id={order.id}
         open={deleting}
         onClose={() => setDeleting(false)}
         onDeleted={() => navigate('/jobs')}
+        onEdit={() => setEditing(true)}
       />
     </>
   )
@@ -284,108 +303,194 @@ function MatchDrawer({
   const designation = store.designation(order.designationId)!
 
   const [query, setQuery] = useState('')
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<CandidateMatchFilters>({
     designation: designation.title,
     minExperience: '',
-    passportOnly: false,
+    passport: 'any',
     owner: 'all',
-    city: '',
+    location: '',
+    skills: [],
+    skillMode: 'all',
   })
   const [picked, setPicked] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [committed, setCommitted] = useState<string[]>([])
+  const [refreshNeeded, setRefreshNeeded] = useState(false)
+
+  const eligibleCandidates = useMemo(() => {
+    const activeIds = new Set(store.applications.filter((a) => a.status === 'active').map((a) => a.candidateId))
+    return store.candidates.filter((c) => !activeIds.has(c.id) && !committed.includes(c.id) && c.status !== 'deployed')
+  }, [store.candidates, store.applications, committed])
+
+  const skills = useMemo(() => skillFacets(eligibleCandidates), [eligibleCandidates])
+  const designationOptions = useMemo(() => normalizedSkills([
+    ...store.designations.map((d) => d.title), ...eligibleCandidates.flatMap((c) => c.designations),
+  ]).sort((a, b) => a.localeCompare(b)), [store.designations, eligibleCandidates])
+  const requiredSkills = normalizedSkills(designation.requiredSkills)
+  const ownerIds = new Set(eligibleCandidates.map((c) => c.ownerId))
+  const owners = store.users.filter((u) => u.role === 'staff' || ownerIds.has(u.id))
 
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return store.candidates.filter((c) => {
-      if (store.activeApplicationFor(c.id)) return false
-      if (c.status === 'deployed') return false
-      if (filters.designation && !c.designations.includes(filters.designation)) return false
-      if (filters.minExperience && c.totalExperience < Number(filters.minExperience)) return false
-      if (filters.passportOnly && !c.passportNo) return false
-      if (filters.owner !== 'all' && c.ownerId !== filters.owner) return false
-      if (filters.city && !c.currentCity.toLowerCase().includes(filters.city.toLowerCase())) return false
-      if (!q) return true
-      return (
-        c.name.toLowerCase().includes(q) ||
-        c.skills.join(' ').toLowerCase().includes(q) ||
-        c.resumeText.toLowerCase().includes(q)
-      )
-    })
-  }, [store.candidates, store.applications, query, filters])
+    return eligibleCandidates.filter((candidate) => matchesCandidate(candidate, filters, query))
+  }, [eligibleCandidates, query, filters])
+  const resultIds = new Set(results.map((candidate) => candidate.id))
+  const selected = picked.filter((id) => resultIds.has(id))
 
-  const set = (k: string, v: unknown) => setFilters((f) => ({ ...f, [k]: v }))
+  const set = <K extends keyof CandidateMatchFilters>(key: K, value: CandidateMatchFilters[K]) => {
+    setFilters((f) => ({ ...f, [key]: value }))
+    setPicked([])
+  }
+  const close = () => { if (!saving) onClose() }
+  const matchSelected = async () => {
+    if (saving || !selected.length || order.status !== 'open') return
+    setSaving(true)
+    setError('')
+    const failed: string[] = []
+    let failureMessage = ''
+    let needsRefresh = false
+    for (const candidateId of selected) {
+      if (!store.isCurrentSession()) return
+      try {
+        const result = await store.mapCandidate(candidateId, orderId)
+        if (!store.isCurrentSession()) return
+        if (!result) return
+        setCommitted((current) => result.refreshed ? [] : [...current, candidateId])
+        needsRefresh = !result.refreshed
+      } catch (cause) {
+        if (!store.isCurrentSession()) return
+        failed.push(candidateId)
+        failureMessage = cause instanceof Error ? cause.message : 'Please try again.'
+      }
+    }
+    setPicked(failed)
+    setSaving(false)
+    setRefreshNeeded(needsRefresh)
+    if (failed.length) {
+      setError(`${selected.length - failed.length} matched; ${failed.length} could not be matched. ${failureMessage}`)
+    } else if (needsRefresh) {
+      setError('Candidates matched successfully. The directory could not refresh. Refresh the results to see their applications.')
+    } else {
+      onClose()
+    }
+  }
 
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      onClose={close}
       width="xl"
       title="Match candidates to this order"
       description={`${designation.title} · ${store.company(order.companyId)?.name} · ${order.ref}`}
       footer={
         <>
           <span className="mr-auto text-xs text-ink-500 tnum">
-            {picked.length} selected · {results.length} available
+            {selected.length} selected · {results.length} matching of {eligibleCandidates.length} available
           </span>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={close} disabled={saving}>
             Cancel
           </Button>
           <Button
             variant="primary"
-            disabled={picked.length === 0}
-            onClick={() => {
-              picked.forEach((candidateId) => void store.mapCandidate(candidateId, orderId))
-              setPicked([])
-              onClose()
-            }}
+            disabled={selected.length === 0 || saving || order.status !== 'open'}
+            onClick={() => void matchSelected()}
           >
-            Match {picked.length || ''} and start stage 1
+            {saving ? 'Matching candidates…' : `Match ${selected.length || ''} and start stage 1`}
           </Button>
         </>
       }
     >
-      <div className="sticky top-0 z-10 border-b border-rule bg-white px-5 py-3">
-        <SearchInput value={query} onChange={setQuery} placeholder="Name, skill, or resume text" />
-        <div className="mt-2.5 grid gap-2 sm:grid-cols-4">
-          <Select value={filters.designation} onChange={(e) => set('designation', e.target.value)} aria-label="Designation">
+      {refreshNeeded && <div className="px-5 pt-3"><Button disabled={saving} onClick={async () => {
+        setSaving(true)
+        try {
+          await store.refresh({ keepCurrent: true })
+          if (store.isCurrentSession()) { setCommitted([]); setRefreshNeeded(false); setError('') }
+        } catch (cause) {
+          if (store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'The results could not refresh. Please retry.')
+        } finally { setSaving(false) }
+      }}>Refresh matching results</Button></div>}
+      <fieldset disabled={saving} className="min-w-0 border-b border-rule bg-white px-5 py-3">
+        <SearchInput value={query} onChange={(value) => { setQuery(value); setPicked([]) }} placeholder="Name, contact, passport, skill, or resume text" />
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Designation">
+          <Select value={filters.designation} onChange={(e) => set('designation', e.target.value)}>
             <option value="">Any designation</option>
-            {store.designations.map((d) => (
-              <option key={d.id} value={d.title}>
-                {d.title}
+            {designationOptions.map((title) => (
+              <option key={skillKey(title)} value={title}>
+                {title}
               </option>
             ))}
           </Select>
-          <Select value={filters.minExperience} onChange={(e) => set('minExperience', e.target.value)} aria-label="Minimum experience">
-            <option value="">Any experience</option>
-            {[2, 3, 5, 8, 10].map((n) => (
-              <option key={n} value={n}>
-                {n}+ years
-              </option>
-            ))}
-          </Select>
-          <Select value={filters.owner} onChange={(e) => set('owner', e.target.value)} aria-label="Assigned staff">
+          </Field>
+          <Field label="Minimum experience (years)">
+            <Input type="number" min="0" step="0.5" value={filters.minExperience} onChange={(e) => set('minExperience', e.target.value)} placeholder="Any experience" />
+          </Field>
+          <Field label="Current location">
+            <Input value={filters.location} onChange={(e) => set('location', e.target.value)} placeholder="City or location" />
+          </Field>
+          <Field label="Assigned staff">
+          <Select value={filters.owner} onChange={(e) => set('owner', e.target.value)}>
             <option value="all">Any staff</option>
-            {store.users
-              .filter((u) => u.role === 'staff')
-              .map((u) => (
+            {owners.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
               ))}
           </Select>
-          <div className="flex items-center">
-            <Checkbox
-              checked={filters.passportOnly}
-              onChange={(v) => set('passportOnly', v)}
-              label="Passport on file"
-            />
-          </div>
+          </Field>
+          <Field label="Passport details">
+            <Select value={filters.passport} onChange={(e) => set('passport', e.target.value as CandidateMatchFilters['passport'])}>
+              <option value="any">Any passport status</option>
+              <option value="present">Passport number recorded</option>
+              <option value="missing">Passport number missing</option>
+            </Select>
+          </Field>
+          <Field label="Recorded skills">
+            <Select value="" onChange={(e) => {
+              if (e.target.value) set('skills', normalizedSkills([...filters.skills, e.target.value]))
+            }}>
+              <option value="">Add a skill filter</option>
+              {skills.filter((skill) => !filters.skills.some((value) => skillKey(value) === skill.key)).map((skill) => (
+                <option key={skill.key} value={skill.label}>{skill.label} ({skill.count})</option>
+              ))}
+            </Select>
+          </Field>
         </div>
-      </div>
+        {filters.skills.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Select className="w-auto" value={filters.skillMode} onChange={(e) => set('skillMode', e.target.value as 'all' | 'any')} aria-label="Skill match rule">
+              <option value="all">All selected skills</option>
+              <option value="any">Any selected skill</option>
+            </Select>
+            {filters.skills.map((skill) => (
+              <button key={skillKey(skill)} type="button" className="rounded-full border border-navy-100 bg-navy-50 px-2.5 py-1 text-xs text-navy-700" aria-label={`Remove ${skill} filter`} onClick={() => set('skills', filters.skills.filter((value) => skillKey(value) !== skillKey(skill)))}>
+                {skill} <span aria-hidden="true">×</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {(requiredSkills.length > 0 || designation.minExperience > 0) && (
+            <Button size="sm" onClick={() => {
+              setFilters((f) => ({ ...f, designation: designation.title, minExperience: designation.minExperience > 0 ? String(designation.minExperience) : '', skills: requiredSkills, skillMode: 'all' }))
+              setPicked([])
+            }}>Use designation requirements</Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => {
+            setFilters({ designation: '', minExperience: '', passport: 'any', owner: 'all', location: '', skills: [], skillMode: 'all' })
+            setQuery('')
+            setPicked([])
+          }}>Clear filters</Button>
+          <p className="text-micro text-ink-400">Skill filters use the skills recorded on each profile.</p>
+        </div>
+      </fieldset>
+      {order.status !== 'open' && <p role="status" className="border-b border-rule bg-amber-50 px-5 py-3 text-sm text-amber-700">This order is {order.status.replace('_', ' ')}. Open it before matching candidates.</p>}
+      {error && <p role="alert" className="border-b border-rule bg-stamp-50 px-5 py-3 text-sm text-stamp-700">{error}</p>}
 
       {results.length === 0 ? (
         <EmptyState
           title="No candidates match these filters"
-          description="Widen the designation or experience filter. Candidates already on another order are hidden."
+          description="Adjust or clear the filters. Candidates already on another order and deployed candidates are hidden."
         />
       ) : (
         <ul className="divide-y divide-rule-soft">
@@ -393,7 +498,8 @@ function MatchDrawer({
             <MatchRow
               key={c.id}
               candidate={c}
-              checked={picked.includes(c.id)}
+              checked={selected.includes(c.id)}
+              disabled={saving || order.status !== 'open'}
               onToggle={() =>
                 setPicked((p) => (p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p, c.id]))
               }
@@ -408,17 +514,19 @@ function MatchDrawer({
 function MatchRow({
   candidate,
   checked,
+  disabled,
   onToggle,
 }: {
   candidate: Candidate
   checked: boolean
+  disabled: boolean
   onToggle: () => void
 }) {
   const store = useStore()
   return (
     <li className={cn('px-5 py-3 transition-colors', checked ? 'bg-navy-50/70' : 'hover:bg-field/60')}>
       <label className="flex cursor-pointer items-center gap-3">
-        <Checkbox checked={checked} onChange={onToggle} />
+        <CheckboxInput checked={checked} onChange={onToggle} disabled={disabled} aria-label={`Select ${candidate.name}`} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium text-ink">{candidate.name}</span>
@@ -432,8 +540,8 @@ function MatchRow({
           </p>
         </div>
         <div className="hidden shrink-0 gap-1 sm:flex">
-          {candidate.skills.slice(0, 2).map((s) => (
-            <Badge key={s}>{s}</Badge>
+          {normalizedSkills(candidate.skills).slice(0, 2).map((s) => (
+            <Badge key={skillKey(s)}>{s}</Badge>
           ))}
         </div>
       </label>

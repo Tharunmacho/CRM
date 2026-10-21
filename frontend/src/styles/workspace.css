@@ -1321,3 +1321,43 @@
     padding: 12px;
   }
 }
+
+/* Shared reading rhythm: one family, clear labels and consistent control sizing. */
+.app-shell, .workspace-dialog, .custom-select-popup { font-family: 'Poppins', system-ui, sans-serif; }
+.workspace-page { font-size: 14px; line-height: 1.65; }
+.workspace-page-header h1 { font-size: clamp(25px, 2.2vw, 31px); letter-spacing: -.8px; line-height: 1.35; }
+.workspace-page-header .workspace-heading-copy > p:last-child:not(.workspace-eyebrow) { font-size: 14px; line-height: 1.75; }
+.workspace-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.workspace-page .ui-button, .workspace-dialog .ui-button { min-height: 40px; font-size: 13px; line-height: 1.4; }
+.workspace-page .ui-input, .workspace-dialog .ui-input, .workspace-page .custom-select-trigger, .workspace-dialog .custom-select-trigger { min-height: 43px; font-size: 14px; border-color: #dce2ec; border-radius: 9px; }
+.workspace-page textarea.ui-input, .workspace-dialog textarea.ui-input { line-height: 1.75; }
+.workspace-page .ui-field > span:first-child, .workspace-dialog .ui-field > span:first-child { font-size: 13px; font-weight: 500; line-height: 1.55; color: #3f4b61; }
+.workspace-page .ui-field > span:last-child:not(:first-child), .workspace-dialog .ui-field > span:last-child:not(:first-child) { font-size: 12px; line-height: 1.65; }
+.workspace-page .ui-panel-header { gap: 12px; }
+.workspace-page .ui-data-table th { font-size: 12px; font-weight: 500; color: #637188; padding: 13px 16px; }
+.workspace-page .ui-data-table td { font-size: 13px; line-height: 1.65; padding: 15px 16px; vertical-align: middle; }
+.workspace-page .ui-data-table td .text-micro { font-size: 11px; line-height: 1.65; }
+.workspace-page .ui-table-pagination { font-size: 12px; padding: 16px; }
+.workspace-page .ui-search { width: min(100%, 440px); }
+.workspace-page .ident, .workspace-dialog .ident { font-family: inherit; font-variant-numeric: tabular-nums; letter-spacing: .015em; }
+.workspace-page .summary-card-top { font-size: 13px; line-height: 1.6; }
+.workspace-page .summary-card p:last-child { font-size: 12px; line-height: 1.65; }
+.workspace-dialog > header { padding: 24px; }
+.workspace-dialog > header h2 { font-size: 21px; line-height: 1.45; letter-spacing: -.4px; }
+.workspace-dialog > header p { max-width: 65ch; font-size: 13px; line-height: 1.75; }
+.workspace-dialog > footer { gap: 10px; }
+.custom-select-option { min-height: 40px; font-size: 13px; }
+.ui-button:disabled { box-shadow: none; }
+@media (max-width: 640px) {
+  .workspace-page-header-row { align-items: flex-start; gap: 14px; }
+  .workspace-header-actions { width: 100%; }
+  .workspace-header-actions > .ui-button { flex: 1 1 auto; }
+  .workspace-page .ui-button, .workspace-dialog .ui-button { min-height: 42px; }
+  .workspace-page .ui-input, .workspace-dialog .ui-input, .workspace-page .custom-select-trigger, .workspace-dialog .custom-select-trigger { font-size: 16px; min-height: 45px; }
+  .workspace-page .ui-data-table th, .workspace-page .ui-data-table td { padding: 12px 14px; }
+  .workspace-dialog > header, .workspace-dialog > div, .workspace-dialog > footer { padding: 20px; }
+  .workspace-dialog > footer { flex-wrap: wrap; }
+  .workspace-dialog > footer > .ui-button { flex: 1 1 auto; }
+  .workspace-list-toolbar { flex-wrap: wrap; gap: 12px; }
+  .workspace-page .ui-search { width: 100%; max-width: none; }
+}

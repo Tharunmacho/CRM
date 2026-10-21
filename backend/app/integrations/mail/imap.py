@@ -7,6 +7,7 @@ import json
 import math
 import re
 import ssl
+from datetime import date
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 
@@ -24,13 +25,17 @@ class MailConfig:
     use_ssl: bool = True
     timeout: float = 30
     max_message_bytes: int = 30 * 1024 * 1024
+    access_token: str | None = field(default=None, repr=False)
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_use_ssl: bool = False
 
     def __post_init__(self):
         if not self.host or re.search(r"[\s/@\\]", self.host):
             raise MailAdapterError("invalid_config", "Configure a valid IMAP hostname without a URL prefix.")
         if type(self.port) is not int or not 1 <= self.port <= 65535:
             raise MailAdapterError("invalid_config", "Configure a valid IMAP port.")
-        if not self.username or not self.password:
+        if not self.username or not (self.password or self.access_token):
             raise MailAdapterError("invalid_config", "Configure an IMAP username and password or app password.")
         if not self.folder or any(c in self.folder + self.username for c in "\r\n\x00"):
             raise MailAdapterError("invalid_config", "The IMAP mailbox name or username is invalid.")
@@ -131,7 +136,11 @@ class IMAPMailbox:
             self.close()
             raise MailAdapterError("connection_failed", "Could not establish a secure IMAP connection.", retryable=True) from None
         try:
-            status, _ = connection.login(self.config.username, self.config.password)
+            if self.config.access_token:
+                auth = f"user={self.config.username}\x01auth=Bearer {self.config.access_token}\x01\x01".encode()
+                status, _ = connection.authenticate("XOAUTH2", lambda challenge: auth if not challenge else b"")
+            else:
+                status, _ = connection.login(self.config.username, self.config.password)
             if status != "OK":
                 raise imaplib.IMAP4.error("login refused")
         except Exception:
@@ -238,8 +247,25 @@ class IMAPMailbox:
                     pass
             unread = b"\\seen" not in {flag.lower() for flag in imaplib.ParseFlags(details)}
             return parse_message(raw, provider_id=provider_id, uid=uid, uid_validity=str(uid_validity),
-                                 folder=self.config.folder, received_at=received, unread=unread)
+                                 folder=self.config.folder, received_at=received, unread=unread,
+                                 starred=b"\\flagged" in {flag.lower() for flag in imaplib.ParseFlags(details)})
         except MailMessageError:
             raise
         except Exception:
             raise failure("fetch_failed", "The email could not be downloaded safely. Retry the source message.", True) from None
+
+    def history_uids(self, *, after_uid: int, before_uid: int, since: str, uid_validity: str, limit=25):
+        """Bound history to a saved upper UID and an explicit administrator date."""
+        start = date.fromisoformat(since)
+        if after_uid >= before_uid:
+            return []
+        self._selected(uid_validity)
+        stamp = f"{start.day:02}-{('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')[start.month - 1]}-{start.year}"
+        try:
+            status, data = self._connection.uid("SEARCH", None, "UID", f"{after_uid + 1}:{before_uid}", "SINCE", stamp)
+            if status != "OK":
+                raise ValueError()
+            values = [int(value) for value in ((data or [b""])[0] or b"").split()]
+            return sorted({value for value in values if after_uid < value <= before_uid})[:limit]
+        except Exception:
+            raise MailAdapterError("history_search", "Historical messages could not be listed. Resume the import after checking the connection.", retryable=True) from None

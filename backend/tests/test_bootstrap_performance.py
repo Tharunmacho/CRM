@@ -233,17 +233,21 @@ def desk_engine(schema_database):
 
 
 @pytest.fixture
-def desk_client(desk_engine):
+def desk_client(desk_engine, monkeypatch):
     # A small isolated app has no startup hooks, Redis, static files, or .env reads.
     with patch(
         "app.core.config.get_settings",
         return_value=SimpleNamespace(
+            agency_timezone="Asia/Kolkata",
             database_url=desk_engine.url.render_as_string(hide_password=False)
         ),
     ):
         from app.api.routers import auth, data
         from app.db.session import get_db
 
+    # Routers may already be imported by another test module. Patch the bound
+    # name too; an import-time mock must not leak another test's configuration.
+    monkeypatch.setattr(data, "get_settings", lambda: SimpleNamespace(agency_timezone="Asia/Kolkata"))
     application = FastAPI()
     application.include_router(auth.router)
     application.include_router(data.router)
@@ -292,7 +296,7 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
     assert response.status_code == 200
     assert_select_budget(statements, 2)
     body = response.json()
-    assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision"}
+    assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision", "agencyTimezone"}
     assert body["ingestionRevision"] == "0:0"
     assert_no_private_data(body)
 

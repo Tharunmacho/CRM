@@ -51,6 +51,8 @@ export interface StageField {
 export interface StageEvaluation {
   canComplete: boolean
   missing: string[]
+  /** Records a medical attempt and creates a follow-up without advancing. */
+  repeats?: boolean
   /** Set when the recorded outcome ends the application here. */
   closes?: { reason: ClosureReason; label: string }
   /** Human-readable outcome stored on the completed stage record. */
@@ -79,7 +81,7 @@ const YES_NO = [
 ]
 
 const need = (d: Record<string, any>, keys: [string, string][]) =>
-  keys.filter(([k]) => !d[k] && d[k] !== 0).map(([, label]) => label)
+  keys.filter(([k]) => d[k] == null || (typeof d[k] === 'string' ? !d[k].trim() : !d[k] && d[k] !== 0)).map(([, label]) => label)
 
 export const STAGES: StageDef[] = [
   {
@@ -166,7 +168,6 @@ export const STAGES: StageDef[] = [
       }
       const missing = need(d, [
         ['forwarded', 'Forwarded to client'],
-        ['dateForwarded', 'Date forwarded'],
       ])
       return { canComplete: missing.length === 0, missing, outcome: 'Forwarded' }
     },
@@ -217,7 +218,6 @@ export const STAGES: StageDef[] = [
         return { canComplete: false, missing: ['Interview scheduled'], outcome: '' }
       const missing = need(d, [
         ['date', 'Date'],
-        ['mode', 'Mode'],
       ])
       return { canComplete: missing.length === 0, missing, outcome: 'Scheduled' }
     },
@@ -330,16 +330,17 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (d.applied !== 'yes')
+      if (d.applied === 'no')
         return { canComplete: false, missing: ['Applied for medical'], outcome: '' }
       if (!d.result) return { canComplete: false, missing: ['Result'], outcome: '' }
       if (d.result === 'fit') return { canComplete: true, missing: [], outcome: 'Fit' }
       if (d.reapplying === 'yes') {
         const missing = need(d, [['retestDate', 'New medical date']])
         return {
-          canComplete: false,
-          missing: missing.length ? missing : ['A fit result is needed to move on'],
-          outcome: '',
+          canComplete: missing.length === 0,
+          missing,
+          outcome: 'Unfit: reapplying',
+          repeats: true,
         }
       }
       if (d.reapplying === 'no')
@@ -386,10 +387,7 @@ export const STAGES: StageDef[] = [
     evaluate: (d) => {
       if (d.collected !== 'yes')
         return { canComplete: false, missing: ['Original passport collected'], outcome: '' }
-      const missing = need(d, [
-        ['collectedDate', 'Date collected'],
-        ['heldBy', 'Held by'],
-      ])
+      const missing: string[] = []
       return { canComplete: missing.length === 0, missing, outcome: 'Collected' }
     },
   },
@@ -471,7 +469,6 @@ export const STAGES: StageDef[] = [
         return { canComplete: false, missing: ['Advance collected'], outcome: '' }
       const missing = need(d, [
         ['amount', 'Amount'],
-        ['amountCurrency', 'Currency'],
         ['receipt', 'Receipt'],
       ])
       return { canComplete: missing.length === 0, missing, outcome: 'Collected' }
@@ -567,8 +564,6 @@ export const STAGES: StageDef[] = [
     ],
     evaluate: (d) => {
       const missing = need(d, [
-        ['bookedBy', 'Booked by'],
-        ['travelDate', 'Travel date'],
         ['file', 'Ticket copy'],
       ])
       return { canComplete: missing.length === 0, missing, outcome: 'Booked' }
@@ -576,8 +571,38 @@ export const STAGES: StageDef[] = [
   },
 ]
 
+/** Mirror the server's supplied-value checks before its authoritative validation. */
+for (const definition of STAGES) {
+  const evaluate = definition.evaluate
+  definition.evaluate = (data) => {
+    const invalid: string[] = []
+    for (const field of definition.fields) {
+      const value = data[field.name]
+      if (value == null || value === '') continue
+      if (field.options && !field.options.some((option) => option.value === value)) invalid.push(`${field.label}: choose a listed option`)
+      if (field.type === 'date') {
+        const date = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : null
+        if (!date || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) invalid.push(`${field.label}: enter a valid date`)
+      }
+      if (field.type === 'time' && (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value))) invalid.push(`${field.label}: enter a valid time`)
+      if (field.type === 'file' && (typeof value !== 'object' || typeof value.id !== 'string' || !value.id.trim())) invalid.push(`${field.label}: upload a document`)
+      if (field.type === 'checkbox' && typeof value !== 'boolean') invalid.push(`${field.label}: choose yes or no`)
+      if (field.type === 'number' && (typeof value === 'boolean' || !Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) >= 10_000_000_000 || Math.abs(Number(value) * 100 - Math.round(Number(value) * 100)) > 0.000001)) invalid.push(`${field.label}: enter a positive amount with at most two decimal places`)
+    }
+    if (definition.no === 6 && data.result === 'unfit' && data.reapplying === 'yes' && data.retestDate && data.appliedDate && data.retestDate < data.appliedDate) invalid.push('New medical date must be on or after the previous medical date')
+    return invalid.length ? { canComplete: false, missing: invalid, outcome: '' } : evaluate(data)
+  }
+}
+
 export const stageByNo = (no: number) => STAGES[no - 1]
 export const TOTAL_STAGES = STAGES.length
+
+/** Route filters may be edited or linked from outside the application. */
+export function parseStageNumber(value: string | null): number | null {
+  if (!value || !/^\d+$/.test(value)) return null
+  const stage = Number(value)
+  return Number.isInteger(stage) && stage >= 1 && stage <= TOTAL_STAGES ? stage : null
+}
 
 export const closureLabels: Record<ClosureReason, string> = {
   prescreen_failed: 'Failed prescreening',

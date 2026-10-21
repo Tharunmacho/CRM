@@ -26,14 +26,16 @@ from test_email_intake import (
 
 
 @pytest.fixture
-def revision_client(intake):
+def revision_client(intake, monkeypatch):
     # Importing a router must not initialize a connection from backend/.env.
     with patch("app.core.config.get_settings", return_value=SimpleNamespace(
+            agency_timezone="Asia/Kolkata",
         database_url=intake.engine.url.render_as_string(hide_password=False),
     )):
         from app.api.routers import data, inbox
         from app.db.session import get_db
 
+    monkeypatch.setattr(data, "get_settings", lambda: SimpleNamespace(agency_timezone="Asia/Kolkata"))
     with intake.sessions() as db:
         db.add(User(id="revision-manager", name="Manager", email="manager@example.test", role=Role.manager))
         db.flush()

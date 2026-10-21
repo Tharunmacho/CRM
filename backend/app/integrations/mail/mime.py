@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
-from email.utils import parseaddr, parsedate_to_datetime
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import PurePosixPath, PureWindowsPath
 
@@ -97,7 +97,7 @@ class _TextHTML(HTMLParser):
 
 def parse_message(
     data: bytes, *, provider_id: str, uid: int, uid_validity: str, folder: str,
-    received_at: datetime | None, unread: bool,
+    received_at: datetime | None, unread: bool, starred: bool = False,
 ) -> InboundMessage:
     def malformed():
         return MailMessageError("malformed_message", "The email has damaged MIME content. Review the source message.",
@@ -169,6 +169,12 @@ def parse_message(
             subject=str(message.get("Subject", "")), from_name=from_name,
             from_address=from_address, body=body, received_at=received_at.astimezone(timezone.utc),
             unread=unread, attachments=tuple(attachments), warnings=tuple(dict.fromkeys(warnings)),
+            message_id_header=str(message.get("Message-ID", ""))[:2000] or None,
+            references_header=str(message.get("References", ""))[:8000] or None,
+            reply_to=parseaddr(str(message.get("Reply-To", "")))[1][:255] or None,
+            to_addresses=tuple(a[:255] for _, a in getaddresses(message.get_all("To", [])) if a),
+            cc_addresses=tuple(a[:255] for _, a in getaddresses(message.get_all("Cc", [])) if a), starred=starred,
+            bcc_addresses=tuple(a[:255] for _, a in getaddresses(message.get_all("Bcc", [])) if a),
         )
     except MailMessageError:
         raise

@@ -1,7 +1,8 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { FileText, History, Image as ImageIcon, Paperclip, Upload } from 'lucide-react'
+import { Download, FileText, History, Image as ImageIcon, Paperclip, Upload } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel } from '@/shared/lib/format'
+import { DOCUMENT_ACCEPT, DOCUMENT_HELP, documentFileError, fileDownloadPath, newestFileVersions } from '@/shared/lib/document-files'
 import { fileHref } from '@/shared/api/client'
 import type { FileVersion } from '@/shared/model/types'
 import { IconButton } from './primitives'
@@ -24,15 +25,17 @@ export function FileLink({
   children,
   className,
   title,
+  download = false,
 }: {
   url: string
   children: ReactNode
   className?: string
   title?: string
+  download?: boolean
 }) {
   return (
     <a
-      href={fileHref(url)}
+      href={fileHref(download ? fileDownloadPath(url) : url)}
       target="_blank"
       rel="noreferrer"
       title={title}
@@ -45,7 +48,17 @@ export function FileLink({
 }
 
 function iconFor(name: string) {
-  return /\.(jpe?g|png|webp)$/i.test(name) ? ImageIcon : FileText
+  return /\.(jpe?g|png|webp|heic)$/i.test(name) ? ImageIcon : FileText
+}
+
+function DownloadLink({ file }: { file: StoredFile }) {
+  if (!file.url) return null
+  return (
+    <FileLink url={file.url} download title={`Download ${file.name}`} className="shrink-0 rounded-control p-1 hover:bg-field">
+      <Download className="h-4 w-4" aria-hidden />
+      <span className="sr-only">Download {file.name}</span>
+    </FileLink>
+  )
 }
 
 /**
@@ -62,6 +75,7 @@ export function FileDrop({
   disabled,
   busy,
   busyLabel = 'uploading…',
+  uploaderName,
 }: {
   label?: string
   value?: StoredFile | null
@@ -73,34 +87,53 @@ export function FileDrop({
   disabled?: boolean
   busy?: boolean
   busyLabel?: string
+  uploaderName?: (id: string) => string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inFlight = useRef(false)
 
   // Works uncontrolled: a caller that only wants the raw File (because the record it
   // belongs to does not exist yet) still gets the chosen file shown back to them.
   const [picked, setPicked] = useState<StoredFile | null>(null)
   const shown = value !== undefined ? value : picked
+  const locked = disabled || busy || working
 
-  const take = (files: FileList | null) => {
-    if (disabled) return
+  const take = async (files: FileList | null) => {
+    if (locked || inFlight.current) return
     const f = files?.[0]
     if (!f) return
+    const invalid = documentFileError(f)
+    setError(invalid ?? null)
+    if (invalid) return
+    const previous = picked
     const chosen: StoredFile = { name: f.name, sizeKb: Math.max(1, Math.round(f.size / 1024)) }
     setPicked(chosen)
-    onChange?.(chosen)
-    void onFile?.(f)
+    inFlight.current = true
+    setWorking(true)
+    try {
+      await onFile?.(f)
+      onChange?.(chosen)
+    } catch (err) {
+      setPicked(previous)
+      setError(err instanceof Error ? err.message : 'The file was not uploaded. Please try again.')
+    } finally {
+      inFlight.current = false
+      setWorking(false)
+    }
   }
 
   const Icon = shown ? iconFor(shown.name) : Upload
 
   return (
-    <div className="ui-file-drop">
+    <div className="ui-file-drop" aria-busy={busy || working}>
       {label && <span className="mb-1.5 block text-xs font-medium text-ink-600">{label}</span>}
 
       {shown ? (
-        <div className="flex items-center gap-2.5 rounded-control border border-rule bg-white px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2.5 rounded-control border border-rule bg-white px-3 py-2">
           <Icon className="h-4 w-4 shrink-0 text-navy-600" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm text-ink">
@@ -115,17 +148,17 @@ export function FileDrop({
             <p className="text-micro tnum">
               <span className="text-ink-400">{shown.sizeKb} KB</span>
               {shown.version ? <span className="text-ink-400"> · v{shown.version}</span> : null}
-              {busy ? (
+              {busy || working ? (
                 <span className="text-amber-700"> · {busyLabel}</span>
               ) : shown.id ? (
                 <span className="text-navy-700"> · saved</span>
               ) : (
-                <span className="text-amber-700"> · not uploaded</span>
+                <span className="text-amber-700"> · selected, not yet saved</span>
               )}
             </p>
           </div>
           {versions.length > 0 && (
-            <IconButton label="Version history" onClick={() => setShowHistory((v) => !v)}>
+            <IconButton type="button" label="Version history" aria-expanded={showHistory} onClick={() => setShowHistory((v) => !v)}>
               <History className="h-4 w-4" />
             </IconButton>
           )}
@@ -134,11 +167,13 @@ export function FileDrop({
               View
             </FileLink>
           )}
+          <DownloadLink file={shown} />
           {!disabled && (
             <button
               type="button"
+              disabled={locked}
               onClick={() => inputRef.current?.click()}
-              className="shrink-0 text-xs font-medium text-navy-700 hover:text-navy-600"
+              className="shrink-0 text-xs font-medium text-navy-700 hover:text-navy-600 disabled:opacity-50"
             >
               Replace
             </button>
@@ -147,54 +182,58 @@ export function FileDrop({
       ) : (
         <button
           type="button"
-          disabled={disabled}
+          disabled={locked}
           onClick={() => inputRef.current?.click()}
           onDragOver={(e) => {
             e.preventDefault()
-            setDragging(true)
+            if (!locked) setDragging(true)
           }}
           onDragLeave={() => setDragging(false)}
           onDrop={(e) => {
             e.preventDefault()
             setDragging(false)
-            take(e.dataTransfer.files)
+            void take(e.dataTransfer.files)
           }}
           className={cn(
             'file-drop-target flex w-full items-center justify-center gap-2 rounded-control border border-dashed px-3 py-3.5 text-sm transition-colors',
             dragging
               ? 'border-navy-500 bg-navy-50 text-navy-700'
               : 'border-rule bg-field/40 text-ink-400 hover:border-ink-300 hover:text-ink-600',
-            disabled && 'cursor-not-allowed opacity-60',
+            locked && 'cursor-not-allowed opacity-60',
           )}
         >
           <Upload className="h-4 w-4" />
-          Choose a file or drop it here
+          {busy || working ? busyLabel : 'Choose a file or drop it here'}
         </button>
       )}
 
       <input
         ref={inputRef}
         type="file"
+        accept={DOCUMENT_ACCEPT}
+        aria-label={label ? `Choose ${label}` : 'Choose a document'}
         className="sr-only"
-        disabled={disabled}
-        onChange={(e) => take(e.target.files)}
+        disabled={locked}
+        onChange={(e) => { void take(e.currentTarget.files); e.currentTarget.value = '' }}
         tabIndex={-1}
       />
 
-      {help && <span className="mt-1 block text-micro text-ink-400">{help}</span>}
+      {(help || !disabled) && <span className="mt-1 block text-micro text-ink-400">{help}{help && !disabled ? ' ' : ''}{!disabled && DOCUMENT_HELP}</span>}
+      {error && <p role="alert" className="mt-1.5 text-xs text-stamp-700">{error}</p>}
 
       {showHistory && versions.length > 0 && (
         <ul className="mt-2 divide-y divide-rule-soft rounded-control border border-rule-soft bg-field/40">
-          {[...versions].reverse().map((v) => (
-            <li key={v.id} className="flex items-center gap-2 px-3 py-1.5 text-micro text-ink-500">
+          {newestFileVersions(versions).map((v) => (
+            <li key={v.id} className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-micro text-ink-500">
               <Paperclip className="h-3 w-3 shrink-0" />
               <span className="tnum">v{v.version}</span>
               <FileLink url={v.url} className="truncate">
                 {v.name}
               </FileLink>
-              <span className="ml-auto shrink-0">
-                {v.uploadedBy} · {dateTimeLabel(v.uploadedAt)}
+              <span className="ml-auto">
+                {uploaderName?.(v.uploadedBy) || v.uploadedBy || 'Unknown uploader'} · {dateTimeLabel(v.uploadedAt)}
               </span>
+              <DownloadLink file={v} />
             </li>
           ))}
         </ul>
@@ -208,20 +247,24 @@ export function DocumentSlotRow({
   label,
   versions,
   onUpload,
+  uploaderName,
 }: {
   label: string
   versions: FileVersion[]
   onUpload?: (file: File) => void | Promise<void>
+  uploaderName?: (id: string) => string
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inFlight = useRef(false)
   const pickRef = useRef<HTMLInputElement>(null)
-  const latest = versions[versions.length - 1]
+  const latest = newestFileVersions(versions)[0]
   const Icon = latest ? iconFor(latest.name) : Paperclip
 
   return (
-    <div className="border-b border-rule-soft last:border-0">
-      <div className="flex items-center gap-3 py-2.5">
+    <div className="border-b border-rule-soft last:border-0" aria-busy={busy}>
+      <div className="flex flex-wrap items-center gap-2.5 py-2.5">
         <Icon className={cn('h-4 w-4 shrink-0', latest ? 'text-navy-600' : 'text-ink-300')} />
         <div className="min-w-0 flex-1">
           <p className="text-sm text-ink">{label}</p>
@@ -230,18 +273,20 @@ export function DocumentSlotRow({
               <FileLink url={latest.url} title={`Open ${latest.name}`}>
                 {latest.name}
               </FileLink>{' '}
-              · {latest.sizeKb} KB · {dateTimeLabel(latest.uploadedAt)}
+              · v{latest.version} · {latest.sizeKb} KB
             </p>
           ) : (
             <p className="text-micro text-ink-300">Not uploaded</p>
           )}
         </div>
-        {versions.length > 1 && (
+        {versions.length > 0 && (
           <button
+            type="button"
+            aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
             className="shrink-0 text-micro text-ink-400 hover:text-ink tnum"
           >
-            {versions.length} versions
+            {open ? 'Hide history' : `History (${versions.length})`}
           </button>
         )}
         {latest && (
@@ -249,9 +294,11 @@ export function DocumentSlotRow({
             View
           </FileLink>
         )}
+        {latest && <DownloadLink file={latest} />}
         {onUpload && (
           <>
             <button
+              type="button"
               onClick={() => pickRef.current?.click()}
               disabled={busy}
               className="shrink-0 text-xs font-medium text-navy-700 hover:text-navy-600 disabled:opacity-50"
@@ -261,30 +308,43 @@ export function DocumentSlotRow({
             <input
               ref={pickRef}
               type="file"
+              accept={DOCUMENT_ACCEPT}
+              aria-label={`Choose ${label}`}
+              disabled={busy}
               className="sr-only"
               tabIndex={-1}
               onChange={async (e) => {
-                const f = e.target.files?.[0]
-                if (!f) return
+                const f = e.currentTarget.files?.[0]
+                e.currentTarget.value = ''
+                if (!f || inFlight.current) return
+                const invalid = documentFileError(f)
+                setError(invalid ?? null)
+                if (invalid) return
+                inFlight.current = true
                 setBusy(true)
                 try {
                   await onUpload(f)
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'The file was not uploaded. Please try again.')
                 } finally {
+                  inFlight.current = false
                   setBusy(false)
-                  e.target.value = ''
                 }
               }}
             />
           </>
         )}
       </div>
+      {error && <p role="alert" className="mb-2 ml-7 text-xs text-stamp-700">{error}</p>}
       {open && (
         <ul className="mb-2 ml-7 space-y-1 border-l border-rule-soft pl-3">
-          {[...versions].reverse().map((v) => (
-            <li key={v.id} className="text-micro text-ink-400">
-              <span className="tnum">v{v.version}</span> · <FileLink url={v.url}>{v.name}</FileLink> ·{' '}
-              {v.uploadedBy} ·{' '}
-              {dateTimeLabel(v.uploadedAt)}
+          {newestFileVersions(versions).map((v, index) => (
+            <li key={v.id} className="flex items-start gap-2 text-micro text-ink-400">
+              <div className="min-w-0 flex-1">
+                <p className="break-words"><span className="tnum">v{v.version}{index === 0 ? ' · Latest' : ''}</span> · <FileLink url={v.url}>{v.name}</FileLink></p>
+                <p>{uploaderName?.(v.uploadedBy) || v.uploadedBy || 'Unknown uploader'} · {dateTimeLabel(v.uploadedAt)} · {v.sizeKb} KB</p>
+              </div>
+              <DownloadLink file={v} />
             </li>
           ))}
         </ul>

@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import Field, field_validator
@@ -12,6 +13,8 @@ class Settings(BaseSettings):
     """
     Configuration comes from the environment. In Dokploy these are set on the service;
     locally they come from backend/.env, independent of the working directory.
+    get_settings() can select a separate file through CRM_ENV_FILE for an isolated
+    process, without merging the default file into that configuration.
     """
 
     model_config = SettingsConfigDict(env_file=BACKEND_ROOT / ".env", extra="ignore")
@@ -22,6 +25,22 @@ class Settings(BaseSettings):
     # The agency's timezone decides what "today" and "end of day" mean for the
     # 48-hour SLA, the daily-remark check and the escalation scan.
     agency_timezone: str = "Asia/Kolkata"
+
+    whatsapp_enabled: bool = False
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_graph_version: str | None = None
+    whatsapp_access_token: str | None = Field(default=None, repr=False)
+    whatsapp_app_secret: str | None = Field(default=None, repr=False)
+    whatsapp_verify_token: str | None = Field(default=None, repr=False)
+
+    # Optional S3-compatible storage; existing local keys remain readable.
+    storage_backend: str = "local"
+    s3_bucket: str | None = None
+    s3_region: str = "us-east-1"
+    s3_endpoint_url: str | None = None
+    s3_access_key_id: str | None = Field(default=None, repr=False)
+    s3_secret_access_key: str | None = Field(default=None, repr=False)
+    s3_prefix: str = "crm"
 
     # Where the built SPA lives inside the image.
     static_dir: str = str(BACKEND_ROOT / "static")
@@ -60,6 +79,18 @@ class Settings(BaseSettings):
     imap_folder: str = "INBOX"
     # Optional multiple accounts using the same keys as the single IMAP settings.
     email_accounts_json: str | None = Field(default=None, repr=False)
+    # OAuth encryption uses a persistent Fernet key. Tokens never leave the server.
+    mail_token_encryption_key: str | None = Field(default=None, repr=False)
+    gmail_client_id: str | None = None
+    gmail_client_secret: str | None = Field(default=None, repr=False)
+    gmail_redirect_uri: str | None = None
+    microsoft_client_id: str | None = None
+    microsoft_client_secret: str | None = Field(default=None, repr=False)
+    microsoft_redirect_uri: str | None = None
+    microsoft_tenant: str = "common"
+    smtp_server: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_use_ssl: bool = False
 
     @field_validator("database_url")
     @classmethod
@@ -83,4 +114,9 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    override = os.environ.get("CRM_ENV_FILE")
+    if override is None:
+        return Settings()
+    if not override.strip() or not Path(override).is_file():
+        raise ValueError("CRM_ENV_FILE must name an existing environment file.")
+    return Settings(_env_file=Path(override))

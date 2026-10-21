@@ -29,6 +29,9 @@ def configured_mailboxes(settings) -> dict[str, MailConfig]:
                 host=item["host"], port=int(item.get("port", 993)),
                 username=item["username"], password=item["password"],
                 folder=item.get("folder", "INBOX"), use_ssl=item.get("use_ssl", True),
+                smtp_host=item.get("smtp_host", getattr(settings, "smtp_server", None)),
+                smtp_port=int(item.get("smtp_port", getattr(settings, "smtp_port", 587))),
+                smtp_use_ssl=item.get("smtp_use_ssl", getattr(settings, "smtp_use_ssl", False)),
             )
     except (KeyError, ValueError, TypeError):
         raise ValueError("Each mailbox needs a unique username, host, port and app password.") from None

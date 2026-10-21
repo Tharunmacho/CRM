@@ -35,6 +35,11 @@ export function fileHref(url: string) {
   return `${BASE}${url}`
 }
 
+/** Resolve public API links against the same base used by API requests. */
+export function absoluteApiHref(path: string) {
+  return new URL(fileHref(path), window.location.origin).href
+}
+
 interface RequestOptions {
   signal?: AbortSignal
 }
@@ -103,6 +108,7 @@ function safeParse(text: string): unknown {
 
 function messageFrom(detail: unknown): string | undefined {
   if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((item) => typeof item?.msg === 'string' ? `${(item.loc ?? []).filter((part: unknown) => part !== 'body').join('.')}: ${item.msg}` : '').filter(Boolean).join('; ') || undefined
   if (detail && typeof detail === 'object' && 'message' in detail) {
     return String((detail as { message: unknown }).message)
   }
@@ -207,6 +213,7 @@ export interface OcrInspection {
   page_count: number
   resume_pages: number[]
   passport_pages?: number[]
+  aadhaar_pages?: number[]
   selected_pages?: number[]
   unread_pages: number[]
   unknown_pages: number[]
@@ -235,12 +242,13 @@ export interface OcrScan {
 export interface InboxAccount {
   id: string
   address: string
-  provider: 'gmail' | 'microsoft' | 'imap'
+  provider: 'gmail' | 'microsoft' | 'imap' | 'zoho'
   autoIngest: boolean
   lastSyncAt: string | null
   configured: boolean
   connectionStatus: string
   lastError: string | null
+  disconnectedAt?: string | null
 }
 
 export interface InboxInspection {
@@ -269,11 +277,16 @@ export interface InboxJob {
 export interface InboxSnapshot {
   accounts: InboxAccount[]
   availableAccounts: string[]
+  providers?: { provider: 'gmail' | 'microsoft'; ready: boolean; message: string }[]
+  total?: number
+  offset?: number
+  limit?: number
+  hasMore?: boolean
   messages: (Omit<MailMessage, 'attachments'> & {
     attachments: { id: string; fileName: string; sizeKb: number; kind: string; url?: string }[]
   })[]
   jobs: InboxJob[]
-  worker: { enabled: boolean; lastHeartbeat: string | null }
+  worker: { enabled: boolean; lastHeartbeat: string | null; extractionHeartbeat?: string | null }
 }
 
 export interface InboxHealth {
@@ -294,6 +307,7 @@ async function ocr(kind: 'resume' | 'passport', file: File, options: RequestOpti
 export const api = {
   upload,
   ocr,
+  form: <T>(path: string, form: FormData) => postForm<T>(path, form, 'The attachment could not be uploaded.'),
   inbox: {
     get: (options?: RequestOptions) => request<InboxSnapshot>('GET', '/inbox', undefined, options),
     revision: (options?: RequestOptions) => request<{ revision?: string }>('GET', '/inbox/revision', undefined, options),
@@ -307,7 +321,7 @@ export const api = {
     retry: (jobId: string) => request<{ status: 'queued' }>('POST', `/inbox/jobs/${encodeURIComponent(jobId)}/retry`),
   },
   get: <T>(path: string, options?: RequestOptions) => request<T>('GET', path, undefined, options),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  post: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>('POST', path, body, options),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   del: <T>(path: string) => request<T>('DELETE', path),

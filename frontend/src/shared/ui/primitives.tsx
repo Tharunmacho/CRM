@@ -44,6 +44,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <button
       ref={ref}
+      type="button"
       className={cn(
         'ui-button inline-flex items-center justify-center rounded-control font-medium transition-colors',
         `ui-button-${variant}`,
@@ -72,6 +73,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   return (
     <button
       ref={ref}
+      type="button"
       aria-label={label}
       title={label}
       className={cn(
@@ -265,12 +267,14 @@ export function Switch({
   label,
   description,
   disabled,
+  compact = false,
 }: {
   checked: boolean
   onChange: (v: boolean) => void
   label?: string
   description?: string
   disabled?: boolean
+  compact?: boolean
 }) {
   const control = (
     <button
@@ -295,7 +299,7 @@ export function Switch({
     </button>
   )
 
-  if (!label) return control
+  if (!label || compact) return control
 
   return (
     <label

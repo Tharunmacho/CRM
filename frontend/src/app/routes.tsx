@@ -12,6 +12,7 @@ const AppShell = lazy(() =>
 )
 const DashboardPage = lazy(() => import('@/features/dashboard/pages/dashboard'))
 const InboxPage = lazy(() => import('@/features/inbox/pages/inbox'))
+const WhatsAppPage = lazy(() => import('@/features/inbox/pages/whatsapp'))
 const ClientsPage = lazy(() => import('@/features/clients/pages/clients'))
 const ClientDetailPage = lazy(() => import('@/features/clients/pages/client-detail'))
 const CompaniesPage = lazy(() => import('@/features/companies/pages/companies'))
@@ -22,6 +23,7 @@ const DataBankPage = lazy(() => import('@/features/candidates/pages/data-bank'))
 const MappedCandidatesPage = lazy(() => import('@/features/workflow/pages/mapped-candidates'))
 const CandidateProfilePage = lazy(() => import('@/features/candidates/pages/candidate-profile'))
 const TasksPage = lazy(() => import('@/features/tasks/pages/tasks'))
+const AttendancePage = lazy(() => import('@/features/attendance/pages/attendance'))
 const TodoPage = lazy(() => import('@/features/todos/pages/todo'))
 const ReportsPage = lazy(() => import('@/features/reports/pages/reports'))
 const UsersPage = lazy(() => import('@/features/users/pages/users'))
@@ -72,6 +74,7 @@ export default function AppRoutes() {
           <Route element={<RequireAuth />}>
             <Route index element={<DashboardPage />} />
             <Route path="inbox" element={<InboxPage />} />
+            <Route path="whatsapp" element={<WhatsAppPage />} />
             <Route path="clients" element={<ClientsPage />} />
             <Route path="clients/:id" element={<ClientDetailPage />} />
             <Route path="companies" element={<CompaniesPage />} />
@@ -82,6 +85,7 @@ export default function AppRoutes() {
             <Route path="mapped" element={<MappedCandidatesPage />} />
             <Route path="candidates/:id" element={<CandidateProfilePage />} />
             <Route path="tasks" element={<TasksPage />} />
+            <Route path="attendance" element={<AttendancePage />} />
             <Route
               path="todo"
               element={

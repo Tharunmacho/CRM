@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, PhoneCall, Link2 } from 'lucide-react'
+import { ArrowLeft, PhoneCall, Link2, Pencil } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel, smartTime } from '@/shared/lib/format'
+import { DOCUMENT_HELP } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
 import { api } from '@/shared/api/client'
 import { closureLabels, stageByNo } from '@/shared/workflow/stages'
@@ -21,6 +22,8 @@ import { Dialog } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { MapToOrderDialog } from '@/features/candidates/components/map-dialog'
 import { CandidateSections, type CandidateOcr } from '@/features/candidates/components/profile-sections'
+import { CandidateEditDialog } from '../components/candidate-edit-dialog'
+import { EmailEvidenceHistory } from '@/features/inbox/email-evidence-history'
 
 export default function CandidateProfilePage() {
   const { id } = useParams()
@@ -31,6 +34,7 @@ export default function CandidateProfilePage() {
   const [openApp, setOpenApp] = useState<string | null>(null)
   const [calling, setCalling] = useState(false)
   const [mapping, setMapping] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   // The stored OCR output is not in the bootstrap, so the profile fetches it for itself.
   const { notify } = store
@@ -61,6 +65,7 @@ export default function CandidateProfilePage() {
   const owner = store.user(cand.ownerId)
   const apps = store.applicationsFor(cand.id)
   const active = apps.find((a) => a.status === 'active')
+  const deployed = apps.some((a) => a.status === 'deployed') || cand.status === 'deployed'
   const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
 
   return (
@@ -86,7 +91,8 @@ export default function CandidateProfilePage() {
         }
         actions={
           <>
-            {!active && (
+            {canWork && <Button icon={<Pencil size={14} />} onClick={() => setEditing(true)}>Correct profile</Button>}
+            {!active && !deployed && (
               <Button variant="primary" icon={<Link2 className="h-4 w-4" />} onClick={() => setMapping(true)}>
                 Map to an order
               </Button>
@@ -116,7 +122,7 @@ export default function CandidateProfilePage() {
               <EmptyState
                 title="Not mapped to any order"
                 description="The stage modal unlocks once this candidate is matched from an order page."
-                action={<Button variant="primary" onClick={() => setMapping(true)}>Map to an order</Button>}
+                action={!deployed ? <Button variant="primary" onClick={() => setMapping(true)}>Map to an order</Button> : undefined}
               />
             ) : (
               <ul>
@@ -159,7 +165,7 @@ export default function CandidateProfilePage() {
             <PanelHeader
               title="Initial call"
               action={
-                canWork && (
+                canWork && !active && !deployed && (
                   <Button size="sm" variant="secondary" icon={<PhoneCall className="h-3.5 w-3.5" />} onClick={() => setCalling(true)}>
                     {cand.callOutcome ? 'Update' : 'Record'}
                   </Button>
@@ -167,6 +173,7 @@ export default function CandidateProfilePage() {
               }
             />
             <div className="px-4 py-3.5">
+              {(active || deployed) && <p className="mb-2 text-xs text-ink-500">Record further call outcomes in the application workflow.</p>}
               {cand.callOutcome ? (
                 <>
                   <div className="flex items-center gap-2">
@@ -195,42 +202,49 @@ export default function CandidateProfilePage() {
             <PanelHeader title="Owner" />
             <div className="flex items-center gap-2.5 px-4 py-3.5">
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-ink">{owner?.name}</p>
+                <p className="truncate text-sm font-medium text-ink">{owner?.name || 'Needs assignment'}</p>
                 <p className="truncate text-micro capitalize text-ink-400">{owner?.role}</p>
               </div>
             </div>
           </Panel>
 
           <Panel flush>
-            <PanelHeader title="Documents" meta="Nothing is overwritten — replacing a file adds a version." />
+            <PanelHeader title="Documents" meta="View or download any version. Replacing a file keeps its history." />
+            {canWork && <p className="px-4 pb-2 text-micro text-ink-400">{DOCUMENT_HELP}</p>}
             <div className="px-4">
               {cand.documents.map((d) => (
                 <DocumentSlotRow
                   key={d.key}
                   label={d.label}
                   versions={d.versions}
+                  uploaderName={(userId) => store.user(userId)?.name || 'Former team member'}
                   onUpload={
-                    canWork
+                    canWork && d.key !== 'source_bundle'
                       ? async (file) => {
+                          await api.upload('candidate', cand.id, d.key, file)
                           try {
-                            await api.upload('candidate', cand.id, d.key, file)
                             await store.refresh()
                             store.notify(`${d.label} uploaded`)
                           } catch (err) {
-                            store.notify((err as Error).message || 'Upload failed', 'warn')
+                            store.notify(`${d.label} was uploaded. Reload the page to see the saved version.`, 'warn')
                           }
                         }
                       : undefined
                   }
                 />
               ))}
+              {cand.documents.some((d) => d.key === 'source_bundle' && d.versions.length > 0) && (
+                <p className="py-2 text-micro text-ink-400">Original documents are kept as received. Upload corrections to the matching document above.</p>
+              )}
+              <EmailEvidenceHistory candidateId={cand.id} />
             </div>
           </Panel>
         </div>
       </div>
 
       <CallDialog open={calling} onClose={() => setCalling(false)} candidateId={cand.id} />
-      <MapToOrderDialog open={mapping} onClose={() => setMapping(false)} candidateId={cand.id} />
+      {editing && <CandidateEditDialog candidate={cand} onClose={() => setEditing(false)} />}
+      {mapping && <MapToOrderDialog open onClose={() => setMapping(false)} candidateId={cand.id} />}
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
     </>
   )
@@ -248,54 +262,62 @@ function CallDialog({
   const { recordCall } = useStore()
   const [interested, setInterested] = useState('')
   const [remarks, setRemarks] = useState('')
+  const [called, setCalled] = useState('yes')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose() }}
       title="Record the call outcome"
-      description="This closes the initial-call task. Not interested keeps the candidate in the Data Bank for other orders."
+      description="A confirmed interested or not-interested outcome completes the initial-call task. An unanswered or unmade call remains open."
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" disabled={saving} onClick={onClose}>
             Cancel
           </Button>
           <Button
             variant="primary"
-            disabled={!interested}
-            onClick={() => {
-              void recordCall(candidateId, interested, remarks)
-              setInterested('')
-              setRemarks('')
-              onClose()
+            disabled={saving || !interested}
+            onClick={async () => {
+              if (saving) return
+              setSaving(true); setError('')
+              try {
+                await recordCall(candidateId, interested, remarks, called === 'yes')
+                setInterested(''); setRemarks(''); setCalled('yes'); onClose()
+              } catch (error) { setError(error instanceof Error ? error.message : 'The call outcome was not saved.') } finally { setSaving(false) }
             }}
           >
-            Save outcome
+            {saving ? 'Saving…' : 'Save outcome'}
           </Button>
         </>
       }
     >
-      <div className="space-y-4">
+      <fieldset disabled={saving} className="min-w-0 space-y-4">
+        <Field label="Called" required><RadioRow name="called" value={called} onChange={value => { setCalled(value); if (value === 'no') setInterested('unreachable') }} options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} /></Field>
         <Field label="Interested" required>
           <RadioRow
             name="interested"
             value={interested}
             onChange={setInterested}
-            options={[
+            options={called === 'no' ? [{ value: 'unreachable', label: 'Not contacted yet' }] : [
               { value: 'yes', label: 'Yes' },
               { value: 'no', label: 'No' },
               { value: 'unreachable', label: 'Not reachable' },
             ]}
           />
         </Field>
+        {error && <p role="alert" className="text-sm text-stamp-600">{error}</p>}
         <Field label="Remarks">
           <Textarea
+            maxLength={10000}
             value={remarks}
             onChange={(e) => setRemarks(e.target.value)}
             placeholder="What the candidate said"
           />
         </Field>
-      </div>
+      </fieldset>
     </Dialog>
   )
 }

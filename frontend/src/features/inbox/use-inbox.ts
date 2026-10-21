@@ -5,7 +5,7 @@ import { createLatestRequest } from '@/shared/api/latest-request'
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'The inbox request failed. Please try again.'
 
 /** Inbox owns its snapshot; reading mail does not reload the entire CRM. */
-export function useInbox(identityId: string, isCurrentSession: () => boolean) {
+export function useInbox(identityId: string, isCurrentSession: () => boolean, search = '') {
   const [data, setData] = useState<InboxSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -27,7 +27,7 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean) {
     setRefreshing(true)
     try {
       await requests[afterWrite ? 'replace' : 'run'](
-        (signal) => api.inbox.get({ signal }),
+        (signal) => search ? api.get<InboxSnapshot>(`/inbox?${search}`, { signal }) : api.inbox.get({ signal }),
         (snapshot) => {
           if (!mounted.current || generation.current !== currentGeneration || !ownsSession()) return
           setData(snapshot)
@@ -43,7 +43,7 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean) {
         setRefreshing(false)
       }
     }
-  }, [requests])
+  }, [requests, search])
 
   useEffect(() => {
     generation.current += 1

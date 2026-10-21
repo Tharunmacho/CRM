@@ -44,6 +44,13 @@ class InboundMessage:
     uid_validity: str | None = None
     folder: str | None = None
     warnings: tuple[str, ...] = ()
+    message_id_header: str | None = None
+    references_header: str | None = None
+    reply_to: str | None = None
+    to_addresses: tuple[str, ...] = ()
+    cc_addresses: tuple[str, ...] = ()
+    bcc_addresses: tuple[str, ...] = ()
+    starred: bool = False
 
     def source_key(self, account_id: str) -> str:
         """Provider identifiers are scoped by the immutable CRM account ID."""

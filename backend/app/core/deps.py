@@ -30,7 +30,8 @@ def current_user(
 
     row, user = result
     if row.expires_at <= datetime.now(timezone.utc):
-        db.delete(row)
+        from app.services.staff_activity import logout_session
+        logout_session(db, row.id)
         db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired")
 

@@ -150,10 +150,7 @@ def test_matching_schema_execs_api_with_correct_paths_and_port(launch, monkeypat
     assert len(launch.calls) == 1
     call = launch.calls[0]
     assert call["executable"] == sys.executable
-    assert call["arguments"] == [
-        sys.executable, "-m", "uvicorn", "app.main:app",
-        "--host", "0.0.0.0", "--port", "9017" if custom else "8000",
-    ]
+    assert call["arguments"] == [sys.executable, "-m", "app.runtime"]
     assert call["cwd"] == BACKEND
     # Alembic can prepend its own configured script paths while resolving heads.
     # The launcher's backend import directory must remain available afterward.
@@ -176,13 +173,13 @@ def test_enabled_email_uses_supervisor_after_schema_validation(launch, monkeypat
 
 
 @pytest.mark.parametrize("value", ["false", "0", "off", "n", "f", "NO"])
-def test_disabled_email_uses_api_only_for_all_supported_false_values(launch, monkeypatch, value):
+def test_disabled_email_keeps_task_and_document_supervisor(launch, monkeypatch, value):
     monkeypatch.setenv("EMAIL_INGESTION_ENABLED", value)
 
     with pytest.raises(ApiStarted):
         launch.main()
 
-    assert launch.calls[0]["arguments"][1:4] == ["-m", "uvicorn", "app.main:app"]
+    assert launch.calls[0]["arguments"] == [sys.executable, "-m", "app.runtime"]
 
 
 def test_launcher_uses_parsed_settings_when_flag_is_not_in_process_environment(launch, monkeypatch):

@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routers.candidates import lock_assignment_cursor, next_owner
@@ -28,6 +28,9 @@ from app.services.document_extraction import (
     extract_attachment, ExtractionPending, request_extraction_retry,
 )
 from app.services.mail_config import configured_mailboxes
+from app.services.zoho_mail import account_config
+from app.services.candidate_identity import identity_matches, enrich_empty, normalize_candidate_values, normalize_phone, normalize_email, normalize_passport
+from app.services.document_storage import put_bytes, read_bytes
 
 log = logging.getLogger(__name__)
 
@@ -44,30 +47,29 @@ def store_original(settings, account_id: str, message_key: str, ordinal: int, da
     digest = hashlib.sha256(data).hexdigest()
     receipt = hashlib.sha256(message_key.encode()).hexdigest()
     key = f"email/{account_id}/{receipt}/{ordinal}-{digest}.bin"
-    target = Path(settings.storage_dir) / key
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(f".{uuid.uuid4().hex}.tmp")
-    temporary.write_bytes(data)
-    temporary.replace(target)
-    return key
+    return put_bytes(settings, key, data, "application/octet-stream")
 
 
 def receive_account(account_id, *, sessions, settings):
     """Commit originals/receipts before advancing the IMAP cursor; never mark read."""
-    configs = configured_mailboxes(settings)
     with sessions() as db:
         account = db.get(MailAccount, account_id)
-        if not account:
+        if not account or account.disconnected_at:
             return
         address, cursor = account.address, dict(account.sync_state)
         auto = account.auto_ingest
-    if address not in configs:
-        raise ValueError("Mailbox credentials are missing from the server environment.")
-    require_cursor_source(cursor, configs[address])
-    with IMAPMailbox(configs[address]) as mailbox:
+        config = account_config(db, settings, account)
+        if config is None:
+            raise ValueError("Mailbox credentials are missing from the server environment.")
+    require_cursor_source(cursor, config)
+    with IMAPMailbox(config) as mailbox:
         uids = mailbox.list_uids(after_uid=cursor["last_uid"],
                                  uid_validity=cursor["uid_validity"], limit=25)
         for uid in uids:
+            with sessions() as db:
+                current_account = db.get(MailAccount, account_id)
+                if not current_account or current_account.disconnected_at:
+                    return
             try:
                 incoming = mailbox.fetch(uid, uid_validity=cursor["uid_validity"])
             except MailMessageError as exc:
@@ -86,8 +88,8 @@ def receive_account(account_id, *, sessions, settings):
                         db.flush()
                         db.add(EmailIngestionJob(message_id=message.id, status="failed",
                                                 last_error=str(exc), state={"receive_error": True}))
-                    account = db.get(MailAccount, account_id)
-                    account.sync_state = {**cursor, "last_uid": uid}
+                    account = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
+                    account.sync_state = {**account.sync_state, "last_uid": uid}
                     db.commit()
                 cursor["last_uid"] = uid
                 continue
@@ -96,6 +98,7 @@ def receive_account(account_id, *, sessions, settings):
                 for index, part in enumerate(incoming.attachments)
             ]
             with sessions() as db:
+                db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
                 message = db.scalar(select(MailMessage).where(
                     MailMessage.account_id == account_id, MailMessage.provider_message_id == incoming.provider_id))
                 if message is None:
@@ -104,6 +107,11 @@ def receive_account(account_id, *, sessions, settings):
                         from_name=incoming.from_name[:200], from_address=incoming.from_address[:255],
                         subject=incoming.subject, body=incoming.body, received_at=incoming.received_at,
                         unread=incoming.unread,
+                        message_id_header=incoming.message_id_header,
+                        references_header=incoming.references_header, reply_to=incoming.reply_to,
+                        folder=incoming.folder or "INBOX", remote_uid=incoming.uid, uid_validity=incoming.uid_validity,
+                        to_addresses=list(incoming.to_addresses), cc_addresses=list(incoming.cc_addresses),
+                        bcc_addresses=list(incoming.bcc_addresses), starred=incoming.starred,
                     )
                     db.add(message)
                     db.flush()
@@ -113,10 +121,10 @@ def receive_account(account_id, *, sessions, settings):
                             size_kb=(len(part.data) + 1023) // 1024,
                             object_key=key, content_hash=part.content_hash,
                         ))
-                    if auto and stored:
-                        db.add(EmailIngestionJob(message_id=message.id, state={}))
-                account = db.get(MailAccount, account_id)
-                account.sync_state = {**cursor, "last_uid": uid}
+                if auto and stored and not db.scalar(select(EmailIngestionJob.id).where(EmailIngestionJob.message_id == message.id)):
+                    db.add(EmailIngestionJob(message_id=message.id, state={}))
+                account = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
+                account.sync_state = {**account.sync_state, "last_uid": uid}
                 account.worker_seen_at = now()
                 db.commit()
             cursor["last_uid"] = uid
@@ -146,7 +154,9 @@ def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
             for key in ("phone", "email", "passport_no", "dob", "gender"):
                 value = current.get(key)
                 normalized = (
-                    re.sub(r"\D", "", value)[-10:] if key == "phone" and value
+                    normalize_phone(value) if key == "phone" and value
+                    else normalize_email(value) if key == "email" and value
+                    else normalize_passport(value) if key == "passport_no" and value
                     else str(parse_loose_date(str(value)) or "") if key == "dob" and value
                     else str(value or "").strip().casefold()
                 )
@@ -169,15 +179,7 @@ def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
 
 
 def _duplicates(db, fields):
-    clauses = []
-    digits = re.sub(r"\D", "", fields.get("phone") or "")
-    if len(digits) >= 10:
-        clauses.append(func.right(func.regexp_replace(Candidate.phone, r"\D", "", "g"), 10) == digits[-10:])
-    if fields.get("email"):
-        clauses.append(func.lower(func.trim(Candidate.email)) == fields["email"].strip().lower())
-    if fields.get("passport_no"):
-        clauses.append(func.upper(func.trim(Candidate.passport_no)) == fields["passport_no"].strip().upper())
-    return list(db.scalars(select(Candidate).where(or_(*clauses)).with_for_update())) if clauses else []
+    return [candidate for candidate, _ in identity_matches(db, fields)]
 
 
 def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict]):
@@ -202,6 +204,7 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict]):
             values[name] = parse_loose_date(str(fields[name]))
     if fields.get("designation"):
         values["designations"] = [fields["designation"]]
+    values = normalize_candidate_values(values)
     review = review or not values.get("name") or not values.get("phone")
     if created:
         owner = next_owner(db, pointer=pointer)
@@ -211,6 +214,7 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict]):
             ref=f"CND-E-{job.id.replace('-', '')}", name=values.pop("name", None) or "Name needs review",
             phone=values.pop("phone", None) or "", source=Source.email,
             source_detail=f"email_message:{message.id}", owner_id=owner.id if owner else None,
+            intake_owner_id=owner.id if owner else None,
             needs_review=review or owner is None,
             status=CandidateStatus.needs_review if review or owner is None else CandidateStatus.new,
             ocr_data=raw, **values,
@@ -218,9 +222,11 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict]):
         db.add(candidate)
         db.flush()
         if owner:
+            started = now()
             db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest",
-                        candidate_id=candidate.id, owner_id=owner.id, created_at=now()))
-        recipients = set(db.scalars(select(User.id).where(User.role == Role.admin, User.active.is_(True))))
+                        candidate_id=candidate.id, owner_id=owner.id, created_at=started,
+                        sla_started_at=started, due_at=started + timedelta(hours=48)))
+        recipients = set(db.scalars(select(User.id).where(User.role.in_([Role.admin, Role.manager]), User.active.is_(True))))
         if owner:
             recipients.add(owner.id)
         for recipient in recipients:
@@ -233,16 +239,7 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict]):
             raise IntakeReviewError("The date of birth conflicts with the existing candidate. Review the source documents.")
         if candidate.gender and values.get("gender") and candidate.gender.casefold() != values["gender"].casefold():
             raise IntakeReviewError("The gender conflicts with the existing candidate. Review the source documents.")
-        for name, value in values.items():
-            if getattr(candidate, name) in (None, "", [], 0):
-                setattr(candidate, name, value)
-        previous = copy.deepcopy(candidate.ocr_data or {})
-        for kind, value in raw.items():
-            if kind not in previous:
-                previous[kind] = value
-            else:
-                previous.setdefault("additional_documents", []).append({kind: value})
-        candidate.ocr_data = previous
+        enrich_empty(candidate, values, raw)
         # Existing ownership, status and human-corrected populated fields are preserved.
     text = "\n".join(page.get("text", "") for result in results
                      for kind, part in result.get("extractions", {}).items() if kind == "resume"
@@ -368,7 +365,7 @@ def process_job(job_id, *, sessions, settings):
             job.state = copy.deepcopy(state)
             job.inspection = _inspection_summary(state, attachments)
             job.updated_at = now()
-            db.get(MailAccount, account_id).worker_seen_at = now()
+            db.get(MailAccount, account_id).extraction_seen_at = now()
             db.commit()
 
     try:
@@ -376,7 +373,7 @@ def process_job(job_id, *, sessions, settings):
         for attachment in attachments:
             document_state = state.get(attachment.id, {})
             result = document_state.get("output")
-            data = (Path(settings.storage_dir) / attachment.object_key).read_bytes()
+            data = read_bytes(settings, attachment.object_key)
             if hashlib.sha256(data).hexdigest() != attachment.content_hash:
                 raise IntakeReviewError("Stored attachment checksum mismatch. Restore the original file before retrying.")
             if result is None:
@@ -421,7 +418,7 @@ def process_job(job_id, *, sessions, settings):
                     checkpoint(attachment.id, document_state)
                 else:
                     for document in documents.values():
-                        content = (Path(settings.storage_dir) / document["object_key"]).read_bytes()
+                        content = read_bytes(settings, document["object_key"])
                         if hashlib.sha256(content).hexdigest() != document["content_hash"]:
                             raise IntakeReviewError("A selected document checksum does not match. Restore it before retrying.")
             results.append(result)

@@ -11,7 +11,7 @@ import {
 import { ApiError, api } from '@/shared/api/client'
 import { createLatestRequest } from '@/shared/api/latest-request'
 import { createIngestionRefresh } from '@/shared/api/ingestion-refresh'
-import { isSameDay } from '@/shared/lib/format'
+import { agencyDay } from '@/shared/lib/task-time'
 import type {
   Application,
   Candidate,
@@ -39,6 +39,7 @@ import type {
  */
 
 interface Data {
+  agencyTimezone?: string
   ingestionRevision?: string
   users: User[]
   clients: Client[]
@@ -120,7 +121,7 @@ interface StoreValue extends Data {
 
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
-  refresh: () => Promise<void>
+  refresh: (options?: { keepCurrent?: boolean }) => Promise<void>
   notify: (message: string, tone?: 'ok' | 'warn') => void
   dismissToast: () => void
 
@@ -144,10 +145,11 @@ interface StoreValue extends Data {
   // Writes. Each posts and then reloads, so nothing is left only in the browser.
   saveDraft: (applicationId: string, data: Record<string, unknown>, lockVersion: number) => Promise<void>
   completeStage: (applicationId: string, lockVersion: number) => Promise<void>
-  mapCandidate: (candidateId: string, orderId: string) => Promise<void>
+  mapCandidate: (candidateId: string, orderId: string) => Promise<{ refreshed: boolean } | null>
   unmap: (applicationId: string) => Promise<void>
   addRemark: (taskId: string, body: string) => Promise<void>
-  recordCall: (candidateId: string, interested: string, remarks: string) => Promise<void>
+  recordCall: (candidateId: string, interested: string, remarks: string, called?: boolean) => Promise<void>
+  markNotificationRead: (id?: string) => Promise<void>
   addCandidate: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
   addClient: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
   addCompany: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
@@ -228,10 +230,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [requests],
   )
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((options: { keepCurrent?: boolean } = {}) => {
     // This can follow a write outside the store too (for example a file upload).
     // A read that started before that write must not supply the refreshed snapshot.
-    return loadWorkspace(false, true)
+    return loadWorkspace(false, true, Boolean(options.keepCurrent))
   }, [loadWorkspace])
 
   const retryStartup = useCallback(async () => {
@@ -290,6 +292,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [me?.id, ready, loadError, loadWorkspace])
 
+  useEffect(() => {
+    if (!me || !ready) return
+    const version = authVersion.current
+    const controller = new AbortController()
+    let running = false
+    const check = async () => {
+      if (running || document.visibilityState !== 'visible') return
+      running = true
+      try {
+        const items = await api.get<Notification[]>('/notifications', { signal: controller.signal })
+        if (!controller.signal.aborted && version === authVersion.current) {
+          const hasNew = items.some((n) => !currentData.current.notifications.some((old) => old.id === n.id))
+          setData((current) => ({ ...current, notifications: items.map((n) => ({ ...n, read: n.read || Boolean(current.notifications.find((old) => old.id === n.id)?.read) })) }))
+          if (hasNew) await loadWorkspace(false, false, true)
+        }
+      } catch (error) {
+        if (!controller.signal.aborted && error instanceof ApiError && error.isUnauthorised) void loadWorkspace(false, false, true).catch(() => {})
+      } finally { running = false }
+    }
+    const timer = window.setInterval(() => void check(), 30_000)
+    return () => { controller.abort(); window.clearInterval(timer) }
+  }, [me?.id, ready, loadWorkspace])
+
   const queueAuthWrite = useCallback((write: () => Promise<unknown>) => {
     pendingAuthWrites.current += 1
     const result = authQueue.current.then(write).finally(() => {
@@ -307,7 +332,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const result = await work()
         if (version !== authVersion.current) return null
-        await refresh()
+        try { await refresh({ keepCurrent: true }) }
+        catch {
+          if (version === authVersion.current) notify('Saved. The workspace could not refresh; reload to see the latest records.', 'warn')
+          return version === authVersion.current ? result : null
+        }
         if (version !== authVersion.current) return null
         if (success) notify(success)
         return result
@@ -378,7 +407,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       signOut,
       // Callbacks retained by an upload/dialog from an old session must not
       // refresh or show notifications in the account that signed in afterward.
-      refresh: () => (isCurrentSession() ? refresh() : Promise.resolve()),
+      refresh: (options) => (isCurrentSession() ? refresh(options) : Promise.resolve()),
       notify: (message, tone) => {
         if (version === authVersion.current) notify(message, tone)
       },
@@ -410,7 +439,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           .filter((r) => r.taskId === taskId)
           .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
       updatedToday: (taskId) =>
-        data.remarks.some((r) => r.taskId === taskId && isSameDay(r.createdAt, new Date())),
+        data.remarks.some((r) => r.taskId === taskId && r.authorId === data.tasks.find((t) => t.id === taskId)?.ownerId && agencyDay(r.createdAt, data.agencyTimezone) === agencyDay(new Date(), data.agencyTimezone)),
 
       saveDraft: async (applicationId, draft, lockVersion) => {
         await run(
@@ -425,10 +454,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         )
       },
       mapCandidate: async (candidateId, orderId) => {
-        await run(
-          () => api.post('/applications', { candidate_id: candidateId, order_id: orderId }),
-          'Mapped. Stage 1 task raised.',
-        )
+        try { await api.post('/applications', { candidate_id: candidateId, order_id: orderId }) }
+        catch (error) {
+          if (isCurrentSession()) notify(error instanceof Error ? error.message : 'Mapping failed', 'warn')
+          throw error
+        }
+        if (!isCurrentSession()) return null
+        try {
+          await refresh({ keepCurrent: true })
+          if (!isCurrentSession()) return null
+          notify('Mapped. Stage 1 task raised.')
+          return { refreshed: true }
+        } catch {
+          if (!isCurrentSession()) return null
+          notify('Candidate mapped. The directory could not refresh; refresh the results to see the change.', 'warn')
+          return { refreshed: false }
+        }
       },
       unmap: async (applicationId) => {
         await run(
@@ -439,16 +480,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addRemark: async (taskId, body) => {
         await run(() => api.post(`/tasks/${taskId}/remarks`, { body }), 'Remark added')
       },
-      recordCall: async (candidateId, interested, remarks) => {
+      recordCall: async (candidateId, interested, remarks, called = true) => {
         await run(
-          () => api.post(`/candidates/${candidateId}/call`, { called: true, interested, remarks }),
+          () => api.post(`/candidates/${candidateId}/call`, { called, interested, remarks }),
           interested === 'no'
             ? 'Marked not interested. The candidate stays in the Data Bank.'
             : 'Call outcome recorded',
         )
       },
-      addCandidate: (payload) =>
-        run(() => api.post<{ id: string }>('/candidates', payload), 'Candidate saved and assigned'),
+      markNotificationRead: async (id) => {
+        await api.post(id ? `/notifications/${id}/read` : '/notifications/read-all')
+        if (isCurrentSession()) setData((current) => ({ ...current, notifications: current.notifications.map((n) => !id || n.id === id ? { ...n, read: true } : n) }))
+      },
+      addCandidate: async (payload) => {
+        const created = await api.post<{ id: string }>('/candidates', payload)
+        if (!isCurrentSession()) return null
+        // A refresh failure must not discard the saved ID and create a duplicate on retry.
+        try { await refresh({ keepCurrent: true }) }
+        catch { if (isCurrentSession()) notify('Candidate saved. The directory could not refresh; reopen it to try again.', 'warn') }
+        return isCurrentSession() ? created : null
+      },
       addClient: (payload) => run(() => api.post<{ id: string }>('/clients', payload), 'Client saved'),
       addCompany: (payload) => run(() => api.post<{ id: string }>('/companies', payload), 'Company saved'),
       deleteClient: async (id) => {

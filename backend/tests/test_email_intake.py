@@ -106,7 +106,7 @@ def intake(schema_database, tmp_path, monkeypatch):
     # Any accidental integration call is a test failure before network is possible.
     monkeypatch.setattr(subject, "IMAPMailbox", lambda *a, **kw: pytest.fail("Unexpected real mailbox"))
     monkeypatch.setattr(subject, "extract_attachment", lambda *a, **kw: pytest.fail("Unexpected OCR call"))
-    monkeypatch.setattr(subject, "configured_mailboxes", lambda _: MAIL_CONFIGS)
+    monkeypatch.setattr(subject, "account_config", lambda db, settings, account: MAIL_CONFIGS[account.address])
     return SimpleNamespace(sessions=sessions, settings=settings, engine=schema_database)
 
 

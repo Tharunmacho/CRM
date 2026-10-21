@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import shutil
 from uuid import UUID
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,3 +48,14 @@ def test_concurrent_creators_observe_one_complete_identity(tmp_path):
     assert len(set(values)) == 1
     assert storage_identity(tmp_path) == values[0]
     assert list(tmp_path.iterdir()) == [tmp_path / MARKER_NAME]
+
+
+def test_s3_identity_tracks_remote_namespace_not_local_worker_volume(tmp_path):
+    settings = SimpleNamespace(storage_backend="s3", s3_bucket="test-bucket", s3_prefix="crm", s3_endpoint_url="https://storage.example.test")
+    first = storage_identity(tmp_path / "worker-a", settings)
+    assert first.startswith("s3:")
+    assert first == storage_identity(tmp_path / "worker-b", settings)
+    assert not (tmp_path / "worker-a").exists()
+    settings.s3_prefix = "another-prefix"
+    assert first != storage_identity(tmp_path / "worker-a", settings)
+    assert first != storage_identity(tmp_path / "worker-a")

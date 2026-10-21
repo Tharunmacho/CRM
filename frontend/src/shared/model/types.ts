@@ -99,6 +99,7 @@ export interface Company {
   contactPerson?: string
   contactEmail?: string
   phone?: string
+  whatsapp?: string
   address?: string
   notes?: string
   status: 'active' | 'inactive'
@@ -146,6 +147,8 @@ export type ClosureReason =
   | 'unmapped'
 
 export interface StageRecord {
+  id?: string
+  ownerId?: string
   stage: number
   attempt: number
   data: Record<string, unknown>
@@ -159,6 +162,7 @@ export interface Application {
   id: string
   candidateId: string
   orderId: string
+  ownerId?: string
   currentStage: number
   status: ApplicationStatus
   closureReason?: ClosureReason
@@ -192,6 +196,9 @@ export interface Task {
   completedAt?: string
   cancelledAt?: string
   escalated: boolean
+  escalatedAt?: string
+  slaStartedAt?: string
+  dueAt?: string
 }
 
 export type Priority = 'high' | 'normal' | 'low'

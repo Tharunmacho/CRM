@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, Check, FileText, ScanLine, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
-import { api, ApiError, type OcrInspection, type OcrScan } from '@/shared/api/client'
-import type { Candidate } from '@/shared/model/types'
+import { api, ApiError, type OcrScan } from '@/shared/api/client'
 import { Badge, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { FileDrop } from '@/shared/ui/file-drop'
@@ -11,6 +10,9 @@ import { DatePicker } from '@/shared/ui/date-picker'
 import { Dialog } from '@/shared/ui/overlay'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { hasOcrExtraction, inspectedPageCount, mergeOcrForm, scanWarnings, type DocumentScans, type ScanKind } from '../ocr-form'
+import { normalizedSkills } from '../candidate-skills'
+import { scansFromJobs, useDocumentIntake } from '../use-document-intake'
+import { IntakeRecovery } from '../components/intake-recovery'
 
 const EMPTY = {
   name: '',
@@ -35,14 +37,16 @@ const EMPTY = {
 }
 
 type FormKey = keyof typeof EMPTY
-const SCAN_KINDS: ScanKind[] = ['resume', 'passport']
+type Duplicate = { id: string; ref: string; name: string; phone: string; ownerId: string | null; ownerName: string | null; matchedOn: string[] }
+const SCAN_KINDS: ScanKind[] = ['resume', 'passport', 'aadhaar']
 
 function DocumentReadReport({ kind, scan }: { kind: ScanKind; scan: OcrScan }) {
+  const label = kind === 'resume' ? 'Resume' : kind === 'passport' ? 'Passport' : 'Aadhaar'
   const inspection = scan.inspection
   const extracted = hasOcrExtraction(scan)
   const warnings = scanWarnings(scan)
   const selected = inspection?.selected_pages
-    ?? (kind === 'resume' ? inspection?.resume_pages : inspection?.passport_pages)
+    ?? (kind === 'resume' ? inspection?.resume_pages : kind === 'passport' ? inspection?.passport_pages : inspection?.aadhaar_pages)
   const list = (pages: number[] | undefined) => pages?.length ? pages.join(', ') : 'None'
   const title = scan.extraction_status === 'no_resume'
     ? 'No resume identified'
@@ -50,10 +54,10 @@ function DocumentReadReport({ kind, scan }: { kind: ScanKind; scan: OcrScan }) {
 
   return (
     <section
-      aria-label={`${kind === 'resume' ? 'Resume' : 'Passport'} reading result`}
+      aria-label={`${label} reading result`}
       className={`rounded-control border px-3 py-3 text-xs ${extracted ? 'border-navy-100 bg-navy-50 text-navy-700' : 'border-amber-200 bg-amber-50 text-amber-900'}`}
     >
-      <p className="font-semibold">{kind === 'resume' ? 'Resume' : 'Passport'}: {title}</p>
+      <p className="font-semibold">{label}: {title}</p>
       <p className="mt-1">
         {extracted
           ? 'Review the suggested details before saving. Fields you edited have been kept.'
@@ -102,12 +106,14 @@ function DocumentReadReport({ kind, scan }: { kind: ScanKind; scan: OcrScan }) {
 export default function AddCandidatePage() {
   const store = useStore()
   const navigate = useNavigate()
+  const intake = useDocumentIntake(store.me!.id)
   const [form, setForm] = useState(EMPTY)
-  // Files are chosen before the candidate exists, so they are held until it does.
-  const [pending, setPending] = useState<Record<string, File>>({})
   const [saving, setSaving] = useState(false)
+  const [savedCandidateId, setSavedCandidateId] = useState<string | null>(null)
+  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({})
+  const [saveError, setSaveError] = useState('')
 
-  const [duplicate, setDuplicate] = useState<{ candidate: Candidate; matchedOn: string[] } | null>(null)
+  const [duplicate, setDuplicate] = useState<{ candidate: Duplicate; matchedOn: string[] } | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   // Inspection can succeed without extraction, so it has its own visible result.
@@ -131,57 +137,70 @@ export default function AddCandidatePage() {
     setErrors((e) => ({ ...e, [k]: '' }))
   }
 
-  /** A replacement file makes the last reading of that document stale until read again. */
-  const choose = (kind: ScanKind) => (file: File) => {
-    if (readController.current || saving) return
-    setPending((p) => ({ ...p, [kind]: file }))
+  const snapshotDraft = (candidateId = savedCandidateId) => ({ form, editedFields: [...edited.current], savedCandidateId: candidateId })
+  const draftRef = useRef(snapshotDraft())
+  draftRef.current = snapshotDraft()
+  useEffect(() => {
+    if (!intake.jobs.length) return
+    const timer = setTimeout(() => { void intake.saveDraft(draftRef.current).catch(() => {}) }, 700)
+    return () => clearTimeout(timer)
+  }, [form, intake.jobs.length, savedCandidateId])
+
+  /** Originals are durable before reading; choosing a replacement keeps human edits. */
+  const choose = (kind: ScanKind) => async (file: File) => {
+    if (readController.current || saving || savedCandidateId) return
+    await intake.upload(kind, file)
+    if (!store.isCurrentSession()) return
     const { [kind]: _, ...remaining } = scansRef.current
     scansRef.current = remaining
     setScans(remaining)
-    setForm((prev) => mergeOcrForm(prev, EMPTY, remaining, edited.current))
+    setForm((previous) => mergeOcrForm(previous, EMPTY, remaining, edited.current))
     setReadErrors(({ [kind]: _, ...rest }) => rest)
-    setReadMessage('')
+    setReadMessage('Original saved. You can leave this page and resume this intake later.')
+    await intake.saveDraft(draftRef.current).catch(() => {})
   }
 
-  const chosen = SCAN_KINDS.filter((k) => pending[k])
+  const chosen = intake.jobs.filter((job) => SCAN_KINDS.some((kind) => job.kind === kind)).map((job) => job.kind)
+  const recoverIntake = async (groupId: string) => {
+    if (saving || reading || intake.uploading) return
+    try {
+      const recovered = await intake.recover(groupId)
+      const read = scansFromJobs(recovered.jobs)
+      const draft = recovered.draft
+      const savedForm = { ...EMPTY, ...(draft?.form ?? {}) }
+      const recoveredEdits = new Set<FormKey>((draft?.editedFields ?? []).filter((key): key is FormKey => Object.hasOwn(EMPTY, key)))
+      // Current unsaved human edits win when a saved intake is opened.
+      for (const key of edited.current) { savedForm[key] = form[key]; recoveredEdits.add(key) }
+      edited.current = recoveredEdits
+      scansRef.current = read
+      setScans(read)
+      setForm(mergeOcrForm(savedForm, EMPTY, read, edited.current))
+      setSavedCandidateId(draft?.savedCandidateId ?? recovered.jobs.find((job) => job.candidateId)?.candidateId ?? null)
+      setReadErrors({}); setSaveError('')
+      setReadMessage('Saved originals, reading progress and your form draft have been restored.')
+    } catch { /* The intake panel keeps the recovery error visible. */ }
+  }
 
   const readDocuments = async () => {
-    if (readController.current || saving || chosen.length === 0) return
+    if (readController.current || saving || savedCandidateId || intake.uploading || chosen.length === 0) return
     const controller = new AbortController()
     readController.current = controller
-    setReading(true)
-    setReadErrors({})
-    setReadMessage('')
-    // A retry must not show the previous attempt as its successful result.
-    scansRef.current = {}
-    setScans({})
-    const results = await Promise.allSettled(chosen.map((k) => api.ocr(k, pending[k], { signal: controller.signal })))
-    if (readController.current !== controller || !store.isCurrentSession()) return
-    const read: DocumentScans = {}
-    const failures: Partial<Record<ScanKind, string>> = {}
-    results.forEach((r, i) => {
-      const kind = chosen[i]
-      if (r.status === 'fulfilled') read[kind] = r.value
-      else {
-        const message = r.reason instanceof Error ? r.reason.message : 'The document could not be read. Please try again.'
-        const detail = r.reason instanceof ApiError
-          ? r.reason.detail as { inspection?: OcrInspection } | undefined
-          : undefined
-        if (detail?.inspection) {
-          read[kind] = {
-            fields: {}, raw: {}, warnings: [message],
-            inspection: detail.inspection, extraction_status: 'needs_review',
-          }
-        } else failures[kind] = message
-      }
-    })
-    scansRef.current = read
-    setScans(read)
-    setReadErrors(failures)
-    setForm((prev) => mergeOcrForm(prev, EMPTY, read, edited.current))
-    setErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => edited.current.has(key as FormKey))))
-    readController.current = null
-    setReading(false)
+    setReading(true); setReadErrors({}); setReadMessage('')
+    try {
+      await intake.saveDraft(snapshotDraft())
+      const jobs = await intake.read(controller.signal)
+      if (readController.current !== controller || !store.isCurrentSession()) return
+      const read = scansFromJobs(jobs)
+      const failures: Partial<Record<ScanKind, string>> = {}
+      for (const job of jobs) if (job.status === 'failed' && SCAN_KINDS.some((kind) => job.kind === kind)) failures[job.kind as ScanKind] = job.lastError ?? 'Reading failed. Retry the saved original or enter details manually.'
+      scansRef.current = read; setScans(read); setReadErrors(failures)
+      setForm((previous) => mergeOcrForm(previous, EMPTY, read, edited.current))
+      setErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => edited.current.has(key as FormKey))))
+    } catch (error) {
+      if (readController.current === controller && store.isCurrentSession()) setReadMessage(error instanceof Error ? error.message : 'Reading could not finish. Your original and progress are saved.')
+    } finally {
+      if (readController.current === controller) { readController.current = null; setReading(false) }
+    }
   }
 
   const cancelReading = () => {
@@ -189,69 +208,54 @@ export default function AddCandidatePage() {
     readController.current = null
     setReading(false)
     setForm((prev) => mergeOcrForm(prev, EMPTY, scansRef.current, edited.current))
-    setReadMessage('Stopped waiting for document reading. Enter the details manually or read the documents again.')
+    setReadMessage('Stopped waiting. Your saved reading continues in the background; resume it later or enter details manually.')
   }
 
   const scanned = SCAN_KINDS.filter((kind) => hasOcrExtraction(scans[kind]))
   const ocr = Object.fromEntries(scanned.map((kind) => [kind, scans[kind]!.raw]))
 
-  /**
-   * The last ten digits, so "+91 98400 11111", "098400 11111" and "9840011111" are
-   * recognised as the same number.
-   */
-  const phoneTail = (v: string) => v.replace(/\D/g, '').slice(-10)
-
-  const findDuplicate = (): { candidate: Candidate; matchedOn: string[] } | null => {
-    const tail = phoneTail(form.phone)
-
-    if (form.dob && tail.length === 10) {
-      const hit = store.candidates.find(
-        (c) => c.dob?.slice(0, 10) === form.dob && phoneTail(c.phone) === tail,
-      )
-      if (hit) return { candidate: hit, matchedOn: ['date of birth', 'phone number'] }
-    }
-
-    // A passport match alone is enough — it is the strongest identity a candidate has,
-    // and two records for one passport collide later when the original is collected.
-    if (form.passportNo.trim()) {
-      const hit = store.candidates.find(
-        (c) => c.passportNo?.toUpperCase() === form.passportNo.trim().toUpperCase(),
-      )
-      if (hit) return { candidate: hit, matchedOn: ['passport number'] }
-    }
-
-    return null
-  }
-
   const save = async () => {
+    if (saving || reading || intake.uploading) return
     const next: Record<string, string> = {}
     if (!form.name.trim()) next.name = 'A name is needed to save the record.'
     if (!form.phone.trim()) next.phone = 'A phone number is needed — it is how duplicates are caught.'
+    for (const field of ['totalExperience', 'gulfExperience'] as const) {
+      if (form[field] && (!Number.isInteger(Number(form[field])) || Number(form[field]) < 0)) {
+        next[field] = 'Enter a whole number of years, zero or more.'
+      }
+    }
+    if (form.expectedSalary && (!Number.isFinite(Number(form.expectedSalary)) || Number(form.expectedSalary) < 0)) {
+      next.expectedSalary = 'Enter an amount of zero or more.'
+    }
     setErrors(next)
     if (Object.keys(next).length) return
 
     setSaving(true)
+    setSaveError('')
     try {
-      await doSave()
+      if (savedCandidateId) await uploadDocuments(savedCandidateId)
+      else await doSave()
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409 && typeof error.detail === 'object' && error.detail && 'candidate' in error.detail) {
+        const candidate = (error.detail as { candidate: Duplicate }).candidate
+        setDuplicate({ candidate, matchedOn: candidate.matchedOn })
+      }
+      if (store.isCurrentSession()) setSaveError(error instanceof Error ? error.message : 'The candidate could not be saved. Please try again.')
     } finally {
       setSaving(false)
     }
   }
 
   const doSave = async () => {
-    const dup = findDuplicate()
-    if (dup) {
-      // A duplicate is refused outright — there is no merge path.
-      setDuplicate(dup)
+    const result = await api.post<{ duplicate: boolean; candidate?: Duplicate }>('/candidates/check-duplicate', payload())
+    if (result.duplicate && result.candidate) {
+      setDuplicate({ candidate: result.candidate, matchedOn: result.candidate.matchedOn })
       return
     }
     await commit()
   }
 
-  const commit = async () => {
-    // The server assigns the reference and the owner — round-robin has to be decided
-    // under a lock, not guessed here.
-    const created = await store.addCandidate({
+  const payload = () => ({
       name: form.name.trim(),
       phone: form.phone.trim(),
       whatsapp: form.whatsapp.trim() || undefined,
@@ -265,29 +269,39 @@ export default function AddCandidatePage() {
       passport_issue: form.passportIssue || undefined,
       passport_expiry: form.passportExpiry || undefined,
       passport_place: form.passportPlace || undefined,
-      designations: form.designation ? [form.designation] : [],
+      designations: normalizedSkills(form.designation.split(',')),
       total_experience: Number(form.totalExperience) || 0,
       gulf_experience: Number(form.gulfExperience) || 0,
-      skills: form.skills.split(',').map((s) => s.trim()).filter(Boolean),
-      expected_salary: Number(form.expectedSalary) || undefined,
+      skills: normalizedSkills(form.skills.split(/[,;\n]/)),
+      expected_salary: form.expectedSalary.trim() ? Number(form.expectedSalary) : undefined,
       source: form.source,
       // The server prefers the scanned resume's own text; this covers a hand-filled form.
       resume_text: `${form.name} — ${form.designation}, ${form.totalExperience || 0} years. ${form.skills}`,
       ocr_data: scanned.length ? ocr : undefined,
     })
-    if (!created) return
 
-    // Upload after the record exists. A failure here is reported but does not undo the
-    // candidate — better a saved candidate missing a scan than a lost entry.
-    for (const [slot, file] of Object.entries(pending)) {
-      if (!store.isCurrentSession()) return
-      try {
-        await api.upload('candidate', created.id, slot, file)
-      } catch {
-        store.notify(`${file.name} could not be uploaded`, 'warn')
-      }
-    }
-    if (store.isCurrentSession()) navigate(`/candidates/${created.id}`)
+  const commit = async (mergeId?: string) => {
+    const created = mergeId ? await api.post<{ id: string }>(`/candidates/${mergeId}/merge`, payload()) : await store.addCandidate(payload())
+    if (!created) return
+    setSavedCandidateId(created.id)
+    setDuplicate(null)
+    await intake.saveDraft(snapshotDraft(created.id))
+    await uploadDocuments(created.id)
+  }
+
+  const uploadDocuments = async (candidateId: string) => {
+    await intake.saveDraft(snapshotDraft(candidateId))
+    const failed: Record<string, string> = await intake.attach(candidateId)
+    if (!store.isCurrentSession()) return
+    setUploadErrors(failed)
+    if (!Object.keys(failed).length) await openSavedProfile(candidateId)
+  }
+
+  const openSavedProfile = async (candidateId: string) => {
+    // Read after uploads so the profile contains the newly saved original files.
+    // A failed read leaves this recovery screen mounted with the saved record ID.
+    await store.refresh({ keepCurrent: true })
+    if (store.isCurrentSession()) navigate(`/candidates/${candidateId}`)
   }
 
   return (
@@ -309,6 +323,7 @@ export default function AddCandidatePage() {
                 { id: 'candidate-documents', label: 'Documents', detail: 'Resume & passport scans', icon: FileText, complete: chosen.length > 0 },
                 { id: 'candidate-basic', label: 'Basic details', detail: 'Identity & contact information', icon: UserRound, complete: Boolean(form.name.trim() && form.phone.trim()) },
                 { id: 'candidate-passport', label: 'Passport details', detail: 'Travel document information', icon: ShieldCheck, complete: Boolean(form.passportNo.trim()) },
+                { id: 'candidate-work', label: 'Work profile', detail: 'Skills, experience & source', icon: UserRound, complete: Boolean(form.skills.trim() || form.designation.trim()) },
               ].map(({ id, label, detail, icon: Icon, complete }) => (
                 <a href={`#${id}`} key={id} className={complete ? 'is-filled' : ''}>
                   <span>{complete ? <Check size={17} /> : <Icon size={17} />}</span>
@@ -321,16 +336,52 @@ export default function AddCandidatePage() {
           <div className="candidate-guide-tip"><ScanLine size={21} /><h2>Less typing, more recruiting</h2><p>Upload a resume and passport, then use Read documents to fill in the details. Review everything before saving.</p></div>
         </aside>
         <div className="candidate-form-sections space-y-4">
+          <IntakeRecovery intake={intake} disabled={saving || reading || intake.uploading} onRecover={recoverIntake} onSaveDraft={() => intake.saveDraft(snapshotDraft())} />
+          {saveError && <p role="alert" className="rounded-control border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{saveError}</p>}
+          {savedCandidateId && (Object.keys(uploadErrors).length > 0 || saveError) && <Panel>
+            <div role="alert">
+              <h2 className="font-semibold">{Object.keys(uploadErrors).length ? 'Candidate saved. Some documents still need attaching.' : 'Candidate saved. Finish the remaining intake steps.'}</h2>
+              <p className="mt-1 text-sm text-ink-500">Keep this page open to retry. Retrying uses the same candidate record and keeps successful uploads.</p>
+              <ul className="my-3 space-y-1 text-sm text-amber-900">{Object.entries(uploadErrors).map(([slot, error]) => <li key={slot}>{error}</li>)}</ul>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" disabled={saving} onClick={save}>{saving ? 'Please wait…' : Object.keys(uploadErrors).length ? 'Retry failed uploads' : 'Retry saved intake'}</Button>
+              {Object.keys(uploadErrors).length > 0 && <Button disabled={saving} onClick={async () => {
+                setSaving(true)
+                try { await openSavedProfile(savedCandidateId) }
+                catch (error) { if (store.isCurrentSession()) setSaveError(error instanceof Error ? error.message : 'The profile could not refresh. Please retry.') }
+                finally { setSaving(false) }
+              }}>Open saved profile</Button>}
+            </div>
+            {Object.keys(uploadErrors).length > 0 && <p className="mt-2 text-xs text-ink-500">Your originals remain in Saved document intake. Resume this intake to retry attaching them.</p>}
+          </Panel>}
+          <fieldset disabled={saving || Boolean(savedCandidateId)} className="min-w-0 space-y-4">
           <Panel flush id="candidate-documents" className="candidate-form-section">
             <PanelHeader title={<span className="form-section-title"><span>01</span>Documents</span>} meta="Upload first. Let document reading do the heavy lifting." />
             <div className="grid gap-4 px-5 py-5 sm:grid-cols-2">
-              <FileDrop label="Resume" onFile={choose('resume')} disabled={reading || saving} busy={reading && !!pending.resume} busyLabel="reading…" />
-              <FileDrop label="Passport copy" onFile={choose('passport')} disabled={reading || saving} busy={reading && !!pending.passport} busyLabel="reading…" />
+              {SCAN_KINDS.map((kind) => {
+                const job = intake.jobs.find((item) => item.kind === kind)
+                return <FileDrop key={kind} label={kind === 'resume' ? 'Resume' : kind === 'passport' ? 'Passport copy' : 'Aadhaar copy'}
+                  value={job ? { id: job.id, name: job.filename, sizeKb: job.sizeKb, url: job.originalUrl } : null}
+                  onFile={choose(kind)} disabled={reading || saving || intake.uploading} busy={reading && !!job} busyLabel="reading…"
+                  help="The original is saved immediately. Choose Read documents to extract details." />
+              })}
+              {([
+                { slot: 'photo', label: 'Photo' },
+                { slot: 'education', label: 'Education certificates' },
+                { slot: 'experience', label: 'Experience certificates' },
+              ] as const).map(({ slot, label }) => {
+                const job = intake.jobs.find((item) => item.kind === slot)
+                return <FileDrop key={slot} label={label} disabled={saving || intake.uploading || reading || Boolean(savedCandidateId)}
+                  value={job ? { id: job.id, name: job.filename, sizeKb: job.sizeKb, url: job.originalUrl } : null}
+                  help="The original is saved immediately and attached when you save the candidate."
+                  onFile={async (file) => { await intake.upload(slot, file); await intake.saveDraft(draftRef.current).catch(() => {}) }} />
+              })}
             </div>
             <div className="document-read-actions flex flex-wrap items-center gap-3 px-5 pb-5">
               <Button
                 onClick={readDocuments}
-                disabled={reading || saving || chosen.length === 0}
+                disabled={reading || saving || intake.uploading || chosen.length === 0}
                 icon={<Sparkles className="h-4 w-4" />}
               >
                 {reading ? 'Reading…' : 'Read documents'}
@@ -338,7 +389,7 @@ export default function AddCandidatePage() {
               {reading && <Button variant="ghost" onClick={cancelReading}>Continue manually</Button>}
               <span className="text-xs text-ink-400">
                 {reading
-                  ? 'Keep this page open. Long documents can take several minutes. Choose Continue manually to stop waiting.'
+                  ? 'Reading continues in the background if you leave. Choose Continue manually to stop waiting.'
                   : 'Your edits are kept on every read. For unedited identity fields, passport details take priority.'}
               </span>
             </div>
@@ -347,7 +398,7 @@ export default function AddCandidatePage() {
               {SCAN_KINDS.map((kind) => (
                 readErrors[kind] ? (
                   <p key={kind} role="alert" className="rounded-control border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
-                    <strong>{kind === 'resume' ? 'Resume' : 'Passport'}:</strong> {readErrors[kind]} You can enter the details and save manually.
+                    <strong>{kind === 'resume' ? 'Resume' : kind === 'passport' ? 'Passport' : 'Aadhaar'}:</strong> {readErrors[kind]} You can enter the details and save manually.
                   </p>
                 ) : scans[kind] ? <DocumentReadReport key={kind} kind={kind} scan={scans[kind]!} /> : null
               ))}
@@ -365,6 +416,12 @@ export default function AddCandidatePage() {
               </Field>
               <Field label="Email">
                 <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+              </Field>
+              <Field label="WhatsApp number">
+                <Input ident value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} />
+              </Field>
+              <Field label="Current city">
+                <Input value={form.currentCity} onChange={(e) => set('currentCity', e.target.value)} />
               </Field>
               <Field label="Date of birth">
                 <DatePicker value={form.dob} onChange={(value) => set('dob', value)} />
@@ -403,22 +460,50 @@ export default function AddCandidatePage() {
             </div>
           </Panel>
 
-          <div className="candidate-save-bar flex items-center justify-end gap-2 pb-2">
+          <Panel flush id="candidate-work" className="candidate-form-section">
+            <PanelHeader title={<span className="form-section-title"><span>04</span>Work profile & source</span>} meta="Review extracted skills and experience before saving." />
+            <div className="grid gap-4 px-4 py-4 sm:grid-cols-2">
+              <Field label="Preferred designations" hint="Separate multiple job titles with commas." className="sm:col-span-2">
+                <Input list="candidate-designations" value={form.designation} onChange={(e) => set('designation', e.target.value)} placeholder="Welder, Fabricator" />
+                <datalist id="candidate-designations">{store.designations.map((designation) => <option key={designation.id} value={designation.title} />)}</datalist>
+              </Field>
+              <Field label="Total experience (years)" error={errors.totalExperience}>
+                <Input type="number" min="0" step="1" value={form.totalExperience} onChange={(e) => set('totalExperience', e.target.value)} />
+              </Field>
+              <Field label="Gulf / overseas experience (years)" error={errors.gulfExperience}>
+                <Input type="number" min="0" step="1" value={form.gulfExperience} onChange={(e) => set('gulfExperience', e.target.value)} />
+              </Field>
+              <Field label="Skills" hint="Separate skills with commas or new lines. These skills are used in Data Bank and order matching." className="sm:col-span-2">
+                <Textarea value={form.skills} onChange={(e) => set('skills', e.target.value)} placeholder="TIG welding, Pipe fitting, Blueprint reading" />
+              </Field>
+              <Field label="Expected salary" error={errors.expectedSalary}>
+                <Input type="number" min="0" step="0.01" value={form.expectedSalary} onChange={(e) => set('expectedSalary', e.target.value)} />
+              </Field>
+              <Field label="Source">
+                <Select value={form.source} onChange={(e) => set('source', e.target.value)}>
+                  <option value="walk_in">Walk-in</option><option value="referral">Referral</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option>
+                </Select>
+              </Field>
+            </div>
+          </Panel>
+          </fieldset>
+
+          {!savedCandidateId && <div className="candidate-save-bar flex items-center justify-end gap-2 pb-2">
             <span><ShieldCheck size={16} /> Name and phone are required</span>
-            <Button variant="ghost" onClick={() => navigate('/data-bank')}>
+            <Button variant="ghost" disabled={saving} onClick={() => navigate('/data-bank')}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={save} disabled={saving || reading}>
+            <Button variant="primary" onClick={save} disabled={saving || reading || intake.uploading}>
               {saving ? 'Saving…' : reading ? 'Reading documents…' : 'Save and assign'}
             </Button>
-          </div>
+          </div>}
         </div>
       </div>
 
       <Dialog
         open={!!duplicate}
-        onClose={() => setDuplicate(null)}
-        title="Duplicate found — this candidate is not saved"
+        onClose={() => { if (!saving) setDuplicate(null) }}
+        title="Existing candidate found"
         description={
           duplicate
             ? `The ${duplicate.matchedOn.join(' and ')} already belong to a record in the Data Bank.`
@@ -426,11 +511,11 @@ export default function AddCandidatePage() {
         }
         footer={
           <>
-            <Button variant="ghost" onClick={() => setDuplicate(null)}>
-              Back to the form
+            <Button variant="ghost" disabled={saving} onClick={() => setDuplicate(null)}>
+              Cancel merge
             </Button>
             <Button
-              variant="primary"
+              disabled={saving}
               onClick={() => {
                 const id = duplicate!.candidate.id
                 setDuplicate(null)
@@ -439,6 +524,11 @@ export default function AddCandidatePage() {
             >
               Open the existing record
             </Button>
+            <Button variant="primary" disabled={saving || (!!duplicate && !store.can('work_any_candidate') && duplicate.candidate.ownerId !== store.me.id)} onClick={async () => {
+              if (!duplicate) return
+              setSaving(true); setSaveError('')
+              try { await commit(duplicate.candidate.id) } catch (error) { setSaveError(error instanceof Error ? error.message : 'Merge failed. Your entry has been kept.') } finally { setSaving(false) }
+            }}>{saving ? 'Merging…' : 'Merge into existing'}</Button>
           </>
         }
       >
@@ -447,21 +537,18 @@ export default function AddCandidatePage() {
             <p className="text-sm font-semibold text-ink">{duplicate.candidate.name}</p>
             <p className="mt-0.5 text-micro text-ink-400 ident">
               {duplicate.candidate.phone}
-              {duplicate.candidate.passportNo ? ` · ${duplicate.candidate.passportNo}` : ''}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <Badge>{duplicate.candidate.ref}</Badge>
-              <Badge>{duplicate.candidate.designations[0] ?? 'No designation'}</Badge>
-              <Badge>Owner: {store.user(duplicate.candidate.ownerId)?.name ?? 'Unassigned'}</Badge>
+              <Badge>Owner: {duplicate.candidate.ownerName ?? 'Unassigned'}</Badge>
             </div>
           </div>
         )}
         <p className="mt-3 flex items-start gap-2 text-xs text-ink-500">
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-600" />
-          Nothing was saved. If this is genuinely a different person, change the detail that
-          clashes; otherwise work from the existing record so one candidate does not end up with
-          two files.
+          Merging fills empty profile fields and adds your documents as new versions. Existing details, ownership and workflow stay in place. Only the assigned recruiter or a supervisor can merge.
         </p>
+        {saveError && <p role="alert" className="mt-3 text-sm text-stamp-600">{saveError}</p>}
       </Dialog>
     </>
   )

@@ -27,6 +27,7 @@ from app.services import bootstrap
 with patch(
     "app.core.config.get_settings",
     return_value=SimpleNamespace(
+            agency_timezone="Asia/Kolkata",
         database_url="postgresql+psycopg://unused:unused@127.0.0.1:1/auth_tests"
     ),
 ):
@@ -44,7 +45,7 @@ def database():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(
-        engine, tables=[User.__table__, SessionRow.__table__, AssignmentPointer.__table__]
+        engine, tables=[User.__table__, SessionRow.__table__, AssignmentPointer.__table__, __import__("app.db.models", fromlist=["StaffPresenceInterval"]).StaffPresenceInterval.__table__]
     )
     factory = sessionmaker(bind=engine)
 
@@ -347,6 +348,7 @@ def test_health_recovers_from_failed_startup_without_modifying_accounts(
     with patch(
         "app.core.config.get_settings",
         return_value=SimpleNamespace(
+            agency_timezone="Asia/Kolkata",
             cors_origin_list=["https://testserver"],
             # A path beneath this file cannot be a directory, so importing the
             # app cannot mount real static assets or need filesystem setup.
@@ -361,6 +363,8 @@ def test_health_recovers_from_failed_startup_without_modifying_accounts(
         from app import main
 
     monkeypatch.setattr(main, "engine", database.kw["bind"])
+    # This SQLite fixture tests startup recovery, not Alembic schema readiness.
+    monkeypatch.setattr(main, "schema_status", lambda connection: {"status": "ok", "current": ["test"], "expected": ["test"]})
     monkeypatch.setattr(main, "SessionLocal", database)
     monkeypatch.setattr(
         main, "redis_health",

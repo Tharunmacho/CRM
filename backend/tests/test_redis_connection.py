@@ -196,6 +196,7 @@ def _health_application(monkeypatch, *, database_ready=True, bootstrap_ready=Tru
         else Mock(side_effect=RuntimeError("Synthetic database outage"))
     )
     monkeypatch.setattr(main, "engine", SimpleNamespace(connect=connect))
+    monkeypatch.setattr(main, "schema_status", lambda connection: {"status": "ok", "current": ["test"], "expected": ["test"]})
     monkeypatch.setattr(
         main, "bootstrap_state",
         lambda: {

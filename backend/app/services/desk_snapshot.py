@@ -6,8 +6,8 @@ password hashes, raw OCR output, search vectors and file storage keys are not re
 This is a fresh database snapshot, not a cross-user cache.
 """
 
-from sqlalchemy import JSON, Select, func, select
-from sqlalchemy.dialects.postgresql import aggregate_order_by
+from sqlalchemy import JSON, Select, case, cast, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
@@ -16,7 +16,7 @@ from app.api.schemas import (
 )
 from app.db.models import (
     Application, ApplicationStage, Attachment, Candidate, Client, Company,
-    Designation, Notification, Order, Remark, Task, TodoItem, User,
+    Designation, Notification, Order, Remark, Role, Task, TodoItem, User,
 )
 from app.services.ingestion_revision import revision_expression
 
@@ -41,6 +41,17 @@ def _rows(name: str, statement: Select, *ordering):
 
 
 def snapshot_statement(user_id: str) -> Select:
+    supervisor = select(User.role.in_([Role.admin, Role.manager])).where(User.id == user_id).scalar_subquery()
+    owned_candidates = select(Candidate.id).where(Candidate.owner_id == user_id)
+    visible_tasks = or_(supervisor, Task.owner_id == user_id)
+    visible_applications = or_(supervisor, Application.candidate_id.in_(owned_candidates))
+    application_fields = _fields(Application, ApplicationOut)
+    # Placement summaries remain shared for Data Bank availability; another
+    # recruiter's draft and detailed stage/task history do not cross the boundary.
+    application_fields = application_fields.with_only_columns(*(
+        case((visible_applications, column), else_=cast(literal('{}'), JSONB)).label("draft") if column.name == "draft" else column
+        for column in application_fields.selected_columns
+    ))
     candidate_files = select(
         Attachment.id, Attachment.entity_id, Attachment.slot, Attachment.version,
         Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at,
@@ -69,13 +80,13 @@ def snapshot_statement(user_id: str) -> Select:
         ),
         _rows("files", candidate_files, ("version", False)),
         _rows("agreements", agreements),
-        _rows("applications", _fields(Application, ApplicationOut)),
+        _rows("applications", application_fields),
         _rows(
-            "stages", _fields(ApplicationStage, StageRecordOut, "application_id"),
+            "stages", _fields(ApplicationStage, StageRecordOut, "application_id").where(ApplicationStage.application_id.in_(select(Application.id).where(visible_applications))),
             ("stage", False), ("attempt", False),
         ),
-        _rows("tasks", _fields(Task, TaskOut)),
-        _rows("remarks", _fields(Remark, RemarkOut)),
+        _rows("tasks", _fields(Task, TaskOut).where(visible_tasks)),
+        _rows("remarks", _fields(Remark, RemarkOut).where(Remark.task_id.in_(select(Task.id).where(visible_tasks)))),
         _rows("todos", _fields(TodoItem, TodoOut).where(TodoItem.owner_id == user_id)),
         _rows(
             "notifications",

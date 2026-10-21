@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListFilter } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from './primitives'
@@ -32,6 +32,14 @@ interface DataTableProps<T> {
   rowClassName?: (row: T) => string | undefined
   dense?: boolean
   gridLines?: boolean
+  /** Reset pagination for an external search without losing column filters or sort. */
+  resetPageKey?: string
+  /** For bounded endpoints: sort/filter/page decisions are delegated to the server. */
+  server?: {
+    page: number; total: number; onPageChange: (page: number) => void
+    sort: { key: string; dir: 'asc' | 'desc' }; onSortChange: (sort: { key: string; dir: 'asc' | 'desc' }) => void
+    filters: Record<string, string>; onFilterChange: (key: string, value: string) => void
+  }
 }
 
 export function DataTable<T>({
@@ -47,11 +55,15 @@ export function DataTable<T>({
   rowClassName,
   dense,
   gridLines = false,
+  resetPageKey,
+  server,
 }: DataTableProps<T>) {
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
+  const [localSort, setLocalSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
+  const sort = server?.sort ?? localSort
   const [filters, setFilters] = useState<Record<string, string[]>>({})
   const [page, setPage] = useState(0)
   const [openFilter, setOpenFilter] = useState<string | null>(null)
+  useEffect(() => { setPage(0) }, [resetPageKey])
 
   const valueOf = (col: Column<T>, row: T) => {
     const v = col.value?.(row)
@@ -59,6 +71,7 @@ export function DataTable<T>({
   }
 
   const filtered = useMemo(() => {
+    if (server) return rows
     const active = Object.entries(filters).filter(([, v]) => v.length)
     if (!active.length) return rows
     return rows.filter((row) =>
@@ -68,9 +81,10 @@ export function DataTable<T>({
         return values.includes(valueOf(col, row))
       }),
     )
-  }, [rows, filters, columns])
+  }, [rows, filters, columns, server])
 
   const sorted = useMemo(() => {
+    if (server) return rows
     if (!sort) return filtered
     const col = columns.find((c) => c.key === sort.key)
     if (!col?.value) return filtered
@@ -85,11 +99,13 @@ export function DataTable<T>({
           : String(av).localeCompare(String(bv), undefined, { numeric: true })
       return sort.dir === 'asc' ? cmp : -cmp
     })
-  }, [filtered, sort, columns])
+  }, [filtered, sort, columns, server, rows])
 
-  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize))
-  const safePage = Math.min(page, pageCount - 1)
-  const pageRows = sorted.slice(safePage * pageSize, safePage * pageSize + pageSize)
+  const total = server?.total ?? sorted.length
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const safePage = Math.min(server?.page ?? page, pageCount - 1)
+  const pageRows = server ? rows : sorted.slice(safePage * pageSize, safePage * pageSize + pageSize)
+  const changePage = (next: number) => server ? server.onPageChange(next) : setPage(next)
 
   const allOnPageSelected =
     pageRows.length > 0 && pageRows.every((r) => selected.includes(rowKey(r)))
@@ -112,7 +128,7 @@ export function DataTable<T>({
   const pad = dense ? 'px-4 py-2' : 'px-4 py-3.5'
   const rule = gridLines ? 'border-r border-rule-soft last:border-r-0' : ''
 
-  if (!rows.length) {
+  if (!rows.length && !server) {
     return <>{empty ?? <EmptyState title="Nothing here yet" />}</>
   }
 
@@ -136,7 +152,7 @@ export function DataTable<T>({
               )}
               {columns.map((col) => {
                 const isSorted = sort?.key === col.key
-                const active = (filters[col.key] ?? []).length > 0
+                const active = server ? !!server.filters[col.key] : (filters[col.key] ?? []).length > 0
                 return (
                   <th
                     key={col.key}
@@ -163,14 +179,12 @@ export function DataTable<T>({
                       <button
                         type="button"
                         disabled={!col.sortable}
-                        onClick={() =>
-                          col.sortable &&
-                          setSort((s) =>
-                            s?.key === col.key
-                              ? { key: col.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
-                              : { key: col.key, dir: 'asc' },
-                          )
-                        }
+                        onClick={() => {
+                          if (!col.sortable) return
+                          const next = { key: col.key, dir: sort?.key === col.key && sort.dir === 'asc' ? 'desc' as const : 'asc' as const }
+                          if (server) server.onSortChange(next)
+                          else setLocalSort(next)
+                        }}
                         className={cn(
                           'text-xs font-medium',
                           col.sortable && 'cursor-pointer hover:text-ink',
@@ -204,7 +218,7 @@ export function DataTable<T>({
 
                     {openFilter === col.key && (
                       <div className="absolute left-2 top-full z-30 mt-1 w-56 rounded-panel border border-rule bg-white p-1 shadow-pop">
-                        <div className="scrollbar-thin max-h-64 overflow-y-auto">
+                        {server ? <div className="p-2"><label className="block text-xs text-ink-500">Filter {col.header}<input autoFocus value={server.filters[col.key] || ''} onChange={event => server.onFilterChange(col.key, event.target.value)} className="mt-2 w-full rounded-control border border-rule px-2 py-2 text-sm" placeholder={['experience', 'stage'].includes(col.key) ? 'Exact number' : 'Contains…'} /></label><button className="mt-2 text-xs text-navy-600" onClick={() => setOpenFilter(null)}>Done</button></div> : <div className="scrollbar-thin max-h-64 overflow-y-auto">
                           {distinct(col).map((v) => {
                             const on = (filters[col.key] ?? []).includes(v)
                             return (
@@ -224,10 +238,10 @@ export function DataTable<T>({
                               </div>
                             )
                           })}
-                        </div>
+                        </div>}
                         {active && (
                           <button
-                            onClick={() => setFilters((f) => ({ ...f, [col.key]: [] }))}
+                            onClick={() => server ? server.onFilterChange(col.key, '') : setFilters((f) => ({ ...f, [col.key]: [] }))}
                             className="mt-1 w-full border-t border-rule-soft px-2 py-1.5 text-left text-xs text-ink-500 hover:text-ink"
                           >
                             Clear this filter
@@ -302,7 +316,7 @@ export function DataTable<T>({
       </div>
 
       {!sorted.length && (
-        <EmptyState
+        empty ?? <EmptyState
           title="No rows match these filters"
           description="Clear a filter to widen the search."
         />
@@ -312,12 +326,12 @@ export function DataTable<T>({
         <div className="ui-table-pagination flex items-center justify-between border-t border-rule-soft px-3 py-2.5 text-xs text-ink-500">
           <span className="tnum" aria-live="polite">
             <span className="pagination-label">Showing </span>
-            {safePage * pageSize + 1}–{Math.min(sorted.length, (safePage + 1) * pageSize)} of{' '}
-            {sorted.length}
+            {safePage * pageSize + 1}–{Math.min(total, (safePage + 1) * pageSize)} of{' '}
+            {total}
           </span>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              onClick={() => changePage(Math.max(0, safePage - 1))}
               disabled={safePage === 0}
               className="flex h-7 w-7 items-center justify-center rounded-control hover:bg-field disabled:opacity-40"
               aria-label="Previous page"
@@ -328,7 +342,7 @@ export function DataTable<T>({
               {safePage + 1} / {pageCount}
             </span>
             <button
-              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              onClick={() => changePage(Math.min(pageCount - 1, safePage + 1))}
               disabled={safePage >= pageCount - 1}
               className="flex h-7 w-7 items-center justify-center rounded-control hover:bg-field disabled:opacity-40"
               aria-label="Next page"

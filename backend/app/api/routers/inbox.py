@@ -1,10 +1,11 @@
-"""Mailbox configuration references and durable intake controls. No outgoing mail."""
+"""Connected inbox, explicit replies and durable intake controls."""
 from datetime import datetime, timezone
 from copy import deepcopy
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, load_only
 
@@ -18,8 +19,16 @@ from app.integrations.mail.imap import (
 from app.services.mail_config import configured_mailboxes
 from app.services.document_extraction import request_extraction_retry
 from app.services.ingestion_revision import read_revision
+from app.services import zoho_mail
+from app.api.routers.mail_actions import router as actions_router
+from app.api.routers.zoho_mailbox import router as zoho_router
+from app.api.routers.mail_compose import router as compose_router
+from app.services.mail_storage import storage_identity
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
+router.include_router(actions_router)
+router.include_router(zoho_router)
+router.include_router(compose_router)
 admin = require_role(Role.admin)
 
 
@@ -43,41 +52,69 @@ def account_out(account, configured):
     return {
         "id": account.id, "address": account.address, "provider": account.provider,
         "autoIngest": account.auto_ingest, "lastSyncAt": account.last_sync_at,
-        "configured": account.address in configured,
-        "connectionStatus": "error" if account.last_error else "connected",
+        "configured": not account.disconnected_at and (account.provider == "zoho" or account.address in configured),
+        "connectionStatus": "disconnected" if account.disconnected_at else "error" if account.last_error else "connected",
+        "disconnectedAt": account.disconnected_at,
         "lastError": account.last_error,
     }
 
 
 @router.get("")
-def inbox(db: Session = Depends(get_db), user: User = Depends(current_user)):
+def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
+          limit: Annotated[int, Query(ge=1, le=100)] = 50,
+          offset: Annotated[int, Query(ge=0)] = 0,
+          q: Annotated[str, Query(max_length=200)] = "",
+          account_ids: str | None = None, unread: bool | None = None, message_id: str | None = None,
+          has_attachments: bool | None = None, scope: Literal["inbox", "stored"] = "inbox"):
     accounts = list(db.scalars(select(MailAccount).options(
         defer(MailAccount.secrets), defer(MailAccount.sync_state),
     ).order_by(MailAccount.address)))
-    messages = list(db.scalars(select(MailMessage).order_by(MailMessage.received_at.desc()).limit(200)))
+    query = select(MailMessage).where(MailMessage.remote_deleted.is_(False))
+    if message_id:
+        query = query.where(MailMessage.id == message_id)
+    elif scope != "stored":
+        query = query.where(MailMessage.folder == "INBOX")
+    if account_ids is not None:
+        query = query.where(MailMessage.account_id.in_([value for value in account_ids.split(",") if value][:100]))
+    if unread is not None:
+        query = query.where(MailMessage.unread == unread)
+    if has_attachments is not None:
+        attached = select(MailAttachment.id).where(MailAttachment.message_id == MailMessage.id).exists()
+        query = query.where(attached if has_attachments else ~attached)
+    if q.strip():
+        pattern = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.where(or_(*[column.ilike(pattern, escape="\\") for column in (MailMessage.subject, MailMessage.from_name, MailMessage.from_address, MailMessage.body)]))
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    messages = list(db.scalars(query.order_by(MailMessage.received_at.desc(), MailMessage.id.desc()).offset(offset).limit(limit)))
     ids = [m.id for m in messages]
     attachments = list(db.scalars(select(MailAttachment).where(MailAttachment.message_id.in_(ids)))) if ids else []
-    jobs = list(db.scalars(select(EmailIngestionJob).order_by(EmailIngestionJob.updated_at.desc()).limit(100)))
+    jobs = list(db.scalars(select(EmailIngestionJob).where(EmailIngestionJob.message_id.in_(ids)).order_by(EmailIngestionJob.updated_at.desc()))) if ids else []
     # Administrators configure accounts; other roles never receive credential names/values.
     configured = configs() if user.role == Role.admin else {}
-    heartbeat = max((a.worker_seen_at for a in accounts if a.worker_seen_at), default=None)
+    heartbeat = max((a.worker_seen_at for a in accounts if not a.disconnected_at and a.worker_seen_at), default=None)
+    extraction_heartbeat = max((a.extraction_seen_at for a in accounts if not a.disconnected_at and a.extraction_seen_at), default=None)
     return {
         "accounts": [account_out(a, configured) for a in accounts],
         "availableAccounts": list(configured) if user.role == Role.admin else [],
+        "providers": zoho_mail.readiness(get_settings()) if user.role == Role.admin else [],
+        "total": total, "offset": offset, "limit": limit, "hasMore": offset + len(messages) < total,
+        "scope": scope,
         "messages": [{
             "id": m.id, "accountId": m.account_id, "fromName": m.from_name or m.from_address or "",
             "fromAddress": m.from_address or "", "subject": m.subject or "(No subject)",
             "body": m.body or "", "preview": (m.body or "")[:180],
             "receivedAt": m.received_at, "unread": m.unread, "candidateId": m.candidate_id,
+            "folder": m.folder, "starred": m.starred, "toAddresses": m.to_addresses or [], "ccAddresses": m.cc_addresses or [],
+            "remoteState": m.remote_state, "remoteError": m.remote_error,
             "attachments": [{"id": a.id, "fileName": a.file_name, "sizeKb": a.size_kb or 0,
-                             "kind": a.kind or "document"} for a in attachments if a.message_id == m.id],
+                             "kind": a.kind or "document", "url": f"/api/inbox/attachments/{a.id}" if a.object_key else None} for a in attachments if a.message_id == m.id],
         } for m in messages],
         "jobs": [{
             "id": j.id, "messageId": j.message_id, "status": j.status, "attempts": j.attempts,
             "lastError": j.last_error, "candidateId": j.candidate_id, "updatedAt": j.updated_at,
             "inspection": j.inspection,
         } for j in jobs],
-        "worker": {"enabled": get_settings().email_ingestion_enabled, "lastHeartbeat": heartbeat},
+        "worker": {"enabled": get_settings().email_ingestion_enabled, "lastHeartbeat": heartbeat, "extractionHeartbeat": extraction_heartbeat},
     }
 
 
@@ -85,8 +122,8 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user)):
 def health(db: Session = Depends(get_db), user: User = Depends(admin)):
     accounts = list(db.scalars(select(MailAccount).options(load_only(
         MailAccount.id, MailAccount.address, MailAccount.last_sync_at,
-        MailAccount.last_error, MailAccount.auto_ingest, MailAccount.worker_seen_at,
-    )).order_by(MailAccount.address)))
+        MailAccount.last_error, MailAccount.auto_ingest, MailAccount.worker_seen_at, MailAccount.extraction_seen_at,
+    )).where(MailAccount.disconnected_at.is_(None)).order_by(MailAccount.address)))
     counts = {name: 0 for name in (
         "pending", "processing", "retry", "needs_review", "failed", "completed", "ignored",
     )}
@@ -104,6 +141,7 @@ def health(db: Session = Depends(get_db), user: User = Depends(admin)):
         "worker": {
             "enabled": get_settings().email_ingestion_enabled,
             "lastHeartbeat": max((a.worker_seen_at for a in accounts if a.worker_seen_at), default=None),
+            "extractionHeartbeat": max((a.extraction_seen_at for a in accounts if a.extraction_seen_at), default=None),
         },
     }
 
@@ -122,13 +160,36 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
     address = body.address.strip().lower() if body.address else next(iter(available))
     if address not in available:
         raise HTTPException(422, "This address has no server-side mailbox configuration.")
+    try:
+        zoho_mail.validate_config(available[address])
+    except MailAdapterError as exc:
+        raise HTTPException(422, str(exc)) from None
     existing = db.scalar(select(MailAccount).where(MailAccount.address == address))
     if existing:
+        if existing.provider != "imap":
+            raise HTTPException(409, "Reconnect this account using its original Gmail or Microsoft provider.")
         try:
             require_cursor_source(existing.sync_state or {}, available[address])
         except MailAdapterError as exc:
             raise HTTPException(409, str(exc)) from None
         # Reconnecting must never jump over an existing durable cursor.
+        if existing.disconnected_at:
+            saved_cursor = dict(existing.sync_state)
+            saved_id = existing.id
+            db.rollback()
+            try:
+                with IMAPMailbox(available[address]) as mailbox:
+                    current_cursor = mailbox.probe()
+                if current_cursor.uid_validity != str(saved_cursor.get("uid_validity")):
+                    raise MailAdapterError("uidvalidity_changed", "The mailbox identifiers changed. Restore the original mailbox before reconnecting.")
+            except MailAdapterError as exc:
+                raise HTTPException(502, str(exc)) from None
+            existing = db.scalar(select(MailAccount).where(MailAccount.id == saved_id).with_for_update())
+            if not existing or dict(existing.sync_state) != saved_cursor:
+                raise HTTPException(409, "The mailbox changed during reconnect. Refresh and try again.")
+            existing.disconnected_at, existing.last_error, existing.sync_requested = None, None, True
+            existing.auto_ingest, existing.connected_by = body.auto_ingest, user.id
+            db.commit()
         return account_out(existing, available)
     db.rollback()
     try:
@@ -136,9 +197,10 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
             cursor = mailbox.probe()
     except MailAdapterError as exc:
         raise HTTPException(502, str(exc)) from exc
-    account = MailAccount(address=address, provider="imap", auto_ingest=body.auto_ingest,
+    account = MailAccount(address=address, provider="imap", auto_ingest=body.auto_ingest, connected_by=user.id,
                           sync_state={"uid_validity": cursor.uid_validity, "last_uid": cursor.last_uid,
-                                      "source_id": mailbox_source_id(available[address])},
+                                      "source_id": mailbox_source_id(available[address]),
+                                      "storage_id": storage_identity(get_settings().storage_dir, get_settings())},
                           sync_requested=True)
     db.add(account)
     try:
@@ -157,6 +219,10 @@ def update_account(account_id: str, body: AccountIn, db: Session = Depends(get_d
     account = db.get(MailAccount, account_id)
     if not account:
         raise HTTPException(404, "Mailbox not found")
+    if account.provider not in {"zoho", "imap"}:
+        raise HTTPException(409, "This provider is archived. Only Zoho Mail can enable automatic intake.")
+    if account.disconnected_at:
+        raise HTTPException(409, "Reconnect this mailbox before changing automatic processing.")
     account.auto_ingest = body.auto_ingest
     db.commit()
     return account_out(account, configs())
@@ -186,7 +252,7 @@ def ingest(message_id: str, db: Session = Depends(get_db), user: User = Depends(
 
 @router.post("/jobs/{job_id}/retry", status_code=202)
 def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(admin)):
-    job = db.get(EmailIngestionJob, job_id)
+    job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Ingestion job not found")
     if job.status not in {"failed", "needs_review", "ignored"}:

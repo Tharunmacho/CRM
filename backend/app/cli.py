@@ -102,7 +102,11 @@ def set_password(email: str, password: str | None = None) -> int:
             print("Password must not be empty.", file=sys.stderr)
             return 1
 
-        user.password_hash = hash_password(password)
+        password_hash = hash_password(password)
+        from app.services.staff_activity import close_user_presence
+        # Use the same User → Login → Presence lock order as HTTP revocation.
+        close_user_presence(db, user.id)
+        user.password_hash = password_hash
         db.execute(delete(SessionRow).where(SessionRow.user_id == user.id))
         db.commit()
 

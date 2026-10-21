@@ -22,10 +22,12 @@ def account(id="account-1", address="first@example.test", **changes):
         **{
             "id": id, "address": address, "provider": "imap", "auto_ingest": False,
             "last_sync_at": None, "last_error": None, "worker_seen_at": None,
+            "disconnected_at": None,
+            "extraction_seen_at": None,
             "sync_requested": False, "sync_state": {
                 "uid_validity": "123", "last_uid": 17,
                 "source_id": mailbox_source_id(MailConfig(
-                    host="imap.first.invalid", port=993, username=address, password="synthetic-only",
+                    host="imappro.zoho.com", port=993, username=address, password="synthetic-only",
                 )),
             },
             "secrets": {"password": "PRIVATE-DATABASE-PASSWORD"}, **changes,
@@ -37,7 +39,8 @@ def message():
     return SimpleNamespace(
         id="message-1", account_id="account-1", from_name="Applicant",
         from_address="applicant@example.test", subject="Synthetic application", body="Synthetic body",
-        received_at=NOW, unread=True, candidate_id=None,
+        received_at=NOW, unread=True, candidate_id=None, folder="INBOX", starred=False,
+        to_addresses=[], cc_addresses=[], remote_state="synced", remote_error=None,
     )
 
 
@@ -82,6 +85,9 @@ class Database:
         return list(rows)
 
     def scalar(self, statement):
+        if statement.column_descriptions[0]["entity"] is None:
+            self.queries.append(str(statement))
+            return len(self.messages)
         rows, params = self._query(statement)
         for row in rows:
             if "address_1" in params and row.address != params["address_1"]:
@@ -130,18 +136,20 @@ def environment(monkeypatch, tmp_path):
         database_url="postgresql+psycopg://unused@127.0.0.1:1/unused",
         storage_dir=str(tmp_path), email_ingestion_enabled=True, email_poll_seconds=120,
         email_accounts_json=json.dumps([
-            {"host": "imap.first.invalid", "username": "first@example.test", "password": "PRIVATE-FIRST"},
-            {"host": "imap.second.invalid", "username": "second@example.test", "password": "PRIVATE-SECOND"},
+            {"host": "imappro.zoho.com", "smtp_host": "smtppro.zoho.com", "username": "first@example.test", "password": "PRIVATE-FIRST"},
+            {"host": "imappro.zoho.in", "smtp_host": "smtppro.zoho.in", "username": "second@example.test", "password": "PRIVATE-SECOND"},
         ]),
         imap_server=None, imap_username=None, imap_password=None, imap_port=993,
         imap_folder="INBOX", imap_use_ssl=True,
     )
     with patch("app.core.config.get_settings", return_value=settings):
         from app.api.routers import inbox
+        from app.api.routers import mail_actions
         from app import email_worker
     from app.db.models import Role
 
     monkeypatch.setattr(inbox, "get_settings", lambda: settings)
+    monkeypatch.setattr(mail_actions, "get_settings", lambda: settings)
     monkeypatch.setattr(email_worker, "get_settings", lambda: settings)
     monkeypatch.setattr(email_worker, "now", lambda: NOW)
     monkeypatch.setattr(email_worker, "STOP", threading.Event())
@@ -227,11 +235,12 @@ def test_connect_uses_selected_account_and_future_only_probe_cursor(environment)
         "address": " SECOND@example.test ", "auto_ingest": False,
     })
     assert response.status_code == 200
-    assert environment.probes[0].host == "imap.second.invalid"
+    assert environment.probes[0].host == "imappro.zoho.in"
     connected, = environment.database.accounts
     assert connected.sync_state == {
         "uid_validity": "validity-9", "last_uid": 500,
         "source_id": mailbox_source_id(environment.probes[0]),
+        "storage_id": environment.worker.storage_identity(environment.settings.storage_dir, environment.settings),
     }
     assert connected.auto_ingest is False
     assert connected.sync_requested is True
@@ -263,10 +272,10 @@ def test_reconnect_cannot_silently_rebind_or_reset_an_old_cursor(environment, bi
     assert "commit" not in environment.database.events
 
 
-def test_manual_sync_endpoint_is_absent_and_does_not_write_queue_state(environment):
+def test_manual_sync_missing_account_preserves_queue_state(environment):
     response = environment.client.post("/api/inbox/accounts/account-1/sync")
     assert response.status_code == 404
-    assert environment.database.queries == environment.database.events == []
+    assert environment.database.events == []
 
 
 def test_invalid_configuration_fails_without_returning_credential_values(environment):
@@ -498,6 +507,21 @@ def test_only_matching_volume_accounts_are_eligible_in_mixed_queue(environment, 
     assert own.worker_seen_at == NOW
     assert foreign.last_error == environment.worker.STORAGE_MISMATCH
     assert foreign.worker_seen_at is None
-    queue_query = database.queries[-1]
+    queue_query = next(query for query in database.queries if "email_messages.account_id IN" in query)
     assert "JOIN email_messages" in queue_query
     assert "email_messages.account_id IN" in queue_query
+
+
+def test_receiver_and_extractor_cycles_do_not_block_each_other(environment, monkeypatch):
+    database = environment.database
+    database.accounts.append(account(sync_requested=True))
+    database.messages.append(message())
+    database.jobs.append(job())
+    calls = []
+    monkeypatch.setattr(environment.worker, "receive_account", lambda identifier, **kwargs: calls.append(("receive", identifier)))
+    monkeypatch.setattr(environment.worker, "process_job", lambda identifier, **kwargs: calls.append(("extract", identifier)))
+    environment.worker.run_cycle(sessions=lambda: database, settings=environment.settings, mode="receive")
+    assert calls == [("receive", "account-1")]
+    calls.clear()
+    environment.worker.run_cycle(sessions=lambda: database, settings=environment.settings, mode="extract")
+    assert calls == [("extract", "job-1")]

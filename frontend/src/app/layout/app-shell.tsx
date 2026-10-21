@@ -6,6 +6,7 @@ import {
   Building2,
   Factory,
   ChevronDown,
+  Clock3,
   Database,
   GitBranch,
   FileBarChart,
@@ -15,6 +16,7 @@ import {
   LogOut,
   Layers2,
   Mail,
+  MessageCircle,
   Menu,
   SquareCheckBig,
   Search,
@@ -25,11 +27,14 @@ import {
 import { cn } from '@/shared/lib/cn'
 import { ago, initials, slaState } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
+import { taskClockStart } from '@/shared/lib/task-time'
 import { agency } from '@/app/config/agency'
 import { Dropdown, MenuItem, Toast } from '@/shared/ui/overlay'
 import { IconButton } from '@/shared/ui/primitives'
 import { PageLoading } from '@/shared/ui/page-loading'
 import type { Capability } from '@/shared/state/crm-store'
+import { AttendanceProvider } from '@/features/attendance/attendance-context'
+import { AttendanceClock } from '@/features/attendance/components/attendance-clock'
 
 interface NavItem {
   to: string
@@ -43,6 +48,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/inbox', label: 'Inbox', icon: Inbox, count: 'inbox' },
+  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle },
   { to: '/clients', label: 'Clients', icon: Building2 },
   { to: '/companies', label: 'Companies', icon: Factory },
   { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase },
@@ -50,6 +56,7 @@ const NAV: NavItem[] = [
   { to: '/data-bank', label: 'Data Bank', icon: Database },
   { to: '/mapped', label: 'Mapped Candidates', icon: GitBranch },
   { to: '/tasks', label: 'Tasks', icon: ListChecks, count: 'tasks' },
+  { to: '/attendance', label: 'Attendance', icon: Clock3 },
   { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list' },
   { to: '/reports', label: 'Reports', icon: FileBarChart },
   { to: '/users', label: 'User Management', icon: Users, capability: 'user_management' },
@@ -63,7 +70,7 @@ export function AppShell() {
 
   const counts = useMemo(() => {
     const mine = store.visibleTasks.filter((t) => !t.completedAt && !t.cancelledAt)
-    const overdue = mine.filter((t) => slaState(t.createdAt).overdue).length
+    const overdue = mine.filter((t) => slaState(taskClockStart(t)).overdue).length
     return {
       inbox: store.mailMessages.filter((m) => m.unread).length,
       tasks: mine.length,
@@ -74,7 +81,7 @@ export function AppShell() {
   const items = NAV.filter((n) => !n.capability || can(n.capability))
 
   return (
-    <div className="app-shell flex min-h-screen bg-canvas">
+    <AttendanceProvider key={store.me.id}><div className="app-shell flex min-h-screen bg-canvas">
       {/* Sidebar */}
       <aside
         className={cn(
@@ -169,7 +176,7 @@ export function AppShell() {
       </div>
 
       {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={dismissToast} />}
-    </div>
+    </div></AttendanceProvider>
   )
 }
 
@@ -214,7 +221,7 @@ function SidebarAccount() {
 }
 
 function Topbar({ onMenu }: { onMenu: () => void }) {
-  const { notifications, mailMessages, notify } = useStore()
+  const { notifications, mailMessages, notify, markNotificationRead } = useStore()
   const navigate = useNavigate()
   const unread = notifications.filter((n) => !n.read).length
   const location = useLocation()
@@ -247,6 +254,7 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
       </div>
 
       <div className="shell-topbar-actions ml-auto flex items-center">
+        <AttendanceClock compact />
         <GlobalSearch />
         <button
           className="shell-icon-button"
@@ -281,7 +289,7 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
                 <span className="text-xs font-medium text-ink">Notifications</span>
                 {unread > 0 && (
                   <button
-                    onClick={() => notify('Notifications are not stored yet', 'warn')}
+                    onClick={() => void markNotificationRead().catch((e) => notify(e.message, 'warn'))}
                     className="text-micro text-navy-700 hover:text-navy-600"
                   >
                     Mark all read
@@ -298,6 +306,7 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
                   <button
                     key={n.id}
                     onClick={() => {
+                      void markNotificationRead(n.id).catch((e) => notify(e.message, 'warn'))
                       if (n.linkTo) navigate(n.linkTo)
                       close()
                     }}

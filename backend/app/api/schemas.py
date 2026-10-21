@@ -69,6 +69,7 @@ class CompanyOut(Wire):
     contact_person: str | None = None
     contact_email: str | None = None
     phone: str | None = None
+    whatsapp: str | None = None
     address: str | None = None
     notes: str | None = None
     status: str
@@ -150,6 +151,9 @@ class CandidateOut(Wire):
 
 
 class StageRecordOut(Wire):
+    id: str | None = None
+    owner_id: str | None = None
+    reopened_reason: str | None = None
     stage: int
     attempt: int
     data: dict[str, Any]
@@ -162,6 +166,7 @@ class ApplicationOut(Wire):
     id: str
     candidate_id: str
     order_id: str
+    owner_id: str | None = None
     current_stage: int
     status: str
     closure_reason: str | None = None
@@ -184,6 +189,9 @@ class TaskOut(Wire):
     completed_at: datetime | None = None
     cancelled_at: datetime | None = None
     escalated: bool = False
+    escalated_at: datetime | None = None
+    sla_started_at: datetime | None = None
+    due_at: datetime | None = None
 
 
 class RemarkOut(Wire):

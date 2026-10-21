@@ -1,6 +1,6 @@
 import type { OcrInspection, OcrScan } from '@/shared/api/client'
 
-export type ScanKind = 'resume' | 'passport'
+export type ScanKind = 'resume' | 'passport' | 'aadhaar'
 export type DocumentScans = Partial<Record<ScanKind, OcrScan>>
 
 export function inspectedPageCount(inspection: OcrInspection): number {
@@ -27,7 +27,7 @@ export function mergeOcrForm<T extends Record<string, string>>(
 ): T {
   const extracted: Record<string, string> = {}
   // Preserve the existing passport-over-resume precedence for unedited fields.
-  for (const kind of ['resume', 'passport'] as const) {
+  for (const kind of ['resume', 'aadhaar', 'passport'] as const) {
     const scan = scans[kind]
     if (!hasOcrExtraction(scan)) continue
     for (const [key, value] of Object.entries(scan.fields)) {

@@ -6,8 +6,8 @@ import type { Client } from '@/shared/model/types'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { EmptyState, PageHeader, Panel, PanelHeader, StatusPill } from '@/shared/ui/display'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
-import { Button, Field, Input, SearchInput, Select, Textarea } from '@/shared/ui/primitives'
-import { Dialog } from '@/shared/ui/overlay'
+import { Button, SearchInput } from '@/shared/ui/primitives'
+import { ClientDialog } from '../components/client-dialog'
 
 /**
  * Clients are people. The businesses they own are companies, and an order is placed
@@ -183,87 +183,7 @@ export default function ClientsPage() {
         />
       </Panel>
 
-      <ClientDialog open={adding} onClose={() => setAdding(false)} />
+      {adding && <ClientDialog onClose={() => setAdding(false)} />}
     </>
-  )
-}
-
-function ClientDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { addClient } = useStore()
-  const empty = {
-    name: '',
-    email: '',
-    phone: '',
-    whatsapp: '',
-    country: '',
-    city: '',
-    notes: '',
-    status: 'active' as const,
-  }
-  const [form, setForm] = useState(empty)
-  const [saving, setSaving] = useState(false)
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
-
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      width="lg"
-      title="New client"
-      description="A person. You can add the companies they own next."
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!form.name.trim() || saving}
-            onClick={async () => {
-              setSaving(true)
-              try {
-                await addClient(form)
-                setForm(empty)
-                onClose()
-              } finally {
-                setSaving(false)
-              }
-            }}
-          >
-            {saving ? 'Saving…' : 'Save client'}
-          </Button>
-        </>
-      }
-    >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Full name" required className="sm:col-span-2">
-          <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Khalid Rahman" />
-        </Field>
-        <Field label="Email">
-          <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
-        </Field>
-        <Field label="Status">
-          <Select value={form.status} onChange={(e) => set('status', e.target.value)}>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </Select>
-        </Field>
-        <Field label="Phone">
-          <Input ident value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+971 50 000 0000" />
-        </Field>
-        <Field label="WhatsApp">
-          <Input ident value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} />
-        </Field>
-        <Field label="City">
-          <Input value={form.city} onChange={(e) => set('city', e.target.value)} />
-        </Field>
-        <Field label="Country">
-          <Input value={form.country} onChange={(e) => set('country', e.target.value)} />
-        </Field>
-        <Field label="Notes" className="sm:col-span-2">
-          <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
-        </Field>
-      </div>
-    </Dialog>
   )
 }

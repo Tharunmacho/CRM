@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
@@ -6,20 +6,49 @@ import { IconButton } from './primitives'
 
 /* ----------------------------------------------------------- Escape hook */
 
-function useDismiss(open: boolean, onClose: () => void) {
+const openModals: HTMLElement[] = []
+let originalOverflow = ''
+
+function useDismiss(open: boolean, onClose: () => void, root: RefObject<HTMLDivElement>) {
+  const close = useRef(onClose)
+  close.current = onClose
   useEffect(() => {
-    if (!open) return
+    const element = root.current
+    if (!open || !element) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (!openModals.length) {
+      originalOverflow = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+    }
+    openModals.push(element)
+    const focusable = () => Array.from(element.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
+    )).filter((item) => item.getClientRects().length > 0 && !item.closest('[aria-hidden="true"]'))
+    const frame = requestAnimationFrame(() => {
+      if (!element.contains(document.activeElement)) (element.querySelector<HTMLElement>('[autofocus]') || focusable()[0] || element).focus()
+    })
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (openModals[openModals.length - 1] !== element || document.querySelector('.custom-select-popup')) return
+      if (e.key === 'Escape') { e.preventDefault(); close.current() }
+      if (e.key === 'Tab') {
+        const items = focusable()
+        const first = items[0]
+        const last = items[items.length - 1]
+        if (!first) { e.preventDefault(); element.focus() }
+        else if (e.shiftKey && (document.activeElement === first || !element.contains(document.activeElement))) { e.preventDefault(); last.focus() }
+        else if (!e.shiftKey && (document.activeElement === last || !element.contains(document.activeElement))) { e.preventDefault(); first.focus() }
+      }
     }
     document.addEventListener('keydown', onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     return () => {
+      cancelAnimationFrame(frame)
       document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
+      const index = openModals.indexOf(element)
+      if (index >= 0) openModals.splice(index, 1)
+      if (!openModals.length) document.body.style.overflow = originalOverflow
+      if (previousFocus?.isConnected) previousFocus.focus()
     }
-  }, [open, onClose])
+  }, [open, root])
 }
 
 /* ---------------------------------------------------------------- Dialog */
@@ -42,7 +71,8 @@ export function Dialog({
   /** `full` takes the whole window: the header stays put and the body scrolls under it. */
   width?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
 }) {
-  useDismiss(open, onClose)
+  const root = useRef<HTMLDivElement>(null)
+  useDismiss(open, onClose, root)
   if (!open) return null
 
   const full = width === 'full'
@@ -57,6 +87,8 @@ export function Dialog({
     >
       <div className="fixed inset-0 bg-ink-900/40 animate-fade-in" onClick={onClose} aria-hidden />
       <div
+        ref={root}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -106,7 +138,8 @@ export function Sheet({
   footer?: ReactNode
   width?: 'md' | 'lg' | 'xl'
 }) {
-  useDismiss(open, onClose)
+  const root = useRef<HTMLDivElement>(null)
+  useDismiss(open, onClose, root)
   if (!open) return null
 
   const widths = { md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-5xl' }[width]
@@ -115,10 +148,12 @@ export function Sheet({
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="fixed inset-0 bg-ink-900/40 animate-fade-in" onClick={onClose} aria-hidden />
       <div
+        ref={root}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={cn('relative z-10 flex h-full w-full flex-col bg-white shadow-overlay', widths)}
+        className={cn('workspace-sheet relative z-10 flex h-full w-full flex-col bg-white shadow-overlay', widths)}
         style={{ animation: 'sheet-in 200ms cubic-bezier(.2,.8,.3,1)' }}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-rule px-5 py-4">

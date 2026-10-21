@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { CalendarCheck2, CalendarClock, CheckCheck, LockKeyhole, Plus, TimerOff, Trash2 } from 'lucide-react'
+import { CalendarCheck2, CalendarClock, CheckCheck, LockKeyhole, Pencil, Plus, TimerOff, Trash2 } from 'lucide-react'
+import { api } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel, isSameDay, smartTime } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
@@ -24,6 +25,7 @@ export default function TodoPage() {
   const store = useStore()
   const [tab, setTab] = useState<TabKey>('today')
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<TodoItem | null>(null)
 
   const mine = useMemo(
     () => store.todos.filter((t) => t.ownerId === store.me.id),
@@ -130,7 +132,7 @@ export default function TodoPage() {
           ) : (
             <ul className="workspace-todo-list">
               {rows.map((t) => (
-                <Row key={t.id} item={t} />
+                <Row key={t.id} item={t} onEdit={() => setEditing(t)} />
               ))}
             </ul>
           )}
@@ -167,13 +169,15 @@ export default function TodoPage() {
         </Panel>
       </div>
 
-      <AddDialog open={adding} onClose={() => setAdding(false)} />
+      {(adding || editing) && <AddDialog key={editing?.id || 'new'} open item={editing} onClose={() => { setAdding(false); setEditing(null) }} />}
     </>
   )
 }
 
-function Row({ item }: { item: TodoItem }) {
+function Row({ item, onEdit }: { item: TodoItem; onEdit: () => void }) {
   const store = useStore()
+  const [busy, setBusy] = useState(false)
+  const perform = async (action: () => Promise<void>) => { setBusy(true); try { await action() } catch (e) { store.notify(e instanceof Error ? e.message : 'Could not save the change', 'warn') } finally { setBusy(false) } }
   const overdue = !item.done && new Date(item.dueAt) < new Date()
 
   return (
@@ -187,7 +191,8 @@ function Row({ item }: { item: TodoItem }) {
         <Checkbox
           aria-label={`Complete ${item.title}`}
           checked={item.done}
-          onChange={() => void store.toggleTodo(item.id)}
+          disabled={busy}
+          onChange={() => void perform(() => store.toggleTodo(item.id))}
         />
       </div>
 
@@ -216,7 +221,14 @@ function Row({ item }: { item: TodoItem }) {
       </div>
 
       <button
-        onClick={() => void store.deleteTodo(item.id)}
+        onClick={onEdit}
+        disabled={busy}
+        aria-label={`Edit ${item.title}`}
+        className="shrink-0 rounded-control p-1.5 text-ink-500 hover:bg-field"
+      ><Pencil className="h-3.5 w-3.5" /></button>
+      <button
+        disabled={busy}
+        onClick={() => void perform(() => store.deleteTodo(item.id))}
         aria-label={`Delete ${item.title}`}
         className="shrink-0 rounded-control p-1.5 text-ink-300 hover:bg-stamp-50 hover:text-stamp-600"
       >
@@ -226,7 +238,7 @@ function Row({ item }: { item: TodoItem }) {
   )
 }
 
-function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function AddDialog({ open, onClose, item }: { open: boolean; onClose: () => void; item?: TodoItem | null }) {
   const store = useStore()
   const todayAt = (() => {
     const d = new Date()
@@ -234,19 +246,22 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     return format(d, "yyyy-MM-dd'T'HH:mm")
   })()
 
-  const [form, setForm] = useState({ title: '', notes: '', dueAt: todayAt, priority: 'normal', link: '' })
+  const [form, setForm] = useState({ title: item?.title || '', notes: item?.notes || '', dueAt: item ? format(new Date(item.dueAt), "yyyy-MM-dd'T'HH:mm") : todayAt, priority: item?.priority || 'normal', link: item?.linkTo || '' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const linkOptions = [
     ...store.clients.map((c) => ({ value: `/clients/${c.id}`, label: `Client — ${c.name}` })),
-    ...store.orders.slice(0, 10).map((o) => ({ value: `/orders/${o.id}`, label: `Order — ${o.ref}` })),
+    ...store.orders.map((o) => ({ value: `/orders/${o.id}`, label: `Order — ${o.ref}` })),
+    ...store.candidates.map((c) => ({ value: `/candidates/${c.id}`, label: `Candidate — ${c.name}` })),
   ]
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      title="Add a to-do"
+      title={item ? 'Edit to-do' : 'Add a to-do'}
       description="Only you see this item. You will get a reminder in the notification bell when it is due."
       footer={
         <>
@@ -255,26 +270,32 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
           </Button>
           <Button
             variant="primary"
-            disabled={!form.title.trim()}
-            onClick={() => {
+            disabled={busy || !form.title.trim() || !form.dueAt}
+            onClick={async () => {
+              setBusy(true); setError('')
               const chosen = linkOptions.find((o) => o.value === form.link)
-              void store.addTodo({
+              const payload = {
                 title: form.title.trim(),
                 notes: form.notes.trim() || undefined,
                 dueAt: new Date(form.dueAt).toISOString(),
                 priority: form.priority,
                 linkTo: chosen?.value,
                 linkLabel: chosen?.label.split(' — ')[1],
-              })
-              setForm({ title: '', notes: '', dueAt: todayAt, priority: 'normal', link: '' })
-              onClose()
+              }
+              try {
+                if (item) { await api.patch(`/todos/${item.id}`, payload); try { await store.refresh({ keepCurrent: true }) } catch { store.notify('Saved. Refresh to see the latest list.', 'warn') } }
+                else await store.addTodo(payload)
+                onClose()
+              } catch (e) { setError(e instanceof Error ? e.message : 'To-do could not be saved') }
+              finally { setBusy(false) }
             }}
           >
-            Add item
+            {busy ? 'Saving…' : item ? 'Save changes' : 'Add item'}
           </Button>
         </>
       }
     >
+      {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Title" required className="sm:col-span-2">
           <Input

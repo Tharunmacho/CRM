@@ -1,6 +1,8 @@
 """Persistent uploads-volume identity shared by mail receipt and worker selection."""
 
 import os
+import hashlib
+import json
 from pathlib import Path
 import tempfile
 from uuid import UUID, uuid4
@@ -28,8 +30,16 @@ def _read_identity(marker: Path) -> str:
         ) from None
 
 
-def storage_identity(storage_dir: str | Path) -> str:
+def storage_identity(storage_dir: str | Path, settings=None) -> str:
     """Create once without replacement; copying the entire volume preserves it."""
+    if settings is not None and getattr(settings, "storage_backend", "local") == "s3":
+        bucket = getattr(settings, "s3_bucket", "")
+        if not bucket:
+            raise StorageIdentityError("An S3 bucket is required before receiving mail.")
+        endpoint = (getattr(settings, "s3_endpoint_url", None) or "aws:s3").rstrip("/")
+        prefix = getattr(settings, "s3_prefix", "crm").strip("/")
+        namespace = json.dumps([endpoint, bucket, prefix], separators=(",", ":"))
+        return "s3:" + hashlib.sha256(namespace.encode()).hexdigest()
     directory = Path(storage_dir)
     directory.mkdir(parents=True, exist_ok=True)
     marker = directory / MARKER_NAME

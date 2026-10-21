@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BriefcaseBusiness, Building2, Globe2, Plus, ShieldCheck, Trash2 } from 'lucide-react'
+import { BriefcaseBusiness, Building2, Globe2, History, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import type { Company } from '@/shared/model/types'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { EmptyState, PageHeader, Panel, PanelHeader, StatusPill } from '@/shared/ui/display'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
-import { Button, Field, Input, SearchInput, Select, Textarea } from '@/shared/ui/primitives'
-import { Dialog } from '@/shared/ui/overlay'
-import { FileDrop, FileLink } from '@/shared/ui/file-drop'
-import { api } from '@/shared/api/client'
+import { Button, IconButton, SearchInput, Select } from '@/shared/ui/primitives'
+import { FileLink } from '@/shared/ui/file-drop'
+import { CompanyDialog } from '../components/company-dialog'
+import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
 
 /**
@@ -22,6 +22,8 @@ export default function CompaniesPage() {
   const [query, setQuery] = useState('')
   const [clientFilter, setClientFilter] = useState('all')
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<Company | null>(null)
+  const [history, setHistory] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const rows = useMemo(() => {
@@ -81,6 +83,12 @@ export default function CompaniesPage() {
         c.phone ? <span className="ident text-ink-600">{c.phone}</span> : <span className="text-ink-300">—</span>,
     },
     {
+      key: 'whatsapp',
+      header: 'WhatsApp',
+      className: 'whitespace-nowrap ident',
+      value: (c) => c.whatsapp || '—',
+    },
+    {
       key: 'orders',
       header: 'Open orders',
       align: 'right',
@@ -113,6 +121,10 @@ export default function CompaniesPage() {
       value: (c) => c.status,
       render: (c) => <StatusPill status={c.status} />,
     },
+    { key: 'edit', header: 'Actions', render: (company) => <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+      <IconButton label={'Edit ' + company.name} onClick={() => setEditing(company)}><Pencil className="h-4 w-4" /></IconButton>
+      <IconButton label={'Activity for ' + company.name} onClick={() => setHistory(company.id)}><History className="h-4 w-4" /></IconButton>
+    </div> },
     ...(store.can('delete_records')
       ? [
           {
@@ -235,133 +247,15 @@ export default function CompaniesPage() {
         />
       </Panel>
 
-      <CompanyDialog open={adding} onClose={() => setAdding(false)} />
+      {(adding || editing) && <CompanyDialog company={editing ?? undefined} onClose={() => { setAdding(false); setEditing(null) }} />}
+      {history && <RecordAudit kind="company" id={history} onClose={() => setHistory(null)} />}
       <DeleteRecordDialog
         kind="company"
         id={deletingId ?? ''}
         open={!!deletingId}
         onClose={() => setDeletingId(null)}
+        onEdit={() => setEditing(store.company(deletingId ?? '') ?? null)}
       />
     </>
-  )
-}
-
-function CompanyDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const store = useStore()
-  const empty = {
-    clientId: '',
-    name: '',
-    country: '',
-    city: '',
-    industry: '',
-    contactPerson: '',
-    contactEmail: '',
-    phone: '',
-    address: '',
-    notes: '',
-    status: 'active' as const,
-  }
-  const [form, setForm] = useState(empty)
-  // The agreement is chosen before the company exists, so it waits for an id.
-  const [agreement, setAgreement] = useState<File | null>(null)
-  const [saving, setSaving] = useState(false)
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
-
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      width="lg"
-      title="New company"
-      description="The employer an order will be placed for."
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!form.name.trim() || !form.clientId || saving}
-            onClick={async () => {
-              setSaving(true)
-              try {
-                const created = await store.addCompany(form)
-                if (created && agreement) {
-                  await api.upload('company', created.id, 'agreement', agreement)
-                }
-                setForm(empty)
-                setAgreement(null)
-                onClose()
-              } finally {
-                setSaving(false)
-              }
-            }}
-          >
-            {saving ? 'Saving…' : 'Save company'}
-          </Button>
-        </>
-      }
-    >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Client" required hint="The person who owns this company" className="sm:col-span-2">
-          <Select value={form.clientId} onChange={(e) => set('clientId', e.target.value)}>
-            <option value="">Choose a client</option>
-            {store.clients
-              .filter((c) => c.status === 'active')
-              .map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.city ? ` — ${c.city}` : ''}
-                </option>
-              ))}
-          </Select>
-        </Field>
-        <Field label="Company name" required className="sm:col-span-2">
-          <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Al Habtoor Contracting" />
-        </Field>
-        <Field label="Industry">
-          <Input value={form.industry} onChange={(e) => set('industry', e.target.value)} placeholder="Construction" />
-        </Field>
-        <Field label="Status">
-          <Select value={form.status} onChange={(e) => set('status', e.target.value)}>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </Select>
-        </Field>
-        <Field label="City">
-          <Input value={form.city} onChange={(e) => set('city', e.target.value)} />
-        </Field>
-        <Field label="Country">
-          <Input value={form.country} onChange={(e) => set('country', e.target.value)} />
-        </Field>
-        <Field label="Contact person">
-          <Input value={form.contactPerson} onChange={(e) => set('contactPerson', e.target.value)} />
-        </Field>
-        <Field label="Contact email">
-          <Input type="email" value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} />
-        </Field>
-        <Field label="Phone / WhatsApp" className="sm:col-span-2">
-          <Input ident value={form.phone} onChange={(e) => set('phone', e.target.value)} />
-        </Field>
-        <Field label="Address" className="sm:col-span-2">
-          <Textarea rows={2} value={form.address} onChange={(e) => set('address', e.target.value)} />
-        </Field>
-        <div className="sm:col-span-2">
-          <FileDrop
-            label="Agreement"
-            help="The signed agreement with this employer. Uploaded once the company is saved."
-            onFile={(f) => setAgreement(f)}
-          />
-        </div>
-        <Field label="Notes" className="sm:col-span-2">
-          <Textarea
-            rows={2}
-            value={form.notes}
-            onChange={(e) => set('notes', e.target.value)}
-            placeholder="Interview preferences, payment terms, anything the team should know"
-          />
-        </Field>
-      </div>
-    </Dialog>
   )
 }

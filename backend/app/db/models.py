@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
@@ -228,6 +229,7 @@ class Company(Base, PkMixin, TimestampMixin):
     contact_person: Mapped[str | None] = mapped_column(String(160))
     contact_email: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(40))
+    whatsapp: Mapped[str | None] = mapped_column(String(40))
     address: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
@@ -313,6 +315,14 @@ class Candidate(Base, PkMixin, TimestampMixin):
     needs_review: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
     owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"), index=True)
+    intake_owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id"), index=True,
+        comment="Recruiter assigned at intake; retained when current ownership changes. Legacy rows use the owner at migration.",
+    )
+    created_by: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id"),
+        comment="CRM user who entered this candidate; null for automatic intake or legacy records.",
+    )
 
     # Parsed resume text, plus the index the Data Bank's full-text search runs on.
     resume_text: Mapped[str | None] = mapped_column(Text)
@@ -386,6 +396,10 @@ class Application(Base, PkMixin, TimestampMixin):
         ForeignKey("crm_candidates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     order_id: Mapped[str] = mapped_column(ForeignKey("crm_job_orders.id"), nullable=False, index=True)
+    owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id"), index=True,
+        comment="Recruiter responsible when this placement was mapped; a historical reporting snapshot.",
+    )
     current_stage: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     status: Mapped[ApplicationStatus] = mapped_column(
         pg_enum(ApplicationStatus, "application_status"),
@@ -441,6 +455,10 @@ class ApplicationStage(Base, PkMixin):
     # paid abroad, so it cannot be assumed to match the order's.
     amount_currency: Mapped[str | None] = mapped_column(String(8))
     completed_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id"), index=True,
+        comment="Responsible recruiter recorded for this stage attempt, independent of the person completing it.",
+    )
     completed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -476,6 +494,12 @@ class Task(Base, PkMixin):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     escalated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sla_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="Start of the current SLA window; reassignment does not reset it.",
+    )
+    due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, comment="Deadline of the current 48-hour SLA window.",
+    )
 
     __table_args__ = (
         # The escalation scan runs every 15 minutes forever; without this it degrades
@@ -513,6 +537,23 @@ class Remark(Base, PkMixin):
     )
 
 
+class TaskEvent(Base, PkMixin):
+    """Durable SLA history. Current task flags are not historical reports."""
+
+    __tablename__ = "workflow_task_events"
+    task_id: Mapped[str] = mapped_column(ForeignKey("workflow_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id", ondelete="SET NULL"), index=True)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(180), nullable=False, unique=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    meta: Mapped[dict | None] = mapped_column(JSONB)
+    __table_args__ = (
+        CheckConstraint("kind IN ('escalation','missed_update','sla_reset','reminder','assignment')", name="ck_workflow_task_events_kind"),
+        {"comment": "Append-only task SLA events, with owner at event time and unique delivery key for repeat-safe scheduling."},
+    )
+
+
 class TodoItem(Base, PkMixin):
     __tablename__ = "personal_todos"
     __table_args__ = {
@@ -529,6 +570,9 @@ class TodoItem(Base, PkMixin):
         pg_enum(Priority, "todo_priority"), nullable=False, server_default=text("'normal'")
     )
     done: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    reminded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="When the current due-date reminder was delivered; cleared when due date changes.",
+    )
     link_to: Mapped[str | None] = mapped_column(String(255))
     link_label: Mapped[str | None] = mapped_column(String(160))
     created_at: Mapped[datetime] = mapped_column(
@@ -554,6 +598,9 @@ class MailAccount(Base, PkMixin, TimestampMixin):
     last_error: Mapped[str | None] = mapped_column(Text)
     sync_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     worker_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    extraction_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    connected_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
 
 
 class MailMessage(Base, PkMixin):
@@ -572,6 +619,22 @@ class MailMessage(Base, PkMixin):
     from_address: Mapped[str | None] = mapped_column(String(255))
     subject: Mapped[str | None] = mapped_column(Text)
     body: Mapped[str | None] = mapped_column(Text)
+    message_id_header: Mapped[str | None] = mapped_column(Text)
+    references_header: Mapped[str | None] = mapped_column(Text)
+    folder: Mapped[str] = mapped_column(String(255), nullable=False, server_default="INBOX")
+    remote_uid: Mapped[int | None] = mapped_column(BigInteger)
+    uid_validity: Mapped[str | None] = mapped_column(String(80))
+    to_addresses: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    cc_addresses: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    bcc_addresses: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    starred: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    remote_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    previous_folder: Mapped[str | None] = mapped_column(String(255))
+    remote_state: Mapped[str] = mapped_column(String(20), nullable=False, server_default="synced")
+    remote_error: Mapped[str | None] = mapped_column(Text)
+    remote_operation: Mapped[dict | None] = mapped_column(JSONB)
+
+    reply_to: Mapped[str | None] = mapped_column(String(255))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     unread: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"))
@@ -600,6 +663,76 @@ class MailAttachment(Base, PkMixin):
     content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
 
+class MailOAuthState(Base, PkMixin):
+    __tablename__ = "email_oauth_states"
+    state_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    address: Mapped[str] = mapped_column(String(255), nullable=False)
+    verifier_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = {"comment": "Short-lived, single-use Gmail/Microsoft connection handshakes; PKCE verifier is encrypted and OAuth state is hashed."}
+
+
+class MailReply(Base, PkMixin):
+    __tablename__ = "email_replies"
+    message_id: Mapped[str] = mapped_column(ForeignKey("email_messages.id"), nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), nullable=False, index=True)
+    actor_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    request_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','sending','sent','unknown','failed')", name="ck_email_replies_status"),
+        {"comment": "Human-requested replies sent from the originating mailbox. Unknown delivery outcomes must be reconciled before retrying."},
+    )
+
+
+class WhatsAppChannel(Base, TimestampMixin):
+    __tablename__ = "whatsapp_channels"
+    phone_number_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    display_number: Mapped[str | None] = mapped_column(String(80))
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    auto_ingest: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    last_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = {"comment": "Connected WhatsApp Business phone numbers and inbound processing health. Provider credentials remain in server configuration."}
+
+
+class WhatsAppMessage(Base, PkMixin, TimestampMixin):
+    __tablename__ = "whatsapp_messages"
+    provider_message_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    phone_number_id: Mapped[str] = mapped_column(ForeignKey("whatsapp_channels.phone_number_id"), nullable=False, index=True)
+    sender_number: Mapped[str] = mapped_column(String(40), nullable=False)
+    sender_name: Mapped[str | None] = mapped_column(String(200))
+    message_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    media_id: Mapped[str | None] = mapped_column(String(100))
+    file_name: Mapped[str | None] = mapped_column(String(255))
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    object_key: Mapped[str | None] = mapped_column(String(500))
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_error: Mapped[str | None] = mapped_column(Text)
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"), index=True)
+    processing_state: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True)
+    __table_args__ = (
+        CheckConstraint("status IN ('received','pending','processing','retry','needs_review','completed','ignored','failed')", name="ck_whatsapp_messages_status"),
+        Index("ix_whatsapp_messages_ready", "next_attempt_at", postgresql_where=text("status IN ('pending','processing','retry')")),
+        {"comment": "Durable inbound WhatsApp receipts, original media and OCR checkpoints. Sender number is provenance, not assumed candidate identity."},
+    )
+
+
 class EmailIngestionJob(Base, PkMixin, TimestampMixin):
     """Durable message receipt, OCR checkpoints and candidate commit outcome."""
 
@@ -622,6 +755,33 @@ class EmailIngestionJob(Base, PkMixin, TimestampMixin):
         Index("ix_email_ingestion_jobs_ready", "next_attempt_at",
               postgresql_where=text("status IN ('pending','processing','retry')")),
         {"comment": "Durable email intake queue and per-document OCR checkpoints; links source messages to candidate outcomes."},
+    )
+
+
+class DocumentExtractionJob(Base, PkMixin, TimestampMixin):
+    __tablename__ = "document_extraction_jobs"
+    owner_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    group_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    filename: Mapped[str] = mapped_column(String(150), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_kb: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    state: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True)
+    result: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True)
+    draft: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"))
+    attachment_id: Mapped[str | None] = mapped_column(ForeignKey("document_attachments.id"))
+    __table_args__ = (
+        UniqueConstraint("owner_id", "group_id", "kind", "content_hash", name="uq_document_extraction_source"),
+        CheckConstraint("status IN ('uploaded','pending','processing','retry','completed','needs_review','failed','attached','dismissed')", name="ck_document_extraction_jobs_status"),
+        Index("ix_document_extraction_jobs_ready", "status", "next_attempt_at"),
+        {"comment": "Manual candidate document uploads, durable OCR checkpoints and recruiter form drafts, grouped by one intake session."},
     )
 
 
@@ -695,4 +855,134 @@ class AssignmentPointer(Base):
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_single_pointer_row"),
         {"comment": "Singleton round-robin assignment cursor; id 1 records the last assigned CRM user."},
+    )
+
+
+class WorkflowSettings(Base):
+    __tablename__ = "workflow_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, server_default=text("1"))
+    escalation_repeat_hours: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_daily_check_date: Mapped[date | None] = mapped_column(Date)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_workflow_settings_singleton"),
+        CheckConstraint("escalation_repeat_hours IN (0, 24)", name="ck_workflow_settings_repeat"),
+        {"comment": "Agency task automation settings and scheduler checkpoint. Repeat 0 means one escalation; 24 enables daily reminders."},
+    )
+
+
+class MailDraft(Base, PkMixin, TimestampMixin):
+    __tablename__ = "email_drafts"
+    account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), nullable=False, index=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, server_default="compose")
+    source_message_id: Mapped[str | None] = mapped_column(ForeignKey("email_messages.id"))
+    to_addresses: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    cc_addresses: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    bcc_addresses: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    subject: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="draft")
+    remote_uid: Mapped[int | None] = mapped_column(BigInteger)
+    remote_uid_validity: Mapped[str | None] = mapped_column(String(80))
+    remote_folder: Mapped[str | None] = mapped_column(String(255))
+    remote_state: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("mode IN ('compose','reply','reply_all','forward','edit_draft')", name="ck_email_drafts_mode"),
+        CheckConstraint("status IN ('draft','sending','sent','unknown','failed','discarded')", name="ck_email_drafts_status"),
+        {"comment": "Durable Zoho message drafts with recipients, optimistic versions, mailbox synchronization and send state."},
+    )
+
+
+class MailDraftAttachment(Base, PkMixin):
+    __tablename__ = "email_draft_attachments"
+    draft_id: Mapped[str] = mapped_column(ForeignKey("email_drafts.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    object_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    __table_args__ = {"comment": "Immutable draft attachment bytes referenced by durable Zoho drafts and send snapshots."}
+
+
+class MailSendAttempt(Base, PkMixin):
+    __tablename__ = "email_send_attempts"
+    draft_id: Mapped[str] = mapped_column(ForeignKey("email_drafts.id"), nullable=False, index=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    refused_recipients: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','sending','sent','partial','unknown','failed')", name="ck_email_send_attempts_status"),
+        {"comment": "Idempotent human-requested Zoho sends with immutable content snapshots and explicit uncertain/partial delivery outcomes."},
+    )
+
+
+class StaffAttendanceSession(Base, PkMixin, TimestampMixin):
+    __tablename__ = "staff_attendance_sessions"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    checked_in_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    checked_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    checkin_request_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    checkout_request_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    corrected_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    correction_reason: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("checked_out_at IS NULL OR checked_out_at >= checked_in_at", name="ck_staff_attendance_time_order"),
+        Index("ix_staff_attendance_one_open", "user_id", unique=True, postgresql_where=text("checked_out_at IS NULL")),
+        Index("ix_staff_attendance_user_time", "user_id", "checked_in_at"),
+        {"comment": "Explicit staff check-in/check-out intervals. Attendance is independent of browser presence; corrections are audited."},
+    )
+
+
+class StaffPresenceInterval(Base, PkMixin):
+    __tablename__ = "staff_presence_intervals"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    auth_session_id: Mapped[str | None] = mapped_column(ForeignKey("auth_sessions.id", ondelete="SET NULL"), index=True)
+    state: Mapped[str] = mapped_column(String(12), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        CheckConstraint("state IN ('online','idle')", name="ck_staff_presence_state"),
+        CheckConstraint("ended_at IS NULL OR ended_at >= started_at", name="ck_staff_presence_time_order"),
+        Index("ix_staff_presence_one_open", "user_id", "client_id", unique=True, postgresql_where=text("ended_at IS NULL")),
+        Index("ix_staff_presence_stale", "last_seen_at", postgresql_where=text("ended_at IS NULL")),
+        Index("ix_staff_presence_user_time", "user_id", "started_at"),
+        {"comment": "Visible browser heartbeat intervals for online/idle estimates. Offline time is derived within explicit attendance; multiple tabs are deduplicated."},
+    )
+
+
+class StaffAttendanceRequest(Base):
+    __tablename__ = "staff_attendance_requests"
+    kind: Mapped[str] = mapped_column(String(12), primary_key=True)
+    request_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
+    attendance_id: Mapped[str] = mapped_column(ForeignKey("staff_attendance_sessions.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        CheckConstraint("kind IN ('check_in','check_out')", name="ck_staff_attendance_request_kind"),
+        {"comment": "Durable attendance retry ledger, including requests that return an already-open or already-closed session."},
+    )
+
+
+class StaffPresenceClient(Base):
+    __tablename__ = "staff_presence_clients"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    auth_session_id: Mapped[str | None] = mapped_column(ForeignKey("auth_sessions.id", ondelete="SET NULL"), index=True)
+    last_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        CheckConstraint("last_sequence >= 1", name="ck_staff_presence_client_sequence"),
+        {"comment": "Per-page ordering checkpoint and login binding. Leave requests persist even before the first heartbeat, rejecting delayed older updates."},
     )

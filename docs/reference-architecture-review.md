@@ -1,5 +1,7 @@
 # Email automation reference review
 
+For the current full comparison, see the [21 October screen-by-screen PRD integration audit](integration-audit.md), including all three CRM roles, every reference destination, the eleven stages and the proposed implementation sequence. The dated sections below remain historical evidence.
+
 Reviewed on 19 October 2026 at the user's request. This is a source-level comparison of `M:\email-automation-main`, `M:\gmail automation`, and the current recruitment CRM. The references were read without running their applications, jobs, tests, database operations or provider calls. Secret files and stored candidate/mailbox data were not inspected. Findings describe connected source paths, not verified production behavior.
 
 The [12-page recruitment PRD](requirements/recruitment-crm-developer-specification.pdf) remains the target contract. The references help explain intake and operational patterns; they do not replace the PRD's roles, assignment, eleven stages or reporting rules. Implementation changes remain scheduled in the [phase plan](implementation-phases.md).

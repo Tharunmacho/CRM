@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronRight, History, Pencil, Trash2 } from 'lucide-react'
 import { dateLabel, money } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import { stageByNo } from '@/shared/workflow/stages'
@@ -18,6 +18,8 @@ import {
 import { Button } from '@/shared/ui/primitives'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
+import { ClientDialog } from '../components/client-dialog'
+import { RecordAudit } from '@/features/master-data/components/record-audit'
 
 export default function ClientDetailPage() {
   const { id } = useParams()
@@ -26,6 +28,8 @@ export default function ClientDetailPage() {
   const client = store.clients.find((c) => c.id === id)
   const [openApp, setOpenApp] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [history, setHistory] = useState(false)
 
   if (!client) {
     return (
@@ -53,6 +57,8 @@ export default function ClientDetailPage() {
         actions={
           <>
             <StatusPill status={client.status} />
+            <Button icon={<History className="h-4 w-4" />} onClick={() => setHistory(true)}>Activity</Button>
+            <Button icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit client</Button>
             {store.can('delete_records') && (
               <Button variant="dangerGhost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>
                 Delete client
@@ -87,6 +93,20 @@ export default function ClientDetailPage() {
           </p>
         )}
       </Panel>
+
+      {companies.length > 0 && <Panel className="mb-4" flush>
+        <PanelHeader title="Employer contacts" meta="Company phone and WhatsApp numbers" />
+        <div className="divide-y divide-rule-soft">
+          {companies.map((company) => <div key={company.id} className="px-4 py-4">
+            <p className="mb-3 text-sm font-medium text-ink">{company.name}</p>
+            <DefList cols={3}>
+              <Def label="Contact person">{company.contactPerson || '—'}</Def>
+              <Def label="Phone" ident>{company.phone || '—'}</Def>
+              <Def label="WhatsApp" ident>{company.whatsapp || '—'}</Def>
+            </DefList>
+          </div>)}
+        </div>
+      </Panel>}
 
       {orders.length === 0 ? (
         <Panel>
@@ -155,12 +175,15 @@ export default function ClientDetailPage() {
       )}
 
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
+      {editing && <ClientDialog client={client} onClose={() => setEditing(false)} />}
+      {history && <RecordAudit kind="client" id={client.id} onClose={() => setHistory(false)} />}
       <DeleteRecordDialog
         kind="client"
         id={client.id}
         open={deleting}
         onClose={() => setDeleting(false)}
         onDeleted={() => navigate('/clients')}
+        onEdit={() => setEditing(true)}
       />
     </>
   )

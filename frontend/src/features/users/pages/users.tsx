@@ -1,429 +1,241 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CalendarDays, KeyRound, LogOut, Plus, RotateCw, ScrollText, UserCheck, UserCog, Users } from 'lucide-react'
-import { cn } from '@/shared/lib/cn'
-import { dateTimeLabel, smartTime } from '@/shared/lib/format'
+import { dateTimeLabel } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
-import { auditLog } from '@/mocks/seed'
+import { api } from '@/shared/api/client'
 import type { Role, User } from '@/shared/model/types'
 import { Badge, EmptyState, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
-import { Button, Field, Input, Select, Switch } from '@/shared/ui/primitives'
+import { Button, Field, Input, SearchInput, Select, Switch } from '@/shared/ui/primitives'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { Dialog, Dropdown, MenuItem, Sheet } from '@/shared/ui/overlay'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
 
+interface AuditRow {
+  id: string; actorId: string | null; action: string; target: string | null
+  entityType: string | null; entityId: string | null; at: string
+  meta: { changes?: Record<string, { before: unknown; after: unknown }>; transfer?: { candidates: number; tasks: number }; revokedSessions?: number }
+}
+interface AuditPage { items: AuditRow[]; nextBefore: string | null }
+const failureText = (error: unknown) => error instanceof Error ? error.message : 'The change could not be saved. Try again.'
+const roleLabels = { admin: 'Admin', manager: 'Manager', staff: 'Staff' }
+
 export default function UsersPage() {
   const store = useStore()
-  const [editing, setEditing] = useState<User | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [deactivating, setDeactivating] = useState<User | null>(null)
+  const [editing, setEditing] = useState<{ user: User | null; deactivate?: boolean } | null>(null)
+  const [security, setSecurity] = useState<{ user: User; kind: 'password' | 'logout' } | null>(null)
   const [auditFor, setAuditFor] = useState<User | null>(null)
+  const [query, setQuery] = useState('')
+  const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const eligible = store.users.filter((u) => u.role === 'staff' && u.active && u.receivesAutoAssign && !u.onLeave)
+  const rows = store.users.filter((u) => [u.name, u.email, u.phone || ''].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
 
-  const eligible = store.users.filter(
-    (u) => u.role === 'staff' && u.active && u.receivesAutoAssign && !u.onLeave,
-  )
-
-  const userColumns: Column<User>[] = [
-    {
-      key: 'name',
-      header: 'Name',
-      sortable: true,
-      width: '24%',
-      value: (u) => u.name,
-      render: (u) => (
-        <RecordIdentity name={u.name} detail={u.email} />
-      ),
-    },
-    {
-      key: 'role',
-      header: 'Role',
-      sortable: true,
-      filterable: true,
-      value: (u) => u.role,
-      render: (u) => (
-        <Badge tone={u.role === 'admin' ? 'ink' : u.role === 'manager' ? 'navy' : 'neutral'}>
-          <span className="capitalize">{u.role}</span>
-        </Badge>
-      ),
-    },
-    {
-      key: 'phone',
-      header: 'Phone',
-      className: 'whitespace-nowrap',
-      value: (u) => u.phone,
-      render: (u) => <span className="ident text-ink-600">{u.phone}</span>,
-    },
-    {
-      key: 'autoAssign',
-      header: 'Auto-assign',
-      align: 'center',
-      filterable: true,
-      value: (u) => (u.receivesAutoAssign ? 'On' : 'Off'),
-      render: (u) => (
-        <Switch
-          checked={u.receivesAutoAssign}
-          disabled={u.role !== 'staff' || !u.active}
-          onChange={(v) =>
-            store.notify('User management is not connected to the server yet', 'warn')
-          }
-        />
-      ),
-    },
-    {
-      key: 'onLeave',
-      header: 'On leave',
-      align: 'center',
-      filterable: true,
-      value: (u) => (u.onLeave ? 'Yes' : 'No'),
-      render: (u) => (
-        <Switch
-          checked={u.onLeave}
-          disabled={!u.active}
-          onChange={(v) => store.notify('User management is not connected to the server yet', 'warn')}
-        />
-      ),
-    },
-    {
-      key: 'candidates',
-      header: 'Candidates',
-      align: 'right',
-      sortable: true,
-      value: (u) => store.candidates.filter((c) => c.ownerId === u.id).length,
-      render: (u) => (
-        <span className="tnum">{store.candidates.filter((c) => c.ownerId === u.id).length}</span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      filterable: true,
-      value: (u) => (u.active ? 'Active' : 'Deactivated'),
-      render: (u) => (
-        <Badge tone={u.active ? 'navy' : 'neutral'} dot>
-          {u.active ? 'Active' : 'Deactivated'}
-        </Badge>
-      ),
-    },
-    {
-      key: 'action',
-      header: '',
-      align: 'right',
-      render: (u) => (
-        <Dropdown
-          trigger={({ toggle }) => (
-            <button
-              onClick={toggle}
-              aria-label={`Actions for ${u.name}`}
-              className="rounded-control p-1.5 text-ink-400 hover:bg-field hover:text-ink"
-            >
-              <UserCog className="h-4 w-4" />
-            </button>
-          )}
-        >
-          {(close) => (
-            <>
-              <MenuItem
-                icon={<UserCog className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  setEditing(u)
-                  close()
-                }}
-              >
-                Edit user
-              </MenuItem>
-              <MenuItem
-                icon={<ScrollText className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  setAuditFor(u)
-                  close()
-                }}
-              >
-                View audit log
-              </MenuItem>
-              <MenuItem
-                icon={<KeyRound className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  store.notify(`Password reset is not connected yet`, 'warn')
-                  close()
-                }}
-              >
-                Reset password
-              </MenuItem>
-              <MenuItem
-                icon={<LogOut className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  store.notify('Force logout is not connected yet', 'warn')
-                  close()
-                }}
-              >
-                Force logout
-              </MenuItem>
-              {u.active && (
-                <MenuItem
-                  tone="danger"
-                  onClick={() => {
-                    setDeactivating(u)
-                    close()
-                  }}
-                >
-                  Deactivate
-                </MenuItem>
-              )}
-            </>
-          )}
-        </Dropdown>
-      ),
-    },
+  const refreshSaved = async (message: string) => {
+    try { await store.refresh(); store.notify(message) }
+    catch { store.notify('The change was saved. Reload the directory to see the latest details.', 'warn') }
+  }
+  const changeFlag = async (user: User, values: Record<string, boolean>) => {
+    if (pending) return
+    setPending(user.id); setError('')
+    try { await api.patch('/users/' + user.id, values); await refreshSaved('Availability updated') }
+    catch (err) { setError(failureText(err)) }
+    finally { setPending(null) }
+  }
+  const columns: Column<User>[] = [
+    { key: 'name', header: 'Team member', sortable: true, value: (u) => u.name,
+      render: (u) => <RecordIdentity name={u.name + (u.id === store.me.id ? ' (you)' : '')} detail={u.email} /> },
+    { key: 'role', header: 'Role', filterable: true, value: (u) => roleLabels[u.role],
+      render: (u) => <Badge tone={u.role === 'admin' ? 'ink' : u.role === 'manager' ? 'navy' : 'neutral'}>{roleLabels[u.role]}</Badge> },
+    { key: 'phone', header: 'Phone', value: (u) => u.phone || '—' },
+    { key: 'auto', header: 'Auto-assign', filterable: true, value: (u) => u.receivesAutoAssign ? 'On' : 'Off',
+      render: (u) => <Switch checked={u.receivesAutoAssign} disabled={!!pending || u.role !== 'staff' || !u.active}
+        label={'Auto-assign ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /> },
+    { key: 'leave', header: 'On leave', filterable: true, value: (u) => u.onLeave ? 'Yes' : 'No',
+      render: (u) => <Switch checked={u.onLeave} disabled={!!pending || u.role !== 'staff' || !u.active}
+        label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /> },
+    { key: 'candidates', header: 'Candidates', sortable: true, align: 'right',
+      value: (u) => store.candidates.filter((c) => c.ownerId === u.id).length },
+    { key: 'status', header: 'Status', filterable: true, value: (u) => u.active ? 'Active' : 'Inactive',
+      render: (u) => <Badge tone={u.active ? 'navy' : 'neutral'} dot>{u.active ? 'Active' : 'Inactive'}</Badge> },
+    { key: 'actions', header: '', align: 'right', render: (u) => <Dropdown trigger={({ toggle }) => (
+      <Button size="sm" variant="ghost" aria-label={'Actions for ' + u.name} onClick={toggle}><UserCog className="h-4 w-4" /></Button>
+    )}>{(close) => <>
+      <MenuItem onClick={() => { close(); setEditing({ user: u }) }}>Edit account</MenuItem>
+      <MenuItem icon={<ScrollText className="h-4 w-4" />} onClick={() => { close(); setAuditFor(u) }}>View audit history</MenuItem>
+      <MenuItem icon={<KeyRound className="h-4 w-4" />} onClick={() => { close(); setSecurity({ user: u, kind: 'password' }) }}>Reset password</MenuItem>
+      <MenuItem icon={<LogOut className="h-4 w-4" />} onClick={() => { close(); setSecurity({ user: u, kind: 'logout' }) }}>Sign out all sessions</MenuItem>
+      {u.active && u.id !== store.me.id && <MenuItem tone="danger" onClick={() => { close(); setEditing({ user: u, deactivate: true }) }}>Deactivate account</MenuItem>}
+    </>}</Dropdown> },
   ]
-
-  return (
-    <>
-      <PageHeader
-        title="User Management"
-        eyebrow="People & permissions"
-        description="A well-connected team works better. Manage access, availability, and candidate assignment."
-        actions={
-          <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>
-            Add user
-          </Button>
-        }
-      />
-
-      <SummaryCards
-        items={[
-          {
-            label: 'Team members',
-            value: store.users.length,
-            detail: 'People in your workspace',
-            icon: Users,
-          },
-          {
-            label: 'Active accounts',
-            value: store.users.filter((user) => user.active).length,
-            detail: 'With access to the platform',
-            icon: UserCheck,
-            tone: 'green',
-          },
-          {
-            label: 'In rotation',
-            value: eligible.length,
-            detail: 'Receiving new candidates',
-            icon: RotateCw,
-            tone: 'violet',
-          },
-          {
-            label: 'On leave',
-            value: store.users.filter((user) => user.active && user.onLeave).length,
-            detail: 'Paused from auto-assignment',
-            icon: CalendarDays,
-            tone: 'amber',
-          },
-        ]}
-      />
-
-      <Panel className="rotation-panel mb-4">
-        <div className="rotation-heading"><span className="summary-icon tone-blue"><RotateCw size={18} /></span><h2>Auto-assignment rotation</h2><Badge tone="navy">Round-robin</Badge></div>
-        <p className="mt-1 text-xs text-ink-500">
-          New candidates go to each of these staff in turn — strict round-robin, no load balancing.
-          Staff on leave are skipped.
-        </p>
-        <ol className="rotation-members mt-3 flex flex-wrap items-center gap-2">
-          {eligible.map((u, i) => (
-            <li key={u.id} className="flex items-center gap-1.5">
-              <span className="text-micro text-ink-300 tnum">{i + 1}</span>
-              <RecordIdentity name={u.name} detail="Available for assignment" />
-            </li>
-          ))}
-          {eligible.length === 0 && (
-            <li className="text-xs text-stamp-600">
-              Nobody is eligible — new candidates cannot be assigned.
-            </li>
-          )}
-        </ol>
-      </Panel>
-
-      <Panel flush>
-        <PanelHeader title="Team directory" meta={`${store.users.length} accounts · Manage roles and availability`} />
-        <DataTable
-          rows={store.users}
-          columns={userColumns}
-          rowKey={(u) => u.id}
-          pageSize={15}
-          rowClassName={(u) => (!u.active ? 'opacity-60' : undefined)}
-        />
-      </Panel>
-
-      <UserDialog
-        open={adding || !!editing}
-        user={editing}
-        onClose={() => {
-          setAdding(false)
-          setEditing(null)
-        }}
-      />
-
-      <DeactivateDialog user={deactivating} onClose={() => setDeactivating(null)} />
-
-      <Sheet
-        open={!!auditFor}
-        onClose={() => setAuditFor(null)}
-        title={`Audit log — ${auditFor?.name ?? ''}`}
-        description="Every create, edit, stage change, reassignment and file upload, with user and timestamp."
-      >
-        <ul className="divide-y divide-rule-soft">
-          {auditLog.map((a) => (
-            <li key={a.id} className="px-5 py-3">
-              <p className="text-sm text-ink">{a.action}</p>
-              <p className="mt-0.5 text-xs text-ink-500">{a.target}</p>
-              <p className="mt-1 text-micro text-ink-400">
-                {store.user(a.actorId)?.name} · {dateTimeLabel(a.at)}
-              </p>
-            </li>
-          ))}
-        </ul>
-      </Sheet>
-    </>
-  )
+  return <>
+    <PageHeader title="User Management" eyebrow="People & permissions"
+      description="Manage your team, access and assignment availability."
+      actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button>} />
+    <SummaryCards items={[
+      { label: 'Team members', value: store.users.length, detail: 'Accounts in your workspace', icon: Users },
+      { label: 'Active accounts', value: store.users.filter((u) => u.active).length, detail: 'With access to the CRM', icon: UserCheck, tone: 'green' },
+      { label: 'In rotation', value: eligible.length, detail: 'Available for new candidates', icon: RotateCw, tone: 'violet' },
+      { label: 'On leave', value: store.users.filter((u) => u.active && u.onLeave).length, detail: 'Paused from auto-assignment', icon: CalendarDays, tone: 'amber' },
+    ]} />
+    <Panel className="mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-h3 font-semibold">Candidate assignment</h2><Badge tone="navy">Round-robin</Badge></div>
+      <p className="mt-1 text-xs text-ink-500">New candidates rotate equally among active staff with auto-assignment enabled. Staff on leave are skipped.</p>
+      <div className="mt-3 flex flex-wrap gap-2">{eligible.length ? eligible.map((u) => <Badge key={u.id}>{u.name}</Badge>)
+        : <p role="status" className="text-sm text-amber-700">No staff are currently available. Enable auto-assignment for an active staff member.</p>}</div>
+    </Panel>
+    {error && <p role="alert" className="mb-4 rounded-control border border-stamp-100 bg-stamp-50 p-3 text-sm text-stamp-700">{error}</p>}
+    <Panel flush>
+      <PanelHeader title="Team directory" meta={store.users.length + ' accounts'} />
+      <div className="workspace-list-toolbar"><SearchInput value={query} onChange={setQuery} placeholder="Search name, email or phone" /></div>
+      <DataTable rows={rows} columns={columns} rowKey={(u) => u.id} pageSize={15}
+        empty={<EmptyState title="No team members match" description="Try a different name or email." />}
+        rowClassName={(u) => u.active ? undefined : 'bg-field/40'} />
+    </Panel>
+    {editing && <UserDialog key={(editing.user?.id || 'new') + Boolean(editing.deactivate)} user={editing.user} deactivate={editing.deactivate}
+      onClose={() => setEditing(null)} onSaved={refreshSaved} />}
+    {security && <SecurityDialog key={security.user.id + security.kind} {...security} onClose={() => setSecurity(null)} />}
+    {auditFor && <AuditHistory key={auditFor.id} user={auditFor} onClose={() => setAuditFor(null)} />}
+  </>
 }
 
-function UserDialog({
-  open,
-  user,
-  onClose,
-}: {
-  open: boolean
-  user: User | null
-  onClose: () => void
+function UserDialog({ user, deactivate, onClose, onSaved }: {
+  user: User | null; deactivate?: boolean; onClose: () => void; onSaved: (message: string) => Promise<void>
 }) {
   const store = useStore()
-  const [form, setForm] = useState({ name: '', email: '', phone: '', role: 'staff' as Role })
-
-  // Re-seed the form whenever a different user is opened.
-  const [seeded, setSeeded] = useState<string | null>(null)
-  if (open && seeded !== (user?.id ?? 'new')) {
-    setSeeded(user?.id ?? 'new')
-    setForm(
-      user
-        ? { name: user.name, email: user.email, phone: user.phone, role: user.role }
-        : { name: '', email: '', phone: '', role: 'staff' },
-    )
+  const [form, setForm] = useState({
+    name: user?.name || '', email: user?.email || '', phone: user?.phone || '',
+    role: user?.role || 'staff' as Role, active: deactivate ? false : user?.active ?? true,
+    receivesAutoAssign: user?.receivesAutoAssign ?? true, onLeave: user?.onLeave ?? false,
+    password: '', confirmation: '', reassignToUserId: '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const set = <K extends keyof typeof form>(key: K, value: typeof form[K]) => setForm((current) => ({ ...current, [key]: value }))
+  const own = user?.id === store.me.id
+  const owned = user ? store.candidates.filter((c) => c.ownerId === user.id).length : 0
+  const tasks = user ? store.tasks.filter((t) => t.ownerId === user.id && !t.completedAt && !t.cancelledAt).length : 0
+  const transfers = !!user && (!form.active || (user.role === 'staff' && form.role !== 'staff')) && (owned > 0 || tasks > 0)
+  const save = async () => {
+    if (busy) return
+    if (!form.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      setError('Enter a name and a valid email address.'); return
+    }
+    if (!user && (form.password.length < 12 || form.password !== form.confirmation)) {
+      setError('Use a password of at least 12 characters and enter the same password twice.'); return
+    }
+    if (transfers && !form.reassignToUserId) { setError('Choose a staff member to receive the candidates and open tasks.'); return }
+    setBusy(true); setError('')
+    const { confirmation, password, reassignToUserId, ...fields } = form
+    const payload = { ...fields, name: form.name.trim(), email: form.email.trim().toLowerCase(),
+      receivesAutoAssign: form.role === 'staff' && form.active && form.receivesAutoAssign,
+      onLeave: form.role === 'staff' && form.onLeave }
+    try {
+      if (user) await api.patch('/users/' + user.id, { ...payload, ...(transfers ? { reassignToUserId } : {}) })
+      else await api.post('/users', { ...payload, password })
+      if (own && payload.email !== user?.email) { onClose(); await store.signOut(); return }
+      await onSaved(user ? 'Account updated' : 'User created')
+      onClose()
+    } catch (err) { setError(failureText(err)) }
+    finally { setBusy(false) }
   }
-
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title={user ? `Edit ${user.name}` : 'Add user'}
-      description={user ? 'Changes take effect immediately.' : 'They can sign in with this email address.'}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={!form.name.trim() || !form.email.trim()}
-            onClick={() => {
-              if (user) {
-                store.notify('User management is not connected to the server yet', 'warn')
-              } else {
-                store.notify('Adding users is not connected to the server yet', 'warn')
-              }
-              setSeeded(null)
-              onClose()
-            }}
-          >
-            {user ? 'Save changes' : 'Add user'}
-          </Button>
-        </>
-      }
-    >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Name" required className="sm:col-span-2">
-          <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-        </Field>
-        <Field label="Email" required>
-          <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-        </Field>
-        <Field label="Phone">
-          <Input ident value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
-        </Field>
-        <Field
-          label="Role"
-          hint="Only staff receive auto-assigned candidates."
-          className="sm:col-span-2"
-        >
-          <Select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}>
-            <option value="staff">Staff</option>
-            <option value="manager">Manager</option>
-            <option value="admin">Admin</option>
-          </Select>
-        </Field>
+  return <Dialog open onClose={() => { if (!busy) onClose() }} width="lg"
+    title={deactivate ? 'Deactivate ' + user?.name : user ? 'Edit account' : 'Add a team member'}
+    description={deactivate ? 'Access is removed and assigned work is transferred together.' : 'Set account details, role and candidate assignment availability.'}
+    footer={<><Button disabled={busy} variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={busy} variant={form.active ? 'primary' : 'danger'} onClick={() => void save()}>
+      {busy ? 'Saving…' : !form.active && user ? 'Deactivate account' : user ? 'Save changes' : 'Create user'}</Button></>}>
+    <div className="grid gap-5 sm:grid-cols-2">
+      <Field label="Full name" required><Input autoFocus maxLength={160} value={form.name} disabled={busy} onChange={(e) => set('name', e.target.value)} /></Field>
+      <Field label="Sign-in email" required><Input type="email" maxLength={255} value={form.email} disabled={busy} onChange={(e) => set('email', e.target.value)} /></Field>
+      <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} disabled={busy} onChange={(e) => set('phone', e.target.value)} /></Field>
+      <Field label="Role" hint={own ? 'Your own Admin role cannot be removed.' : 'Staff receive candidates. Managers supervise. Admins manage access.'}>
+        <Select value={form.role} disabled={busy || own} onChange={(e) => set('role', e.target.value as Role)}><option value="staff">Staff</option><option value="manager">Manager</option><option value="admin">Admin</option></Select>
+      </Field>
+      {!user && <><Field label="Initial password" required hint="At least 12 characters. Share securely with the new user.">
+        <Input type="password" autoComplete="new-password" minLength={12} maxLength={128} value={form.password} disabled={busy} onChange={(e) => set('password', e.target.value)} /></Field>
+        <Field label="Confirm password" required><Input type="password" autoComplete="new-password" maxLength={128} value={form.confirmation} disabled={busy} onChange={(e) => set('confirmation', e.target.value)} /></Field></>}
+      <div className="space-y-4 rounded-panel border border-rule-soft bg-field/30 p-4 sm:col-span-2">
+        <Switch label="Account active" description="Inactive accounts cannot sign in." checked={form.active} disabled={busy || own} onChange={(value) => set('active', value)} />
+        {form.role === 'staff' && <><Switch label="Receives auto-assigned candidates" description="Include this recruiter in the round-robin rotation." checked={form.receivesAutoAssign} disabled={busy || !form.active} onChange={(value) => set('receivesAutoAssign', value)} />
+          <Switch label="On leave" description="Pause new automatic assignments while keeping existing work." checked={form.onLeave} disabled={busy || !form.active} onChange={(value) => set('onLeave', value)} /></>}
       </div>
-    </Dialog>
-  )
+      {transfers && <div className="space-y-3 rounded-panel border border-amber-100 bg-amber-50 p-4 sm:col-span-2">
+        <p className="text-sm text-amber-700">{owned} candidates and {tasks} open tasks need a new owner. Existing due times and history are kept.</p>
+        <Field label="Reassign work to" required><Select value={form.reassignToUserId} disabled={busy} onChange={(e) => set('reassignToUserId', e.target.value)}>
+          <option value="">Choose an available staff member</option>{store.users.filter((u) => u.id !== user?.id && u.active && u.role === 'staff' && !u.onLeave).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </Select></Field>
+      </div>}
+      {user && <p className="text-xs text-ink-500 sm:col-span-2">Changing role or sign-in email signs out existing sessions. Deactivation removes access immediately.</p>}
+      {error && <p role="alert" className="text-sm text-stamp-700 sm:col-span-2">{error}</p>}
+    </div>
+  </Dialog>
 }
 
-function DeactivateDialog({ user, onClose }: { user: User | null; onClose: () => void }) {
+function SecurityDialog({ user, kind, onClose }: { user: User; kind: 'password' | 'logout'; onClose: () => void }) {
   const store = useStore()
-  const [reassignTo, setReassignTo] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const submit = async () => {
+    if (busy) return
+    if (kind === 'password' && (password.length < 12 || password !== confirmation)) { setError('Use at least 12 characters and matching passwords.'); return }
+    setBusy(true); setError('')
+    try {
+      await api.post('/users/' + user.id + (kind === 'password' ? '/password' : '/force-logout'), kind === 'password' ? { password } : undefined)
+      if (user.id === store.me.id) { onClose(); await store.signOut(); return }
+      store.notify(kind === 'password' ? 'Password changed. Existing sessions were signed out.' : 'All sessions were signed out.')
+      onClose()
+    } catch (err) { setError(failureText(err)) }
+    finally { setBusy(false) }
+  }
+  return <Dialog open onClose={() => { if (!busy) onClose() }} title={kind === 'password' ? 'Reset password' : 'Sign out all sessions'}
+    description={user.name + ' · ' + user.email} footer={<><Button disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy} onClick={() => void submit()}>{busy ? 'Saving…' : kind === 'password' ? 'Reset password' : 'Sign out sessions'}</Button></>}>
+    <div className="space-y-4">
+      <p className="text-sm text-ink-500">{kind === 'password' ? 'Set a new password and revoke all existing sessions. The account keeps its current activation status.' : 'This user will need to sign in again. Their account and assigned work remain available.'}</p>
+      {kind === 'password' && <><Field label="New password" required hint="At least 12 characters."><Input type="password" autoComplete="new-password" autoFocus maxLength={128} disabled={busy} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        <Field label="Confirm new password" required><Input type="password" autoComplete="new-password" maxLength={128} disabled={busy} value={confirmation} onChange={(e) => setConfirmation(e.target.value)} /></Field></>}
+      {user.id === store.me.id && <p className="text-sm text-amber-700">This is your account. You will be signed out after this change.</p>}
+      {error && <p role="alert" className="text-sm text-stamp-700">{error}</p>}
+    </div>
+  </Dialog>
+}
 
-  if (!user) return null
-  const owned = store.candidates.filter((c) => c.ownerId === user.id)
-  const openTasks = store.tasks.filter((t) => t.ownerId === user.id && !t.completedAt && !t.cancelledAt)
-
-  return (
-    <Dialog
-      open={!!user}
-      onClose={onClose}
-      title={`Deactivate ${user.name}?`}
-      description="They will be signed out and will no longer receive candidates."
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            disabled={owned.length > 0 && !reassignTo}
-            onClick={() => {
-              if (reassignTo) {
-                void store.reassign(owned.map((c) => c.id), reassignTo)
-              }
-              store.notify('User management is not connected to the server yet', 'warn')
-              setReassignTo('')
-              onClose()
-            }}
-          >
-            Deactivate
-          </Button>
-        </>
-      }
-    >
-      {owned.length > 0 ? (
-        <>
-          <p className="mb-3 rounded-control border border-amber-100 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
-            {user.name} owns {owned.length} candidates and {openTasks.length} open tasks. Choose who
-            takes them over — the 48-hour clocks keep running.
-          </p>
-          <Field label="Reassign everything to" required>
-            <Select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)}>
-              <option value="">Choose a staff member</option>
-              {store.users
-                .filter((u) => u.id !== user.id && u.active && u.role === 'staff')
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                    {u.onLeave ? ' — on leave' : ''}
-                  </option>
-                ))}
-            </Select>
-          </Field>
-        </>
-      ) : (
-        <p className="text-sm text-ink-600">
-          They own no candidates, so nothing needs reassigning.
-        </p>
-      )}
-    </Dialog>
-  )
+function AuditHistory({ user, onClose }: { user: User; onClose: () => void }) {
+  const store = useStore()
+  const [data, setData] = useState<AuditPage>({ items: [], nextBefore: null })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
+  useEffect(() => {
+    const controller = new AbortController()
+    setLoading(true); setError('')
+    api.get<AuditPage>('/users/' + user.id + '/audit', { signal: controller.signal }).then(setData)
+      .catch((err) => { if (!controller.signal.aborted) setError(failureText(err)) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [user.id, retry])
+  const more = async () => {
+    if (!data.nextBefore || loading) return
+    setLoading(true); setError('')
+    try {
+      const next = await api.get<AuditPage>('/users/' + user.id + '/audit?before=' + encodeURIComponent(data.nextBefore))
+      setData((current) => ({ items: [...current.items, ...next.items], nextBefore: next.nextBefore }))
+    } catch (err) { setError(failureText(err)) }
+    finally { setLoading(false) }
+  }
+  return <Sheet open onClose={onClose} title={'Audit history · ' + user.name} description="Account changes and actions recorded by this user." width="lg">
+    <div className="space-y-4 p-5">
+      {error && <div role="alert" className="rounded-control bg-stamp-50 p-3 text-sm text-stamp-700">{error}<Button size="sm" className="mt-2" onClick={() => setRetry((v) => v + 1)}>Reload history</Button></div>}
+      {loading && data.items.length === 0 && <p role="status" className="text-sm text-ink-500">Loading recorded activity…</p>}
+      {!loading && !error && data.items.length === 0 && <EmptyState title="No activity recorded yet" description="Future account changes and recorded CRM actions will appear here." />}
+      <ol className="divide-y divide-rule-soft">{data.items.map((row) => <li key={row.id} className="py-4 first:pt-0">
+        <p className="text-sm font-semibold text-ink">{row.action}</p>
+        <p className="mt-1 break-words text-sm text-ink-600">{row.target}</p>
+        {row.meta.changes && <dl className="mt-2 space-y-1 text-xs text-ink-500">{Object.entries(row.meta.changes).map(([key, change]) => <div key={key} className="flex flex-wrap gap-x-2"><dt className="font-medium capitalize">{key.replaceAll('_', ' ')}</dt><dd>{String(change.before ?? '—')} → {String(change.after ?? '—')}</dd></div>)}</dl>}
+        {row.meta.transfer && <p className="mt-1 text-xs text-ink-500">Reassigned {row.meta.transfer.candidates} candidates and {row.meta.transfer.tasks} open tasks.</p>}
+        <p className="mt-2 text-micro text-ink-400">{store.user(row.actorId || '')?.name || 'System'} · {dateTimeLabel(row.at)}</p>
+      </li>)}</ol>
+      {data.nextBefore && <Button disabled={loading} onClick={() => void more()}>{loading ? 'Loading…' : 'Load earlier activity'}</Button>}
+    </div>
+  </Sheet>
 }

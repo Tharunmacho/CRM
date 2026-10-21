@@ -63,26 +63,10 @@ def main() -> None:
             "made by this startup check."
         )
 
-    # When enabled, the supervisor owns a separate mail worker process. Both use
-    # the same persistent upload volume; no OCR work runs in an API request.
-    if get_settings().email_ingestion_enabled:
-        os.execv(sys.executable, [sys.executable, "-m", "app.runtime"])
-        return
+    # Monitoring and durable manual uploads are always supervised. Email and
+    # WhatsApp workers are selected independently by their server settings.
+    os.execv(sys.executable, [sys.executable, "-m", "app.runtime"])
 
-    # Replace the launcher so the API receives container shutdown signals directly.
-    os.execv(
-        sys.executable,
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            port,
-        ],
-    )
 
 
 if __name__ == "__main__":

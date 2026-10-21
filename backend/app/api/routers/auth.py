@@ -110,10 +110,9 @@ def logout(
     crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> None:
     if crm_session:
-        row = db.get(SessionRow, crm_session)
-        if row is not None:
-            db.delete(row)
-            db.commit()
+        from app.services.staff_activity import logout_session
+        logout_session(db, crm_session)
+        db.commit()
     response.delete_cookie(SESSION_COOKIE, path="/")
 
 

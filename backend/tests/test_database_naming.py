@@ -55,9 +55,10 @@ BACKEND = Path(__file__).resolve().parents[1]
 
 
 def test_domain_names_cover_renamed_models_and_documented_intake_extension():
-    expected = set(TABLE_NAMES.values()) | {"email_ingestion_jobs"}
+    expected = set(TABLE_NAMES.values()) | {"email_ingestion_jobs", "workflow_task_events", "workflow_settings", "email_oauth_states", "email_replies", "whatsapp_channels", "whatsapp_messages", "document_extraction_jobs", "email_drafts", "email_draft_attachments", "email_send_attempts", "staff_attendance_sessions", "staff_presence_intervals"}
+    expected |= {"staff_attendance_requests", "staff_presence_clients"}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 21
+    assert len(Base.metadata.tables) == 35
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
@@ -332,7 +333,9 @@ def _assert_renamed_schema(engine):
             actual_indexes = {
                 index["name"] for index in inspect(connection).get_indexes(table.name, schema="public")
             }
-            assert {index.name for index in table.indexes} <= actual_indexes
+            revision_columns = {column["name"] for column in inspect(connection).get_columns(table.name, schema="public")}
+            expected_indexes = {index.name for index in table.indexes if all(column.name in revision_columns for column in index.columns)}
+            assert expected_indexes <= actual_indexes
         for table, column in [
             ("auth_users", "email"), ("auth_users", "role"), ("auth_users", "password_hash"),
             ("auth_sessions", "user_id"), ("auth_sessions", "expires_at"),
@@ -436,6 +439,7 @@ def test_existing_login_session_bootstrap_and_health_work_after_rename(
         veris_ocr_api_key=None,
         tesseract_cmd=None,
         ocr_languages="eng",
+        agency_timezone="Asia/Kolkata",
     )
     with patch("app.core.config.get_settings", return_value=settings):
         from app import main
@@ -443,6 +447,8 @@ def test_existing_login_session_bootstrap_and_health_work_after_rename(
         from app.services import bootstrap
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    from app.api.routers import data
+    monkeypatch.setattr(data, "get_settings", lambda: settings)
     monkeypatch.setattr(main, "settings", settings)
     monkeypatch.setattr(main, "find_tesseract", lambda command=None: None)
     monkeypatch.setattr(main, "engine", engine)
@@ -548,3 +554,22 @@ def test_supplied_transaction_can_validate_then_rollback_without_committing(sche
         assert _data_snapshot(connection, renamed=False) == before
         assert _catalog_snapshot(connection) == catalog
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == PREVIOUS
+
+
+def test_head_schema_matches_models_and_new_revisions_round_trip(schema_database):
+    engine = schema_database
+    _migrate(engine, "head")
+    catalog = inspect(engine)
+    assert set(catalog.get_table_names(schema="public")) == {*Base.metadata.tables, "alembic_version"}
+    for name, table in Base.metadata.tables.items():
+        actual = {column["name"]: column for column in catalog.get_columns(name)}
+        assert set(actual) == set(table.columns.keys()), name
+        for column in table.columns:
+            assert actual[column.name]["nullable"] == column.nullable, f"{name}.{column.name}"
+        indexes = {item["name"] for item in catalog.get_indexes(name)}
+        assert {index.name for index in table.indexes} <= indexes, name
+        constraints = {item["name"] for item in catalog.get_check_constraints(name)}
+        assert {item.name for item in table.constraints if isinstance(item, __import__("sqlalchemy").CheckConstraint)} <= constraints, name
+    _migrate(engine, "0007_email_intake", downgrade=True)
+    _migrate(engine, "head")
+    assert set(inspect(engine).get_table_names(schema="public")) == {*Base.metadata.tables, "alembic_version"}
