@@ -2,17 +2,42 @@ import type { OcrInspection, OcrScan } from '@/shared/api/client'
 
 export type ScanKind = 'resume' | 'passport' | 'aadhaar'
 export type DocumentScans = Partial<Record<ScanKind, OcrScan>>
+const SCAN_KINDS: ScanKind[] = ['resume', 'passport', 'aadhaar']
 
 export function inspectedPageCount(inspection: OcrInspection): number {
   return inspection.pages.filter((page) => page.method !== 'not_processed').length
 }
 
-/** An inspection report alone is not extracted candidate data. */
+/** Provenance keys older responses mixed into `raw`; they are not Veris output. */
+const LEGACY_PROVENANCE_KEYS = new Set(['local_inspection', 'source_sha256', 'source_file', 'provider_page_number'])
+
+/**
+ * An inspection report alone is not extracted candidate data. `raw` is the verbatim Veris
+ * result, so any Veris key counts; provenance that older responses stored inside it does not.
+ */
 export function hasOcrExtraction(scan: OcrScan | undefined): scan is OcrScan {
   return !!scan
     && (scan.extraction_status === undefined || scan.extraction_status === 'complete')
     && !!scan.raw
-    && Object.keys(scan.raw).some((key) => key !== 'local_inspection')
+    && Object.keys(scan.raw).some((key) => !LEGACY_PROVENANCE_KEYS.has(key))
+}
+
+/**
+ * The `ocr_data` sent with a save: each scanned kind's verbatim Veris result, plus its provenance
+ * under `_sources` (omitted for older responses that carry the provenance inside `raw`).
+ */
+export function ocrSavePayload(scans: DocumentScans): Record<string, unknown> | undefined {
+  const kinds = SCAN_KINDS.filter((kind) => hasOcrExtraction(scans[kind]))
+  if (!kinds.length) return undefined
+  const data: Record<string, unknown> = {}
+  const sources: Record<string, unknown> = {}
+  for (const kind of kinds) {
+    const scan = scans[kind]!
+    data[kind] = scan.raw
+    if (scan.source && typeof scan.source === 'object') sources[kind] = scan.source
+  }
+  if (Object.keys(sources).length) data._sources = sources
+  return data
 }
 
 /**

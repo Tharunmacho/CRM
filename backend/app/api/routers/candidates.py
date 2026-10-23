@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import copy
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.api.schemas import Wire
+from app.api.schemas import CandidateOut as CandidateDetailOut, Wire
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -17,7 +20,10 @@ from app.db.session import get_db
 from app.core.deps import current_user, require_role
 from app.integrations.ocr.mapping import resume_text_from
 from app.services.candidate_identity import identity_matches, enrich_empty, normalize_candidate_values, normalize_phone
-from app.services.candidate_search import Search, search_candidates, export_candidates
+from app.services.candidate_intake_binding import bind_intake, lock_intake_group, saved_candidate
+from app.services.candidate_search import Pool, Search, search_candidates, export_candidates, candidate_skill_facets, pool_counts
+from app.services.candidate_matching import match_candidates
+from app.services.parallel_reads import parallel_reads
 from app.db.models import (
     AssignmentPointer,
     AuditEntry,
@@ -34,12 +40,13 @@ from app.db.models import (
 router = APIRouter(prefix="/api/candidates", tags=["candidates"])
 
 
-def candidate_filters(q: str = Query(default="", max_length=500), pool: Literal["all", "unmapped", "not_interested"] = "all",
+def candidate_filters(q: str = Query(default="", max_length=500), pool: Pool = "all",
                       skills: list[str] = Query(default=[]), skill_mode: Literal["all", "any"] = "all", missing_skills: bool = False,
-                      column_filters: str = Query(default="{}", max_length=5000), sort: str = "added", direction: Literal["asc", "desc"] = "desc"):
+                      column_filters: str = Query(default="{}", max_length=5000), sort: str = "added", direction: Literal["asc", "desc"] = "desc",
+                      staff: str | None = Query(default=None, max_length=36)):
     if len(skills) > 50 or any(len(skill) > 200 for skill in skills):
         raise HTTPException(422, "Select at most 50 skills of at most 200 characters each.")
-    return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction)
+    return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, staff or None)
 
 
 @router.get("")
@@ -54,12 +61,53 @@ def candidate_export(filters: Search = Depends(candidate_filters), db: Session =
                     headers={"Content-Disposition": 'attachment; filename="candidate-data-bank.xlsx"', "Cache-Control": "private, no-store"})
 
 
+@router.get("/skill-facets")
+def skill_facets(response: Response, pool: Pool = "all",
+                 staff: str | None = Query(default=None, max_length=36), matchable: bool = False,
+                 db: Session = Depends(get_db), user: User = Depends(current_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    return candidate_skill_facets(db, Search(pool=pool, staff=staff or None, matchable=matchable))
+
+
+@router.get("/matching")
+def candidate_matching(response: Response, order_id: str = Query(min_length=1, max_length=36),
+                       filters: Search = Depends(candidate_filters), designation: str = Query(default="", max_length=200),
+                       min_experience: float | None = Query(default=None, ge=0, le=100),
+                       passport: Literal["any", "present", "missing"] = "any", location: str = Query(default="", max_length=120),
+                       page: int = Query(default=0, ge=0), page_size: int = Query(default=20, ge=1, le=100),
+                       db: Session = Depends(get_db), user: User = Depends(current_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    filters.designation, filters.min_experience = designation, min_experience
+    filters.passport, filters.location = passport, location
+    return match_candidates(db, order_id, filters, page, page_size)
+
+
+@router.get("/pool-counts")
+def candidate_pool_counts(response: Response, staff: str | None = Query(default=None, max_length=36),
+                          db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Size of every Data Bank pool, so a tab or summary card can show a count and a
+    supervisor can see how many candidates are still waiting for a recruiter."""
+    response.headers["Cache-Control"] = "private, no-store"
+    return pool_counts(db, staff or None)
+
+
+@router.post("/assign-waiting")
+def assign_waiting(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
+    """Give every owner-less candidate to the next eligible recruiter (round-robin).
+
+    Intake leaves a candidate unassigned when nobody is eligible; this is the sweep that
+    runs once staff are, and the button a supervisor can press. One transaction under the
+    shared assignment-cursor lock."""
+    from app.services.candidate_review import assign_waiting_candidates
+    result = assign_waiting_candidates(db, user.id, user.name)
+    db.commit()
+    return result
+
+
 @router.get("/{candidate_id}/assignment-history")
 def assignment_history(candidate_id: str, response: Response, limit: int = Query(20, ge=1, le=100),
                        before: str | None = Query(None, max_length=150),
                        db: Session = Depends(get_db), user: User = Depends(current_user)):
-    if db.get(Candidate, candidate_id) is None:
-        raise HTTPException(404, "Candidate not found")
     statement = select(AuditEntry).where(AuditEntry.entity_type == 'candidate', AuditEntry.entity_id == candidate_id,
         or_(AuditEntry.meta.has_key('fromUserId'), AuditEntry.meta.has_key('fromOwnerId')))
     if before:
@@ -71,7 +119,13 @@ def assignment_history(candidate_id: str, response: Response, limit: int = Query
         except (ValueError, TypeError):
             raise HTTPException(422, "Invalid history cursor. Reload ownership history.")
         statement = statement.where(or_(AuditEntry.at < moment, (AuditEntry.at == moment) & (AuditEntry.id < identifier)))
-    rows = list(db.scalars(statement.order_by(AuditEntry.at.desc(), AuditEntry.id.desc()).limit(limit + 1)))
+    exists_, rows = parallel_reads(
+        db,
+        lambda session: session.scalar(select(Candidate.id).where(Candidate.id == candidate_id)) is not None,
+        lambda session: list(session.scalars(statement.order_by(AuditEntry.at.desc(), AuditEntry.id.desc()).limit(limit + 1))),
+    )
+    if not exists_:
+        raise HTTPException(404, "Candidate not found")
     user_ids = {uid for row in rows[:limit] for uid in (row.actor_id, row.meta.get('fromUserId', row.meta.get('fromOwnerId')), row.meta.get('toUserId', row.meta.get('toOwnerId'))) if uid}
     names = dict(db.execute(select(User.id, User.name).where(User.id.in_(user_ids))).all()) if user_ids else {}
     response.headers['Cache-Control'] = 'private, no-store'
@@ -87,14 +141,58 @@ def assignment_history(candidate_id: str, response: Response, limit: int = Query
     return {'items': items, 'nextBefore': f'{rows[limit-1].at.isoformat()}|{rows[limit-1].id}' if len(rows) > limit else None}
 
 
-class OcrDataIn(BaseModel):
-    """The Veris output the form received from /api/ocr, sent back with the save."""
+@router.get("/{candidate_id}", response_model=CandidateDetailOut)
+def candidate_detail(candidate_id: str, response: Response,
+                     db: Session = Depends(get_db),
+                     user: User = Depends(require_role(Role.admin, Role.manager, Role.staff))):
+    """Return the existing shared profile to the three authorized CRM roles.
 
-    model_config = ConfigDict(extra="forbid")
+    BANK-01 explicitly permits Staff to read every candidate (requirements-matrix
+    and workflows/07-data-bank-skills). This is the same schema/field allowlist
+    already returned by bootstrap, with no application drafts, stages or tasks.
+    test_desk_snapshot_scope protects that separate ownership boundary.
+    """
+    from app.api.routers.data import _candidate_out
+    from app.db.models import Attachment
+    from app.services.desk_snapshot import _fields, _rows
+
+    statement = select(
+        _rows("candidate", _fields(Candidate, CandidateDetailOut, "created_at", "call_called",
+            "call_interested", "call_remarks", "call_recorded_at").where(Candidate.id == candidate_id)),
+        _rows("files", select(Attachment.id, Attachment.entity_id, Attachment.slot, Attachment.version,
+            Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at)
+            .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id), ("version", False)),
+    )
+    result = db.execute(statement).mappings().one()
+    if not result["candidate"]:
+        raise HTTPException(404, "Candidate not found")
+    files = {}
+    for attachment in result["files"] or []:
+        files.setdefault((candidate_id, attachment["slot"]), []).append(attachment)
+    response.headers["Cache-Control"] = "private, no-store"
+    return _candidate_out(result["candidate"][0], files)
+
+
+class OcrDataIn(BaseModel):
+    """The Veris output the form received from /api/ocr, sent back with the save.
+
+    `resume` / `passport` / `aadhaar` are each the verbatim Veris result (the scan's
+    `raw`). The form's own notes about them (the scan's `source`) go in `_sources`,
+    keyed by kind, and are stored beside the documents, never inside them.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     resume: dict[str, Any] | None = None
     passport: dict[str, Any] | None = None
     aadhaar: dict[str, Any] | None = None
+    sources: dict[Literal["resume", "passport", "aadhaar"], dict[str, Any]] | None = Field(default=None, alias="_sources")
+    # Further documents of a kind already above, as [{"passport": {...raw...}, "_source": {...}}].
+    additional_documents: list[dict[Literal["resume", "passport", "aadhaar", "_source"], dict[str, Any]]] | None = Field(default=None, max_length=50)
+
+    def stored(self) -> dict[str, Any]:
+        """The shape kept in candidates.ocr_data."""
+        return self.model_dump(exclude_none=True, by_alias=True)
 
 
 PROFILE_CHECK_FIELDS = ("phone", "dob", "passport_issue", "passport_expiry", "total_experience", "gulf_experience")
@@ -141,6 +239,7 @@ class CandidateIn(BaseModel):
     source_detail: str | None = None
     resume_text: str | None = None
     ocr_data: OcrDataIn | None = None
+    intake_group_id: UUID | None = None
 
     @field_validator("name", "phone")
     @classmethod
@@ -250,6 +349,13 @@ def create_candidate(
     user: User = Depends(current_user),
 ) -> CandidateOut:
     pointer = lock_assignment_cursor(db)
+    intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
+    recovered = saved_candidate(db, intake_jobs, user)
+    if recovered is not None:
+        owner = db.get(User, recovered.owner_id) if recovered.owner_id else None
+        task_id = db.scalar(select(Task.id).where(Task.candidate_id == recovered.id, Task.kind == TaskKind.initial_call))
+        return CandidateOut(id=recovered.id, ref=recovered.ref, name=recovered.name,
+                            owner_id=recovered.owner_id, owner_name=owner.name if owner else None, task_id=task_id)
     match = find_duplicate(db, body.phone, body.dob, body.passport_no, body.email)
     if match is not None:
         existing, fields = match
@@ -273,7 +379,7 @@ def create_candidate(
 
     owner = next_owner(db, pointer=pointer)
 
-    ocr_data = body.ocr_data.model_dump(exclude_none=True) if body.ocr_data else {}
+    ocr_data = body.ocr_data.stored() if body.ocr_data else {}
 
     candidate = Candidate(
         ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}",
@@ -313,6 +419,9 @@ def create_candidate(
         setattr(candidate, key, val)
     db.add(candidate)
     db.flush()
+    bind_intake(intake_jobs, candidate.id)
+    from app.services.whatsapp_chat import link_conversations_for_candidate
+    link_conversations_for_candidate(db, candidate)
 
     task_id: str | None = None
     if owner is not None:
@@ -359,6 +468,7 @@ def create_candidate(
 @router.get("/{candidate_id}/ocr")
 def candidate_ocr(
     candidate_id: str,
+    response: Response,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -366,11 +476,84 @@ def candidate_ocr(
     The Veris output stored when the candidate was entered, for the profile's resume
     sections. Fetched on its own because the bootstrap carries every candidate and
     never needs it. A candidate entered by hand has none, which is an empty object.
+
+    Admin, manager and the candidate's owner get the stored payload exactly. For anyone
+    else the Aadhaar number, VID and enrolment id (also where they occur in the Aadhaar
+    page text) keep only their last four digits. Documents
+    of a kind beyond the first are under `additional_documents` as `{kind: raw, "_source": {...}}`.
+    Each kind holds the verbatim Veris result; our provenance for it is in `_sources[kind]`.
+    Rows saved earlier keep their old shape (provenance keys inside each document).
     """
-    candidate = db.get(Candidate, candidate_id)
+    # One narrow read: loading the whole candidate and then its deferred ocr_data was two round trips.
+    candidate = db.execute(select(Candidate.owner_id, Candidate.ocr_data).where(Candidate.id == candidate_id)).one_or_none()
     if candidate is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
-    return candidate.ocr_data or {}
+    response.headers["Cache-Control"] = "private, no-store"
+    stored = candidate.ocr_data or {}
+    if user.role in {Role.admin, Role.manager} or (candidate.owner_id and candidate.owner_id == user.id):
+        return stored
+    return mask_aadhaar_identifiers(stored)
+
+
+_AADHAAR_ID_KEYS = ("aadhaar_number", "vid", "enrollment_id")
+_LONG_DIGITS = re.compile(r"(?<!\d)(\d[\d ]{9,18}\d)(?!\d)")
+
+
+def _mask_digits(value: str) -> str:
+    """Every digit but the last four hidden; spacing is kept so the shape still reads."""
+    total = sum(c.isdigit() for c in value)
+    seen = 0
+    out = []
+    for char in value:
+        if char.isdigit():
+            seen += 1
+            out.append(char if seen > total - 4 else "X")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def _mask_text(value):
+    if not isinstance(value, str):
+        return value
+    return _LONG_DIGITS.sub(lambda m: _mask_digits(m.group(1)) if sum(c.isdigit() for c in m.group(1)) in (12, 16) else m.group(0), value)
+
+
+def _mask_aadhaar_document(document):
+    if not isinstance(document, dict):
+        return document
+    masked = copy.deepcopy(document)
+    identity = masked.get("aadhaar")
+    if isinstance(identity, dict):
+        for key in _AADHAAR_ID_KEYS:
+            if isinstance(identity.get(key), str):
+                identity[key] = _mask_digits(identity[key])
+    for page in masked.get("pages") or []:
+        if isinstance(page, dict):
+            for key in ("text", "html"):
+                page[key] = _mask_text(page.get(key))
+            for line in page.get("lines") or []:
+                if isinstance(line, dict):
+                    original = line.get("text")
+                    line["text"] = _mask_text(original)
+                    if line["text"] != original:
+                        # The digits also sit word by word; hide every group but the last.
+                        numeric = [w for w in line.get("words") or [] if isinstance(w, dict) and str(w.get("text", "")).isdigit()]
+                        for word in numeric[:-1]:
+                            word["text"] = "X" * len(word["text"])
+    return masked
+
+
+def mask_aadhaar_identifiers(stored: dict) -> dict:
+    result = dict(stored)
+    if "aadhaar" in result:
+        result["aadhaar"] = _mask_aadhaar_document(result["aadhaar"])
+    if isinstance(result.get("additional_documents"), list):
+        result["additional_documents"] = [
+            {**entry, "aadhaar": _mask_aadhaar_document(entry["aadhaar"])} if isinstance(entry, dict) and "aadhaar" in entry else entry
+            for entry in result["additional_documents"]
+        ]
+    return result
 
 
 @router.post("/check-duplicate")
@@ -409,16 +592,26 @@ def ensure_candidate_edit(candidate, user):
 @router.post("/{candidate_id}/merge", response_model=CandidateOut)
 def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     lock_assignment_cursor(db)
-    candidate = db.get(Candidate, candidate_id)
+    # Attachments take candidate -> document job locks. Keep the same ordering
+    # when an existing candidate is merged with a saved intake.
+    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if not candidate:
         raise HTTPException(404, "Candidate not found.")
     ensure_candidate_edit(candidate, user)
+    intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
+    recovered = saved_candidate(db, intake_jobs, user)
+    if recovered is not None and recovered.id != candidate_id:
+        raise HTTPException(409, "These documents already belong to another saved candidate.")
+    if recovered is not None:
+        owner = db.get(User, candidate.owner_id) if candidate.owner_id else None
+        return CandidateOut(id=candidate.id, ref=candidate.ref, name=candidate.name, owner_id=candidate.owner_id,
+                            owner_name=owner.name if owner else None, task_id=None)
     matches = identity_matches(db, body.model_dump())
     if len(matches) != 1 or matches[0][0].id != candidate.id:
         raise HTTPException(409, "The candidate identity changed. Check duplicates again before merging.")
     if candidate.dob and body.dob and candidate.dob != body.dob:
         raise HTTPException(409, "The date of birth conflicts with the existing record. Review the documents before merging.")
-    values = body.model_dump(exclude={"ocr_data", "source", "source_detail"})
+    values = body.model_dump(exclude={"ocr_data", "source", "source_detail", "intake_group_id"})
     combined = {key: getattr(candidate, key) for key in PROFILE_CHECK_FIELDS}
     for key in PROFILE_CHECK_FIELDS:
         if combined[key] in (None, "") and values.get(key) not in (None, ""):
@@ -427,7 +620,8 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
         _validate_profile_relationships(combined)
     except ValueError as exc:
         raise HTTPException(409, f"These details conflict with the retained candidate profile: {exc}") from exc
-    changed = enrich_empty(candidate, values, body.ocr_data.model_dump(exclude_none=True) if body.ocr_data else None)
+    changed = enrich_empty(candidate, values, body.ocr_data.stored() if body.ocr_data else None)
+    bind_intake(intake_jobs, candidate.id)
     db.add(AuditEntry(actor_id=user.id, action="Merged candidate entry", target=candidate.name, entity_type="candidate", entity_id=candidate.id, meta={"filled_fields": changed}))
     db.commit()
     owner_user = db.get(User, candidate.owner_id) if candidate.owner_id else None
@@ -446,6 +640,8 @@ class CandidateCorrection(CandidateIn):
 
 @router.patch("/{candidate_id}")
 def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if body.intake_group_id is not None:
+        raise HTTPException(422, "Resume saved document intake from Add Candidate before attaching its documents.")
     lock_assignment_cursor(db)
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if not candidate:
@@ -457,7 +653,7 @@ def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session 
         raise HTTPException(422, "Assign this candidate to an eligible recruiter before clearing review.")
     # Patch only explicitly sent editable fields. Ownership, source provenance and
     # OCR evidence are never replaced by a profile correction.
-    changes = normalize_candidate_values(body.model_dump(exclude_unset=True, exclude={"source", "source_detail", "ocr_data", "mark_reviewed"}))
+    changes = normalize_candidate_values(body.model_dump(exclude_unset=True, exclude={"source", "source_detail", "ocr_data", "mark_reviewed", "intake_group_id"}))
     try:
         _validate_profile_relationships({key: changes.get(key, getattr(candidate, key)) for key in PROFILE_CHECK_FIELDS})
     except ValueError as exc:

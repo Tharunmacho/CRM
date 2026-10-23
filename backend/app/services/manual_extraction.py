@@ -61,6 +61,7 @@ def _scan_results(output):
         scans[kind] = {
             "fields": OcrFields.model_validate(extraction.get("fields", {})).model_dump(by_alias=True, exclude_none=True, mode="json") if extraction else {},
             "raw": extraction.get("raw", {}) if extraction else {},
+            "source": extraction.get("source", {}) if extraction else {},
             "inspection": {**report, "selected_pages": selected},
             "warnings": output.get("warnings", []),
             "extraction_status": "complete" if extraction else "no_resume" if kind == "resume" and not selected and output["status"] != "needs_review" else "needs_review",
@@ -70,7 +71,7 @@ def _scan_results(output):
 
 def process_job(identifier, *, sessions, settings):
     with sessions() as db:
-        job = db.get(DocumentExtractionJob, identifier)
+        job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
         if job is None or job.status not in READY:
             return
         job.status = "processing"
@@ -84,11 +85,16 @@ def process_job(identifier, *, sessions, settings):
     def checkpoint(value):
         with sessions() as db:
             current = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
-            if current is None or current.status not in READY:
+            if current is None:
                 raise JobFinished()
-            current.state = deepcopy(value)
+            paused = current.status not in READY
+            # A reviewer can reserve the source while a provider acceptance is
+            # in flight. Keep its returned ID/result, but never reopen the job.
+            current.state = {**deepcopy(current.state or {}), **deepcopy(value)}
             current.updated_at = now()
             db.commit()
+            if paused:
+                raise JobFinished()
 
     try:
         data = read_bytes(settings, key)
@@ -99,6 +105,10 @@ def process_job(identifier, *, sessions, settings):
             output = extract_attachment(data, state=state, save=checkpoint, settings=settings, designations=titles)
             state["output"] = deepcopy(output)
             checkpoint(state)
+        from app.services.document_extraction import checked_person_output
+        output = checked_person_output(data, output, state, settings)
+        state["output"] = deepcopy(output)
+        checkpoint(state)
         # Retain selected PDFs beside the original bundle; later attachment is a
         # short transaction and never needs to resubmit paid extraction work.
         documents = state.setdefault("documents", {})
@@ -153,6 +163,11 @@ def process_job(identifier, *, sessions, settings):
 
 
 def attach_original(db, user, identifier, candidate_id, settings):
+    from app.api.routers.candidates import lock_assignment_cursor
+    from app.services.document_person_split import ensure_single_person_source
+    lock_assignment_cursor(db)
+    source_job = owned_job(db, identifier, user.id)
+    ensure_single_person_source(db, "manual", source_job.group_id)
     # Candidate locks are shared with normal file uploads, guaranteeing one next
     # version even when another recruiter uploads to this candidate concurrently.
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())

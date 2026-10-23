@@ -9,6 +9,9 @@ import { Button, Field, Input, SearchInput, Select, Switch } from '@/shared/ui/p
 import { DataTable, type Column } from '@/shared/ui/table'
 import { Dialog, Dropdown, MenuItem, Sheet } from '@/shared/ui/overlay'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
+import { useStaffAvailability } from '@/features/staff/use-staff-availability'
+import { canReceiveManualAssignment, manualAssignmentLabel } from '@/features/staff/availability-model'
+import { useWorkspaceRead } from '@/features/staff/use-workspace-read'
 
 interface AuditRow {
   id: string; actorId: string | null; action: string; target: string | null
@@ -21,18 +24,23 @@ const roleLabels = { admin: 'Admin', manager: 'Manager', staff: 'Staff' }
 
 export default function UsersPage() {
   const store = useStore()
+  const accountRead = useWorkspaceRead()
   const [editing, setEditing] = useState<{ user: User | null; deactivate?: boolean } | null>(null)
   const [security, setSecurity] = useState<{ user: User; kind: 'password' | 'logout' } | null>(null)
   const [auditFor, setAuditFor] = useState<User | null>(null)
   const [query, setQuery] = useState('')
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const eligible = store.users.filter((u) => u.role === 'staff' && u.active && u.receivesAutoAssign && !u.onLeave)
+  const availability = useStaffAvailability({ revision: store.users.map(user => `${user.id}:${user.role}:${user.active}:${user.receivesAutoAssign}:${user.onLeave}`).join('|') })
+  const eligible = (availability.data?.staff ?? []).filter(user => user.availability.eligible)
+  const onLeave = (availability.data?.staff ?? []).filter(user => user.active && ['approved_leave', 'manual_leave'].includes(user.availability.status))
+  const availabilityFor = (id: string) => availability.data?.staff.find(user => user.id === id)?.availability
   const rows = store.users.filter((u) => [u.name, u.email, u.phone || ''].join(' ').toLowerCase().includes(query.trim().toLowerCase()))
 
   const refreshSaved = async (message: string) => {
     try { await store.refresh(); store.notify(message) }
     catch { store.notify('The change was saved. Reload the directory to see the latest details.', 'warn') }
+    availability.refresh()
   }
   const changeFlag = async (user: User, values: Record<string, boolean>) => {
     if (pending) return
@@ -50,9 +58,11 @@ export default function UsersPage() {
     { key: 'auto', header: 'Auto-assign', filterable: true, value: (u) => u.receivesAutoAssign ? 'On' : 'Off',
       render: (u) => <Switch checked={u.receivesAutoAssign} disabled={!!pending || u.role !== 'staff' || !u.active}
         label={'Auto-assign ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /> },
-    { key: 'leave', header: 'On leave', filterable: true, value: (u) => u.onLeave ? 'Yes' : 'No',
+    { key: 'leave', header: 'Manual leave', filterable: true, value: (u) => u.onLeave ? 'Yes' : 'No',
       render: (u) => <Switch checked={u.onLeave} disabled={!!pending || u.role !== 'staff' || !u.active}
-        label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /> },
+        label={'Manual leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /> },
+    { key: 'availability', header: 'Availability today', filterable: true, value: user => availabilityFor(user.id)?.label || 'Not checked',
+      render: user => { const current = availabilityFor(user.id); return current ? <Badge tone={current.eligible ? 'navy' : ['approved_leave', 'manual_leave'].includes(current.status) ? 'amber' : 'neutral'}>{current.label}</Badge> : <span className="text-xs text-ink-400">{availability.loading ? 'Checking…' : 'Unavailable'}</span> } },
     { key: 'candidates', header: 'Candidates', sortable: true, align: 'right',
       value: (u) => store.candidates.filter((c) => c.ownerId === u.id).length },
     { key: 'status', header: 'Status', filterable: true, value: (u) => u.active ? 'Active' : 'Inactive',
@@ -67,21 +77,27 @@ export default function UsersPage() {
       {u.active && u.id !== store.me.id && <MenuItem tone="danger" onClick={() => { close(); setEditing({ user: u, deactivate: true }) }}>Deactivate account</MenuItem>}
     </>}</Dropdown> },
   ]
+  if (accountRead.loading || accountRead.error) return <>
+    <PageHeader title="User Management" eyebrow="People & permissions" description="Manage your team, access and assignment availability." />
+    <Panel>{accountRead.error ? <div className="space-y-3"><p role="alert" className="text-sm text-stamp-700">{accountRead.error}</p><p className="text-sm text-ink-500">Account controls are available after the current directory loads.</p><Button onClick={accountRead.refresh}>Retry directory</Button></div>
+      : <p role="status" className="text-sm text-ink-500">Loading current accounts and assigned work…</p>}</Panel>
+  </>
   return <>
     <PageHeader title="User Management" eyebrow="People & permissions"
       description="Manage your team, access and assignment availability."
-      actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button>} />
+      actions={<><Button onClick={() => { accountRead.refresh(); availability.refresh() }}>Refresh directory</Button><Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button></>} />
     <SummaryCards items={[
       { label: 'Team members', value: store.users.length, detail: 'Accounts in your workspace', icon: Users },
       { label: 'Active accounts', value: store.users.filter((u) => u.active).length, detail: 'With access to the CRM', icon: UserCheck, tone: 'green' },
-      { label: 'In rotation', value: eligible.length, detail: 'Available for new candidates', icon: RotateCw, tone: 'violet' },
-      { label: 'On leave', value: store.users.filter((u) => u.active && u.onLeave).length, detail: 'Paused from auto-assignment', icon: CalendarDays, tone: 'amber' },
+      { label: 'In rotation', value: availability.data ? eligible.length : '—', detail: 'Available for new candidates', icon: RotateCw, tone: 'violet' },
+      { label: 'On leave', value: availability.data ? onLeave.length : '—', detail: 'Approved or manual leave today', icon: CalendarDays, tone: 'amber' },
     ]} />
     <Panel className="mb-5">
-      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-h3 font-semibold">Candidate assignment</h2><Badge tone="navy">Round-robin</Badge></div>
-      <p className="mt-1 text-xs text-ink-500">New candidates rotate equally among active staff with auto-assignment enabled. Staff on leave are skipped.</p>
-      <div className="mt-3 flex flex-wrap gap-2">{eligible.length ? eligible.map((u) => <Badge key={u.id}>{u.name}</Badge>)
-        : <p role="status" className="text-sm text-amber-700">No staff are currently available. Enable auto-assignment for an active staff member.</p>}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-h3 font-semibold">Candidate assignment</h2><div className="flex items-center gap-2"><Badge tone="navy">Round-robin</Badge><Button size="sm" disabled={availability.loading} onClick={availability.refresh}>Refresh availability</Button></div></div>
+      <p className="mt-1 text-xs text-ink-500">New candidates rotate equally among active staff with auto-assignment enabled. Approved attendance leave and manual leave both exclude staff. Clearing manual leave does not cancel approved leave.</p>
+      <div className="mt-3 flex flex-wrap gap-2">{availability.loading ? <p role="status" className="text-sm text-ink-500">Checking current availability…</p> : availability.error ? <p role="alert" className="text-sm text-stamp-700">{availability.error}</p> : eligible.length ? eligible.map((u) => <Badge key={u.id}>{u.name}</Badge>)
+        : <p role="status" className="text-sm text-amber-700">No staff are currently in rotation. Check approved leave, manual leave and auto-assignment settings.</p>}</div>
+      {availability.data && <p className="mt-3 text-xs text-ink-400">Availability for {availability.data.today} · {availability.data.timezone}</p>}
     </Panel>
     {error && <p role="alert" className="mb-4 rounded-control border border-stamp-100 bg-stamp-50 p-3 text-sm text-stamp-700">{error}</p>}
     <Panel flush>
@@ -110,6 +126,10 @@ function UserDialog({ user, deactivate, onClose, onSaved }: {
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const availability = useStaffAvailability({ enabled: !!user })
+  const replacementOptions = (availability.data?.staff ?? []).filter(candidate => candidate.id !== user?.id && canReceiveManualAssignment(candidate))
+  const replacementValid = replacementOptions.some(candidate => candidate.id === form.reassignToUserId)
+  const currentAvailability = availability.data?.staff.find(candidate => candidate.id === user?.id)?.availability
   const set = <K extends keyof typeof form>(key: K, value: typeof form[K]) => setForm((current) => ({ ...current, [key]: value }))
   const own = user?.id === store.me.id
   const owned = user ? store.candidates.filter((c) => c.ownerId === user.id).length : 0
@@ -123,7 +143,7 @@ function UserDialog({ user, deactivate, onClose, onSaved }: {
     if (!user && (form.password.length < 12 || form.password !== form.confirmation)) {
       setError('Use a password of at least 12 characters and enter the same password twice.'); return
     }
-    if (transfers && !form.reassignToUserId) { setError('Choose a staff member to receive the candidates and open tasks.'); return }
+    if (transfers && (availability.loading || availability.error || !replacementValid)) { setError('Choose a currently available staff member to receive the candidates and open tasks.'); return }
     setBusy(true); setError('')
     const { confirmation, password, reassignToUserId, ...fields } = form
     const payload = { ...fields, name: form.name.trim(), email: form.email.trim().toLowerCase(),
@@ -135,13 +155,13 @@ function UserDialog({ user, deactivate, onClose, onSaved }: {
       if (own && payload.email !== user?.email) { onClose(); await store.signOut(); return }
       await onSaved(user ? 'Account updated' : 'User created')
       onClose()
-    } catch (err) { setError(failureText(err)) }
+    } catch (err) { setError(failureText(err)); if (transfers) availability.refresh() }
     finally { setBusy(false) }
   }
   return <Dialog open onClose={() => { if (!busy) onClose() }} width="lg"
     title={deactivate ? 'Deactivate ' + user?.name : user ? 'Edit account' : 'Add a team member'}
     description={deactivate ? 'Access is removed and assigned work is transferred together.' : 'Set account details, role and candidate assignment availability.'}
-    footer={<><Button disabled={busy} variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={busy} variant={form.active ? 'primary' : 'danger'} onClick={() => void save()}>
+    footer={<><Button disabled={busy} variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={busy || (transfers && (availability.loading || !!availability.error || !replacementValid))} variant={form.active ? 'primary' : 'danger'} onClick={() => void save()}>
       {busy ? 'Saving…' : !form.active && user ? 'Deactivate account' : user ? 'Save changes' : 'Create user'}</Button></>}>
     <div className="grid gap-5 sm:grid-cols-2">
       <Field label="Full name" required><Input autoFocus maxLength={160} value={form.name} disabled={busy} onChange={(e) => set('name', e.target.value)} /></Field>
@@ -156,13 +176,18 @@ function UserDialog({ user, deactivate, onClose, onSaved }: {
       <div className="space-y-4 rounded-panel border border-rule-soft bg-field/30 p-4 sm:col-span-2">
         <Switch label="Account active" description="Inactive accounts cannot sign in." checked={form.active} disabled={busy || own} onChange={(value) => set('active', value)} />
         {form.role === 'staff' && <><Switch label="Receives auto-assigned candidates" description="Include this recruiter in the round-robin rotation." checked={form.receivesAutoAssign} disabled={busy || !form.active} onChange={(value) => set('receivesAutoAssign', value)} />
-          <Switch label="On leave" description="Pause new automatic assignments while keeping existing work." checked={form.onLeave} disabled={busy || !form.active} onChange={(value) => set('onLeave', value)} /></>}
+          <Switch label="Manual leave" description="Prevent new assignments while keeping existing work. Approved leave is managed in Attendance and is also respected." checked={form.onLeave} disabled={busy || !form.active} onChange={(value) => set('onLeave', value)} /></>}
+        {currentAvailability && <p className="text-xs text-ink-500">Current availability: {currentAvailability.label}. Changes take effect when you save.</p>}
       </div>
       {transfers && <div className="space-y-3 rounded-panel border border-amber-100 bg-amber-50 p-4 sm:col-span-2">
         <p className="text-sm text-amber-700">{owned} candidates and {tasks} open tasks need a new owner. Existing due times and history are kept.</p>
-        <Field label="Reassign work to" required><Select value={form.reassignToUserId} disabled={busy} onChange={(e) => set('reassignToUserId', e.target.value)}>
-          <option value="">Choose an available staff member</option>{store.users.filter((u) => u.id !== user?.id && u.active && u.role === 'staff' && !u.onLeave).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        {availability.loading && <p role="status" className="text-sm text-ink-500">Checking replacement availability…</p>}
+        {availability.error && <p role="alert" className="text-sm text-stamp-700">{availability.error}</p>}
+        <Field label="Reassign work to" required><Select value={replacementValid ? form.reassignToUserId : ''} disabled={busy || availability.loading || !!availability.error || !replacementOptions.length} onChange={(e) => set('reassignToUserId', e.target.value)}>
+          <option value="">Choose an available staff member</option>{replacementOptions.map((candidate) => <option key={candidate.id} value={candidate.id}>{manualAssignmentLabel(candidate)}</option>)}
         </Select></Field>
+        {availability.data && !replacementOptions.length && <p role="status" className="text-sm text-amber-700">No eligible replacement is available. Review staff availability before deactivating this account.</p>}
+        <Button size="sm" disabled={busy || availability.loading} onClick={availability.refresh}>Refresh availability</Button>
       </div>}
       {user && <p className="text-xs text-ink-500 sm:col-span-2">Changing role or sign-in email signs out existing sessions. Deactivation removes access immediately.</p>}
       {error && <p role="alert" className="text-sm text-stamp-700 sm:col-span-2">{error}</p>}

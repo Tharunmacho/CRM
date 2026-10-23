@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     whatsapp_enabled: bool = False
     whatsapp_phone_number_id: str | None = None
+    whatsapp_business_account_id: str | None = None
     whatsapp_graph_version: str | None = None
     whatsapp_access_token: str | None = Field(default=None, repr=False)
     whatsapp_app_secret: str | None = Field(default=None, repr=False)
@@ -50,6 +51,17 @@ class Settings(BaseSettings):
     storage_dir: str = str(BACKEND_ROOT / "data" / "uploads")
 
     cors_origins: str = "http://localhost:5173"
+
+    # Development convenience: when the database only lacks newer migrations, apply them
+    # when the backend starts instead of refusing to start. Leave off for any database a
+    # deployed copy of the CRM also uses, because a migrated schema is newer than that
+    # copy and it will report "update required" until it is redeployed.
+    crm_auto_migrate: bool = False
+
+    # Where signed-in users reach the CRM, used only to send browsers back after a
+    # mailbox OAuth consent. Blank keeps the redirect on the API's own origin, which is
+    # correct in production where one service serves both the API and the SPA.
+    app_base_url: str = ""
 
     # Optional Redis connection. Blank leaves Redis disabled; credentials stay
     # out of Settings repr and are never included in the health response.

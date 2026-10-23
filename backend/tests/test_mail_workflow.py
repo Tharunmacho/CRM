@@ -19,7 +19,7 @@ from app.db.models import Attachment, AuditEntry, Candidate, CandidateStatus, Em
 from test_database_naming import _migrate, schema_database
 
 with patch("app.core.config.get_settings", return_value=SimpleNamespace(database_url="postgresql+psycopg://unused@127.0.0.1:1/unused", storage_dir="unused")):
-    from app.api.routers import inbox, mail_actions
+    from app.api.routers import inbox, mail_accounts, mail_actions
     from app.services import mail_oauth
 from app.integrations.mail import smtp
 from app.integrations.mail.imap import MailAdapterError, MailConfig, IMAPMailbox, mailbox_source_id
@@ -36,9 +36,10 @@ def mailbox(schema_database, tmp_path, monkeypatch):
         smtp_port=587, smtp_use_ssl=False, mail_token_encryption_key=Fernet.generate_key().decode(),
         gmail_client_id="fake-client", gmail_client_secret="fake-secret", gmail_redirect_uri="https://crm.example.test/api/inbox/oauth/gmail/callback",
         microsoft_client_id="fake-ms-client", microsoft_client_secret="fake-ms-secret",
-        microsoft_redirect_uri="https://crm.example.test/api/inbox/oauth/microsoft/callback", microsoft_tenant="common")
+        microsoft_redirect_uri="https://crm.example.test/api/inbox/oauth/microsoft/callback", microsoft_tenant="common", app_base_url="")
     monkeypatch.setattr(inbox, "get_settings", lambda: settings)
     monkeypatch.setattr(mail_actions, "get_settings", lambda: settings)
+    monkeypatch.setattr(mail_accounts, "get_settings", lambda: settings)
     env = SimpleNamespace(sessions=sessions, settings=settings, actor=SimpleNamespace(id="admin", role=Role.admin))
     with sessions() as db:
         db.add_all([User(id="admin", name="Admin", email="admin@example.test", role=Role.admin), User(id="staff", name="Staff", email="staff@example.test", role=Role.staff)])
@@ -74,7 +75,15 @@ def test_inbox_server_filters_paging_read_original_and_disconnect_retention(mail
     assert not ({row["id"] for row in first["messages"]} & {row["id"] for row in second["messages"]})
     assert env.client.get("/api/inbox?account_ids=").json()["messages"] == []
     assert env.client.get("/api/inbox?q=%25").json()["messages"] == []
+    # Live providers change read state on the mailbox itself (see test_zoho_mailbox); a
+    # retained archived provider has no live connection, so only the CRM copy changes.
+    with env.sessions() as db:
+        db.get(MailAccount, "account").provider = "archived-provider"
+        db.commit()
     assert env.client.patch("/api/inbox/messages/message-0/read", json={"unread": False}).status_code == 200
+    with env.sessions() as db:
+        db.get(MailAccount, "account").provider = "imap"
+        db.commit()
     assert env.client.get("/api/inbox?unread=true").json()["total"] == 3
     file = env.client.get("/api/inbox/attachments/attachment")
     assert file.content.startswith(b"%PDF") and file.headers["content-disposition"].startswith("inline")
@@ -88,7 +97,7 @@ def test_inbox_server_filters_paging_read_original_and_disconnect_retention(mail
 
 
 @pytest.mark.parametrize("provider", ["gmail", "microsoft"])
-def test_retired_oauth_providers_never_start_or_exchange_grants(mailbox, monkeypatch, provider):
+def test_oauth_provider_connects_once_stores_encrypted_tokens_and_never_leaks_them(mailbox, monkeypatch, provider):
     env = mailbox
     calls = []
     def token_post(url, *, data, timeout):
@@ -97,20 +106,41 @@ def test_retired_oauth_providers_never_start_or_exchange_grants(mailbox, monkeyp
     monkeypatch.setattr(mail_oauth.httpx, "post", token_post)
     fake = MagicMock(); fake.__enter__.return_value.probe.return_value = SimpleNamespace(uid_validity="123", last_uid=99)
     monkeypatch.setattr(mail_oauth, "IMAPMailbox", lambda _: fake)
-    response = env.client.post(f"/api/inbox/oauth/{provider}/start", json={"address": "oauth@example.test", "auto_ingest": False})
-    assert response.status_code == 410, response.text
-    denied = env.client.get(f"/api/inbox/oauth/{provider}/callback", params={"state": "retired-grant", "code": "code"}, follow_redirects=False)
-    assert "mail_error=" in denied.headers["location"] and not calls
-    response_text = env.client.get("/api/inbox").text
-    assert "access-secret" not in response_text and "refresh-secret" not in response_text and "fake-secret" not in response_text
+    start = env.client.post(f"/api/inbox/oauth/{provider}/start", json={"address": "OAuth@example.test", "auto_ingest": False})
+    assert start.status_code == 200, start.text
+    url = urlparse(start.json()["authorizationUrl"])
+    query = parse_qs(url.query)
+    assert url.hostname in {"accounts.google.com", "login.microsoftonline.com"}
+    assert query["login_hint"] == ["oauth@example.test"] and query["code_challenge_method"] == ["S256"]
+    done = env.client.get(f"/api/inbox/oauth/{provider}/callback", params={"state": query["state"][0], "code": "code"}, follow_redirects=False)
+    assert done.status_code == 303 and "mail_connected=" in done.headers["location"], done.headers
+    assert calls and calls[0]["grant_type"] == "authorization_code" and calls[0]["code_verifier"]
+    replay = env.client.get(f"/api/inbox/oauth/{provider}/callback", params={"state": query["state"][0], "code": "code"}, follow_redirects=False)
+    assert "mail_error=" in replay.headers["location"] and len(calls) == 1
+    payload = env.client.get("/api/inbox").text
+    assert "access-secret" not in payload and "refresh-secret" not in payload and "fake-secret" not in payload
+    account = next(item for item in env.client.get("/api/inbox").json()["accounts"] if item["address"] == "oauth@example.test")
+    assert account["provider"] == provider and account["connectionStatus"] == "connected" and account["autoIngest"] is False
     with env.sessions() as db:
-        assert db.scalar(select(MailAccount).where(MailAccount.provider == provider)) is None
-        assert db.scalar(select(MailOAuthState)) is None
+        row = db.scalar(select(MailAccount).where(MailAccount.provider == provider))
+        assert "access-secret" not in str(row.secrets) and mail_oauth.decrypt(env.settings, row.secrets["encrypted"])["refresh_token"] == "refresh-secret"
+
+
+@pytest.mark.parametrize("provider", ["gmail", "microsoft"])
+def test_oauth_denied_consent_connects_nothing(mailbox, monkeypatch, provider):
+    env = mailbox
+    monkeypatch.setattr(mail_oauth.httpx, "post", lambda *args, **kwargs: pytest.fail("A denied consent must not contact the provider"))
+    start = env.client.post(f"/api/inbox/oauth/{provider}/start", json={"address": "denied@example.test"})
+    state = parse_qs(urlparse(start.json()["authorizationUrl"]).query)["state"][0]
+    response = env.client.get(f"/api/inbox/oauth/{provider}/callback", params={"state": state, "error": "access_denied"}, follow_redirects=False)
+    assert "mail_error=" in response.headers["location"]
+    with env.sessions() as db:
+        assert db.scalar(select(MailAccount).where(MailAccount.address == "denied@example.test")) is None
 
 
 @pytest.mark.parametrize("provider, disconnected", [
-    ("zoho", True), ("imap", True), ("gmail", False),
-    ("microsoft", False), ("unsupported", False),
+    ("zoho", True), ("imap", True), ("gmail", True),
+    ("microsoft", True), ("unsupported", False),
 ])
 def test_unavailable_sources_reject_intake_and_retry_but_keep_evidence_and_review(mailbox, provider, disconnected):
     env = mailbox
@@ -255,8 +285,6 @@ def test_admin_review_links_original_selected_pages_and_preserves_candidate_fiel
 def test_expired_oauth_state_never_contacts_provider(mailbox, monkeypatch):
     env = mailbox
     monkeypatch.setattr(mail_oauth.httpx, "post", lambda *args, **kwargs: pytest.fail("Expired grants must not contact provider"))
-    response = env.client.post("/api/inbox/oauth/gmail/start", json={"address": "expired@example.test"})
-    assert response.status_code == 410
     response = env.client.get("/api/inbox/oauth/gmail/callback", params={"state": "old-expired-state", "code": "expired"}, follow_redirects=False)
     assert "mail_error=" in response.headers["location"]
 

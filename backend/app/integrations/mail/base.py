@@ -51,6 +51,8 @@ class InboundMessage:
     cc_addresses: tuple[str, ...] = ()
     bcc_addresses: tuple[str, ...] = ()
     starred: bool = False
+    # Empty means unknown/legacy, never proof that automatic replies are safe.
+    automation_headers: dict = field(default_factory=dict, repr=False)
 
     def source_key(self, account_id: str) -> str:
         """Provider identifiers are scoped by the immutable CRM account ID."""

@@ -62,9 +62,9 @@ export function RemoveDesignationDialog({ designation, onClose, onDeleted }: { d
   </Dialog>
 }
 
-export function OrderDialog({ designation, order, onClose }: { designation?: Designation; order?: Order; onClose: () => void }) {
+export function OrderDialog({ designation, order, companyId, onClose, onSaved }: { designation?: Designation; order?: Order; companyId?: string; onClose: () => void; onSaved?: (id: string) => void }) {
   const store = useStore()
-  const [form, setForm] = useState({ companyId: order?.companyId ?? '', designationId: order?.designationId ?? designation?.id ?? '',
+  const [form, setForm] = useState({ companyId: order?.companyId ?? companyId ?? '', designationId: order?.designationId ?? designation?.id ?? '',
     openings: String(order?.openings ?? 1), country: order?.country ?? '', city: order?.city ?? '',
     salary: order?.salary === undefined || order?.salary === null ? '' : String(order.salary), currency: order?.currency ?? 'AED',
     benefits: order?.benefits.join(', ') ?? '', contractPeriod: order?.contractPeriod ?? '',
@@ -84,9 +84,9 @@ export function OrderDialog({ designation, order, onClose }: { designation?: Des
     try {
       const payload = { ...form, openings: Number(form.openings), salary: form.salary === '' ? null : Number(form.salary),
         benefits: form.benefits.split(',').map((benefit) => benefit.trim()).filter(Boolean), interviewDate: form.interviewDate || null, deadline: form.deadline || null }
-      if (order) await api.put('/orders/' + order.id, payload)
-      else await api.post('/orders', payload)
+      const record = order ? await api.put<Order>('/orders/' + order.id, payload) : await api.post<Order>('/orders', payload)
       await refreshMasterData(store, order ? 'Order updated' : 'Order created')
+      if (store.isCurrentSession()) onSaved?.(record.id)
       onClose()
     } catch (err) { setError(err instanceof Error ? err.message : 'Order could not be saved. Please try again.') }
     finally { setSaving(false) }

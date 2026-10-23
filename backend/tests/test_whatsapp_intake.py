@@ -23,7 +23,11 @@ from test_email_intake import extraction, ORIGINAL
 
 
 @pytest.fixture
-def setup(workspace, tmp_path):
+def setup(workspace, tmp_path, monkeypatch):
+    # Keep synthetic checkpoint tests independent of installed local OCR;
+    # native person inspection remains enabled for the stored PDF.
+    from app.integrations.ocr import inspection
+    monkeypatch.setattr(inspection, "find_tesseract", lambda _command=None: None)
     settings = SimpleNamespace(whatsapp_enabled=True, whatsapp_phone_number_id="12345", whatsapp_graph_version="v24.0",
         whatsapp_access_token="synthetic-access-token", whatsapp_app_secret="synthetic-app-secret", whatsapp_verify_token="synthetic-verify-token",
         storage_dir=str(tmp_path), storage_backend="local", ocr_document_timeout_seconds=600)
@@ -140,6 +144,35 @@ def test_existing_candidate_identity_is_enriched_without_reassignment(setup):
         assert row.status == "completed" and row.candidate_id == candidate.id
         assert candidate.name == "Human correction" and candidate.skills == ["Human skill"] and candidate.total_experience == 0
         assert db.scalar(select(func.count()).select_from(Task)) == 0
+
+
+def test_whatsapp_keeps_verbatim_provider_output_beside_provenance_and_adds_a_second_passport_to_an_old_shape_candidate(setup):
+    sessions, settings = setup
+    old = {"request_id": "passport-old", "pages": [{"page_number": 3, "text": "old passport text"}], "source_sha256": "old"}
+    with sessions() as db:
+        db.get(Candidate, "candidate").ocr_data = {"passport": old}
+        db.commit()
+    message_id = receipt(sessions, settings)
+    output = extraction(kind="passport", fields={"phone": "9000000001"})
+    output["extractions"]["passport"]["raw"] = {"request_id": "passport-new", "mrz_source": "mrz", "raw_mrz": "P<IND",
+        "pages": [{"page_number": 1, "text": "new passport text", "lines": [{"text": "kept"}]}], "unmodelled": {"kept": 1}}
+    output["extractions"]["passport"]["selected_pages"] = [3]
+    output["extractions"]["passport"]["source"] = {"local_inspection": {"selected_pages": [3]}, "selected_pages": [3], "source_sha256": "new"}
+
+    process_message(message_id, sessions=sessions, settings=settings, fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
+        extract=lambda *_, **__: deepcopy(output))
+
+    with sessions() as db:
+        row = db.get(WhatsAppMessage, message_id)
+        assert row.status == "completed", row.last_error
+        stored = db.get(Candidate, row.candidate_id).ocr_data
+        assert stored["passport"] == old
+        (entry,) = stored["additional_documents"]
+        assert entry["passport"] == output["extractions"]["passport"]["raw"]
+        assert entry["_source"] == {
+            "source_file": {"channel": "whatsapp", "message_id": message_id, "file_name": "resume.pdf", "selected_pages": [3]},
+            "local_inspection": {"selected_pages": [3]}, "selected_pages": [3], "source_sha256": "new"}
+        assert "_sources" not in stored
 
 
 @pytest.mark.parametrize("provider_status", ["failed", "queued", "running", "submitting", "unknown", "succeeded"])

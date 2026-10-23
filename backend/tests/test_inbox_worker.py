@@ -52,9 +52,17 @@ def job(id="job-1", **changes):
     })
 
 
+class Rows(list):
+    """Small iterable result with the SQLAlchemy result API used by these routes."""
+
+    def all(self):
+        return list(self)
+
+
 class Database:
     def __init__(self):
         self.accounts, self.messages, self.attachments, self.jobs = [], [], [], []
+        self.bundles, self.person_groups, self.acknowledgements = [], [], []
         self.pending, self.queries, self.events = [], [], []
         self.collision = None
 
@@ -68,6 +76,8 @@ class Database:
         return {
             "MailAccount": self.accounts, "MailMessage": self.messages,
             "MailAttachment": self.attachments, "EmailIngestionJob": self.jobs,
+            "MultiPersonIntake": self.bundles, "DocumentPersonGroup": self.person_groups,
+            "IntakeAcknowledgement": self.acknowledgements,
         }[model.__name__]
 
     def _query(self, statement):
@@ -75,14 +85,36 @@ class Database:
         entity = statement.column_descriptions[0]["entity"]
         return self.table(entity), statement.compile().params
 
+    @staticmethod
+    def _project(statement, row):
+        description = statement.column_descriptions[0]
+        if description["name"] == description["entity"].__name__:
+            return row
+        return getattr(row, description["name"])
+
+    @staticmethod
+    def _matches(row, params, names):
+        for name in names:
+            key = f"{name}_1"
+            if key not in params:
+                continue
+            value = params[key]
+            actual = getattr(row, name)
+            if (actual not in value) if isinstance(value, (list, tuple)) else (actual != value):
+                return False
+        return True
+
     def scalars(self, statement):
         rows, params = self._query(statement)
-        if statement.column_descriptions[0]["entity"].__name__ == "EmailIngestionJob" and "account_id_1" in params:
+        model = statement.column_descriptions[0]["entity"].__name__
+        if model == "EmailIngestionJob" and "account_id_1" in params:
             message_ids = {item.id for item in self.messages if item.account_id in params["account_id_1"]}
             rows = [row for row in rows if row.message_id in message_ids]
-        if statement.column_descriptions[0]["name"] == "id":
-            return [row.id for row in rows]
-        return list(rows)
+        if model == "IntakeAcknowledgement":
+            rows = [row for row in rows if self._matches(row, params, ("source_kind", "status"))]
+            if "started_at_1" in params:
+                rows = [row for row in rows if row.started_at and row.started_at < params["started_at_1"]]
+        return Rows(self._project(statement, row) for row in rows)
 
     def scalar(self, statement):
         if statement.column_descriptions[0]["entity"] is None:
@@ -90,19 +122,33 @@ class Database:
             return len(self.messages)
         rows, params = self._query(statement)
         for row in rows:
-            if "address_1" in params and row.address != params["address_1"]:
+            if not self._matches(row, params, ("address", "message_id", "source_type", "source_id")):
                 continue
-            if "message_id_1" in params and row.message_id != params["message_id_1"]:
-                continue
-            return row.id if statement.column_descriptions[0]["name"] == "id" else row
+            return self._project(statement, row)
         return None
 
     def execute(self, statement):
         self.queries.append(str(statement))
+        if statement.column_descriptions[0]["entity"].__name__ == "MultiPersonIntake":
+            params = statement.compile().params
+            rows = Rows()
+            for bundle in self.bundles:
+                if not self._matches(bundle, params, ("source_type", "source_id")):
+                    continue
+                groups = sorted((group for group in self.person_groups if group.bundle_id == bundle.id), key=lambda group: group.ordinal)
+                rows.extend((bundle.id, bundle.source_id, bundle.status, group.candidate_id if group else None) for group in (groups or [None]))
+            return rows
+        if statement.column_descriptions[0]["name"] == "account_id":
+            return Rows()  # per-account message/unread totals; not under test here
+        entity = statement.column_descriptions[0]["entity"].__name__
+        if entity == "MailAccount":  # account list with a has-credentials flag; never the secret itself
+            return Rows((account, account.secrets is not None) for account in self.accounts)
+        if entity == "MailMessage" and len(statement.column_descriptions) == 3:  # page + body head + window total
+            return Rows((message, (message.body or "")[:600], len(self.messages)) for message in self.messages)
         counts = {}
         for item in self.jobs:
             counts[item.status] = counts.get(item.status, 0) + 1
-        return list(counts.items())
+        return Rows(counts.items())
 
     def get(self, model, id):
         self.events.append(("get", model.__name__, id))
@@ -220,7 +266,7 @@ def test_inbox_excludes_secrets_cursors_and_deferred_job_state(environment):
     assert "PRIVATE" not in response.text
     assert "sync_state" not in response.text and "provider_token" not in response.text
     assert not any("email_ingestion_jobs.state" in query for query in database.queries)
-    assert not any("email_accounts.secrets" in query for query in database.queries)
+    assert not any("email_accounts.secrets" in query.replace("email_accounts.secrets IS NOT NULL", "") for query in database.queries)
     assert not any("email_accounts.sync_state" in query for query in database.queries)
 
 
@@ -486,7 +532,10 @@ def test_wrong_volume_never_fetches_or_processes_mail_and_preserves_cursor(envir
     assert mailbox.last_sync_at is None
     assert mailbox.sync_requested is True
     assert vars(queued) == before_job
-    assert len(database.queries) == 1  # Return immediately; no queue scan/long-held lock.
+    # Acknowledgements are independent of document storage. Volume mismatch must
+    # still return before scanning the ingestion queue or acquiring job locks.
+    assert not any("email_ingestion_jobs" in query or "email_messages" in query for query in database.queries)
+    assert len([query for query in database.queries if "intake_acknowledgements" not in query]) == 1
 
 
 def test_only_matching_volume_accounts_are_eligible_in_mixed_queue(environment, monkeypatch):

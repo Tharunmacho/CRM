@@ -60,8 +60,9 @@ def test_domain_names_cover_renamed_models_and_documented_intake_extension():
     expected |= {"staff_attendance_hr_requests", "staff_attendance_weekly_off", "staff_attendance_work_timings",
                  "staff_attendance_duty_plans", "staff_attendance_calendar", "staff_attendance_adjustments",
                  "staff_attendance_cover_items"}
+    expected |= {'whatsapp_send_attempts', 'whatsapp_templates', 'whatsapp_delivery_events', 'intake_acknowledgements', 'document_person_intakes', 'whatsapp_conversations', 'document_person_groups', 'intake_acknowledgement_settings'}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 42
+    assert len(Base.metadata.tables) == 50
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
@@ -602,9 +603,37 @@ def test_attendance_policy_upgrade_preserves_existing_clocks_and_presence(schema
     before = snapshot()
     _migrate(engine, "head")
     assert snapshot() == before
-    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 42
+    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 50
     _migrate(engine, "0014_attendance_ordering", downgrade=True)
     assert snapshot() == before
     assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 35
     _migrate(engine, "head")
     assert snapshot() == before
+
+
+def test_communication_migration_preserves_inbound_and_backfills_conversations(schema_database):
+    engine = schema_database
+    _migrate(engine, "0015_attendance_hr")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO whatsapp_channels (phone_number_id) VALUES ('synthetic-business')"))
+        connection.execute(text("""INSERT INTO whatsapp_messages
+            (id,provider_message_id,phone_number_id,sender_number,sender_name,message_type,body,received_at,status)
+            VALUES ('receipt-first','provider-first','synthetic-business','919876543210','Earlier name','text','First message',now()-interval '2 days','received'),
+                   ('receipt-last','provider-last','synthetic-business','919876543210','Latest name','text','Latest message',now()-interval '1 hour','received')"""))
+    _migrate(engine, "head")
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT peer_number,display_name,last_preview,candidate_id FROM whatsapp_conversations")).one()
+        assert tuple(row) == ("919876543210", "Latest name", "Latest message", None)
+        assert connection.scalar(text("SELECT count(*) FROM whatsapp_messages")) == 2
+        assert connection.scalar(text("SELECT count(*) FROM intake_acknowledgements")) == 0
+        assert connection.scalar(text("SELECT count(*) FROM intake_acknowledgement_settings")) == 0
+        assert connection.scalar(text("SELECT count(*) FROM whatsapp_send_attempts")) == 0
+        assert connection.scalar(text("SELECT count(*) FROM pg_indexes WHERE indexname='ix_whatsapp_messages_conversation'")) == 1
+        assert connection.scalar(text("SELECT column_default FROM information_schema.columns WHERE table_name='email_messages' AND column_name='automation_headers'")) == "'{}'::jsonb"
+    _migrate(engine, "0015_attendance_hr", downgrade=True)
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM whatsapp_messages")) == 2
+        assert "whatsapp_conversations" not in inspect(connection).get_table_names()
+    _migrate(engine, "head")
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM whatsapp_conversations")) == 1

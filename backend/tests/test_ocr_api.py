@@ -1,6 +1,7 @@
 """OCR request boundaries using synthetic PDFs and no database/provider network."""
 
 import asyncio
+import hashlib
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -78,6 +79,13 @@ def provider_page(number, text="Verified synthetic page text"):
 
 
 def provider_response(kind="resume", pages=None):
+    """The provider's result dict as returned (extra keys and line boxes included)."""
+    payload = _provider_model(kind, pages).model_dump(mode="json")
+    payload["unmodelled_key"] = {"kept": [1]}
+    return payload
+
+
+def _provider_model(kind, pages):
     values = {
         "request_id": "synthetic-ocr-result",
         "processing_time_ms": 1,
@@ -220,9 +228,13 @@ def test_content_selects_only_matching_pages_despite_filename_and_mime(
     if kind == "aadhaar":
         assert body["fields"] == {"name": "Alice Example", "dob": "1990-01-01", "gender": "female"}
         assert body["raw"]["aadhaar"]["masked_aadhaar_number"] == "XXXX XXXX 0000"
-    assert body["raw"]["pages"][0]["page_number"] == selected
-    assert body["raw"]["pages"][0]["provider_page_number"] == 1
-    assert body["raw"]["local_inspection"]["selected_pages"] == [selected]
+    # The raw document is the provider's result, untouched; provenance is separate.
+    assert body["raw"] == provider_response(kind)
+    assert body["raw"]["pages"][0]["page_number"] == 1
+    assert body["source"]["selected_pages"] == [selected]
+    assert body["source"]["local_inspection"]["selected_pages"] == [selected]
+    assert body["source"]["source_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert not {"provider_page_number", "local_inspection", "source_sha256"} & set(body["raw"])
     called_kind, upload, options = environment.calls[0]
     assert called_kind == kind
     assert upload.filename == f"{kind}.pdf"
@@ -349,7 +361,7 @@ def test_incomplete_provider_coverage_cannot_be_complete(ocr_environment, monkey
     assert "designations" not in environment.database.events
 
 
-def test_complete_provider_pages_are_remapped_by_number_not_response_order(ocr_environment, monkeypatch):
+def test_complete_provider_pages_are_stored_in_provider_order_with_a_page_map(ocr_environment, monkeypatch):
     environment = ocr_environment
 
     def provider(kind, document, **kwargs):
@@ -365,10 +377,11 @@ def test_complete_provider_pages_are_remapped_by_number_not_response_order(ocr_e
     body = response.json()
     assert body["extraction_status"] == "complete"
     assert body["inspection"]["selected_pages"] == [2, 3]
-    assert [
-        (page["page_number"], page["provider_page_number"], page["text"])
-        for page in body["raw"]["pages"]
-    ] == [(2, 1, "First selected page"), (3, 2, "Second selected page")]
+    assert body["source"]["selected_pages"] == [2, 3]
+    # Veris order and numbering are kept; `source.selected_pages[page_number - 1]` is the original page.
+    assert [(page["page_number"], page["text"]) for page in body["raw"]["pages"]] == [
+        (2, "Second selected page"), (1, "First selected page")]
+    assert [body["source"]["selected_pages"][page["page_number"] - 1] for page in body["raw"]["pages"]] == [3, 2]
 
 
 def test_pdf_filename_and_mime_do_not_admit_non_document_bytes(ocr_environment):
@@ -444,9 +457,7 @@ def test_provider_failure_preserves_local_inspection_without_candidate_fields(
 
 def test_invalid_provider_model_does_not_expose_its_input(ocr_environment, monkeypatch, caplog):
     def provider(*args, **kwargs):
-        return ResumeResponse.model_validate({
-            "request_id": {"PRIVATE": "document identity"}, "processing_time_ms": 1,
-        })
+        return {"request_id": {"PRIVATE": "document identity"}, "processing_time_ms": 1}
 
     monkeypatch.setattr(ocr_environment.ocr, "veris_scan", provider)
     response = post_scan(ocr_environment, native_pdf(RESUME), filename="PRIVATE-document.pdf")
@@ -461,10 +472,11 @@ def test_candidate_ocr_input_accepts_aadhaar_as_separate_evidence(ocr_environmen
     with patch("app.core.config.get_settings", return_value=ocr_environment.settings):
         from app.api.routers.candidates import OcrDataIn
 
-    raw = provider_response("aadhaar").model_dump(mode="json")
-    stored = OcrDataIn(aadhaar=raw).model_dump(exclude_none=True)
+    raw = provider_response("aadhaar")
+    source = {"source_sha256": "a", "selected_pages": [4], "local_inspection": {"page_count": 4}}
+    stored = OcrDataIn.model_validate({"aadhaar": raw, "_sources": {"aadhaar": source}}).stored()
 
-    assert stored == {"aadhaar": raw}
+    assert stored == {"aadhaar": raw, "_sources": {"aadhaar": source}}
 
 
 def test_unauthenticated_request_cannot_inspect_or_submit(ocr_environment):

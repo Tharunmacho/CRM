@@ -2,11 +2,9 @@
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 from typing import Literal
-from urllib.parse import urlencode
 import mimetypes
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -15,43 +13,15 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.deps import current_user, require_role
 from app.db.models import Attachment, AuditEntry, Candidate, EmailIngestionJob, MailAccount, MailAttachment, MailMessage, MailReply, Role, User
-from app.db.session import get_db
+from app.db.session import get_db, writes_on_get
 from app.integrations.mail.base import MailAdapterError
 from app.integrations.mail.smtp import MailSendError, address as valid_address, send_reply
-from app.services import zoho_mail
+from app.services import mail_providers
+from app.services.parallel_reads import parallel_reads
 from app.services.document_storage import file_response
 
 router = APIRouter(tags=["inbox"])
 admin = require_role(Role.admin)
-
-
-class OAuthIn(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    address: str = Field(min_length=3, max_length=255)
-    auto_ingest: StrictBool = True
-
-    @field_validator("address")
-    @classmethod
-    def mailbox_address(cls, value):
-        try:
-            parsed = valid_address(value)
-            if parsed != value:
-                raise ValueError()
-            return parsed.lower()
-        except (ValueError, MailSendError):
-            raise ValueError("Enter a mailbox email address.") from None
-
-
-@router.post("/oauth/{provider}/start")
-def oauth_start(provider: Literal["gmail", "microsoft"], body: OAuthIn, request: Request,
-                db: Session = Depends(get_db), user: User = Depends(admin)):
-    raise HTTPException(410, "Gmail and Microsoft connections are disabled. Connect Zoho Mail in mailbox settings.")
-
-
-@router.get("/oauth/{provider}/callback")
-def oauth_callback(provider: Literal["gmail", "microsoft"], request: Request, state: str = "", code: str = "", error: str = "",
-                   db: Session = Depends(get_db), user: User = Depends(admin)):
-    return RedirectResponse("/inbox?" + urlencode({"mail_error": "Only Zoho Mail connections are enabled."}), status_code=303)
 
 
 @router.post("/accounts/{account_id}/disconnect")
@@ -72,8 +42,8 @@ def sync_account(account_id: str, db: Session = Depends(get_db), user: User = De
     account = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
     if not account:
         raise HTTPException(404, "Mailbox not found")
-    if account.provider not in {"zoho", "imap"}:
-        raise HTTPException(409, "This provider is archived. Only Zoho Mail can be synchronized.")
+    if not mail_providers.is_live(account.provider):
+        raise HTTPException(409, "This provider is archived. Stored history is read only.")
     if account.disconnected_at:
         raise HTTPException(409, "Reconnect this mailbox before requesting sync.")
     if not get_settings().email_ingestion_enabled:
@@ -94,7 +64,7 @@ def mark_read(message_id: str, body: ReadIn, db: Session = Depends(get_db), user
     if not message:
         raise HTTPException(404, "Message not found")
     source = db.get(MailAccount, message.account_id)
-    if source.provider == "zoho":
+    if mail_providers.is_live(source.provider):
         from app.api.routers.zoho_mailbox import FlagsIn, flags
         return flags(message_id, FlagsIn(unread=body.unread), db, user)
     message.unread = body.unread
@@ -136,6 +106,7 @@ def reply_out(reply):
 
 
 @router.get("/messages/{message_id}/replies")
+@writes_on_get
 def replies(message_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     if db.get(MailMessage, message_id) is None:
         raise HTTPException(404, "Message not found")
@@ -161,7 +132,7 @@ def reply(message_id: str, body: ReplyIn, db: Session = Depends(get_db), user: U
     if account.disconnected_at:
         raise HTTPException(409, "Reconnect the original mailbox before replying.")
     try:
-        config = zoho_mail.account_config(db, get_settings(), account)
+        config = mail_providers.account_config(db, get_settings(), account)
         valid_address(message.reply_to or message.from_address)
     except MailAdapterError as exc:
         db.rollback()
@@ -197,6 +168,10 @@ class ReviewIn(BaseModel):
 
 @router.post("/jobs/{job_id}/review")
 def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user: User = Depends(admin)):
+    from app.api.routers.candidates import lock_assignment_cursor
+    from app.services.document_person_split import ensure_single_person_source
+    from app.services.intake_acknowledgements import queue_intake_acknowledgement
+    lock_assignment_cursor(db)
     candidate = None
     if body.decision == "link":
         if not body.candidate_id:
@@ -210,6 +185,7 @@ def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user:
     if job.status not in {"needs_review", "failed", "ignored"}:
         raise HTTPException(409, "This receipt is already processing or complete. Refresh its current status.")
     message = db.get(MailMessage, job.message_id)
+    ensure_single_person_source(db, "email", message.id)
     evidence = list(db.scalars(select(MailAttachment).where(MailAttachment.message_id == message.id)))
     linked = 0
     if candidate:
@@ -232,6 +208,7 @@ def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user:
                     **{name: item.get(name) for name in ("slot", "file_name", "size_kb", "object_key", "content_hash", "content_type")}))
                 db.flush(); linked += 1
         message.candidate_id, job.candidate_id, job.status = candidate.id, candidate.id, "completed"
+        queue_intake_acknowledgement(db, "email", message.id)
         db.add(AuditEntry(actor_id=user.id, action="Linked reviewed email evidence", target=candidate.name,
             entity_type="candidate", entity_id=candidate.id, meta={"job_id": job.id, "message_id": message.id, "reason": body.reason, "documents": linked}))
     else:
@@ -247,18 +224,30 @@ def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user:
 
 @router.get("/candidates/{candidate_id}/evidence")
 def candidate_email_history(candidate_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    if db.get(Candidate, candidate_id) is None:
-        raise HTTPException(404, "Candidate not found")
-    rows = db.execute(select(MailMessage, MailAccount.address,
+    from app.db.models import DocumentPersonGroup, MultiPersonIntake
+    from sqlalchemy import or_
+    statement = (select(MailMessage.id, MailMessage.subject, MailMessage.from_address, MailMessage.received_at, MailAccount.address,
         EmailIngestionJob.state["manual_review"].label("review"))
         .join(MailAccount, MailAccount.id == MailMessage.account_id)
         .outerjoin(EmailIngestionJob, EmailIngestionJob.message_id == MailMessage.id)
-        .where(MailMessage.candidate_id == candidate_id)
+        .where(or_(MailMessage.candidate_id == candidate_id, select(DocumentPersonGroup.id)
+            .join(MultiPersonIntake, MultiPersonIntake.id == DocumentPersonGroup.bundle_id)
+            .where(DocumentPersonGroup.candidate_id == candidate_id,
+                   MultiPersonIntake.source_type == "email",
+                   MultiPersonIntake.source_id == MailMessage.id,
+                   MultiPersonIntake.status == "completed").exists()))
         .order_by(MailMessage.received_at.desc(), MailMessage.id.desc()).limit(100))
-    return [{"messageId": message.id, "subject": message.subject or "(No subject)", "mailbox": mailbox,
-        "fromAddress": message.from_address, "receivedAt": message.received_at,
+    known, rows = parallel_reads(
+        db,
+        lambda session: session.scalar(select(Candidate.id).where(Candidate.id == candidate_id)) is not None,
+        lambda session: session.execute(statement).all(),
+    )
+    if not known:
+        raise HTTPException(404, "Candidate not found")
+    return [{"messageId": message_id, "subject": subject or "(No subject)", "mailbox": mailbox,
+        "fromAddress": from_address, "receivedAt": received_at,
         "review": {name: review.get(name) for name in ("decision", "reason", "actor_id", "at")} if isinstance(review, dict) else None}
-        for message, mailbox, review in rows]
+        for message_id, subject, from_address, received_at, mailbox, review in rows]
 
 
 class HistoryIn(BaseModel):
@@ -298,8 +287,8 @@ def history_account(db, account_id):
     account = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
     if not account:
         raise HTTPException(404, "Mailbox not found")
-    if account.provider not in {"zoho", "imap"}:
-        raise HTTPException(409, "This provider is archived. Only Zoho Mail can import new history.")
+    if not mail_providers.is_live(account.provider):
+        raise HTTPException(409, "This provider is archived. Stored history is read only.")
     if account.disconnected_at:
         raise HTTPException(409, "Reconnect this mailbox before importing its history.")
     if not get_settings().email_ingestion_enabled:

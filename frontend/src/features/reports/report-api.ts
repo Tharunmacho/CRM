@@ -37,6 +37,7 @@ export function useReportData<T>(path: string, sessionId: string, revision = '')
   const [snapshot, setSnapshot] = useState<{ key: string; data: T } | null>(null)
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null)
   const [reload, setReload] = useState(0)
+  const [reading, setReading] = useState<string | null>(null)
   const key = `${sessionId}:${path}:${revision}`
   useEffect(() => {
     let active = true
@@ -44,24 +45,29 @@ export function useReportData<T>(path: string, sessionId: string, revision = '')
     const read = async () => {
       if (request || document.visibilityState === 'hidden') return
       const controller = new AbortController(); request = controller
+      setReading(key)
       try {
         const data = await api.get<T>(path, { signal: controller.signal })
         if (active) { setSnapshot({ key, data }); setFailure(null) }
       } catch (error) {
         if (active && !controller.signal.aborted) setFailure({ key, message: error instanceof Error ? error.message : 'Unable to load this view.' })
-      } finally { if (request === controller) request = null }
+      } finally { if (request === controller) request = null; if (active) setReading(null) }
     }
     void read()
     const interval = window.setInterval(() => void read(), 30_000)
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
-    return () => { active = false; request?.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', visible) }
+    window.addEventListener('focus', visible)
+    return () => { active = false; request?.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [key, path, reload])
-  return { data: snapshot?.key === key ? snapshot.data : null, error: failure?.key === key ? failure.message : '', refresh: () => setReload(n => n + 1) }
+  return { data: snapshot?.key === key ? snapshot.data : null, error: failure?.key === key ? failure.message : '', refreshing: reading === key, refresh: () => setReload(n => n + 1) }
 }
 
 export async function downloadReport(report: string, format: 'xlsx' | 'pdf', query: string) {
-  const response = await fetch(fileHref(`/api/reports/${report}/export?${query}&format=${format}`), { credentials: 'include' })
+  const controller = new AbortController()
+  const deadline = window.setTimeout(() => controller.abort(), 90_000)
+  try {
+  const response = await fetch(fileHref(`/api/reports/${report}/export?${query}&format=${format}`), { credentials: 'include', signal: controller.signal })
   if (!response.ok) {
     const failure = await response.json().catch(() => null)
     throw new Error(typeof failure?.detail === 'string' ? failure.detail : 'The export could not be created. Please try again.')
@@ -71,4 +77,8 @@ export async function downloadReport(report: string, format: 'xlsx' | 'pdf', que
   link.href = url; link.download = `${report}-${new URLSearchParams(query).get('from_date')}.${format}`
   document.body.appendChild(link); link.click(); link.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('The export took too long. Try a shorter reporting period or retry.')
+    throw error
+  } finally { window.clearTimeout(deadline) }
 }

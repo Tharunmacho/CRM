@@ -18,6 +18,9 @@ from app.db.session import get_db
 from app.services.document_extraction import request_extraction_retry
 from app.services.document_storage import delete_bytes, file_response, put_bytes
 from app.services.manual_extraction import READY, attach_original, job_out, now, owned_job
+from app.services.candidate_intake_binding import ensure_intake_candidate_access, saved_candidate_id
+from app.services.document_person_split import ensure_single_person_source
+from app.api.routers.candidates import lock_assignment_cursor
 
 router = APIRouter(prefix="/api/ocr/jobs", tags=["document-intake"])
 
@@ -47,6 +50,10 @@ def create(kind: Literal["resume", "passport", "aadhaar", "photo", "education", 
     commit_attempted = False
     settings = get_settings()
     try:
+        lock_assignment_cursor(db)
+        # A replacement upload must be possible before dismissing an incorrect
+        # original. Only an already frozen person review prevents new sources.
+        ensure_single_person_source(db, "manual", group_id, check_evidence=False)
         key = put_bytes(settings, "manual/" + user.id + "/" + identifier + "/original", payload, media)
         recent = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.owner_id == user.id,
             DocumentExtractionJob.group_id == group_id).order_by(DocumentExtractionJob.updated_at.desc()).limit(1))
@@ -60,6 +67,9 @@ def create(kind: Literal["resume", "passport", "aadhaar", "photo", "education", 
         commit_attempted = True
         db.commit()
         return job_out(job, detail=True)
+    except HTTPException:
+        db.rollback()
+        raise
     except IntegrityError:
         db.rollback()
         existing = db.scalar(statement)
@@ -130,12 +140,31 @@ class DraftIn(BaseModel):
 
 @router.put("/groups/{group_id}/draft")
 def save_draft(group_id: str, body: DraftIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    lock_assignment_cursor(db)
     jobs = db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.owner_id == user.id,
         DocumentExtractionJob.group_id == _group(group_id)).order_by(DocumentExtractionJob.id).with_for_update()).all()
     if not jobs: raise HTTPException(404, "Document intake not found")
+    # Keep split provenance intact even if an older tab still has autosave queued.
+    from app.db.models import MultiPersonIntake
+    if db.scalar(select(MultiPersonIntake.id).where(MultiPersonIntake.source_type == "manual", MultiPersonIntake.source_id == _group(group_id))):
+        raise HTTPException(409, "This intake is being reviewed by person. Save details in its people-and-pages review.")
     if set(body.jobIds) - {job.id for job in jobs}: raise HTTPException(422, "The selected documents do not belong to this intake")
+    # A queued pre-save draft must never erase the binding committed with the
+    # candidate. This is also what makes an interrupted save recoverable.
+    existing_id = saved_candidate_id(jobs)
+    if existing_id and body.savedCandidateId and body.savedCandidateId != existing_id:
+        raise HTTPException(409, "This intake is already linked to a saved candidate.")
+    if body.savedCandidateId and not existing_id:
+        from app.db.models import Candidate
+        candidate = db.get(Candidate, body.savedCandidateId)
+        if candidate is None:
+            raise HTTPException(404, "Saved candidate not found.")
+        ensure_intake_candidate_access(candidate, user)
+    payload = body.model_dump()
+    if existing_id:
+        payload["savedCandidateId"] = existing_id
     for job in jobs:
-        job.draft = body.model_dump()
+        job.draft = deepcopy(payload)
         job.updated_at = now()
     db.commit()
     return {"saved": True}
@@ -156,7 +185,9 @@ def original(job_id: str, download: bool = False, db: Session = Depends(get_db),
 
 @router.post("/{job_id}/retry")
 def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    lock_assignment_cursor(db)
     job = owned_job(db, job_id, user.id, lock=True)
+    ensure_single_person_source(db, "manual", job.group_id)
     if job.status in READY: return job_out(job, detail=True)
     if job.kind not in {"resume", "passport", "aadhaar"}:
         raise HTTPException(422, "This document is stored as an attachment and does not need identity extraction")
@@ -174,7 +205,11 @@ def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(curre
 
 @router.post("/{job_id}/dismiss")
 def dismiss(job_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    lock_assignment_cursor(db)
     job = owned_job(db, job_id, user.id, lock=True)
+    from app.db.models import MultiPersonIntake
+    if db.scalar(select(MultiPersonIntake.id).where(MultiPersonIntake.source_type == "manual", MultiPersonIntake.source_id == job.group_id)):
+        raise HTTPException(409, "This source belongs to a saved people-and-pages review. Exclude pages with a reason inside that review.")
     if job.status != "attached":
         job.status, job.updated_at = "dismissed", now()
         db.commit()

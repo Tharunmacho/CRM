@@ -169,7 +169,7 @@ def test_zoho_reconnect_after_uid_reset_keeps_cursor_and_history_for_explicit_re
         assert db.get(MailAttachment, "attachment").object_key == "original.pdf"
 
 
-def test_zoho_connection_encrypts_credentials_and_legacy_oauth_disabled(zoho):
+def test_zoho_connection_encrypts_credentials(zoho):
     env = zoho
     response = env.client.post("/api/inbox/accounts/zoho", json={"address": "new@example.test", "password": "synthetic-private-value", "region": "in"})
     assert response.status_code == 200, response.text
@@ -180,9 +180,8 @@ def test_zoho_connection_encrypts_credentials_and_legacy_oauth_disabled(zoho):
         assert "synthetic-private-value" not in str(account.secrets)
         assert decrypt(env.settings, account.secrets["encrypted"])["password"] == "synthetic-private-value"
         assert "synthetic-private-value" not in str(list(db.scalars(select(AuditEntry.meta))))
-    assert env.client.post("/api/inbox/oauth/gmail/start", json={"address": "old@example.test"}).status_code == 410
     providers = env.client.get("/api/inbox").json()["providers"]
-    assert [item["provider"] for item in providers] == ["zoho"]
+    assert {item["provider"] for item in providers} == {"gmail", "microsoft", "zoho", "imap"}
     env.actor.role = Role.staff
     assert env.client.post("/api/inbox/accounts/zoho", json={"address": "new@example.test", "password": "synthetic"}).status_code == 403
 
@@ -470,3 +469,14 @@ def test_live_unread_filter_uses_remote_counts_and_keeps_folder_paging(zoho):
     assert zoho.client.get("/api/inbox/accounts/account/mailbox?unread=true").json()["messages"] == []
     read = zoho.client.get("/api/inbox/accounts/account/mailbox?unread=false&limit=1").json()
     assert read["total"] == 1 and read["messages"][0]["id"] == "message-0" and not read["hasMore"]
+
+
+def test_folder_list_is_reused_briefly_and_refresh_forces_a_live_read(zoho):
+    env, reads = zoho, []
+    original = env.provider.folders
+    env.provider.folders = lambda: (reads.append(1), original())[1]
+    assert env.client.get("/api/inbox/accounts/account/folders").status_code == 200
+    assert env.client.get("/api/inbox/accounts/account/folders").json()["folders"]
+    assert len(reads) == 1
+    assert env.client.get("/api/inbox/accounts/account/folders?refresh=true").status_code == 200
+    assert len(reads) == 2

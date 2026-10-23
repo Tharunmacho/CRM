@@ -8,7 +8,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from starlette.concurrency import run_in_threadpool
 
 from app.api.routers.candidates import lock_assignment_cursor
@@ -20,9 +20,19 @@ from app.integrations.whatsapp import missing_settings, verify_signature
 from app.services.document_extraction import request_extraction_retry
 from app.services.document_storage import file_response
 from app.services.whatsapp_intake import attach_original, receive_payload
+from app.services.whatsapp_chat import record_inbound_payload, reconcile_payload
+from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp"])
 admin = require_role(Role.admin)
+
+
+def receive_chat_payload(db, payload, settings):
+    count = receive_payload(db, payload, settings) if settings.whatsapp_enabled else 0
+    if settings.whatsapp_enabled: record_inbound_payload(db, payload, settings)
+    reconcile_payload(db, payload, settings)
+    db.commit()
+    return count
 
 
 @router.get("/webhook", response_class=PlainTextResponse)
@@ -36,7 +46,9 @@ def verify(mode: str = Query(alias="hub.mode"), token: str = Query(alias="hub.ve
 @router.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
     settings = get_settings()
-    if not settings.whatsapp_enabled or missing_settings(settings):
+    # Previously accepted sends must still reconcile after intake/sending is
+    # disabled. A signature secret and configured phone are sufficient here.
+    if not settings.whatsapp_phone_number_id or not settings.whatsapp_app_secret:
         raise HTTPException(503, "WhatsApp is not configured")
     body = bytearray()
     async for chunk in request.stream():
@@ -49,7 +61,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         payload = json.loads(body)
         if not isinstance(payload, dict) or payload.get("object") != "whatsapp_business_account":
             raise ValueError()
-        count = await run_in_threadpool(receive_payload, db, payload, settings)
+        count = await run_in_threadpool(receive_chat_payload, db, payload, settings)
     except (ValueError, TypeError, AttributeError, OverflowError, OSError):
         db.rollback()
         raise HTTPException(400, "Webhook payload is invalid") from None
@@ -65,9 +77,21 @@ def inbox(q: str = "", page: int = Query(1, ge=1), page_size: int = Query(20, ge
         pattern = f"%{q.strip()}%"
         conditions.append(or_(WhatsAppMessage.sender_number.ilike(pattern), WhatsAppMessage.sender_name.ilike(pattern), WhatsAppMessage.body.ilike(pattern), WhatsAppMessage.file_name.ilike(pattern)))
     if status: conditions.append(WhatsAppMessage.status == status)
-    total = db.scalar(select(func.count()).select_from(WhatsAppMessage).where(*conditions)) or 0
-    rows = db.scalars(select(WhatsAppMessage).where(*conditions).order_by(WhatsAppMessage.received_at.desc(), WhatsAppMessage.id).offset((page - 1) * page_size).limit(page_size))
-    channels = db.scalars(select(WhatsAppChannel))
+    def read_rows(session):
+        return list(session.scalars(select(WhatsAppMessage).options(load_only(WhatsAppMessage.id, WhatsAppMessage.phone_number_id,
+            WhatsAppMessage.sender_number, WhatsAppMessage.sender_name, WhatsAppMessage.message_type, WhatsAppMessage.body,
+            WhatsAppMessage.file_name, WhatsAppMessage.object_key, WhatsAppMessage.received_at, WhatsAppMessage.status,
+            WhatsAppMessage.attempts, WhatsAppMessage.last_error, WhatsAppMessage.candidate_id))
+            .where(*conditions).order_by(WhatsAppMessage.received_at.desc(), WhatsAppMessage.id).offset((page - 1) * page_size).limit(page_size)))
+
+    total, rows, channels = parallel_reads(
+        db,
+        lambda session: session.scalar(select(func.count()).select_from(WhatsAppMessage).where(*conditions)) or 0,
+        read_rows,
+        lambda session: list(session.scalars(select(WhatsAppChannel))),
+    )
+    from app.services.document_bundle_summary import source_summaries
+    bundles = source_summaries(db, "whatsapp", [row.id for row in rows])
     return {"configured": settings.whatsapp_enabled and not missing_settings(settings), "missingSettings": missing_settings(settings) if user.role == Role.admin else [],
         "enabled": settings.whatsapp_enabled, "configuredPhoneNumberId": settings.whatsapp_phone_number_id if user.role == Role.admin else None,
         "webhookPath": "/api/whatsapp/webhook", "total": total, "page": page, "pageSize": page_size,
@@ -75,21 +99,26 @@ def inbox(q: str = "", page: int = Query(1, ge=1), page_size: int = Query(20, ge
                       "lastReceivedAt": row.last_received_at, "workerSeenAt": row.worker_seen_at, "lastError": row.last_error} for row in channels],
         "messages": [{"id": row.id, "phoneNumberId": row.phone_number_id, "senderNumber": row.sender_number, "senderName": row.sender_name, "type": row.message_type,
                       "body": row.body, "fileName": row.file_name, "hasFile": bool(row.object_key), "receivedAt": row.received_at,
-                      "status": row.status, "attempts": row.attempts, "lastError": row.last_error, "candidateId": row.candidate_id} for row in rows]}
+                      "status": row.status, "attempts": row.attempts, "lastError": row.last_error, "candidateId": row.candidate_id, "documentBundle": bundles.get(row.id)} for row in rows]}
 
 
 @router.get("/health")
 def health(db: Session = Depends(get_db), user: User = Depends(admin)):
     """Operational counters only; the dashboard does not need message bodies."""
     settings = get_settings()
-    counts = dict(db.execute(select(WhatsAppMessage.status, func.count()).group_by(WhatsAppMessage.status)).all())
+    grouped, channels = parallel_reads(
+        db,
+        lambda session: session.execute(select(WhatsAppMessage.status, func.count()).group_by(WhatsAppMessage.status)).all(),
+        lambda session: list(session.scalars(select(WhatsAppChannel).order_by(WhatsAppChannel.phone_number_id))),
+    )
+    counts = dict(grouped)
     return {"enabled": settings.whatsapp_enabled,
             "configured": settings.whatsapp_enabled and not missing_settings(settings),
             "counts": {name: counts.get(name, 0) for name in ("received", "pending", "processing", "retry", "needs_review", "completed", "ignored", "failed")},
             "channels": [{"id": row.phone_number_id, "displayNumber": row.display_number,
                           "enabled": row.enabled, "autoIngest": row.auto_ingest,
                           "lastReceivedAt": row.last_received_at, "workerSeenAt": row.worker_seen_at,
-                          "lastError": row.last_error} for row in db.scalars(select(WhatsAppChannel).order_by(WhatsAppChannel.phone_number_id))]}
+                          "lastError": row.last_error} for row in channels]}
 
 
 class ChannelIn(BaseModel):
@@ -142,6 +171,9 @@ def attachment(message_id: str, download: bool = False, db: Session = Depends(ge
 
 @router.post("/messages/{message_id}/retry")
 def retry(message_id: str, db: Session = Depends(get_db), user: User = Depends(admin)):
+    from app.services.document_person_split import ensure_single_person_source
+    lock_assignment_cursor(db)
+    ensure_single_person_source(db, "whatsapp", message_id)
     row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
     if row is None: raise HTTPException(404, "Message not found")
     channel = db.get(WhatsAppChannel, row.phone_number_id)
@@ -169,7 +201,10 @@ class ResolveIn(BaseModel):
 
 @router.post("/messages/{message_id}/resolve")
 def resolve(message_id: str, body: ResolveIn, db: Session = Depends(get_db), user: User = Depends(admin)):
+    from app.services.document_person_split import ensure_single_person_source
+    from app.services.intake_acknowledgements import queue_intake_acknowledgement
     lock_assignment_cursor(db)
+    ensure_single_person_source(db, "whatsapp", message_id)
     candidate = db.scalar(select(Candidate).where(Candidate.id == body.candidateId).with_for_update())
     if candidate is None: raise HTTPException(404, "Candidate not found")
     row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
@@ -180,6 +215,7 @@ def resolve(message_id: str, body: ResolveIn, db: Session = Depends(get_db), use
         raise HTTPException(422, "Retrieve the original document before linking this message to a candidate.")
     attach_original(db, row, candidate)
     row.candidate_id, row.status, row.last_error = candidate.id, "completed", None
+    queue_intake_acknowledgement(db, "whatsapp", row.id)
     db.add(AuditEntry(actor_id=user.id, action="Resolved WhatsApp intake", entity_type="candidate", entity_id=candidate.id,
                       target=candidate.name, meta={"messageId": row.id, "reason": body.reason}))
     db.commit()

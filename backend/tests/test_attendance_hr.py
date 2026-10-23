@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from app.core.deps import current_user
 from app.core.security import SESSION_COOKIE
 from app.db.models import (AttendanceAdjustment, AttendanceCalendarDay, AttendanceCoverItem,
-    AttendanceHRRequest, AuditEntry, Candidate, Role, Session as LoginSession, Source,
+    AttendanceHRRequest, AuditEntry, Candidate, Notification, Role, Session as LoginSession, Source,
     StaffAttendanceSession, Task, TaskEvent, TaskKind, User)
 from app.db.session import get_db
 from app.services import attendance_hr as hr, staff_activity
@@ -171,8 +171,12 @@ def test_cover_sweep_returns_pending_keeps_completed_and_preserves_clocks(worksp
         assert first["started"] == 2
         assert pending.owner_id == completed.owner_id == "other"
         assert pending.due_at == NOW + timedelta(hours=36)
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
+        assert len(notices) == 8
+        assert {notice.user_id for notice in notices} == {'other', 'admin', 'manager', 'manager2'}
         assert hr.run_cover_sweep(db, at=NOW + timedelta(minutes=1))["started"] == 0
         db.commit()
+        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 8
         completed.completed_at = NOW + timedelta(hours=1)
         db.get(Candidate, "completed").call_recorded_at = NOW + timedelta(hours=1)
         db.commit()
@@ -184,6 +188,11 @@ def test_cover_sweep_returns_pending_keeps_completed_and_preserves_clocks(worksp
         assert hr.run_cover_sweep(db, at=NOW + timedelta(days=1, minutes=1))["settled"] == 0
         assert db.scalar(select(func.count()).select_from(AttendanceCoverItem).where(AttendanceCoverItem.request_id == request_id)) == 2
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_type == "candidate", AuditEntry.entity_id == "candidate")) == 2
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
+        returned = [notice for notice in notices if 'returned after leave cover' in notice.detail]
+        assert len(notices) == 12 and len(returned) == 4
+        assert {notice.user_id for notice in returned} == {'owner', 'admin', 'manager', 'manager2'}
+        assert all(notice.link_to == '/candidates/candidate' for notice in returned)
 
 
 def test_cover_never_steals_human_reassignment_even_back_to_cover(workspace):
@@ -331,10 +340,12 @@ def test_cover_sweep_rollback_retries_without_half_transferred_work(workspace):
         db.rollback()
         assert db.get(Candidate, "candidate").owner_id == "owner"
         assert db.get(AttendanceHRRequest, request_id).cover_started_at is None
+        assert db.scalar(select(Notification.id).where(Notification.kind == 'assignment')) is None
         assert hr.run_cover_sweep(db, at=NOW + timedelta(minutes=1))["started"] == 1
         db.commit()
         assert db.scalar(select(func.count()).select_from(AttendanceCoverItem)) == 1
         assert db.scalar(select(func.count()).select_from(TaskEvent).where(TaskEvent.kind == "assignment")) == 1
+        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 4
 
 
 def test_status_override_survives_monthly_permission_classification(workspace):

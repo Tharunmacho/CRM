@@ -14,7 +14,7 @@ from statistics import mean
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import JSON, func, select
+from sqlalchemy import JSON, func, or_, select
 
 from app.db import models as m
 from app.domain.stages import STAGES as WORKFLOW_STAGES
@@ -60,8 +60,16 @@ class Filters:
                        self.designation_id, user.id if value(user.role) == "staff" else self.staff_id)
 
 
-def read_reporting_data(db):
-    """Select only reporting fields: no resumes, credentials, documents or mail bodies."""
+def read_reporting_data(db, filters: Filters | None = None, zone="Asia/Kolkata"):
+    """Read report inputs without changing historical attribution.
+
+    An authorized period bounds events and execution tasks. Latest effective
+    stages are selected BEFORE date filtering, preserving superseded receipts.
+    The SQL projection has exact full-response parity with the original reader
+    across 60 real-PostgreSQL role/date/relation cases in
+    test_reporting_read_projection, including reopened attempts and old tasks
+    referenced by current events. Omitting filters preserves the original reader.
+    """
     fields = {
         "users": (m.User, "id name role active"),
         "clients": (m.Client, "id name"),
@@ -77,13 +85,124 @@ def read_reporting_data(db):
     }
     # One statement sees a consistent committed snapshot across all tables and
     # avoids twelve round trips to a remotely hosted PostgreSQL instance.
+    if filters is not None:
+        tz = ZoneInfo(zone)
+        start = datetime.combine(filters.from_date, time.min, tzinfo=tz)
+        end = datetime.combine(filters.to_date + timedelta(days=1), time.min, tzinfo=tz)
+        events_in_period = (m.TaskEvent.occurred_at >= start, m.TaskEvent.occurred_at < end)
+        event_tasks = select(m.TaskEvent.task_id).where(*events_in_period)
     collections = []
     for name, (model, names) in fields.items():
-        rows = select(*(getattr(model, field) for field in names.split())).subquery(name)
+        columns = [getattr(model, field) for field in names.split()]
+        if filters is not None and name == "stages":
+            columns = [func.json_build_object("result", model.data["result"], "amount", model.data["amount"],
+                "currency", model.data["currency"]).label("data") if field.key == "data" else field for field in columns]
+        query = select(*columns)
+        if filters is not None:
+            if name == "events":
+                query = query.where(*events_in_period)
+            elif name == "tasks":
+                # Do not filter by current task owner: historical stage/event
+                # ownership can differ after reassignment.
+                query = query.where(or_((m.Task.completed_at >= start) & (m.Task.completed_at < end), m.Task.id.in_(event_tasks)))
+            elif name == "stages":
+                query = (query.where(or_(model.reopened_reason.is_(None), model.reopened_reason == ""))
+                    .distinct(model.application_id, model.stage)
+                    .order_by(model.application_id, model.stage, model.attempt.desc(), model.completed_at.desc()))
+            elif name == "remarks":
+                # Report missed-update totals use persisted events, not remarks.
+                query = query.where(False)
+        rows = query.subquery(name)
         collections.append(select(func.json_agg(func.row_to_json(rows.table_valued()), type_=JSON)).scalar_subquery().label(name))
-    mail = select(m.MailMessage.id, m.MailAccount.address).join(m.MailAccount, m.MailAccount.id == m.MailMessage.account_id).subquery("mail_sources")
+    mail = select(m.MailMessage.id, m.MailAccount.address).join(m.MailAccount, m.MailAccount.id == m.MailMessage.account_id)
+    if filters is not None:
+        # Account attribution follows candidate intake date, never message date.
+        # Other messages cannot affect this period's source-account totals.
+        mail = mail.where(select(m.Candidate.id).where(m.Candidate.source == m.Source.email,
+            m.Candidate.created_at >= start, m.Candidate.created_at < end,
+            m.Candidate.source_detail == "email_message:" + m.MailMessage.id).exists())
+    mail = mail.subquery("mail_sources")
     collections.append(select(func.json_agg(func.row_to_json(mail.table_valued()), type_=JSON)).scalar_subquery().label("mailSources"))
     return {key: rows or [] for key, rows in db.execute(select(*collections)).mappings().one().items()}
+
+
+def read_dashboard_data(db, user, staff_id=None, zone="Asia/Kolkata", now=None):
+    """One fresh projection of operational data, excluding historical report input."""
+    if value(user.role) != "admin" and staff_id not in (None, user.id):
+        raise HTTPException(403, "Only administrators can change dashboard staff scope.")
+    scope = staff_id if value(user.role) == "admin" else user.id
+    today = aware(now or datetime.now(timezone.utc)).astimezone(ZoneInfo(zone)).date()
+    start = datetime.combine(today, time.min, ZoneInfo(zone))
+    end = datetime.combine(today + timedelta(days=1), time.min, ZoneInfo(zone))
+    open_tasks = (m.Task.completed_at.is_(None), m.Task.cancelled_at.is_(None))
+    if scope:
+        open_tasks += (m.Task.owner_id.in_([scope, user.id]),)
+    apps = select(m.Application.id)
+    if scope:
+        apps = apps.where(m.Application.candidate_id.in_(select(m.Candidate.id).where(m.Candidate.owner_id == scope)))
+    fields = {
+        "users": (m.User, "id name"), "clients": (m.Client, "id name"),
+        "companies": (m.Company, "id client_id name"), "designations": (m.Designation, "id title"),
+        "orders": (m.Order, "id ref company_id designation_id openings status created_at"),
+        "candidates": (m.Candidate, "id name owner_id created_at source"),
+        "applications": (m.Application, "id candidate_id order_id current_stage status created_at"),
+        "tasks": (m.Task, "id title candidate_id application_id stage owner_id created_at due_at sla_started_at escalated"),
+        "remarks": (m.Remark, "task_id author_id created_at"),
+    }
+    collections = []
+    for name, (model, names) in fields.items():
+        query = select(*(getattr(model, field) for field in names.split()))
+        if name == "applications":
+            query = query.where(m.Application.id.in_(apps))
+        elif name == "tasks":
+            query = query.where(*open_tasks)
+        elif name == "remarks":
+            query = query.join(m.Task, m.Task.id == m.Remark.task_id).where(*open_tasks,
+                m.Remark.author_id == m.Task.owner_id, m.Remark.created_at >= start, m.Remark.created_at < end)
+        rows = query.subquery(name)
+        collections.append(select(func.json_agg(func.row_to_json(rows.table_valued()), type_=JSON)).scalar_subquery().label(name))
+    # Only the effective interview result affects the dashboard's selected count.
+    # Never transfer stage attachments, remarks, receipts or other stage payloads.
+    stages = (select(m.ApplicationStage.application_id, m.ApplicationStage.stage, m.ApplicationStage.attempt,
+        func.json_build_object("result", m.ApplicationStage.data["result"].astext).label("data"), m.ApplicationStage.completed_at)
+        .where(m.ApplicationStage.application_id.in_(apps), m.ApplicationStage.stage == 4,
+            (m.ApplicationStage.reopened_reason.is_(None)) | (m.ApplicationStage.reopened_reason == ""))
+        .distinct(m.ApplicationStage.application_id)
+        .order_by(m.ApplicationStage.application_id, m.ApplicationStage.attempt.desc(), m.ApplicationStage.completed_at.desc())
+        .subquery("stages"))
+    collections.append(select(func.json_agg(func.row_to_json(stages.table_valued()), type_=JSON)).scalar_subquery().label("stages"))
+    return {key: rows or [] for key, rows in db.execute(select(*collections)).mappings().one().items()}
+
+
+def _effective_stages(stages):
+    effective = defaultdict(dict)
+    for row in stages:
+        if row.get("reopened_reason"):
+            continue
+        current = effective[row["application_id"]].get(row["stage"])
+        if current is None or (row["attempt"], aware(row["completed_at"])) > (current["attempt"], aware(current["completed_at"])):
+            effective[row["application_id"]][row["stage"]] = row
+    return effective
+
+
+def _order_rows(orders, cohort, companies, clients, designations, effective, staff_id, inside):
+    by_order = defaultdict(list)
+    for app in cohort:
+        by_order[app["order_id"]].append(app)
+    output = []
+    for order in orders:
+        order_apps = by_order[order["id"]]
+        if not order_apps and (staff_id or not inside(order["created_at"])):
+            continue
+        company = companies.get(order["company_id"], {})
+        output.append({"id": order["id"], "ref": order["ref"], "company": company.get("name", ""),
+            "client": clients.get(company.get("client_id"), {}).get("name", ""),
+            "designation": designations.get(order["designation_id"], {}).get("title", ""),
+            "status": value(order["status"]), "openings": order["openings"], "matched": len(order_apps),
+            "selected": sum((effective.get(a["id"], {}).get(4, {}).get("data") or {}).get("result") == "selected"
+                or a["current_stage"] > 4 or value(a["status"]) == "deployed" for a in order_apps),
+            "deployed": sum(value(a["status"]) == "deployed" for a in order_apps)})
+    return output
 
 
 def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
@@ -101,13 +220,8 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
     users = {row["id"]: row for row in data["users"]}
     orders = {row["id"]: row for row in data["orders"]}
     applications = {row["id"]: row for row in data["applications"]}
-    valid_stages = [row for row in data["stages"] if not row.get("reopened_reason")]
-    by_app = defaultdict(list)
-    for stage in valid_stages:
-        by_app[stage["application_id"]].append(stage)
     # A repeated stage contributes once to its current effective result.
-    effective = {app_id: {n: max((s for s in rows if s["stage"] == n), key=lambda s: (s["attempt"], aware(s["completed_at"])))
-                          for n in {s["stage"] for s in rows}} for app_id, rows in by_app.items()}
+    effective = _effective_stages(data["stages"])
 
     def order_matches(order):
         if not order:
@@ -153,6 +267,10 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
         relation_matches = app["order_id"] in matching_orders if app else candidate_matches(event.get("candidate_id"))
         if inside(event["occurred_at"]) and staff_matches(event["owner_id"]) and relation_matches:
             events.append(event)
+    completed_tasks_by_stage = defaultdict(list)
+    for task in data["tasks"]:
+        if task.get("application_id") and task.get("completed_at"):
+            completed_tasks_by_stage[(task["application_id"], task.get("stage"), aware(task["completed_at"]))].append(task)
     durations = []
     for app in applications.values():
         if app["order_id"] not in matching_orders:
@@ -161,8 +279,7 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
             who = record.get("owner_id") or app_owner(app)
             if not inside(record["completed_at"]) or not staff_matches(who):
                 continue
-            matching_tasks = [t for t in data["tasks"] if t.get("application_id") == app["id"] and t.get("stage") == no
-                              and t.get("completed_at") and aware(t["completed_at"]) == aware(record["completed_at"])]
+            matching_tasks = completed_tasks_by_stage[(app["id"], no, aware(record["completed_at"]))]
             if not matching_tasks:
                 # No fabricated duration for imported/legacy stages without an execution task.
                 continue
@@ -199,22 +316,8 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
         return detail or "Account not recorded"
     accounts = Counter(source_account(c) for c in intake if value(c["source"]) == "email")
     source_accounts = [{"account": account, "count": count} for account, count in sorted(accounts.items())]
-    order_rows = []
-    for order in orders.values():
-        if order["id"] not in matching_orders:
-            continue
-        order_apps = [app for app in cohort if app["order_id"] == order["id"]]
-        if not order_apps and (filters.staff_id or not inside(order["created_at"])):
-            continue
-        company = companies.get(order["company_id"], {})
-        order_rows.append({"id": order["id"], "ref": order["ref"], "company": company.get("name", ""),
-                           "client": clients.get(company.get("client_id"), {}).get("name", ""),
-                           "designation": designations.get(order["designation_id"], {}).get("title", ""),
-                           "status": value(order["status"]), "openings": order["openings"],
-                           "matched": len(order_apps),
-                           "selected": sum((effective.get(a["id"], {}).get(4, {}).get("data") or {}).get("result") == "selected"
-                                           or a["current_stage"] > 4 or value(a["status"]) == "deployed" for a in order_apps),
-                           "deployed": sum(value(a["status"]) == "deployed" for a in order_apps)})
+    order_rows = _order_rows((order for order in orders.values() if order["id"] in matching_orders),
+        cohort, companies, clients, designations, effective, filters.staff_id, inside)
 
     # Rejections and receipts use the date of the actual terminal/collection event,
     # allowing a long-running application created before this period to contribute.
@@ -318,11 +421,15 @@ def dashboard_data(data, user, staff_id=None, zone="Asia/Kolkata", now=None):
                           "escalated": bool(task.get("escalated")), "notUpdated": task["id"] not in remarks_today})
     task_rows.sort(key=lambda t: (aware(t["dueAt"]), t["id"]))
     scoped_task_rows = [t for t in task_rows if not scope or t["ownerId"] == scope]
-    # Reuse precisely the order metric definitions, while dashboard scope follows
-    # current operational ownership instead of the report's historic assignment.
-    dashboard_input = {**data, "applications": [{**a, "owner_id": scope} for a in apps]}
-    all_time = report_data(dashboard_input, user, Filters(date(1970, 1, 1), today, staff_id=scope), zone, now)
-    active_orders = [o for o in all_time["orders"] if o["status"] == "open"]
+    # Share the order definitions without calculating six unused reports. Current
+    # candidate ownership governs the desk; reports retain historical ownership.
+    start = datetime(1970, 1, 1, tzinfo=tz)
+    end = datetime.combine(today + timedelta(days=1), time.min, tzinfo=tz)
+    inside = lambda raw: bool(raw and start <= aware(raw) < end)
+    active_orders = _order_rows((order for order in orders.values() if value(order["status"]) == "open"),
+        [app for app in apps if inside(app["created_at"])],
+        {c["id"]: c for c in data["companies"]}, {c["id"]: c for c in data["clients"]},
+        {d["id"]: d for d in data["designations"]}, _effective_stages(data["stages"]), scope, inside)
     active_apps = [a for a in apps if value(a["status"]) == "active"]
     return {"generatedAt": now.isoformat(), "timezone": zone, "date": today.isoformat(), "staffId": scope,
             "staffOptions": [{"id": u["id"], "label": u["name"]} for u in users.values()] if value(user.role) == "admin" else [],

@@ -1,8 +1,9 @@
 ﻿"""Staff attendance and visible online/idle/offline history."""
 from datetime import date, datetime
+from hashlib import sha256
 from uuid import UUID
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
@@ -19,6 +20,7 @@ employee = require_role(Role.staff, Role.manager)
 
 class CheckIn(BaseModel):
     requestKey: UUID
+    clockContext: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class CheckOut(CheckIn):
@@ -58,18 +60,33 @@ def own_summary(db, user):
     return result["staff"][0]
 
 
+def clock_context(session_id):
+    return sha256(("attendance-clock:" + session_id).encode()).hexdigest() if session_id else None
+
+
+def check_clock_context(body, session_id):
+    if body.clockContext is not None and body.clockContext != clock_context(session_id):
+        raise HTTPException(409, "Your login changed. Refresh attendance before recording a new action.")
+
+
 @router.get("/attendance")
 def report(response: Response, date: date | None = None, staffId: str | None = None,
-           db: Session = Depends(get_db), user: User = Depends(current_user)):
+           db: Session = Depends(get_db), user: User = Depends(current_user),
+           crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
     response.headers["Cache-Control"] = "no-store"
     zone = get_settings().agency_timezone
     day = date or activity.utcnow().astimezone(ZoneInfo(zone)).date()
-    return activity.attendance_report(db, user, day, zone, staffId)
+    result = activity.attendance_report(db, user, day, zone, staffId)
+    # A non-credential marker binds a recovered browser intent to this login.
+    # It cannot authenticate requests and never exposes the HttpOnly cookie.
+    result["clockContext"] = clock_context(crm_session)
+    return result
 
 
 @router.post("/attendance/check-in")
 def check_in(body: CheckIn, db: Session = Depends(get_db), user: User = Depends(employee),
              crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
+    check_clock_context(body, crm_session)
     activity.check_in(db, user, str(body.requestKey), auth_session_id=crm_session); db.commit()
     return own_summary(db, user)
 
@@ -77,6 +94,7 @@ def check_in(body: CheckIn, db: Session = Depends(get_db), user: User = Depends(
 @router.post("/attendance/check-out")
 def check_out(body: CheckOut, db: Session = Depends(get_db), user: User = Depends(employee),
               crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
+    check_clock_context(body, crm_session)
     activity.check_out(db, user, body.sessionId, str(body.requestKey), auth_session_id=crm_session); db.commit()
     return own_summary(db, user)
 

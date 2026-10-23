@@ -150,6 +150,7 @@ def test_scan_forwards_idempotency_key_to_one_submission(monkeypatch, kind, mode
             "aadhaar": {"name": "Alice Example", "masked_aadhaar_number": "XXXX XXXX 0000"},
             "page_count": 1, "languages_used": "eng", "total_processing_time_ms": 1,
         }
+    result["unmodelled_key"] = {"kept": [1]}
     jobs = SubmittingJobs(
         job("queued", mode=kind),
         job("succeeded", mode=kind, result=result),
@@ -162,8 +163,9 @@ def test_scan_forwards_idempotency_key_to_one_submission(monkeypatch, kind, mode
         idempotency_key="crm-stable-selected-pages",
     )
 
-    assert isinstance(response, model)
-    assert response.request_id == "synthetic-result"
+    # The provider's result comes back exactly as returned, not as a rebuilt model.
+    assert response == result and isinstance(response, dict)
+    model.model_validate(response)
     assert jobs.submissions == [(document, kind, "crm-stable-selected-pages")]
     assert jobs.polls == 2
     assert provider.closed

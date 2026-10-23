@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.deps import current_user
 from app.db.models import User
 from app.db.session import get_db
-from app.services.reporting import Filters, dashboard_data, read_reporting_data, report_data
+from app.services.reporting import Filters, dashboard_data, read_dashboard_data, read_reporting_data, report_data
 from app.services.report_exports import REPORTS, pdf, xlsx
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -27,7 +27,8 @@ def report_filters(from_date: date | None = None, to_date: date | None = None,
 
 def authorized_report(db, user, filters):
     authorized = filters.authorize(user)  # Reject scope tampering before any data reads.
-    return report_data(read_reporting_data(db), user, authorized, get_settings().agency_timezone)
+    zone = get_settings().agency_timezone
+    return report_data(read_reporting_data(db, authorized, zone), user, authorized, zone)
 
 
 @router.get("")
@@ -53,4 +54,6 @@ def export_report(report: str, format: Literal["xlsx", "pdf"], filters: Filters 
 def dashboard(staff_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if user.role != "admin" and staff_id not in (None, "", user.id):
         raise HTTPException(403, "Only administrators can change dashboard staff scope.")
-    return dashboard_data(read_reporting_data(db), user, staff_id or None, get_settings().agency_timezone)
+    zone = get_settings().agency_timezone
+    now = datetime.now(ZoneInfo(zone))
+    return dashboard_data(read_dashboard_data(db, user, staff_id or None, zone, now), user, staff_id or None, zone, now)

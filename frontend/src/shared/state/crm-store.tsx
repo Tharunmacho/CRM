@@ -12,14 +12,13 @@ import { ApiError, api } from '@/shared/api/client'
 import { createLatestRequest } from '@/shared/api/latest-request'
 import { createIngestionRefresh } from '@/shared/api/ingestion-refresh'
 import { agencyDay } from '@/shared/lib/task-time'
+import { indexWorkspace } from './workspace-index'
 import type {
   Application,
   Candidate,
   Client,
   Company,
   Designation,
-  MailAccount,
-  MailMessage,
   Notification,
   Order,
   Remark,
@@ -51,8 +50,6 @@ interface Data {
   tasks: Task[]
   remarks: Remark[]
   todos: TodoItem[]
-  mailAccounts: MailAccount[]
-  mailMessages: MailMessage[]
   notifications: Notification[]
 }
 
@@ -69,8 +66,6 @@ const EMPTY: Data = {
   tasks: [],
   remarks: [],
   todos: [],
-  mailAccounts: [],
-  mailMessages: [],
   notifications: [],
 }
 
@@ -117,11 +112,17 @@ interface StoreValue extends Data {
   retryStartup: () => Promise<void>
   /** Whether a pending UI operation still belongs to this signed-in account. */
   isCurrentSession: () => boolean
+  /** Unread INBOX messages across connected mailboxes; the mail itself is never loaded into the store. */
+  inboxUnread: number
+  /** Re-read the unread count now, e.g. after leaving the inbox where messages were read. */
+  refreshInboxUnread: () => Promise<void>
   toast: Toast
 
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   refresh: (options?: { keepCurrent?: boolean }) => Promise<void>
+  /** Route-entry read: share current reads and reuse a snapshot loaded in the last five seconds. */
+  ensureFresh: () => Promise<void>
   notify: (message: string, tone?: 'ok' | 'warn') => void
   dismissToast: () => void
 
@@ -132,7 +133,7 @@ interface StoreValue extends Data {
   company: (id: string) => Company | undefined
   order: (id: string) => Order | undefined
   designation: (id: string) => Designation | undefined
-  user: (id: string) => User | undefined
+  user: (id: string | null | undefined) => User | undefined
   orderLabel: (id: string) => string
   openTasks: Task[]
   myOpenTasks: Task[]
@@ -150,7 +151,7 @@ interface StoreValue extends Data {
   addRemark: (taskId: string, body: string) => Promise<void>
   recordCall: (candidateId: string, interested: string, remarks: string, called?: boolean) => Promise<void>
   markNotificationRead: (id?: string) => Promise<void>
-  addCandidate: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
+  addCandidate: (payload: Record<string, unknown>) => Promise<{ id: string; ownerName?: string | null } | null>
   addClient: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
   addCompany: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
   /** Throw when the server refuses (a candidate still active or deployed below). */
@@ -173,6 +174,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast>(null)
+  const [inboxUnread, setInboxUnread] = useState(0)
+  const readInboxUnread = useRef<() => Promise<void>>(() => Promise.resolve())
   const requests = useRef(createLatestRequest<Bootstrap | null>()).current
   const mounted = useRef(false)
   const authVersion = useRef(0)
@@ -180,6 +183,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pendingAuthWrites = useRef(0)
   const currentData = useRef(data)
   currentData.current = data
+  const lastLoadedAt = useRef(0)
+  const index = useMemo(() => indexWorkspace(data), [data.candidates, data.clients, data.companies,
+    data.designations, data.orders, data.users, data.applications, data.tasks, data.remarks])
 
   const notify = useCallback((message: string, tone: 'ok' | 'warn' = 'ok') => {
     setToast({ id: Date.now(), message, tone })
@@ -189,21 +195,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     (checkSession: boolean, replace = false, background = false) =>
       (replace ? requests.replace : requests.run)(
         async (signal) => {
-          // A logged-out visit needs only a small session response, not CRM data.
+          // One round trip for an authenticated startup; anonymous visits still
+          // receive only { me: null } and never load CRM collections.
           if (checkSession) {
-            const session = await api.get<{ me: User | null }>('/auth/session', { signal })
+            const session = await api.get<Bootstrap | { me: null }>('/auth/session?workspace=true&compact=true', { signal })
             if (session?.me === null) return null
-            if (!session?.me?.id) {
+            if (!session?.me?.id || !('candidates' in session)) {
               throw new ApiError(502, 'The server returned an invalid session response.')
             }
+            return session
           }
-          const payload = await api.get<Bootstrap>('/bootstrap', { signal })
+          const payload = await api.get<Bootstrap>('/bootstrap?compact=true', { signal })
           if (!payload?.me?.id) {
             throw new ApiError(502, 'The server returned an invalid workspace response.')
           }
           return payload
         },
         (payload) => {
+          lastLoadedAt.current = payload ? Date.now() : 0
           setMe(payload?.me ?? null)
           if (payload) {
             const { me: _who, ...rest } = payload
@@ -215,6 +224,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setReady(true)
         },
         (error) => {
+          lastLoadedAt.current = 0
           if (error instanceof ApiError && error.isUnauthorised) {
             setMe(null)
             setData(EMPTY)
@@ -233,11 +243,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback((options: { keepCurrent?: boolean } = {}) => {
     // This can follow a write outside the store too (for example a file upload).
     // A read that started before that write must not supply the refreshed snapshot.
+    lastLoadedAt.current = 0
     return loadWorkspace(false, true, Boolean(options.keepCurrent))
+  }, [loadWorkspace])
+
+  const ensureFresh = useCallback(() => {
+    if (lastLoadedAt.current > 0 && Date.now() - lastLoadedAt.current < 5_000) return Promise.resolve()
+    return loadWorkspace(false, false, true)
   }, [loadWorkspace])
 
   const retryStartup = useCallback(async () => {
     requests.invalidate()
+    lastLoadedAt.current = 0
     setReady(false)
     setLoadError(null)
     try {
@@ -292,6 +309,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [me?.id, ready, loadError, loadWorkspace])
 
+  // A small grouped count feeds the sidebar badge and bell dot. It follows the
+  // tab's visibility and re-reads whenever intake changes the workspace revision.
+  useEffect(() => {
+    if (!me || !ready || loadError) {
+      if (!me) setInboxUnread(0)
+      return
+    }
+    const version = authVersion.current
+    const controller = new AbortController()
+    let running = false
+    const read = async () => {
+      if (running || document.visibilityState !== 'visible') return
+      running = true
+      try {
+        const result = await api.inbox.unreadCount({ signal: controller.signal })
+        if (!controller.signal.aborted && version === authVersion.current && typeof result?.total === 'number') setInboxUnread(result.total)
+      } catch {
+        // Keep the last known count; the next poll retries.
+      } finally { running = false }
+    }
+    readInboxUnread.current = read
+    void read()
+    const timer = window.setInterval(() => void read(), 30_000)
+    const visible = () => void read()
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      controller.abort()
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', visible)
+      readInboxUnread.current = () => Promise.resolve()
+    }
+  }, [me?.id, ready, loadError, data.ingestionRevision])
+
   useEffect(() => {
     if (!me || !ready) return
     const version = authVersion.current
@@ -303,8 +353,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const items = await api.get<Notification[]>('/notifications', { signal: controller.signal })
         if (!controller.signal.aborted && version === authVersion.current) {
-          const hasNew = items.some((n) => !currentData.current.notifications.some((old) => old.id === n.id))
-          setData((current) => ({ ...current, notifications: items.map((n) => ({ ...n, read: n.read || Boolean(current.notifications.find((old) => old.id === n.id)?.read) })) }))
+          const knownIds = new Set(currentData.current.notifications.map(item => item.id))
+          const hasNew = items.some(item => !knownIds.has(item.id))
+          setData((current) => {
+            const readIds = new Set(current.notifications.filter(item => item.read).map(item => item.id))
+            return { ...current, notifications: items.map(item => ({ ...item, read: item.read || readIds.has(item.id) })) }
+          })
           if (hasNew) await loadWorkspace(false, false, true)
         }
       } catch (error) {
@@ -353,6 +407,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const version = ++authVersion.current
       requests.invalidate()
+      lastLoadedAt.current = 0
       setMe(null)
       setData(EMPTY)
       setLoadError(null)
@@ -371,6 +426,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     const version = ++authVersion.current
     requests.invalidate()
+    lastLoadedAt.current = 0
     setReady(false)
     setLoadError(null)
     try {
@@ -402,29 +458,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       loadError,
       retryStartup,
       isCurrentSession,
+      inboxUnread,
+      refreshInboxUnread: () => readInboxUnread.current(),
       toast,
       signIn,
       signOut,
       // Callbacks retained by an upload/dialog from an old session must not
       // refresh or show notifications in the account that signed in afterward.
       refresh: (options) => (isCurrentSession() ? refresh(options) : Promise.resolve()),
+      ensureFresh: () => (isCurrentSession() ? ensureFresh() : Promise.resolve()),
       notify: (message, tone) => {
         if (version === authVersion.current) notify(message, tone)
       },
       dismissToast: () => setToast(null),
       can,
 
-      candidate: (id) => data.candidates.find((c) => c.id === id),
-      client: (id) => data.clients.find((c) => c.id === id),
-      company: (id) => data.companies.find((c) => c.id === id),
-      order: (id) => data.orders.find((o) => o.id === id),
-      designation: (id) => data.designations.find((d) => d.id === id),
-      user: (id) => data.users.find((u) => u.id === id),
+      candidate: (id) => index.candidates.get(id),
+      client: (id) => index.clients.get(id),
+      company: (id) => index.companies.get(id),
+      order: (id) => index.orders.get(id),
+      designation: (id) => index.designations.get(id),
+      user: (id) => (id ? index.users.get(id) : undefined),
       orderLabel: (id) => {
-        const o = data.orders.find((x) => x.id === id)
+        const o = index.orders.get(id)
         if (!o) return '—'
-        const des = data.designations.find((d) => d.id === o.designationId)
-        const co = data.companies.find((c) => c.id === o.companyId)
+        const des = index.designations.get(o.designationId)
+        const co = index.companies.get(o.companyId)
         return `${des?.title ?? 'Role'} · ${co?.name ?? 'Company'}`
       },
       openTasks,
@@ -432,14 +491,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Staff see their own work; admin and managers see the whole desk.
       visibleTasks: me?.role === 'staff' ? data.tasks.filter((t) => t.ownerId === me.id) : data.tasks,
       activeApplicationFor: (candidateId) =>
-        data.applications.find((a) => a.candidateId === candidateId && a.status === 'active'),
-      applicationsFor: (candidateId) => data.applications.filter((a) => a.candidateId === candidateId),
-      remarksFor: (taskId) =>
-        data.remarks
-          .filter((r) => r.taskId === taskId)
-          .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
+        index.activeApplications.get(candidateId),
+      applicationsFor: (candidateId) => index.applications.get(candidateId) ?? [],
+      remarksFor: (taskId) => index.remarks.get(taskId) ?? [],
       updatedToday: (taskId) =>
-        data.remarks.some((r) => r.taskId === taskId && r.authorId === data.tasks.find((t) => t.id === taskId)?.ownerId && agencyDay(r.createdAt, data.agencyTimezone) === agencyDay(new Date(), data.agencyTimezone)),
+        (index.remarks.get(taskId) ?? []).some((r) => r.authorId === index.tasks.get(taskId)?.ownerId && agencyDay(r.createdAt, data.agencyTimezone) === agencyDay(new Date(), data.agencyTimezone)),
 
       saveDraft: async (applicationId, draft, lockVersion) => {
         await run(
@@ -493,7 +549,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (isCurrentSession()) setData((current) => ({ ...current, notifications: current.notifications.map((n) => !id || n.id === id ? { ...n, read: true } : n) }))
       },
       addCandidate: async (payload) => {
-        const created = await api.post<{ id: string }>('/candidates', payload)
+        const created = await api.post<{ id: string; ownerName?: string | null }>('/candidates', payload)
         if (!isCurrentSession()) return null
         // A refresh failure must not discard the saved ID and create a duplicate on retry.
         try { await refresh({ keepCurrent: true }) }
@@ -521,7 +577,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await run(() => api.post('/todos', payload), 'To-do added')
       },
       toggleTodo: async (id) => {
-        await run(() => api.patch(`/todos/${id}`))
+        const item = currentData.current.todos.find(todo => todo.id === id)
+        if (item) await run(() => api.patch(`/todos/${id}`, { done: !item.done }))
       },
       deleteTodo: async (id) => {
         await run(() => api.del(`/todos/${id}`))
@@ -530,7 +587,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await run(() => api.post('/candidates/reassign', { candidateIds, toUserId, reason }), 'Reassigned')
       },
     }
-  }, [data, me, ready, loadError, retryStartup, toast, signIn, signOut, refresh, notify, run])
+  }, [data, index, me, ready, loadError, retryStartup, inboxUnread, toast, signIn, signOut, refresh, ensureFresh, notify, run])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

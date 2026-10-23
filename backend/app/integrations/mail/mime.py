@@ -175,6 +175,11 @@ def parse_message(
             to_addresses=tuple(a[:255] for _, a in getaddresses(message.get_all("To", [])) if a),
             cc_addresses=tuple(a[:255] for _, a in getaddresses(message.get_all("Cc", [])) if a), starred=starred,
             bcc_addresses=tuple(a[:255] for _, a in getaddresses(message.get_all("Bcc", [])) if a),
+            automation_headers={"parsed": True, **{
+                name.lower(): [str(value)[:2000] for value in message.get_all(name, [])]
+                for name in ("Auto-Submitted", "Precedence", "List-ID", "List-Unsubscribe",
+                             "X-Auto-Response-Suppress", "Return-Path", "From")
+            }},
         )
     except MailMessageError:
         raise

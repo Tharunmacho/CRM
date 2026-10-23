@@ -4,18 +4,23 @@ export interface AttendanceSession {
   checkedInAt: string
   checkedOutAt: string | null
   durationSeconds: number
+  correctionReason?: string | null
+  correctedBy?: string | null
 }
 export interface PresenceSummary {
   status: PresenceStatus
+  tracked: boolean
   lastSeenAt: string | null
   activeSeconds: number
   idleSeconds: number
   offlineSeconds: number
-  sessions: { startedAt: string; endedAt: string | null; status: PresenceStatus }[]
+  sessions: { startedAt: string; endedAt: string | null; status: PresenceStatus; durationSeconds: number }[]
 }
 export interface StaffAttendance {
   userId: string
   name: string
+  role: 'admin' | 'manager' | 'staff'
+  active: boolean
   attendance: {
     status: 'checked_in' | 'checked_out'
     sessionId?: string | null
@@ -30,6 +35,8 @@ export interface AttendanceResponse {
   date: string
   timezone: string
   canViewTeam: boolean
+  generatedAt: string
+  clockContext: string | null
   staff: StaffAttendance[]
 }
 

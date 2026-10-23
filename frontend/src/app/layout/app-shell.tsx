@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
@@ -22,12 +22,14 @@ import {
   Search,
   UserPlus,
   Users,
+  ContactRound,
   X,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { ago, initials, slaState } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import { taskClockStart } from '@/shared/lib/task-time'
+import { dataBankAttention } from '@/features/dashboard/attention'
 import { agency } from '@/app/config/agency'
 import { Dropdown, MenuItem, Toast } from '@/shared/ui/overlay'
 import { IconButton } from '@/shared/ui/primitives'
@@ -41,22 +43,26 @@ interface NavItem {
   label: string
   icon: typeof LayoutDashboard
   capability?: Capability
-  count?: 'inbox' | 'tasks'
+  supervisorsOnly?: boolean
+  count?: 'tasks' | 'dataBank'
+  /** Pages beyond the PRD's ten-item sidebar stay mounted and searchable, but are not listed in the menu. */
+  extension?: boolean
   group: 'Overview' | 'Recruitment' | 'Workspace'
 }
 
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, group: 'Overview' },
-  { to: '/inbox', label: 'Inbox', icon: Inbox, count: 'inbox', group: 'Overview' },
-  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, group: 'Overview' },
+  { to: '/inbox', label: 'Inbox', icon: Inbox, group: 'Overview' },
+  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, group: 'Overview', extension: true },
   { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
-  { to: '/companies', label: 'Companies', icon: Factory, group: 'Recruitment' },
+  { to: '/companies', label: 'Companies', icon: Factory, group: 'Recruitment', extension: true },
   { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, group: 'Recruitment' },
   { to: '/add-candidate', label: 'Add Candidate', icon: UserPlus, group: 'Recruitment' },
-  { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
-  { to: '/mapped', label: 'Mapped Candidates', icon: GitBranch, group: 'Recruitment' },
+  { to: '/data-bank', label: 'Data Bank', icon: Database, count: 'dataBank', group: 'Recruitment' },
+  { to: '/mapped', label: 'Mapped Candidates', icon: GitBranch, group: 'Recruitment', extension: true },
   { to: '/tasks', label: 'Tasks', icon: ListChecks, count: 'tasks', group: 'Workspace' },
-  { to: '/attendance', label: 'Attendance', icon: Clock3, group: 'Workspace' },
+  { to: '/staff-directory', label: 'Staff Directory', icon: ContactRound, supervisorsOnly: true, group: 'Workspace', extension: true },
+  { to: '/attendance', label: 'Attendance', icon: Clock3, group: 'Workspace', extension: true },
   { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list', group: 'Workspace' },
   { to: '/reports', label: 'Reports', icon: FileBarChart, group: 'Workspace' },
   { to: '/users', label: 'User Management', icon: Users, capability: 'user_management', group: 'Workspace' },
@@ -70,17 +76,27 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
 
+  const dataBank = useMemo(() => dataBankAttention(store.candidates), [store.candidates])
   const counts = useMemo(() => {
     const mine = store.visibleTasks.filter((t) => !t.completedAt && !t.cancelledAt)
     const overdue = mine.filter((t) => slaState(taskClockStart(t)).overdue).length
     return {
-      inbox: store.mailMessages.filter((m) => m.unread).length,
       tasks: mine.length,
+      dataBank,
       overdue,
     }
-  }, [store.visibleTasks, store.mailMessages])
+  }, [store.visibleTasks, dataBank])
 
-  const items = NAV.filter((n) => !n.capability || can(n.capability))
+  // Reading mail happens inside the inbox; refresh the badge as soon as you leave it.
+  const refreshInboxUnread = store.refreshInboxUnread
+  const previousPath = useRef(location.pathname)
+  useEffect(() => {
+    const left = previousPath.current === '/inbox' && location.pathname !== '/inbox'
+    previousPath.current = location.pathname
+    if (left) void refreshInboxUnread()
+  }, [location.pathname, refreshInboxUnread])
+
+  const items = NAV.filter((n) => !n.extension && (!n.capability || can(n.capability)) && (!n.supervisorsOnly || store.me.role === 'admin' || store.me.role === 'manager'))
 
   return (
     <AttendanceProvider key={store.me.id}><div className={cn('app-shell flex min-h-screen bg-canvas', location.pathname === '/' && 'is-dashboard-view')}>
@@ -113,11 +129,11 @@ export function AppShell() {
               <p className="shell-nav-group-label">{group}</p>
               {items.filter((item) => item.group === group).map((item) => {
                 const badge =
-                  item.count === 'inbox'
-                    ? counts.inbox
-                    : item.count === 'tasks'
+                  item.count === 'tasks'
                       ? counts.tasks
-                      : undefined
+                      : item.count === 'dataBank'
+                        ? counts.dataBank
+                        : undefined
                 const danger = item.count === 'tasks' && counts.overdue > 0
                 return (
                   <NavLink
@@ -137,6 +153,7 @@ export function AppShell() {
                     {badge != null && badge > 0 && (
                       <span
                         className={cn('shell-nav-count shrink-0 tnum', danger && 'has-overdue')}
+                        title={item.count === 'dataBank' ? `${badge} candidate${badge === 1 ? '' : 's'} need review or a recruiter` : undefined}
                       >
                         {danger ? `${counts.overdue} late` : badge}
                       </span>
@@ -224,7 +241,7 @@ function AccountMenu({ compact = false }: { compact?: boolean }) {
 }
 
 function Topbar({ onMenu }: { onMenu: () => void }) {
-  const { notifications, mailMessages, notify, markNotificationRead } = useStore()
+  const { notifications, inboxUnread, notify, markNotificationRead } = useStore()
   const navigate = useNavigate()
   const unread = notifications.filter((n) => !n.read).length
   const location = useLocation()
@@ -236,7 +253,9 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
         ? 'Client details'
         : location.pathname.startsWith('/orders/')
           ? 'Order details'
-          : 'Workspace')
+          : location.pathname.startsWith('/staff-directory/')
+            ? 'Employee record'
+            : 'Workspace')
 
   return (
     <header
@@ -260,11 +279,11 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
         <AttendanceClock compact />
         <button
           className="shell-icon-button"
-          aria-label="Open messages"
+          aria-label={inboxUnread > 0 ? `Open messages, ${inboxUnread} unread` : 'Open messages'}
           onClick={() => navigate('/inbox')}
         >
           <Mail size={18} strokeWidth={1.5} />
-          {mailMessages.some((message) => message.unread) && <span className="shell-unread-dot" />}
+          {inboxUnread > 0 && <span className="shell-unread-dot" />}
         </button>
         <Dropdown
           width="w-[min(22rem,calc(100vw-2rem))] max-sm:fixed max-sm:left-4 max-sm:right-4 max-sm:top-[82px] max-sm:w-auto"
@@ -322,7 +341,7 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
                         'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
                         n.kind === 'escalation'
                           ? 'bg-stamp-600'
-                          : n.kind === 'missed_update'
+                          : n.kind === 'reminder'
                             ? 'bg-amber-600'
                             : n.read
                               ? 'bg-ink-300'
@@ -374,6 +393,7 @@ function GlobalSearch() {
         ...NAV.filter(
           (item) =>
             (!item.capability || store.can(item.capability)) &&
+            (!item.supervisorsOnly || store.me.role === 'admin' || store.me.role === 'manager') &&
             item.label.toLowerCase().includes(normalized),
         ).map((item) => ({ label: item.label, detail: 'Go to page', to: item.to })),
       ].slice(0, 6)

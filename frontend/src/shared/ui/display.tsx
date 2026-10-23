@@ -145,9 +145,9 @@ const STATUS_LABEL: Record<string, string> = {
   inactive: 'Inactive',
 }
 
-export function StatusPill({ status, className }: { status: string; className?: string }) {
+export function StatusPill({ status, className, dot }: { status: string; className?: string; dot?: boolean }) {
   return (
-    <Badge tone={STATUS_TONE[status] ?? 'neutral'} className={className}>
+    <Badge tone={STATUS_TONE[status] ?? 'neutral'} className={className} dot={dot}>
       {STATUS_LABEL[status] ?? status}
     </Badge>
   )

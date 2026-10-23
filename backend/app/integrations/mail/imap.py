@@ -112,6 +112,7 @@ class IMAPMailbox:
     def __init__(self, config: MailConfig):
         self.config = config
         self._connection = None
+        self._prefetched: dict = {}
 
     def __enter__(self):
         self.connect()
@@ -212,6 +213,78 @@ class IMAPMailbox:
         except Exception:
             raise MailAdapterError("search_failed", "Could not list new email messages.", retryable=True) from None
 
+    def _download(self, uid: int, failure) -> tuple[int, bytes, bytes]:
+        """Size, FETCH metadata and raw bytes of one message; a batch prefetch may already hold them."""
+        held = self._prefetched.pop(uid, None)
+        if held is not None:
+            return held
+        status, size_rows = self._connection.uid("FETCH", str(uid), "(UID RFC822.SIZE)")
+        if status != "OK":
+            raise failure("message_unavailable", "The source email could not be fetched.", True)
+        metadata = next((row for row in size_rows or [] if isinstance(row, bytes)
+                         and re.search(rb"\bUID\s+" + str(uid).encode() + rb"\b", row)), b"")
+        size_match = re.search(rb"\bRFC822\.SIZE\s+(\d+)", metadata)
+        if not size_match:
+            raise failure("message_unavailable", "The source email is missing or has no valid size.")
+        size = int(size_match.group(1))
+        if size > self.config.max_message_bytes:
+            raise failure("message_too_large", "The email exceeds the configured message size limit.")
+        request = f"(UID BODY.PEEK[]<0.{self.config.max_message_bytes + 1}> INTERNALDATE FLAGS)"
+        status, body_rows = self._connection.uid("FETCH", str(uid), request)
+        if status != "OK":
+            raise failure("fetch_failed", "The source email body could not be read.", True)
+        matches = [row for row in body_rows or [] if isinstance(row, tuple) and len(row) == 2
+                   and isinstance(row[0], bytes) and isinstance(row[1], bytes)
+                   and re.search(rb"\bUID\s+" + str(uid).encode() + rb"\b", row[0])]
+        if len(matches) != 1:
+            raise failure("fetch_failed", "The server did not return the requested email.", True)
+        details, raw = matches[0]
+        return size, details, raw
+
+    def prefetch(self, uids, *, batch_bytes: int = 12 * 1024 * 1024) -> None:
+        """Download several messages in a few round trips instead of two per message.
+
+        Purely an optimisation: anything unavailable here is simply fetched one by one,
+        so every size and integrity check in ``fetch`` still applies to each message.
+        """
+        self._prefetched = {}
+        try:
+            wanted = [int(uid) for uid in uids]
+            if len(wanted) < 2:
+                return
+            status, rows = self._connection.uid("FETCH", ",".join(map(str, wanted)), "(UID RFC822.SIZE)")
+            if status != "OK":
+                return
+            sizes = {}
+            for row in rows or []:
+                if isinstance(row, bytes):
+                    uid_match, size_match = re.search(rb"\bUID\s+(\d+)\b", row), re.search(rb"\bRFC822\.SIZE\s+(\d+)", row)
+                    if uid_match and size_match:
+                        sizes[int(uid_match.group(1))] = int(size_match.group(1))
+            batches, current, weight = [], [], 0
+            for uid in wanted:
+                size = sizes.get(uid)
+                if size is None or size > self.config.max_message_bytes:
+                    continue  # fetch() reports these individually
+                if current and weight + size > batch_bytes:
+                    batches.append(current)
+                    current, weight = [], 0
+                current.append(uid)
+                weight += size
+            if current:
+                batches.append(current)
+            for batch in batches:
+                status, body_rows = self._connection.uid("FETCH", ",".join(map(str, batch)), "(UID BODY.PEEK[] INTERNALDATE FLAGS)")
+                if status != "OK":
+                    continue
+                for row in body_rows or []:
+                    if isinstance(row, tuple) and len(row) == 2 and isinstance(row[0], bytes) and isinstance(row[1], bytes):
+                        uid_match = re.search(rb"\bUID\s+(\d+)\b", row[0])
+                        if uid_match and int(uid_match.group(1)) in sizes:
+                            self._prefetched[int(uid_match.group(1))] = (sizes[int(uid_match.group(1))], row[0], row[1])
+        except Exception:
+            self._prefetched = {}
+
     def fetch(self, uid: int, *, uid_validity: str) -> InboundMessage:
         if type(uid) is not int or uid <= 0:
             raise MailAdapterError("invalid_cursor", "The message UID must be a positive integer.")
@@ -220,30 +293,14 @@ class IMAPMailbox:
         def failure(code: str, message: str, retryable=False):
             return MailMessageError(code, message, uid=uid, provider_id=provider_id, retryable=retryable)
         try:
-            status, size_rows = self._connection.uid("FETCH", str(uid), "(UID RFC822.SIZE)")
-            if status != "OK":
-                raise failure("message_unavailable", "The source email could not be fetched.", True)
-            metadata = next((row for row in size_rows or [] if isinstance(row, bytes)
-                             and re.search(rb"\bUID\s+" + str(uid).encode() + rb"\b", row)), b"")
-            size_match = re.search(rb"\bRFC822\.SIZE\s+(\d+)", metadata)
-            if not size_match:
-                raise failure("message_unavailable", "The source email is missing or has no valid size.")
-            size = int(size_match.group(1))
-            if size > self.config.max_message_bytes:
-                raise failure("message_too_large", "The email exceeds the configured message size limit.")
-            request = f"(UID BODY.PEEK[]<0.{self.config.max_message_bytes + 1}> INTERNALDATE FLAGS)"
-            status, body_rows = self._connection.uid("FETCH", str(uid), request)
-            if status != "OK":
-                raise failure("fetch_failed", "The source email body could not be read.", True)
-            matches = [row for row in body_rows or [] if isinstance(row, tuple) and len(row) == 2
-                       and isinstance(row[0], bytes) and isinstance(row[1], bytes)
-                       and re.search(rb"\bUID\s+" + str(uid).encode() + rb"\b", row[0])]
-            if len(matches) != 1:
-                raise failure("fetch_failed", "The server did not return the requested email.", True)
-            details, raw = matches[0]
+            size, details, raw = self._download(uid, failure)
             if len(raw) > self.config.max_message_bytes:
                 raise failure("message_too_large", "The fetched email exceeds the configured message size limit.")
-            if len(raw) != size:
+            # RFC822.SIZE and the delivered bytes legitimately differ by a little on many
+            # servers (line-ending normalisation, generated headers), so equality would
+            # reject good mail and block whole folders. A transfer cut short is the real
+            # failure: the body is meaningfully smaller than announced.
+            if (size - len(raw)) * 100 > size * 3:
                 raise failure("incomplete_message", "The email download was incomplete. Retry the source message.", True)
             received = None
             date_match = re.search(rb'INTERNALDATE "([^"]+)"', details)

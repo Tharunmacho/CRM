@@ -7,7 +7,7 @@ import sys
 import threading
 
 from app.core.config import get_settings
-from app.db.schema_readiness import UPDATE_REQUIRED, schema_status
+from app.db.schema_readiness import UPDATE_REQUIRED, is_behind, schema_status, upgrade_to_head
 
 
 class _WindowsProcessJob:
@@ -135,14 +135,39 @@ def _start_child(command, options, job):
 
 def require_current_schema():
     # Also protect direct/local launches; workers must never run against old tables.
-    from app.db.session import engine
+    from app.db.session import connect_with_retry, engine
     try:
-        with engine.connect() as connection:
+        with connect_with_retry() as connection:
             state = schema_status(connection)
     except Exception:
         raise SystemExit("Cannot check the CRM database. Check the server database configuration.") from None
+    if state["status"] == "ok":
+        return
+    current, required = ", ".join(state["current"]) or "unversioned", ", ".join(state["expected"])
+    if not is_behind(state["current"]):
+        raise SystemExit(
+            f"The database is at {current}, which this version of the CRM cannot upgrade from "
+            f"(it expects {required}). The database was prepared by newer code or is not a CRM database: "
+            "update this checkout to the matching version, or restore a matching database backup."
+        )
+    if not getattr(get_settings(), "crm_auto_migrate", False):
+        raise SystemExit(
+            f"The database is at {current} and this version needs {required}. "
+            "Apply the pending migrations with 'npm run db:migrate' (from the project root), "
+            "or set CRM_AUTO_MIGRATE=true in backend/.env to apply them automatically at startup. "
+            "If a deployed copy of the CRM uses this same database, deploy the matching version "
+            "right after migrating; until then that copy reports 'update required'."
+        )
+    print(f"[crm] Database is at {current}; applying migrations up to {required} (CRM_AUTO_MIGRATE is on)...", flush=True)
+    try:
+        upgrade_to_head()
+        with engine.connect() as connection:
+            state = schema_status(connection)
+    except Exception as exc:
+        raise SystemExit(f"Migration failed and was rolled back ({type(exc).__name__}). Fix the cause, then start again.") from None
     if state["status"] != "ok":
-        raise SystemExit(f"{UPDATE_REQUIRED} Current: {', '.join(state['current']) or 'unversioned'}; required: {', '.join(state['expected'])}.")
+        raise SystemExit(f"{UPDATE_REQUIRED} Current: {', '.join(state['current'])}; required: {', '.join(state['expected'])}.")
+    print("[crm] Migrations applied.", flush=True)
 
 
 def main(*, host="0.0.0.0", port=None, reload_api=False):
@@ -155,7 +180,10 @@ def main(*, host="0.0.0.0", port=None, reload_api=False):
         signal.signal(getattr(signal, name), lambda *_: stop.set())
     # CREATE_NO_WINDOW keeps workers hidden on Windows; pass the supervisor's
     # handles explicitly so their logs still reach the npm terminal.
-    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    # A windowless child cannot write to its parent's console, so when this runs in a terminal the
+    # services share it (no extra windows open) and their logs stay visible.
+    hidden = 0 if sys.stdout.isatty() else getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    options = {"creationflags": hidden,
                "stdout": sys.stdout, "stderr": sys.stderr,
                "env": {**os.environ, "PYTHONUNBUFFERED": "1"}}
     listen_port = str(port or os.environ.get("PORT", "8000"))

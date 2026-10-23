@@ -18,10 +18,10 @@ import {
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
-import { applicationFileSlot, applicationFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
+import { applicationFileSlot, applicationFileVersions, newestFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { ApiError, api } from '@/shared/api/client'
+import { ApiError, api, fileHref } from '@/shared/api/client'
 import { taskClockStart } from '@/shared/lib/task-time'
 import {
   STAGES,
@@ -46,6 +46,7 @@ import {
   Textarea,
 } from '@/shared/ui/primitives'
 import { DocumentSlotRow, FileDrop, type StoredFile } from '@/shared/ui/file-drop'
+import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 
 /**
  * One scrolling application: completed sections are collapsed, the current stage
@@ -61,12 +62,14 @@ export function StageModal({
   onClose: () => void
 }) {
   const store = useStore()
+  const snapshot = useWorkspaceReady(open && applicationId ? `stage:${applicationId}` : null)
   const app = store.applications.find((a) => a.id === applicationId)
   const [files, setFiles] = useState<ApplicationFile[]>([])
   const [fileError, setFileError] = useState(false)
   const [fileRetry, setFileRetry] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [pending, setPending] = useState(false)
+  const [reopening, setReopening] = useState(false)
 
   useEffect(() => {
     if (!open || !applicationId) return
@@ -79,11 +82,11 @@ export function StageModal({
     return () => { live = false }
   }, [applicationId, open, fileRetry])
 
-  if (!app) return null
-  const cand = store.candidate(app.candidateId)!
-  const order = store.order(app.orderId)!
-  const client = store.company(order.companyId)!
-  const designation = store.designation(order.designationId)!
+  const cand = app ? store.candidate(app.candidateId) : undefined
+  const order = app ? store.order(app.orderId) : undefined
+  const client = order ? store.company(order.companyId) : undefined
+  const designation = order ? store.designation(order.designationId) : undefined
+  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title="Recruitment application"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the latest application and ownership…' : 'This application or its linked records are no longer available. Refresh to check your access.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" onClick={snapshot.retry}>Refresh application</Button>}</Dialog>
   const owner = store.user(cand.ownerId)
 
   const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
@@ -94,13 +97,15 @@ export function StageModal({
   return (
     <Dialog
       open={open}
-      onClose={() => { if (!pending && (!dirty || window.confirm('Discard unsaved stage changes?'))) onClose() }}
+      onClose={() => { if (!pending && !reopening && (!dirty || window.confirm('Discard unsaved stage changes?'))) onClose() }}
       width="full"
       title={cand.name}
       description={`${designation.title} · ${client.name} · ${order.ref}`}
     >
       <div className="-mx-6 -my-5">
+        <div className="border-b border-rule-soft bg-field/50 px-4 py-5 sm:px-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="workspace-eyebrow">Recruitment progress</p><h2 className="mt-1 text-xl font-semibold">{app.status === 'active' ? `Stage ${app.currentStage}: ${stageByNo(app.currentStage).title}` : app.status === 'deployed' ? 'Deployment completed' : 'Application closed'}</h2><p className="mt-2 text-sm text-ink-500">{app.status === 'active' ? 'Complete the current stage below. Earlier decisions and documents remain available in history.' : 'Review the saved decisions and documents below.'}</p></div><Badge tone={app.status === 'active' ? 'navy' : 'neutral'}>{new Set(effective.map(record => record.stage)).size} of {STAGES.length} stages recorded</Badge></div><ol className="mt-4 flex gap-1.5" aria-label="Eleven recruitment stages">{STAGES.map(stage => <li key={stage.no} title={`${stage.no}. ${stage.title}${stage.no === live ? ' (current)' : ''}`} aria-current={stage.no === live ? 'step' : undefined} className={cn('flex h-8 min-w-0 flex-1 items-center justify-center rounded-control text-xs font-semibold', stage.no === live ? 'bg-navy-600 text-white' : effective.some(record => record.stage === stage.no) ? 'bg-navy-100 text-navy-800' : 'bg-white text-ink-400')}>{stage.no}</li>)}</ol></div>
         <CandidateDetails app={app} />
+        {!owner?.active && <p role="status" className="border-b border-amber-100 bg-amber-50 px-6 py-3 text-sm text-amber-800">Assign an active recruiter from the candidate profile before completing or reopening stages. Authorized users can still save draft details.</p>}
 
         {!canWork && (
           <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-6 py-3 text-xs text-amber-700">
@@ -123,7 +128,7 @@ export function StageModal({
                 <ChevronDown className="h-4 w-4 text-ink-400 transition-transform group-open:rotate-180" />
               </summary>
               <div className="space-y-5 border-t border-rule px-4 py-4">{records.map((record) => <CompletedStage key={`${record.stage}-${record.attempt}`} record={record} files={files} app={app} />)}
-                <ReopenStage app={app} stage={definition.no} />
+                <ReopenStage app={app} stage={definition.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Reopening replaces the current stage and discards its unsaved changes. Continue?')} />
               </div>
             </details>
           })}
@@ -135,7 +140,7 @@ export function StageModal({
             <CurrentStage
               key={`${app.id}-${app.currentStage}-${app.stages.length}`}
               app={app}
-              canWork={canWork}
+              canWork={canWork && !reopening}
               onDirtyChange={setDirty}
               onBusyChange={setPending}
               files={files}
@@ -173,11 +178,13 @@ function CandidateDetails({ app }: { app: Application }) {
   const client = store.company(order.companyId)!
   const designation = store.designation(order.designationId)!
   const owner = store.user(cand.ownerId)
+  const photo = newestFileVersions(cand.documents.find(document => document.key === 'photo')?.versions ?? [])[0]
 
   return (
     <section className="border-b border-rule-soft">
-      <div className="flex flex-wrap items-center gap-4 px-6 py-4">
-        <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-4 px-6 py-4 min-[641px]:flex min-[641px]:flex-wrap">
+        <span className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-navy-50 text-xl font-semibold text-navy-700" aria-hidden="true">{cand.name.slice(0, 1)}{photo?.url && <img className="absolute inset-0 h-full w-full object-cover" src={fileHref(photo.url)} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} />}</span>
+        <dl className="order-3 col-span-2 grid w-full min-w-0 grid-cols-2 gap-x-4 gap-y-3 min-[641px]:order-2 min-[641px]:w-auto min-[641px]:flex-1 min-[641px]:grid-cols-4 min-[641px]:gap-x-8">
           <Cell label="Phone" value={cand.phone} ident />
           <Cell label="Passport" value={cand.passportNo ?? 'Not on file'} ident={!!cand.passportNo} />
           <Cell label="Owner" value={owner?.name ?? '—'} />
@@ -192,7 +199,7 @@ function CandidateDetails({ app }: { app: Application }) {
             }
           />
         </dl>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="order-2 flex min-w-0 flex-wrap items-center justify-end gap-3 min-[641px]:order-3 min-[641px]:shrink-0">
           <div className="flex flex-col items-end gap-1.5">
             <StatusPill status={app.status} />
             {app.status === 'closed' && app.closureReason && (
@@ -248,7 +255,7 @@ function CandidateDetails({ app }: { app: Application }) {
           <Segment
             icon={<BookUser className="h-4 w-4" />}
             title="Passport"
-            subtitle="Required before the original is collected at stage 7"
+            subtitle="Saved passport details. Original collection is recorded separately at stage 7."
           >
             <Fact label="Passport Number" value={cand.passportNo ?? 'Not on file'} ident={!!cand.passportNo} />
             <Fact label="Place of Issue" value={cand.passportPlace ?? 'Not provided'} />
@@ -262,10 +269,10 @@ function CandidateDetails({ app }: { app: Application }) {
             subtitle="Trade, experience and expectations"
           >
             <Fact label="Preferred Designation" value={cand.designations.join(', ') || 'Not provided'} />
-            <Fact label="Total Experience" value={`${cand.totalExperience} years`} />
+            <Fact label="Total Experience" value={cand.totalExperience == null ? 'Not recorded' : `${cand.totalExperience} years`} />
             <Fact
               label="Gulf / Overseas Experience"
-              value={cand.gulfExperience ? `${cand.gulfExperience} years` : 'None'}
+              value={cand.gulfExperience == null ? 'Not recorded' : `${cand.gulfExperience} years`}
             />
             <Fact label="Expected Salary" value={money(cand.expectedSalary, 'AED')} />
             <div className="sm:col-span-4">
@@ -285,10 +292,11 @@ function CandidateDetails({ app }: { app: Application }) {
             title="Order"
             subtitle="The opening this candidate is mapped to"
           >
-            <Fact label="Client" value={client.name} />
+            <Fact label="Employer" value={client.name} />
+            <Fact label="Client contact" value={store.client(client.clientId)?.name ?? 'Not available'} />
             <Fact label="Designation" value={designation.title} />
             <Fact label="Order Reference" value={order.ref} ident />
-            <Fact label="Location" value={`${order.city}, ${order.country}`} />
+            <Fact label="Location" value={[order.city, order.country].filter(Boolean).join(', ') || 'Not recorded'} />
             <Fact label="Salary" value={money(order.salary, order.currency)} />
             <Fact label="Contract Period" value={order.contractPeriod} />
             <Fact label="Interview Date" value={dateLabel(order.interviewDate)} />
@@ -394,7 +402,7 @@ function Cell({ label, value, ident }: { label: string; value: string; ident?: b
   return (
     <div className="min-w-0">
       <dt className="text-micro text-ink-400">{label}</dt>
-      <dd className={cn('mt-0.5 truncate text-sm text-ink', ident && 'ident')}>{value}</dd>
+      <dd className={cn('mt-0.5 break-words text-sm text-ink min-[641px]:truncate', ident && 'ident')}>{value}</dd>
     </div>
   )
 }
@@ -441,16 +449,17 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   )
 }
 
-function ReopenStage({ app, stage }: { app: Application; stage: number }) {
+function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen }: { app: Application; stage: number; disabled: boolean; onBusyChange: (busy: boolean) => void; beforeReopen: () => boolean }) {
   const store = useStore()
   const [editing, setEditing] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  useEffect(() => { if (busy) onBusyChange(true); return () => { if (busy) onBusyChange(false) } }, [busy, onBusyChange])
   if (!store.can('reopen_stage')) return null
   const reopen = async () => {
-    if (!reason.trim() || busy || saved) return
+    if (!reason.trim() || busy || disabled || saved || !beforeReopen()) return
     setBusy(true); setError('')
     try {
       await api.post(`/applications/${app.id}/reopen`, { stage, reason: reason.trim(), lock_version: app.lockVersion })
@@ -468,9 +477,9 @@ function ReopenStage({ app, stage }: { app: Application; stage: number }) {
     {saved ? <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(() => setError('The application could not refresh. Please try again.'))}>Refresh saved application</Button>
       : editing ? <div className="space-y-3">
         <p className="text-xs text-ink-600">This restarts stage {stage}, supersedes later completed stages and replaces the current open task. Original records and files remain in history. Reopening a deployment also updates the order count.</p>
-        <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy} placeholder="Describe the correction needed" /></Field>
-        <div className="flex flex-wrap gap-2"><Button variant="primary" disabled={busy || !reason.trim()} onClick={() => void reopen()}>{busy ? 'Reopening…' : `Reopen stage ${stage}`}</Button><Button disabled={busy} onClick={() => { setEditing(false); setError('') }}>Cancel</Button></div>
-      </div> : <Button variant="secondary" size="sm" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setEditing(true)}>Reopen stage {stage}</Button>}
+        <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy || disabled} placeholder="Describe the correction needed" /></Field>
+        <div className="flex flex-wrap gap-2"><Button variant="primary" disabled={busy || disabled || !reason.trim()} onClick={() => void reopen()}>{busy ? 'Reopening…' : `Reopen stage ${stage}`}</Button><Button disabled={busy || disabled} onClick={() => { setEditing(false); setError('') }}>Cancel</Button></div>
+      </div> : <Button variant="secondary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setEditing(true)}>Reopen stage {stage}</Button>}
   </div>
 }
 
@@ -509,6 +518,7 @@ function CurrentStage({
   const store = useStore()
   const { addRemark } = store
   const def = stageByNo(app.currentStage)
+  const ownerActive = !!store.user(store.candidate(app.candidateId)?.ownerId ?? '')?.active
 
   // Edits are held locally until Save. Nothing is written as you type, so the form has
   // a dirty state and leaving with unsaved work is a deliberate act, not an accident.
@@ -523,6 +533,7 @@ function CurrentStage({
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState<{ draft?: Record<string, unknown>; lock_version?: number; current_stage?: number; status?: string } | null>(null)
   const [completed, setCompleted] = useState(false)
+  const [refreshRequired, setRefreshRequired] = useState(false)
   const [remarkBusy, setRemarkBusy] = useState(false)
 
   useEffect(() => { onDirtyChange(dirty); return () => onDirtyChange(false) }, [dirty, onDirtyChange])
@@ -555,8 +566,8 @@ function CurrentStage({
   }
 
   const refreshAfterWrite = async () => {
-    try { await store.refresh({ keepCurrent: true }) }
-    catch { if (store.isCurrentSession()) setError('Your change was saved. Refresh the application to load the latest history.') }
+    try { await store.refresh({ keepCurrent: true }); setRefreshRequired(false); setError('') }
+    catch { if (store.isCurrentSession()) { setRefreshRequired(true); setError('Your change was saved. Refresh the application to load the latest history.') } }
   }
 
   const save = async () => {
@@ -576,7 +587,7 @@ function CurrentStage({
   }
 
   const complete = async () => {
-    if (uploading || busy || completed) return
+    if (uploading || busy || completed || !ownerActive) return
     setAttempted(true)
     if (!result.canComplete) return
     setBusy(true)
@@ -602,21 +613,28 @@ function CurrentStage({
           {conflict.current_stage === app.currentStage && conflict.status === 'active' && <Button size="sm" onClick={() => { setData(conflict.draft ?? {}); setLockVersion(conflict.lock_version ?? lockVersion); setDirty(false); setConflict(null); setError('') }}>Load saved values</Button>}
           <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(reportFailure)}>Refresh application</Button>
         </div>}
+        {refreshRequired && !completed && <Button className="mt-3" size="sm" disabled={busy} onClick={() => void refreshAfterWrite()}>Refresh saved stage</Button>}
       </div>}
       {completed && <div role="status" className="mb-3 rounded-control border border-navy-100 bg-navy-50 p-3 text-sm text-navy-800">This result was saved. <button className="underline" onClick={() => void refreshAfterWrite()}>Refresh history</button></div>}
       <div className="rounded-panel border border-ink-300 bg-white">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rule-soft px-4 py-3">
           <div className="min-w-0">
             <h3 className="text-h3 font-semibold text-ink">{def.title}</h3>
-            <p className="mt-0.5 max-w-[60ch] text-xs text-ink-500">{def.summary}</p>
+            <p className="mt-1 max-w-[60ch] text-sm text-ink-500">{def.summary}</p>
           </div>
           {task && (
-            <div className="w-40 shrink-0">
+            <div className="w-full sm:w-56 shrink-0">
               <TimeBar createdAt={taskClockStart(task)} />
-              <p className="mt-1 text-right text-micro text-ink-400">48-hour limit</p>
+              <p className="mt-2 text-sm text-ink-500 sm:text-right">Due {dateTimeLabel(task.dueAt)}</p>
             </div>
           )}
         </header>
+
+        <div className={cn('border-b border-rule-soft px-4 py-4', result.canComplete ? 'bg-navy-50/50' : 'bg-field/50')} aria-live="polite">
+          <p className="text-sm font-semibold text-ink">{result.canComplete ? 'Ready to record this outcome' : 'Before completing this stage'}</p>
+          {result.missing.length > 0 ? <ul className="mt-2 flex flex-wrap gap-x-6 gap-y-1 pl-4 text-sm text-ink-600 list-disc">{result.missing.map(item => <li key={item}>{item}</li>)}</ul> : <p className="mt-1 text-sm text-ink-600">{result.repeats ? 'This records the medical attempt and starts the next medical follow-up.' : result.closes ? `This closes the application: ${result.closes.label}. The previous work remains in history.` : def.no < STAGES.length ? `Next: stage ${def.no + 1}, ${stageByNo(def.no + 1).title}. A new task starts after completion.` : 'This completes deployment and updates the order’s filled openings.'}</p>}
+          <p className="mt-2 text-xs text-ink-500">Save keeps a draft. Complete records the decision and advances the workflow.</p>
+        </div>
 
         <div className="grid gap-4 px-4 py-4 sm:grid-cols-2">
           {def.fields.filter((f) => fieldVisible(f, data)).map((f) => (
@@ -657,13 +675,13 @@ function CurrentStage({
           </span>
           <div className="flex flex-wrap items-center gap-2">
             {uploading ? <span role="status" className="text-micro text-amber-700">Uploading documents…</span> : dirty && <span className="text-micro text-amber-700">Unsaved changes</span>}
-            <Button variant="secondary" onClick={save} disabled={!canWork || !dirty || busy || uploading || completed}>
+            <Button variant="secondary" onClick={save} disabled={!canWork || !dirty || busy || uploading || completed || refreshRequired}>
               {busy ? 'Saving…' : 'Save'}
             </Button>
           <Button
             variant={result.closes ? 'danger' : 'primary'}
             onClick={complete}
-            disabled={!canWork || busy || uploading || completed}
+            disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive}
             icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
           >
             {result.repeats ? 'Record attempt and schedule re-medical' : result.closes ? `Complete and close — ${result.closes.label}` : 'Complete stage'}

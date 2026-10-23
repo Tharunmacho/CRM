@@ -4,9 +4,12 @@ import { createLatestRequest } from '@/shared/api/latest-request'
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'The inbox request failed. Please try again.'
 
+/** The last snapshot per user and query, so coming back to the Inbox paints at once while it refreshes. */
+const lastSnapshot = new Map<string, InboxSnapshot>()
+
 /** Inbox owns its snapshot; reading mail does not reload the entire CRM. */
 export function useInbox(identityId: string, isCurrentSession: () => boolean, search = '') {
-  const [data, setData] = useState<InboxSnapshot | null>(null)
+  const [data, setData] = useState<InboxSnapshot | null>(() => lastSnapshot.get(`${identityId}?${search}`) ?? null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -18,6 +21,9 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean, se
   const mounted = useRef(false)
   const generation = useRef(0)
   const busyRef = useRef(false)
+  const snapshotRef = useRef(data)
+  snapshotRef.current = data
+  const lastReadAt = useRef(0)
   const requests = useRef(createLatestRequest<InboxSnapshot>()).current
 
   const refresh = useCallback(async (afterWrite = false) => {
@@ -25,11 +31,13 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean, se
     const currentGeneration = generation.current
     if (!mounted.current || !ownsSession() || (busyRef.current && !afterWrite)) return
     setRefreshing(true)
+    lastReadAt.current = Date.now()
     try {
       await requests[afterWrite ? 'replace' : 'run'](
         (signal) => search ? api.get<InboxSnapshot>(`/inbox?${search}`, { signal }) : api.inbox.get({ signal }),
         (snapshot) => {
           if (!mounted.current || generation.current !== currentGeneration || !ownsSession()) return
+          if (!search.includes('message_id=')) lastSnapshot.set(`${identityId}?${search}`, snapshot)
           setData(snapshot)
           setError('')
         },
@@ -43,12 +51,20 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean, se
         setRefreshing(false)
       }
     }
-  }, [requests, search])
+  }, [requests, search, identityId])
+  // A mailbox/filter can change while a write is in flight. Its completion
+  // must refresh the scope now on screen, not the query captured at submission.
+  const latestRefresh = useRef(refresh)
+  latestRefresh.current = refresh
 
+  // A different user or mailbox clears the list at once; a new search, filter or page keeps the old rows until the new ones arrive.
+  const mailboxOf = (query: string) => new URLSearchParams(query).get('account_ids') ?? ''
+  const shownFor = useRef(`${identityId}|${mailboxOf(search)}`)
   useEffect(() => {
     generation.current += 1
     mounted.current = true
-    setData(null)
+    const scope = `${identityId}|${mailboxOf(search)}`
+    if (shownFor.current !== scope) { shownFor.current = scope; setData(null) }
     setLoading(true)
     setError('')
     setActionError('')
@@ -57,7 +73,10 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean, se
       if (document.visibilityState === 'visible') void refresh().catch(() => {})
     }
     read()
-    const timer = window.setInterval(read, 5000)
+    const timer = window.setInterval(() => {
+      const processing = snapshotRef.current?.jobs.some(job => ['pending', 'processing', 'retry'].includes(job.status))
+      if (Date.now() - lastReadAt.current >= (processing ? 5000 : 15_000)) read()
+    }, 5000)
     document.addEventListener('visibilitychange', read)
     return () => {
       generation.current += 1
@@ -81,7 +100,7 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean, se
       if (!mounted.current || !ownsSession()) return false
       setNotice(success)
       // A successful write and a failed follow-up read have distinct messages.
-      await refresh(true).catch(() => {})
+      await latestRefresh.current(true).catch(() => {})
       return true
     } catch (failure) {
       if (mounted.current && ownsSession()) setActionError(errorMessage(failure))

@@ -1,360 +1,179 @@
 import { useState, type ReactNode } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import type { Candidate } from '@/shared/model/types'
-import { dateLabel, money } from '@/shared/lib/format'
-import { Badge, Panel, PanelHeader } from '@/shared/ui/display'
+import { Badge } from '@/shared/ui/display'
 import { Button } from '@/shared/ui/primitives'
+import { BulletSection, ProfileCard, ProfileRows } from './fact-section'
+import type { AadhaarOcr, CandidateOcr, PassportOcr } from './ocr-types'
+import { AadhaarReading, PassportReading } from './ocr-sections'
+import { primaryDocument } from '../ocr-view'
+import type { ProfileModel } from '../profile-view'
+
+export type { CandidateOcr, ResumeOcr } from './ocr-types'
 
 /**
- * The Veris output stored on the candidate (GET /candidates/:id/ocr). Kept in Veris's
- * own snake_case, exactly as it arrived, and every field is optional: no two resumes
- * come back with the same parts filled in.
+ * A tab's worth of cards. The page reads `data-profile-tab` from the DOM to build the tab bar,
+ * so a group whose cards all had nothing to show (an empty element) gets no tab and takes no space.
  */
-export interface ResumeOcr {
-  contact?: {
-    emails?: string[]
-    linkedin?: string | null
-    github?: string | null
-    websites?: string[]
-    address?: string | null
-    whatsapp?: string | null
-  }
-  personal_info?: {
-    gender?: string | null
-    father_name?: string | null
-    mother_name?: string | null
-    place_of_birth?: string | null
-    religion?: string | null
-    marital_status?: string | null
-    languages_known?: string[]
-  }
-  designation?: string | null
-  industry?: string | null
-  highest_qualification?: string | null
-  experience?: {
-    title?: string | null
-    company?: string | null
-    location?: string | null
-    country?: string | null
-    is_overseas?: boolean
-    start?: string | null
-    end?: string | null
-    duration_months?: number
-    duration_human?: string
-    description?: string | null
-  }[]
-  total_experience_months?: number
-  total_experience_human?: string
-  indian_experience_months?: number
-  indian_experience_human?: string
-  overseas_experience_months?: number
-  overseas_experience_human?: string
-  skills?: string[]
-  certifications?: string[]
-  achievements?: string[]
-  projects?: { name?: string | null; description?: string | null }[]
-  education?: { degree?: string | null; institution?: string | null; start?: string | null; end?: string | null }[]
-}
-
-export interface CandidateOcr {
-  resume?: ResumeOcr
-  passport?: { mrz?: { all_check_digits_valid?: boolean } | null }
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  walk_in: 'Walk-in',
-  referral: 'Referral',
-  email: 'Email',
-  whatsapp: 'WhatsApp',
-  other: 'Other',
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** "2019-06" reads as "Jun 2019". A bare year, or anything else, is shown as written. */
-function monthLabel(value?: string | null) {
-  const v = (value ?? '').trim()
-  const m = /^(\d{4})-(\d{2})$/.exec(v)
-  if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) return `${MONTHS[Number(m[2]) - 1]} ${m[1]}`
-  return v
-}
-
-function period(start?: string | null, end?: string | null) {
-  const s = monthLabel(start)
-  const e = monthLabel(end)
-  if (s && e) return s === e ? s : `${s} – ${e}`
-  if (s) return `From ${s}`
-  if (e) return `Until ${e}`
-  return ''
-}
-
-function capitalise(v?: string | null) {
-  return v ? v.charAt(0).toUpperCase() + v.slice(1) : ''
-}
-
-/** Only an experience figure Veris actually counted; zero months means it read none. */
-function span(months?: number, human?: string) {
-  return months && months > 0 ? human : undefined
-}
-
-function ExternalLink({ href }: { href: string }) {
-  const url = /^https?:\/\//i.test(href) ? href : `https://${href}`
+function TabGroup({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="break-all text-navy-700 hover:underline">
-      {href}
-    </a>
-  )
-}
-
-/** Lets a long address wrap at the "@" rather than mid-word in a narrow column. */
-function EmailAddress({ value }: { value: string }) {
-  const at = value.indexOf('@')
-  if (at <= 0) return <>{value}</>
-  return (
-    <>
-      {value.slice(0, at)}
-      <wbr />
-      {value.slice(at)}
-    </>
-  )
-}
-
-type Fact = [label: string, value: ReactNode]
-
-const isFilled = (v: ReactNode) => v !== null && v !== undefined && v !== false && v !== ''
-
-/**
- * A titled group of label/value pairs. Pairs without a value are dropped, and a group
- * left with none is not drawn at all — an empty heading is noise on a profile.
- */
-function FactSection({ title, action, facts }: { title: string; action?: ReactNode; facts: Fact[] }) {
-  const shown = facts.filter(([, v]) => isFilled(v))
-  if (shown.length === 0) return null
-  return (
-    <Panel flush>
-      <PanelHeader title={title} action={action} />
-      <dl className="grid gap-x-6 gap-y-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map(([label, value]) => (
-          <div key={label} className="min-w-0">
-            <dt className="text-micro text-ink-400">{label}</dt>
-            {/* Wraps rather than truncating: addresses and names run long. */}
-            <dd className="mt-0.5 break-words text-sm text-ink">{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </Panel>
-  )
-}
-
-function BulletSection({ title, items }: { title: string; items?: string[] }) {
-  const shown = (items ?? []).map((s) => s.trim()).filter(Boolean)
-  if (shown.length === 0) return null
-  return (
-    <Panel flush>
-      <PanelHeader title={title} />
-      <ul className="list-disc space-y-1.5 py-4 pl-10 pr-5 text-sm text-ink-700 marker:text-ink-300">
-        {shown.map((s, i) => (
-          <li key={i}>{s}</li>
-        ))}
-      </ul>
-    </Panel>
-  )
-}
-
-function ScannedText({ text }: { text: string }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <Panel flush>
-      <PanelHeader
-        title="Scanned resume text"
-        meta="Exactly what the OCR read — this is what the Data Bank searches"
-        action={
-          <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
-            {open ? 'Hide' : 'Show'}
-          </Button>
-        }
-      />
-      {open && <p className="whitespace-pre-line px-5 py-4 text-sm leading-relaxed text-ink-600">{text}</p>}
-    </Panel>
+    <div
+      id={`profile-${id}`}
+      data-profile-tab={label}
+      className="flex scroll-mt-40 flex-col gap-6 empty:hidden"
+    >
+      {children}
+    </div>
   )
 }
 
 /**
- * Everything known about the candidate, grouped under the heading it belongs to. The
- * saved record comes first; the stored resume fills in what the form never asked for.
+ * Everything known about the candidate, grouped under the heading it belongs to. The saved record
+ * comes first; the stored Veris reading fills in what the form never asked for.
  */
-export function CandidateSections({ cand, ocr }: { cand: Candidate; ocr: CandidateOcr }) {
-  const r = ocr.resume
-  const contact = r?.contact
-  const personal = r?.personal_info
-
-  const jobs = [...(r?.experience ?? [])]
-    .filter((j) => j.title || j.company)
-    // Newest first; an entry without a start date sinks to the bottom.
-    .sort((a, b) => (b.start ?? '').localeCompare(a.start ?? ''))
-  const schools = (r?.education ?? []).filter((e) => e.degree || e.institution)
-  const projects = (r?.projects ?? []).filter((p) => p.name)
-  const skills = cand.skills.length ? cand.skills : (r?.skills ?? [])
-
-  const total = span(r?.total_experience_months, r?.total_experience_human)
-  const overseas = span(r?.overseas_experience_months, r?.overseas_experience_human)
-  const experienceMeta = [total && `${total} in total`, overseas && `${overseas} overseas`]
-    .filter(Boolean)
-    .join(' · ')
+export function CandidateSections({
+  cand,
+  model,
+  ocr,
+  canViewFullIdNumbers = false,
+}: {
+  cand: Candidate
+  model: ProfileModel
+  ocr: CandidateOcr
+  /** Whether this viewer may see a full Aadhaar number; everyone else gets the masked form. */
+  canViewFullIdNumbers?: boolean
+}) {
+  const passport = primaryDocument(ocr, 'passport')?.payload as PassportOcr | undefined
+  const aadhaar = primaryDocument(ocr, 'aadhaar')?.payload as AadhaarOcr | undefined
 
   return (
-    <>
-      <FactSection
-        title="Contact details"
-        facts={[
-          ['Phone', <span className="ident">{cand.phone}</span>],
-          ['WhatsApp', (cand.whatsapp || contact?.whatsapp) && <span className="ident">{cand.whatsapp || contact?.whatsapp}</span>],
-          ['Email', (cand.email || contact?.emails?.[0]) && <EmailAddress value={(cand.email || contact?.emails?.[0])!} />],
-          ['Current city', cand.currentCity],
-          ['Address', contact?.address],
-          ['LinkedIn', contact?.linkedin && <ExternalLink href={contact.linkedin} />],
-          ['GitHub', contact?.github && <ExternalLink href={contact.github} />],
-          [
-            'Websites',
-            contact?.websites?.length ? (
-              <span className="flex flex-col">
-                {contact.websites.map((w) => (
-                  <ExternalLink key={w} href={w} />
-                ))}
-              </span>
-            ) : null,
-          ],
-        ]}
-      />
+    <div className="flex min-w-0 flex-col gap-6">
+      <TabGroup id="details" label="Details">
+        {model.details.length > 0 && (
+          <ProfileCard title="Candidate details">
+            <ProfileRows rows={model.details} />
+          </ProfileCard>
+        )}
+      </TabGroup>
 
-      <FactSection
-        title="Personal details"
-        facts={[
-          ['Date of birth', cand.dob && dateLabel(cand.dob)],
-          ['Gender', capitalise(cand.gender) || capitalise(personal?.gender)],
-          ['Nationality', cand.nationality],
-          ['Languages', (cand.languages.length ? cand.languages : (personal?.languages_known ?? [])).join(', ')],
-          ["Father's name", personal?.father_name],
-          ["Mother's name", personal?.mother_name],
-          ['Marital status', capitalise(personal?.marital_status)],
-          ['Place of birth', personal?.place_of_birth],
-          ['Religion', personal?.religion],
-        ]}
-      />
+      <TabGroup id="summary" label="Summary">
+        {model.summary && (
+          <ProfileCard title="Summary">
+            <p className="whitespace-pre-line pt-5 text-[17px] leading-7 text-ink-700">{model.summary}</p>
+          </ProfileCard>
+        )}
+      </TabGroup>
 
-      <FactSection
-        title="Passport details"
-        action={
-          ocr.passport?.mrz?.all_check_digits_valid ? (
-            <Badge tone="navy">
-              <ShieldCheck className="h-3 w-3" />
-              MRZ verified
-            </Badge>
-          ) : undefined
-        }
-        facts={[
-          ['Passport number', cand.passportNo && <span className="ident">{cand.passportNo}</span>],
-          ['Place of issue', cand.passportPlace],
-          ['Issue date', cand.passportIssue && dateLabel(cand.passportIssue)],
-          ['Expiry date', cand.passportExpiry && dateLabel(cand.passportExpiry)],
-        ]}
-      />
-
-      <FactSection
-        title="Professional summary"
-        facts={[
-          ['Designation', cand.designations.join(', ') || r?.designation],
-          ['Industry', r?.industry],
-          ['Highest qualification', r?.highest_qualification],
-          ['Total experience', total ?? (cand.totalExperience > 0 ? `${cand.totalExperience} years` : null)],
-          ['Experience in India', span(r?.indian_experience_months, r?.indian_experience_human)],
-          ['Overseas experience', overseas ?? (cand.gulfExperience > 0 ? `${cand.gulfExperience} years` : null)],
-          ['Expected salary', cand.expectedSalary != null && money(cand.expectedSalary)],
-          [
-            'Source',
-            `${SOURCE_LABEL[cand.source] ?? cand.source}${cand.sourceDetail ? ` · ${cand.sourceDetail}` : ''}`,
-          ],
-        ]}
-      />
-
-      {jobs.length > 0 && (
-        <Panel flush>
-          <PanelHeader title="Work experience" meta={experienceMeta || undefined} />
-          <ol className="px-6 pb-2 pt-5">
-            {jobs.map((j, i) => (
-              <li key={i} className="relative border-l border-rule pb-6 pl-6 last:border-transparent last:pb-4">
-                <span className="absolute -left-[5px] top-1 h-2.5 w-2.5 rounded-full bg-navy-600 ring-4 ring-white" />
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                  <p className="text-sm font-semibold text-ink">
-                    {j.title || 'Role not stated'}
-                    {j.company && <span className="font-normal text-ink-500"> · {j.company}</span>}
-                  </p>
-                  <p className="text-micro text-ink-400 tnum">
-                    {[period(j.start, j.end), span(j.duration_months, j.duration_human)].filter(Boolean).join(' · ')}
-                  </p>
-                </div>
-                {(j.location || j.country || j.is_overseas) && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                    {j.location || j.country}
-                    {j.is_overseas && <Badge tone="navy">Overseas</Badge>}
+      <TabGroup id="experience" label="Experience">
+        {model.jobs.length > 0 && (
+          <ProfileCard title="Experience" meta={model.experienceMeta || undefined}>
+            <ol className="pt-6">
+              {model.jobs.map((j, i) => (
+                <li key={i} className="relative border-l-2 border-rule pb-8 pl-7 last:border-transparent last:pb-1">
+                  <span className="absolute -left-[7px] top-2 h-3 w-3 rounded-full bg-ink-700 ring-4 ring-white" />
+                  <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1">
+                    <div className="min-w-0">
+                      <p className="break-words text-[17px] font-semibold leading-7 text-ink">{j.title || 'Role not stated'}</p>
+                      {(j.company || j.location || j.overseas) && (
+                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[16px] leading-6 text-ink-600">
+                          {[j.company, j.location].filter(Boolean).join(' · ')}
+                          {j.overseas && <Badge tone="navy" className="rounded-full px-2.5 py-0.5 text-[14px]">Overseas</Badge>}
+                        </p>
+                      )}
+                    </div>
+                    {(j.period || j.duration) && (
+                      <div className="text-[15px] leading-6 text-ink-600 tnum sm:text-right">
+                        {j.period && <p className="font-medium text-ink-700">{j.period}</p>}
+                        {j.duration && <p>{j.duration}</p>}
+                      </div>
+                    )}
                   </div>
-                )}
-                {j.description?.trim() && (
-                  <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink-600">{j.description.trim()}</p>
-                )}
-              </li>
-            ))}
-          </ol>
-        </Panel>
-      )}
+                  {j.description && <p className="mt-3 whitespace-pre-line text-[16px] leading-7 text-ink-700">{j.description}</p>}
+                </li>
+              ))}
+            </ol>
+          </ProfileCard>
+        )}
+      </TabGroup>
 
-      {schools.length > 0 && (
-        <Panel flush>
-          <PanelHeader title="Education" />
-          <ul className="divide-y divide-rule-soft">
-            {schools.map((e, i) => (
-              <li key={i} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-3.5">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink">{e.degree || e.institution}</p>
-                  {e.degree && e.institution && <p className="mt-0.5 text-xs text-ink-500">{e.institution}</p>}
-                </div>
-                {period(e.start, e.end) && <p className="text-micro text-ink-400 tnum">{period(e.start, e.end)}</p>}
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
+      <TabGroup id="skills" label="Skills">
+        {model.skills.length > 0 && (
+          <ProfileCard title="Skills">
+            <ul className="flex flex-wrap gap-2.5 pt-5">
+              {model.skills.map((s) => (
+                <li key={s} className="max-w-full break-words rounded-full border border-rule bg-field/70 px-4 py-1.5 text-[16px] font-medium leading-6 text-ink-700">
+                  {s}
+                </li>
+              ))}
+            </ul>
+          </ProfileCard>
+        )}
+      </TabGroup>
 
-      {skills.length > 0 && (
-        <Panel flush>
-          <PanelHeader title="Skills" />
-          <div className="flex flex-wrap gap-1.5 px-5 py-4">
-            {skills.map((s) => (
-              <Badge key={s}>{s}</Badge>
-            ))}
-          </div>
-        </Panel>
-      )}
+      <TabGroup id="education" label="Education">
+        {model.education.length > 0 && (
+          <ProfileCard title="Education">
+            <ul className="space-y-3 pt-5">
+              {model.education.map((e, i) => (
+                <li key={i} className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1 rounded-xl border border-rule-soft bg-field/50 px-5 py-4">
+                  <div className="min-w-0">
+                    <p className="break-words text-[17px] font-semibold leading-6 text-ink">{e.degree || e.institution}</p>
+                    {(e.degree ? [e.institution, e.grade] : [e.grade]).filter(Boolean).length > 0 && (
+                      <p className="mt-0.5 break-words text-[16px] text-ink-600">{(e.degree ? [e.institution, e.grade] : [e.grade]).filter(Boolean).join(' · ')}</p>
+                    )}
+                  </div>
+                  {e.period && <p className="text-[15px] font-medium leading-6 text-ink-600 tnum">{e.period}</p>}
+                </li>
+              ))}
+            </ul>
+          </ProfileCard>
+        )}
+      </TabGroup>
 
-      <BulletSection title="Certifications" items={r?.certifications} />
-      <BulletSection title="Achievements" items={r?.achievements} />
+      <TabGroup id="passport" label="Passport">
+        {/* The stated details only earn a card of their own when no passport scan was read. */}
+        {!passport && model.passport.length > 0 && (
+          <ProfileCard title="Passport">
+            <ProfileRows rows={model.passport} />
+          </ProfileCard>
+        )}
+        <PassportReading passport={passport} />
+      </TabGroup>
 
-      {projects.length > 0 && (
-        <Panel flush>
-          <PanelHeader title="Projects" />
-          <ul className="divide-y divide-rule-soft">
-            {projects.map((p, i) => (
-              <li key={i} className="px-5 py-3.5">
-                <p className="text-sm font-semibold text-ink">{p.name}</p>
-                {p.description?.trim() && <p className="mt-1 text-sm leading-relaxed text-ink-600">{p.description.trim()}</p>}
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
+      <TabGroup id="aadhaar" label="Aadhaar">
+        <AadhaarReading aadhaar={aadhaar} canReveal={canViewFullIdNumbers} />
+      </TabGroup>
 
-      {/* Only a scanned resume has text worth reading; a hand-filled one holds a summary line. */}
-      {r && cand.resumeText?.trim() && <ScannedText text={cand.resumeText.trim()} />}
-    </>
+      <TabGroup id="achievements" label="Achievements">
+        <BulletSection title="Achievements" items={model.achievements} />
+      </TabGroup>
+
+      <TabGroup id="certifications" label="Certifications">
+        <BulletSection title="Certifications" items={model.certifications} />
+      </TabGroup>
+
+      <TabGroup id="projects" label="Projects">
+        {model.projects.length > 0 && (
+          <ProfileCard title="Projects">
+            <ul className="divide-y divide-rule-soft">
+              {model.projects.map((p, i) => (
+                <li key={i} className="py-4 last:pb-1">
+                  <p className="break-words text-[17px] font-semibold text-ink-700">{p.name}</p>
+                  {p.description && <p className="mt-1 whitespace-pre-line text-[16px] leading-7 text-ink-700">{p.description}</p>}
+                </li>
+              ))}
+            </ul>
+          </ProfileCard>
+        )}
+      </TabGroup>
+
+      <TabGroup id="additional" label="Additional">
+        {model.additional.length > 0 && (
+          <ProfileCard title="Additional information">
+            <ProfileRows rows={model.additional} />
+          </ProfileCard>
+        )}
+      </TabGroup>
+    </div>
   )
 }

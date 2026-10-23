@@ -28,6 +28,7 @@ from app.db.models import (
     TodoItem, User,
 )
 from app.services.desk_snapshot import read_snapshot, snapshot_statement
+from app.services.ingestion_revision import read_revision
 from test_database_naming import (
     PREVIOUS, _migrate, _seed_previous_schema, schema_database,
 )
@@ -40,6 +41,8 @@ SNAPSHOT_COLLECTIONS = {
     "todos", "notifications",
 }
 WIRE_COLLECTIONS = SNAPSHOT_COLLECTIONS - {"files", "agreements", "stages"}
+# Email completions, WhatsApp completions and candidate changes: count:epoch each.
+EMPTY_REVISION = "0:0:0:0:0:0"
 FORBIDDEN_FIELDS = {
     "password_hash", "passwordHash", "object_key", "objectKey",
     "content_hash", "contentHash", "ocr_data", "ocrData",
@@ -49,6 +52,9 @@ FORBIDDEN_FIELDS = {
 
 @contextmanager
 def recorded_statements(engine):
+    # Budgets count a fresh request, including its sign-in lookup, so forget the 10 s sign-in memo.
+    from app.core import deps
+    deps._AUTH_CACHE.clear()
     statements = []
 
     def record(connection, cursor, statement, parameters, context, executemany):
@@ -297,7 +303,9 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
     assert_select_budget(statements, 2)
     body = response.json()
     assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision", "agencyTimezone"}
-    assert body["ingestionRevision"] == "0:0"
+    with Session(desk_engine) as db:
+        # The fixture holds a candidate, so the token is the committed aggregate, never empty.
+        assert body["ingestionRevision"] == read_revision(db) != EMPTY_REVISION
     assert_no_private_data(body)
 
     # Compare all existing direct fields against the previous ORM/schema path,
@@ -426,7 +434,7 @@ def test_empty_snapshot_returns_arrays_with_one_query(schema_database):
         with recorded_statements(schema_database) as statements:
             snapshot = read_snapshot(db, "no-account")
     assert_select_budget(statements, 1)
-    assert snapshot == {**{key: [] for key in SNAPSHOT_COLLECTIONS}, "ingestionRevision": "0:0"}
+    assert snapshot == {**{key: [] for key in SNAPSHOT_COLLECTIONS}, "ingestionRevision": EMPTY_REVISION}
 
 
 def test_snapshot_query_count_stays_constant_and_committed_changes_are_visible(desk_engine):

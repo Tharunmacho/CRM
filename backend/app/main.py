@@ -1,4 +1,5 @@
 import logging
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -8,11 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
-from app.api.routers import applications, auth, candidates, data, files, ocr, inbox, users, reports, workflow, whatsapp, document_jobs, attendance
+from app.api.routers import applications, auth, candidates, data, files, ocr, inbox, users, reports, workflow, whatsapp, document_jobs, attendance, staff_directory
+from app.api.routers import document_bundles, intake_acknowledgements, whatsapp_chat
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
 from app.db.models import User
-from app.db.session import SessionLocal, engine
+from app.db.session import SessionLocal, connect_with_retry, engine, warm_pool
 from app.db.schema_readiness import UPDATE_REQUIRED, schema_status
 from app.integrations.redis import close_redis, redis_health
 from app.integrations.ocr.inspection import find_tesseract
@@ -43,7 +45,7 @@ app.add_middleware(
 def on_startup() -> None:
     """Initialize the assignment cursor without modifying user accounts."""
     try:
-        with engine.connect() as connection:
+        with connect_with_retry() as connection:
             schema = schema_status(connection)
         if schema["status"] == "ok":
             with SessionLocal() as db:
@@ -53,6 +55,8 @@ def on_startup() -> None:
             log.error("Database migration required: current=%s expected=%s. No startup data was changed.", schema["current"], schema["expected"])
     except Exception:  # reported by /api/health; account login never seeds data
         log.error("Application state initialization failed.")
+
+    threading.Thread(target=warm_pool, name="db-pool-warmup", daemon=True).start()
 
     state = redis_health()
     if state["status"] == "ok":
@@ -77,10 +81,14 @@ app.include_router(document_jobs.router)
 app.include_router(ocr.router)
 app.include_router(inbox.router)
 app.include_router(users.router)
+app.include_router(staff_directory.router)
 app.include_router(reports.router)
 app.include_router(reports.dashboard_router)
 app.include_router(workflow.router)
 app.include_router(whatsapp.router)
+app.include_router(whatsapp_chat.router)
+app.include_router(document_bundles.router)
+app.include_router(intake_acknowledgements.router)
 app.include_router(attendance.router)
 
 

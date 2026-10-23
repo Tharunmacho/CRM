@@ -1,4 +1,4 @@
-"""Zoho-only connections and two-way mailbox operations."""
+"""Live two-way mailbox operations (folders, flags, moves) and Zoho connection."""
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -6,20 +6,20 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, field_validator
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.routers.mail_accounts import account_summary, save_password_account
 from app.core.config import get_settings
 from app.core.deps import current_user, require_role
-from app.db.models import AuditEntry, MailAccount, MailMessage, Role, User
-from app.db.session import get_db
-from app.integrations.mail.imap import UIDVALIDITY_RECOVERY_REQUIRED, mailbox_source_id, provider_message_id, require_cursor_source
+from app.db.models import AuditEntry, MailAccount, MailAttachment, MailMessage, Role, User
+from app.db.session import get_db, writes_on_get
+from app.integrations.mail.imap import provider_message_id
 from app.integrations.mail.mailbox import WritableMailbox, MailAdapterError, MailMutationError
 from app.integrations.mail.smtp import address as email_address
-from app.services import zoho_mail
+from app.services import mail_providers, zoho_mail
 from app.services.mail_oauth import encrypt
-from app.services.mail_storage import storage_identity
-from app.services.mailbox_sync import persist_message, message_out
+from app.services.mailbox_sync import persist_messages, message_out
+from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(tags=["inbox"])
 admin = require_role(Role.admin)
@@ -34,7 +34,7 @@ def account(db, account_id):
     if not row:
         raise HTTPException(404, "Mailbox not found")
     try:
-        config = zoho_mail.account_config(db, get_settings(), row)
+        config = mail_providers.account_config(db, get_settings(), row)
     except MailAdapterError as exc:
         raise HTTPException(409, str(exc)) from None
     return row, config
@@ -69,46 +69,31 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
             folders = mailbox.folders()
     except MailAdapterError as exc:
         raise HTTPException(422 if exc.code.startswith("zoho_") else 502, str(exc)) from None
-    row = db.scalar(select(MailAccount).where(MailAccount.address == address).with_for_update())
-    if row:
-        if row.provider not in {"zoho", "imap"}:
-            raise HTTPException(409, "This address has retained history from a different provider. Use a different Zoho account.")
-        try:
-            require_cursor_source(row.sync_state or {}, config)
-        except MailAdapterError as exc:
-            raise HTTPException(409, str(exc)) from None
-        if str(row.sync_state.get("uid_validity")) != cursor.uid_validity:
-            raise HTTPException(409, UIDVALIDITY_RECOVERY_REQUIRED)
-    else:
-        row = MailAccount(address=address, provider="zoho", sync_state={"source_id": mailbox_source_id(config),
-            "last_uid": cursor.last_uid, "uid_validity": cursor.uid_validity, "storage_id": storage_identity(settings.storage_dir, settings)})
-        db.add(row)
-        db.flush()
-    row.provider, row.secrets = "zoho", {"encrypted": envelope}
-    row.auto_ingest, row.connected_by, row.disconnected_at = body.auto_ingest, user.id, None
-    row.last_error, row.sync_requested = None, True
-    row.sync_state = {**row.sync_state, "folders": folders}
-    audit(db, user, "connect_zoho", row.id, "Connected Zoho Mail; credentials encrypted and excluded from audit data.")
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "This mailbox was connected in another request. Refresh the account list.") from None
-    return {"id": row.id, "address": row.address, "provider": "zoho", "autoIngest": row.auto_ingest,
-        "configured": True, "connectionStatus": "connected", "lastSyncAt": row.last_sync_at,
-        "disconnectedAt": None, "lastError": None}
+    row = save_password_account(db, settings, user, provider="zoho", address=address, config=config, envelope=envelope,
+        auto_ingest=body.auto_ingest, folders=folders, cursor=cursor)
+    return account_summary(row)
+
+
+FOLDER_CACHE_SECONDS = 45
 
 
 @router.get("/accounts/{account_id}/folders")
-def folders(account_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+@writes_on_get
+def folders(account_id: str, refresh: bool = False, db: Session = Depends(get_db), user: User = Depends(current_user)):
     row, config = account(db, account_id)
+    state = row.sync_state or {}
+    saved_at = state.get("folders_at")
+    if not refresh and state.get("folders") and saved_at:
+        # Counting every folder takes one server round trip each, so a recent answer is reused.
+        if (datetime.now(timezone.utc) - datetime.fromisoformat(saved_at)).total_seconds() < FOLDER_CACHE_SECONDS:
+            return {"accountId": account_id, "folders": state["folders"]}
     try:
         with WritableMailbox(config) as mailbox:
             result = mailbox.folders()
     except MailAdapterError as exc:
         raise HTTPException(502, str(exc)) from None
     row = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
-    row.sync_state = {**row.sync_state, "folders": result}
+    row.sync_state = {**row.sync_state, "folders": result, "folders_at": datetime.now(timezone.utc).isoformat()}
     db.commit()
     return {"accountId": account_id, "folders": result}
 
@@ -136,18 +121,19 @@ def create_folder(account_id: str, body: FolderIn, db: Session = Depends(get_db)
                 mailbox.create_folder(body.name)
                 result = mailbox.folders()
                 if body.name not in {item["name"] for item in result}:
-                    raise MailMutationError("Zoho has not confirmed the new folder. Refresh before retrying.", unknown=True)
+                    raise MailMutationError("The mailbox has not confirmed the new folder. Refresh before retrying.", unknown=True)
     except MailAdapterError as exc:
         raise HTTPException(502, str(exc)) from None
     row = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
     row.sync_state = {**row.sync_state, "folders": result}
     if created:
-        audit(db, user, "create_mail_folder", account_id, f"Created Zoho folder {body.name}.")
+        audit(db, user, "create_mail_folder", account_id, f"Created mailbox folder {body.name}.")
     db.commit()
     return {"accountId": account_id, "folders": result, "created": created}
 
 
 @router.get("/accounts/{account_id}/mailbox")
+@writes_on_get
 def mailbox_page(account_id: str, folder: Annotated[str, Query(min_length=1, max_length=255)] = "INBOX",
     search: Annotated[str, Query(max_length=200)] = "", offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 25, unread: bool | None = None,
@@ -156,12 +142,19 @@ def mailbox_page(account_id: str, folder: Annotated[str, Query(min_length=1, max
     try:
         with WritableMailbox(config) as mailbox:
             _, total, incoming = mailbox.page(folder, search=search, offset=offset, limit=limit, unread=unread)
-        ids = []
-        for message in incoming:
-            item = persist_message(db, get_settings(), account_id, message)
-            ids.append(item.id)
+        rows = persist_messages(db, get_settings(), account_id, incoming)
+        ids = [item.id for item in rows]
         db.commit()
-        messages = [message_out(db, db.get(MailMessage, item)) for item in ids]
+        from app.services.document_bundle_summary import source_summaries
+        bundles, files = parallel_reads(
+            db,
+            lambda session: source_summaries(session, "email", ids),
+            lambda session: list(session.scalars(select(MailAttachment).where(MailAttachment.message_id.in_(ids)))) if ids else [],
+        )
+        by_message: dict[str, list] = {}
+        for item in files:
+            by_message.setdefault(item.message_id, []).append(item)
+        messages = [message_out(db, item, bundles=bundles, attachments=by_message.get(item.id, [])) for item in rows]
     except MailAdapterError as exc:
         db.rollback()
         raise HTTPException(502, str(exc)) from None
@@ -180,7 +173,7 @@ def message_account(db, message_id):
         raise HTTPException(404, "Message not found")
     source, config = account(db, row.account_id)
     if not row.remote_uid or not row.uid_validity or row.remote_deleted:
-        raise HTTPException(409, "Refresh this message from its Zoho folder before changing it.")
+        raise HTTPException(409, "Refresh this message from its mailbox folder before changing it.")
     return row, source, config
 
 
@@ -218,7 +211,7 @@ def move_message(db, user, row, config, destination):
     with WritableMailbox(config) as mailbox:
         available = mailbox.folders()
         if destination not in {f["name"] for f in available}:
-            raise HTTPException(422, "Choose an existing Zoho folder.")
+            raise HTTPException(422, "Choose an existing mailbox folder.")
         original = row.folder
         row.remote_state, row.remote_operation = "moving", {"action": "move", "target": destination, "source": original,
             "uid": row.remote_uid, "validity": row.uid_validity, "started_at": datetime.now(timezone.utc).isoformat()}
@@ -278,7 +271,7 @@ def action(message_id: str, body: ActionIn, db: Session = Depends(get_db), user:
             wanted = "inbox" if body.action == "restore" else body.action
             destination = next((item["name"] for item in available if item["role"] == wanted), None)
         if not destination:
-            raise HTTPException(409, "This mailbox has no matching folder visible over IMAP. Enable it in Zoho's IMAP folder settings.")
+            raise HTTPException(409, "This mailbox has no matching folder visible over IMAP. Make it visible to IMAP in the mailbox's folder settings.")
         return move_message(db, user, row, config, destination)
     except MailAdapterError as exc:
         raise HTTPException(502, str(exc)) from None
@@ -302,7 +295,7 @@ def reconcile(message_id: str, db: Session = Depends(get_db), user: User = Depen
     if operation.get("action") != "move" or row.remote_state not in {"moving", "unknown"}:
         return message_out(db, row)
     if not row.message_id_header:
-        raise HTTPException(409, "This message has no stable Message-ID. Check source and destination in Zoho before further action.")
+        raise HTTPException(409, "This message has no stable Message-ID. Check source and destination folders before further action.")
     try:
         with WritableMailbox(config) as mailbox:
             target, targets = mailbox.find_message_id(operation["target"], row.message_id_header)
@@ -321,7 +314,7 @@ def reconcile(message_id: str, db: Session = Depends(get_db), user: User = Depen
         elif not targets and sources == [operation["uid"]]:
             row.remote_state, row.remote_error, row.remote_operation = "synced", None, None
         else:
-            row.remote_state, row.remote_error = "unknown", "Zoho still shows an ambiguous move outcome. Review both folders; no automatic retry was made."
+            row.remote_state, row.remote_error = "unknown", "The mailbox still shows an ambiguous move outcome. Review both folders; no automatic retry was made."
         db.commit()
     except MailAdapterError as exc:
         raise HTTPException(502, str(exc)) from None

@@ -32,13 +32,13 @@ test('manual retry follows the backend state machine without resubmitting active
 })
 
 test('candidate intake follows the connected source eligibility without requiring auto-ingest', () => {
-  for (const provider of ['zoho', 'imap']) {
+  for (const provider of ['gmail', 'microsoft', 'zoho', 'imap']) {
     const account = { provider, autoIngest: false, connectionStatus: 'connected', disconnectedAt: null }
     assert.equal(intakeUnavailable(account), null)
     assert.match(intakeUnavailable({ ...account, connectionStatus: 'disconnected' }), /reconnect/i)
     assert.match(intakeUnavailable({ ...account, disconnectedAt: '2026-10-21T12:00:00Z' }), /reconnect/i)
   }
-  for (const provider of ['gmail', 'microsoft', 'unsupported']) {
+  for (const provider of ['unsupported']) {
     assert.match(intakeUnavailable({ provider, connectionStatus: 'connected' }), /archived.*history is read only/)
   }
   assert.match(intakeUnavailable(undefined), /Refresh before processing/)

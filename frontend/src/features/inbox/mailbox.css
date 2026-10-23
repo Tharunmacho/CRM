@@ -1,31 +1,126 @@
-.zoho-workspace { min-width: 0; }
-.zoho-controls { display:grid; grid-template-columns:minmax(220px,320px) minmax(180px,1fr); gap:16px; align-items:end; margin:20px 0 14px; }
-.zoho-folder-mobile { display:none; }
-.zoho-mail-layout { display:grid; grid-template-columns:190px minmax(245px,310px) minmax(0,1fr); min-height:630px; height:calc(100vh - 310px); max-height:1000px; overflow:hidden; border:1px solid var(--color-rule,#e1e6ee); border-radius:16px; background:white; box-shadow:0 5px 24px #263b5c05; }
-.zoho-folders { padding:22px 10px; border-right:1px solid #e8edf3; background:#fbfcfe; overflow-y:auto; }
-.zoho-folder { display:flex; width:100%; align-items:center; gap:10px; padding:11px 12px; margin-bottom:3px; border-radius:9px; color:#66748a; font-size:12px; font-weight:500; }
-.zoho-folder:hover { background:#eff3f8; }
-.zoho-folder.is-active { background:#e9eff8; color:#294974; font-weight:600; }
-.zoho-unread-count { min-width:20px; padding:2px 5px; background:#fff; border-radius:5px; font-size:10px; text-align:center; }
-.zoho-message-list { display:flex; min-width:0; min-height:0; flex-direction:column; border-right:1px solid #e8edf3; }
-.zoho-section-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; min-height:58px; padding:16px; border-bottom:1px solid #e8edf3; }
+/* Inbox workspace: a message-list card and a reader card side by side. */
+.zoho-workspace { min-width: 0; font-family: Poppins, system-ui, sans-serif; }
+.zoho-workspace button, .zoho-workspace input, .zoho-workspace select, .zoho-workspace textarea { font-family: inherit; }
+
+.zoho-status { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; margin:0 0 14px; font-size:13px; color:#4a5b73; }
+.zoho-status .zoho-chip { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border:1px solid #e3e8ef; border-radius:999px; background:#fff; font-weight:500; }
+.zoho-status .zoho-chip.is-on { border-color:#bcd1ee; background:#f1f6fd; color:#294974; }
+.zoho-account-alert { flex-basis:100%; padding:12px 16px; border:1px solid #f1d9a8; border-radius:12px; background:#fffaf0; color:#6b4a06; font-size:13px; line-height:1.6; }
+.zoho-account-alert strong { display:block; margin-bottom:2px; font-weight:600; color:#4d3504; }
+
+/* Two separate cards. */
+.zoho-mail-layout { display:grid; grid-template-columns:minmax(340px,400px) minmax(0,1fr); gap:16px; height:max(560px, calc(100dvh - 230px)); align-items:stretch; }
+.zoho-mail-layout.is-drafts { grid-template-columns:minmax(0,1fr); }
+.zoho-message-list, .zoho-reader, .zoho-draft-list { display:flex; min-width:0; min-height:0; flex-direction:column; overflow:hidden; border:1px solid #e3e8ef; border-radius:14px; background:#fff; }
+
+/* List head: mailbox + folder, tabs, search + filters. */
+.zoho-list-head { padding:14px 14px 0; border-bottom:1px solid #e8edf3; }
+.zoho-list-controls { display:flex; gap:8px; min-width:0; }
+.zoho-list-controls > * { min-width:0; flex:1 1 0; }
+.zoho-tabs { display:flex; gap:22px; margin-top:12px; }
+.zoho-tab { position:relative; padding:8px 2px 10px; font-size:14px; font-weight:500; color:#6b7a90; }
+.zoho-tab:hover { color:#1c2a3f; }
+.zoho-tab.is-active { color:#2f55c8; font-weight:600; }
+.zoho-tab.is-active::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:#2f55c8; }
+.zoho-search-row { display:flex; align-items:center; gap:8px; padding:12px 0; margin:0 -14px; padding-inline:14px; border-top:1px solid #e8edf3; }
+.zoho-tool-search { min-width:0; flex:1; }
+.zoho-filter-wrap { position:relative; flex-shrink:0; }
+.zoho-filter-pop { position:absolute; right:0; top:calc(100% + 6px); z-index:20; display:flex; flex-direction:column; gap:8px; width:230px; padding:12px; border:1px solid #e3e8ef; border-radius:12px; background:#fff; box-shadow:0 10px 30px rgba(20,35,60,.14); }
+.zoho-list-note { padding:6px 16px; font-size:12px; color:#6b7a90; }
 .zoho-message-scroll { min-height:0; flex:1; overflow-y:auto; }
-.zoho-message-row { display:flex; align-items:start; border-bottom:1px solid #edf0f5; }
-.zoho-message-row:hover { background:#fafbfd; }
-.zoho-message-row.is-selected { background:#edf3fc; box-shadow:inset 3px 0 #385f93; }
-.zoho-open-message { display:flex; flex:1; min-width:0; gap:10px; padding:17px 5px 17px 15px; text-align:left; }
-.zoho-open-message .mail-sender-avatar { width:30px; height:30px; font-size:10px; }
-.zoho-star { flex-shrink:0; padding:18px 11px 8px 4px; }
-.zoho-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; border-top:1px solid #e8edf3; }
-.zoho-reader { display:flex; min-width:0; min-height:0; flex-direction:column; }
-.zoho-reader-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-height:58px; padding:12px 16px; border-bottom:1px solid #e8edf3; background:#fdfefe; }
-.zoho-reader-toolbar button { font-size:11px; }
-.zoho-reader-scroll { min-height:0; flex:1; overflow-y:auto; }
-.zoho-reader-heading { padding:24px 22px 20px; }
-.zoho-message-body { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.85; color:#526176; padding:4px 22px 28px; }
-.zoho-draft-list { grid-column:2 / -1; min-width:0; overflow-y:auto; }
-.zoho-draft-row { display:flex; align-items:center; gap:14px; width:100%; padding:18px 20px; border-bottom:1px solid #edf0f5; }
-.zoho-draft-row:hover { background:#f6f8fc; }
+.zoho-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 14px; border-top:1px solid #e8edf3; font-size:13px; }
+
+.zoho-icon-btn { display:inline-flex; width:34px; height:34px; flex-shrink:0; align-items:center; justify-content:center; border:1px solid transparent; border-radius:10px; color:#4a5b73; cursor:pointer; list-style:none; }
+.zoho-icon-btn::-webkit-details-marker { display:none; }
+.zoho-icon-btn:hover:not(:disabled) { background:#eef2f8; color:#1c2a3f; }
+.zoho-icon-btn:disabled { opacity:.45; cursor:default; }
+.zoho-filter-wrap .zoho-icon-btn { border-color:#e3e8ef; width:38px; height:38px; }
+.zoho-icon-btn.is-active { border-color:#bcd1ee; background:#eef4fd; color:#2f55c8; }
+
+/* Message row. */
+.zoho-message-row { position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; border-bottom:1px solid #eef1f5; }
+.zoho-message-row:hover { background:#f8fafd; }
+.zoho-message-row.is-selected { background:#eef4fd; box-shadow:inset 3px 0 #2f55c8; }
+.zoho-open-message { display:flex; min-width:0; gap:12px; padding:13px 2px 13px 16px; text-align:left; }
+.zoho-open-message .mail-sender-avatar { width:36px; height:36px; font-size:12px; font-weight:600; }
+.zoho-row-body { display:flex; min-width:0; flex:1; flex-direction:column; gap:2px; }
+.zoho-row-top { display:flex; align-items:center; gap:8px; min-width:0; }
+.zoho-unread-dot { width:8px; height:8px; flex-shrink:0; border-radius:999px; background:#2f55c8; }
+.zoho-row-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; font-weight:500; color:#2c3d55; }
+.zoho-row-name.is-unread { font-weight:600; color:#0b1420; }
+.zoho-row-time { flex-shrink:0; font-size:12px; font-weight:500; color:#6b7a90; white-space:nowrap; }
+.zoho-row-subject { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13.5px; font-weight:500; color:#2c3d55; }
+.zoho-row-subject.is-unread { font-weight:600; color:#0b1420; }
+.zoho-row-preview { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; font-weight:400; color:#6b7a90; }
+.zoho-row-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px; }
+.zoho-row-meta.has-badge { padding-right:96px; }
+.zoho-meta-chip { display:inline-flex; align-items:center; gap:4px; max-width:100%; padding:1px 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:999px; background:#f1f4f9; font-size:12px; font-weight:500; color:#4a5b73; }
+.zoho-meta-chip.is-account { max-width:230px; }
+.zoho-star { align-self:start; padding:34px 14px 6px 6px; }
+.zoho-message-row:not(:has(.zoho-star)) { grid-template-columns:minmax(0,1fr); }
+.mail-candidate-badge { position:absolute; right:12px; bottom:10px; display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border:1px solid #bcd1ee; border-radius:999px; background:#eef4fc; color:#1f3d6b; font-size:12px; font-weight:600; }
+.mail-candidate-badge:hover:not(:disabled) { background:#dfeafa; }
+.mail-candidate-badge:disabled { opacity:.6; }
+
+/* Reader. */
+.zoho-reader-toolbar { display:flex; align-items:center; gap:4px; min-height:56px; padding:10px 14px; border-bottom:1px solid #e8edf3; }
+.zoho-reader-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:4px; font-size:16px; font-weight:600; color:#1c2a3f; }
+.zoho-toolbar-gap { flex:1; }
 .zoho-back { display:none; }
-@media(max-width:1180px) { .zoho-mail-layout { grid-template-columns:minmax(235px,300px) minmax(0,1fr); } .zoho-folders { display:none; } .zoho-draft-list { grid-column:1 / -1; } .zoho-folder-mobile { display:block; } .zoho-controls { grid-template-columns:minmax(170px,1fr) minmax(150px,1fr) minmax(160px,1.2fr); gap:12px; } }
-@media(max-width:700px) { .zoho-controls { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; } .zoho-search { grid-column:1 / -1; } .zoho-mail-layout { display:block; height:auto; min-height:520px; max-height:none; border-radius:12px; } .zoho-message-list { min-height:520px; border-right:0; } .zoho-message-scroll { max-height:620px; } .zoho-reader { display:none; } .zoho-mail-layout.is-reading .zoho-message-list { display:none; } .zoho-mail-layout.is-reading .zoho-reader { display:flex; } .zoho-back { display:inline-flex; } .zoho-reader-toolbar { padding:12px; } .zoho-reader-heading { padding:20px 16px; } .zoho-message-body { padding:0 16px 24px; } .zoho-draft-row { flex-wrap:wrap; padding:15px; } .zoho-draft-row > span:first-of-type { flex-basis:65%; } }
+.zoho-more { position:relative; }
+.zoho-more-pop { position:absolute; right:0; top:calc(100% + 6px); z-index:20; width:220px; padding:10px; border:1px solid #e3e8ef; border-radius:12px; background:#fff; box-shadow:0 10px 30px rgba(20,35,60,.14); }
+.zoho-reader-scroll { min-height:0; flex:1; overflow-y:auto; }
+.zoho-reader-heading { display:flex; align-items:flex-start; gap:12px; padding:20px 24px 12px; }
+.zoho-reader-heading .mail-sender-avatar { width:42px; height:42px; font-size:14px; font-weight:600; }
+.zoho-sender-name { overflow-wrap:anywhere; font-size:14.5px; font-weight:600; color:#0b1420; }
+.zoho-sender-address { overflow-wrap:anywhere; font-size:12.5px; color:#6b7a90; }
+.zoho-sender-to { margin-top:2px; overflow-wrap:anywhere; font-size:12.5px; color:#6b7a90; }
+.zoho-message-body { white-space:pre-wrap; overflow-wrap:anywhere; font-size:14.5px; line-height:1.75; color:#2c3d55; padding:6px 24px 22px; }
+.zoho-section-label { font-size:11.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#6b7a90; }
+.zoho-attachments { padding:0 24px 20px; }
+.zoho-attachments ul { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.zoho-attachment { display:flex; min-width:0; max-width:100%; align-items:center; gap:8px; padding:8px 12px; border:1px solid #e3e8ef; border-radius:10px; background:#fafbfd; font-size:13px; }
+.zoho-attachment-size { font-size:12px; color:#6b7a90; }
+.zoho-link { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:500; color:#2f55c8; }
+.zoho-link:hover { text-decoration:underline; }
+.zoho-reply-bar { display:flex; flex-wrap:wrap; gap:8px; padding:14px 24px; border-top:1px solid #e8edf3; }
+.zoho-intake { display:flex; flex-direction:column; gap:12px; padding:16px 24px 24px; border-top:1px solid #e8edf3; background:#fbfcfe; }
+.zoho-intake > div:first-child { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+
+/* Saved drafts. */
+.zoho-draft-list { overflow-y:auto; }
+.zoho-section-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; min-height:56px; padding:10px 16px; border-bottom:1px solid #e8edf3; }
+.zoho-section-header h2 { font-size:16px; font-weight:600; color:#1c2a3f; }
+.zoho-draft-controls { width:min(100%,460px); }
+.zoho-draft-row { display:flex; align-items:center; gap:14px; width:100%; padding:14px 20px; border-bottom:1px solid #eef1f5; }
+.zoho-draft-row:hover { background:#f6f8fc; }
+
+/* First load: the page's own shape, not a line of text. */
+.zoho-skeleton { margin-top:18px; overflow:hidden; border:1px solid #e3e8ef; border-radius:14px; background:#fff; }
+.zoho-skeleton-bar { height:56px; border-bottom:1px solid #e8edf3; background:#f6f8fb; }
+.zoho-skeleton-row { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid #eef1f5; }
+.zoho-skeleton-row > span { width:34px; height:34px; flex-shrink:0; border-radius:999px; background:#eef1f6; }
+.zoho-skeleton-row > div { display:flex; flex:1; flex-direction:column; gap:8px; }
+.zoho-skeleton-row i { display:block; height:10px; border-radius:6px; background:#eef1f6; }
+.zoho-skeleton-row i:first-child { width:38%; }
+.zoho-skeleton-row i:last-child { width:72%; }
+.zoho-skeleton-bar, .zoho-skeleton-row > span, .zoho-skeleton-row i { animation:zoho-pulse 1.4s ease-in-out infinite; }
+@keyframes zoho-pulse { 50% { opacity:.55; } }
+@media (prefers-reduced-motion: reduce) { .zoho-skeleton-bar, .zoho-skeleton-row > span, .zoho-skeleton-row i { animation:none; } }
+
+@media(max-width:1100px) { .zoho-mail-layout { grid-template-columns:minmax(300px,360px) minmax(0,1fr); } }
+@media(max-width:700px) {
+  .zoho-mail-layout, .zoho-mail-layout.is-drafts { display:block; height:auto; }
+  .zoho-message-list { min-height:480px; }
+  .zoho-message-scroll { max-height:640px; }
+  .zoho-reader { display:none; }
+  .zoho-mail-layout.is-reading .zoho-message-list { display:none; }
+  .zoho-mail-layout.is-reading .zoho-reader { display:flex; }
+  .zoho-back { display:inline-flex; }
+  .zoho-reader-toolbar { flex-wrap:wrap; padding:8px 10px; }
+  .zoho-reader-heading { padding:16px 16px 10px; }
+  .zoho-message-body { padding:4px 16px 18px; }
+  .zoho-attachments, .zoho-reply-bar, .zoho-intake { padding-inline:16px; }
+  .zoho-draft-row { flex-wrap:wrap; padding:14px; }
+  .zoho-draft-row > span:first-of-type { flex-basis:65%; }
+}

@@ -1,6 +1,6 @@
 # CRM database and document storage
 
-The CRM uses PostgreSQL, SQLAlchemy models and an ordered Alembic migration chain. The current head is `0015_attendance_hr`; it contains **42 application tables** plus `alembic_version`. File bytes live in private local/shared-volume or S3-compatible storage. No MongoDB collections are required.
+The CRM uses PostgreSQL, SQLAlchemy models and an ordered Alembic migration chain. The current head is `0016_intake_communications`; it contains **50 application tables** plus `alembic_version`. File bytes live in private local/shared-volume or S3-compatible storage. No MongoDB collections are required.
 
 ## Find the right table
 
@@ -43,8 +43,16 @@ The CRM uses PostgreSQL, SQLAlchemy models and an ordered Alembic migration chai
 | Staff | `staff_attendance_cover_items` | Temporary candidate/task ownership ledger; safe retry and return without overwriting later assignments. |
 | WhatsApp | `whatsapp_channels` | Configured Business phone, intake setting and reception/worker health. Credentials stay in server secrets. |
 | WhatsApp | `whatsapp_messages` | Deduplicated signed webhook receipts, sender provenance, original media, extraction checkpoints, review and linked candidate. |
+| WhatsApp | `whatsapp_conversations` | Business phone/contact history, explicit candidate link and last inbound time for the reply window. |
+| WhatsApp | `whatsapp_send_attempts` | Durable outgoing text, attachment or approved-template intents, unique request keys, immutable payloads and delivery outcome. |
+| WhatsApp | `whatsapp_delivery_events` | Deduplicated signed delivery callbacks, including callbacks received before a send response. |
+| WhatsApp | `whatsapp_templates` | Provider-synchronized template catalogue, language, components and current approval state. |
 | Documents | `document_attachments` | Versioned candidate, company and application documents. Owner is `entity_type` + `entity_id`; the file service validates owner/access. |
 | Documents | `document_extraction_jobs` | Owner-scoped manual uploads grouped by an intake session, original bytes, OCR state, saved human form edits and idempotent candidate attachment. |
+| Documents | `document_person_intakes` | Durable manual/email/WhatsApp review, immutable source provenance, page evidence, exclusions and review revision. |
+| Documents | `document_person_groups` | Reviewed person fields, exclusive page selections and resulting candidate links. All groups commit together. |
+| Intake | `intake_acknowledgement_settings` | Per-channel Admin-approved message and activation cutoff; disabled by default. |
+| Intake | `intake_acknowledgements` | One confirmation intent per saved source receipt, original message snapshot and explicit uncertain-delivery recovery. |
 | Intake | `ingestion_failures` | Retained failed-intake records and resolution details; inspect alongside each channel's durable job ledger. |
 | System | `system_notifications` | Recipient-owned notification bell items and persisted read state. |
 | System | `system_audit_log` | Recorded actor, action, affected entity, timestamp and structured context. User Management reads this history. |
@@ -66,6 +74,8 @@ Candidate identity matching uses normalized phone **OR** email **OR** passport. 
 ## Documents and recovery
 
 Original documents are retained separately from selected resume/passport/Aadhaar PDFs. Uploads are immutable: replacing a slot creates another version. Manual document jobs persist the original before the user requests OCR, retain provider job IDs and recover the saved form after a reload. Human-edited values take precedence over extraction. Candidate attachment is idempotent, including retry after a committed candidate save.
+
+Multi-person review preserves the original source and attaches only each confirmed person's selected pages to that candidate. Its source can link several candidates through `document_person_groups`; the legacy single `candidate_id` must not be used as the complete result. Shared email/WhatsApp review is Admin-controlled, and manual review stays private to its uploader. See [communication and split intake](communications-and-split-intake.md).
 
 Slow OCR/provider work runs outside ordinary record-change transactions. Email reception, email extraction, manual document extraction, WhatsApp extraction, presence expiry and task monitoring are separately supervised processes. Durable PostgreSQL checkpoints survive restart; locks prevent duplicate workers from processing the same queue. User-facing pending, failed and needs-review states distinguish an accepted remote job from a confirmed failure.
 
@@ -118,7 +128,7 @@ Avoid exporting password hashes, session IDs, OAuth secrets or raw identity-docu
 
 ## Migration policy
 
-The chain is `0001` through `0015`. Revisions `0001` through `0007` are retained; this integration adds:
+The chain is `0001` through `0016`. Revisions `0001` through `0007` are retained; this integration adds:
 
 - `0008_workflow_history`: ownership snapshots, persisted SLA timing, task history/settings and personal reminder delivery state.
 - `0009_communication_channels`: encrypted OAuth handshake/reply metadata, WhatsApp receipts, separate mail-worker heartbeat, atomic reference sequences and maintained resume full-text search.
@@ -128,7 +138,8 @@ The chain is `0001` through `0015`. Revisions `0001` through `0007` are retained
 - `0013_staff_attendance`: staff check-in/out, corrections and browser activity intervals with partial uniqueness indexes.
 - `0014_attendance_ordering`: durable clock-request ledger and browser-presence sequencing, including earlier request-key backfill.
 - `0015_attendance_hr`: seven monthly-policy, approval, weekly-off, roster, calendar, adjustment and leave-cover tables. Existing clocks and recruitment data remain unchanged.
+- `0016_intake_communications`: eight acknowledgement, document-review and WhatsApp chat tables, original mail safety metadata and a conversation-history index. Existing incoming WhatsApp history becomes readable conversations without guessed candidate links or queued messages.
 
 Migrations and model parity, fresh upgrade, earlier-record preservation and rollback/upgrade are checked against disposable PostgreSQL. This is not evidence that a production migration has been run. Apply the schema once during a coordinated release with the matching API; stop older writers first. Do not rewrite an applied migration. A future change must add a new revision.
 
-Downgrading removes the new feature ledgers/settings. `0015` removes monthly-policy requests, calendar, schedules, adjustments and cover ledgers; `0014` removes clock-request and presence-ordering ledgers; `0013` removes attendance/activity history; `0012` removes drafts/send attempts and mailbox action state; `0011` removes employer WhatsApp. `0010` downgrade removes manual extraction jobs and assignment events; `0009` removes channel/OAuth/reply data; `0008` removes workflow history/snapshots. Preserve a database plus document backup before rollback. Prefer a forward correction after real intake has begun. No downgrade deletes stored document bytes, and no migration recreates default accounts.
+Downgrading removes the new feature ledgers/settings. `0016` removes acknowledgements, person/page review and outgoing WhatsApp history; source receipts and candidate records remain, but the newer review/send provenance would be lost. `0015` removes monthly-policy requests, calendar, schedules, adjustments and cover ledgers; `0014` removes clock-request and presence-ordering ledgers; `0013` removes attendance/activity history; `0012` removes drafts/send attempts and mailbox action state; `0011` removes employer WhatsApp. `0010` downgrade removes manual extraction jobs and assignment events; `0009` removes channel/OAuth/reply data; `0008` removes workflow history/snapshots. Preserve a database plus document backup before rollback. Prefer a forward correction after real intake has begun. No downgrade deletes stored document bytes, and no migration recreates default accounts.

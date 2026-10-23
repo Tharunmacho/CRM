@@ -2,7 +2,8 @@ import hashlib
 import pytest
 from app.core.config import Settings
 from app.db.models import (Attachment, DocumentExtractionJob, MailAccount,
-                           MailDraft, MailDraftAttachment, MailSendAttempt)
+                           MailDraft, MailDraftAttachment, MailSendAttempt, MultiPersonIntake,
+                           WhatsAppChannel, WhatsAppConversation, WhatsAppSendAttempt)
 from app import storage_admin
 from app.services.document_storage import put_bytes, read_bytes
 from test_workflow_scheduler import workspace
@@ -108,4 +109,36 @@ def test_draft_and_sent_snapshot_files_are_audited_and_migrated(workspace, tmp_p
         assert saved["subject"] == snapshot["subject"] and saved["to"] == snapshot["to"]
         assert saved["attachments"][0] == {**snapshot["attachments"][0], "object_key": "s3://synthetic/crm/" + sent_key}
         assert remote["s3://synthetic/crm/" + sent_key] == read_bytes(settings, sent_key) == b"sent-file"
+        assert storage_admin.audit(db, settings)["ok"]
+
+
+def test_whatsapp_outbox_and_split_source_bytes_survive_verified_storage_migration(workspace, tmp_path, monkeypatch):
+    settings = Settings(_env_file=None, storage_dir=str(tmp_path), storage_backend="local", s3_bucket="synthetic", s3_prefix="crm")
+    remote = {}
+    monkeypatch.setattr(storage_admin, "read_bytes", lambda config, key: remote[key] if key.startswith("s3://") else read_bytes(config, key))
+    monkeypatch.setattr(storage_admin, "put_bytes", lambda config, key, data: remote.setdefault(key, data))
+    with workspace() as db:
+        # The reviewed source stays recoverable even when no candidate has yet
+        # been committed. Derived person PDFs use ordinary Attachment rows.
+        source = put_bytes(settings, "split/original.pdf", b"two-person-source")
+        outgoing = put_bytes(settings, "whatsapp/outbound/file.pdf", b"outgoing-message")
+        derived = put_bytes(settings, "split/person-resume.pdf", b"selected-person-pages")
+        digest = lambda value: hashlib.sha256(value).hexdigest()
+        db.add(WhatsAppChannel(phone_number_id="12345")); db.flush()
+        db.add(WhatsAppConversation(id="chat", phone_number_id="12345", peer_number="919999999999")); db.flush()
+        db.add(WhatsAppSendAttempt(id="outgoing", conversation_id="chat", sender_user_id="owner", request_key="storage-chat-test",
+            payload_hash="a" * 64, message_type="document", state="unknown", object_key=outgoing, content_hash=digest(b"outgoing-message")))
+        db.add(MultiPersonIntake(id="bundle", source_type="manual", source_id="original-job", created_by="owner",
+            sources=[{"id": "original-job", "object_key": source, "hash": digest(b"two-person-source"), "name": "original.pdf"}]))
+        db.add(Attachment(id="derived", entity_type="candidate", entity_id="candidate", slot="resume", file_name="person-resume.pdf",
+            object_key=derived, content_hash=digest(b"selected-person-pages")))
+        db.commit()
+        report = storage_admin.audit(db, settings)
+        assert report["ok"] and {row["key"] for row in report["objects"]} == {source, outgoing, derived}
+        storage_admin.migrate_s3(db, settings, apply=True, writers_stopped=True)
+        assert db.get(WhatsAppSendAttempt, "outgoing").object_key == "s3://synthetic/crm/" + outgoing
+        assert db.get(WhatsAppSendAttempt, "outgoing").state == "unknown"
+        assert db.get(MultiPersonIntake, "bundle").sources[0]["object_key"] == "s3://synthetic/crm/" + source
+        assert db.get(Attachment, "derived").object_key == "s3://synthetic/crm/" + derived
+        assert all(read_bytes(settings, key) for key in (source, outgoing, derived))
         assert storage_admin.audit(db, settings)["ok"]

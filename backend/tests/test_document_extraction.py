@@ -47,6 +47,67 @@ def result(kind, count):
     return value
 
 
+def full_page(kind, number):
+    box = {"x": 10, "y": 20, "w": 300, "h": 18}
+    return {
+        "page_number": number, "text": f"{kind} complete text {number}\nsecond line", "html": f"<p>{kind} {number}</p>",
+        "language": "eng+hin", "width": 1240, "height": 1754, "average_confidence": 0.93, "processing_time_ms": 40 + number,
+        "lines": [{"text": f"{kind} line", "confidence": 0.91, "bbox": box,
+                   "words": [{"text": kind, "confidence": 0.9, "bbox": box}]}],
+        "page_addition": {"kept": number},
+    }
+
+
+def full_payload(kind, count):
+    """A provider result touching every documented field plus additions the SDK does not model."""
+    pages = [full_page(kind, number) for number in range(1, count + 1)]
+    if kind == "aadhaar":
+        return {
+            "request_id": "req-aadhaar", "page_count": count, "pages": pages, "document_type": "aadhaar",
+            "languages_used": "eng+hin", "total_processing_time_ms": 77, "warnings": ["Back side is blurred"],
+            "aadhaar": {
+                "name": "ALEX EXAMPLE", "aadhaar_number": "000000000000", "masked_aadhaar_number": "XXXX XXXX 0000",
+                "aadhaar_number_valid": True, "date_of_birth": "1990-01-01", "year_of_birth": 1990, "gender": "male",
+                "mobile_number": "0000000000", "address": "1 Example Road, Example City", "care_of": "C/O Example Parent",
+                "pincode": "000000", "vid": "0000000000000000", "enrollment_id": "0000/00000/00000", "document_side": "both",
+                "card_addition": "kept",
+            },
+            "top_addition": {"kept": True},
+        }
+    if kind == "passport":
+        return {
+            "request_id": "req-passport", "processing_time_ms": 55, "pages": pages, "confidence": 0.97,
+            "mrz_source": "mrz", "raw_mrz": "P<EXAMPLE<<ALEX<<<<<<\nP0000000<0EXA9001010M3001019<<<<<<<<<<<<<<00",
+            "warnings": [], "top_addition": {"kept": True},
+            "mrz": {
+                "document_type": "P", "issuing_country": "IND", "surname": "EXAMPLE", "given_names": "ALEX",
+                "passport_number": "P0000000", "nationality": "IND", "date_of_birth": "1990-01-01", "sex": "M",
+                "expiry_date": "2030-01-01", "date_of_issue": "2020-01-02", "personal_number": "PN1",
+                "all_check_digits_valid": True,
+                "individual_check_digits": {"passport_number": True, "date_of_birth": True, "expiry_date": True,
+                                            "personal_number": True, "composite": True},
+            },
+            "fields": [{"label": "Place of issue", "value": "COCHIN", "category": "place", "page": 1,
+                        "source": "visual", "confidence": 0.88}],
+        }
+    return {
+        "request_id": "req-resume", "processing_time_ms": 99, "pages": pages, "name": "ALEX EXAMPLE",
+        "contact": {"emails": ["alex@example.test", "alt@example.test"], "phones": ["0000000000", "0000000001"],
+                    "linkedin": "https://linkedin.example/alex", "address": "2 Example Road", "websites": ["https://alex.example"]},
+        "personal_info": {"father_name": "Parent Example", "marital_status": "single", "religion": "n/a",
+                          "place_of_birth": "Example City", "languages_known": ["English", "Hindi"]},
+        "designation": "welder", "industry": "Construction", "highest_qualification": "Diploma",
+        "experience": [{"title": "Welder", "company": "ACME", "location": "Dubai", "country": "UAE", "is_overseas": True,
+                        "start": "2019-01", "end": "2022-01", "duration_months": 36, "duration_human": "3 years",
+                        "description": "TIG welding", "entry_addition": 1}],
+        "total_experience_months": 36, "total_experience_years": 3.0, "total_experience_human": "3 years",
+        "overseas_experience_months": 36, "overseas_experience_years": 3.0, "overseas_experience_human": "3 years",
+        "skills": ["TIG"], "projects": [{"name": "Plant", "description": "Pipe work"}],
+        "education": [{"degree": "Diploma", "institution": "ITI", "start": "2015", "end": "2018"}],
+        "achievements": ["Best welder"], "certifications": ["6G"], "warnings": [], "top_addition": {"kept": True},
+    }
+
+
 @pytest.fixture
 def environment(monkeypatch):
     settings = SimpleNamespace(
@@ -122,19 +183,57 @@ def test_all_document_types_select_exact_pages_and_keep_aadhaar_identity_separat
     expected = {"resume": [2], "passport": [3], "aadhaar": [4, 5]}
     for kind, extraction in output["extractions"].items():
         assert extraction["selected_pages"] == expected[kind]
-        assert [page["page_number"] for page in extraction["raw"]["pages"]] == expected[kind]
-        assert [page["provider_page_number"] for page in extraction["raw"]["pages"]] == list(
-            range(1, len(expected[kind]) + 1)
-        )
+        # Veris numbers stay the provider's; the mapping to the original file is in `source`.
+        assert [page["page_number"] for page in extraction["raw"]["pages"]] == list(range(1, len(expected[kind]) + 1))
+        assert extraction["source"]["selected_pages"] == expected[kind]
+        assert not {"provider_page_number", "local_inspection", "source_sha256"} & set(extraction["raw"])
         assert any("result" in snapshot.get("provider_jobs", {}).get(kind, {}) for snapshot in environment.saved)
     aadhaar = output["extractions"]["aadhaar"]
     assert aadhaar["fields"] == {
-        "name": "Alex Example", "phone": "0000000000", "dob": "1990-01-01", "gender": "male",
+        "name": "Alex Example", "dob": "1990-01-01", "gender": "male",
     }
     assert aadhaar["raw"]["aadhaar"]["masked_aadhaar_number"] == "XXXX XXXX 0000"
     assert output["extractions"]["resume"]["fields"]["total_experience"] == 3
     assert "totalExperience" not in output["extractions"]["resume"]["fields"]
     assert output["extractions"]["passport"]["fields"]["passport_no"] == "P0000000"
+
+
+def test_the_stored_document_is_exactly_the_provider_result_for_resume_passport_and_aadhaar(environment):
+    payloads = {"resume": full_payload("resume", 1), "passport": full_payload("passport", 1), "aadhaar": full_payload("aadhaar", 2)}
+    environment.results.update(deepcopy(payloads))
+
+    output = environment.extract(pdf(CV, PASSPORT, AADHAAR, AADHAAR_BACK))
+
+    assert output["status"] == "complete"
+    expected_pages = {"resume": [1], "passport": [2], "aadhaar": [3, 4]}
+    for kind, payload in payloads.items():
+        extraction = output["extractions"][kind]
+        # Byte-for-byte: unknown keys, html, line boxes and the provider's page numbers included.
+        assert extraction["raw"] == payload
+        assert extraction["raw"] == environment.saved[-1]["provider_jobs"][kind]["result"]
+        assert extraction["source"]["selected_pages"] == expected_pages[kind]
+        assert extraction["source"]["local_inspection"]["selected_pages"] == expected_pages[kind]
+        assert extraction["source"]["local_inspection"]["page_count"] == 4
+        assert extraction["source"]["source_sha256"] == environment.state["source_sha256"]
+    # Aadhaar identifiers and the passport's printed fields are stored although not mapped to columns.
+    assert set(output["extractions"]["aadhaar"]["fields"]) == {"name", "dob", "gender"}
+    assert output["extractions"]["aadhaar"]["raw"]["aadhaar"]["aadhaar_number"] == "000000000000"
+    assert output["extractions"]["passport"]["raw"]["fields"][0]["value"] == "COCHIN"
+    assert output["extractions"]["passport"]["fields"]["passport_place"] == "COCHIN"
+    # The paid response also stays verbatim in the durable checkpoint.
+    for kind, payload in payloads.items():
+        assert environment.saved[-1]["provider_jobs"][kind]["result"] == payload
+
+
+def test_a_page_beyond_the_limit_is_reported_and_blocks_extraction_instead_of_vanishing(environment):
+    environment.settings.ocr_max_pages = 1
+
+    output = environment.extract(pdf(CV, PASSPORT))
+
+    assert output["status"] == "needs_review" and output["extractions"] == {}
+    assert output["inspection"]["unread_pages"] == [2]
+    assert "inspection limit" in output["inspection"]["pages"][1]["reason"]
+    assert environment.submissions == []
 
 
 def test_pending_job_is_saved_before_poll_and_resumed_after_worker_restart(environment):
@@ -428,3 +527,78 @@ def test_aadhaar_birth_year_and_number_never_become_invented_candidate_fields(en
     assert "current_city" not in fields
     assert any("birth year" in warning for warning in output["warnings"])
     assert any("number did not pass" in warning for warning in output["warnings"])
+
+
+# ---- partial extraction, dual-kind pages, unreadable and decorative files -----------------
+
+UNCLASSIFIED = "This is correspondence about travel arrangements and several unrelated meeting dates. " * 3
+
+
+def gray_png(width=600, height=800):
+    import io
+    from PIL import Image
+    with Image.new("RGB", (width, height), "gray") as image:
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+        return out.getvalue()
+
+
+def test_unclassified_page_holds_everything_back_unless_partial_extraction_is_requested(environment):
+    data = pdf(CV, UNCLASSIFIED)
+    held = environment.extract(data)
+    assert held["status"] == "needs_review" and not held["extractions"] and not environment.submissions
+
+
+def test_partial_extraction_sends_the_classified_pages_and_names_the_rest(environment):
+    output = environment.extract(pdf(CV, UNCLASSIFIED), partial=True)
+
+    assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume"}
+    assert output["extractions"]["resume"]["selected_pages"] == [1]
+    assert output["inspection"]["unknown_pages"] == [2]
+    assert any("Pages 2" in warning and "not extracted" in warning for warning in output["warnings"])
+    assert [entry[0] for entry in environment.submissions] == ["resume"]
+    with fitz.open(stream=environment.submissions[0][1].data, filetype="pdf") as sent:
+        assert sent.page_count == 1
+
+
+def test_partial_extraction_with_nothing_classified_still_needs_review(environment):
+    output = environment.extract(pdf(UNCLASSIFIED), partial=True)
+    assert output["status"] == "needs_review" and not output["extractions"] and not environment.submissions
+
+
+def test_partial_checkpoint_resumes_without_a_second_submission(environment):
+    data = pdf(CV, UNCLASSIFIED)
+    environment.extract(data, partial=True)
+    again = environment.extract(data, partial=True)
+    assert again["extractions"]["resume"]["selected_pages"] == [1]
+    assert len(environment.submissions) == 1
+
+
+def test_page_with_passport_and_aadhaar_is_sent_to_both_extractions(environment):
+    output = environment.extract(pdf(CV, PASSPORT + AADHAAR))
+
+    assert output["status"] == "complete"
+    assert output["extractions"]["passport"]["selected_pages"] == [2]
+    assert output["extractions"]["aadhaar"]["selected_pages"] == [2]
+
+
+def test_decorative_image_is_ignored_only_when_the_caller_allows_it(environment):
+    data = gray_png()
+    ignored = environment.extract(data, ignore_decorative=True)
+    assert ignored["status"] == "ignored" and ignored["reason"] and not ignored["warnings"]
+    held = environment.extract(data, state={})
+    assert held["status"] == "needs_review"
+
+
+def test_damaged_file_is_unreadable_but_a_missing_converter_is_a_retryable_failure(environment, monkeypatch):
+    with pytest.raises(subject.UnreadableDocument):
+        environment.extract(b"%PDF-1.4 definitely not a pdf", state={})
+    import io
+    import zipfile
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("word/document.xml", "<w/>")
+    monkeypatch.setattr(inspection, "_find_libreoffice", lambda: None)
+    with pytest.raises(subject.ExtractionFailure) as raised:
+        environment.extract(buffer.getvalue(), state={})
+    assert not isinstance(raised.value, subject.UnreadableDocument)

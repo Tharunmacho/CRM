@@ -8,10 +8,10 @@ import { Dialog } from '@/shared/ui/overlay'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 
-export function CompanyDialog({ company, onClose }: { company?: Company; onClose: () => void }) {
+export function CompanyDialog({ company, clientId, onClose }: { company?: Company; clientId?: string; onClose: () => void }) {
   const store = useStore()
   const [form, setForm] = useState({
-    clientId: company?.clientId ?? '', name: company?.name ?? '', country: company?.country ?? '',
+    clientId: company?.clientId ?? clientId ?? '', name: company?.name ?? '', country: company?.country ?? '',
     city: company?.city ?? '', industry: company?.industry ?? '', contactPerson: company?.contactPerson ?? '',
     contactEmail: company?.contactEmail ?? '', phone: company?.phone ?? '', whatsapp: company?.whatsapp ?? '', address: company?.address ?? '',
     notes: company?.notes ?? '', status: company?.status ?? 'active',
@@ -65,7 +65,7 @@ export function CompanyDialog({ company, onClose }: { company?: Company; onClose
     {error && <p role="alert" className="mb-4 rounded-control bg-stamp-50 p-3 text-sm text-stamp-700">{error}</p>}
     <form id="company-form" onSubmit={(event) => { event.preventDefault(); void save() }}>
       <fieldset disabled={saving} className="grid gap-4 sm:grid-cols-2">
-        <Field label="Client" required hint="The person who owns this company" className="sm:col-span-2"><Select value={form.clientId} onChange={(e) => set('clientId', e.target.value)}><option value="">Choose a client</option>{store.clients.filter((client) => client.status === 'active' || client.id === form.clientId).map((client) => <option key={client.id} value={client.id}>{client.name}{client.status === 'inactive' ? ' (inactive)' : ''}</option>)}</Select></Field>
+        <Field label="Client contact" required hint="The client relationship this employer belongs to" className="sm:col-span-2"><Select value={form.clientId} onChange={(e) => set('clientId', e.target.value)}><option value="">Choose a client contact</option>{store.clients.filter((client) => client.status === 'active' || client.id === form.clientId).map((client) => <option key={client.id} value={client.id}>{client.name}{client.status === 'inactive' ? ' (inactive)' : ''}</option>)}</Select></Field>
         <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
         <Field label="Industry"><Input maxLength={120} value={form.industry} onChange={(e) => set('industry', e.target.value)} /></Field>
         <Field label="Status"><Select value={form.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></Select></Field>

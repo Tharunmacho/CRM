@@ -61,6 +61,8 @@ export function Dialog({
   children,
   footer,
   width = 'md',
+  scroll = 'page',
+  appearance = 'default',
 }: {
   open: boolean
   onClose: () => void
@@ -68,24 +70,29 @@ export function Dialog({
   description?: string
   children: ReactNode
   footer?: ReactNode
+  /** `clean` lightens the backdrop and keeps every part of the card white. */
+  appearance?: 'default' | 'clean'
   /** `full` takes the whole window: the header stays put and the body scrolls under it. */
   width?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+  /** Keep the title and actions visible while a long form scrolls inside its card. */
+  scroll?: 'page' | 'inside'
 }) {
   const root = useRef<HTMLDivElement>(null)
   useDismiss(open, onClose, root)
   if (!open) return null
 
   const full = width === 'full'
+  const contained = full || scroll === 'inside'
   const widths = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl', xl: 'max-w-5xl', full: '' }[width]
 
   return createPortal(
     <div
       className={cn(
         'fixed inset-0 z-50 flex',
-        full ? '' : 'items-start justify-center overflow-y-auto p-4 sm:p-8',
+        full ? '' : scroll === 'inside' ? 'items-center justify-center overflow-hidden p-3 sm:p-6' : 'items-start justify-center overflow-y-auto p-4 sm:p-8',
       )}
     >
-      <div className="fixed inset-0 bg-ink-900/40 animate-fade-in" onClick={onClose} aria-hidden />
+      <div className={cn('fixed inset-0 animate-fade-in', appearance === 'clean' ? 'bg-white/75 backdrop-blur-[3px]' : 'bg-ink-900/40')} onClick={onClose} aria-hidden />
       <div
         ref={root}
         tabIndex={-1}
@@ -94,7 +101,8 @@ export function Dialog({
         aria-label={title}
         className={cn(
           'workspace-dialog relative z-10 w-full overflow-hidden bg-white shadow-overlay animate-sheet-in',
-          full ? 'flex h-full flex-col' : 'rounded-panel',
+          appearance === 'clean' && 'border border-rule-soft shadow-[0_24px_70px_-20px_rgba(20,38,66,0.28)]',
+          full ? 'flex h-full flex-col' : scroll === 'inside' ? 'flex max-h-[calc(100dvh-1.5rem)] flex-col rounded-panel sm:max-h-[calc(100dvh-3rem)]' : 'rounded-panel',
           widths,
         )}
       >
@@ -107,9 +115,9 @@ export function Dialog({
             <X className="h-4 w-4" />
           </IconButton>
         </header>
-        <div className={cn('px-6 py-5', full && 'scrollbar-thin min-h-0 flex-1 overflow-y-auto')}>{children}</div>
+        <div className={cn('px-6 py-5', contained && 'dialog-scroll-body scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain')}>{children}</div>
         {footer && (
-          <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-rule-soft bg-field/40 px-6 py-4">
+          <footer className={cn('flex shrink-0 items-center justify-end gap-2 border-t border-rule-soft px-6 py-4', appearance === 'clean' ? 'bg-white' : 'bg-field/40')}>
             {footer}
           </footer>
         )}

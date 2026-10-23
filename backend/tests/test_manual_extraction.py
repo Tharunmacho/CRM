@@ -127,6 +127,11 @@ def test_provider_id_result_and_form_draft_survive_worker_restart(intake, monkey
     detail = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
     assert detail["status"] == "completed"
     assert detail["result"]["scans"]["resume"]["fields"]["totalExperience"] == 3
+    # The reading result carries the provider's document untouched, with provenance beside it.
+    scan = detail["result"]["scans"]["resume"]
+    assert scan["raw"] == intake.results["resume"]
+    assert scan["source"]["selected_pages"] == [1] and scan["source"]["local_inspection"]["selected_pages"] == [1]
+    assert scan["source"]["source_sha256"]
     assert len(intake.submissions) == 1 and intake.polls == ["job-resume", "job-resume"]
     assert intake.client.get(path).json()[0]["draft"] == {**draft, "savedCandidateId": None}
 
@@ -223,14 +228,14 @@ def test_supporting_documents_are_durable_without_starting_paid_extraction(intak
 @pytest.mark.parametrize("recovery_available", [True, False])
 def test_lost_commit_response_retains_original_and_retry_recovers_same_job(intake, monkeypatch, recovery_available):
     commit, scalar = Session.commit, Session.scalar
-    reads = 0
+    committed = False
     def uncertain_commit(db):
+        nonlocal committed
         commit(db)
+        committed = True
         raise SQLAlchemyError("Synthetic lost commit response")
     def read(db, *args, **kwargs):
-        nonlocal reads
-        reads += 1
-        if not recovery_available and reads >= 3:
+        if not recovery_available and committed:
             raise SQLAlchemyError("Synthetic recovery connection unavailable")
         return scalar(db, *args, **kwargs)
     monkeypatch.setattr(Session, "commit", uncertain_commit)

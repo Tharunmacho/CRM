@@ -35,7 +35,8 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.core.deps import current_user
 from app.db.models import Designation, User
-from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields, trim_raw
+from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields
+from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 from app.integrations.ocr.client import ScanFailed, ScanTimedOut, scan as veris_scan
 from app.integrations.ocr.inspection import InspectionError, inspect_document
 from app.api.routers.files import MAX_BYTES
@@ -44,6 +45,7 @@ router = APIRouter(prefix="/api/ocr", tags=["ocr"])
 
 log = logging.getLogger("uvicorn.error")
 settings = get_settings()
+_MODELS = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}
 
 
 def _inspection_error(code: int, message: str, report: dict) -> HTTPException:
@@ -145,10 +147,11 @@ def scan(
     request_key = "crm-" + hashlib.sha256(key_input.encode()).hexdigest()
     provider_started = time.monotonic()
     try:
-        result = veris_scan(
+        payload_out = veris_scan(
             kind, doc, base_url=settings.veris_ocr_base_url, api_key=settings.veris_ocr_api_key,
             idempotency_key=request_key,
         )
+        result = _MODELS[kind].model_validate(payload_out)
     except ScanFailed:
         log.warning("Veris %s extraction failed (ScanFailed)", kind)
         raise _inspection_error(
@@ -200,18 +203,14 @@ def scan(
     else:
         fields, provider_warnings = aadhaar_fields(result)
 
-    raw = trim_raw(result)
-    for page in raw["pages"]:
-        local_number = page["page_number"]
-        page["provider_page_number"] = local_number
-        page["page_number"] = selected[local_number - 1]
-    raw["pages"].sort(key=lambda p: p["page_number"])
-    raw["local_inspection"] = report
-    raw["source_sha256"] = source_hash
+    # `payload_out` is the Veris result verbatim. Page numbers stay the provider's
+    # (1..n of the pages sent); `source.selected_pages[page_number - 1]` maps one back
+    # to the uploaded file. The recruiter's form sends both back with the save.
     return _response(
         report, warnings + provider_warnings, "complete",
         fields=fields.model_dump(by_alias=True, exclude_none=True, mode="json"),
-        raw=raw,
+        raw=payload_out,
+        source={"local_inspection": report, "source_sha256": source_hash, "selected_pages": list(selected)},
     )
 
 
@@ -222,11 +221,13 @@ def _response(
     *,
     fields: dict | None = None,
     raw: dict | None = None,
+    source: dict | None = None,
 ) -> dict:
     return {
         "fields": fields or {},
         "warnings": warnings,
         "raw": raw or {},
+        "source": source or {},
         "inspection": inspection,
         "extraction_status": extraction_status,
     }

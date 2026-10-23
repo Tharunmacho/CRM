@@ -10,8 +10,10 @@ from app.core.config import get_settings
 from app.db.models import EmailIngestionJob, MailAccount, MailMessage
 from app.db.session import SessionLocal, engine
 from app.services.email_intake import now, process_job, receive_account
+from app.services.mail_providers import LIVE_PROVIDERS
 from app.services.mail_storage import STORAGE_MISMATCH, storage_identity
 from app.services.mail_history import receive_history
+from app.services.intake_acknowledgements import dispatch_pending_email_acknowledgements
 
 log = logging.getLogger("email_worker")
 STOP = threading.Event()
@@ -25,7 +27,7 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
         return
     volume_id = storage_identity(settings.storage_dir, settings)
     with sessions() as db:
-        accounts = list(db.scalars(select(MailAccount).where(MailAccount.disconnected_at.is_(None), MailAccount.provider.in_(["zoho", "imap"])).with_for_update()))
+        accounts = list(db.scalars(select(MailAccount).where(MailAccount.disconnected_at.is_(None), MailAccount.provider.in_(sorted(LIVE_PROVIDERS))).with_for_update()))
         due, eligible = [], []
         for account in accounts:
             cursor = dict(account.sync_state or {})
@@ -49,6 +51,8 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
                 due.append(account.id)
         db.commit()
     if not eligible:
+        if mode != "extract":
+            dispatch_pending_email_acknowledgements(sessions=sessions, settings=settings)
         return
     for account_id in due if mode != "extract" else []:
         if STOP.is_set():
@@ -70,6 +74,7 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
                         account.sync_state = {**account.sync_state, "history": history}
                     db.commit()
     if mode == "receive":
+        dispatch_pending_email_acknowledgements(sessions=sessions, settings=settings)
         return
     with sessions() as db:
         ready = list(db.scalars(select(EmailIngestionJob.id).join(
@@ -102,6 +107,8 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
                     job.next_attempt_at = now() + timedelta(seconds=90 * 2 ** (job.attempts - 1))
                     job.last_error = "Document processing failed. Retry after checking worker configuration."
                     db.commit()
+    if mode != "extract":
+        dispatch_pending_email_acknowledgements(sessions=sessions, settings=settings)
 
 
 def main(mode="receive"):
@@ -112,7 +119,7 @@ def main(mode="receive"):
     for name in ("SIGINT", "SIGTERM"):
         signal.signal(getattr(signal, name), lambda *_: STOP.set())
     lock_key = LOCK + (1 if mode == "extract" else 0)
-    log.info("Email %s worker started; receive cadence %ss. Auto-replies are disabled.", mode, settings.email_poll_seconds)
+    log.info("Email %s worker started; receive cadence %ss. Saved-intake acknowledgements require per-mailbox Admin approval.", mode, settings.email_poll_seconds)
     while not STOP.is_set():
         try:
             # A dedicated autocommit connection holds a session lock, not a long

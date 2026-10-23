@@ -128,12 +128,84 @@ def test_aadhaar_mention_or_twelve_digit_number_alone_is_insufficient(text):
     assert classify_page(text).document_type == "unknown"
 
 
-@pytest.mark.parametrize("other", [CV, PASSPORT])
-def test_aadhaar_mixed_with_another_document_requires_review(other):
-    assert classify_page(other + AADHAAR).document_type == "unknown"
-    assert classify_pages([CV, other + AADHAAR])[1].document_type == "unknown"
+def test_aadhaar_mixed_with_a_resume_requires_review():
+    assert classify_page(CV + AADHAAR).document_type == "unknown"
+    assert classify_pages([CV, CV + AADHAAR])[1].document_type == "unknown"
+
+
+def test_aadhaar_mixed_with_a_passport_belongs_to_both():
+    assert classify_page(PASSPORT + AADHAAR).also == ("aadhaar",)
 
 
 def test_aadhaar_pages_are_excluded_from_resume_and_stop_continuation():
     result = classify_pages([CV, CONTINUATION, AADHAAR, AADHAAR_BACK, CONTINUATION])
     assert [page.document_type for page in result] == ["resume", "resume", "aadhaar", "aadhaar", "unknown"]
+
+
+# ---- detection robustness, mixed pages and back sides ---------------------------------
+
+GARBLED_MRZ = (
+    "PKINDKUMARKKRAHULKKKKKKKKKKKKKKKKKKKKKK\n"
+    "Z1234567<4IND9001015M3001012<<<<<<<<<<<<<<04"
+)
+INDIA_PASSPORT_DATA = """REPUBLIC OF INDIA
+PASSPORT
+Type P Country Code IND Passport No. Z1234567
+Surname KUMAR
+Given Name(s) RAHUL
+Nationality INDIAN
+Date of Birth 01/01/1990
+Place of Issue COCHIN
+"""
+PASSPORT_ADDRESS = """Name of Father / Legal Guardian  SURESH KUMAR
+Name of Mother  LATHA KUMAR
+Address 12 EXAMPLE ROAD KOCHI PIN 682001
+Old Passport No. NA
+File No. COH/1234/2020
+"""
+VISA = """VISA
+Type of visa: Employment
+Valid until 01/01/2030
+Number of entries: multiple
+Issued at DOHA
+"""
+AADHAAR_VID_BACK = """Address: C/O Suresh Kumar, 12 Example Road, Kochi, Kerala - 682001
+VID : 1234 5678 9012 3456
+Download Date: 01/01/2026
+"""
+
+
+@pytest.mark.parametrize("text", [GARBLED_MRZ, INDIA_PASSPORT_DATA, PASSPORT_ADDRESS])
+def test_passport_detection_tolerates_garbled_chevrons_republic_of_india_and_address_pages(text):
+    assert classify_page(text).document_type == "passport"
+
+
+def test_visa_page_is_supporting_not_unknown_but_a_resume_listing_visa_stays_resume():
+    assert classify_page(VISA).document_type == "other"
+    assert classify_page(CV + "\nVisa status: Employment visa\nValid until 01/01/2030\nType of visa: work").document_type == "resume"
+
+
+def test_aadhaar_virtual_id_page_is_recognized_without_issuer_text():
+    assert classify_page(AADHAAR_VID_BACK).document_type == "aadhaar"
+
+
+def test_resume_personal_details_do_not_look_like_a_passport_address_page():
+    text = CV + "\nName of Father: Suresh\nName of Mother: Latha\nAddress: Kochi PIN 682001"
+    assert classify_page(text).document_type == "resume"
+
+
+def test_page_with_passport_and_aadhaar_goes_to_both_kinds():
+    page = classify_page(PASSPORT + AADHAAR)
+    assert page.document_type == "passport" and page.also == ("aadhaar",)
+
+
+def test_unknown_back_side_inherits_the_adjoining_identity_document():
+    back = "Some printed text with address details and a barcode. " * 3
+    result = classify_pages([CV, AADHAAR, back])
+    assert result[2].document_type == "aadhaar" and result[2].inherited
+
+
+def test_unknown_page_between_different_documents_or_beside_a_resume_stays_unknown():
+    back = "Some printed text with address details and a barcode. " * 3
+    assert classify_pages([PASSPORT, back, AADHAAR])[1].document_type == "unknown"
+    assert classify_pages([CV, back])[1].document_type == "unknown"

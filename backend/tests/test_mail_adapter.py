@@ -209,6 +209,14 @@ def test_incomplete_message_is_not_parsed_as_success(connection, config):
     assert error.value.retryable
 
 
+def test_small_server_size_discrepancy_does_not_block_the_message(connection, config):
+    # Servers differ slightly between RFC822.SIZE and delivered bytes (line endings, headers).
+    for drift in (1, -1):
+        connection.size += drift
+        with subject.IMAPMailbox(config) as mailbox:
+            assert mailbox.fetch(9, uid_validity="123").uid == 9
+
+
 def test_unsolicited_other_uid_cannot_be_attached_to_requested_message(connection, config):
     connection.fetch_uid = 8
     with subject.IMAPMailbox(config) as mailbox:

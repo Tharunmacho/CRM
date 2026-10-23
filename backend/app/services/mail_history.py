@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.db.models import EmailIngestionJob, MailAccount, MailAttachment, MailMessage
 from app.integrations.mail.imap import IMAPMailbox, MailAdapterError, MailMessageError, require_cursor_source
 from app.services.email_intake import store_original
-from app.services.zoho_mail import account_config
+from app.services.mail_providers import account_config
 
 
 ACTIVE = {"queued", "running"}
@@ -56,6 +56,7 @@ def receive_history(account_id, *, sessions, settings):
                             from_name=incoming.from_name[:200] if incoming else None, from_address=incoming.from_address[:255] if incoming else None,
                             body=incoming.body if incoming else None, unread=incoming.unread if incoming else True,
                             message_id_header=incoming.message_id_header if incoming else None,
+                            automation_headers={**incoming.automation_headers, "historical_import": True} if incoming else {},
                             references_header=incoming.references_header if incoming else None, reply_to=incoming.reply_to if incoming else None,
                             folder=(incoming.folder or "INBOX") if incoming else "INBOX", remote_uid=incoming.uid if incoming else None,
                             uid_validity=incoming.uid_validity if incoming else None,

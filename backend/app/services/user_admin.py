@@ -1,6 +1,7 @@
 """Transactional account administration; credentials never enter audit metadata."""
 from __future__ import annotations
 from datetime import datetime, timezone
+import logging
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, or_, select
@@ -10,6 +11,23 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.db.models import AssignmentPointer, AuditEntry, Candidate, Role, Session as LoginSession, Task, TaskEvent, User
+
+
+log = logging.getLogger(__name__)
+
+
+def _assign_waiting_after_change(db: Session, actor_id: str, actor_name: str) -> None:
+    """Hand owner-less candidates to staff who just became eligible.
+
+    Best effort and after the account change is committed: a failure here is rolled back
+    on its own and must never fail the administrator's request."""
+    try:
+        from app.services.candidate_review import assign_waiting_candidates
+        assign_waiting_candidates(db, actor_id, actor_name)
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.warning("Waiting candidates could not be assigned after an account change; use Assign waiting candidates.", exc_info=True)
 
 
 def _directory(db: Session, actor: User) -> list[User]:
@@ -71,15 +89,18 @@ def create_user(db: Session, actor: User, values: dict) -> User:
     db.flush()
     _audit(db, actor, user, 'User created', {'role': user.role.value, 'active': user.active})
     _commit(db)
+    from app.services.candidate_review import eligible_for_assignment
+    if eligible_for_assignment(user):
+        _assign_waiting_after_change(db, actor.id, actor.name)
     return user
 
 
-def _transfer(db: Session, actor: User, user: User, users: list[User], target_id: str | None) -> dict:
+def _transfer(db: Session, actor: User, user: User, users: list[User], target_id: str | None) -> tuple[dict, list, list]:
     candidates = list(db.scalars(select(Candidate).where(Candidate.owner_id == user.id).order_by(Candidate.id).with_for_update()))
     open_count = db.scalar(select(func.count()).select_from(Task).where(
         Task.owner_id == user.id, Task.completed_at.is_(None), Task.cancelled_at.is_(None))) or 0
     if not candidates and not open_count:
-        return {'candidates': 0, 'tasks': 0}
+        return {'candidates': 0, 'tasks': 0}, [], []
     if not target_id:
         raise HTTPException(422, 'Choose a staff member to receive all owned candidates and open tasks.')
     target = _find(users, target_id)
@@ -98,15 +119,19 @@ def _transfer(db: Session, actor: User, user: User, users: list[User], target_id
     ).order_by(Task.id).with_for_update()))
     at = datetime.now(timezone.utc)
     moved = 0
+    task_only_changes = []
     for task in tasks:
         if task.owner_id == target.id:
             continue
+        if task.candidate_id not in ids:
+            task_only_changes.append((task.id, task.title, task.owner_id, target.id))
         db.add(TaskEvent(kind='assignment', task_id=task.id, candidate_id=task.candidate_id,
             owner_id=target.id, event_key=f'assignment:{task.id}:{at.isoformat()}:{target.id}', occurred_at=at,
             meta={'fromOwnerId': task.owner_id, 'toOwnerId': target.id}))
         task.owner_id = target.id
         moved += 1
-    return {'candidates': len(candidates), 'tasks': moved, 'toUserId': target.id}
+    return {'candidates': len(candidates), 'tasks': moved, 'toUserId': target.id}, [
+        (candidate.id, candidate.name, user.id, target.id) for candidate in candidates], task_only_changes
 
 
 def update_user(db: Session, actor: User, user_id: str, values: dict) -> User:
@@ -130,16 +155,29 @@ def update_user(db: Session, actor: User, user_id: str, values: dict) -> User:
     changes = {key: {'before': getattr(user, key), 'after': value} for key, value in values.items()
                if value != getattr(user, key)}
     transfer = None
+    ownership_changes = []
+    task_only_changes = []
     if not next_active or (user.role == Role.staff and next_role != Role.staff):
-        transfer = _transfer(db, actor, user, users, target_id)
+        transfer, ownership_changes, task_only_changes = _transfer(db, actor, user, users, target_id)
     revoke = not next_active or next_role != user.role or values.get('email', user.email) != user.email
+    from app.services.candidate_review import eligible_for_assignment
+    was_eligible = eligible_for_assignment(user)
     for key, value in values.items():
         setattr(user, key, value)
+    became_eligible = not was_eligible and eligible_for_assignment(user)
+    if ownership_changes or task_only_changes:
+        from app.services.assignment_notifications import notify_assignment_changes, notify_task_assignment_changes
+        notify_assignment_changes(db, ownership_changes,
+            reason=f"Transferred during an account change by {actor.name}.", users=users)
+        notify_task_assignment_changes(db, task_only_changes,
+            reason=f"Transferred during an account change by {actor.name}.", users=users)
     revoked = _revoke(db, user) if revoke else 0
     if changes or transfer:
         _audit(db, actor, user, 'User updated' if next_active else 'User deactivated',
                {'changes': changes, 'transfer': transfer, 'revokedSessions': revoked})
     _commit(db)
+    if became_eligible:
+        _assign_waiting_after_change(db, actor.id, actor.name)
     return user
 
 

@@ -1,4 +1,4 @@
-"""Zoho compose, private drafts, attachment ownership and explicit send recovery."""
+"""Compose, private drafts, attachment ownership and explicit send recovery."""
 import hashlib
 import re
 from pathlib import PurePosixPath, PureWindowsPath
@@ -18,7 +18,8 @@ from app.db.session import get_db
 from app.integrations.mail.mailbox import WritableMailbox, MailAdapterError, role_for
 from app.integrations.mail.smtp import address, deliver, MailSendError
 from app.services.document_storage import file_response, put_bytes, read_bytes
-from app.services import mail_drafts as service, zoho_mail
+from app.services import mail_drafts as service, mail_providers
+from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(tags=["inbox"])
 
@@ -69,11 +70,30 @@ def drafts(account_id: str | None = None, status: str | None = None,
         pattern = "%" + search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         query = query.where(or_(*[column.ilike(pattern, escape="\\") for column in
             (MailDraft.subject, MailDraft.body, cast(MailDraft.to_addresses, Text), cast(MailDraft.cc_addresses, Text), cast(MailDraft.bcc_addresses, Text))]))
-    total = db.scalar(select(func.count()).select_from(query.subquery()))
-    rows = list(db.scalars(query.order_by(MailDraft.updated_at.desc(), MailDraft.id.desc()).offset(offset).limit(limit)))
+    total, rows = parallel_reads(
+        db,
+        lambda session: session.scalar(select(func.count()).select_from(query.subquery())),
+        lambda session: list(session.scalars(query.order_by(MailDraft.updated_at.desc(), MailDraft.id.desc()).offset(offset).limit(limit))),
+    )
+    ids = [row.id for row in rows]
+    attempts: dict[str, list] = {row_id: [] for row_id in ids}
+    attachments: dict[str, list] = {row_id: [] for row_id in ids}
+    if ids:
+        # Two reads for the whole page, not one of each per draft.
+        sent, files = parallel_reads(
+            db,
+            lambda session: list(session.scalars(select(MailSendAttempt).where(MailSendAttempt.draft_id.in_(ids)).order_by(MailSendAttempt.created_at.desc()))),
+            lambda session: list(session.scalars(select(MailDraftAttachment).where(MailDraftAttachment.draft_id.in_(ids)).order_by(MailDraftAttachment.id))),
+        )
+        for item in sent:
+            attempts[item.draft_id].append(item)
+        for item in files:
+            attachments[item.draft_id].append(item)
+    db.add_all(rows)  # the reads ran in their own sessions; a state fix below is saved through this one
+    db.add_all([item for group in attempts.values() for item in group])
     for row in rows:
-        service.expire_sending(db, row)
-    return {"drafts": [service.draft_out(db, row) for row in rows], "total": total, "offset": offset, "limit": limit, "hasMore": offset + len(rows) < total}
+        service.expire_sending(db, row, attempts[row.id])
+    return {"drafts": [service.draft_out(db, row, attachments[row.id]) for row in rows], "total": total, "offset": offset, "limit": limit, "hasMore": offset + len(rows) < total}
 
 
 @router.post("/drafts", status_code=201)
@@ -82,7 +102,7 @@ def create(body: CreateIn, db: Session = Depends(get_db), user: User = Depends(c
     if not account:
         raise HTTPException(404, "Mailbox not found")
     try:
-        config = zoho_mail.account_config(db, get_settings(), account)
+        config = mail_providers.account_config(db, get_settings(), account)
     except MailAdapterError as exc:
         raise HTTPException(409, str(exc)) from None
     source = None
@@ -119,12 +139,12 @@ def create(body: CreateIn, db: Session = Depends(get_db), user: User = Depends(c
             content = "\n\n---------- Forwarded message ----------\nFrom: " + (source.from_address or "") + "\nSubject: " + (source.subject or "") + "\n\n" + (source.body or "")
         else:
             if not source.remote_uid or not source.uid_validity:
-                raise HTTPException(409, "Refresh this draft from the Zoho Drafts folder before editing it.")
+                raise HTTPException(409, "Refresh this draft from the mailbox Drafts folder before editing it.")
             try:
                 with WritableMailbox(config) as mailbox:
                     folders = mailbox.folders()
                 if not any(folder["name"] == source.folder and folder["role"] == "drafts" for folder in folders):
-                    raise HTTPException(422, "Only a message in Zoho Drafts can be edited as an existing draft.")
+                    raise HTTPException(422, "Only a message in the Drafts folder can be edited as an existing draft.")
             except MailAdapterError as exc:
                 raise HTTPException(502, str(exc)) from None
             existing = db.scalar(select(MailDraft).where(MailDraft.account_id == account.id,
@@ -314,7 +334,7 @@ def send(draft_id: str, body: SendIn, db: Session = Depends(get_db), user: User 
         attempt.status = "unknown" if exc.unknown else "failed"
         attempt.last_error, row.status = str(exc), attempt.status
     row.last_error = attempt.last_error
-    db.add(AuditEntry(actor_id=user.id, action="Zoho mail " + attempt.status, entity_type="mail_send", entity_id=attempt.id,
+    db.add(AuditEntry(actor_id=user.id, action="Mail send " + attempt.status, entity_type="mail_send", entity_id=attempt.id,
         meta={"draft_id": row.id, "account_id": row.account_id, "status": attempt.status, "recipient_count": len(recipients)}))
     db.commit()
     if attempt.status == "sent":
@@ -340,11 +360,11 @@ def reconcile(draft_id: str, db: Session = Depends(get_db), user: User = Depends
         with WritableMailbox(config) as mailbox:
             sent_folder = next((folder["name"] for folder in mailbox.folders() if folder["role"] == "sent"), None)
             if not sent_folder:
-                raise MailAdapterError("sent_folder", "Enable Sent in Zoho's IMAP folder settings to check this send.")
+                raise MailAdapterError("sent_folder", "Make the Sent folder visible to IMAP in the mailbox settings to check this send.")
             _, uids = mailbox.find_message_id(sent_folder, attempt.provider_message_id)
             if uids:
                 attempt.status, row.status, attempt.sent_at = "sent", "sent", service.now()
-                attempt.last_error = "The message is present in Zoho Sent. Individual recipient delivery cannot be reconstructed from Sent alone."
+                attempt.last_error = "The message is present in the Sent folder. Individual recipient delivery cannot be reconstructed from Sent alone."
                 row.last_error = attempt.last_error
             else:
                 row.last_error = "No matching Sent message was found yet. The send remains unconfirmed; no message was resent."

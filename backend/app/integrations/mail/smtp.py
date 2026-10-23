@@ -1,4 +1,4 @@
-"""Explicit user replies only. Never retry an ambiguous SMTP acceptance."""
+"""Explicit replies and approved intake acknowledgements; uncertain sends never retry."""
 import re
 import smtplib
 import ssl
@@ -68,7 +68,7 @@ def compose(config, *, message_id, to, cc, bcc, subject, body, attachments=(), i
     return outgoing, list(dict.fromkeys(address(value) for value in [*to, *cc, *bcc]))
 
 
-def deliver(config, outgoing, recipients):
+def deliver(config, outgoing, recipients, *, envelope_from=None):
     if not config.smtp_host:
         raise MailSendError("Outgoing mail is not configured for this mailbox.")
     server = None
@@ -88,7 +88,7 @@ def deliver(config, outgoing, recipients):
         else:
             server.login(config.username, config.password)
         sending = True
-        refused = server.send_message(outgoing, from_addr=config.username, to_addrs=recipients)
+        refused = server.send_message(outgoing, from_addr=config.username if envelope_from is None else envelope_from, to_addrs=recipients)
         return list(refused)
     except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError, smtplib.SMTPAuthenticationError, smtplib.SMTPNotSupportedError):
         raise MailSendError("The mailbox provider refused this reply. Check the recipient and outgoing-mail permissions before trying again.") from None

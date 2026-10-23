@@ -14,10 +14,13 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects import postgresql
 
 from app.core.security import SESSION_COOKIE
-from app.db.models import Candidate, EmailIngestionJob, Role, Session as SessionRow, User
+from app.db.models import (
+    Candidate, CandidateStatus, EmailIngestionJob, Role, Session as SessionRow, Source, User,
+    WhatsAppChannel, WhatsAppMessage,
+)
 from app.services.ingestion_revision import read_revision, revision_expression
 from test_bootstrap_performance import (
-    assert_no_private_data, assert_select_budget, recorded_statements,
+    EMPTY_REVISION, assert_no_private_data, assert_select_budget, recorded_statements,
 )
 from test_database_naming import schema_database
 from test_email_intake import (
@@ -73,6 +76,8 @@ def request_revision(client, engine):
         assert f"email_ingestion_jobs.{forbidden}" not in statements[-1]
     assert "email_messages" not in statements[-1]
     assert "email_accounts" not in statements[-1]
+    assert "whatsapp_messages.processing_state" not in statements[-1]
+    assert "crm_candidates.resume_text" not in statements[-1]
     return revision
 
 
@@ -94,18 +99,23 @@ def test_revision_sql_compiles_to_private_data_free_scalar():
     assert len(statement.selected_columns) == 1
     assert "email_ingestion_jobs.updated_at" in sql
     assert "email_ingestion_jobs.status" in sql
+    assert "whatsapp_messages.updated_at" in sql and "whatsapp_messages.status" in sql
+    assert "crm_candidates.updated_at" in sql
     assert "completed" in compiled.params.values()
     for excluded in (
         "email_ingestion_jobs.state", "email_ingestion_jobs.inspection",
         "email_ingestion_jobs.message_id", "email_ingestion_jobs.last_error",
-        "email_messages", "email_accounts", "crm_candidates", "document_attachments",
+        "email_messages", "email_accounts", "document_attachments",
+        "whatsapp_messages.processing_state", "whatsapp_messages.body", "whatsapp_messages.sender_number",
+        "whatsapp_messages.object_key", "whatsapp_messages.last_error",
+        "crm_candidates.resume_text", "crm_candidates.phone", "crm_candidates.name", "crm_candidates.email",
     ):
         assert excluded not in sql
 
 
 def test_empty_revision_agrees_with_bootstrap_without_extra_queries(intake, revision_client):
     revision = request_revision(revision_client, intake.engine)
-    assert revision == "0:0"
+    assert revision == EMPTY_REVISION
     body = request_bootstrap(revision_client, intake.engine, revision)
     assert body["candidates"] == []
 
@@ -115,7 +125,7 @@ def test_revision_is_available_to_every_signed_in_role_without_mailbox_details(
     intake, revision_client, user_id,
 ):
     revision_client.cookies.set(SESSION_COOKIE, f"revision-{user_id}-session")
-    assert request_revision(revision_client, intake.engine) == "0:0"
+    assert request_revision(revision_client, intake.engine) == EMPTY_REVISION
 
 
 def test_revision_requires_current_active_session_before_reading_completion_metadata(intake, revision_client):
@@ -132,7 +142,7 @@ def test_revision_requires_current_active_session_before_reading_completion_meta
     assert "email_ingestion_jobs" not in statements[0]
 
     revision_client.cookies.set(SESSION_COOKIE, "revision-staff-a-session")
-    assert request_revision(revision_client, intake.engine) == "0:0"
+    assert request_revision(revision_client, intake.engine) == EMPTY_REVISION
     with intake.sessions() as db:
         db.get(User, "staff-a").active = False
         db.commit()
@@ -231,3 +241,60 @@ def test_revision_is_transactional_and_identical_across_connection_timezones(int
         india_revision = read_revision(observer)
         assert utc_revision == india_revision != initial
         assert observer.scalar(select(Candidate.current_city)) == "Updated city"
+
+
+def add_whatsapp(intake, status="pending"):
+    with intake.sessions() as db:
+        if db.get(WhatsAppChannel, "channel-1") is None:
+            db.add(WhatsAppChannel(phone_number_id="channel-1"))
+            db.flush()
+        message = WhatsAppMessage(
+            provider_message_id=f"wamid.{status}", phone_number_id="channel-1", sender_number="+910000000099",
+            message_type="document", received_at=datetime(2026, 10, 20, tzinfo=timezone.utc), status=status,
+        )
+        db.add(message)
+        db.commit()
+        return message.id
+
+
+def test_whatsapp_completion_advances_revision_but_unfinished_receipts_do_not(intake, revision_client):
+    before = request_revision(revision_client, intake.engine)
+    message_id = add_whatsapp(intake, "pending")
+    assert request_revision(revision_client, intake.engine) == before
+    for status in ("processing", "retry", "needs_review", "failed", "ignored"):
+        with intake.sessions() as db:
+            db.get(WhatsAppMessage, message_id).status = status
+            db.commit()
+        assert request_revision(revision_client, intake.engine) == before
+    with intake.sessions() as db:
+        db.get(WhatsAppMessage, message_id).status = "completed"
+        db.commit()
+    completed = request_revision(revision_client, intake.engine)
+    assert completed != before
+    assert completed.split(":")[2:4] != before.split(":")[2:4]  # Only the WhatsApp segment moved.
+    assert request_revision(revision_client, intake.engine) == completed
+
+
+def test_candidate_creation_edit_and_deletion_advance_revision(intake, revision_client):
+    before = request_revision(revision_client, intake.engine)
+    with intake.sessions() as db:
+        candidate = Candidate(ref="REV-1", name="Revision Person", phone="+910000000001",
+                              source=Source.whatsapp, status=CandidateStatus.new)
+        db.add(candidate)
+        db.commit()
+        candidate_id = candidate.id
+    created = request_revision(revision_client, intake.engine)
+    assert created != before and created.split(":")[:4] == before.split(":")[:4]
+    assert request_revision(revision_client, intake.engine) == created
+    # Bundle commits and merges edit existing candidates without creating one.
+    with intake.sessions() as db:
+        db.get(Candidate, candidate_id).current_city = "Merged city"
+        db.commit()
+    edited = request_revision(revision_client, intake.engine)
+    assert edited != created
+    with intake.sessions() as db:
+        db.delete(db.get(Candidate, candidate_id))
+        db.commit()
+    deleted = request_revision(revision_client, intake.engine)
+    assert deleted not in {created, edited}
+    assert deleted.split(":")[4] == "0"

@@ -635,6 +635,7 @@ class MailMessage(Base, PkMixin):
     remote_operation: Mapped[dict | None] = mapped_column(JSONB)
 
     reply_to: Mapped[str | None] = mapped_column(String(255))
+    automation_headers: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     unread: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"))
@@ -729,6 +730,7 @@ class WhatsAppMessage(Base, PkMixin, TimestampMixin):
     __table_args__ = (
         CheckConstraint("status IN ('received','pending','processing','retry','needs_review','completed','ignored','failed')", name="ck_whatsapp_messages_status"),
         Index("ix_whatsapp_messages_ready", "next_attempt_at", postgresql_where=text("status IN ('pending','processing','retry')")),
+        Index("ix_whatsapp_messages_conversation", "phone_number_id", "sender_number", "received_at", "id"),
         {"comment": "Durable inbound WhatsApp receipts, original media and OCR checkpoints. Sender number is provenance, not assumed candidate identity."},
     )
 
@@ -1091,3 +1093,162 @@ class AttendanceCoverItem(Base, PkMixin):
     outcome: Mapped[str | None] = mapped_column(String(20))
     __table_args__ = (UniqueConstraint("request_id", "candidate_id", name="uq_attendance_cover_item"),
         {"comment": "Durable temporary leave-cover ownership ledger. Completed or subsequently reassigned work is not returned."})
+
+
+# ------------------------------------------------ communication and split intake
+
+class WhatsAppConversation(Base, PkMixin, TimestampMixin):
+    __tablename__ = "whatsapp_conversations"
+    phone_number_id: Mapped[str] = mapped_column(ForeignKey("whatsapp_channels.phone_number_id"), nullable=False)
+    peer_number: Mapped[str] = mapped_column(String(40), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(200))
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"), index=True)
+    last_inbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_preview: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("phone_number_id", "peer_number", name="uq_whatsapp_conversation_peer"),
+        Index("ix_whatsapp_conversations_recent", "last_message_at", "id"),
+        {"comment": "Business conversations with an explicit candidate link and last inbound time for the reply window."},
+    )
+
+
+class WhatsAppSendAttempt(Base, PkMixin, TimestampMixin):
+    __tablename__ = "whatsapp_send_attempts"
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("whatsapp_conversations.id"), nullable=False, index=True)
+    request_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    sender_user_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    source_message_id: Mapped[str | None] = mapped_column(ForeignKey("whatsapp_messages.id"))
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    message_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    template: Mapped[dict | None] = mapped_column(JSONB)
+    object_key: Mapped[str | None] = mapped_column(String(500))
+    file_name: Mapped[str | None] = mapped_column(String(255))
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    provider_media_id: Mapped[str | None] = mapped_column(String(100))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, server_default="queued")
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("state IN ('queued','preparing','sending','accepted','sent','delivered','read','failed','unknown','cancelled')", name="ck_whatsapp_send_state"),
+        Index("ix_whatsapp_send_queue", "created_at", postgresql_where=text("state IN ('queued','preparing','sending')")),
+        {"comment": "Durable outgoing WhatsApp intents; uncertain provider outcomes are never blindly resent."},
+    )
+
+
+class WhatsAppDeliveryEvent(Base, PkMixin):
+    __tablename__ = "whatsapp_delivery_events"
+    attempt_id: Mapped[str | None] = mapped_column(ForeignKey("whatsapp_send_attempts.id"), index=True)
+    phone_number_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    provider_message_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    callback_data: Mapped[str | None] = mapped_column(String(64))
+    recipient_number: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    error_detail: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = ({"comment": "Deduplicated signed provider delivery events retained even when they precede the send response."},)
+
+
+class WhatsAppTemplate(Base, PkMixin):
+    __tablename__ = "whatsapp_templates"
+    phone_number_id: Mapped[str] = mapped_column(ForeignKey("whatsapp_channels.phone_number_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(512), nullable=False)
+    language: Mapped[str] = mapped_column(String(30), nullable=False)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    components: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        UniqueConstraint("phone_number_id", "name", "language", name="uq_whatsapp_template_language"),
+        {"comment": "Provider-synced approved template catalogue for messages outside the customer reply window."},
+    )
+
+
+class IntakeAcknowledgementSettings(Base, PkMixin, TimestampMixin):
+    __tablename__ = "intake_acknowledgement_settings"
+    source_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    __table_args__ = (
+        UniqueConstraint("source_kind", "channel_id", name="uq_intake_ack_settings_channel"),
+        CheckConstraint("source_kind IN ('email','whatsapp')", name="ck_intake_ack_settings_source"),
+        {"comment": "Admin-controlled acknowledgement templates; disabled by default and applicable only to new receipts."},
+    )
+
+
+class IntakeAcknowledgement(Base, PkMixin, TimestampMixin):
+    __tablename__ = "intake_acknowledgements"
+    source_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    request_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    outbound_id: Mapped[str | None] = mapped_column(ForeignKey("whatsapp_send_attempts.id"))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("source_kind", "source_id", name="uq_intake_ack_receipt"),
+        CheckConstraint("source_kind IN ('email','whatsapp')", name="ck_intake_ack_source"),
+        CheckConstraint("status IN ('pending','sending','sent','unknown','failed','suppressed','paused')", name="ck_intake_ack_status"),
+        Index("ix_intake_ack_queue", "status", "created_at"),
+        {"comment": "One acknowledgement intent per successfully saved source receipt, with explicit uncertain-send recovery."},
+    )
+
+
+class MultiPersonIntake(Base, PkMixin, TimestampMixin):
+    __tablename__ = "document_person_intakes"
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    created_by: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    sources: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    pages: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    ignored_pages: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_id", name="uq_document_person_intake_source"),
+        CheckConstraint("source_type IN ('manual','email','whatsapp')", name="ck_document_person_intake_source"),
+        CheckConstraint("status IN ('pending','review','completed')", name="ck_document_person_intake_status"),
+        Index("ix_document_person_intakes_pending", "created_at", postgresql_where=text("status = 'pending' AND last_error IS NULL")),
+        Index("ix_document_person_intakes_owner_history", "owner_id", "updated_at", "id", postgresql_where=text("source_type = 'manual' AND status = 'completed'")),
+        {"comment": "Durable human review of multi-person source documents with immutable source provenance and page evidence."},
+    )
+
+
+class DocumentPersonGroup(Base, PkMixin, TimestampMixin):
+    __tablename__ = "document_person_groups"
+    bundle_id: Mapped[str] = mapped_column(ForeignKey("document_person_intakes.id", ondelete="CASCADE"), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    fields: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    pages: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="draft")
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"))
+    __table_args__ = (
+        UniqueConstraint("bundle_id", "ordinal", name="uq_document_person_group_ordinal"),
+        CheckConstraint("status IN ('draft','committed')", name="ck_document_person_group_status"),
+        Index("ix_document_person_groups_candidate", "candidate_id", "bundle_id", postgresql_where=text("status = 'committed'")),
+        {"comment": "Reviewed person fields and exclusive page selections, committed atomically to candidate records."},
+    )

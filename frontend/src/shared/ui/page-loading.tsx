@@ -1,12 +1,24 @@
-import { Component, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ReactNode } from 'react'
 
-export function PageLoading({ fullScreen = false }: { fullScreen?: boolean }) {
+export function PageLoading({ fullScreen = false, onRetry }: { fullScreen?: boolean; onRetry?: () => void }) {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), 6_000)
+    return () => window.clearTimeout(timer)
+  }, [])
   return (
     <div
       role="status"
-      className={`flex items-center justify-center bg-canvas ${fullScreen ? 'min-h-screen' : 'min-h-48'}`}
+      className={`workspace-loading ${fullScreen ? 'is-fullscreen' : ''}`}
     >
-      <p className="text-sm text-ink-400">Loading workspace…</p>
+      <div className="workspace-loading-card">
+        <span className="workspace-loading-mark" aria-hidden="true"><span /></span>
+        {fullScreen && <p className="workspace-loading-brand">Care India</p>}
+        <h1>{fullScreen ? 'Opening your workspace' : 'Loading this view'}</h1>
+        <p>{slow ? 'The server is taking longer than usual. Your saved work is safe.' : 'Getting your latest records and permissions.'}</p>
+        <div className="workspace-loading-track" aria-hidden="true"><span /></div>
+        {slow && onRetry && <button type="button" className="workspace-loading-retry" onClick={onRetry}>Retry connection</button>}
+      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { initials } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/cn'
@@ -9,6 +9,9 @@ interface SummaryItem {
   detail: string
   icon: LucideIcon
   tone?: 'blue' | 'green' | 'amber' | 'violet'
+  /** Makes the card a toggle that applies (or clears) a list filter. */
+  onSelect?: () => void
+  active?: boolean
 }
 
 export function SummaryCards({ items }: { items: SummaryItem[] }) {
@@ -17,8 +20,16 @@ export function SummaryCards({ items }: { items: SummaryItem[] }) {
       className="workspace-summary"
       style={{ '--summary-columns': items.length } as CSSProperties}
     >
-      {items.map(({ label, value, detail, icon: Icon, tone = 'blue' }) => (
-        <section className="summary-card" key={label} aria-label={label}>
+      {items.map(({ label, value, detail, icon: Icon, tone = 'blue', onSelect, active }) => (
+        <section
+          className={cn('summary-card', onSelect && 'cursor-pointer transition-shadow hover:shadow-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-navy-600', active && 'ring-2 ring-navy-600')}
+          key={label}
+          aria-label={label}
+          {...(onSelect ? {
+            role: 'button', tabIndex: 0, 'aria-pressed': !!active, onClick: onSelect,
+            onKeyDown: (event: KeyboardEvent<HTMLElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } },
+          } : {})}
+        >
           <div className="summary-card-top">
             <span>{label}</span>
             <span className={`summary-icon tone-${tone}`}>

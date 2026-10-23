@@ -22,7 +22,16 @@ from .classification import classify_page, classify_pages
 
 
 class InspectionError(ValueError):
-    """Actionable input/inspection failure, safe to show without document data."""
+    """Actionable input/inspection failure, safe to show without document data.
+
+    ``retryable`` marks a failure of this server rather than of the document (a missing
+    converter, a timeout): trying again later can succeed, so it is never a reason to
+    set the document aside.
+    """
+
+    def __init__(self, message: str = "", *, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 @dataclass
@@ -34,6 +43,13 @@ class InspectedPage:
     text: str = field(repr=False)
     confidence: float = 0.0
     reason: str = ""
+    # Further kinds a page also belongs to (a passport and Aadhaar copy on one sheet).
+    also: list[str] = field(default_factory=list)
+    # True when the kind was taken from the adjoining document, not from the page itself.
+    inherited: bool = False
+
+
+_IMAGE_FORMATS = {"jpeg", "jpg", "png", "gif", "bmp", "tiff", "webp", "mpo"}
 
 
 @dataclass
@@ -43,18 +59,39 @@ class Inspection:
     source_format: str
     warnings: list[str]
     _pdf: bytes = field(repr=False)
+    # Set by a caller that extracts only the confidently classified pages of a file
+    # that also has unread/unclassified ones. Those pages are never selected.
+    allow_partial: bool = field(default=False, repr=False)
+
+    def _pages_of(self, kind: str) -> list[int]:
+        return [p.page_number for p in self.pages
+                if p.status == "read" and (p.document_type == kind or kind in p.also)]
 
     @property
     def resume_pages(self) -> list[int]:
-        return [p.page_number for p in self.pages if p.document_type == "resume" and p.status == "read"]
+        return self._pages_of("resume")
 
     @property
     def passport_pages(self) -> list[int]:
-        return [p.page_number for p in self.pages if p.document_type == "passport" and p.status == "read"]
+        return self._pages_of("passport")
 
     @property
     def aadhaar_pages(self) -> list[int]:
-        return [p.page_number for p in self.pages if p.document_type == "aadhaar" and p.status == "read"]
+        return self._pages_of("aadhaar")
+
+    @property
+    def inherited_pages(self) -> list[int]:
+        return [p.page_number for p in self.pages if p.status == "read" and p.inherited]
+
+    @property
+    def decorative_image(self) -> bool:
+        """A single picture with no document text at all: a logo, signature or photo."""
+        if self.source_format not in _IMAGE_FORMATS or len(self.pages) != 1:
+            return False
+        page = self.pages[0]
+        if page.status == "blank":
+            return True
+        return page.status == "unread" and sum(c.isalnum() for c in page.text) < 15
 
     @property
     def unread_pages(self) -> list[int]:
@@ -68,6 +105,10 @@ class Inspection:
     def complete(self) -> bool:
         return len(self.pages) == self.page_count and not self.unread_pages and not self.unknown_pages
 
+    @property
+    def has_classified_pages(self) -> bool:
+        return bool(self.resume_pages or self.passport_pages or self.aadhaar_pages)
+
     def to_dict(self, *, include_text: bool = False) -> dict:
         pages = [asdict(page) for page in self.pages]
         if not include_text:
@@ -77,22 +118,22 @@ class Inspection:
             "source_format": self.source_format, "page_count": self.page_count,
             "pages": pages, "resume_pages": self.resume_pages,
             "passport_pages": self.passport_pages, "aadhaar_pages": self.aadhaar_pages,
-            "unread_pages": self.unread_pages,
+            "unread_pages": self.unread_pages, "inherited_pages": self.inherited_pages,
             "unknown_pages": self.unknown_pages, "warnings": list(self.warnings),
             "complete": self.complete,
         }
 
     def pdf_for_pages(self, page_numbers: list[int]) -> bytes:
         """Only verified pages; positions in the report always name the original."""
-        if not self.complete:
+        if not (self.complete or self.allow_partial):
             raise InspectionError("Some pages are unread or unclassified. Review the inspection before sending this document.")
         if not page_numbers:
             raise InspectionError("No matching pages were identified in this document.")
         if any(type(n) is not int or n < 1 or n > self.page_count for n in page_numbers):
             raise InspectionError("Selected page numbers are outside this document.")
         wanted = sorted(set(page_numbers))
-        if any(self.pages[n - 1].status != "read" for n in wanted):
-            raise InspectionError("Only successfully read pages can be selected.")
+        if any(self.pages[n - 1].status != "read" or self.pages[n - 1].document_type == "unknown" for n in wanted):
+            raise InspectionError("Only successfully read and classified pages can be selected.")
         with fitz.open(stream=self._pdf, filetype="pdf") as source, fitz.open() as subset:
             for number in wanted:
                 subset.insert_pdf(source, from_page=number - 1, to_page=number - 1)
@@ -201,7 +242,7 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
 def _word_pdf(data: bytes, suffix: str, deadline: float) -> bytes:
     command = _find_libreoffice()
     if not command:
-        raise InspectionError("Word inspection requires LibreOffice. Install LibreOffice on the server or upload an exported PDF.")
+        raise InspectionError("Word inspection requires LibreOffice. Install LibreOffice on the server or upload an exported PDF.", retryable=True)
     with tempfile.TemporaryDirectory(prefix="crm-word-inspection-") as directory:
         root = Path(directory)
         source = root / f"document.{suffix}"
@@ -214,7 +255,7 @@ def _word_pdf(data: bytes, suffix: str, deadline: float) -> bytes:
                 check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.TimeoutExpired):
-            raise InspectionError("Word-to-PDF conversion failed or timed out. Export the document as PDF and retry.") from None
+            raise InspectionError("Word-to-PDF conversion failed or timed out. Export the document as PDF and retry.", retryable=True) from None
         output = root / "document.pdf"
         if result.returncode or not output.is_file():
             raise InspectionError("LibreOffice could not convert this Word document. Export it as PDF and retry.")
@@ -333,41 +374,68 @@ def inspect_document(
     for page, verdict in zip(pages, classified):
         if page.status == "read":
             page.document_type = verdict.document_type
+            page.also = list(verdict.also)
+            page.inherited = verdict.inherited
             page.confidence = min(page.confidence, verdict.confidence)
             page.reason = verdict.reason
-    if any(p.status == "unread" for p in pages):
-        warnings.append("One or more pages could not be read. No pages will be sent to Veris until the document is resolved.")
-    if any(p.status == "read" and p.document_type == "unknown" for p in pages):
-        warnings.append("One or more pages need classification review. No pages will be sent to Veris until the document is resolved.")
+    unread = [p.page_number for p in pages if p.status == "unread"]
+    unknown = [p.page_number for p in pages if p.status == "read" and p.document_type == "unknown"]
+    inherited = [p.page_number for p in pages if p.status == "read" and p.inherited]
+    if unread:
+        warnings.append(f"Pages {_numbers(unread)} could not be read. Review them in the stored original.")
+    if unknown:
+        warnings.append(f"Pages {_numbers(unknown)} could not be classified. Review them in the stored original.")
+    if inherited:
+        warnings.append(
+            f"Pages {_numbers(inherited)} have no identifying content and were assigned to the adjoining "
+            "document (for example the back of a card). Check them."
+        )
     return Inspection(pages, len(pages), source_format, warnings, normalized)
 
 
-def restore_inspection(data: bytes, report: dict, *, document_timeout: float = 600) -> Inspection:
-    """Restore a trusted, complete checkpoint without repeating local OCR.
+def _numbers(values: list[int]) -> str:
+    shown = ", ".join(str(value) for value in values[:20])
+    return shown + (f" and {len(values) - 20} more" if len(values) > 20 else "")
+
+
+def restore_inspection(
+    data: bytes, report: dict, *, document_timeout: float = 600, allow_partial: bool = False,
+) -> Inspection:
+    """Restore a trusted checkpoint without repeating local OCR.
 
     The caller must verify source hash and inspection settings first. Reopening
-    the original verifies physical page count; Word may need reconversion.
+    the original verifies physical page count; Word may need reconversion. A
+    checkpoint with unread/unclassified pages is restored only for a caller that
+    extracts the classified pages alone (``allow_partial``); those pages stay
+    unselectable.
     """
     try:
         count = report["page_count"]
         entries = report["pages"]
         if (
-            report.get("complete") is not True or type(count) is not int or count < 1
+            (report.get("complete") is not True and not allow_partial) or type(count) is not int or count < 1
             or not isinstance(entries, list) or len(entries) != count
         ):
             raise ValueError()
+        statuses = {"read", "blank", "unread"} if allow_partial else {"read", "blank"}
+        types = ({"resume", "passport", "aadhaar", "other", "unknown"} if allow_partial
+                 else {"resume", "passport", "aadhaar", "other"})
         pages = []
         for number, entry in enumerate(entries, 1):
+            also = entry.get("also", [])
             if (
                 type(entry["page_number"]) is not int or entry["page_number"] != number
-                or entry["status"] not in {"read", "blank"}
-                or entry["document_type"] not in {"resume", "passport", "aadhaar", "other"}
+                or entry["status"] not in statuses
+                or entry["document_type"] not in types
                 or (entry["status"] == "blank" and entry["document_type"] != "other")
+                or not isinstance(also, list) or any(kind not in {"resume", "passport", "aadhaar"} for kind in also)
+                or (entry["status"] == "unread" and entry["document_type"] != "unknown")
             ):
                 raise ValueError()
             pages.append(InspectedPage(
                 number, entry["status"], entry["document_type"], entry["method"], "",
                 confidence=entry.get("confidence", 0.0), reason=entry.get("reason", ""),
+                also=list(also), inherited=bool(entry.get("inherited", False)),
             ))
     except (KeyError, TypeError, ValueError):
         raise InspectionError("Saved page inspection is incomplete or invalid.") from None
@@ -380,4 +448,5 @@ def restore_inspection(data: bytes, report: dict, *, document_timeout: float = 6
         raise
     except Exception:
         raise InspectionError("The original document could not be reopened.") from None
-    return Inspection(pages, count, source_format, list(report.get("warnings", [])), normalized)
+    return Inspection(pages, count, source_format, list(report.get("warnings", [])), normalized,
+                      allow_partial=allow_partial)

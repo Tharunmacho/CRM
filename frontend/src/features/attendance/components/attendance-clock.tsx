@@ -8,16 +8,17 @@ import { useAttendance } from '../attendance-context'
 import { durationLabel, type PresenceStatus } from '../model'
 
 export function PresenceBadge({ status }: { status: PresenceStatus }) {
-  return <Badge dot tone={status === 'online' ? 'navy' : status === 'idle' ? 'amber' : 'neutral'}>{status === 'online' ? 'Online' : status === 'idle' ? 'Idle' : 'Offline'}</Badge>
+  return <Badge dot tone={status === 'online' ? 'navy' : status === 'idle' ? 'amber' : 'neutral'}>{status === 'online' ? 'Online in CRM' : status === 'idle' ? 'Idle in CRM' : 'Away / no signal'}</Badge>
 }
 
 export function AttendanceClock({ compact = false }: { compact?: boolean }) {
-  const { me } = useStore()
+  const { me, agencyTimezone } = useStore()
   const { own, loading, error, presenceError, busy, pendingKind, refreshedAt, refresh, clock } = useAttendance()
   const [now, setNow] = useState(performance.now())
   useEffect(() => { const interval = setInterval(() => setNow(performance.now()), 15_000); return () => clearInterval(interval) }, [])
   const checkedIn = own?.attendance.status === 'checked_in'
-  const seconds = (own?.attendance.totalSeconds ?? 0) + (checkedIn && refreshedAt && !error ? Math.max(0, (now - refreshedAt) / 1000) : 0)
+  // A suspended/background page cannot keep presenting an unverified clock indefinitely.
+  const seconds = (own?.attendance.totalSeconds ?? 0) + (checkedIn && refreshedAt && !error ? Math.min(30, Math.max(0, (now - refreshedAt) / 1000)) : 0)
   const action = pendingKind ?? (checkedIn ? 'check-out' : 'check-in')
   const label = (pendingKind && !busy ? 'Retry ' : '') + (action === 'check-out' ? 'Check out' : 'Check in')
 
@@ -33,13 +34,14 @@ export function AttendanceClock({ compact = false }: { compact?: boolean }) {
     <div className="flex flex-wrap items-center justify-between gap-4">
       <div>
         <p className="text-xs font-medium text-ink-500">Your attendance today</p>
-        <div className="mt-2 flex flex-wrap items-center gap-3"><strong className="text-2xl font-semibold text-ink tnum">{durationLabel(seconds)}</strong><Badge tone={checkedIn ? 'navy' : 'neutral'}>{checkedIn ? 'Checked in' : 'Checked out'}</Badge>{me.role === 'staff' && own && <PresenceBadge status={own.presence.status} />}</div>
+        <div className="mt-2 flex flex-wrap items-center gap-3"><strong className="text-2xl font-semibold text-ink tnum">{loading ? 'Loading…' : durationLabel(seconds)}</strong>{own && <Badge tone={checkedIn ? 'navy' : 'neutral'}>{checkedIn ? 'Checked in' : 'Checked out'}</Badge>}{me.role === 'staff' && own && !presenceError && <PresenceBadge status={own.presence.status} />}</div>
+        {own?.attendance.checkedInAt && <p className="mt-2 text-sm text-ink-600">Current session started {new Intl.DateTimeFormat('en-GB', { timeZone: agencyTimezone || 'Asia/Kolkata', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(own.attendance.checkedInAt))} · {agencyTimezone || 'Asia/Kolkata'}</p>}
         <p className="mt-2 text-xs text-ink-500">Check out when your shift ends. Closing the browser or signing out keeps your attendance session open.</p>
       </div>
       <Button variant={checkedIn ? 'secondary' : 'primary'} disabled={loading || busy || !own || (!!error && !pendingKind)} icon={action === 'check-out' ? <LogOut size={16} /> : <LogIn size={16} />} onClick={() => void clock()}>{busy ? 'Saving…' : label}</Button>
     </div>
     {loading && <p className="mt-3 text-xs text-ink-500" role="status">Loading your attendance…</p>}
-    {error && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-stamp-700"><span>{error}</span>{!pendingKind && <Button size="sm" onClick={() => void refresh()}>Retry attendance</Button>}</div>}
+    {error && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-stamp-700"><span>{error}</span><Button size="sm" disabled={busy} onClick={() => void refresh()}>Refresh attendance</Button></div>}
     {me.role === 'staff' && presenceError && <p role="status" className="mt-3 text-xs text-amber-700">Presence sync is delayed. {presenceError} Your check-in and check-out are saved separately.</p>}
   </div>
 }

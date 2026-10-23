@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, fileHref, type OcrScan } from '@/shared/api/client'
 import type { DocumentScans, ScanKind } from './ocr-form'
 
-export type IntakeDraft = { form: Record<string, string>; editedFields: string[]; jobIds?: string[]; savedCandidateId?: string | null }
+export type IntakeDraft = { form: Record<string, string>; editedFields: string[]; jobIds?: string[]; savedCandidateId?: string | null; splitCandidateIds?: string[] }
 export type IntakeKind = ScanKind | 'photo' | 'education' | 'experience'
 export type IntakeJob = {
   id: string; groupId: string; kind: IntakeKind; filename: string; sizeKb: number; status: string;
@@ -125,5 +125,10 @@ export function useDocumentIntake(ownerId: string) {
     await Promise.all(selected.map((job) => api.post('/ocr/jobs/' + job.id + '/dismiss')))
     await list()
   }
-  return { jobs, available, uploading, loading, error, draftError, upload, recover, read, attach, saveDraft, reload: list, dismiss }
+  const reset = () => {
+    group.current = crypto.randomUUID()
+    update([])
+    setError(''); setDraftError('')
+  }
+  return { jobs, available, uploading, loading, error, draftError, upload, recover, read, attach, saveDraft, reload: list, dismiss, reset }
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ChevronRight, History, Pencil, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronRight, History, Pencil, Plus, Trash2 } from 'lucide-react'
 import { dateLabel, money } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import { stageByNo } from '@/shared/workflow/stages'
@@ -19,18 +19,23 @@ import { Button } from '@/shared/ui/primitives'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
 import { ClientDialog } from '@/features/clients/components/client-dialog'
+import { CompanyDialog } from '@/features/companies/components/company-dialog'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
+import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 
 export default function ClientDetailPage() {
   const { id } = useParams()
   const store = useStore()
+  const snapshot = useWorkspaceReady(id ? `client:${id}` : null)
   const navigate = useNavigate()
   const client = store.clients.find((c) => c.id === id)
   const [openApp, setOpenApp] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [editing, setEditing] = useState(false)
   const [history, setHistory] = useState(false)
+  const [addingCompany, setAddingCompany] = useState(false)
 
+  if (!snapshot.ready) return <Panel><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || 'Loading the client relationship…'}</p>{snapshot.error && <Button className="mt-3" onClick={snapshot.retry}>Retry client</Button>}</Panel>
   if (!client) {
     return (
       <EmptyState
@@ -94,11 +99,13 @@ export default function ClientDetailPage() {
         )}
       </Panel>
 
-      {companies.length > 0 && <Panel className="mb-4" flush>
-        <PanelHeader title="Employer contacts" meta="Company phone and WhatsApp numbers" />
+      <Panel className="mb-4" flush>
+        <PanelHeader title="Employers & hiring" meta="Choose an employer to view its recruitment orders. Each employer keeps its own contacts and agreement."
+          action={<Button icon={<Plus className="h-4 w-4" />} disabled={client.status !== 'active'} onClick={() => setAddingCompany(true)}>Add employer</Button>} />
+        {companies.length === 0 && <EmptyState title="Add the first employer" description={client.status === 'active' ? 'Create the employer company, then add a recruitment order with the role, openings and terms.' : 'This client is inactive. Reactivate the client before adding an employer.'} action={client.status === 'active' ? <Button variant="primary" onClick={() => setAddingCompany(true)}>Add employer</Button> : undefined} />}
         <div className="divide-y divide-rule-soft">
           {companies.map((company) => <div key={company.id} className="px-4 py-4">
-            <p className="mb-3 text-sm font-medium text-ink">{company.name}</p>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><p className="text-base font-semibold text-ink">{company.name}</p><p className="mt-1 text-sm text-ink-500">{[company.city, company.country].filter(Boolean).join(', ') || 'Location not recorded'}</p></div><div className="flex flex-wrap items-center gap-2"><StatusPill status={company.status} /><Button onClick={() => navigate(`/companies?client=${encodeURIComponent(client.id)}`)}>Company details</Button><Button variant="primary" onClick={() => navigate(`/jobs?company=${encodeURIComponent(company.id)}`)}>View hiring orders</Button></div></div>
             <DefList cols={3}>
               <Def label="Contact person">{company.contactPerson || '—'}</Def>
               <Def label="Phone" ident>{company.phone || '—'}</Def>
@@ -106,9 +113,9 @@ export default function ClientDetailPage() {
             </DefList>
           </div>)}
         </div>
-      </Panel>}
+      </Panel>
 
-      {orders.length === 0 ? (
+      {orders.length === 0 && companies.length > 0 ? (
         <Panel>
           <EmptyState
             title="No orders for this client yet"
@@ -116,7 +123,7 @@ export default function ClientDetailPage() {
             action={<Button variant="primary" onClick={() => navigate('/jobs')}>Go to Jobs</Button>}
           />
         </Panel>
-      ) : (
+      ) : orders.length > 0 ? (
         <div className="space-y-4">
           {orders.map((o) => {
             const apps = store.applications.filter((a) => a.orderId === o.id)
@@ -125,7 +132,7 @@ export default function ClientDetailPage() {
               <Panel key={o.id} flush>
                 <PanelHeader
                   title={`${store.designation(o.designationId)?.title ?? 'Order'} · ${store.company(o.companyId)?.name ?? ''}`}
-                  meta={`${o.ref} · ${o.city}, ${o.country} · ${money(o.salary, o.currency)} · closes ${dateLabel(o.deadline)}`}
+                  meta={[o.ref, [o.city, o.country].filter(Boolean).join(', '), money(o.salary, o.currency), o.deadline ? `closes ${dateLabel(o.deadline)}` : ''].filter(Boolean).join(' · ')}
                   action={
                     <>
                       <span className="text-micro text-ink-500 tnum">
@@ -172,10 +179,11 @@ export default function ClientDetailPage() {
             )
           })}
         </div>
-      )}
+      ) : null}
 
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
       {editing && <ClientDialog client={client} onClose={() => setEditing(false)} />}
+      {addingCompany && <CompanyDialog clientId={client.id} onClose={() => setAddingCompany(false)} />}
       {history && <RecordAudit kind="client" id={client.id} onClose={() => setHistory(false)} />}
       <DeleteRecordDialog
         kind="client"

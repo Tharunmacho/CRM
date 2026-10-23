@@ -20,6 +20,7 @@ from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry,
     Candidate, CandidateStatus, ClosureReason, Order, OrderStatus, Role, Task, TaskKind, User,
 )
+from app.domain.orders import reopen_blocker
 from app.domain.stages import FILE_FIELDS, TOTAL_STAGES, stage_by_no, validate_payload
 from app.services import document_storage
 
@@ -413,6 +414,9 @@ def reopen_stage(application_id: str, body: ReopenIn, db: Session = Depends(get_
         app, candidate, order = _locked_application(db, application_id)
         _check_version(app, body.lock_version)
         _owner(db, candidate)
+        blocker = reopen_blocker(order.status)
+        if blocker:
+            raise HTTPException(409, blocker)
         if app.status == ApplicationStatus.active and body.stage >= app.current_stage:
             raise HTTPException(409, "Choose a completed stage before the current stage.")
         if db.scalar(select(Application.id).where(

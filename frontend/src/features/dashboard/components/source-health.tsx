@@ -47,7 +47,7 @@ export function SourceHealth() {
       } finally { if (pending === controller) pending = null }
     }
     void read()
-    const timer = window.setInterval(() => void read(), 10_000)
+    const timer = window.setInterval(() => void read(), 30_000)
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     return () => {
@@ -88,7 +88,7 @@ export function SourceHealth() {
               {!account.autoIngest && ' · Auto-ingest off'}
             </span></span>
           </li>)}
-        </ul> : <p className="px-4 py-4 text-xs text-ink-500">No mailbox connected. Connect Zoho Mail in Inbox to start receiving applications.</p>}
+        </ul> : <p className="px-4 py-4 text-xs text-ink-500">No mailbox connected. Connect a mailbox in Inbox to start receiving applications.</p>}
         <button className="m-4 text-xs font-medium text-navy-700 underline" onClick={() => navigate('/inbox')}>Review messages and processing</button>
       </>}
       <div className="border-t border-rule">

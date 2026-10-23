@@ -1,0 +1,29 @@
+/* Reports: filters in one row, a quiet section heading per report, tidy totals and notes. */
+.reports-page { display:flex; flex-direction:column; gap:16px; }
+.reports-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:12px 14px; border:1px solid #e3e8ef; border-radius:14px; background:#fff; }
+.reports-toolbar > * { min-width:0; }
+.reports-date { display:inline-flex; align-items:center; gap:8px; font-size:12.5px; font-weight:500; color:#6b7a90; }
+.reports-date input { width:9.5rem; }
+.reports-select { flex:0 1 11rem; }
+.reports-own { margin-left:auto; padding:6px 12px; border-radius:999px; background:#eef4fc; font-size:12.5px; font-weight:500; color:#294974; }
+.reports-alert { padding:12px 16px; border:1px solid #f1c9c9; border-radius:12px; background:#fff5f5; font-size:14px; color:#9b2c2c; }
+
+.reports-section-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 14px; padding:16px 20px 12px; }
+.reports-section-head h2 { font-size:15px; font-weight:600; color:#1c2a3f; }
+.reports-section-head p { font-size:13px; color:#6b7a90; }
+.reports-subhead { padding:14px 20px; border-top:1px solid #e8edf3; border-bottom:1px solid #e8edf3; background:#fbfcfe; font-size:13.5px; font-weight:600; color:#1c2a3f; }
+.reports-totals { display:flex; flex-wrap:wrap; gap:12px; padding:0 20px 16px; }
+.reports-totals > div { min-width:10rem; padding:12px 16px; border:1px solid #e3e8ef; border-radius:12px; background:#f7f9fc; }
+.reports-totals p { font-size:12.5px; color:#6b7a90; }
+.reports-totals strong { display:block; margin-top:2px; font-size:20px; font-weight:600; color:#1c2a3f; }
+
+.reports-notes { padding:12px 18px; border:1px solid #e3e8ef; border-radius:12px; background:#fff; font-size:13px; color:#6b7a90; }
+.reports-notes summary { cursor:pointer; font-weight:500; color:#1c2a3f; }
+.reports-notes p { margin-top:10px; }
+.reports-notes ul { margin:8px 0 0 18px; list-style:disc; display:flex; flex-direction:column; gap:4px; }
+
+@media (max-width:700px) {
+  .reports-toolbar > * { flex:1 1 100%; }
+  .reports-date { flex:1 1 45%; }
+  .reports-own { margin-left:0; }
+}

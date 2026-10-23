@@ -1,7 +1,5 @@
 """Zoho connection policy. Credentials are accepted once and encrypted at rest."""
 import re
-from dataclasses import replace
-
 from app.integrations.mail.imap import MailConfig, MailAdapterError
 
 REGIONS = ("com", "in", "eu", "com.au", "jp", "ca", "com.cn", "sa")
@@ -26,21 +24,18 @@ def make_config(address, password, *, region="com", account_type="organization",
         smtp_port=smtp_port, smtp_use_ssl=smtp_port == 465))
 
 
-def account_config(db, settings, account):
+def zoho_config(settings, account):
     from app.services.mail_oauth import decrypt
-    from app.services.mail_config import configured_mailboxes
-    if account.disconnected_at:
-        raise MailAdapterError("disconnected", "This mailbox is disconnected. An administrator can reconnect it.")
-    if account.provider == "zoho":
-        saved = decrypt(settings, (account.secrets or {}).get("encrypted", ""))
-        return make_config(account.address, saved.get("password", ""), region=saved.get("region", "com"),
-            account_type=saved.get("account_type", "organization"), imap_host=saved.get("imap_host"),
-            smtp_host=saved.get("smtp_host"), smtp_port=saved.get("smtp_port", 465))
-    if account.provider == "imap":
-        config = configured_mailboxes(settings).get(account.address)
-        if config:
-            return validate_config(config)
-    raise MailAdapterError("zoho_only", "Only Zoho Mail connections are enabled. Existing message history is retained.")
+    saved = decrypt(settings, (account.secrets or {}).get("encrypted", ""))
+    return make_config(account.address, saved.get("password", ""), region=saved.get("region", "com"),
+        account_type=saved.get("account_type", "organization"), imap_host=saved.get("imap_host"),
+        smtp_host=saved.get("smtp_host"), smtp_port=saved.get("smtp_port", 465))
+
+
+def account_config(db, settings, account):
+    """Resolve any connected provider; kept here for callers written for Zoho-only mail."""
+    from app.services import mail_providers
+    return mail_providers.account_config(db, settings, account)
 
 
 def readiness(settings):

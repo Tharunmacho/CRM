@@ -303,6 +303,33 @@ def calculate_month(days: Iterable[dict], policy: AttendancePolicy | None = None
     return results
 
 
+def attendance_overview(days: Iterable[Mapping]) -> dict:
+    """Reference monthly attendance rate, independent of payable work minutes.
+
+    The caller supplies the employee's tracked days through today (or their
+    deactivation date). Weekly offs and holidays do not enter the denominator.
+    Paid leave counts as attendance, as do provisional days with a check-in;
+    an incomplete day without a check-in remains scheduled but not attended.
+    Status overrides affect this attendance view, never the pay calculation.
+    """
+    rows = list(days)
+    scheduled = [row for row in rows if row["status"] not in {"WO", "H"}]
+    attended = sum(
+        row["status"] in {"P", "LT", "EE", "PP", "OD", "WFH", "PL"}
+        or bool(row.get("provisional") and row.get("check_in"))
+        for row in scheduled
+    )
+    return {
+        "scheduledDays": len(scheduled),
+        "attendedDays": attended,
+        # No scheduled days means no measured rate, not zero attendance.
+        "attendancePercentage": round(attended / len(scheduled) * 100, 1) if scheduled else None,
+        "absenceDays": sum(row["status"] in {"A", "UL"} for row in rows),
+        "lateDays": sum(row["status"] == "LT" for row in rows),
+        "incompleteDays": sum(row["status"] == "MP" for row in rows),
+    }
+
+
 def lop_amount(unpaid_minutes: int, wage_basis: float, scheduled_payable_minutes: int) -> float:
     if wage_basis < 0 or scheduled_payable_minutes <= 0:
         raise ValueError("wage basis must be non-negative and scheduled minutes positive")

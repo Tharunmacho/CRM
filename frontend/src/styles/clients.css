@@ -1,0 +1,19 @@
+/* Clients: summary tiles, one filter row, then a compact directory. */
+.clients-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:14px 20px; border-bottom:1px solid #e8edf3; }
+.clients-filters > .ui-search { flex:1 1 280px; min-width:0; max-width:none; }
+.clients-filters > select, .clients-filters > div:has(> select) { flex:0 1 180px; min-width:0; }
+.clients-chip { display:inline-flex; align-items:center; gap:6px; min-height:40px; padding:0 14px; border:1px solid #d9e1ec; border-radius:10px; background:#fff; font-size:14px; font-weight:500; color:#2c3d55; white-space:nowrap; }
+.clients-chip:hover { background:#f6f8fc; }
+.clients-chip[aria-pressed="true"] { border-color:#9fbbe4; background:#eaf1fc; color:#1f3d6b; }
+.clients-count { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 20px; font-size:13px; color:#6b7a90; border-bottom:1px solid #eef1f5; }
+.clients-cell { min-width:0; line-height:1.45; }
+.clients-cell .primary { font-weight:500; color:#0b1420; }
+.clients-cell .secondary { display:block; max-width:16rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:#6b7a90; }
+.clients-demand { display:inline-flex; flex-direction:column; align-items:flex-end; line-height:1.35; }
+.clients-demand .primary { font-weight:600; color:#0b1420; }
+.clients-demand .secondary { font-size:12.5px; color:#6b7a90; }
+@media (max-width:700px) {
+  .clients-filters { padding:12px 16px; }
+  .clients-filters > * { flex:1 1 100% !important; }
+  .clients-count { padding:10px 16px; }
+}

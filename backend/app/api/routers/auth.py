@@ -5,6 +5,8 @@ Sessions are rows, not JWTs, so an admin's "force logout" can actually revoke on
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -44,7 +46,9 @@ def session_state(
     response: Response,
     db: DbSession = Depends(get_db),
     crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-) -> dict[str, UserOut | None]:
+    workspace: bool = False,
+    compact: bool = False,
+) -> dict[str, Any]:
     """Return the current account, or an anonymous state without an auth error."""
     response.headers["Cache-Control"] = "no-store"
     if not crm_session:
@@ -55,6 +59,11 @@ def session_state(
         if exc.status_code == status.HTTP_401_UNAUTHORIZED:
             return {"me": None}
         raise
+    if workspace:
+        # Authenticate once and return the desk in the same response. Anonymous
+        # visits still return immediately without loading any CRM collections.
+        from app.api.routers.data import bootstrap
+        return bootstrap(db=db, user=user, compact=compact)
     return {"me": UserOut.model_validate(user)}
 
 

@@ -1,4 +1,18 @@
 /* Shared reading and spacing scale for every CRM screen and its dialogs. */
+.workspace-loading { display: grid; place-items: center; min-height: 280px; padding: 28px; background: #f5f7fb; font-family: 'Poppins', system-ui, sans-serif; }
+.workspace-loading.is-fullscreen { min-height: 100vh; }
+.workspace-loading-card { width: min(100%, 420px); text-align: center; padding: 36px 28px; border: 1px solid #e2e8f1; border-radius: 20px; background: white; box-shadow: 0 12px 48px #20325408; }
+.workspace-loading-mark { display: grid; place-items: center; margin: 0 auto 20px; width: 52px; height: 52px; border-radius: 16px; background: #edf2ff; }
+.workspace-loading-mark > span { display: block; width: 23px; height: 23px; border: 3px solid #4169e1; border-radius: 5px; transform: rotate(45deg); }
+.workspace-loading-brand { color: #4169e1; font-size: 13px; font-weight: 500; margin-bottom: 8px; }
+.workspace-loading h1 { font-size: 21px; line-height: 1.5; font-weight: 600; color: #202d43; }
+.workspace-loading h1 + p { margin-top: 10px; color: #68768c; font-size: 14px; line-height: 1.8; }
+.workspace-loading-track { height: 4px; margin-top: 26px; background: #eef2f8; overflow: hidden; border-radius: 8px; }
+.workspace-loading-track > span { display: block; height: 100%; width: 36%; background: #4169e1; border-radius: inherit; animation: workspace-progress 1.8s ease-in-out infinite alternate; }
+.workspace-loading-retry { margin-top: 22px; padding: 11px 18px; border-radius: 10px; border: 1px solid #dce3ee; color: #3156cb; font-size: 14px; font-weight: 500; }
+.workspace-loading-retry:hover { background: #f5f7ff; }
+@keyframes workspace-progress { to { transform: translateX(180%); } }
+
 :root {
   --crm-font: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --crm-ink: #202d43;
@@ -127,7 +141,7 @@
 .workspace-page .candidate-form-guide nav strong { font-size: 14px; }
 .workspace-page .candidate-form-guide nav small { font-size: 12px; color: var(--crm-muted); }
 .workspace-page .candidate-form-guide nav a { padding-top: 14px; padding-bottom: 14px; }
-.workspace-page .candidate-form-section > .grid { padding: 26px; gap: 22px; }
+.workspace-page .candidate-form-section > .grid { padding: 20px 22px; gap: 16px 18px; }
 .workspace-page .candidate-form-section .file-drop-target { min-height: 128px; }
 .workspace-page .document-read-actions { padding: 0 26px 24px; gap: 14px; }
 .workspace-page .document-read-actions > span, .workspace-page .candidate-save-bar > span { font-size: 13px; line-height: 1.65; }
@@ -140,12 +154,7 @@
 .workspace-page .mail-list-copy :is(.text-xs, .text-micro), .workspace-page .mail-sender-detail .text-micro, .workspace-page .mail-attachment .text-micro { font-size: 12px; }
 .workspace-page .mail-attachment .text-sm, .workspace-page .inbox-reply > p { font-size: 13px; }
 .workspace-page .mail-sender-avatar { width: 36px; height: 36px; font-size: 12px; }
-.workspace-page .zoho-folder { min-height: 44px; font-size: 14px; }
-.workspace-page .zoho-unread-count { font-size: 12px; }
 .workspace-page .zoho-reader-toolbar button { font-size: 13px; }
-.workspace-page .zoho-message-body { font-size: 15px; line-height: 1.85; }
-.workspace-page .zoho-open-message .mail-sender-avatar { width: 36px; height: 36px; font-size: 12px; }
-.workspace-page .zoho-reader-heading h2 { font-size: 21px; }
 
 .workspace-dialog { font-size: 15px; border: 1px solid #e4eaf3; border-radius: 18px; }
 .workspace-dialog > header { padding: 24px 28px; border-color: #e8edf5; }
@@ -196,7 +205,7 @@
   .workspace-page .workspace-todo-row > button:nth-last-child(2) { grid-column: 2; justify-self: end; }
   .workspace-page .workspace-todo-row > button:last-child { grid-column: 3; }
   .workspace-page :is(.ui-input, .custom-select-trigger, .date-picker-trigger), .workspace-dialog :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { min-height: 46px; font-size: 16px; }
-  .workspace-page .candidate-form-section > .grid { padding: 20px; gap: 20px; }
+  .workspace-page .candidate-form-section > .grid { padding: 16px; gap: 14px; }
   .workspace-page .document-read-actions { padding: 0 20px 20px; }
   .workspace-page .candidate-save-bar { padding: 16px; }
   .workspace-dialog > header, .workspace-dialog > div, .workspace-dialog > footer { padding: 20px; }

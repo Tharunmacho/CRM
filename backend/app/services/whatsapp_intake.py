@@ -61,15 +61,15 @@ def receive_payload(db, payload, settings):
                 if not provider_id or len(provider_id) > 255 or not sender or len(sender) > 40:
                     continue
                 kind = str(message.get("type", "unknown"))[:30]
-                media = message.get(kind, {}) if kind in {"document", "image"} else {}
+                media = message.get(kind, {}) if kind in {"document", "image", "audio", "video", "sticker"} else {}
                 received = datetime.fromtimestamp(int(message.get("timestamp", utcnow().timestamp())), timezone.utc)
                 has_media = bool(media.get("id"))
-                state = "pending" if has_media and channel.auto_ingest and channel.enabled else "received" if has_media else "ignored"
+                state = "pending" if has_media and kind in {"document", "image"} and channel.auto_ingest and channel.enabled else "received" if has_media else "ignored"
                 row_id = db.scalar(insert(WhatsAppMessage).values(
                     provider_message_id=provider_id, phone_number_id=phone_id, sender_number=sender, sender_name=contacts.get(sender),
                     message_type=kind, body=str(message.get("text", {}).get("body") or media.get("caption") or "")[:65000],
                     media_id=str(media["id"])[:100] if has_media else None,
-                    file_name=str(media.get("filename") or ("image.jpg" if kind == "image" else "document"))[:255] if has_media else None,
+                    file_name=str(media.get("filename") or {"image": "image.jpg", "audio": "audio.ogg", "video": "video.mp4", "sticker": "sticker.webp"}.get(kind, "document"))[:255] if has_media else None,
                     content_type=str(media.get("mime_type") or "")[:120] if has_media else None,
                     received_at=received, status=state,
                 ).on_conflict_do_nothing(index_elements=["provider_message_id"]).returning(WhatsAppMessage.id))
@@ -95,8 +95,14 @@ def attach_original(db, message, candidate):
 
 def commit_candidate(db, message, output):
     from app.services.email_intake import combine_extractions, IntakeReviewError
-    fields, raw, review = combine_extractions([output])
+    fields, raw, review = combine_extractions([{**output, "source": {
+        "channel": "whatsapp", "message_id": message.id, "file_name": message.file_name}}])
     pointer = lock_assignment_cursor(db)
+    from app.services.document_person_split import ensure_single_person_source
+    ensure_single_person_source(db, "whatsapp", message.id)
+    db.refresh(message)
+    if message.status == "completed":
+        return
     matches = identity_matches(db, fields)
     if len(matches) > 1:
         raise IntakeReviewError("The document matches multiple candidates. Review the original and choose the correct profile.")
@@ -122,10 +128,8 @@ def commit_candidate(db, message, output):
             now = utcnow()
             db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=candidate.id, owner_id=owner.id,
                         created_at=now, sla_started_at=now, due_at=now + timedelta(hours=48)))
-        recipients = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
-        if owner: recipients.add(owner.id)
-        for recipient in recipients:
-            db.add(Notification(user_id=recipient, kind="assignment", title="Candidate received by WhatsApp", detail=candidate.name, link_to=f"/candidates/{candidate.id}"))
+        from app.services.candidate_review import notify_candidate_received
+        notify_candidate_received(db, candidate, owner, channel="WhatsApp", kind="assignment", results=[output])
     else:
         candidate = matches[0][0]
         if candidate.dob and values.get("dob") and candidate.dob != values["dob"]:
@@ -137,6 +141,16 @@ def commit_candidate(db, message, output):
         candidate.resume_text = resume_text_from(raw)
     attach_original(db, message, candidate)
     message.candidate_id, message.status, message.last_error = candidate.id, "completed", None
+    db.flush()
+    # The sender's conversation belongs to this candidate, so the owner can message them.
+    from app.services.whatsapp_chat import link_message_sender
+    try:
+        with db.begin_nested():
+            link_message_sender(db, message, candidate.id)
+    except Exception:
+        log.warning("WhatsApp conversation could not be linked to the candidate; intake continues.")
+    from app.services.intake_acknowledgements import queue_intake_acknowledgement
+    queue_intake_acknowledgement(db, "whatsapp", message.id)
     db.add(AuditEntry(action="Created WhatsApp candidate" if created else "Added WhatsApp candidate evidence", entity_type="candidate", entity_id=candidate.id, target=candidate.name, meta={"messageId": message.id, "senderNumber": message.sender_number}))
 
 
@@ -149,6 +163,9 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             channel = connected_channel(db, message.phone_number_id, settings, lock=True)
         except ChannelPaused:
             return
+        message = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update().execution_options(populate_existing=True))
+        if not message or message.status not in {"pending", "processing", "retry"}:
+            return
         message.status = "processing"
         state, key, media_id = deepcopy(message.processing_state or {}), message.object_key, message.media_id
         phone_id = message.phone_number_id
@@ -157,9 +174,14 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         db.commit()
     def checkpoint(value):
         with sessions() as db:
-            row = db.get(WhatsAppMessage, message_id)
+            row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
+            if not row:
+                raise WhatsAppError("This message is being reviewed or already saved.")
+            paused = row.status not in {"pending", "processing", "retry"}
             row.processing_state = deepcopy(value)
             db.commit()
+            if paused:
+                raise WhatsAppError("This message is being reviewed or already saved.")
             connected_channel(db, phone_id, settings)
     try:
         with sessions() as db:
@@ -174,7 +196,9 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             key = put_bytes(settings, f"whatsapp/{message_id}/{digest}.bin", data, mime)
             state.update({"originalHash": digest, "sizeKb": (len(data) + 1023) // 1024})
             with sessions() as db:
-                row = db.get(WhatsAppMessage, message_id)
+                row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
+                if not row or row.status not in {"pending", "processing", "retry"}:
+                    return
                 row.object_key, row.content_hash, row.content_type, row.processing_state = key, digest, mime, deepcopy(state)
                 db.commit()
                 connected_channel(db, phone_id, settings)
@@ -190,6 +214,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                     WhatsAppMessage.status == "completed", WhatsAppMessage.id != message_id,
                 ).order_by(WhatsAppMessage.received_at.desc(), WhatsAppMessage.id))
                 for receipt in previous:
+                    saved_extraction = (receipt.processing_state or {}).get("extraction", {})
                     cached = (receipt.processing_state or {}).get("output")
                     if not isinstance(cached, dict) or cached.get("status") == "needs_review" or not cached.get("extractions") or not receipt.object_key:
                         continue
@@ -199,7 +224,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                         valid = False
                     if valid:
                         output = deepcopy(cached)
-                        state.update(output=output, reusedReceiptId=receipt.id)
+                        state.update(output=output, reusedReceiptId=receipt.id, extraction=deepcopy(saved_extraction))
                         break
             if output is not None:
                 checkpoint(state)
@@ -211,12 +236,19 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             output = extract(data, state=extraction_state, save=save_extraction, settings=settings, designations=titles)
             state["output"] = output
             checkpoint(state)
+        from app.services.document_extraction import checked_person_output
+        output = checked_person_output(data, output, state.setdefault("extraction", {}), settings)
+        state["output"] = output
+        checkpoint(state)
         if output.get("status") == "needs_review":
             raise WhatsAppError("Some pages need review. Open the original document before resolving this message.")
         if not output.get("extractions"):
             with sessions() as db:
                 connected_channel(db, phone_id, settings, lock=True)
-                db.get(WhatsAppMessage, message_id).status = "ignored"
+                row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
+                if not row or row.status not in {"pending", "processing", "retry"}:
+                    return
+                row.status = "ignored"
                 db.commit()
             return
         if not state.get("documents"):
@@ -239,23 +271,33 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                 raise WhatsAppError("Stored document checksum mismatch. Restore the original before retrying.")
         with sessions() as db:
             connected_channel(db, phone_id, settings, lock=True)
-            commit_candidate(db, db.get(WhatsAppMessage, message_id), output)
+            lock_assignment_cursor(db)
+            row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
+            if not row or row.status not in {"pending", "processing", "retry"}:
+                return
+            commit_candidate(db, row, output)
             db.commit()
     except ChannelPaused:
         with sessions() as db:
-            row = db.get(WhatsAppMessage, message_id)
+            row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
+            if not row or row.status not in {"pending", "processing", "retry"}:
+                return
             row.status, row.next_attempt_at = "retry", utcnow()
             row.last_error = "Channel disconnected. Saved work will resume after reconnecting."
             db.commit()
     except ExtractionPending:
         with sessions() as db:
-            row = db.get(WhatsAppMessage, message_id)
+            row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
+            if not row or row.status not in {"pending", "processing", "retry"}:
+                return
             row.status, row.next_attempt_at, row.last_error = "retry", utcnow() + timedelta(seconds=30), "Waiting for the existing document extraction job"
             db.commit()
     except Exception as exc:
         from app.services.email_intake import IntakeReviewError
         with sessions() as db:
-            row = db.get(WhatsAppMessage, message_id)
+            row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
+            if not row or row.status not in {"pending", "processing", "retry"}:
+                return
             row.attempts += 1
             review = isinstance(exc, IntakeReviewError) or isinstance(exc, WhatsAppError) and any(word in str(exc).lower() for word in ("review", "checksum", "format", "limit"))
             row.status = "needs_review" if review else "failed" if row.attempts >= 4 else "retry"

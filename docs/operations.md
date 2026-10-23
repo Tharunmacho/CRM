@@ -14,7 +14,7 @@ Task escalation and daily-update checks run every 15 minutes. Personal to-do rem
 
 1. Back up the existing PostgreSQL database and all documents; retain the current release and environment configuration, especially the token-encryption key.
 2. Stop older API instances and workers that write to this database. Confirm the deployment points to the intended database and persistent storage.
-3. From the repository root, run `python -m alembic -c backend/alembic.ini upgrade head` in the configured deployment environment. The expected head is `0015_attendance_hr`.
+3. From the repository root, run `python -m alembic -c backend/alembic.ini upgrade head` in the configured deployment environment. The expected head is `0016_intake_communications`.
 4. Start the matching release. Verify `/api/health`, existing account login, an old uploaded document, a new upload, task-monitoring heartbeat and ingestion source health.
 5. Configure the selected services below, then run live acceptance with dedicated test records. Keep synthetic tests separate from production candidate data.
 
@@ -68,7 +68,7 @@ Configure `WHATSAPP_ENABLED`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_VERSIO
 
 The public HTTPS callback is `https://YOUR_CRM_DOMAIN/api/whatsapp/webhook`. Configure the same verification token with Meta and subscribe the intended Business phone's message events. The callback checks the GET verification challenge and the POST HMAC signature before persisting a receipt. Meta's [webhook SDK reference](https://whatsapp.github.io/WhatsApp-Nodejs-SDK/api-reference/webhooks/start/) describes those verification mechanisms.
 
-The UI shows channel state, originals, candidates, failures and Admin review/retry actions. Automatic intake can be paused. Sender number is retained as provenance and supplies an empty WhatsApp contact field; it is never used as candidate identity. The supported channel is inbound documents/images and candidate intake. Automatic acknowledgements and outbound WhatsApp templates are optional PRD functionality and are not implemented.
+The UI shows channel state, originals, candidates, failures and Admin review/retry actions. Automatic intake can be paused. Sender number is retained as provenance and supplies an empty WhatsApp contact field; it is never used as candidate identity. The channel now includes outgoing text/media, approved templates and signed delivery states. Automatic acknowledgements are opt-in per channel and default off. Multi-person intake uses the existing document worker. Configure `WHATSAPP_BUSINESS_ACCOUNT_ID` for template sync; see [activation and acceptance](communications-and-split-intake.md).
 
 Live acceptance must complete webhook verification, receive a real test document, check signature rejection and duplicate delivery, verify original/selected documents and assignment, restart during a pending extraction, and review a non-extractable document. No live WhatsApp delivery was performed during local verification.
 

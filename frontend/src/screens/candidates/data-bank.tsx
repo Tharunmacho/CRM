@@ -1,17 +1,31 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { CircleCheck, Download, FileSearch, UserCog, UserPlus, Users, UserSearch } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { CircleCheck, Download, Eye, FileSearch, RefreshCw, UserCog, UserPlus, UserRound, Users, UserSearch } from 'lucide-react'
 import { dateLabel } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import { api, fileHref } from '@/shared/api/client'
 import { stageByNo } from '@/shared/workflow/stages'
 import type { Candidate } from '@/shared/model/types'
 import { DataTable, type Column } from '@/shared/ui/table'
-import { Badge, EmptyState, PageHeader, Panel, PanelHeader, StatusPill } from '@/shared/ui/display'
+import { EmptyState, PageHeader, Panel, PanelHeader, StatusPill } from '@/shared/ui/display'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
-import { Button, Field, SearchInput, Select, Textarea } from '@/shared/ui/primitives'
-import { Dialog, Tabs } from '@/shared/ui/overlay'
-import { normalizedSkills, skillFacets } from '@/features/candidates/candidate-skills'
+import { Button, IconButton, SearchInput, Select } from '@/shared/ui/primitives'
+import { Tabs } from '@/shared/ui/overlay'
+import { normalizedSkills } from '@/features/candidates/candidate-skills'
+import { useSkillFacets } from '@/features/candidates/use-skill-facets'
+import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
+import {
+  NEEDS_ASSIGNMENT_LABEL, assignWaitingLabel, assignWaitingMessage, canAssignWaiting, emptyPoolCopy, ownerLabel, poolCountsPath, togglePool,
+  type AssignWaitingResult, type DataBankPool, type PoolCounts,
+} from '@/features/candidates/data-bank-pools'
+
+const STATUS_LABEL: Record<string, string> = {
+  new: 'New',
+  in_process: 'In process',
+  not_interested: 'Not interested',
+  deployed: 'Deployed',
+  needs_review: 'Needs review',
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   email: 'Email',
@@ -24,49 +38,95 @@ const SOURCE_LABEL: Record<string, string> = {
 export default function DataBankPage() {
   const store = useStore()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const staffFilter = store.can('all_reports') ? searchParams.get('staff') || '' : ''
+  const changeStaff = (staff: string) => setSearchParams(previous => {
+    const next = new URLSearchParams(previous)
+    if (staff) next.set('staff', staff)
+    else next.delete('staff')
+    return next
+  })
   const [query, setQuery] = useState('')
-  const [pool, setPool] = useState<'all' | 'not_interested' | 'unmapped'>('all')
+  const [pool, setPool] = useState<DataBankPool>('all')
   const [selected, setSelected] = useState<string[]>([])
-  const [reassigning, setReassigning] = useState(false)
-  const [reassignTo, setReassignTo] = useState('')
-  const [reassignReason, setReassignReason] = useState('')
+  const [reassigning, setReassigning] = useState<string[] | null>(null)
   const [skills, setSkills] = useState<string[]>([])
   const [skillMode, setSkillMode] = useState<'all' | 'any'>('all')
   const [skillStatus, setSkillStatus] = useState('all')
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'added', dir: 'desc' })
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
-  const [result, setResult] = useState<{ items: Candidate[]; total: number; page: number } | null>(null)
+  const [snapshot, setSnapshot] = useState<{ items: Candidate[]; total: number; page: number; scope: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [exporting, setExporting] = useState(false)
+  const [poolCounts, setPoolCounts] = useState<{ scope: string; counts: PoolCounts } | null>(null)
+  const [assigningWaiting, setAssigningWaiting] = useState(false)
   const [mutationError, setMutationError] = useState('')
-  const [reassigningBusy, setReassigningBusy] = useState(false)
-
-  const poolCandidates = useMemo(() => store.candidates.filter((candidate) => (
-    pool === 'not_interested' ? candidate.status === 'not_interested'
-      : pool === 'unmapped' ? !store.activeApplicationFor(candidate.id) : true
-  )), [store.candidates, store.applications, pool])
-  const facets = useMemo(() => skillFacets(poolCandidates), [poolCandidates])
-  const hasFilters = Boolean(query.trim() || skills.length || skillStatus !== 'all' || Object.values(columnFilters).some(Boolean))
-  const resetFilters = () => { setQuery(''); setSkills([]); setSkillStatus('all'); setSkillMode('all'); setColumnFilters({}) }
+  const [refreshToken, setRefreshToken] = useState(0)
+  const refreshRef = useRef({ ensureFresh: store.ensureFresh, refresh: store.refresh })
+  refreshRef.current = { ensureFresh: store.ensureFresh, refresh: store.refresh }
+  const staffScopeKey = `${store.me.id}:${staffFilter}:${refreshToken}`
+  const [directoryRead, setDirectoryRead] = useState<{ key: string; error: string } | null>(null)
+  useEffect(() => {
+    let active = true
+    const request = refreshToken ? refreshRef.current.refresh({ keepCurrent: true }) : refreshRef.current.ensureFresh()
+    void request
+      .then(() => { if (active) setDirectoryRead({ key: staffScopeKey, error: '' }) })
+      .catch(error => { if (active) setDirectoryRead({ key: staffScopeKey, error: error instanceof Error ? error.message : 'Current candidate ownership could not be loaded.' }) })
+    return () => { active = false }
+  }, [staffScopeKey])
+  const directoryReady = directoryRead?.key === staffScopeKey && !directoryRead.error
+  const directoryError = directoryRead?.key === staffScopeKey ? directoryRead.error : ''
+  const ownedCandidates = useMemo(() => store.candidates.filter(candidate => !staffFilter || candidate.ownerId === staffFilter), [store.candidates, staffFilter])
+  const facetParams = new URLSearchParams({ pool, ...(staffFilter ? { staff: staffFilter } : {}) }).toString()
+  const coverage = useSkillFacets(facetParams, store.candidates, !!directoryReady)
+  const facets = coverage.data?.skills ?? []
+  const hasFilters = Boolean(staffFilter || query.trim() || skills.length || skillStatus !== 'all' || Object.values(columnFilters).some(Boolean))
+  const resetFilters = () => { setQuery(''); setSkills([]); setSkillStatus('all'); setSkillMode('all'); setColumnFilters({}); changeStaff('') }
 
   const params = new URLSearchParams({ q: query, pool, skill_mode: skillMode, missing_skills: String(skillStatus === 'missing'), column_filters: JSON.stringify(columnFilters), sort: sort.key, direction: sort.dir })
+  if (staffFilter) params.set('staff', staffFilter)
   skills.forEach(skill => params.append('skills', skill))
   const filterQuery = params.toString()
-  useEffect(() => { setPage(0); setSelected([]) }, [filterQuery])
+  const result = snapshot?.scope === filterQuery ? snapshot : null
+  useEffect(() => { setPage(0); setSelected([]); setReassigning(null) }, [filterQuery])
   useEffect(() => {
+    if (!directoryReady) return
     const controller = new AbortController()
     setLoading(true); setLoadError('')
     const timer = window.setTimeout(() => {
       api.get<{ items: Candidate[]; total: number; page: number }>(`/candidates?${filterQuery}&page=${page}&page_size=20`, { signal: controller.signal })
-        .then(data => { if (!controller.signal.aborted) setResult(data) })
+        .then(data => { if (!controller.signal.aborted) setSnapshot({ ...data, scope: filterQuery }) })
         .catch(error => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : 'Search failed.') })
         .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     }, 250)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [filterQuery, page, store.candidates, store.me.id])
+  }, [directoryReady, filterQuery, page, store.candidates, store.me.id])
   const rows = result?.items ?? []
+  const countsScope = `${staffFilter}:${refreshToken}`
+  useEffect(() => {
+    if (!directoryReady) return
+    const controller = new AbortController()
+    // Best effort: tabs and cards fall back to the loaded directory when the counts are unavailable.
+    api.get<PoolCounts>(poolCountsPath(staffFilter || undefined), { signal: controller.signal })
+      .then(counts => { if (!controller.signal.aborted) setPoolCounts({ scope: countsScope, counts }) })
+      .catch(() => { if (!controller.signal.aborted) setPoolCounts(null) })
+    return () => controller.abort()
+  }, [directoryReady, countsScope, store.candidates])
+  const counts = poolCounts?.scope === countsScope ? poolCounts.counts : null
+  const assignWaiting = async () => {
+    if (assigningWaiting) return
+    setAssigningWaiting(true); setMutationError('')
+    try {
+      const outcome = await api.post<AssignWaitingResult>('/candidates/assign-waiting')
+      const message = assignWaitingMessage(outcome)
+      store.notify(message.text, message.tone)
+      setSelected([])
+      try { await store.refresh({ keepCurrent: true }) } catch { store.notify('Candidates were assigned. Refresh the directory to see current ownership.', 'warn') }
+      setRefreshToken(value => value + 1)
+    } catch (error) { setMutationError(error instanceof Error ? error.message : 'Waiting candidates could not be assigned.') } finally { setAssigningWaiting(false) }
+  }
   const exportExcel = async () => {
     setExporting(true); setMutationError('')
     try {
@@ -81,122 +141,103 @@ export default function DataBankPage() {
   // A hidden selection must not be reassigned after changing the talent pool.
   useEffect(() => { setSelected([]) }, [query, pool, skills, skillMode, skillStatus, page])
 
+  if (!directoryReady) return <>
+    <PageHeader title="Data Bank" eyebrow="Talent directory" description="Current candidates and recruiter ownership." />
+    <Panel><div className="space-y-3 p-5">
+      {directoryError ? <><p role="alert" className="text-sm text-stamp-700">{directoryError}</p><p className="text-sm text-ink-500">Refresh the directory to load current ownership. Previous summaries and assignment actions stay hidden until this check succeeds.</p><Button onClick={() => setRefreshToken(value => value + 1)}>Retry directory refresh</Button></>
+        : <p role="status" className="text-sm text-ink-500">Loading current candidates and ownership…</p>}
+    </div></Panel>
+  </>
+
   const columns: Column<Candidate>[] = [
     {
       key: 'name',
       header: 'Candidate',
       sortable: true,
       value: (c) => c.name,
-      width: '20%',
+      width: '27%',
       render: (c) => (
-        <div className="flex items-center gap-2">
-          <RecordIdentity name={c.name} detail={<span className="ident">{c.phone}</span>} />
-          {c.needsReview && <Badge tone="amber">Review</Badge>}
-        </div>
+        <RecordIdentity
+          name={c.name}
+          detail={<>
+            <span className="ident block max-w-[16rem] truncate" title={c.ref}>ID · {c.ref}</span>
+            <span className="block whitespace-nowrap text-[12.5px] text-ink-400">Added {dateLabel(c.addedAt)}{c.passportNo ? ' · Passport' : ''}</span>
+          </>}
+        />
       ),
     },
-    { key: 'phone', header: 'Phone', value: (c) => c.phone },
     {
       key: 'designation',
-      header: 'Designation',
+      header: 'Role',
       sortable: true,
-      filterable: true,
       value: (c) => c.designations[0] ?? '',
-    },
-    {
-      key: 'skills',
-      header: 'Skills',
-      value: (c) => normalizedSkills(c.skills).join(', '),
-      render: (c) => normalizedSkills(c.skills).length ? (
-        <div className="flex min-w-40 max-w-64 flex-wrap gap-1">
-          {normalizedSkills(c.skills).map((skill) => <Badge key={skill}>{skill}</Badge>)}
-        </div>
-      ) : <span className="text-ink-400">Not recorded</span>,
-    },
-    {
-      key: 'experience',
-      header: 'Exp.',
-      sortable: true,
-      align: 'right',
-      width: '84px',
-      className: 'whitespace-nowrap',
-      value: (c) => c.totalExperience,
-      render: (c) => <span className="tnum">{c.totalExperience} yr</span>,
-    },
-    {
-      key: 'passport',
-      header: 'Passport',
-      filterable: true,
-      width: '100px',
-      value: (c) => (c.passportNo ? 'Yes' : 'No'),
-      render: (c) =>
-        c.passportNo ? (
-          <span className="ident text-ink-600">{c.passportNo}</span>
-        ) : (
-          <span className="text-ink-300">No</span>
-        ),
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      filterable: true,
-      width: '110px',
-      value: (c) => SOURCE_LABEL[c.source],
-    },
-    {
-      key: 'owner',
-      header: 'Assigned to',
-      sortable: true,
-      filterable: true,
-      className: 'whitespace-nowrap',
-      value: (c) => store.user(c.ownerId)?.name ?? '',
-    },
-    {
-      key: 'order',
-      header: 'Mapped order',
-      filterable: true,
-      className: 'whitespace-nowrap',
-      value: (c) => {
-        const app = store.activeApplicationFor(c.id)
-        return app ? store.order(app.orderId)?.ref ?? '' : 'Not mapped'
-      },
+      width: '21%',
       render: (c) => {
-        const app = store.activeApplicationFor(c.id)
-        if (!app) return <span className="text-ink-300">Not mapped</span>
-        return <span className="tnum text-ink-600">{store.order(app.orderId)?.ref}</span>
-      },
-    },
-    {
-      key: 'stage',
-      header: 'Stage',
-      sortable: true,
-      value: (c) => store.activeApplicationFor(c.id)?.currentStage ?? 0,
-      render: (c) => {
-        const app = store.activeApplicationFor(c.id)
-        if (!app) return <span className="text-ink-300">—</span>
+        const skills = normalizedSkills(c.skills)
         return (
-          <span className="whitespace-nowrap text-ink-600">
-            <span className="tnum font-medium text-ink">{app.currentStage}</span>{' '}
-            {stageByNo(app.currentStage).title}
-          </span>
+          <div className="min-w-[11rem] max-w-[17rem]">
+            <p className="font-medium text-ink">{c.designations[0] || <span className="font-normal text-ink-400">Not recorded</span>}</p>
+            {skills.length > 0 && <p className="mt-0.5 truncate text-[13px] text-ink-500" title={skills.join(', ')}>{skills.slice(0, 2).join(' · ')}{skills.length > 2 ? ` +${skills.length - 2}` : ''}</p>}
+          </div>
         )
       },
     },
     {
-      key: 'status',
-      header: 'Status',
-      filterable: true,
-      width: '120px',
-      value: (c) => c.status,
-      render: (c) => <StatusPill status={c.status} />,
+      key: 'experience',
+      header: 'Experience',
+      sortable: true,
+      align: 'right',
+      width: '96px',
+      className: 'whitespace-nowrap',
+      value: (c) => c.totalExperience,
+      render: (c) => <span className="tnum font-medium text-ink">{c.totalExperience} {c.totalExperience === 1 ? 'yr' : 'yrs'}</span>,
     },
     {
-      key: 'added',
-      header: 'Added',
+      key: 'phone',
+      header: 'Contact',
+      value: (c) => c.phone,
+      width: '22%',
+      render: (c) => (
+        <div className="min-w-[12rem]">
+          <p className="ident whitespace-nowrap font-medium text-ink">{c.phone}</p>
+          {c.email && <p className="max-w-[15rem] truncate text-[13px] text-ink-500" title={c.email}>{c.email}</p>}
+          <p className="text-[12.5px] text-ink-400">Source · {SOURCE_LABEL[c.source] ?? c.source}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'owner',
+      header: 'Assignment & status',
       sortable: true,
-      width: '110px',
-      value: (c) => c.addedAt,
-      render: (c) => <span className="whitespace-nowrap text-ink-500">{dateLabel(c.addedAt)}</span>,
+      value: (c) => ownerLabel(store.user(c.ownerId)?.name),
+      width: '20%',
+      render: (c) => {
+        const app = store.activeApplicationFor(c.id)
+        const owner = c.ownerId ? store.user(c.ownerId) : undefined
+        return (
+          <div className="min-w-[10rem] space-y-1">
+            <p className="flex items-center gap-1.5 whitespace-nowrap">
+              <UserRound size={14} className="shrink-0 text-ink-400" aria-hidden />
+              {owner ? <span className="font-medium text-ink">{owner.name}</span> : <span className="font-medium text-amber-700">{ownerLabel(null)}</span>}
+            </p>
+            <StatusPill status={c.needsReview && c.status !== 'needs_review' ? 'needs_review' : c.status} dot />
+            <p className="text-[12.5px] text-ink-400">
+              {app ? `${store.order(app.orderId)?.ref ?? 'Order'} · Stage ${app.currentStage} ${stageByNo(app.currentStage).title}` : 'Not mapped to an order'}
+            </p>
+          </div>
+        )
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: '84px',
+      render: (c) => (
+        <div className="flex items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+          <IconButton label={`Open ${c.name}`} onClick={() => navigate(`/candidates/${c.id}`)}><Eye className="h-4 w-4" /></IconButton>
+          {store.can('reassign') && <IconButton label={`Reassign ${c.name}`} onClick={() => { setMutationError(''); setReassigning([c.id]) }}><UserCog className="h-4 w-4" /></IconButton>}
+        </div>
+      ),
     },
   ]
 
@@ -208,8 +249,14 @@ export default function DataBankPage() {
         description="Your next great placement starts here. Find talent across profiles, skills, and resumes."
         actions={
           <>
+            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => { setSelected([]); setReassigning(null); setRefreshToken(value => value + 1) }}>Refresh directory</Button>
+            {canAssignWaiting(counts, store.can('reassign')) && (
+              <Button variant="primary" disabled={loading || !!loadError || assigningWaiting} icon={<UserCog className="h-4 w-4" />} onClick={() => void assignWaiting()}>
+                {assignWaitingLabel(counts?.unassigned ?? 0, assigningWaiting)}
+              </Button>
+            )}
             {store.can('reassign') && selected.length > 0 && (
-              <Button variant="secondary" disabled={loading || !!loadError} icon={<UserCog className="h-4 w-4" />} onClick={() => { setMutationError(''); setReassigning(true) }}>
+              <Button variant="secondary" disabled={loading || !!loadError} icon={<UserCog className="h-4 w-4" />} onClick={() => { setMutationError(''); setReassigning(selected.filter(id => rows.some(row => row.id === id))) }}>
                 Reassign {selected.length}
               </Button>
             )}
@@ -230,30 +277,34 @@ export default function DataBankPage() {
         items={[
           {
             label: 'Total candidates',
-            value: store.candidates.length,
-            detail: 'Talent in your database',
+            value: ownedCandidates.length,
+            detail: staffFilter ? 'Assigned to this staff member' : 'Talent in your database',
             icon: Users,
           },
           {
             label: 'Not mapped',
-            value: store.candidates.filter((candidate) => !store.activeApplicationFor(candidate.id))
+            value: ownedCandidates.filter((candidate) => !store.activeApplicationFor(candidate.id))
               .length,
             detail: 'Available to match with an order',
             icon: UserSearch,
             tone: 'violet',
+            active: pool === 'unmapped',
+            onSelect: () => setPool(current => togglePool(current, 'unmapped')),
           },
           {
             label: 'Needs review',
-            value: store.candidates.filter(
+            value: counts?.needs_review ?? ownedCandidates.filter(
               (candidate) => candidate.needsReview || candidate.status === 'needs_review',
             ).length,
-            detail: 'Profiles that need your attention',
+            detail: pool === 'needs_review' ? 'Showing these profiles. Select again to show everyone' : 'Select to show profiles that need attention',
             icon: FileSearch,
             tone: 'amber',
+            active: pool === 'needs_review',
+            onSelect: () => setPool(current => togglePool(current, 'needs_review')),
           },
           {
             label: 'Deployed',
-            value: store.candidates.filter((candidate) => candidate.status === 'deployed').length,
+            value: ownedCandidates.filter((candidate) => candidate.status === 'deployed').length,
             detail: 'Successful candidate placements',
             icon: CircleCheck,
             tone: 'green',
@@ -262,63 +313,87 @@ export default function DataBankPage() {
       />
 
       <Panel flush>
-        <PanelHeader title="Candidate directory" meta="Search, discover, and manage your talent pool" />
+        <PanelHeader title="All candidates" meta={loading ? 'Searching…' : `${result?.total ?? 0} matching${counts ? ` of ${counts.all} on file` : ''}`} />
         <Tabs tabs={[
-          { key: 'all', label: 'Everyone', count: store.candidates.length },
-          { key: 'unmapped', label: 'Not mapped' },
-          { key: 'not_interested', label: 'Not interested' },
-        ]} active={pool} onChange={(key) => setPool(key as typeof pool)} />
+          { key: 'all', label: 'Everyone', count: counts?.all ?? ownedCandidates.length },
+          { key: 'unmapped', label: 'Not mapped', count: counts?.unmapped },
+          { key: 'unassigned', label: NEEDS_ASSIGNMENT_LABEL, count: counts?.unassigned, tone: counts?.unassigned ? 'amber' : undefined },
+          { key: 'needs_review', label: 'Needs review', count: counts?.needs_review, tone: counts?.needs_review ? 'amber' : undefined },
+          { key: 'not_interested', label: 'Not interested', count: counts?.not_interested },
+        ]} active={pool} onChange={(key) => setPool(key as DataBankPool)} />
         <div className="workspace-list-toolbar">
           <SearchInput
             value={query}
             onChange={setQuery}
-            placeholder="Search names, skills, passports, or resumes..."
+            placeholder="Search name, role, skills, passport or email"
             className="min-w-0 max-w-xl flex-1"
           />
-          <span className="ml-auto text-xs text-ink-400 tnum" role="status">{loading ? 'Searching…' : `${result?.total ?? 0} candidates`}</span>
+          {store.can('all_reports') && <Select className="w-full sm:w-52" aria-label="Filter candidates by staff" value={staffFilter} onChange={event => changeStaff(event.target.value)}>
+            <option value="">All staff</option>
+            {store.users.filter(user => user.role !== 'admin' || user.id === staffFilter).map(user => <option key={user.id} value={user.id}>{user.name}{!user.active ? ' (inactive)' : ''}</option>)}
+          </Select>}
+          <Select className="w-full sm:w-44" aria-label="Sort candidates" value={`${sort.key}:${sort.dir}`} onChange={event => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
+            <option value="added:desc">Newest first</option>
+            <option value="added:asc">Oldest first</option>
+            <option value="name:asc">Name A–Z</option>
+            <option value="experience:desc">Most experience</option>
+            {!['added:desc', 'added:asc', 'name:asc', 'experience:desc'].includes(`${sort.key}:${sort.dir}`) && <option value={`${sort.key}:${sort.dir}`}>Sorted by column</option>}
+          </Select>
         </div>
+        {staffFilter && <p className="border-b border-rule px-4 pb-3 text-sm text-ink-500">Candidates currently owned by <strong className="font-medium text-ink">{store.user(staffFilter)?.name || 'the selected staff member'}</strong>. <button className="font-medium text-navy-700" onClick={() => changeStaff('')}>Show all staff</button></p>}
 
-        <div className="border-b border-rule px-4 pb-4" aria-label="Skill filters">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Filter by recorded skill" hint="Counts show candidates in the selected pool.">
-              <Select value="" onChange={(event) => {
-                if (event.target.value) { setSkills((current) => [...current, event.target.value]); setSkillStatus('all') }
-              }}>
-                <option value="">Choose a skill</option>
-                {facets.filter((facet) => !skills.includes(facet.key)).map((facet) => (
-                  <option key={facet.key} value={facet.key}>{facet.label} ({facet.count})</option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Skill matching">
-              <Select value={skillMode} onChange={(event) => setSkillMode(event.target.value as 'all' | 'any')}>
-                <option value="all">All selected skills</option>
-                <option value="any">Any selected skill</option>
-              </Select>
-            </Field>
-            <Field label="Skill coverage">
-              <Select value={skillStatus} onChange={(event) => {
-                setSkillStatus(event.target.value)
-                if (event.target.value === 'missing') setSkills([])
-              }}>
-                <option value="all">All candidates</option>
-                <option value="missing">No skills recorded</option>
-              </Select>
-            </Field>
-          </div>
-          {(skills.length > 0 || hasFilters) && <div className="mt-3 flex flex-wrap items-center gap-2">
-            {skills.map((key) => <Button key={key} size="sm" onClick={() => setSkills((current) => current.filter((skill) => skill !== key))}
-              aria-label={`Remove skill ${facets.find((facet) => facet.key === key)?.label ?? key}`}>
-              {facets.find((facet) => facet.key === key)?.label ?? key} ×
-            </Button>)}
-            <Button size="sm" variant="ghost" onClick={resetFilters}>Clear filters</Button>
-          </div>}
+        <div className="flex flex-wrap items-center gap-2 border-y border-rule-soft bg-field/50 px-4 py-3" aria-label="Candidate filters">
+          <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500">Filters</span>
+          <Select className="w-44" aria-label="Filter by status" value={columnFilters.status ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, status: event.target.value }))}>
+            <option value="">Any status</option>
+            {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </Select>
+          <Select className="w-40" aria-label="Filter by source" value={columnFilters.source ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, source: event.target.value }))}>
+            <option value="">Any source</option>
+            {Object.values(SOURCE_LABEL).map(label => <option key={label} value={label}>{label}</option>)}
+          </Select>
+          <Select className="w-40" aria-label="Filter by passport" value={columnFilters.passport ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, passport: event.target.value }))}>
+            <option value="">Any passport</option>
+            <option value="Yes">Passport on file</option>
+            <option value="No">No passport</option>
+          </Select>
+          <Select className="w-44" aria-label="Filter by recruitment stage" value={columnFilters.stage ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, stage: event.target.value }))}>
+            <option value="">Any stage</option>
+            <option value="0">Not mapped</option>
+            {Array.from({ length: 11 }, (_, index) => index + 1).map(no => <option key={no} value={String(no)}>Stage {no} · {stageByNo(no).title}</option>)}
+          </Select>
+          <SearchInput className="w-40" value={columnFilters.order ?? ''} onChange={value => setColumnFilters(previous => ({ ...previous, order: value }))} placeholder="Order ref" />
+          <SearchInput className="w-44" value={columnFilters.designation ?? ''} onChange={value => setColumnFilters(previous => ({ ...previous, designation: value }))} placeholder="Role contains" />
+          <Select className="w-52" aria-label="Filter by recorded skill" value="" disabled={coverage.loading || !!coverage.error} onChange={(event) => {
+            if (event.target.value) { setSkills((current) => [...current, event.target.value]); setSkillStatus('all') }
+          }}>
+            <option value="">{coverage.loading ? 'Loading skills…' : 'Any skill'}</option>
+            {facets.filter((facet) => !skills.includes(facet.key)).slice().sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).map((facet) => (
+              <option key={facet.key} value={facet.key}>{facet.label} ({facet.count})</option>
+            ))}
+          </Select>
+          {skills.length > 1 && <Select className="w-44" aria-label="Skill matching" value={skillMode} onChange={(event) => setSkillMode(event.target.value as 'all' | 'any')}>
+            <option value="all">Match all skills</option>
+            <option value="any">Match any skill</option>
+          </Select>}
+          <Select className="w-48" aria-label="Skill coverage" value={skillStatus} onChange={(event) => {
+            setSkillStatus(event.target.value)
+            if (event.target.value === 'missing') setSkills([])
+          }}>
+            <option value="all">All candidates</option>
+            <option value="missing">No skills recorded{coverage.data ? ` (${coverage.data.missing})` : ''}</option>
+          </Select>
+          {skills.map((key) => <Button key={key} size="sm" onClick={() => setSkills((current) => current.filter((skill) => skill !== key))}
+            aria-label={`Remove skill ${facets.find((facet) => facet.key === key)?.label ?? key}`}>
+            {facets.find((facet) => facet.key === key)?.label ?? key} ×
+          </Button>)}
+          {hasFilters && <Button size="sm" variant="ghost" onClick={resetFilters}>Clear filters</Button>}
         </div>
 
         <DataTable
-          resetPageKey={`${pool}:${query}:${skills.join('|')}:${skillMode}:${skillStatus}`}
+          resetPageKey={`${staffFilter}:${pool}:${query}:${skills.join('|')}:${skillMode}:${skillStatus}`}
           rows={rows}
-          columns={columns.map(column => ({ ...column, filterable: true, sortable: true }))}
+          columns={columns}
           rowKey={(c) => c.id}
           selectable={store.can('reassign')}
           selected={selected}
@@ -330,11 +405,10 @@ export default function DataBankPage() {
             onFilterChange: (key, value) => setColumnFilters(previous => ({ ...previous, [key]: value })) }}
           empty={
             <EmptyState
-              title={loading ? 'Searching candidates…' : hasFilters ? 'No matching candidates' : pool === 'not_interested' ? 'Nobody in the not-interested pool' : 'No candidates yet'}
+              title={loading ? 'Searching candidates…' : hasFilters ? 'No matching candidates' : emptyPoolCopy(pool)?.title ?? 'No candidates yet'}
               description={
-                hasFilters ? 'Try another skill, switch to any selected skill, or clear your filters.' : pool === 'not_interested'
-                  ? 'Candidates who decline land here so you can offer them another order later.'
-                  : 'Add a candidate, or connect an email account so resumes arrive on their own.'
+                hasFilters ? 'Try another search or filter, or clear filters to show the whole directory.'
+                  : emptyPoolCopy(pool)?.description ?? 'Add a candidate, or connect an email account so resumes arrive on their own.'
               }
               action={hasFilters ? <Button onClick={resetFilters}>Clear filters</Button> : <Button variant="primary" onClick={() => navigate('/add-candidate')}>Add candidate</Button>}
             />
@@ -346,47 +420,7 @@ export default function DataBankPage() {
         Select a candidate to view their profile. Manage recruitment stages from Mapped Candidates.
       </p>
 
-      <Dialog
-        open={reassigning}
-        onClose={() => { if (!reassigningBusy) setReassigning(false) }}
-        title={`Reassign ${selected.length} candidates`}
-        description="Their open tasks move to the new owner. The 48-hour clocks keep running."
-        footer={
-          <>
-            <Button variant="ghost" disabled={reassigningBusy} onClick={() => setReassigning(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!reassignTo || !reassignReason.trim() || reassigningBusy}
-              onClick={async () => {
-                setReassigningBusy(true); setMutationError('')
-                try { await store.reassign(selected.filter(id => rows.some(row => row.id === id)), reassignTo, reassignReason.trim()); setSelected([]); setReassignTo(''); setReassignReason(''); setReassigning(false) }
-                catch (error) { setMutationError(error instanceof Error ? error.message : 'Reassignment failed.') }
-                finally { setReassigningBusy(false) }
-              }}
-            >
-              {reassigningBusy ? 'Reassigning…' : 'Reassign'}
-            </Button>
-          </>
-        }
-      >
-        <Select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} aria-label="New owner">
-          <option value="">Choose a staff member</option>
-          {store.users
-            .filter((u) => u.role === 'staff' && u.active && !u.onLeave)
-            .map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-                {u.onLeave ? ' — on leave' : ''}
-              </option>
-            ))}
-        </Select>
-        <Field label="Reason for reassignment" required className="mt-4">
-          <Textarea value={reassignReason} disabled={reassigningBusy} maxLength={1000} onChange={(event) => setReassignReason(event.target.value)} placeholder="Explain the ownership change for the candidate history" />
-        </Field>
-        {mutationError && <p role="alert" className="mt-3 text-sm text-stamp-600">{mutationError}</p>}
-      </Dialog>
+      {reassigning && <ReassignCandidatesDialog candidateIds={reassigning} onClose={() => setReassigning(null)} onSaved={() => setSelected([])} />}
 
     </>
   )

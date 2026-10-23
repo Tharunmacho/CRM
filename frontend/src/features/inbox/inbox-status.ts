@@ -1,4 +1,9 @@
-import type { InboxAccount, InboxJob, InboxSnapshot } from '@/shared/api/client'
+import type { InboxAccount, InboxJob, InboxSnapshot, MailProvider } from '@/shared/api/client'
+
+export const LIVE_PROVIDERS: MailProvider[] = ['gmail', 'microsoft', 'zoho', 'imap']
+export const PROVIDER_LABEL: Record<MailProvider, string> = { gmail: 'Gmail', microsoft: 'Microsoft 365', zoho: 'Zoho Mail', imap: 'IMAP / SMTP' }
+export const isLiveAccount = (account: Pick<InboxAccount, 'provider' | 'connectionStatus'> | undefined) =>
+  !!account && LIVE_PROVIDERS.includes(account.provider) && account.connectionStatus !== 'disconnected'
 
 export const JOB_LABEL: Record<InboxJob['status'], string> = {
   pending: 'Queued',
@@ -20,8 +25,8 @@ export function isJobPending(job: InboxJob): boolean {
 
 export function intakeUnavailable(account: InboxAccount | undefined): string | null {
   if (!account) return 'Mailbox details are unavailable. Refresh before processing these attachments.'
-  if (!['zoho', 'imap'].includes(account.provider)) {
-    return 'This provider is archived. Stored history is read only; connect Zoho Mail for new candidate intake. Original attachments remain available to download.'
+  if (!LIVE_PROVIDERS.includes(account.provider)) {
+    return 'This provider is archived. Stored history is read only; connect the mailbox again for new candidate intake. Original attachments remain available to download.'
   }
   if (account.connectionStatus === 'disconnected' || account.disconnectedAt) {
     return 'An administrator must reconnect this mailbox before creating or retrying candidate processing. Stored messages, processing results and downloads remain available.'

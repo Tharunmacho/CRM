@@ -6,9 +6,10 @@ import threading
 from sqlalchemy import select, text
 
 from app.core.config import get_settings
-from app.db.models import DocumentExtractionJob
+from app.db.models import DocumentExtractionJob, MultiPersonIntake
 from app.db.session import SessionLocal, engine
 from app.services.manual_extraction import READY, now, process_job
+from app.services.document_person_split import process_bundle
 
 STOP = threading.Event()
 LOCK = 724681930119
@@ -17,6 +18,12 @@ log = logging.getLogger("document_extraction_worker")
 
 def run_cycle(*, sessions=SessionLocal, settings=None):
     settings = settings or get_settings()
+    with sessions() as db:
+        bundles = list(db.scalars(select(MultiPersonIntake.id).where(MultiPersonIntake.status == "pending",
+            MultiPersonIntake.last_error.is_(None)).order_by(MultiPersonIntake.created_at).limit(2)))
+    for identifier in bundles:
+        if STOP.is_set(): return
+        process_bundle(identifier, sessions=sessions, settings=settings)
     with sessions() as db:
         ready = list(db.scalars(select(DocumentExtractionJob.id).where(
             DocumentExtractionJob.status.in_(READY), DocumentExtractionJob.next_attempt_at <= now()

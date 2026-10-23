@@ -10,7 +10,7 @@ from app.db.models import MailAccount, MailDraft, MailDraftAttachment, MailMessa
 from app.integrations.mail.mailbox import WritableMailbox, MailAdapterError
 from app.integrations.mail.smtp import compose
 from app.services.document_storage import read_bytes
-from app.services import zoho_mail
+from app.services import mail_providers
 
 MAX_ATTACHMENTS = 20
 MAX_TOTAL_BYTES = 18 * 1024 * 1024  # MIME base64 expansion stays below 25 MB.
@@ -41,7 +41,10 @@ def attachment_rows(db, draft_id):
     return list(db.scalars(select(MailDraftAttachment).where(MailDraftAttachment.draft_id == draft_id).order_by(MailDraftAttachment.id)))
 
 
-def draft_out(db, row):
+def draft_out(db, row, attachments=None):
+    """`attachments` lets a list read them for all drafts at once instead of one query per draft."""
+    if attachments is None:
+        attachments = attachment_rows(db, row.id)
     return {"id": row.id, "accountId": row.account_id, "actorId": row.actor_id, "mode": row.mode,
         "sourceMessageId": row.source_message_id, "to": row.to_addresses or [], "cc": row.cc_addresses or [],
         "bcc": row.bcc_addresses or [], "subject": row.subject or "", "body": row.body or "",
@@ -49,7 +52,7 @@ def draft_out(db, row):
         "lastError": row.last_error, "createdAt": row.created_at, "updatedAt": row.updated_at,
         "attachments": [{"id": item.id, "name": item.file_name, "mime": item.content_type,
             "sizeBytes": item.size_bytes, "url": f"/api/inbox/drafts/{row.id}/attachments/{item.id}",
-            "downloadUrl": f"/api/inbox/drafts/{row.id}/attachments/{item.id}?download=true"} for item in attachment_rows(db, row.id)]}
+            "downloadUrl": f"/api/inbox/drafts/{row.id}/attachments/{item.id}?download=true"} for item in attachments]}
 
 
 def attempt_out(row):
@@ -61,7 +64,7 @@ def attempt_out(row):
 def config_for(db, settings, row):
     source = db.get(MailAccount, row.account_id)
     try:
-        return zoho_mail.account_config(db, settings, source)
+        return mail_providers.account_config(db, settings, source)
     except MailAdapterError as exc:
         raise HTTPException(409, str(exc)) from None
 
@@ -106,10 +109,10 @@ def sync_draft(db, settings, row):
             folders = mailbox.folders()
             destination = next((item["name"] for item in folders if item["role"] == "drafts"), None)
             if not destination:
-                raise MailAdapterError("draft_folder", "Enable the Drafts folder in Zoho's IMAP folder settings. The CRM draft is saved.")
+                raise MailAdapterError("draft_folder", "Make the Drafts folder visible to IMAP in the mailbox settings. The CRM draft is saved.")
             cursor, uids = mailbox.find_message_id(destination, message_id)
             if len(uids) > 1:
-                raise MailAdapterError("draft_duplicates", "Zoho has multiple copies of this draft version. Review them in Zoho before syncing again.")
+                raise MailAdapterError("draft_duplicates", "The mailbox has multiple copies of this draft version. Review them there before syncing again.")
             if uids:
                 validity, uid = cursor.uid_validity, uids[0]
             else:
@@ -117,7 +120,7 @@ def sync_draft(db, settings, row):
                 if result is None:
                     cursor, uids = mailbox.find_message_id(destination, message_id)
                     if len(uids) != 1:
-                        raise MailAdapterError("draft_unknown", "Zoho accepted the draft but its location is unconfirmed. Check draft sync before sending.")
+                        raise MailAdapterError("draft_unknown", "The mailbox accepted the draft but its location is unconfirmed. Check draft sync before sending.")
                     result = cursor.uid_validity, uids[0]
                 validity, uid = result
             old = row.remote_folder, row.remote_uid, row.remote_uid_validity
@@ -128,7 +131,7 @@ def sync_draft(db, settings, row):
                 try:
                     mailbox.remove_draft(*old)
                 except MailAdapterError:
-                    row.last_error = "The latest draft is saved. Zoho may still show an older draft copy; remove it there after checking."
+                    row.last_error = "The latest draft is saved. The mailbox may still show an older draft copy; remove it there after checking."
     except (MailAdapterError, HTTPException) as exc:
         row.remote_state = "unknown" if getattr(exc, "unknown", False) or getattr(exc, "code", "") == "draft_unknown" else "error"
         row.last_error = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
@@ -136,12 +139,13 @@ def sync_draft(db, settings, row):
     return row
 
 
-def expire_sending(db, row):
-    attempts = list(db.scalars(select(MailSendAttempt).where(MailSendAttempt.draft_id == row.id).order_by(MailSendAttempt.created_at.desc())))
+def expire_sending(db, row, attempts=None):
+    if attempts is None:
+        attempts = list(db.scalars(select(MailSendAttempt).where(MailSendAttempt.draft_id == row.id).order_by(MailSendAttempt.created_at.desc())))
     changed = False
     for attempt in attempts:
         if attempt.status in {"pending", "sending"} and attempt.created_at < now() - timedelta(minutes=3):
-            attempt.status, attempt.last_error = "unknown", "The send request was interrupted. Check Zoho Sent before sending another copy."
+            attempt.status, attempt.last_error = "unknown", "The send request was interrupted. Check the Sent folder before sending another copy."
             if row.status == "sending":
                 row.status, row.last_error = "unknown", attempt.last_error
             changed = True
@@ -158,5 +162,5 @@ def remove_remote_draft(db, row, config):
             mailbox.remove_draft(row.remote_folder, row.remote_uid, row.remote_uid_validity)
         row.remote_state, row.remote_uid = "synced", None
     except MailAdapterError:
-        row.remote_state, row.last_error = "error", "Zoho may still show the saved draft. Remove that copy after checking Sent; do not send it again."
+        row.remote_state, row.last_error = "error", "The mailbox may still show the saved draft. Remove that copy after checking Sent; do not send it again."
     db.commit()

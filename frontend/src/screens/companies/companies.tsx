@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { BriefcaseBusiness, Building2, Globe2, History, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import type { Company } from '@/shared/model/types'
@@ -11,6 +11,7 @@ import { FileLink } from '@/shared/ui/file-drop'
 import { CompanyDialog } from '@/features/companies/components/company-dialog'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
+import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 
 /**
  * Companies are the employers orders are placed for. Each belongs to a client, so one
@@ -18,9 +19,13 @@ import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
  */
 export default function CompaniesPage() {
   const store = useStore()
+  const snapshot = useWorkspaceReady('companies')
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
-  const [clientFilter, setClientFilter] = useState('all')
+  const clientFilter = params.get('client') || 'all'
+  const setClientFilter = (value: string) => setParams((previous) => { const next = new URLSearchParams(previous); value === 'all' ? next.delete('client') : next.set('client', value); return next })
+  const canAdd = store.clients.some((client) => client.status === 'active')
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Company | null>(null)
   const [history, setHistory] = useState<string | null>(null)
@@ -41,6 +46,8 @@ export default function CompaniesPage() {
     })
   }, [store.companies, store.clients, query, clientFilter])
 
+  if (!snapshot.ready) return <Panel><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || 'Loading employer companies…'}</p>{snapshot.error && <Button className="mt-3" onClick={snapshot.retry}>Retry employers</Button>}</Panel>
+
   const columns: Column<Company>[] = [
     {
       key: 'name',
@@ -54,11 +61,12 @@ export default function CompaniesPage() {
     },
     {
       key: 'client',
-      header: 'Client',
+      header: 'Client contact',
       sortable: true,
       filterable: true,
       className: 'whitespace-nowrap',
       value: (c) => store.client(c.clientId)?.name ?? '',
+      render: (c) => <button type="button" className="text-left text-navy-700 hover:underline" onClick={(event) => { event.stopPropagation(); navigate(`/clients/${c.clientId}`) }}>{store.client(c.clientId)?.name ?? 'Client unavailable'}</button>,
     },
     { key: 'city', header: 'City', sortable: true, filterable: true, value: (c) => c.city ?? '' },
     {
@@ -122,6 +130,7 @@ export default function CompaniesPage() {
       render: (c) => <StatusPill status={c.status} />,
     },
     { key: 'edit', header: 'Actions', render: (company) => <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+      <Button size="sm" onClick={() => navigate(`/jobs?company=${encodeURIComponent(company.id)}`)}>Hiring orders</Button>
       <IconButton label={'Edit ' + company.name} onClick={() => setEditing(company)}><Pencil className="h-4 w-4" /></IconButton>
       <IconButton label={'Activity for ' + company.name} onClick={() => setHistory(company.id)}><History className="h-4 w-4" /></IconButton>
     </div> },
@@ -162,7 +171,7 @@ export default function CompaniesPage() {
               variant="primary"
               icon={<Plus className="h-4 w-4" />}
               onClick={() => setAdding(true)}
-              disabled={store.clients.length === 0}
+              disabled={!canAdd}
             >
               New company
             </Button>
@@ -204,7 +213,7 @@ export default function CompaniesPage() {
       />
 
       <Panel flush>
-        <PanelHeader title="Company directory" meta="The businesses behind your job orders" />
+        <PanelHeader title="Company directory" meta="Open an employer to view its hiring orders, or edit contacts and agreements here." />
         <div className="workspace-list-toolbar">
           <SearchInput
             value={query}
@@ -222,21 +231,21 @@ export default function CompaniesPage() {
           rows={rows}
           columns={columns}
           rowKey={(c) => c.id}
-          onRowClick={(c) => navigate(`/clients/${c.clientId}`)}
+          onRowClick={(c) => navigate(`/jobs?company=${encodeURIComponent(c.id)}`)}
           empty={
             <EmptyState
-              title={store.clients.length === 0 ? 'Add a client first' : 'No companies yet'}
+              title={!canAdd ? 'An active client contact is needed' : query || clientFilter !== 'all' ? 'No employers match these filters' : 'No companies yet'}
               description={
-                store.clients.length === 0
-                  ? 'A company belongs to a client, so the person has to exist before the business does.'
-                  : 'Add the employer a job order will be placed for.'
+                !canAdd
+                  ? 'Add a client contact or reactivate an existing contact before creating an employer.'
+                  : query || clientFilter !== 'all' ? 'Clear the search and client filter to see the rest of your employer network.' : 'Add the employer a job order will be placed for.'
               }
               action={
-                store.clients.length === 0 ? (
+                !canAdd ? (
                   <Button variant="primary" onClick={() => navigate('/clients')}>
                     Go to Clients
                   </Button>
-                ) : (
+                ) : query || clientFilter !== 'all' ? <Button onClick={() => { setQuery(''); setClientFilter('all') }}>Clear filters</Button> : (
                   <Button variant="primary" onClick={() => setAdding(true)}>
                     New company
                   </Button>
@@ -247,7 +256,7 @@ export default function CompaniesPage() {
         />
       </Panel>
 
-      {(adding || editing) && <CompanyDialog company={editing ?? undefined} onClose={() => { setAdding(false); setEditing(null) }} />}
+      {(adding || editing) && <CompanyDialog company={editing ?? undefined} clientId={store.client(clientFilter)?.status === 'active' ? clientFilter : undefined} onClose={() => { setAdding(false); setEditing(null) }} />}
       {history && <RecordAudit kind="company" id={history} onClose={() => setHistory(null)} />}
       <DeleteRecordDialog
         kind="company"

@@ -40,12 +40,21 @@ def _rows(name: str, statement: Select, *ordering):
     return select(func.json_agg(record, type_=JSON)).scalar_subquery().label(name)
 
 
-def snapshot_statement(user_id: str) -> Select:
+def snapshot_statement(user_id: str, *, compact: bool = False) -> Select:
     supervisor = select(User.role.in_([Role.admin, Role.manager])).where(User.id == user_id).scalar_subquery()
     owned_candidates = select(Candidate.id).where(Candidate.owner_id == user_id)
     visible_tasks = or_(supervisor, Task.owner_id == user_id)
     visible_applications = or_(supervisor, Application.candidate_id.in_(owned_candidates))
     application_fields = _fields(Application, ApplicationOut)
+    candidate_fields = _fields(Candidate, CandidateOut, "created_at", "call_called",
+                              "call_interested", "call_remarks", "call_recorded_at")
+    if compact:
+        # Resume text can dwarf the rest of the desk. Full profile reads and
+        # server-side resume search retain it; list navigation does not need it.
+        candidate_fields = candidate_fields.with_only_columns(*(
+            literal("").label("resume_text") if column.name == "resume_text" else column
+            for column in candidate_fields.selected_columns
+        ))
     # Placement summaries remain shared for Data Bank availability; another
     # recruiter's draft and detailed stage/task history do not cross the boundary.
     application_fields = application_fields.with_only_columns(*(
@@ -74,8 +83,7 @@ def snapshot_statement(user_id: str) -> Select:
         _rows("orders", _fields(Order, OrderOut)),
         _rows(
             "candidates",
-            _fields(Candidate, CandidateOut, "created_at", "call_called",
-                    "call_interested", "call_remarks", "call_recorded_at"),
+            candidate_fields,
             ("created_at", True), ("id", False),
         ),
         _rows("files", candidate_files, ("version", False)),
@@ -96,5 +104,5 @@ def snapshot_statement(user_id: str) -> Select:
     )
 
 
-def read_snapshot(db: Session, user_id: str) -> dict[str, list[dict] | str]:
-    return {name: rows or [] for name, rows in db.execute(snapshot_statement(user_id)).mappings().one().items()}
+def read_snapshot(db: Session, user_id: str, *, compact: bool = False) -> dict[str, list[dict] | str]:
+    return {name: rows or [] for name, rows in db.execute(snapshot_statement(user_id, compact=compact)).mappings().one().items()}

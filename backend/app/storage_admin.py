@@ -11,21 +11,24 @@ from pathlib import Path
 from sqlalchemy import select, text
 
 from app.db.models import (Attachment, AuditEntry, DocumentExtractionJob, EmailIngestionJob,
-                           MailAccount, MailAttachment, MailDraftAttachment, MailSendAttempt, WhatsAppMessage)
+                           MailAccount, MailAttachment, MailDraftAttachment, MailSendAttempt,
+                           MultiPersonIntake, WhatsAppMessage, WhatsAppSendAttempt)
 from app.services.document_storage import put_bytes, read_bytes, storage_key
 from app.services.mail_storage import storage_identity
 
 DIRECT = ((MailDraftAttachment, "object_key"), (Attachment, "object_key"), (MailAttachment, "object_key"),
-          (WhatsAppMessage, "object_key"), (DocumentExtractionJob, "object_key"))
+          (WhatsAppMessage, "object_key"), (DocumentExtractionJob, "object_key"), (WhatsAppSendAttempt, "object_key"))
 NESTED = ((MailSendAttempt, "snapshot"), (EmailIngestionJob, "state"), (WhatsAppMessage, "processing_state"),
-          (DocumentExtractionJob, "state"))
+          (DocumentExtractionJob, "state"), (MultiPersonIntake, "sources"))
 
 
 def embedded_keys(value):
     if isinstance(value, dict):
         key = value.get("object_key")
         if isinstance(key, str) and key:
-            yield key, value.get("content_hash")
+            # Multi-person source snapshots retain their verified digest as
+            # `hash`; document and message snapshots use `content_hash`.
+            yield key, value.get("content_hash") or value.get("hash")
         for child in value.values():
             yield from embedded_keys(child)
     elif isinstance(value, list):

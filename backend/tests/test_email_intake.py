@@ -27,6 +27,8 @@ from app.db.models import (
 from app.integrations.mail.base import InboundAttachment, InboundMessage, MailMessageError
 from app.integrations.mail.imap import MailConfig, MailAdapterError, mailbox_source_id, provider_message_id
 from test_database_naming import _migrate, schema_database
+from test_document_extraction import environment, full_payload, pdf as scan_pdf  # noqa: F401
+from test_ocr_classification import AADHAAR, AADHAAR_BACK, CV, PASSPORT
 
 
 with patch("app.core.config.get_settings", return_value=SimpleNamespace(
@@ -76,6 +78,8 @@ def extraction(*, kind="resume", fields=None, status="complete", warnings=None):
                 "fields": fields,
                 "raw": {"pages": [{"page_number": 2, "text": "Synthetic resume evidence"}]},
                 "selected_pages": [3] if kind == "passport" else [2],
+                "source": {"local_inspection": {"selected_pages": [3] if kind == "passport" else [2]},
+                           "selected_pages": [3] if kind == "passport" else [2]},
             },
         },
     }
@@ -83,6 +87,10 @@ def extraction(*, kind="resume", fields=None, status="complete", warnings=None):
 
 @pytest.fixture
 def intake(schema_database, tmp_path, monkeypatch):
+    # These placeholders exercise durable checkpoints, not an installed OCR
+    # executable. Native person inspection still runs on the retained PDF.
+    from app.integrations.ocr import inspection
+    monkeypatch.setattr(inspection, "find_tesseract", lambda _command=None: None)
     _migrate(schema_database, "head")
     sessions = sessionmaker(bind=schema_database, autoflush=False, expire_on_commit=False)
     settings = SimpleNamespace(storage_dir=tmp_path, ocr_document_timeout_seconds=600)
@@ -181,6 +189,69 @@ def test_combining_top_level_low_confidence_warnings_requires_review():
     assert review is True
     assert fields["name"] == "Alex Example"
     assert raw["resume"]["pages"][0]["page_number"] == 2
+
+
+def tagged(kind, request_id, file_name, *, fields=None, pages=(2,), sha=None):
+    output = extraction(kind=kind, fields=fields)
+    part = output["extractions"][kind]
+    # What Veris returned (provider page numbers 1..n), with provenance kept beside it.
+    part["raw"] = {"request_id": request_id, "pages": [{"page_number": n, "text": f"{request_id} text", "lines": [{"text": "kept"}]} for n in range(1, len(pages) + 1)],
+                   "unmodelled_key": {"kept": True}}
+    part["selected_pages"] = list(pages)
+    part["source"] = {"local_inspection": {"selected_pages": list(pages)}, "selected_pages": list(pages), **({"source_sha256": sha} if sha else {})}
+    return {**output, "source": {"channel": "email", "message_id": "m1", "attachment_id": file_name, "file_name": file_name}}
+
+
+def legacy_tagged(kind, request_id, file_name, *, pages=(2,), sha=None):
+    """A checkpoint saved before provenance moved out of the Veris payload."""
+    output = tagged(kind, request_id, file_name, pages=pages, sha=sha)
+    part = output["extractions"][kind]
+    part.pop("source")
+    part["raw"] = {**part["raw"], "local_inspection": {"selected_pages": list(pages)}, **({"source_sha256": sha} if sha else {})}
+    return output
+
+
+def test_combining_keeps_every_document_of_a_kind_each_with_its_attachment_provenance():
+    results = [
+        tagged("passport", "passport-a", "a.pdf", pages=(3,), sha="a"),
+        tagged("passport", "passport-b", "b.pdf", pages=(1, 2), sha="b"),
+        tagged("resume", "resume-a", "a.pdf", sha="a"),
+        # An Aadhaar whose mapped fields are empty is still retained whole.
+        tagged("aadhaar", "aadhaar-b", "b.pdf", fields={"name": None, "phone": None, "email": None, "designation": None}, pages=(3,), sha="b"),
+    ]
+    snapshot = deepcopy(results)
+
+    fields, raw, review = subject.combine_extractions(results)
+
+    assert results == snapshot
+    # Each document is exactly the provider result; provenance is beside it.
+    assert raw["passport"] == results[0]["extractions"]["passport"]["raw"]
+    assert raw["_sources"]["passport"] == {
+        "source_file": {"channel": "email", "message_id": "m1", "attachment_id": "a.pdf", "file_name": "a.pdf", "selected_pages": [3]},
+        "local_inspection": {"selected_pages": [3]}, "selected_pages": [3], "source_sha256": "a"}
+    assert raw["additional_documents"] == [{"passport": results[1]["extractions"]["passport"]["raw"], "_source": {
+        "source_file": {"channel": "email", "message_id": "m1", "attachment_id": "b.pdf", "file_name": "b.pdf", "selected_pages": [1, 2]},
+        "local_inspection": {"selected_pages": [1, 2]}, "selected_pages": [1, 2], "source_sha256": "b"}}]
+    assert raw["resume"]["request_id"] == "resume-a" and raw["aadhaar"]["request_id"] == "aadhaar-b"
+    assert raw["aadhaar"]["pages"][0]["text"] == "aadhaar-b text"
+    assert set(raw) == {"passport", "resume", "aadhaar", "_sources", "additional_documents"}
+    assert fields["name"] == "Alex Example"
+
+
+def test_combining_the_same_read_twice_stores_it_once():
+    results = [tagged("passport", "passport-a", "a.pdf", pages=(3,), sha="a"),
+               tagged("passport", "passport-a", "copy.pdf", pages=(3,), sha="a")]
+
+    _, raw, _ = subject.combine_extractions(results)
+
+    assert "additional_documents" not in raw and raw["_sources"]["passport"]["source_file"]["file_name"] == "a.pdf"
+
+
+def test_combining_a_pre_provenance_checkpoint_keeps_its_old_shape():
+    _, raw, _ = subject.combine_extractions([legacy_tagged("passport", "passport-a", "a.pdf", pages=(3,), sha="a")])
+
+    assert raw["passport"]["source_file"]["file_name"] == "a.pdf" and raw["passport"]["source_sha256"] == "a"
+    assert "_sources" not in raw
 
 
 @pytest.mark.parametrize("difference", [
@@ -507,6 +578,7 @@ def test_incomplete_or_conflicting_results_require_review_without_candidate_writ
     output = extraction()
     if failure == "partial":
         output["status"] = "needs_review"
+        output["extractions"] = {}
         output["warnings"] = ["Provider did not return every selected page"]
     elif failure == "conflicting_documents":
         output["extractions"]["passport"] = extraction(kind="passport", fields={"name": "Another Applicant"})["extractions"]["passport"]
@@ -594,6 +666,107 @@ def test_bundle_retains_original_and_stores_correct_separate_document_pages(inta
         assert candidate.resume_text == "Synthetic resume evidence"
         assert candidate.ocr_data["passport"]["pages"][0]["text"] == "Synthetic passport evidence"
         assert candidate.ocr_data["aadhaar"]["pages"][0]["text"] == "Synthetic aadhaar evidence"
+
+
+def real_extraction(monkeypatch, environment, intake, payloads_by_data):
+    """The real page-by-page pipeline against a fake provider that answers per attachment."""
+    from app.services import document_extraction
+    intake.settings.__dict__.update(vars(environment.settings))
+
+    def extract(data, *, state, save, settings, designations, **options):
+        environment.results.clear()
+        environment.results.update(deepcopy(payloads_by_data[data]))
+
+        def both(snapshot):
+            environment.saved.append(deepcopy(snapshot))
+            save(snapshot)
+        return document_extraction.extract_attachment(data, state=state, save=both, settings=settings, designations=designations, **options)
+    monkeypatch.setattr(subject, "extract_attachment", extract)
+
+
+def test_full_provider_payloads_from_one_attachment_reach_the_candidate_unchanged(intake, environment, monkeypatch):
+    data = scan_pdf(CV, PASSPORT, AADHAAR, AADHAAR_BACK)
+    payloads = {"resume": full_payload("resume", 1), "passport": full_payload("passport", 1), "aadhaar": full_payload("aadhaar", 2)}
+    real_extraction(monkeypatch, environment, intake, {data: payloads})
+    job_id, part_id = receipt(intake, data=data)
+
+    run(intake, job_id)
+
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        assert job.status == "completed", job.last_error
+        candidate = db.get(Candidate, job.candidate_id)
+        stored = candidate.ocr_data
+        assert set(stored) == {"resume", "passport", "aadhaar", "_sources"}
+        for kind, payload in payloads.items():
+            # Exactly what Veris returned: nothing added, dropped, renumbered or reshaped.
+            assert stored[kind] == payload
+            assert stored["_sources"][kind]["source_file"] == {
+                "channel": "email", "message_id": job.message_id, "attachment_id": part_id,
+                "file_name": "misleading-name.jpg", "selected_pages": stored["_sources"][kind]["selected_pages"]}
+            assert stored["_sources"][kind]["source_sha256"] == hashlib.sha256(data).hexdigest()
+        assert {kind: source["selected_pages"] for kind, source in stored["_sources"].items()} == {"resume": [1], "passport": [2], "aadhaar": [3, 4]}
+        assert [p["page_number"] for p in stored["aadhaar"]["pages"]] == [1, 2]
+        assert stored["aadhaar"]["aadhaar"]["aadhaar_number"] == "000000000000"
+        # Only these Aadhaar values reached columns; the rest stays in ocr_data.
+        assert candidate.name == "Alex Example" and candidate.phone == "0000000000"
+        assert candidate.resume_text.startswith("resume complete text 1")
+
+
+def test_two_passports_in_one_message_are_both_stored_with_their_own_attachment_and_pages(intake, environment, monkeypatch):
+    first, second = scan_pdf(CV, PASSPORT), scan_pdf(PASSPORT, AADHAAR)
+    renewed = full_payload("passport", 1)
+    renewed["request_id"] = "req-passport-renewed"
+    renewed["pages"][0]["text"] = "renewed passport text"
+    real_extraction(monkeypatch, environment, intake, {
+        first: {"resume": full_payload("resume", 1), "passport": full_payload("passport", 1)},
+        second: {"passport": renewed, "aadhaar": full_payload("aadhaar", 1)},
+    })
+    job_id, part_id = receipt(intake, data=first)
+    key = subject.store_original(intake.settings, "account-a", "second", 1, second)
+    with intake.sessions() as db:
+        db.add(MailAttachment(message_id=db.get(EmailIngestionJob, job_id).message_id, file_name="passport-and-card.pdf",
+                              content_hash=hashlib.sha256(second).hexdigest(), object_key=key, size_kb=1))
+        db.commit()
+
+    run(intake, job_id)
+
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        assert job.status == "completed", job.last_error
+        stored = db.get(Candidate, job.candidate_id).ocr_data
+        entries = [(stored["passport"], stored["_sources"]["passport"]), *((entry["passport"], entry["_source"]) for entry in stored["additional_documents"])]
+        assert sorted(item["request_id"] for item, _ in entries) == ["req-passport", "req-passport-renewed"]
+        assert {source["source_file"]["file_name"] for _, source in entries} == {"misleading-name.jpg", "passport-and-card.pdf"}
+        assert {source["source_sha256"] for _, source in entries} == {hashlib.sha256(first).hexdigest(), hashlib.sha256(second).hexdigest()}
+        # Both stay as Veris returned them (page 1 of the single page sent); the source maps back to the file.
+        assert all(item["pages"][0]["page_number"] == 1 for item, _ in entries)
+        assert all(source["selected_pages"] == [2 if source["source_file"]["file_name"] == "misleading-name.jpg" else 1] for _, source in entries)
+        assert renewed in [item for item, _ in entries] and full_payload("passport", 1) in [item for item, _ in entries]
+        assert stored["resume"]["request_id"] == "req-resume" and stored["aadhaar"]["request_id"] == "req-aadhaar"
+        assert len(stored["additional_documents"]) == 1
+
+
+def test_existing_candidate_receiving_a_second_passport_keeps_both(intake, monkeypatch):
+    first, _ = receipt(intake)
+    fake_extraction(monkeypatch, tagged("passport", "passport-old", "old.pdf", pages=(3,), sha="old"))
+    run(intake, first)
+    second, _ = receipt(intake, uid=12, data=ORIGINAL + b" renewed")
+    fake_extraction(monkeypatch, tagged("passport", "passport-new", "new.pdf", pages=(3,), sha="new"))
+
+    run(intake, second)
+
+    with intake.sessions() as db:
+        assert row_count(db, Candidate) == 1
+        stored = db.get(Candidate, db.get(EmailIngestionJob, first).candidate_id).ocr_data
+        assert db.get(EmailIngestionJob, second).status == "completed"
+        assert stored["passport"]["request_id"] == "passport-old"
+        assert [entry["passport"]["request_id"] for entry in stored["additional_documents"]] == ["passport-new"]
+        assert stored["additional_documents"][0]["passport"]["pages"][0]["text"] == "passport-new text"
+        assert stored["additional_documents"][0]["_source"]["source_sha256"] == "new" and stored["_sources"]["passport"]["source_sha256"] == "old"
+        # Re-delivery of the same completed receipt does not duplicate anything.
+        run(intake, second)
+        assert len(db.get(Candidate, db.get(EmailIngestionJob, first).candidate_id).ocr_data["additional_documents"]) == 1
 
 
 def test_email_migration_round_trip_preserves_existing_accounts_messages_and_candidates(schema_database):
@@ -690,3 +863,141 @@ def test_manual_creation_waits_for_intake_lock_before_duplicate_and_reference_re
     with intake.sessions() as db:
         assert row_count(db, Candidate) == 1
         assert row_count(db, Task) == row_count(db, AuditEntry) == 0
+
+
+# ---- one bad attachment, name variants, Aadhaar mobile, designation ---------------------
+
+def png(width, height):
+    import io
+    from PIL import Image
+    with Image.new("RGB", (width, height), "white") as image:
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+        return out.getvalue()
+
+
+def receipt_many(intake, files, *, account="account-a", uid=31):
+    with intake.sessions() as db:
+        message = MailMessage(account_id=account, provider_message_id=f"synthetic:{uid}", received_at=STAMP)
+        db.add(message)
+        db.flush()
+        parts = []
+        for ordinal, (name, data) in enumerate(files):
+            key = subject.store_original(intake.settings, account, str(uid), ordinal, data)
+            part = MailAttachment(message_id=message.id, file_name=name, content_hash=hashlib.sha256(data).hexdigest(),
+                                  object_key=key, size_kb=1)
+            db.add(part)
+            parts.append(part)
+        job = EmailIngestionJob(message_id=message.id, state={})
+        db.add(job)
+        db.commit()
+        return job.id, [part.id for part in parts]
+
+
+def test_signature_logo_and_vcard_do_not_block_the_resume(intake, monkeypatch):
+    job_id, (resume_id, logo_id, vcf_id, zip_id) = receipt_many(intake, [
+        ("cv.pdf", ORIGINAL), ("image001.png", png(120, 40)),
+        ("contact.vcf", b"BEGIN:VCARD\nFN:Sender\nEND:VCARD\n"), ("data.zip", b"PK\x03\x04 not a docx"),
+    ])
+    calls = fake_extraction(monkeypatch)
+    run(intake, job_id)
+    assert calls == [ORIGINAL]
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        candidate = db.scalar(select(Candidate))
+        assert job.status == "completed" and job.candidate_id == candidate.id and job.last_error is None
+        assert candidate.status == CandidateStatus.new and not candidate.needs_review
+        report = {item["attachmentId"]: item for item in job.inspection}
+        assert report[resume_id]["status"] == "complete"
+        for identifier in (logo_id, vcf_id, zip_id):
+            assert report[identifier]["status"] == "ignored" and report[identifier]["reason"]
+        assert row_count(db, Candidate) == 1
+
+
+def test_only_ignorable_attachments_leave_the_receipt_ignored(intake, monkeypatch):
+    job_id, _ = receipt_many(intake, [("image001.png", png(100, 30)), ("contact.vcf", b"BEGIN:VCARD")])
+    fake_extraction(monkeypatch)
+    run(intake, job_id)
+    with intake.sessions() as db:
+        assert db.get(EmailIngestionJob, job_id).status == "ignored"
+        assert row_count(db, Candidate) == 0
+
+
+def test_an_unreadable_real_document_is_reported_while_the_rest_saves(intake, monkeypatch):
+    broken = pdf("Scanned passport page that cannot be opened")
+    job_id, (good_id, bad_id) = receipt_many(intake, [("cv.pdf", ORIGINAL), ("passport-scan.pdf", broken)])
+
+    def extract(data, *, state, save, **kwargs):
+        if data == broken:
+            raise subject.UnreadableDocument("Password-protected PDFs must be unlocked before inspection.")
+        state.update(source_sha256=hashlib.sha256(data).hexdigest(), inspection=extraction()["inspection"])
+        save(state)
+        return extraction()
+    monkeypatch.setattr(subject, "extract_attachment", extract)
+    run(intake, job_id)
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        candidate = db.scalar(select(Candidate))
+        assert job.status == "completed" and candidate.needs_review
+        assert "passport-scan.pdf" in job.last_error and "Password-protected" in job.last_error
+        report = {item["attachmentId"]: item for item in job.inspection}
+        assert report[bad_id]["status"] == "needs_review" and report[good_id]["status"] == "complete"
+
+
+def test_every_attachment_unreadable_holds_the_receipt_for_review(intake, monkeypatch):
+    job_id, _ = receipt_many(intake, [("a.pdf", pdf("one")), ("b.pdf", pdf("two"))])
+
+    def extract(data, **kwargs):
+        raise subject.UnreadableDocument("The PDF cannot be opened.")
+    monkeypatch.setattr(subject, "extract_attachment", extract)
+    run(intake, job_id)
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        assert job.status == "needs_review" and row_count(db, Candidate) == 0
+
+
+def test_partly_classified_file_saves_what_was_extracted_and_flags_the_candidate(intake, monkeypatch):
+    job_id, _ = receipt(intake)
+    fake_extraction(monkeypatch, extraction(status="needs_review", warnings=["Pages 3 could not be classified and were not extracted."]))
+    run(intake, job_id)
+    with intake.sessions() as db:
+        candidate = db.scalar(select(Candidate))
+        assert db.get(EmailIngestionJob, job_id).status == "completed"
+        assert candidate.needs_review and candidate.status == CandidateStatus.needs_review
+
+
+@pytest.mark.parametrize("other, outcome", [
+    ("Singh Rahul", "partial"), ("Rahul K Singh", "same"), ("R Singh", "partial"), ("Priya Nair", "different"),
+])
+def test_name_variants_across_documents_are_warnings_only_when_disjoint_names_block(other, outcome):
+    first = extraction(fields={"name": "Rahul Kumar Singh", "phone": "", "email": "", "designation": ""})
+    second = extraction(kind="passport", fields={"name": other})
+    if outcome == "different":
+        with pytest.raises(subject.IntakeReviewError):
+            subject.combine_extractions([first, second])
+        return
+    _, _, review = subject.combine_extractions([first, second])
+    assert review is (outcome == "partial")
+
+
+def test_aadhaar_without_a_mobile_cannot_conflict_with_the_resume_phone():
+    aadhaar = extraction(kind="aadhaar", fields={"name": "Alex Example", "phone": None})
+    fields, _, _ = subject.combine_extractions([extraction(), aadhaar])
+    assert fields["phone"] == "+91 90000 00001"
+
+
+def test_passport_details_come_from_the_passport_with_the_resume_as_fallback():
+    resume = extraction(fields={"passport_no": "Z1234567", "passport_place": "Cochin (resume)", "passport_expiry": "2030-01-01"})
+    passport = extraction(kind="passport", fields={"passport_no": "Z1234567", "passport_place": "COCHIN", "name": "Alex Example"})
+    fields, _, _ = subject.combine_extractions([resume, passport])
+    assert fields["passport_place"] == "COCHIN" and fields["passport_expiry"] == "2030-01-01"
+
+
+def test_unmatched_resume_designation_is_kept_as_free_text(intake, monkeypatch):
+    job_id, _ = receipt(intake)
+    output = extraction(fields={"designation": ""})
+    output["extractions"]["resume"]["raw"]["designation"] = "Senior Pipe Fitter"
+    fake_extraction(monkeypatch, output)
+    run(intake, job_id)
+    with intake.sessions() as db:
+        assert db.scalar(select(Candidate)).designations == ["Senior Pipe Fitter"]

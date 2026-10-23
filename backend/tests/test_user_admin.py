@@ -6,14 +6,14 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import DefaultClause, JSON, MetaData, Text, create_engine, event, select, text
+from sqlalchemy import DefaultClause, JSON, MetaData, Text, create_engine, event, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from test_database_naming import schema_database
 
 from app.core.security import SESSION_COOKIE, hash_password, verify_password
-from app.db.models import AssignmentPointer, AttendanceHRRequest, AttendanceCalendarDay, AuditEntry, Base, Candidate, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, User, StaffPresenceInterval
+from app.db.models import AssignmentPointer, AttendanceHRRequest, AttendanceCalendarDay, AuditEntry, Base, Candidate, CandidateStatus, Notification, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, User, StaffPresenceInterval
 
 with patch('app.core.config.get_settings', return_value=SimpleNamespace(database_url='postgresql+psycopg://unused@127.0.0.1:1/user_admin_tests')):
     from app.api.routers import users
@@ -26,7 +26,7 @@ def env(request):
     metadata = MetaData()
     for table in Base.metadata.sorted_tables:
         table.to_metadata(metadata)
-    models = [User, LoginSession, AssignmentPointer, Candidate, Task, TaskEvent, AuditEntry, StaffPresenceInterval, AttendanceHRRequest, AttendanceCalendarDay]
+    models = [User, LoginSession, AssignmentPointer, Candidate, Task, TaskEvent, AuditEntry, StaffPresenceInterval, AttendanceHRRequest, AttendanceCalendarDay, Notification]
     for model in models:
         for column in metadata.tables[model.__tablename__].columns:
             if isinstance(column.type, JSONB): column.type = JSON()
@@ -142,6 +142,12 @@ def test_deactivation_requires_valid_target_and_is_atomic(env):
         assert event.owner_id == 'receiver' and event.meta == {'fromOwnerId': 'staff', 'toOwnerId': 'receiver'}
         assert db.get(LoginSession, 'session-staff') is None
         assert db.scalar(select(AuditEntry).where(AuditEntry.entity_type == 'candidate')).meta['toUserId'] == 'receiver'
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
+        assert {notice.user_id for notice in notices} == {'receiver', 'admin', 'manager'}
+        assert len(notices) == 3 and all(notice.link_to == '/candidates/candidate' for notice in notices)
+    assert env.client.patch('/api/users/staff', json={'active': False, 'reassignToUserId': 'receiver'}).status_code == 200
+    with env.factory() as db:
+        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 3
 
 
 def test_failed_commit_rolls_back_reassignment_and_revocation(env, monkeypatch):
@@ -156,6 +162,23 @@ def test_failed_commit_rolls_back_reassignment_and_revocation(env, monkeypatch):
         assert db.get(Candidate, 'candidate').owner_id == 'staff'
         assert db.get(Task, 'open').owner_id == 'staff'
         assert db.get(LoginSession, 'session-staff') is not None
+        assert db.scalar(select(Notification.id)) is None
+
+
+def test_deactivation_notifies_about_task_only_transfer_without_claiming_candidate_move(env):
+    assigned_work(env)
+    with env.factory() as db:
+        db.get(Candidate, 'candidate').owner_id = 'receiver'
+        db.commit()
+    response = env.client.patch('/api/users/staff', json={'active': False, 'reassignToUserId': 'receiver'})
+    assert response.status_code == 200, response.text
+    with env.factory() as db:
+        assert db.get(Task, 'open').owner_id == 'receiver'
+        assert db.get(Task, 'completed').owner_id == 'staff'
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
+        assert len(notices) == 3
+        assert {notice.user_id for notice in notices} == {'receiver', 'admin', 'manager'}
+        assert all(notice.title == 'Task assigned' and notice.link_to == '/tasks?task=open' for notice in notices)
 
 
 def test_role_change_transfers_work_and_revokes_sessions(env):
@@ -202,3 +225,59 @@ def test_audit_paginates_equal_timestamps_and_excludes_unrelated_events(env):
     next_page = env.client.get('/api/users/staff/audit', params={'before': page['nextBefore'], 'limit': 2}).json()
     assert [row['id'] for row in next_page['items']] == ['a']
     assert next_page['nextBefore'] is None
+
+
+def waiting_candidates(env, count=2):
+    with env.factory() as db:
+        for number in range(count):
+            db.add(Candidate(id=f'waiting-{number}', ref=f'C-WAIT-{number}', name=f'Waiting {number}', phone=f'9000000{number:03d}',
+                             source=Source.email, owner_id=None, needs_review=True, status=CandidateStatus.needs_review,
+                             languages=[], skills=[], designations=[]))
+        db.commit()
+
+
+def test_new_eligible_staff_account_receives_waiting_candidates(env):
+    # Nobody is eligible: the seeded recruiters leave the rotation, then candidates arrive unowned.
+    for identifier in ('staff', 'receiver'):
+        assert env.client.patch(f'/api/users/{identifier}', json={'receivesAutoAssign': False}).status_code == 200
+    waiting_candidates(env)
+    response = env.client.post('/api/users', json={'name': 'Fresh Recruiter', 'email': 'fresh@example.test',
+        'role': 'staff', 'password': 'new-test-password', 'receivesAutoAssign': True})
+    assert response.status_code == 201, response.text
+    with env.factory() as db:
+        rows = list(db.scalars(select(Candidate).where(Candidate.id.like('waiting-%'))))
+        assert {row.owner_id for row in rows} == {response.json()['id']}
+        assert not any(row.needs_review for row in rows) and {row.status.value for row in rows} == {'new'}
+        assert db.scalar(select(func.count()).select_from(Task).where(Task.candidate_id.like('waiting-%'), Task.kind == TaskKind.initial_call)) == 2
+
+
+@pytest.mark.parametrize('field,blocked,fix', [
+    ('receives_auto_assign', False, {'receivesAutoAssign': True}),
+    ('on_leave', True, {'onLeave': False}),
+    ('active', False, {'active': True}),
+])
+def test_staff_becoming_eligible_triggers_the_waiting_sweep(env, field, blocked, fix):
+    with env.factory() as db:
+        db.get(User, 'receiver').receives_auto_assign = False
+        setattr(db.get(User, 'staff'), field, blocked)
+        db.commit()
+    waiting_candidates(env, 1)
+    assert env.client.patch('/api/users/staff', json=fix).status_code == 200
+    with env.factory() as db:
+        assert db.get(Candidate, 'waiting-0').owner_id == 'staff'
+
+
+def test_sweep_failure_never_fails_the_account_request(env, monkeypatch):
+    for identifier in ('staff', 'receiver'):
+        env.client.patch(f'/api/users/{identifier}', json={'receivesAutoAssign': False})
+    waiting_candidates(env, 1)
+    import app.services.candidate_review as review
+    def broken(*args, **kwargs):
+        raise RuntimeError('sweep failed')
+    monkeypatch.setattr(review, 'assign_waiting_candidates', broken)
+    response = env.client.post('/api/users', json={'name': 'Fresh', 'email': 'fresh2@example.test',
+        'role': 'staff', 'password': 'new-test-password', 'receivesAutoAssign': True})
+    assert response.status_code == 201
+    with env.factory() as db:
+        assert db.get(Candidate, 'waiting-0').owner_id is None
+        assert db.scalar(select(User).where(User.email == 'fresh2@example.test')) is not None

@@ -100,11 +100,99 @@ def enrich_empty(candidate, values, ocr_data=None):
         if getattr(candidate, key) in (None, "", [], {}):
             setattr(candidate, key, val); changed.append(key)
     if ocr_data:
-        previous = copy.deepcopy(candidate.ocr_data or {})
-        for kind, data in ocr_data.items():
-            if kind not in previous:
-                previous[kind] = data
-            elif previous[kind] != data:
-                previous.setdefault("additional_documents", []).append({kind: data})
-        candidate.ocr_data = previous
+        merged = merge_ocr_data(candidate.ocr_data, ocr_data)
+        if merged != (candidate.ocr_data or {}):
+            candidate.ocr_data = merged
     return changed
+
+
+_RESERVED = {"_sources", "additional_documents"}
+
+
+def _provenance(data, source):
+    """Where a stored document came from: its own ``_source`` note, or for rows saved
+    before provenance moved out of the payload, the keys that used to sit inside it."""
+    if isinstance(source, dict) and source:
+        return source
+    if isinstance(data, dict):
+        pages = (data.get("local_inspection") or {}).get("selected_pages")
+        if data.get("source_sha256"):
+            return {"source_sha256": data["source_sha256"], "selected_pages": pages}
+    return {}
+
+
+def _same_document(left, right, left_source=None, right_source=None):
+    """The same read of the same bytes. The provenance note is not part of the content,
+    and a verbatim Veris result is never rewritten to decide this."""
+    if not (isinstance(left, dict) and isinstance(right, dict)):
+        return left == right
+    lp, rp = _provenance(left, left_source), _provenance(right, right_source)
+    if lp.get("source_sha256") and rp.get("source_sha256"):
+        return lp["source_sha256"] == rp["source_sha256"] and lp.get("selected_pages") is not None and lp.get("selected_pages") == rp.get("selected_pages")
+    left, right = ({k: v for k, v in item.items() if k != "source_file"} for item in (left, right))
+    return left == right
+
+
+def merge_ocr_data(existing, incoming):
+    """Add stored Veris output without discarding any. Each ``ocr_data[kind]`` is the
+    verbatim Veris result; our provenance for it lives in ``_sources[kind]``. The first
+    document of a kind stays primary (it is the one the candidate's columns were filled
+    from) and every other distinct document of that kind is kept in
+    ``additional_documents`` as ``{kind: raw, "_source": {...}}``. Rows saved in the old
+    shape (provenance inside the document) are kept untouched and still deduplicate."""
+    merged = copy.deepcopy(existing or {})
+    extra = [entry for entry in merged.pop("additional_documents", None) or [] if isinstance(entry, dict)]
+    sources = merged.pop("_sources", None)
+    sources = sources if isinstance(sources, dict) else {}
+    incoming = incoming or {}
+    incoming_sources = incoming.get("_sources") if isinstance(incoming.get("_sources"), dict) else {}
+    documents = [(kind, data, incoming_sources.get(kind)) for kind, data in incoming.items() if kind not in _RESERVED]
+    for entry in incoming.get("additional_documents") or []:
+        if isinstance(entry, dict):
+            documents.extend((kind, data, entry.get("_source")) for kind, data in entry.items() if kind != "_source")
+    for kind, data, source in documents:
+        known = ([(merged[kind], sources.get(kind))] if kind in merged else []) + [(item[kind], item.get("_source")) for item in extra if kind in item]
+        if any(_same_document(item, data, item_source, source) for item, item_source in known):
+            continue
+        if kind in merged:
+            extra.append({kind: copy.deepcopy(data), **({"_source": copy.deepcopy(source)} if source else {})})
+        else:
+            merged[kind] = copy.deepcopy(data)
+            if source:
+                sources[kind] = copy.deepcopy(source)
+    if sources:
+        merged["_sources"] = sources
+    if extra:
+        merged["additional_documents"] = extra
+    return merged
+
+
+def _name_tokens(value):
+    return [t for t in re.findall(r"[^\W\d_]+", unicodedata.normalize("NFKC", str(value or "")).casefold())]
+
+
+def _token_match(a, b):
+    return a == b or (len(a) == 1 and b.startswith(a)) or (len(b) == 1 and a.startswith(b))
+
+
+def name_relation(left, right):
+    """'same', 'partial' or 'different' for two renderings of a person's name.
+
+    Order, a missing middle name and initials ("Rahul K Singh", "Singh Rahul",
+    "R. Singh") do not make two names different. Only names with no word in common
+    (and no initial that fits a word) are 'different'.
+    """
+    a, b = _name_tokens(left), _name_tokens(right)
+    if not a or not b:
+        return "same"
+    small, large = (a, b) if len(a) <= len(b) else (b, a)
+    free = list(large)
+    matched = 0
+    for token in small:
+        hit = next((other for other in free if _token_match(token, other)), None)
+        if hit is not None:
+            free.remove(hit)
+            matched += 1
+    if matched == 0:
+        return "different"
+    return "same" if matched == len(small) == len(large) else "partial"

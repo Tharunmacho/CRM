@@ -24,7 +24,7 @@ def decode_folder(value):
 
 
 def role_for(name, flags=()):
-    special = {"\\inbox": "inbox", "\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash", "\\archive": "archive", "\\junk": "spam"}
+    special = {"\\inbox": "inbox", "\\sent": "sent", "\\drafts": "drafts", "\\trash": "trash", "\\archive": "archive", "\\all": "archive", "\\junk": "spam"}
     for flag in flags:
         if flag.lower() in special:
             return special[flag.lower()]
@@ -46,7 +46,7 @@ class WritableMailbox(IMAPMailbox):
             try:
                 status, _ = self._connection.select(_mailbox_wire_name(folder), readonly=False)
                 if status != "OK":
-                    raise MailMutationError("Zoho did not allow changes to this folder.")
+                    raise MailMutationError("The mailbox did not allow changes to this folder.")
                 _, values = self._connection.response("UIDVALIDITY")
                 if str(int(values[0])) != cursor.uid_validity:
                     raise MailMutationError("The folder identifiers changed. Refresh the mailbox before changing this message.")
@@ -92,7 +92,7 @@ class WritableMailbox(IMAPMailbox):
         except MailAdapterError:
             raise
         except Exception:
-            raise MailAdapterError("folders_failed", "Zoho folders could not be listed. Check the connection and IMAP folder visibility settings.", retryable=True) from None
+            raise MailAdapterError("folders_failed", "The mailbox folders could not be listed. Check the connection and IMAP folder visibility settings.", retryable=True) from None
 
     def page(self, folder, *, search="", offset=0, limit=25, unread=None):
         cursor = self.select_folder(folder)
@@ -109,11 +109,13 @@ class WritableMailbox(IMAPMailbox):
             if status != "OK":
                 raise ValueError()
             uids = sorted({int(v) for v in ((rows or [b""])[0] or b"").split()}, reverse=True)
-            return cursor, len(uids), [self.fetch(uid, uid_validity=cursor.uid_validity) for uid in uids[offset:offset + limit]]
+            shown = uids[offset:offset + limit]
+            self.prefetch(shown)  # a few batched round trips instead of two per message
+            return cursor, len(uids), [self.fetch(uid, uid_validity=cursor.uid_validity) for uid in shown]
         except MailAdapterError:
             raise
         except Exception:
-            raise MailAdapterError("search_failed", "Zoho could not search this folder. Refresh or try a shorter search.", retryable=True) from None
+            raise MailAdapterError("search_failed", "The mailbox could not search this folder. Refresh or try a shorter search.", retryable=True) from None
 
     def find_message_id(self, folder, message_id):
         cursor = self.select_folder(folder)
@@ -137,7 +139,7 @@ class WritableMailbox(IMAPMailbox):
                     issued = True
                     status, _ = self._connection.uid("STORE", str(uid), "+FLAGS.SILENT" if enabled else "-FLAGS.SILENT", f"({flag})")
                     if status != "OK":
-                        raise MailMutationError("Zoho refused this flag change. Refresh to check the current flags.", unknown=True)
+                        raise MailMutationError("The mailbox refused this flag change. Refresh to check the current flags.", unknown=True)
             return self.fetch(uid, uid_validity=validity)
         except MailAdapterError:
             raise
@@ -149,12 +151,12 @@ class WritableMailbox(IMAPMailbox):
         self.select_folder(folder, validity, writable=True)
         caps = {c.decode().upper() if isinstance(c, bytes) else str(c).upper() for c in self._connection.capabilities}
         if "MOVE" not in caps and "UIDPLUS" not in caps:
-            raise MailMutationError("This Zoho IMAP server does not support moving one message safely. Enable MOVE or UIDPLUS support with the mailbox administrator.")
+            raise MailMutationError("This IMAP server does not support moving one message safely. Enable MOVE or UIDPLUS support with the mailbox administrator.")
         copied = False
         try:
             status, _ = self._connection.uid("MOVE" if "MOVE" in caps else "COPY", str(uid), _mailbox_wire_name(destination))
             if status != "OK":
-                raise MailMutationError("Zoho refused the move. Refresh before trying again.")
+                raise MailMutationError("The mailbox refused the move. Refresh before trying again.")
             _, rows = self._connection.response("COPYUID")
             match = re.search(rb"(\d+)\s+\d+\s+(\d+)", b" ".join(v for v in rows or [] if isinstance(v, bytes)))
             if "MOVE" not in caps:
@@ -180,7 +182,7 @@ class WritableMailbox(IMAPMailbox):
         try:
             status, _ = self._connection.create(_mailbox_wire_name(name))
             if status != "OK":
-                raise MailMutationError("Zoho refused to create this folder. Refresh the folders before retrying.")
+                raise MailMutationError("The mailbox refused to create this folder. Refresh the folders before retrying.")
         except MailAdapterError:
             raise
         except Exception:
@@ -191,25 +193,25 @@ class WritableMailbox(IMAPMailbox):
         try:
             status, _ = self._connection.append(_mailbox_wire_name(folder), "(\\Draft \\Seen)", imaplib.Time2Internaldate(datetime.now(timezone.utc)), raw)
             if status != "OK":
-                raise MailMutationError("Zoho refused to save the draft.")
+                raise MailMutationError("The mailbox refused to save the draft.")
             _, values = self._connection.response("APPENDUID")
             match = re.search(rb"(\d+)\s+(\d+)", b" ".join(v for v in values or [] if isinstance(v, bytes)))
             return (match.group(1).decode(), int(match.group(2))) if match else None
         except MailMutationError:
             raise
         except Exception:
-            raise MailMutationError("The Zoho draft save could not be confirmed. The CRM draft is safe; check its sync state before retrying.", unknown=True) from None
+            raise MailMutationError("The draft save could not be confirmed. The CRM draft is safe; check its sync state before retrying.", unknown=True) from None
 
     def remove_draft(self, folder, uid, validity):
         self._uid(uid)
         self.select_folder(folder, validity, writable=True)
         caps = {c.decode().upper() if isinstance(c, bytes) else str(c).upper() for c in self._connection.capabilities}
         if "UIDPLUS" not in caps:
-            raise MailMutationError("The provider cannot remove one draft safely. Remove the old draft in Zoho.")
+            raise MailMutationError("The provider cannot remove one draft safely. Remove the old draft in the mailbox.")
         try:
             status, _ = self._connection.uid("STORE", str(uid), "+FLAGS.SILENT", "(\\Deleted)")
             if status != "OK":
-                raise MailMutationError("Zoho refused to remove this draft.")
+                raise MailMutationError("The mailbox refused to remove this draft.")
             status, _ = self._connection.uid("EXPUNGE", str(uid))
             if status != "OK":
                 raise MailMutationError("Draft removal could not be confirmed.", unknown=True)

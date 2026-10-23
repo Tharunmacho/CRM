@@ -1,0 +1,56 @@
+/* Dashboard: compact, evenly spaced layout that matches the Data Bank and Inbox screens.
+   Scoped to .dash-v2 so it layers over dashboard-refresh.css without editing it. */
+.dashboard-refresh.dash-v2 { font-size: 14px; }
+
+.dashboard-refresh.dash-v2 .dash-page-heading { align-items: center; margin-bottom: 20px; gap: 14px; }
+.dashboard-refresh.dash-v2 .dash-page-heading h1 { font-size: 26px; letter-spacing: -0.5px; }
+.dashboard-refresh.dash-v2 .dash-page-heading p { margin-top: 2px; font-size: 14px; }
+.dashboard-refresh.dash-v2 .dash-page-actions { gap: 8px; }
+.dashboard-refresh.dash-v2 .dash-button,
+.dashboard-refresh.dash-v2 .dash-date,
+.dashboard-refresh.dash-v2 .custom-select-trigger { height: 40px; min-height: 40px; border-radius: 10px; }
+.dashboard-refresh.dash-v2 .dash-refresh-button { width: 40px; }
+.dashboard-refresh.dash-v2 button, .dashboard-refresh.dash-v2 input, .dashboard-refresh.dash-v2 select { min-height: 0; }
+
+/* KPI tiles: label and icon chip on top, value, one quiet line. */
+.dashboard-refresh.dash-v2 .dash-stats { gap: 16px; margin-bottom: 20px; }
+.dashboard-refresh.dash-v2 .dash-stat { min-height: 0; padding: 16px 18px; border-radius: 12px; gap: 0; }
+.dashboard-refresh.dash-v2 .dash-stat-title { align-items: center; font-size: 13px; color: #737886; }
+.dashboard-refresh.dash-v2 .dash-stat-icon { display: inline-grid; width: 34px; height: 34px; flex-shrink: 0; place-items: center; border-radius: 10px; }
+.dashboard-refresh.dash-v2 .dash-stat-icon > svg { color: inherit; }
+.dashboard-refresh.dash-v2 .dash-stat-icon.tone-blue { background: #eaf1ff; color: #326dff; }
+.dashboard-refresh.dash-v2 .dash-stat-icon.tone-violet { background: #f1edff; color: #6a55d8; }
+.dashboard-refresh.dash-v2 .dash-stat-icon.tone-green { background: #e8f7f0; color: #28764f; }
+.dashboard-refresh.dash-v2 .dash-stat-icon.tone-amber { background: #fff3e1; color: #b9731a; }
+.dashboard-refresh.dash-v2 .dash-stat-value { margin: 10px 0 2px; font-size: 30px; letter-spacing: -0.6px; }
+.dashboard-refresh.dash-v2 .dash-stat-detail { margin-top: 0; font-size: 12.5px; align-items: center; }
+
+/* Two columns that share one gap; cards share one radius, padding and heading size. */
+.dashboard-refresh.dash-v2 .dash-overview-grid { grid-template-columns: minmax(0, 1fr) minmax(300px, 0.42fr); gap: 20px; margin-bottom: 20px; }
+.dashboard-refresh.dash-v2 .dash-primary-column,
+.dashboard-refresh.dash-v2 .dash-secondary-column { gap: 20px; }
+.dashboard-refresh.dash-v2 .dash-card { border-radius: 12px; border-color: #e9eaef; }
+.dashboard-refresh.dash-v2 .dash-card-heading { min-height: 0; padding: 16px 20px 12px; align-items: center; }
+.dashboard-refresh.dash-v2 .dash-card-heading h2 { font-size: 16px; letter-spacing: -0.15px; }
+.dashboard-refresh.dash-v2 .dash-card-foot { justify-content: flex-end; padding: 10px 20px; min-height: 0; }
+.dashboard-refresh.dash-v2 .dash-own-tasks { margin-bottom: 20px; }
+.dashboard-refresh.dash-v2 .dash-task-tabs { padding-left: 20px; padding-right: 20px; }
+.dashboard-refresh.dash-v2 .dash-connected-sources { margin-bottom: 20px; }
+
+/* Tables inside cards: the same row rhythm as the Data Bank. */
+.dashboard-refresh.dash-v2 .ui-data-table th { padding-top: 10px; padding-bottom: 10px; font-size: 11.5px; letter-spacing: 0.06em; }
+.dashboard-refresh.dash-v2 .ui-data-table td { padding-top: 12px; padding-bottom: 12px; }
+.dashboard-refresh.dash-v2 .dash-page-foot { margin-top: 4px; }
+
+@media (max-width: 1100px) {
+  .dashboard-refresh.dash-v2 .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-refresh.dash-v2 .dash-overview-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-refresh.dash-v2 .dash-secondary-column { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: start; }
+}
+
+@media (max-width: 560px) {
+  .dashboard-refresh.dash-v2 .dash-stats { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .dashboard-refresh.dash-v2 .dash-page-heading h1 { font-size: 22px; }
+  .dashboard-refresh.dash-v2 .dash-page-actions { width: 100%; }
+  .dashboard-refresh.dash-v2 .dash-team-select { width: 100%; }
+}

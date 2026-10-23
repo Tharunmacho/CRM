@@ -3,8 +3,8 @@ import { api, fileHref } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
 import { activeAttendanceSession, type AttendanceResponse, type PresenceSummary, type StaffAttendance } from './model'
 import { createPresenceReporter } from './presence-reporter'
+import { readClockIntent, writeClockIntent, type ClockIntent } from './clock-intent'
 
-type ClockIntent = { kind: 'check-in' | 'check-out'; requestKey: string; sessionId?: string }
 interface AttendanceContextValue {
   own: StaffAttendance | null
   loading: boolean
@@ -36,6 +36,8 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
   const request = useRef<AbortController | null>(null)
   const mutationVersion = useRef(0)
   const lifecycleVersion = useRef(0)
+  const clockContext = useRef<string | null>(null)
+  const intentRecovered = useRef(false)
 
   const refresh = useCallback(async () => {
     if (me.role === 'admin') { setLoading(false); return }
@@ -46,6 +48,18 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     try {
       const result = await api.get<AttendanceResponse>('/attendance?staffId=' + encodeURIComponent(me.id), { signal: controller.signal })
       if (!active.current || controller.signal.aborted || version !== mutationVersion.current) return
+      if (clockContext.current && clockContext.current !== result.clockContext) {
+        intent.current = null; setPendingKind(undefined); intentRecovered.current = false
+      }
+      clockContext.current = result.clockContext
+      if (!intentRecovered.current) {
+        intentRecovered.current = true
+        try { intent.current = readClockIntent(sessionStorage, me.id, result.clockContext) } catch { /* Storage may be blocked. */ }
+        if (intent.current) {
+          setPendingKind(intent.current.kind)
+          setError('An earlier attendance action was not confirmed in this tab. Use Retry to confirm the original action safely.')
+        }
+      }
       setOwn(result.staff.find((row) => row.userId === me.id) ?? null)
       setRefreshedAt(performance.now()); if (!intent.current) setError('')
     } catch (err) {
@@ -57,9 +71,13 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     active.current = true
     lifecycleVersion.current += 1
     busyRef.current = false; setBusy(false); intent.current = null; setPendingKind(undefined)
+    intentRecovered.current = false; clockContext.current = null
+    setOwn(null); setLoading(true); setError(''); setPresenceError('')
     void refresh()
     const interval = window.setInterval(() => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }, 30_000)
-    return () => { active.current = false; lifecycleVersion.current += 1; request.current?.abort(); clearInterval(interval) }
+    const resume = () => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }
+    window.addEventListener('focus', resume); window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
+    return () => { active.current = false; lifecycleVersion.current += 1; request.current?.abort(); clearInterval(interval); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [refresh])
 
   useEffect(() => {
@@ -67,7 +85,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     // A fresh page instance prevents duplicated tabs from sharing a heartbeat identity.
     const clientId = crypto.randomUUID()
     try { sessionStorage.setItem('crm-presence-client-id', clientId) } catch { /* Private browsing still has an in-memory identity. */ }
-    const visible = () => document.visibilityState === 'visible' && document.hasFocus()
+    const visible = () => navigator.onLine && document.visibilityState === 'visible' && document.hasFocus()
     const reporter = createPresenceReporter<PresenceSummary>({
       clientId,
       now: () => performance.now(),
@@ -86,6 +104,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
       if (reporter.recordInteraction()) reporter.publish(true)
     }
     const visibility = () => reporter.publish(visible())
+    const offline = () => { setPresenceError('Your browser is offline. The last received presence state may be out of date.'); reporter.leave() }
     const leave = () => reporter.leave()
     const events = ['pointerdown', 'pointermove', 'keydown', 'touchstart', 'scroll']
     for (const type of events) window.addEventListener(type, interaction, { passive: true })
@@ -95,6 +114,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     window.addEventListener('pagehide', leave)
     window.addEventListener('pageshow', visibility)
     window.addEventListener('online', visibility)
+    window.addEventListener('offline', offline)
     const interval = window.setInterval(() => { if (visible()) reporter.publish(true) }, 30_000)
     visibility()
     return () => {
@@ -106,6 +126,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', leave)
       window.removeEventListener('pageshow', visibility)
       window.removeEventListener('online', visibility)
+      window.removeEventListener('offline', offline)
     }
   }, [me.id, me.role])
 
@@ -115,16 +136,18 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
       const sessionId = activeAttendanceSession(own)
       if (own.attendance.status === 'checked_in' && !sessionId) { setError('Refresh attendance before checking out.'); return }
       intent.current = { kind: sessionId ? 'check-out' : 'check-in', requestKey: crypto.randomUUID(), ...(sessionId ? { sessionId } : {}) }
+      try { writeClockIntent(sessionStorage, me.id, clockContext.current, intent.current) } catch { /* Storage may be blocked. */ }
     }
     const pending = intent.current
     const lifecycle = lifecycleVersion.current
     busyRef.current = true; setBusy(true); setPendingKind(pending.kind); setError('')
     mutationVersion.current += 1; request.current?.abort()
     try {
-      const saved = await api.post<StaffAttendance>('/attendance/' + pending.kind, { requestKey: pending.requestKey, ...(pending.sessionId ? { sessionId: pending.sessionId } : {}) })
+      const saved = await api.post<StaffAttendance>('/attendance/' + pending.kind, { requestKey: pending.requestKey, ...(clockContext.current ? { clockContext: clockContext.current } : {}), ...(pending.sessionId ? { sessionId: pending.sessionId } : {}) })
       if (!active.current || lifecycle !== lifecycleVersion.current) return
       setOwn(saved); setRefreshedAt(performance.now()); setRevision((value) => value + 1)
       intent.current = null; setPendingKind(undefined)
+      try { writeClockIntent(sessionStorage, me.id, clockContext.current, null) } catch { /* Storage may be blocked. */ }
     } catch (err) {
       if (active.current && lifecycle === lifecycleVersion.current) setError(err instanceof Error ? err.message : 'The attendance change could not be confirmed. Retry safely.')
     } finally { if (active.current && lifecycle === lifecycleVersion.current) { busyRef.current = false; setBusy(false); setLoading(false) } }

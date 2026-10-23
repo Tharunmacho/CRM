@@ -1,0 +1,178 @@
+/* Attendance uses the reference's reading order: summary, actions, then people. */
+.app-shell:has(.attendance-workspace) .shell-main { background: #f5f5f6; }
+.workspace-page .attendance-workspace { color: #20242c; }
+.workspace-page .attendance-workspace > .workspace-page-header {
+  margin-bottom: 28px;
+  padding: 28px 32px;
+  border: 1px solid #e0e2e6;
+  border-radius: 22px;
+  background: #fff;
+}
+.attendance-workspace > .workspace-page-header .workspace-page-header-row { align-items: center; gap: 24px; }
+.workspace-page .attendance-workspace .workspace-eyebrow { color: #252a33; font-size: 13px; font-weight: 600; letter-spacing: 1.3px; }
+.workspace-page .attendance-workspace .workspace-page-header h1 { color: #171d27; font-size: 32px; font-weight: 500; letter-spacing: -1.1px; }
+.workspace-page .attendance-workspace .workspace-heading-copy > p:last-child:not(.workspace-eyebrow) { max-width: 60ch; font-size: 15px; color: #68717f; }
+.workspace-page .attendance-workspace .attendance-filters .ui-field > span { color: #535e6e; }
+.workspace-page .attendance-workspace .attendance-filters :is(.ui-input, .custom-select-trigger) { min-height: 48px; border-color: #dce0e5; border-radius: 9px; }
+.workspace-page .attendance-workspace .ui-button-secondary { border-color: #dce0e5; color: #20242c; }
+.workspace-page .attendance-workspace .ui-button-secondary:hover:not(:disabled) { background: #f6f7f9; border-color: #b9c1cc; }
+.workspace-page .attendance-workspace > .workspace-summary { margin: 28px 0; gap: 22px; }
+.workspace-page .attendance-workspace .summary-card { min-height: 158px; padding: 25px 27px; border: 1px solid #e0e2e6; border-radius: 20px; box-shadow: none; }
+.workspace-page .attendance-workspace .summary-card-top { min-height: 25px; align-items: center; color: #20242c; font-size: 16px; font-weight: 500; }
+.workspace-page .attendance-workspace .summary-icon { width: 24px; height: 24px; background: transparent; color: #272d36; border-radius: 0; }
+.workspace-page .attendance-workspace .summary-icon svg { width: 20px; height: 20px; }
+.workspace-page .attendance-workspace .summary-value { margin-top: 13px; color: #111827; font-size: 32px; font-weight: 600; letter-spacing: -.6px; }
+.workspace-page .attendance-workspace .summary-card p:last-child { margin-top: 8px; font-size: 13px; line-height: 1.65; color: #68717f; }
+
+.attendance-workspace .attendance-navigation { display: flex; align-items: center; gap: 8px; margin: 26px 0 24px; padding: 5px; border: 1px solid #e0e2e6; border-radius: 17px; background: #fff; }
+.attendance-workspace .attendance-tabs { display: flex; flex: 1; min-width: 0; gap: 6px; margin: 0; padding: 0; border-radius: 12px; background: transparent; scrollbar-width: thin; }
+.attendance-workspace .attendance-tabs > button { gap: 10px; min-height: 52px; padding: 12px 20px; color: #626b79; font-size: 15px; font-weight: 500; }
+.attendance-workspace .attendance-tabs > button > svg { flex-shrink: 0; }
+.attendance-workspace .attendance-tabs > button:hover { background: #f8f9fa; color: #20242c; }
+.attendance-workspace .attendance-tabs > button[aria-current] { background: #f1f2f4; color: #131922; box-shadow: none; }
+.attendance-workspace .attendance-tabs > button > span { min-width: 25px; border-radius: 20px; color: #795b21; background: #fff6df; font-size: 13px; font-weight: 600; }
+.attendance-workspace .attendance-tabs > button:nth-child(4) > span { color: #626b79; background: #eceef1; }
+.attendance-workspace .attendance-more { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px 15px; border-radius: 10px; color: #626b79; font-size: 14px; white-space: nowrap; }
+.attendance-workspace .attendance-more:hover, .attendance-workspace .attendance-more[aria-current] { background: #f1f2f4; color: #131922; }
+.attendance-workspace .attendance-more:focus-visible { outline: 2px solid #4169e1; outline-offset: -2px; }
+.attendance-workspace .attendance-navigation > .relative { flex-shrink: 0; }
+.attendance-workspace .attendance-navigation > .relative > div > button { min-height: 46px; font-size: 14px; }
+.attendance-workspace .attendance-policy { gap: 12px; margin: 0 0 24px; color: #657083; font-size: 13px; }
+.attendance-workspace .attendance-policy > span { gap: 9px; min-height: 44px; padding: 11px 16px; border: 1px solid #e0e2e6; border-radius: 30px; background: #fff; }
+.attendance-workspace .attendance-policy > span > span { line-height: 1.7; }
+.attendance-workspace .attendance-policy strong { color: #252b35; font-weight: 600; }
+.attendance-workspace .attendance-policy svg { color: #333b48; }
+
+.workspace-page .attendance-workspace .attendance-overview { border: 1px solid #e0e2e6; border-radius: 18px; box-shadow: none; overflow: hidden; }
+.attendance-overview-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 25px 28px 23px; }
+.attendance-overview-heading h2 { color: #20242c; font-size: 19px; font-weight: 500; line-height: 1.5; letter-spacing: -.4px; }
+.attendance-overview-heading p { margin-top: 5px; color: #68717f; font-size: 14px; line-height: 1.7; }
+.attendance-staff-count { flex-shrink: 0; padding: 9px 15px; background: #f0f1f3; border-radius: 24px; font-size: 13px; font-weight: 500; color: #596374; }
+.attendance-overview-table-wrap { padding: 0 28px; overflow-x: auto; }
+.attendance-overview-table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid #e0e2e6; border-radius: 10px; text-align: left; font-size: 14px; overflow: hidden; }
+.attendance-overview-table thead th { padding: 16px 20px; color: #68717f; background: #f8f8f9; border-bottom: 1px solid #e0e2e6; font-weight: 400; font-size: 13px; white-space: nowrap; }
+.attendance-overview-table td { padding: 22px 20px; border-bottom: 1px solid #e0e2e6; vertical-align: middle; line-height: 1.6; }
+.attendance-overview-table tbody tr:last-child td { border-bottom: 0; }
+.attendance-overview-table tbody tr:hover { background: #fafbfc; }
+.attendance-overview-table td > strong, .attendance-overview-table .attendance-person > strong { display: block; color: #20242c; font-size: 16px; font-weight: 500; }
+.attendance-overview-table small { display: block; margin-top: 4px; color: #68717f; font-size: 12px; line-height: 1.7; }
+.attendance-person { min-width: 145px; }
+.attendance-person strong { overflow-wrap: anywhere; }
+.attendance-rate { min-width: 105px; max-width: 140px; }
+.attendance-rate > strong { display: block; color: #1d2430; font-size: 22px; font-weight: 600; line-height: 1.4; }
+.attendance-rate-track { height: 6px; width: 100%; overflow: hidden; border-radius: 8px; background: #e4e5e8; margin-top: 10px; }
+.attendance-rate-track > span { display: block; height: 100%; border-radius: inherit; background: #303743; }
+.attendance-exceptions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 195px; }
+.attendance-exceptions > span, .attendance-exceptions > button { display: inline-flex; align-items: center; gap: 3px; min-height: 32px; padding: 5px 8px; border-radius: 7px; color: #657083; background: #f1f2f4; white-space: nowrap; font-size: 12px; line-height: 1.5; }
+.attendance-exceptions > .is-absence { color: #a45145; background: #fff0ed; }
+.attendance-exceptions > .is-late { color: #91630e; background: #fff6e3; }
+.attendance-exceptions > .is-incomplete { color: #7253a2; background: #f3eefb; }
+.attendance-exceptions > button { color: #425a84; background: #eff3fa; min-height: 36px; cursor: pointer; }
+.attendance-exceptions > button:hover { background: #e3ebf7; }
+.attendance-exceptions > button:focus-visible { outline: 2px solid #4169e1; outline-offset: 2px; }
+.attendance-overview-table td > strong.attendance-unpaid { color: #b7730a; }
+.attendance-unpaid-cell { min-width: 160px; }
+.attendance-record-action { text-align: right; white-space: nowrap; }
+.workspace-page .attendance-workspace .attendance-record-action .ui-button { min-height: 46px; padding: 11px 16px; color: #1d2430; font-size: 13px; font-weight: 500; }
+.attendance-overview-note { padding: 15px 28px 20px; color: #68717f; font-size: 12px; line-height: 1.75; }
+.workspace-page .attendance-workspace .attendance-ot-details { border-color: #e0e2e6; border-radius: 14px; }
+.attendance-workspace .attendance-table td { font-size: 14px; }
+.attendance-workspace .attendance-table th { font-size: 13px; color: #626d7d; }
+.attendance-workspace .attendance-table small { color: #68717f; }
+.attendance-record-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; padding: 22px 24px; border-bottom: 1px solid #e7e8eb; background: #fafbfc; }
+.attendance-record-summary dt { color: #68717f; font-size: 13px; line-height: 1.6; }
+.attendance-record-summary dd { color: #20242c; font-size: 22px; font-weight: 500; margin-top: 7px; }
+.attendance-workspace .attendance-provisional { color: #91630e; }
+.attendance-provisional > span { display: block; max-width: 170px; white-space: normal; }
+.attendance-workspace .attendance-table .attendance-unpaid { color: #b7730a; }
+
+@media (min-width: 1200px) and (max-width: 1699px) {
+  .workspace-page .attendance-workspace .summary-card { padding: 23px 22px; }
+  .workspace-page .attendance-workspace .summary-card-top { font-size: 15px; gap: 8px; }
+  .workspace-page .attendance-workspace .summary-card p:last-child { min-height: 43px; }
+  .attendance-workspace .attendance-policy > span { padding-inline: 13px; }
+}
+
+@media (min-width: 1700px) {
+  .attendance-workspace .attendance-tabs > button { padding-inline: 23px; font-size: 16px; }
+  .attendance-overview-table td { padding: 24px 20px; }
+  .attendance-exceptions { min-width: 320px; }
+  .attendance-overview-table small { font-size: 13px; }
+  .attendance-person { min-width: 185px; }
+  .attendance-rate { min-width: 130px; }
+  .attendance-overview-table td:nth-child(3) { min-width: 200px; }
+}
+@media (max-width: 1399px) {
+  .workspace-page .attendance-workspace > .workspace-page-header { padding: 26px; }
+  .attendance-workspace > .workspace-page-header .workspace-page-header-row { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .attendance-workspace > .workspace-page-header .workspace-header-actions { width: 100%; justify-content: flex-start; }
+  .attendance-workspace .attendance-header-tools { flex-direction: row; justify-content: space-between; align-items: end; width: 100%; }
+  .workspace-page .attendance-workspace > .workspace-summary { gap: 16px; }
+  .workspace-page .attendance-workspace .summary-card { padding: 22px; }
+  .workspace-page .attendance-workspace .summary-card-top { font-size: 15px; }
+  .attendance-overview-heading { padding: 23px; }
+  .attendance-overview-table-wrap { padding-inline: 22px; }
+  .attendance-overview-table :is(td, thead th) { padding-inline: 14px; }
+  .attendance-overview-table td { padding-block: 20px; }
+  .attendance-workspace .attendance-tabs > button { padding-inline: 15px; font-size: 14px; }
+  .attendance-overview-note { padding-inline: 23px; }
+}
+@media (max-width: 1199px) and (min-width: 768px) {
+  .workspace-page .attendance-workspace > .workspace-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .workspace-page .attendance-workspace .summary-card { padding: 18px; }
+  .workspace-page .attendance-workspace .summary-card-top { align-items: flex-start; font-size: 14px; }
+  .workspace-page .attendance-workspace .summary-value { font-size: 28px; }
+  .workspace-page .attendance-workspace .summary-card p:last-child { font-size: 12px; }
+  .attendance-workspace .attendance-header-tools { flex-wrap: wrap; }
+}
+@media (max-width: 767px) {
+  .workspace-page .attendance-workspace > .workspace-page-header { padding: 22px 20px; margin-bottom: 20px; border-radius: 17px; }
+  .workspace-page .attendance-workspace .workspace-page-header h1 { font-size: 27px; }
+  .workspace-page .attendance-workspace .workspace-eyebrow { font-size: 11px; }
+  .workspace-page .attendance-workspace .workspace-heading-copy > p:last-child:not(.workspace-eyebrow) { font-size: 14px; }
+  .attendance-workspace .attendance-header-tools { flex-direction: column; align-items: stretch; gap: 18px; }
+  .attendance-workspace .attendance-filters { gap: 12px; }
+  .attendance-workspace .attendance-header-primary { justify-content: flex-start; }
+  .workspace-page .attendance-workspace > .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+  .workspace-page .attendance-workspace .summary-card { padding: 18px 16px; min-height: 154px; border-radius: 16px; }
+  .workspace-page .attendance-workspace .summary-card-top { flex-direction: row; align-items: flex-start; gap: 6px; min-height: 42px; font-size: 13px; }
+  .workspace-page .attendance-workspace .summary-icon { width: 18px; height: 20px; flex-shrink: 0; }
+  .workspace-page .attendance-workspace .summary-icon svg { width: 17px; height: 17px; }
+  .workspace-page .attendance-workspace .summary-value { font-size: 26px; }
+  .workspace-page .attendance-workspace .summary-card p:last-child { font-size: 12px; }
+  .attendance-workspace .attendance-navigation { margin-block: 20px; gap: 2px; border-radius: 14px; }
+  .attendance-workspace .attendance-tabs > button { min-height: 46px; padding: 10px 12px; font-size: 13px; gap: 8px; }
+  .attendance-workspace .attendance-more { min-height: 46px; max-width: 125px; white-space: normal; font-size: 12px; padding-inline: 10px; text-align: left; }
+  .attendance-workspace .attendance-more > svg { flex-shrink: 0; }
+  .attendance-workspace .attendance-policy { gap: 8px; margin-bottom: 20px; }
+  .attendance-workspace .attendance-policy > span { min-height: 38px; padding: 9px 12px; font-size: 12px; }
+  .attendance-overview-heading { padding: 20px; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .attendance-overview-heading h2 { font-size: 18px; }
+  .attendance-overview-heading p { font-size: 13px; }
+  .attendance-staff-count { padding: 6px 12px; font-size: 12px; }
+  .attendance-overview-table-wrap { padding: 0 14px; overflow: visible; }
+  .attendance-overview-table, .attendance-overview-table tbody { display: block; border: 0; overflow: visible; }
+  .attendance-overview-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .attendance-overview-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; padding: 18px; margin-bottom: 14px; border: 1px solid #e0e2e6; border-radius: 12px; }
+  .attendance-overview-table td { display: block; min-width: 0; padding: 0; border: 0; }
+  .attendance-overview-table td::before { content: attr(data-label); display: block; margin-bottom: 7px; color: #68717f; font-size: 12px; }
+  .attendance-overview-table .attendance-person { grid-column: 1 / -1; padding-bottom: 14px; border-bottom: 1px solid #e7e8eb; }
+  .attendance-overview-table .attendance-person::before, .attendance-record-action::before { display: none; }
+  .attendance-overview-table .attendance-person strong { font-size: 17px; }
+  .attendance-overview-table .attendance-exceptions-cell, .attendance-overview-table .attendance-unpaid-cell, .attendance-overview-table .attendance-record-action { grid-column: 1 / -1; }
+  .attendance-exceptions { min-width: 0; gap: 6px; }
+  .attendance-rate { min-width: 0; }
+  .attendance-rate > strong { font-size: 24px; }
+  .attendance-overview-table td > strong { font-size: 16px; }
+  .attendance-overview-table small { font-size: 12px; }
+  .attendance-record-action .ui-button { width: 100%; }
+  .attendance-overview-note { padding: 2px 20px 20px; }
+  .attendance-record-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 20px; }
+  .attendance-record-summary dd { font-size: 21px; }
+  .attendance-daily-table, .attendance-daily-table tbody { display: block; }
+  .attendance-daily-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .attendance-daily-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; padding: 20px; border-bottom: 1px solid #e7e8eb; }
+  .attendance-workspace .attendance-daily-table td { min-width: 0; padding: 0; border: 0; white-space: normal; font-size: 13px; }
+  .attendance-daily-table td::before { content: attr(data-label); display: block; margin-bottom: 6px; color: #68717f; font-size: 12px; }
+  .attendance-daily-table .attendance-work-session { grid-column: 1 / -1; }
+}

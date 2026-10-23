@@ -1361,3 +1361,267 @@
   .workspace-list-toolbar { flex-wrap: wrap; gap: 12px; }
   .workspace-page .ui-search { width: 100%; max-width: none; }
 }
+
+/* Add candidate: full content width. Fields on the left, a compact documents card on the right
+   from 1280px up (stacked below that); the save bar is an ordinary card at the end of the form. */
+.candidate-entry {
+  width: 100%;
+  min-width: 0;
+}
+
+.candidate-entry-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.candidate-form-col {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.candidate-docs-col {
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .candidate-docs-col .ui-file-rows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.candidate-docs-col .ui-file-rows {
+  gap: 8px;
+  padding: 14px;
+}
+
+.candidate-docs-col .ui-file-row {
+  padding: 10px 12px;
+}
+
+.candidate-docs-col .ui-file-row-main {
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+.candidate-docs-col .ui-file-row-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+
+.candidate-docs-col .ui-file-row-main > .min-w-0 {
+  flex: 1 1 140px;
+}
+
+.candidate-docs-col .ui-file-row-actions {
+  margin-left: auto;
+}
+
+.candidate-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  border: 1px solid #e3e8ef;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.candidate-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.candidate-steps li + li {
+  border-left: 1px solid #e8edf3;
+}
+
+.candidate-steps li > span {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #1c2a3f;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.candidate-steps li.is-done > span {
+  background: #2f8f6b;
+}
+
+.candidate-steps strong {
+  display: block;
+  color: #1c2a3f;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.candidate-steps small {
+  display: block;
+  margin-top: 2px;
+  color: #6b7a90;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ui-file-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+}
+
+.ui-file-row {
+  border: 1px dashed #d4dce8;
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px 16px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ui-file-row.is-dragging {
+  border-color: #4169e1;
+  background: #f1f5ff;
+}
+
+.ui-file-row-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ui-file-row-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #f3f5fa;
+  color: #4a5b73;
+}
+
+.ui-file-row-icon.is-filled {
+  background: #edf7f2;
+  color: #2f8f6b;
+}
+
+.ui-file-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #1c2a3f;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.ui-file-row-badge {
+  border-radius: 6px;
+  background: #eef1f6;
+  padding: 1px 8px;
+  color: #6b7a90;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ui-file-row-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.ui-file-row-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d4dce8;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 14px;
+  color: #1c2a3f;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ui-file-row-button:hover:not(:disabled) {
+  border-color: #aab5ca;
+  background: #f8fafd;
+}
+
+.ui-file-row-button:disabled {
+  opacity: 0.55;
+}
+
+.candidate-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-top: 16px;
+  padding: 16px 20px;
+}
+
+.candidate-save-bar > span {
+  flex: 1 1 280px;
+  margin-right: 0;
+}
+
+.candidate-save-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+@media (max-width: 767px) {
+  .candidate-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .candidate-steps li + li {
+    border-top: 1px solid #e8edf3;
+    border-left: 0;
+  }
+
+  .ui-file-rows {
+    padding: 14px;
+  }
+
+  .ui-file-row-main {
+    flex-wrap: wrap;
+  }
+
+  .ui-file-row-main > .min-w-0 {
+    flex-basis: calc(100% - 60px);
+  }
+
+  .ui-file-row-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

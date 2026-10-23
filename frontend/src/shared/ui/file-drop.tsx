@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Download, FileText, History, Image as ImageIcon, Paperclip, Upload } from 'lucide-react'
+import { CloudUpload, Download, FileText, History, Image as ImageIcon, Paperclip, Upload, type LucideIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { DOCUMENT_ACCEPT, DOCUMENT_HELP, documentFileError, fileDownloadPath, newestFileVersions } from '@/shared/lib/document-files'
@@ -76,6 +76,9 @@ export function FileDrop({
   busy,
   busyLabel = 'uploading…',
   uploaderName,
+  variant = 'drop',
+  icon,
+  optional,
 }: {
   label?: string
   value?: StoredFile | null
@@ -88,6 +91,10 @@ export function FileDrop({
   busy?: boolean
   busyLabel?: string
   uploaderName?: (id: string) => string
+  /** 'row' is a compact line: icon, title, hint and a Choose file button. */
+  variant?: 'drop' | 'row'
+  icon?: LucideIcon
+  optional?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -127,6 +134,80 @@ export function FileDrop({
   }
 
   const Icon = shown ? iconFor(shown.name) : Upload
+
+  if (variant === 'row') {
+    const RowIcon = icon ?? (shown ? iconFor(shown.name) : FileText)
+    const hint = help || DOCUMENT_HELP
+    return (
+      <div
+        className={cn('ui-file-row', dragging && 'is-dragging', locked && 'is-locked')}
+        aria-busy={busy || working}
+        onDragOver={(e) => { e.preventDefault(); if (!locked && !shown) setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); if (!shown) void take(e.dataTransfer.files) }}
+      >
+        <div className="ui-file-row-main">
+          <span className={cn('ui-file-row-icon', shown && 'is-filled')} aria-hidden><RowIcon className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="ui-file-row-title">
+              {label}
+              {optional && !shown && <span className="ui-file-row-badge">Optional</span>}
+            </p>
+            {shown ? (
+              <p className="truncate text-[13px] tnum text-ink-500">
+                {shown.url ? <FileLink url={shown.url} className="text-ink hover:text-navy-700">{shown.name}</FileLink> : shown.name}
+                <span className="text-ink-400"> · {shown.sizeKb} KB{shown.version ? ` · v${shown.version}` : ''}</span>
+                {busy || working ? <span className="text-amber-700"> · {busyLabel}</span>
+                  : shown.id ? <span className="text-navy-700"> · saved</span>
+                  : <span className="text-amber-700"> · selected, not yet saved</span>}
+              </p>
+            ) : (
+              <p className="text-[13px] leading-5 text-ink-500">{busy || working ? busyLabel : hint}</p>
+            )}
+          </div>
+          <div className="ui-file-row-actions">
+            {shown && versions.length > 0 && (
+              <IconButton type="button" label="Version history" aria-expanded={showHistory} onClick={() => setShowHistory((v) => !v)}>
+                <History className="h-4 w-4" />
+              </IconButton>
+            )}
+            {shown?.url && <FileLink url={shown.url} className="text-xs font-medium hover:no-underline">View</FileLink>}
+            {shown && <DownloadLink file={shown} />}
+            {!disabled && (
+              <button type="button" disabled={locked} onClick={() => inputRef.current?.click()} className="ui-file-row-button">
+                {!shown && <CloudUpload className="h-4 w-4" aria-hidden />}
+                {shown ? 'Replace' : 'Choose file'}
+              </button>
+            )}
+          </div>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={DOCUMENT_ACCEPT}
+          aria-label={label ? `Choose ${label}` : 'Choose a document'}
+          className="sr-only"
+          disabled={locked}
+          onChange={(e) => { void take(e.currentTarget.files); e.currentTarget.value = '' }}
+          tabIndex={-1}
+        />
+        {error && <p role="alert" className="mt-1.5 text-xs text-stamp-700">{error}</p>}
+        {showHistory && versions.length > 0 && (
+          <ul className="mt-2 divide-y divide-rule-soft rounded-control border border-rule-soft bg-field/40">
+            {newestFileVersions(versions).map((v) => (
+              <li key={v.id} className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-micro text-ink-500">
+                <Paperclip className="h-3 w-3 shrink-0" />
+                <span className="tnum">v{v.version}</span>
+                <FileLink url={v.url} className="truncate">{v.name}</FileLink>
+                <span className="ml-auto">{uploaderName?.(v.uploadedBy) || v.uploadedBy || 'Unknown uploader'} · {dateTimeLabel(v.uploadedAt)}</span>
+                <DownloadLink file={v} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="ui-file-drop" aria-busy={busy || working}>
@@ -248,11 +329,13 @@ export function DocumentSlotRow({
   versions,
   onUpload,
   uploaderName,
+  emptyLabel = 'Not uploaded',
 }: {
   label: string
   versions: FileVersion[]
   onUpload?: (file: File) => void | Promise<void>
   uploaderName?: (id: string) => string
+  emptyLabel?: string
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -276,7 +359,7 @@ export function DocumentSlotRow({
               · v{latest.version} · {latest.sizeKb} KB
             </p>
           ) : (
-            <p className="text-micro text-ink-300">Not uploaded</p>
+            <p className="text-micro text-ink-400">{emptyLabel}</p>
           )}
         </div>
         {versions.length > 0 && (

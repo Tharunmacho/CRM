@@ -28,6 +28,8 @@ const AttendancePage = lazy(() => import('@/screens/attendance/attendance'))
 const TodoPage = lazy(() => import('@/screens/todos/todo'))
 const ReportsPage = lazy(() => import('@/screens/reports/reports'))
 const UsersPage = lazy(() => import('@/screens/users/users'))
+const StaffDirectoryPage = lazy(() => import('@/screens/staff/staff-directory'))
+const StaffDetailPage = lazy(() => import('@/screens/staff/staff-detail'))
 
 /**
  * Nothing renders until the session has been checked, so a refresh does not flash the
@@ -49,7 +51,7 @@ function RequireAuth() {
       </div>
     )
   }
-  if (!ready) return <PageLoading fullScreen />
+  if (!ready) return <PageLoading fullScreen onRetry={() => void retryStartup()} />
   if (!authenticated) return <Navigate to="/login" replace />
   return <AppShell />
 }
@@ -64,6 +66,12 @@ function Require({ capability, children }: { capability: Capability; children: J
       description={`You are signed in as ${me.name} (${me.role}). Ask an admin if you need access.`}
     />
   )
+}
+
+function RequireStaffSupervisor({ children }: { children: JSX.Element }) {
+  const { me } = useStore()
+  if (me.role === 'admin' || me.role === 'manager') return children
+  return <EmptyState title="Staff directory is available to supervisors" description="Administrators and managers can review employee availability and team workload." />
 }
 
 export default function AppRoutes() {
@@ -87,6 +95,8 @@ export default function AppRoutes() {
             <Route path="candidates/:id" element={<CandidateProfilePage />} />
             <Route path="tasks" element={<TasksPage />} />
             <Route path="attendance" element={<AttendancePage />} />
+            <Route path="staff-directory" element={<RequireStaffSupervisor><StaffDirectoryPage /></RequireStaffSupervisor>} />
+            <Route path="staff-directory/:id" element={<RequireStaffSupervisor><StaffDetailPage /></RequireStaffSupervisor>} />
             <Route
               path="todo"
               element={

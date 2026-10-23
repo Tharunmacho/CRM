@@ -45,7 +45,8 @@ export interface Candidate {
   whatsapp?: string
   email?: string
   dob?: string
-  gender?: 'male' | 'female'
+  /** Free text from OCR or manual entry; absent or null when unknown. */
+  gender?: string | null
   nationality: string
   currentCity: string
   languages: string[]
@@ -62,7 +63,8 @@ export interface Candidate {
   sourceDetail?: string
   status: CandidateStatus
   needsReview?: boolean
-  ownerId: string
+  /** Null while a candidate awaits assignment. */
+  ownerId: string | null
   addedAt: string
   photoTone: number
   documents: DocumentSlot[]
@@ -110,8 +112,8 @@ export interface Company {
 export interface Designation {
   id: string
   title: string
-  category: string
-  description: string
+  category: string | null
+  description: string | null
   requiredSkills: string[]
   minExperience: number
 }
@@ -124,14 +126,14 @@ export interface Order {
   companyId: string
   designationId: string
   openings: number
-  country: string
-  city: string
-  salary: number
+  country: string | null
+  city: string | null
+  salary: number | null
   currency: string
   benefits: string[]
-  contractPeriod: string
-  interviewDate?: string
-  deadline: string
+  contractPeriod: string | null
+  interviewDate?: string | null
+  deadline: string | null
   status: OrderStatus
   createdAt: string
 }
@@ -215,15 +217,6 @@ export interface TodoItem {
   linkTo?: string
 }
 
-export interface MailAccount {
-  id: string
-  address: string
-  provider: 'gmail' | 'microsoft' | 'imap'
-  autoIngest: boolean
-  lastSyncAt: string
-  failedCount: number
-}
-
 export interface MailAttachment {
   name: string
   sizeKb: number
@@ -231,6 +224,7 @@ export interface MailAttachment {
 }
 
 export interface MailMessage {
+  documentBundle?: { id: string; status: string; candidateIds: string[] } | null
   id: string
   accountId: string
   fromName: string
@@ -246,7 +240,8 @@ export interface MailMessage {
 
 export interface Notification {
   id: string
-  kind: 'assignment' | 'escalation' | 'missed_update' | 'todo' | 'ingestion'
+  /** Every kind the backend writes: workflow scheduler, assignments, intake and attendance. */
+  kind: 'assignment' | 'candidate_assignment' | 'attendance' | 'escalation' | 'reminder' | 'todo'
   title: string
   detail: string
   createdAt: string
@@ -260,13 +255,4 @@ export interface AuditEntry {
   action: string
   target: string
   at: string
-}
-
-export interface IngestionFailure {
-  id: string
-  fileName: string
-  source: string
-  reason: string
-  attempts: number
-  failedAt: string
 }

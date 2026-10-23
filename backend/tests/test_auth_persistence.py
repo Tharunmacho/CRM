@@ -363,6 +363,7 @@ def test_health_recovers_from_failed_startup_without_modifying_accounts(
         from app import main
 
     monkeypatch.setattr(main, "engine", database.kw["bind"])
+    monkeypatch.setattr(main, "connect_with_retry", lambda: database.kw["bind"].connect())
     # This SQLite fixture tests startup recovery, not Alembic schema readiness.
     monkeypatch.setattr(main, "schema_status", lambda connection: {"status": "ok", "current": ["test"], "expected": ["test"]})
     monkeypatch.setattr(main, "SessionLocal", database)

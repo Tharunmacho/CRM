@@ -7,11 +7,13 @@ administration and assignment. The caller owns the transaction and commit.
 from __future__ import annotations
 
 import calendar
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import Date, and_, cast, func, or_, select, union_all
 from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import get_settings
@@ -21,9 +23,10 @@ from app.db.models import (
     AttendanceWeeklyOff, AttendanceWorkTiming, AuditEntry, Candidate,
     Notification, Role, StaffAttendanceSession, Task, TaskEvent, User,
 )
-from app.services.attendance_policy import AttendancePolicy, calculate_day, calculate_month, local_day, shift_bounds
+from app.services.attendance_policy import AttendancePolicy, attendance_overview, calculate_day, calculate_month, local_day, shift_bounds
 from app.services.attendance_policy_types import AttendanceStatus, Shift
 from app.services.attendance_availability import unavailable_staff_ids
+from app.services.parallel_reads import parallel_reads
 
 EMPLOYEE_ROLES = (Role.staff, Role.manager)
 LEAVE_KINDS = {"paid_leave", "unpaid_leave"}
@@ -95,8 +98,12 @@ def _employee(db, actor, user_id, *, manage=False, active=False):
 def _people(db, actor, staff_id=None):
     if staff_id:
         return [_employee(db, actor, staff_id)]
-    people = list(db.scalars(select(User).where(User.role.in_(EMPLOYEE_ROLES)).order_by(User.name, User.id)))
-    return [u for u in people if _visible(actor, u)]
+    statement = select(User).where(User.role.in_(EMPLOYEE_ROLES))
+    if actor.role == Role.staff:
+        statement = statement.where(User.id == actor.id)
+    elif actor.role == Role.manager:
+        statement = statement.where(or_(User.role == Role.staff, User.id == actor.id))
+    return list(db.scalars(statement.order_by(User.name, User.id)))
 
 
 def _shift_value(value):
@@ -130,27 +137,124 @@ def _tracking_start(db, user_id, p):
     return min(choices) if choices else None
 
 
-def _day(db, person, day, at, p):
-    shift, planned = _shift_for(db, person.id, day)
-    shift_start, shift_end = shift_bounds(day, shift, p.timezone_name)
+@dataclass
+class MonthInputs:
+    """Bounded employee/month inputs shared by every day calculation.
+
+    No cache survives this request. Historical first-tracking dates are aggregated
+    in SQL; documents, presence events and unrelated employees are never loaded.
+    """
+    sessions: dict = field(default_factory=lambda: defaultdict(list))
+    requests: dict = field(default_factory=lambda: defaultdict(list))
+    adjustments: dict = field(default_factory=lambda: defaultdict(list))
+    calendar: dict = field(default_factory=dict)
+    weekly: dict = field(default_factory=dict)
+    plans: dict = field(default_factory=dict)
+    timings: dict = field(default_factory=lambda: defaultdict(list))
+    tracking: dict = field(default_factory=dict)
+    deactivated: dict = field(default_factory=dict)
+
+    def shift(self, user_id, day):
+        plan = self.plans.get((user_id, day))
+        if plan is not None:
+            return _shift_value(plan.shift), True
+        timing = next((row for row in self.timings[user_id] if row.effective_from <= day), None)
+        return _shift_value(timing.shift if timing else None), False
+
+
+def _load_month_inputs(db, people, first, last, p):
+    result = MonthInputs()
+    ids = [person.id for person in people]
+    if not ids:
+        return result
+    tracking_queries = [select(StaffAttendanceSession.user_id.label("user_id"),
+        cast(func.timezone(p.timezone_name, func.min(StaffAttendanceSession.checked_in_at)), Date).label("first_day"))
+        .where(StaffAttendanceSession.user_id.in_(ids)).group_by(StaffAttendanceSession.user_id)]
+    for model in (AttendanceHRRequest, AttendanceCalendarDay, AttendanceAdjustment):
+        tracking_queries.append(select(model.user_id, func.min(model.attendance_date).label("first_day"))
+                                .where(model.user_id.in_(ids)).group_by(model.user_id))
+    tracked = union_all(*tracking_queries).subquery("employee_tracking")
+    inactive = [person.id for person in people if not person.active]
+    start = stop = first_week = last_week = None
+    if last >= first:
+        start = datetime.combine(first, time.min, ZoneInfo(p.timezone_name)).astimezone(timezone.utc)
+        stop = datetime.combine(last + timedelta(days=1), time.min, ZoneInfo(p.timezone_name)).astimezone(timezone.utc)
+        first_week = first - timedelta(days=first.weekday())
+        last_week = last - timedelta(days=last.weekday())
+
+    def tracking(session):
+        return dict(session.execute(select(tracked.c.user_id, func.min(tracked.c.first_day)).group_by(tracked.c.user_id)).all())
+
+    def deactivated(session):
+        if not inactive:
+            return {}
+        return dict(session.execute(select(AuditEntry.entity_id, func.max(AuditEntry.at))
+            .where(AuditEntry.entity_type == "user", AuditEntry.entity_id.in_(inactive), AuditEntry.action == "User deactivated")
+            .group_by(AuditEntry.entity_id)).all())
+
+    def sessions(session):
+        return list(session.scalars(select(StaffAttendanceSession).where(StaffAttendanceSession.user_id.in_(ids),
+            StaffAttendanceSession.checked_in_at >= start, StaffAttendanceSession.checked_in_at < stop)))
+
+    def dated(model):
+        def read(session):
+            query = select(model).where(model.user_id.in_(ids), model.attendance_date.between(first, last))
+            if model is AttendanceHRRequest:
+                query = query.where(model.status == "approved")
+            if model in (AttendanceHRRequest, AttendanceAdjustment):
+                query = query.order_by(model.created_at, model.id)
+            return list(session.scalars(query))
+        return read
+
+    def weekly(session):
+        return list(session.scalars(select(AttendanceWeeklyOff).where(AttendanceWeeklyOff.user_id.in_(ids), AttendanceWeeklyOff.week_start.between(first_week, last_week))))
+
+    def timings(session):
+        return list(session.scalars(select(AttendanceWorkTiming).where(AttendanceWorkTiming.user_id.in_(ids),
+            AttendanceWorkTiming.effective_from <= last).order_by(AttendanceWorkTiming.effective_from.desc())))
+
+    # Every read depends only on the people list: one round trip's wait instead of nine.
+    if last < first:
+        result.tracking, result.deactivated = parallel_reads(db, tracking, deactivated)
+        return result
+    (result.tracking, result.deactivated, month_sessions, requests, adjustments, calendar, plans, weekly_rows, timing_rows
+     ) = parallel_reads(db, tracking, deactivated, sessions, dated(AttendanceHRRequest), dated(AttendanceAdjustment),
+                        dated(AttendanceCalendarDay), dated(AttendanceDutyPlan), weekly, timings)
+    for row in month_sessions:
+        result.sessions[(row.user_id, local_day(row.checked_in_at, p.timezone_name))].append(row)
+    for rows, destination in ((requests, result.requests), (adjustments, result.adjustments)):
+        for row in rows:
+            destination[(row.user_id, row.attendance_date)].append(row)
+    for rows, destination in ((calendar, result.calendar), (plans, result.plans)):
+        for row in rows:
+            destination[(row.user_id, row.attendance_date)] = row
+    for row in weekly_rows:
+        result.weekly[(row.user_id, row.week_start)] = row
+    for row in timing_rows:
+        result.timings[row.user_id].append(row)
+    return result
+
+
+def _day(db, person, day, at, p, inputs=None):
+    shift, planned = inputs.shift(person.id, day) if inputs else _shift_for(db, person.id, day)
     midnight = datetime.combine(day, time.min, ZoneInfo(p.timezone_name)).astimezone(timezone.utc)
     # The shift's start date owns an overnight session, including its next-day checkout.
     next_midnight = datetime.combine(day + timedelta(days=1), time.min, ZoneInfo(p.timezone_name)).astimezone(timezone.utc)
-    sessions = list(db.scalars(select(StaffAttendanceSession).where(StaffAttendanceSession.user_id == person.id,
+    sessions = inputs.sessions[(person.id, day)] if inputs else list(db.scalars(select(StaffAttendanceSession).where(StaffAttendanceSession.user_id == person.id,
         StaffAttendanceSession.checked_in_at >= midnight, StaffAttendanceSession.checked_in_at < next_midnight)))
     punches = []
     for session in sessions:
         punches.append({"action": "check_in", "occurred_at": session.checked_in_at})
         if session.checked_out_at is not None:
             punches.append({"action": "check_out", "occurred_at": session.checked_out_at})
-    requests = list(db.scalars(select(AttendanceHRRequest).where(AttendanceHRRequest.user_id == person.id,
+    requests = inputs.requests[(person.id, day)] if inputs else list(db.scalars(select(AttendanceHRRequest).where(AttendanceHRRequest.user_id == person.id,
         AttendanceHRRequest.attendance_date == day, AttendanceHRRequest.status == "approved").order_by(AttendanceHRRequest.created_at, AttendanceHRRequest.id)))
-    adjustments = list(db.scalars(select(AttendanceAdjustment).where(AttendanceAdjustment.user_id == person.id,
+    adjustments = inputs.adjustments[(person.id, day)] if inputs else list(db.scalars(select(AttendanceAdjustment).where(AttendanceAdjustment.user_id == person.id,
         AttendanceAdjustment.attendance_date == day).order_by(AttendanceAdjustment.created_at, AttendanceAdjustment.id)))
     punches.extend({"action": row.action, "occurred_at": row.occurred_at} for row in adjustments if row.kind == "add_punch")
-    marker = db.scalar(select(AttendanceCalendarDay).where(AttendanceCalendarDay.user_id == person.id, AttendanceCalendarDay.attendance_date == day))
+    marker = inputs.calendar.get((person.id, day)) if inputs else db.scalar(select(AttendanceCalendarDay).where(AttendanceCalendarDay.user_id == person.id, AttendanceCalendarDay.attendance_date == day))
     week = day - timedelta(days=day.weekday())
-    off = db.scalar(select(AttendanceWeeklyOff).where(AttendanceWeeklyOff.user_id == person.id, AttendanceWeeklyOff.week_start == week))
+    off = inputs.weekly.get((person.id, week)) if inputs else db.scalar(select(AttendanceWeeklyOff).where(AttendanceWeeklyOff.user_id == person.id, AttendanceWeeklyOff.week_start == week))
     off_index = WEEKDAYS.index(off.day) if off else 6
     status = AttendanceStatus(marker.status) if marker else AttendanceStatus.WEEKLY_OFF if day.weekday() == off_index else None
     if planned and status in {AttendanceStatus.WEEKLY_OFF, AttendanceStatus.HOLIDAY}:
@@ -189,16 +293,16 @@ def month_report(db, actor, year, month, staff_id=None, *, at=None):
     at, p = at or utcnow(), policy()
     end = min(last, local_day(at, p.timezone_name))
     people = _people(db, actor, staff_id)
+    inputs = _load_month_inputs(db, people, first, end, p)
     output = []
     for person in people:
         person_end = end
         if not person.active:
-            deactivated_at = db.scalar(select(AuditEntry.at).where(AuditEntry.entity_type == "user", AuditEntry.entity_id == person.id,
-                AuditEntry.action == "User deactivated").order_by(AuditEntry.at.desc()).limit(1))
+            deactivated_at = inputs.deactivated.get(person.id)
             person_end = min(end, local_day(deactivated_at or person.updated_at, p.timezone_name))
-        tracking_start = _tracking_start(db, person.id, p)
+        tracking_start = inputs.tracking.get(person.id)
         start = max(first, tracking_start) if tracking_start else person_end + timedelta(days=1)
-        rows = calculate_month([_day(db, person, start + timedelta(days=i), at, p)
+        rows = calculate_month([_day(db, person, start + timedelta(days=i), at, p, inputs=inputs)
                                 for i in range(max(0, (person_end - start).days + 1))], p)
         for row in rows:
             if row.get("status_override_status"):
@@ -212,6 +316,7 @@ def month_report(db, actor, year, month, staff_id=None, *, at=None):
             "graceUsedMinutes": rows[-1]["permission_minutes_used"] if rows else 0,
             "graceRemainingMinutes": rows[-1]["permission_minutes_remaining"] if rows else p.monthly_paid_minutes,
             "permissionOccasionsUsed": rows[-1]["permission_occasions_used"] if rows else 0}
+        summary.update(attendance_overview(rows))
         summary["unpaidBeforeOtMinutes"] = summary["unpaidMinutes"]
         summary["otOffsetMinutes"] = min(summary["extraOtMinutes"], sum(row.get("late_unpaid_minutes", 0) for row in rows))
         summary["unpaidMinutes"] -= summary["otOffsetMinutes"]
@@ -237,9 +342,9 @@ def _decision_stages(actor, employee, row):
     return [stage for stage in required_stages(row) if stage in allowed and not (row.approvals or {}).get(stage, {}).get("approved")]
 
 
-def _request_json(db, actor, row):
-    employee = db.get(User, row.user_id)
-    cover = db.get(User, row.cover_user_id) if row.cover_user_id else None
+def _request_json(db, actor, row, people=None):
+    employee = people[row.user_id] if people is not None else db.get(User, row.user_id)
+    cover = (people.get(row.cover_user_id) if people is not None else db.get(User, row.cover_user_id)) if row.cover_user_id else None
     stages = _decision_stages(actor, employee, row)
     return {"id": row.id, "userId": row.user_id, "name": employee.name, "date": row.attendance_date,
         "kind": row.kind, "minutes": row.minutes, "reason": row.reason, "status": row.status,
@@ -255,11 +360,22 @@ def _request_json(db, actor, row):
 
 def request_report(db, actor, year, month, staff_id=None):
     first, last = period(year, month)
-    ids = [u.id for u in _people(db, actor, staff_id)]
-    rows = db.scalars(select(AttendanceHRRequest).where(AttendanceHRRequest.attendance_date.between(first, last),
-        or_(AttendanceHRRequest.user_id.in_(ids), AttendanceHRRequest.cover_user_id == actor.id))
-        .order_by(AttendanceHRRequest.attendance_date.desc(), AttendanceHRRequest.created_at.desc(), AttendanceHRRequest.id))
-    return {"requests": [_request_json(db, actor, row) for row in rows]}
+    people = {u.id: u for u in _people(db, actor, staff_id)}
+    scope = and_(AttendanceHRRequest.attendance_date.between(first, last),
+                 or_(AttendanceHRRequest.user_id.in_(people), AttendanceHRRequest.cover_user_id == actor.id))
+    # The people named on the requests (requesters, cover colleagues) are found from the same filter,
+    # so both reads can run together.
+    rows, referenced = parallel_reads(
+        db,
+        lambda session: list(session.scalars(select(AttendanceHRRequest).where(scope)
+            .order_by(AttendanceHRRequest.attendance_date.desc(), AttendanceHRRequest.created_at.desc(), AttendanceHRRequest.id))),
+        lambda session: list(session.scalars(select(User).where(or_(
+            User.id.in_(select(AttendanceHRRequest.user_id).where(scope)),
+            User.id.in_(select(AttendanceHRRequest.cover_user_id).where(scope)))))),
+    )
+    for person in referenced:
+        people.setdefault(person.id, person)
+    return {"requests": [_request_json(db, actor, row, people) for row in rows]}
 
 
 def _cover_colleagues(db, employee, day=None):
@@ -466,16 +582,21 @@ def settings_report(db, actor, year, month, staff_id=None, *, at=None):
     people = _people(db, actor, staff_id)
     ids = [u.id for u in people]
     names = {u.id: u.name for u in people}
-    plans = list(db.scalars(select(AttendanceDutyPlan).where(AttendanceDutyPlan.user_id.in_(ids), AttendanceDutyPlan.attendance_date.between(first, last)).order_by(AttendanceDutyPlan.attendance_date)))
-    timings = list(db.scalars(select(AttendanceWorkTiming).where(AttendanceWorkTiming.user_id.in_(ids)).order_by(AttendanceWorkTiming.effective_from.desc())))
-    calendar_rows = list(db.scalars(select(AttendanceCalendarDay).where(AttendanceCalendarDay.user_id.in_(ids), AttendanceCalendarDay.attendance_date.between(first, last)).order_by(AttendanceCalendarDay.attendance_date)))
     today = local_day(at, policy().timezone_name)
     week = today - timedelta(days=today.weekday())
     weeks = [week + timedelta(weeks=i) for i in range(4)]
-    weekly_rows = list(db.scalars(select(AttendanceWeeklyOff).where(AttendanceWeeklyOff.user_id == actor.id, AttendanceWeeklyOff.week_start.in_(weeks))))
-    weekly = [_weekly_json(next((row for row in weekly_rows if row.week_start == w), None), w, at) for w in weeks] if actor.role in EMPLOYEE_ROLES else []
+    employee = actor.role in EMPLOYEE_ROLES
+    plans, timings, calendar_rows, weekly_rows, colleagues = parallel_reads(
+        db,
+        lambda session: list(session.scalars(select(AttendanceDutyPlan).where(AttendanceDutyPlan.user_id.in_(ids), AttendanceDutyPlan.attendance_date.between(first, last)).order_by(AttendanceDutyPlan.attendance_date))),
+        lambda session: list(session.scalars(select(AttendanceWorkTiming).where(AttendanceWorkTiming.user_id.in_(ids)).order_by(AttendanceWorkTiming.effective_from.desc()))),
+        lambda session: list(session.scalars(select(AttendanceCalendarDay).where(AttendanceCalendarDay.user_id.in_(ids), AttendanceCalendarDay.attendance_date.between(first, last)).order_by(AttendanceCalendarDay.attendance_date))),
+        lambda session: list(session.scalars(select(AttendanceWeeklyOff).where(AttendanceWeeklyOff.user_id == actor.id, AttendanceWeeklyOff.week_start.in_(weeks)))),
+        lambda session: _cover_colleagues(session, actor) if employee else [],
+    )
+    weekly = [_weekly_json(next((row for row in weekly_rows if row.week_start == w), None), w, at) for w in weeks] if employee else []
     return {"employees": [{"id": u.id, "name": u.name, "role": u.role.value, "active": u.active} for u in people],
-        "coverColleagues": [{"id": u.id, "name": u.name} for u in _cover_colleagues(db, actor)] if actor.role in EMPLOYEE_ROLES else [],
+        "coverColleagues": [{"id": u.id, "name": u.name} for u in colleagues],
         "weeklyOff": weekly, "policy": policy_json(),
         "dutyPlans": [{"id": row.id, "userId": row.user_id, "name": names[row.user_id], "date": row.attendance_date, "shift": row.shift, "reason": row.reason} for row in plans],
         "workTimings": [{"id": row.id, "userId": row.user_id, "name": names[row.user_id], "effectiveFrom": row.effective_from, "shift": row.shift, "reason": row.reason} for row in timings],
@@ -593,11 +714,13 @@ def adjustment_report(db, actor, year, month, staff_id=None):
     first, last = period(year, month)
     people = _people(db, actor, staff_id)
     names = {u.id: u.name for u in people}
-    rows = db.scalars(select(AttendanceAdjustment).where(AttendanceAdjustment.user_id.in_(names),
-        AttendanceAdjustment.attendance_date.between(first, last)).order_by(AttendanceAdjustment.created_at.desc(), AttendanceAdjustment.id))
+    # The actor's name comes from the same statement, not one lookup per adjustment.
+    rows = db.execute(select(AttendanceAdjustment, User.name).outerjoin(User, User.id == AttendanceAdjustment.actor_id)
+        .where(AttendanceAdjustment.user_id.in_(names), AttendanceAdjustment.attendance_date.between(first, last))
+        .order_by(AttendanceAdjustment.created_at.desc(), AttendanceAdjustment.id)).all()
     return {"adjustments": [{"id": row.id, "userId": row.user_id, "name": names[row.user_id], "date": row.attendance_date,
         "kind": row.kind, "reason": row.reason, "status": row.status, "minutes": row.minutes, "action": row.action,
-        "occurredAt": row.occurred_at, "actorName": db.get(User, row.actor_id).name, "createdAt": row.created_at} for row in rows]}
+        "occurredAt": row.occurred_at, "actorName": actor_name, "createdAt": row.created_at} for row, actor_name in rows]}
 
 
 def _move_task(db, task, target_id, request_id, at, phase):
@@ -623,6 +746,7 @@ def run_cover_sweep(db, *, at=None):
     owners and unresolved overlaps are released rather than overwritten.
     """
     users = {u.id: u for u in _lock(db)}
+    from app.services.assignment_notifications import notify_assignment_changes
     at = at or utcnow()
     today = local_day(at, policy().timezone_name)
     counts = {"started": 0, "returned": 0, "completed": 0, "released": 0, "settled": 0}
@@ -640,6 +764,7 @@ def run_cover_sweep(db, *, at=None):
     finished = list(db.scalars(select(AttendanceHRRequest).where(AttendanceHRRequest.cover_started_at.is_not(None),
         AttendanceHRRequest.cover_settled_at.is_(None), AttendanceHRRequest.attendance_date < today).order_by(AttendanceHRRequest.id).with_for_update()))
     for request in finished:
+        ownership_changes = []
         items = list(db.scalars(select(AttendanceCoverItem).where(AttendanceCoverItem.request_id == request.id,
             AttendanceCoverItem.settled_at.is_(None)).order_by(AttendanceCoverItem.candidate_id).with_for_update()))
         for item in items:
@@ -662,6 +787,7 @@ def run_cover_sweep(db, *, at=None):
                 outcome = "completed"
             else:
                 candidate.owner_id = item.from_user_id
+                ownership_changes.append((candidate.id, candidate.name, item.to_user_id, item.from_user_id))
                 for task in open_tasks:
                     _move_task(db, task, item.from_user_id, request.id, at, "return")
                 outcome = "returned"
@@ -671,6 +797,7 @@ def run_cover_sweep(db, *, at=None):
         request.cover_settled_at = at
         counts["settled"] += 1
         _notify(db, request.user_id, "Leave cover ended", f"Cover for {request.attendance_date} has settled; unfinished unchanged work was returned.")
+        notify_assignment_changes(db, ownership_changes, reason=f"Unfinished work returned after leave cover on {request.attendance_date}.", users=users.values())
     # Sessions use autoflush=False. Today's handover must see yesterday's
     # returned ownership and closed ledger entries in the same transaction.
     db.flush()
@@ -680,6 +807,7 @@ def run_cover_sweep(db, *, at=None):
         AttendanceHRRequest.attendance_date == today)
         .order_by(AttendanceHRRequest.id).with_for_update()))
     for request in due:
+        ownership_changes = []
         owner, cover = users.get(request.user_id), users.get(request.cover_user_id)
         leave_still_effective = db.scalar(select(AttendanceCalendarDay.id).where(AttendanceCalendarDay.user_id == request.user_id,
             AttendanceCalendarDay.attendance_date == today, AttendanceCalendarDay.status.in_(["PL", "UL"])).limit(1))
@@ -712,6 +840,7 @@ def run_cover_sweep(db, *, at=None):
                 to_user_id=cover.id, task_ids=[task.id for task in tasks], started_at=at)
             db.add(item)
             candidate.owner_id = cover.id
+            ownership_changes.append((candidate.id, candidate.name, owner.id, cover.id))
             for task in tasks:
                 _move_task(db, task, cover.id, request.id, at, "start")
             db.flush()
@@ -719,5 +848,6 @@ def run_cover_sweep(db, *, at=None):
             counts["started"] += 1
         request.cover_started_at = at
         _notify(db, cover.id, "Leave cover started", f"You are covering {owner.name} on {today}; unfinished work returns after today.")
+        notify_assignment_changes(db, ownership_changes, reason=f"Covering {owner.name} during leave on {today}.", users=users.values())
     db.flush()
     return counts

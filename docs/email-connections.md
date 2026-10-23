@@ -1,10 +1,46 @@
-﻿# Zoho Mail in the CRM
+# Mailboxes in the CRM
 
-Zoho is the only enabled mail provider. Administrators connect it inside **Inbox → Accounts → Connect Zoho Mail** using the mailbox address, an app password, the account type and its data center. No account credentials are bundled with the project. Gmail/Microsoft connection endpoints are disabled; their existing local messages, documents and receipt history remain readable. No live provider connection or email send was performed during implementation.
+The Inbox is one unified inbox for **any number of mailboxes**; there is no account limit. An administrator connects each one inside **Inbox → Accounts → Connect mailbox**:
+
+| Source | How it connects | Where credentials live |
+| --- | --- | --- |
+| **Gmail** | Google OAuth sign-in (IMAP/SMTP scope) | Encrypted refresh grant on the server |
+| **Microsoft 365** | Microsoft OAuth sign-in (IMAP/SMTP scope) | Encrypted refresh grant on the server |
+| **Zoho Mail** | Address, app password, data center and account type | Encrypted on the server |
+| **Other (IMAP / SMTP)** | Address, password, IMAP and SMTP servers and ports | Encrypted on the server |
+
+Mail from all accounts appears together with an account filter, search, unread state and an attachment icon. Opening a message previews its attachments and replies from the same account. Each account has its own **Auto-ingest resumes** switch; when on, attachments enter the ingestion pipeline automatically. **Create candidate from attachment** is available on any email, for mail that auto-ingest skipped, and each email shows a badge linking to the candidate it produced.
+
+Credentials are encrypted in the database and never returned by the API or written to audit data. Connections always use TLS (IMAP 993 SSL or 143 STARTTLS; SMTP 465 SSL or 587 STARTTLS). Custom IMAP servers must resolve to public addresses; loopback, private-network and link-local hosts are rejected.
+
+## Connecting Gmail and Microsoft 365
+
+Register one OAuth application per provider, then set its values on the CRM server (never in `VITE_` variables):
+
+* **Gmail**: Google Cloud Console → OAuth client of type *Web application*. Add the authorized redirect URI `https://<crm-host>/api/inbox/oauth/gmail/callback` and request the Gmail scope `https://mail.google.com/`. Set `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REDIRECT_URI`. While the app is in *Testing*, only listed test users can sign in and grants expire after seven days; publish the app (and complete Google's verification for restricted scopes) for permanent grants.
+* **Microsoft 365**: Microsoft Entra → App registration (web). Redirect URI `https://<crm-host>/api/inbox/oauth/microsoft/callback`. Delegated permissions `IMAP.AccessAsUser.All`, `SMTP.Send` and `offline_access`. Set `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_REDIRECT_URI` and, for a single organization, `MICROSOFT_TENANT`. The tenant must allow IMAP and authenticated SMTP for the mailbox.
+
+The redirect URI must use HTTPS (plain HTTP is accepted only for `localhost`) and end with exactly the path above. When the browser app and API run on different origins (local development), set `APP_BASE_URL=http://localhost:5173` so the browser returns to the CRM after consent. The connection form shows a provider as unavailable, with the missing setting, until these are configured.
+
+Consent must finish in the same signed-in browser session that started it, within ten minutes, and can be used once. Cancelling consent connects nothing.
+
+## Zoho Mail
+
+Zoho connects with the mailbox address, an app password, the account type and its data center. No account credentials are bundled with the project. Disconnected accounts keep their messages, documents and receipt history.
 
 ## Connection and deployment
 
 Run migrations through the current head. Configure a persistent `MAIL_TOKEN_ENCRYPTION_KEY` generated with Python `cryptography.fernet.Fernet.generate_key()`, stored in server secret configuration. Connected mailbox credentials are encrypted in the database and never returned by the API or included in audit data. Losing this key requires reconnecting accounts. Do not put secrets in `VITE_` variables. The browser connection form does not persist its password.
+
+If the connection form says a valid `MAIL_TOKEN_ENCRYPTION_KEY` is required, configure the backend secret before retrying. This key is separate from the Zoho app password. Reuse an existing production key when the local backend shares that database; all API and mail workers reading the same encrypted records need the same key. Do not replace an established key merely to resolve a missing local setting.
+
+For a first setup with no established key, generate it once in PowerShell:
+
+```powershell
+& 'M:\crm\backend\.venv\Scripts\python.exe' -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode('ascii'))"
+```
+
+Copy that output privately into `MAIL_TOKEN_ENCRYPTION_KEY=` in `backend/.env`, preserving the trailing `=`. Set the same value in the production backend's environment/secret store when it uses the same database. Restart the complete local backend with `npm run dev:backend` from the repository root; redeploy the hosted backend after updating its secret. `CRM_ENV_FILE` selects a different configuration file when set, and process environment values override dotenv values. Refresh Inbox and retry the connection. This configuration correction does not itself require another database migration.
 
 Copy the exact incoming/outgoing hostnames from the mailbox's **Server Configuration Details** in Zoho. Personal and paid organization accounts can use different hosts, and the data center matters. The CRM allows matching `imap`/`smtp` or `imappro`/`smtppro` Zoho hosts for the selected region; arbitrary hosts and insecure ports are rejected. Defaults are suggestions and must match the account's displayed settings. [Zoho's server configuration guide](https://www.zoho.com/mail/help/imap-access.html).
 
@@ -20,7 +56,7 @@ IMAP must be enabled by the account/organization policy. Zoho requires an app-sp
 
 Connection verifies IMAP access and folder listing. Sending uses the same account credentials over secure SMTP; an SMTP-specific policy failure is reported on the send attempt. Zoho normally saves SMTP mail in Sent itself, so the CRM does **not** append a duplicate Sent copy. Keep Zoho's **Save copy of sent emails** enabled for Sent reconciliation. [Zoho SMTP authentication and Sent-copy behavior](https://www.zoho.com/mail/help/zoho-smtp.html).
 
-Existing server-configured IMAP accounts can be used only when their IMAP/SMTP endpoints pass the same Zoho allowlist. Their variables are `IMAP_SERVER`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD`, `IMAP_USE_SSL`, `IMAP_FOLDER`, `SMTP_SERVER`, `SMTP_PORT`, and `SMTP_USE_SSL`, or per-account `EMAIL_ACCOUNTS_JSON` entries. New connections should use the in-app form so credentials are encrypted and retained independently of worker environment files.
+Existing server-configured IMAP accounts remain supported when their endpoints use TLS on the standard ports. Their variables are `IMAP_SERVER`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD`, `IMAP_USE_SSL`, `IMAP_FOLDER`, `SMTP_SERVER`, `SMTP_PORT`, and `SMTP_USE_SSL`, or per-account `EMAIL_ACCOUNTS_JSON` entries. New connections should use the in-app form so credentials are encrypted and retained independently of worker environment files.
 
 Set `EMAIL_INGESTION_ENABLED=true` and `EMAIL_POLL_SECONDS=120` for candidate intake. `python -m app.runtime` supervises separate receiving and extraction workers, so OCR does not delay the receiving cadence. Individual processes are `python -m app.email_worker` and `python -m app.email_extraction_worker`; each uses a separate PostgreSQL advisory lock. Interactive mailbox access works independently of automatic candidate intake.
 

@@ -296,3 +296,47 @@ def test_bad_native_font_mapping_and_spaced_characters_require_ocr():
     assert subject._usable_native(CV)
     assert not subject._usable_native("\ufffd" * 100)
     assert not subject._usable_native("R E S U M E " * 30)
+
+
+def test_unclassified_page_is_left_out_of_the_selection_only_for_a_partial_caller():
+    text = "This is correspondence about travel arrangements and several unrelated meeting dates. " * 3
+    report = subject.inspect_document(pdf([CV, text]))
+    assert report.unknown_pages == [2] and report.resume_pages == [1] and report.has_classified_pages
+    assert any("Pages 2" in warning for warning in report.warnings)
+    report.allow_partial = True
+    with fitz.open(stream=report.resume_pdf(), filetype="pdf") as selected:
+        assert selected.page_count == 1
+    with pytest.raises(subject.InspectionError, match="outside"):
+        report.pdf_for_pages([3])
+    with pytest.raises(subject.InspectionError, match="classified pages"):
+        report.pdf_for_pages([2])
+
+
+def test_partial_report_restores_only_for_a_partial_caller_and_unread_pages_stay_unselectable():
+    text = "This is correspondence about travel arrangements and several unrelated meeting dates. " * 3
+    original = pdf([CV, text, PASSPORT + AADHAAR])
+    report = subject.inspect_document(original)
+    saved = report.to_dict()
+    assert saved["complete"] is False
+    with pytest.raises(subject.InspectionError):
+        subject.restore_inspection(original, saved)
+    restored = subject.restore_inspection(original, saved, allow_partial=True)
+    assert restored.resume_pages == [1] and restored.passport_pages == [3] and restored.aadhaar_pages == [3]
+    assert restored.unknown_pages == [2]
+    assert 2 not in restored.resume_pages + restored.passport_pages + restored.aadhaar_pages
+
+
+def test_back_side_inherits_the_adjoining_card_and_is_reported():
+    back = "Some printed text with address details and a barcode. " * 3
+    report = subject.inspect_document(pdf([AADHAAR, back]))
+    assert report.aadhaar_pages == [1, 2] and report.inherited_pages == [2]
+    assert any("adjoining" in warning for warning in report.warnings)
+    assert report.to_dict()["inherited_pages"] == [2]
+
+
+def test_single_picture_without_text_is_a_decorative_image(monkeypatch):
+    monkeypatch.setattr(subject, "_ocr_image", lambda *a, **k: subject.OCRRead("", 0, "no text"))
+    assert subject.inspect_document(image_bytes()).decorative_image
+    monkeypatch.setattr(subject, "_ocr_image", lambda *a, **k: subject.OCRRead("A few words only here", 30, "weak"))
+    weak = subject.inspect_document(image_bytes())
+    assert weak.unread_pages == [1] and not weak.decorative_image

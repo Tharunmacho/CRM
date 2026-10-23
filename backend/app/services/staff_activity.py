@@ -1,4 +1,5 @@
 ﻿"""Explicit attendance and bounded, transparent browser-presence estimates."""
+from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -6,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert
 
+from app.services.parallel_reads import parallel_reads
 from app.db.models import (AuditEntry, Role, Session as LoginSession,
                            StaffAttendanceRequest as AttendanceRequest,
                            StaffAttendanceSession as Attendance,
@@ -83,6 +85,7 @@ def presence_end(row, at):
 
 
 def staff_summary(user, attendance, presence, start, end, at):
+    tracked = user.role == Role.staff
     cutoff = min(end, at)
     shifts = merged((max(start, row.checked_in_at), min(cutoff, row.checked_out_at or at)) for row in attendance)
     active = merged((max(start, row.started_at), min(cutoff, presence_end(row, at))) for row in presence if row.state == "online")
@@ -93,7 +96,10 @@ def staff_summary(user, attendance, presence, start, end, at):
     current = [row for row in presence if row.ended_at is None and row.last_seen_at + timedelta(seconds=OFFLINE_AFTER_SECONDS) > at]
     live = next((row for row in attendance if row.checked_out_at is None), None)
     state = "online" if any(row.state == "online" for row in current) else "idle" if current else "offline"
-    return {"userId": user.id, "name": user.name, "active": user.active,
+    timeline = activity_timeline(shifts, active, idle) if tracked else []
+    for interval in timeline:
+        interval["durationSeconds"] = seconds([(interval["startedAt"], interval["endedAt"])])
+    return {"userId": user.id, "name": user.name, "role": user.role.value, "active": user.active,
         "attendance": {"status": "checked_in" if live else "checked_out", "sessionId": live.id if live else None,
             "checkedInAt": live.checked_in_at if live else None,
             "lastCheckedOutAt": max((row.checked_out_at for row in attendance if row.checked_out_at), default=None),
@@ -102,10 +108,13 @@ def staff_summary(user, attendance, presence, start, end, at):
                 "durationSeconds": seconds([(max(start, row.checked_in_at), min(cutoff, row.checked_out_at or at))]),
                 "correctionReason": row.correction_reason, "correctedBy": row.corrected_by}
                 for row in sorted(attendance, key=lambda item: item.checked_in_at) if row.checked_in_at < end and (row.checked_out_at or at) >= start]},
-        "presence": {"status": state, "lastSeenAt": max((row.last_seen_at for row in presence), default=None),
-            "activeSeconds": active_seconds, "idleSeconds": max(0, seen_seconds - active_seconds),
-            "offlineSeconds": max(0, total - seen_seconds),
-            "sessions": activity_timeline(shifts, active, idle)}}
+        "presence": {"status": state, "tracked": tracked,
+            "lastSeenAt": max((row.last_seen_at for row in presence), default=None),
+            "activeSeconds": active_seconds if tracked else 0,
+            "idleSeconds": max(0, seen_seconds - active_seconds) if tracked else 0,
+            # No browser signal is not evidence of absence for an untracked role.
+            "offlineSeconds": max(0, total - seen_seconds) if tracked else 0,
+            "sessions": timeline}}
 
 
 def attendance_report(db, user, day, agency_timezone, staff_id=None, *, at=None):
@@ -123,19 +132,28 @@ def attendance_report(db, user, day, agency_timezone, staff_id=None, *, at=None)
                 raise HTTPException(403, "Managers can view Staff and their own attendance")
     if not team: people = people.where(User.id == user.id)
     elif staff_id: people = people.where(User.id == staff_id)
-    users = list(db.scalars(people.order_by(User.name, User.id)))
-    ids = [person.id for person in users]
-    attendance = list(db.scalars(select(Attendance).where(Attendance.user_id.in_(ids),
-        or_(Attendance.checked_out_at.is_(None), Attendance.checked_out_at >= start),
-        or_(Attendance.checked_in_at < end, Attendance.checked_out_at.is_(None))))) if ids else []
-    presence = list(db.scalars(select(Presence).where(Presence.user_id.in_(ids),
-        or_(Presence.ended_at.is_(None), Presence.ended_at >= start),
-        or_(Presence.started_at < end, Presence.ended_at.is_(None))))) if ids else []
-    return {"date": day.isoformat(), "timezone": agency_timezone, "canViewTeam": team,
+    # The shift and presence reads filter on the same people query, so all three can run at once.
+    ids = people.order_by(None).with_only_columns(User.id).scalar_subquery()
+    users, attendance, presence = parallel_reads(
+        db,
+        lambda session: list(session.scalars(people.order_by(User.name, User.id))),
+        lambda session: list(session.scalars(select(Attendance).where(Attendance.user_id.in_(ids),
+            or_(Attendance.checked_out_at.is_(None), Attendance.checked_out_at >= start),
+            or_(Attendance.checked_in_at < end, Attendance.checked_out_at.is_(None))))),
+        lambda session: list(session.scalars(select(Presence).where(Presence.user_id.in_(ids),
+            or_(Presence.ended_at.is_(None), Presence.ended_at >= start),
+            or_(Presence.started_at < end, Presence.ended_at.is_(None))))),
+    )
+    attendance_by_user, presence_by_user = defaultdict(list), defaultdict(list)
+    for row in attendance:
+        attendance_by_user[row.user_id].append(row)
+    for row in presence:
+        presence_by_user[row.user_id].append(row)
+    return {"date": day.isoformat(), "timezone": agency_timezone, "canViewTeam": team, "generatedAt": at,
         "policy": {"heartbeatSeconds": HEARTBEAT_SECONDS, "offlineAfterSeconds": OFFLINE_AFTER_SECONDS,
                    "idleAfterSeconds": IDLE_AFTER_SECONDS, "durationScope": "checked_in_time"},
-        "staff": [staff_summary(person, [row for row in attendance if row.user_id == person.id],
-                   [row for row in presence if row.user_id == person.id], start, end, at) for person in users]}
+        "staff": [staff_summary(person, attendance_by_user[person.id],
+                   presence_by_user[person.id], start, end, at) for person in users]}
 
 
 def _request_session(db, user, kind, request_key, attendance_id=None):

@@ -1,28 +1,41 @@
-"""Small, non-sensitive change token for committed email candidate updates."""
+"""Small, non-sensitive change token for committed intake and candidate updates."""
 
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import EmailIngestionJob
+from app.db.models import Candidate, EmailIngestionJob, WhatsAppMessage
 
 
-def revision_expression():
-    # Candidate changes and job completion commit together. Read only aggregate
-    # metadata: never document state, mailbox contents or provider credentials.
-    # Epoch formatting is independent of the connection's timezone.
+def _signature(count_column, stamp_column, *conditions):
+    """`count:epoch` for one table as a scalar subquery.
+
+    Epoch formatting is independent of the connection's timezone. The count makes
+    deletions visible even when the newest remaining timestamp is unchanged.
+    """
     return (
         select(
             func.concat(
-                cast(func.count(EmailIngestionJob.id), String),
+                cast(func.count(count_column), String),
                 ":",
-                func.coalesce(
-                    cast(func.extract("epoch", func.max(EmailIngestionJob.updated_at)), String),
-                    "0",
-                ),
+                func.coalesce(cast(func.extract("epoch", func.max(stamp_column)), String), "0"),
             )
         )
-        .where(EmailIngestionJob.status == "completed")
+        .where(*conditions)
         .scalar_subquery()
+    )
+
+
+def revision_expression():
+    # Read only aggregate metadata: never document state, mailbox contents,
+    # extraction payloads or provider credentials. Every intake channel
+    # (email, WhatsApp) finishes by creating or enriching a candidate, and bundle
+    # commits and merges also touch candidates, so candidate changes are part of
+    # the token alongside completed email and WhatsApp receipts.
+    return func.concat_ws(
+        ":",
+        _signature(EmailIngestionJob.id, EmailIngestionJob.updated_at, EmailIngestionJob.status == "completed"),
+        _signature(WhatsAppMessage.id, WhatsAppMessage.updated_at, WhatsAppMessage.status == "completed"),
+        _signature(Candidate.id, Candidate.updated_at),
     )
 
 

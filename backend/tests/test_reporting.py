@@ -16,7 +16,7 @@ from app.api.routers import reports
 from app.core.deps import current_user
 from app.db.session import get_db
 from app.db import models as m
-from app.services.reporting import Filters, dashboard_data, read_reporting_data, report_data
+from app.services.reporting import Filters, dashboard_data, read_dashboard_data, read_reporting_data, report_data
 from app.services.report_exports import REPORTS, pdf, xlsx
 from test_database_naming import schema_database, _migrate
 
@@ -145,6 +145,22 @@ def test_dashboard_current_ownership_deadlines_and_roles(dataset):
     assert admin["taskCounts"]["escalated"] == 1
 
 
+@pytest.mark.parametrize("user,scope", [(STAFF, None), (MANAGER, None), (ADMIN, None), (ADMIN, "a"), (ADMIN, "b")])
+def test_dashboard_order_metrics_match_historical_report_definitions(dataset, user, scope):
+    # Repeated, reopened, future and closed records must keep their previous meaning.
+    dataset["stages"].extend([
+        {**dataset["stages"][3], "attempt": 2, "data": {"result": "rejected"}},
+        {**dataset["stages"][3], "attempt": 3, "data": {"result": "selected"}, "reopened_reason": "Correction"},
+    ])
+    dataset["applications"].append({**dataset["applications"][2], "id": "future-app", "created_at": NOW + timedelta(days=1)})
+    dataset["orders"].append({**dataset["orders"][0], "id": "future-order", "created_at": NOW + timedelta(days=1)})
+    effective_scope = scope if user.role == m.Role.admin else user.id
+    ids = {c["id"] for c in dataset["candidates"] if not effective_scope or c["owner_id"] == effective_scope}
+    report_input = {**dataset, "applications": [{**a, "owner_id": effective_scope} for a in dataset["applications"] if a["candidate_id"] in ids]}
+    previous = report_data(report_input, user, Filters(date(1970, 1, 1), DAY, staff_id=effective_scope), now=NOW)
+    assert dashboard_data(dataset, user, scope, now=NOW)["orders"] == [row for row in previous["orders"] if row["status"] == "open"]
+
+
 def test_late_stage_labels_identify_work_still_due_not_deployment(dataset):
     dataset["applications"][0]["current_stage"] = 10
     dataset["applications"][0]["created_at"] = NOW
@@ -240,6 +256,18 @@ def test_real_postgres_report_contract_and_export_authorization(schema_database,
         db.add_all(m.Remark(**row, body='Daily update') for row in dataset['remarks'])
         db.commit()
         loaded = read_reporting_data(db)
+        # Dedicated dashboard reads preserve all roles/current-owner scopes while
+        # omitting every historical task event, completed task and non-interview stage.
+        from test_attendance_read_performance import measured
+        for user, scope in [(STAFF, None), (MANAGER, None), (ADMIN, None), (ADMIN, 'b')]:
+            with measured(db) as measurement:
+                compact = read_dashboard_data(db, user, scope, now=NOW)
+            assert measurement['queries'] == 1
+            assert 'events' not in compact and 'mailSources' not in compact
+            assert all(row['stage'] == 4 for row in compact['stages'])
+            assert all(set(row['data']) == {'result'} for row in compact['stages'])
+            assert 't1' not in {row['id'] for row in compact['tasks']}
+            assert dashboard_data(compact, user, scope, now=NOW) == dashboard_data(loaded, user, scope, now=NOW)
         actual = report_data(loaded, STAFF, FILTERS, now=NOW)
         assert actual['staff'][0]['escalations'] == 1
         assert actual['summary']['intake'] == 5

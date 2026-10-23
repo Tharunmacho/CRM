@@ -33,7 +33,11 @@ The reference's separate salary, payroll and payslip module is not included. Emp
 
 ## Access and screens
 
-Staff and Manager follow the shell attendance shortcut to the Attendance page's check-in/out controls. The workspace provides monthly overview, approvals, employee record and duty roster, with the original Sessions & presence view retained. Only Admin can correct a raw session; a reason is required and before/after values are audited. Corrections reject future times and overlapping sessions.
+Staff and Manager follow the shell attendance shortcut to the Attendance page's check-in/out controls. The workspace provides monthly overview, approvals, employee record, duty roster and a primary **Sessions & activity** tab. Each daily employee record opens that employee's sessions and activity for the selected date. Only Admin can correct a raw session; a reason is required and before/after values are audited. Corrections reject future times and overlapping sessions.
+
+The monthly overview shows attendance percentage, credited days out of scheduled days, absence/late/incomplete counts, requests and the unpaid balance after approved OT. Scheduled days exclude weekly offs and holidays; credited days include present, late, early exit, paid permission, official duty, work from home, paid leave and provisional days with a check-in. An empty schedule shows no percentage. The absence badge includes unpaid leave; late and incomplete badges follow the displayed `LT` and `MP` statuses. These display metrics do not change work-minute or unpaid-time calculations.
+
+Open **View record** for the employee's daily sessions and allowances, or their request badge for that employee's requests. **More** contains correction history. The overview, daily records and sessions/activity roster become cards on narrow screens. This presentation update adds computed API fields and requires no migration beyond `0015_attendance_hr`; deploy its frontend and API together.
 
 The clock's current state is labelled separately from the selected day's totals. Sessions & presence clips an overnight shift to its overlap with each agency day. The monthly policy instead attributes the whole overnight shift to its check-in date. `AGENCY_TIMEZONE` defaults to `Asia/Kolkata`; database timestamps are UTC.
 
@@ -49,9 +53,13 @@ The clock's current state is labelled separately from the selected day's totals.
 
 Only CRM browser signals are collected. The application does not monitor other apps, device activity, screenshots or keystroke contents. Browser activity is not proof of work or a payroll calculation.
 
+The user-facing label for the API's `offline` state is **Away / no signal**: the server cannot distinguish a hidden tab, closed browser, network interruption or work performed outside the CRM. Managers have attendance but no browser collector; their activity is explicitly **Not tracked** and their checked-in time is excluded from activity/offline totals. The sessions view shows server-generated snapshot time, per-interval durations and current-state badges separately from the selected day's totals.
+
 ## Storage and retries
 
 `staff_attendance_sessions` stores server-timestamped check-in/out, original request keys, correction actor and reason. A partial unique index permits one open shift per Staff/Manager account. `staff_attendance_requests` records **every accepted request key**, including a second tab's request that returns an already-open shift and a repeated checkout of an already-closed shift. Retrying that key after the shift closes, another shift opens, or an Admin corrects the original session cannot create or alter a different attendance action.
+
+Unconfirmed browser clock actions also retain their original key and checkout session in tab session storage. A one-way, non-credential login marker scopes recovery to the same user/login. Reload shows an explicit **Retry** action; it never dispatches a stored action automatically. A changed login invalidates the pending intent, and clock POSTs reject a mismatching marker before mutation. Storage failures leave the in-memory retry available.
 
 `staff_presence_intervals` stores the staff account, browser client identifier, login-session relationship, online/idle state, start/end and last heartbeat. `staff_presence_clients` stores each page's login binding and highest accepted sequence separately from activity intervals. An early leave is an ordering checkpoint, not a fabricated interval. Replayed or older sequences neither change state nor renew the 90-second deadline. Fresh page instances use fresh client IDs, including duplicated tabs. Historical activity remains when login rows are removed.
 

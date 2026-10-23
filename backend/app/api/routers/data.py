@@ -67,7 +67,7 @@ DOCUMENT_SLOTS = [
     ("resume", "Resume"),
     ("passport", "Passport copy"),
     ("aadhaar", "Aadhaar copy"),
-    ("source_bundle", "Original document bundles"),
+    ("source_bundle", "Source document evidence"),
     ("photo", "Photograph"),
     ("education", "Education certificates"),
     ("experience", "Experience certificates"),
@@ -108,9 +108,9 @@ def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]]) -> Candida
 
 
 @router.get("/bootstrap")
-def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict[str, Any]:
+def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user), compact: bool = False) -> dict[str, Any]:
     """A fresh desk snapshot with one data query after the session check."""
-    snapshot = read_snapshot(db, user.id)
+    snapshot = read_snapshot(db, user.id, compact=compact)
 
     files: dict[tuple[str, str], list[dict]] = {}
     for f in snapshot["files"]:
@@ -643,19 +643,28 @@ def create_todo(body: TodoIn, db: Session = Depends(get_db), user: User = Depend
     return TodoOut.model_validate(row).model_dump(by_alias=True, mode="json")
 
 
+class TodoCompletionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    done: bool
+
+
 @router.patch("/todos/{todo_id}")
-def toggle_todo(todo_id: str, body: TodoIn | None = None, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
+def toggle_todo(todo_id: str, body: TodoIn | TodoCompletionIn | None = None, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
     row = db.scalar(select(TodoItem).where(TodoItem.id == todo_id).with_for_update())
     if row is None or row.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "To-do not found")
     if body is None:
         row.done = not row.done
+    elif isinstance(body, TodoCompletionIn):
+        if row.done == body.done:
+            return TodoOut.model_validate(row).model_dump(by_alias=True, mode="json")
+        row.done = body.done
     else:
         if row.due_at != body.dueAt:
             row.reminded_at = None
         row.title, row.notes, row.due_at, row.priority = body.title, body.notes, body.dueAt, body.priority
         row.link_to, row.link_label = body.linkTo, body.linkLabel
-    db.add(AuditEntry(actor_id=user.id, action="Updated personal to-do" if body else "Completed personal to-do" if row.done else "Reopened personal to-do", entity_type="todo", entity_id=row.id, target=row.title))
+    db.add(AuditEntry(actor_id=user.id, action="Updated personal to-do" if isinstance(body, TodoIn) else "Completed personal to-do" if row.done else "Reopened personal to-do", entity_type="todo", entity_id=row.id, target=row.title))
     db.commit()
     return TodoOut.model_validate(row).model_dump(by_alias=True, mode="json")
 
@@ -696,10 +705,19 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(404, "One or more candidates no longer exist")
 
     now = datetime.now(timezone.utc)
+    ownership_changes = []
+    # A candidate that waited only for an owner leaves review once it has one; any other
+    # reason (missing name or phone, document warnings) still needs a person's check.
+    from app.services.candidate_review import release_ownership_review, review_reasons
+    waiting_review = [c for c in candidates if c.owner_id is None and c.needs_review]
+    blockers = review_reasons(db, waiting_review)
     for c in candidates:
         previous_owner = c.owner_id
         c.owner_id = target.id
+        if previous_owner is None:
+            release_ownership_review(c, blockers.get(c.id, set()))
         if previous_owner != target.id:
+            ownership_changes.append((c.id, c.name, previous_owner, target.id))
             db.add(AuditEntry(actor_id=user.id, action="Candidate reassigned", target=c.name,
                 entity_type="candidate", entity_id=c.id, at=now,
                 meta={"fromUserId": previous_owner, "toUserId": target.id, "reason": reason}))
@@ -708,9 +726,9 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
         if not db.scalar(select(Task.id).where(Task.candidate_id == c.id).limit(1)) and not c.call_recorded_at:
             db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=c.id,
                         owner_id=target.id, created_at=now, sla_started_at=now, due_at=now + timedelta(hours=48)))
-        db.add(Notification(user_id=target.id, kind="assignment", title="Candidate assigned", detail=c.name, link_to=f"/candidates/{c.id}"))
-
     from app.services.workflow_scheduler import add_event
+    changed_candidate_ids = {change[0] for change in ownership_changes}
+    task_only_changes = []
 
     # Open tasks move with the candidate; preserve the previous owner for daily history.
     for t in db.scalars(
@@ -721,9 +739,16 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
         ).order_by(Task.id).with_for_update()
     ):
         if t.owner_id != target.id:
+            if t.candidate_id not in changed_candidate_ids:
+                task_only_changes.append((t.id, t.title, t.owner_id, target.id))
             add_event(db, t, "assignment", f"assignment:{t.id}:{now.isoformat()}", now,
                       {"fromOwnerId": t.owner_id, "toOwnerId": target.id, "actorId": user.id, "reason": reason})
             t.owner_id = target.id
+
+    from app.services.assignment_notifications import notify_assignment_changes, notify_task_assignment_changes
+    notification_reason = f"Reassigned by {user.name}: {reason}"
+    notify_assignment_changes(db, ownership_changes, reason=notification_reason)
+    notify_task_assignment_changes(db, task_only_changes, reason=notification_reason)
 
     db.add(
         AuditEntry(

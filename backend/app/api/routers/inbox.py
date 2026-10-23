@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, load_only
 
@@ -18,18 +18,25 @@ from app.integrations.mail.imap import (
 )
 from app.services.mail_config import configured_mailboxes
 from app.services.document_extraction import request_extraction_retry
+from app.services.document_person_split import ensure_single_person_source
+from app.services.document_bundle_summary import source_summaries
 from app.services.ingestion_revision import read_revision
-from app.services import zoho_mail
+from app.services.parallel_reads import parallel_reads
+from app.services.intake_attention import attention_list, unread_counts
+from app.services import mail_providers
 from app.api.routers.mail_actions import router as actions_router
 from app.api.routers.zoho_mailbox import router as zoho_router
 from app.api.routers.mail_compose import router as compose_router
+from app.api.routers.mail_accounts import router as accounts_router
 from app.services.mail_storage import storage_identity
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
 router.include_router(actions_router)
 router.include_router(zoho_router)
 router.include_router(compose_router)
+router.include_router(accounts_router)
 admin = require_role(Role.admin)
+supervisor = require_role(Role.admin, Role.manager)
 
 
 class ConnectIn(BaseModel):
@@ -48,11 +55,17 @@ def configs():
         raise HTTPException(503, str(exc)) from exc
 
 
-def account_out(account, configured):
+def account_out(account, configured, counts=None, has_secrets=None):
+    total, unread = (counts or {}).get(account.id, (0, 0))
+    if has_secrets is None:
+        has_secrets = bool((account.secrets or {}).get("encrypted"))
     return {
         "id": account.id, "address": account.address, "provider": account.provider,
+        "providerLabel": mail_providers.LABELS.get(account.provider, account.provider),
         "autoIngest": account.auto_ingest, "lastSyncAt": account.last_sync_at,
-        "configured": not account.disconnected_at and (account.provider == "zoho" or account.address in configured),
+        "messageCount": total, "unreadCount": unread,
+        "configured": not account.disconnected_at and mail_providers.is_live(account.provider)
+            and (account.provider != "imap" or has_secrets or account.address in configured),
         "connectionStatus": "disconnected" if account.disconnected_at else "error" if account.last_error else "connected",
         "disconnectedAt": account.disconnected_at,
         "lastError": account.last_error,
@@ -65,10 +78,14 @@ def require_intake_account(db: Session, account_id: str) -> None:
         raise HTTPException(404, "Mailbox not found")
     # Match the receiving/extraction worker's supported source set. Retained
     # historical receipts can still be read and reviewed without queueing work.
-    if account.provider not in {"zoho", "imap"}:
-        raise HTTPException(409, "This provider is archived. Stored history is read only; connect Zoho Mail for new candidate intake. Original attachments remain available to download.")
+    if not mail_providers.is_live(account.provider):
+        raise HTTPException(409, "This provider is archived. Stored history is read only; connect the mailbox again for new candidate intake. Original attachments remain available to download.")
     if account.disconnected_at:
         raise HTTPException(409, "Reconnect this mailbox before creating or retrying candidate processing. Stored messages, processing results and downloads remain available.")
+
+
+PREVIEW_CHARS = 180
+LIST_BODY_CHARS = 600  # enough for the list; the reader loads one message in full
 
 
 @router.get("")
@@ -78,48 +95,89 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
           q: Annotated[str, Query(max_length=200)] = "",
           account_ids: str | None = None, unread: bool | None = None, message_id: str | None = None,
           has_attachments: bool | None = None, scope: Literal["inbox", "stored"] = "inbox"):
-    accounts = list(db.scalars(select(MailAccount).options(
-        defer(MailAccount.secrets), defer(MailAccount.sync_state),
-    ).order_by(MailAccount.address)))
-    query = select(MailMessage).where(MailMessage.remote_deleted.is_(False))
+    # A message list only needs the start of each body; full text is read one message at a time.
+    # Everything independent runs together, so the page waits for the slowest query, not the sum.
+    filters = [MailMessage.remote_deleted.is_(False)]
     if message_id:
-        query = query.where(MailMessage.id == message_id)
+        filters.append(MailMessage.id == message_id)
     elif scope != "stored":
-        query = query.where(MailMessage.folder == "INBOX")
+        filters.append(MailMessage.folder == "INBOX")
     if account_ids is not None:
-        query = query.where(MailMessage.account_id.in_([value for value in account_ids.split(",") if value][:100]))
+        filters.append(MailMessage.account_id.in_([value for value in account_ids.split(",") if value][:100]))
     if unread is not None:
-        query = query.where(MailMessage.unread == unread)
+        filters.append(MailMessage.unread == unread)
     if has_attachments is not None:
         attached = select(MailAttachment.id).where(MailAttachment.message_id == MailMessage.id).exists()
-        query = query.where(attached if has_attachments else ~attached)
+        filters.append(attached if has_attachments else ~attached)
     if q.strip():
         pattern = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        query = query.where(or_(*[column.ilike(pattern, escape="\\") for column in (MailMessage.subject, MailMessage.from_name, MailMessage.from_address, MailMessage.body)]))
-    total = db.scalar(select(func.count()).select_from(query.subquery()))
-    messages = list(db.scalars(query.order_by(MailMessage.received_at.desc(), MailMessage.id.desc()).offset(offset).limit(limit)))
-    ids = [m.id for m in messages]
-    attachments = list(db.scalars(select(MailAttachment).where(MailAttachment.message_id.in_(ids)))) if ids else []
-    jobs = list(db.scalars(select(EmailIngestionJob).where(EmailIngestionJob.message_id.in_(ids)).order_by(EmailIngestionJob.updated_at.desc()))) if ids else []
+        filters.append(or_(*[column.ilike(pattern, escape="\\") for column in (MailMessage.subject, MailMessage.from_name, MailMessage.from_address, MailMessage.body)]))
+    order = (MailMessage.received_at.desc(), MailMessage.id.desc())
+
+    def read_accounts(session):
+        return list(session.execute(select(MailAccount, MailAccount.secrets.isnot(None).label("has_secrets")).options(
+            defer(MailAccount.secrets), defer(MailAccount.sync_state)).order_by(MailAccount.address)))
+
+    def read_counts(session):
+        # Per-account totals feed the account switcher; single-message reads (job polling) skip them.
+        if message_id:
+            return {}
+        return {account_id: (total, unread_count or 0) for account_id, total, unread_count in session.execute(
+            select(MailMessage.account_id, func.count(), func.sum(case((MailMessage.unread.is_(True), 1), else_=0)))
+            .where(MailMessage.remote_deleted.is_(False), MailMessage.folder == "INBOX").group_by(MailMessage.account_id))}
+
+    def read_page(session):
+        if message_id:
+            rows = [(m, m.body, 1) for m in session.scalars(select(MailMessage).where(*filters))]
+        else:
+            rows = [(m, head, count) for m, head, count in session.execute(
+                select(MailMessage, func.left(MailMessage.body, LIST_BODY_CHARS), func.count().over())
+                .options(defer(MailMessage.body)).where(*filters).order_by(*order).offset(offset).limit(limit))]
+        total = rows[0][2] if rows else (0 if offset == 0 else session.scalar(select(func.count()).select_from(select(MailMessage.id).where(*filters).subquery())))
+        return rows, total
+
+    # The page's ids are a subquery, so the per-message lookups do not wait for the page itself.
+    page_ids = select(MailMessage.id).where(*filters).order_by(*order).offset(0 if message_id else offset).limit(1 if message_id else limit).subquery()
+    on_page = select(page_ids.c.id)
+
+    def read_attachments(session):
+        return list(session.scalars(select(MailAttachment).where(MailAttachment.message_id.in_(on_page))))
+
+    def read_jobs(session):
+        return list(session.scalars(select(EmailIngestionJob).where(EmailIngestionJob.message_id.in_(on_page)).order_by(EmailIngestionJob.updated_at.desc())))
+
+    def read_bundles(session):
+        return source_summaries(session, "email", on_page)
+
+    account_rows, counts, (page, total), attachments, jobs, bundles = parallel_reads(
+        db, read_accounts, read_counts, read_page, read_attachments, read_jobs, read_bundles)
+    messages = [row[0] for row in page]
+    bodies = {row[0].id: row[1] or "" for row in page}
     # Administrators configure accounts; other roles never receive credential names/values.
     configured = configs() if user.role == Role.admin else {}
+    accounts = [row[0] for row in account_rows]
     heartbeat = max((a.worker_seen_at for a in accounts if not a.disconnected_at and a.worker_seen_at), default=None)
     extraction_heartbeat = max((a.extraction_seen_at for a in accounts if not a.disconnected_at and a.extraction_seen_at), default=None)
+    attached_to = {}
+    for item in attachments:
+        attached_to.setdefault(item.message_id, []).append(item)
     return {
-        "accounts": [account_out(a, configured) for a in accounts],
+        "accounts": [account_out(account, configured, counts, has_secrets) for account, has_secrets in account_rows],
         "availableAccounts": list(configured) if user.role == Role.admin else [],
-        "providers": zoho_mail.readiness(get_settings()) if user.role == Role.admin else [],
+        "providers": mail_providers.readiness(get_settings()) if user.role == Role.admin else [],
         "total": total, "offset": offset, "limit": limit, "hasMore": offset + len(messages) < total,
         "scope": scope,
         "messages": [{
             "id": m.id, "accountId": m.account_id, "fromName": m.from_name or m.from_address or "",
             "fromAddress": m.from_address or "", "subject": m.subject or "(No subject)",
-            "body": m.body or "", "preview": (m.body or "")[:180],
+            "body": bodies[m.id], "bodyComplete": bool(message_id) or len(bodies[m.id]) < LIST_BODY_CHARS,
+            "preview": bodies[m.id][:PREVIEW_CHARS],
             "receivedAt": m.received_at, "unread": m.unread, "candidateId": m.candidate_id,
+            "documentBundle": bundles.get(m.id),
             "folder": m.folder, "starred": m.starred, "toAddresses": m.to_addresses or [], "ccAddresses": m.cc_addresses or [],
             "remoteState": m.remote_state, "remoteError": m.remote_error,
             "attachments": [{"id": a.id, "fileName": a.file_name, "sizeKb": a.size_kb or 0,
-                             "kind": a.kind or "document", "url": f"/api/inbox/attachments/{a.id}" if a.object_key else None} for a in attachments if a.message_id == m.id],
+                             "kind": a.kind or "document", "url": f"/api/inbox/attachments/{a.id}" if a.object_key else None} for a in attached_to.get(m.id, [])],
         } for m in messages],
         "jobs": [{
             "id": j.id, "messageId": j.message_id, "status": j.status, "attempts": j.attempts,
@@ -132,16 +190,20 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
 
 @router.get("/health")
 def health(db: Session = Depends(get_db), user: User = Depends(admin)):
-    accounts = list(db.scalars(select(MailAccount).options(load_only(
-        MailAccount.id, MailAccount.address, MailAccount.last_sync_at,
-        MailAccount.last_error, MailAccount.auto_ingest, MailAccount.worker_seen_at, MailAccount.extraction_seen_at,
-    )).where(MailAccount.disconnected_at.is_(None)).order_by(MailAccount.address)))
+    def read_accounts(session):
+        return list(session.scalars(select(MailAccount).options(load_only(
+            MailAccount.id, MailAccount.address, MailAccount.last_sync_at,
+            MailAccount.last_error, MailAccount.auto_ingest, MailAccount.worker_seen_at, MailAccount.extraction_seen_at,
+        )).where(MailAccount.disconnected_at.is_(None)).order_by(MailAccount.address)))
+
+    def read_counts(session):
+        return session.execute(select(EmailIngestionJob.status, func.count()).group_by(EmailIngestionJob.status)).all()
+
+    accounts, grouped = parallel_reads(db, read_accounts, read_counts)
     counts = {name: 0 for name in (
         "pending", "processing", "retry", "needs_review", "failed", "completed", "ignored",
     )}
-    for name, count in db.execute(
-        select(EmailIngestionJob.status, func.count()).group_by(EmailIngestionJob.status)
-    ):
+    for name, count in grouped:
         if name in counts:
             counts[name] = count
     return {
@@ -164,6 +226,18 @@ def revision(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return {"revision": read_revision(db)}
 
 
+@router.get("/unread-count")
+def unread_count(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Sidebar badge: unread INBOX mail across connected live mailboxes, without loading messages."""
+    return unread_counts(db)
+
+
+@router.get("/attention")
+def attention(db: Session = Depends(get_db), user: User = Depends(supervisor)):
+    """Failed or needs-review intake across email, WhatsApp and manual uploads (admin retries, manager reads)."""
+    return attention_list(db, user)
+
+
 @router.post("/connect")
 def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends(admin)):
     available = configs()
@@ -173,13 +247,13 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
     if address not in available:
         raise HTTPException(422, "This address has no server-side mailbox configuration.")
     try:
-        zoho_mail.validate_config(available[address])
+        mail_providers.validate_config(available[address])
     except MailAdapterError as exc:
         raise HTTPException(422, str(exc)) from None
     existing = db.scalar(select(MailAccount).where(MailAccount.address == address))
     if existing:
         if existing.provider != "imap":
-            detail = "Use the Zoho Mail connection form to reconnect this account." if existing.provider == "zoho" else "This provider is archived. Its history remains readable; connect a different Zoho Mail account for new intake."
+            detail = f"Reconnect this account from Inbox → Accounts using its {mail_providers.LABELS.get(existing.provider, 'original')} connection."
             raise HTTPException(409, detail)
         try:
             require_cursor_source(existing.sync_state or {}, available[address])
@@ -232,8 +306,8 @@ def update_account(account_id: str, body: AccountIn, db: Session = Depends(get_d
     account = db.get(MailAccount, account_id)
     if not account:
         raise HTTPException(404, "Mailbox not found")
-    if account.provider not in {"zoho", "imap"}:
-        raise HTTPException(409, "This provider is archived. Only Zoho Mail can enable automatic intake.")
+    if not mail_providers.is_live(account.provider):
+        raise HTTPException(409, "This provider is archived. Reconnect the mailbox before changing automatic intake.")
     if account.disconnected_at:
         raise HTTPException(409, "Reconnect this mailbox before changing automatic processing.")
     account.auto_ingest = body.auto_ingest
@@ -246,6 +320,7 @@ def ingest(message_id: str, db: Session = Depends(get_db), user: User = Depends(
     message = db.get(MailMessage, message_id)
     if not message:
         raise HTTPException(404, "Message not found")
+    ensure_single_person_source(db, "email", message_id)
     job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.message_id == message_id))
     if job:
         return {"status": job.status}
@@ -274,6 +349,7 @@ def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(admin
     message = db.get(MailMessage, job.message_id)
     if not message:
         raise HTTPException(404, "Source message not found")
+    ensure_single_person_source(db, "email", message.id)
     require_intake_account(db, message.account_id)
     state = deepcopy(job.state or {})
     if state.get("receive_error"):

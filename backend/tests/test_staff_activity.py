@@ -93,6 +93,42 @@ def test_presence_timeout_creates_new_interval_without_counting_disconnection(wo
         assert db.scalar(select(func.count()).select_from(Presence))==2
 
 
+def test_untracked_manager_attendance_is_not_reported_as_offline(workspace):
+    with workspace() as db:
+        manager = db.get(User, 'manager')
+        activity.check_in(db, manager, 'manager-clock', auth_session_id='login-manager', at=START)
+        db.commit()
+        report = activity.attendance_report(db, manager, START.date(), 'UTC', 'manager', at=START + timedelta(hours=2))
+        row = report['staff'][0]
+        assert row['role'] == 'manager'
+        assert report['generatedAt'] == START + timedelta(hours=2)
+        assert row['attendance']['totalSeconds'] == 7200
+        assert row['presence']['tracked'] is False
+        assert row['presence']['activeSeconds'] == row['presence']['idleSeconds'] == row['presence']['offlineSeconds'] == 0
+        assert row['presence']['sessions'] == []
+        with pytest.raises(HTTPException) as forbidden:
+            activity.heartbeat(db, manager, 'manager-tab', 'login-manager', True, 0, sequence=1, at=START)
+        assert forbidden.value.status_code == 403
+
+
+def test_activity_timeline_durations_exclude_gaps_between_attendance_sessions(workspace):
+    with workspace() as db:
+        user = db.get(User, 'owner')
+        first = activity.check_in(db, user, 'morning', auth_session_id='login-owner', at=START)
+        activity.heartbeat(db, user, 'tab', 'login-owner', True, 0, sequence=1, at=START)
+        activity.heartbeat(db, user, 'tab', 'login-owner', True, 600, sequence=2, at=START + timedelta(seconds=30))
+        activity.check_out(db, user, first.id, 'break', auth_session_id='login-owner', at=START + timedelta(seconds=60))
+        db.commit()  # Each clock API action commits before another request begins.
+        activity.check_in(db, user, 'afternoon', auth_session_id='login-owner', at=START + timedelta(seconds=600))
+        db.commit()
+        row = activity.attendance_report(db, user, START.date(), 'UTC', at=START + timedelta(seconds=660))['staff'][0]
+        assert row['presence']['tracked'] is True
+        assert row['attendance']['totalSeconds'] == 120
+        assert [(item['status'], item['durationSeconds']) for item in row['presence']['sessions']] == [('online', 30), ('idle', 30), ('offline', 60)]
+        assert sum(item['durationSeconds'] for item in row['presence']['sessions']) == row['attendance']['totalSeconds']
+        assert row['presence']['offlineSeconds'] == 60
+
+
 def test_agency_midnight_clips_attendance_without_losing_overnight_shift(workspace):
     with workspace() as db:
         user=db.get(User,'owner')
@@ -156,6 +192,11 @@ def test_api_clock_validation_permissions_and_database_roundtrip(workspace,monke
     with TestClient(app) as client:
         from app.core.security import SESSION_COOKIE
         client.cookies.set(SESSION_COOKIE, 'login-owner')
+        initial = client.get('/api/attendance?staffId=owner')
+        assert initial.headers['cache-control'] == 'no-store'
+        owner_context = initial.json()['clockContext']
+        assert len(owner_context) == 64 and 'login-owner' not in owner_context
+        assert client.get('/api/attendance?staffId=owner').json()['clockContext'] == owner_context
         first=client.post('/api/attendance/check-in',json={'requestKey':str(uuid4())})
         assert first.status_code==200,first.text
         identifier=first.json()['attendance']['sessionId']
@@ -172,6 +213,8 @@ def test_api_clock_validation_permissions_and_database_roundtrip(workspace,monke
         # The stale Staff login must not authorize the newly selected Manager.
         assert client.post('/api/attendance/check-in',json={'requestKey':str(uuid4())}).status_code==401
         client.cookies.set(SESSION_COOKIE, 'login-manager')
+        assert client.get('/api/attendance').json()['clockContext'] != owner_context
+        assert client.post('/api/attendance/check-in', json={'requestKey': str(uuid4()), 'clockContext': owner_context}).status_code == 409
         assert client.post('/api/attendance/check-in',json={'requestKey':str(uuid4())}).status_code==200
         assert {row['userId'] for row in client.get('/api/attendance').json()['staff']} == {'owner', 'other', 'manager'}
 

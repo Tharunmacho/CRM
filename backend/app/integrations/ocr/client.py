@@ -60,7 +60,9 @@ def scan(
     base_url: str,
     api_key: str,
     idempotency_key: str | None = None,
-) -> ResumeResponse | PassportResponse | AadhaarResponse:
+) -> dict:
+    """The job's ``result`` exactly as Veris returned it, checked against the SDK model
+    (a malformed payload raises ValidationError) but never rebuilt from it."""
     # The SDK otherwise permits 120 seconds per request plus automatic retries,
     # which could exceed the polling budget by several minutes.
     with VerisOCR(base_url=base_url, api_key=api_key, timeout=30.0, max_retries=0) as client:
@@ -68,4 +70,6 @@ def scan(
         job = wait_for_job(client.jobs, accepted.job_id)
 
     model = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}[kind]
-    return model.model_validate(job.result or {})
+    payload = job.result or {}
+    model.model_validate(payload)
+    return payload

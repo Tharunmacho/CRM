@@ -1,9 +1,10 @@
 # Care India Overseas Recruitment CRM
 
-A recruitment CRM with a React/TypeScript frontend, FastAPI backend and PostgreSQL. It integrates candidate intake and documents, employers and job orders, eleven recruitment stages, tasks, reports, user management, Zoho Mail and staff attendance. The requirement matrix distinguishes implemented behavior from live provider acceptance.
+A recruitment CRM with a React/TypeScript frontend, FastAPI backend and PostgreSQL. It integrates candidate intake and documents, employers and job orders, eleven recruitment stages, tasks, reports, user management, a unified multi-account inbox (Gmail, Microsoft 365, Zoho and any IMAP/SMTP mailbox) and staff attendance. The requirement matrix distinguishes implemented behavior from live provider acceptance.
 
 ## Requirements and implementation plan
 
+- [Complete module workflows: user steps, screen/backend rules and PRD acceptance checklists](docs/workflows/README.md)
 - [PRD/reference integration audit, screens, roles and verification evidence](docs/integration-audit.md)
 - [Developer specification â€” original 12-page PDF](docs/requirements/recruitment-crm-developer-specification.pdf)
 - [Architecture and module boundaries](docs/architecture.md)
@@ -31,7 +32,7 @@ backend/app/domain/        Recruitment stage rules
 backend/app/integrations/  Mail, WhatsApp and OCR adapters
 backend/app/services/      Business operations and durable workflows
 backend/app/runtime.py     API and worker supervisor
-backend/alembic/           Ordered schema history through 0015_attendance_hr
+backend/alembic/           Ordered schema history through 0016_intake_communications
 backend/tests/             Unit, API, migration and PostgreSQL integration checks
 docs/                     PRD, requirements, database dictionary and operations
 scripts/                  Workspace commands and production launcher
@@ -65,6 +66,8 @@ Copy-Item frontend/.env.example frontend/.env.local
 docker compose up -d db
 npm.cmd run db:migrate
 ```
+
+When a new version ships a migration, `npm start` stops and prints the exact command to run (`npm run db:migrate` from the project root). On a database only you use, set `CRM_AUTO_MIGRATE=true` in `backend/.env` and startup applies pending migrations itself, so this never interrupts you again. A database that is *ahead* of your code, or unversioned, is never changed automatically. If a deployed copy of the CRM shares the database, migrate it as part of a release and deploy the matching version right after.
 
 Copy the examples only during initial setup; keep any existing local configuration. The local Python database URL uses host port **5433**, matching Compose. If database credentials change, update `POSTGRES_*` and the complete `DATABASE_URL` in the root `.env`, plus the URL in `backend/.env`. The Compose app URL uses `db:5432`; the host Python URL uses `localhost:5433`. Percent-encode reserved characters in URL usernames/passwords; keep `POSTGRES_PASSWORD` as the actual unencoded password. Existing database volumes retain the credentials with which they were initialized.
 
@@ -129,7 +132,8 @@ On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The ro
 | `VITE_API_URL` | Leave empty for the local proxy and same-origin production hosting |
 | `VERIS_OCR_BASE_URL`, `VERIS_OCR_API_KEY` | Optional backend extraction connection; local inspection precedes extraction and manual entry works without it |
 | `TESSERACT_CMD`, `OCR_LANGUAGES`, `OCR_MAX_PAGES`, `OCR_PAGE_TIMEOUT_SECONDS`, `OCR_DOCUMENT_TIMEOUT_SECONDS` | Local document reader configuration; see the first OCR stage below |
-| `EMAIL_INGESTION_ENABLED`, `EMAIL_POLL_SECONDS`, `MAIL_TOKEN_ENCRYPTION_KEY` | Zoho reception/extraction workers and encrypted mailbox connections; see the email connection guide |
+| `GMAIL_*`, `MICROSOFT_*`, `APP_BASE_URL` | Optional OAuth sign-in for Gmail and Microsoft 365 mailboxes; see the email connection guide |
+| `EMAIL_INGESTION_ENABLED`, `EMAIL_POLL_SECONDS`, `MAIL_TOKEN_ENCRYPTION_KEY` | Mail reception/extraction workers and encrypted mailbox connections; see the email connection guide |
 | `AGENCY_TIMEZONE` | Agency-day boundaries for reports, task monitoring and staff attendance |
 | `STORAGE_DIR` | Backend file storage; defaults to `backend/data/uploads` locally |
 | `STATIC_DIR` | Built frontend location; defaults to `backend/static` locally |
@@ -183,9 +187,9 @@ Selecting any Add Candidate file saves its original into private storage with a 
 
 Review suggested fields, correct them and save/assign the candidate. Duplicate identity conflicts require an explicit merge/cancel choice. Saving attaches the original source bundle and generated document slots idempotently. Upload, extraction and attachment outcomes stay visible so retries do not silently duplicate candidates or overwrite documents.
 
-## Zoho Mail and candidate intake
+## Unified inbox and candidate intake
 
-The CRM Inbox provides Zoho folders, paging/search, read/star state, message moves, archive/trash/restore, drafts, compose/reply/reply-all/forward, To/Cc/Bcc and attachments. Admin can connect the account later inside the CRM; configure the server encryption key first. Follow [email connections](docs/email-connections.md) for account-specific Zoho server settings. Earlier Gmail/Microsoft receipts remain historical; new connections and live mailbox operations are Zoho-only.
+The CRM Inbox is one unified inbox for any number of mailboxes. An Admin connects Gmail or Microsoft 365 with OAuth sign-in, Zoho with an app password, or any other provider through IMAP/SMTP, all inside the CRM. Mail from every account is listed together with an account filter, search, unread state and attachment icons; opening a message previews its attachments and replies from the same account. Each account has its own **auto-ingest resumes** switch, any email can be turned into a candidate manually with **Create candidate from attachment**, and a badge on each email links to the candidate it produced. Live folders, read/star state, moves, archive/trash/restore, drafts, reply/reply-all/forward and attachments work on every connected account. Configure the server encryption key (and the Gmail/Microsoft OAuth client settings you intend to use) first; see [email connections](docs/email-connections.md).
 
 Drafts, attachment metadata, message state and immutable send attempts persist in PostgreSQL. Partial or unknown SMTP delivery is shown for review and is never automatically resent. Original bytes are retained in private local/S3 storage. A mailbox disconnect preserves existing evidence and history.
 

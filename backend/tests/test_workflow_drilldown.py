@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import select
-from app.db.models import AuditEntry, Candidate, Session as LoginSession, Task, TaskEvent, User
+from app.db.models import AuditEntry, Candidate, Notification, Role, Session as LoginSession, Task, TaskEvent, User
 from app.api.routers.data import ReassignIn, reassign
 from app.api.routers.workflow import missed_updates
 from test_workflow_scheduler import NOW, workspace, add_task
@@ -56,6 +56,8 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
     from app.core.security import SESSION_COOKIE
     with workspace() as db:
         add_task(db, completed_at=NOW)
+        db.add(User(id='inactive-admin', name='Inactive', email='inactive@example.test', role=Role.admin, active=False))
+        db.commit()
     payload = {'candidateIds': ['candidate'], 'toUserId': 'other'}
     assert history_client.post('/api/candidates/reassign', json=payload).status_code == 422
     assert history_client.post('/api/candidates/reassign', json={**payload, 'reason': '  '}).status_code == 422
@@ -68,6 +70,14 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
         assert db.get(Candidate, 'candidate').owner_id == 'other'
         assert db.get(Task, 'task').owner_id == 'owner'
         assert db.scalar(select(TaskEvent).where(TaskEvent.kind == 'assignment')) is None
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
+        assert {notice.user_id for notice in notices} == {'other', 'admin', 'manager'}
+        assert len(notices) == 3
+        assert all(notice.link_to == '/candidates/candidate' for notice in notices)
+    repeated = history_client.post('/api/candidates/reassign', json={**payload, 'reason': 'Already assigned'})
+    assert repeated.status_code == 200
+    with workspace() as db:
+        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 3
     history_client.cookies.set(SESSION_COOKIE, 'history-owner')
     history = history_client.get('/api/candidates/candidate/assignment-history')
     assert history.status_code == 200
@@ -77,6 +87,22 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
     assert 'meta' not in row
     history_client.cookies.clear()
     assert history_client.get('/api/candidates/candidate/assignment-history').status_code == 401
+
+
+def test_same_candidate_owner_repairs_open_task_and_notifies_only_once(workspace, history_client):
+    with workspace() as db:
+        add_task(db)
+        db.get(Candidate, 'candidate').owner_id = 'other'
+        db.commit()
+    payload = {'candidateIds': ['candidate'], 'toUserId': 'other', 'reason': 'Restore matching open task ownership'}
+    for _ in range(2):
+        assert history_client.post('/api/candidates/reassign', json=payload).status_code == 200
+    with workspace() as db:
+        assert db.get(Task, 'task').owner_id == 'other'
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
+        assert len(notices) == 3
+        assert {notice.user_id for notice in notices} == {'other', 'admin', 'manager'}
+        assert all(notice.title == 'Task assigned' and notice.link_to == '/tasks?task=task' for notice in notices)
 
 
 def test_history_cursor_keeps_tied_timestamps_and_excludes_other_evidence(workspace, history_client):
@@ -121,3 +147,63 @@ def test_approved_leave_blocks_manual_and_account_change_transfers(workspace, hi
         db.rollback()
         assert db.get(User, 'owner').active is True
         assert db.get(Candidate, 'candidate').owner_id == 'owner'
+
+
+def test_manager_reassignment_preserves_candidate_progress_and_every_task_deadline(workspace, history_client):
+    from app.core.security import SESSION_COOKIE
+    from app.db.models import Application, ApplicationStage, Attachment, Client, Company, Designation, Order, Remark, TaskKind
+    with workspace() as db:
+        candidate = db.get(Candidate, 'candidate')
+        candidate.call_called, candidate.call_interested = True, 'yes'
+        candidate.call_remarks, candidate.call_recorded_at = 'Interested in overseas work', NOW
+        db.add_all([Client(id='client', name='Test client'), Designation(id='designation', title='Welder')])
+        db.flush()
+        db.add(Company(id='company', name='Test employer', client_id='client'))
+        db.flush()
+        db.add(Order(id='order', ref='ORDER-REASSIGN', company_id='company', designation_id='designation'))
+        db.flush()
+        db.add(Application(id='application', candidate_id='candidate', order_id='order', owner_id='owner',
+            current_stage=3, draft={'scheduled': 'yes', 'date': '2026-11-02'}, draft_saved_by='owner',
+            draft_saved_at=NOW, lock_version=4))
+        db.flush()
+        db.add(ApplicationStage(id='stage', application_id='application', stage=2, data={'forwarded': 'yes'},
+            completed_by='owner', owner_id='owner', completed_at=NOW, outcome='passed'))
+        db.add(Attachment(id='attachment', entity_type='candidate', entity_id='candidate', slot='resume',
+            version=2, file_name='synthetic-resume.pdf', object_key='synthetic/resume-v2.pdf', uploaded_by='owner'))
+        for identifier in ('open-one', 'open-two', 'completed', 'cancelled'):
+            db.add(Task(id=identifier, kind=TaskKind.stage, title=identifier, candidate_id='candidate',
+                application_id='application', owner_id='owner', stage=3,
+                created_at=NOW - timedelta(hours=72), sla_started_at=NOW - timedelta(hours=60),
+                due_at=NOW - timedelta(hours=12), escalated=True,
+                completed_at=NOW if identifier == 'completed' else None,
+                cancelled_at=NOW if identifier == 'cancelled' else None))
+        db.flush()
+        db.add(Remark(id='remark', task_id='open-one', author_id='owner', body='Waiting for interview details', created_at=NOW))
+        db.commit()
+    history_client.cookies.set(SESSION_COOKIE, 'history-manager')
+    response = history_client.post('/api/candidates/reassign', json={
+        'candidateIds': ['candidate'], 'toUserId': 'other', 'reason': 'Manager follow-up from escalation'})
+    assert response.status_code == 200, response.text
+    with workspace() as db:
+        candidate = db.get(Candidate, 'candidate')
+        assert candidate.owner_id == 'other'
+        assert (candidate.call_called, candidate.call_interested, candidate.call_remarks, candidate.call_recorded_at) == (
+            True, 'yes', 'Interested in overseas work', NOW)
+        for identifier in ('open-one', 'open-two', 'completed', 'cancelled'):
+            task = db.get(Task, identifier)
+            assert task.owner_id == ('other' if identifier.startswith('open-') else 'owner')
+            assert task.created_at == NOW - timedelta(hours=72)
+            assert task.sla_started_at == NOW - timedelta(hours=60)
+            assert task.due_at == NOW - timedelta(hours=12) and task.escalated is True
+        app = db.get(Application, 'application')
+        assert (app.current_stage, app.owner_id, app.lock_version) == (3, 'owner', 4)
+        assert app.draft == {'scheduled': 'yes', 'date': '2026-11-02'}
+        assert (app.draft_saved_by, app.draft_saved_at) == ('owner', NOW)
+        stage = db.get(ApplicationStage, 'stage')
+        assert stage.data == {'forwarded': 'yes'} and stage.owner_id == 'owner' and stage.completed_by == 'owner'
+        remark = db.get(Remark, 'remark')
+        assert (remark.author_id, remark.body, remark.created_at) == ('owner', 'Waiting for interview details', NOW)
+        attachment = db.get(Attachment, 'attachment')
+        assert (attachment.version, attachment.object_key, attachment.uploaded_by) == (2, 'synthetic/resume-v2.pdf', 'owner')
+        events = list(db.scalars(select(TaskEvent).where(TaskEvent.kind == 'assignment')))
+        assert {event.task_id for event in events} == {'open-one', 'open-two'}

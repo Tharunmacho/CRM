@@ -221,7 +221,7 @@ export interface OcrInspection {
   pages: {
     page_number: number
     status: 'read' | 'blank' | 'unread'
-    document_type: 'resume' | 'passport' | 'other' | 'unknown'
+    document_type: 'resume' | 'passport' | 'aadhaar' | 'other' | 'unknown'
     method: string
     reason?: string
     confidence?: number
@@ -229,20 +229,35 @@ export interface OcrInspection {
   warnings: string[]
 }
 
+/** Our own provenance for a scan, kept beside (never inside) the verbatim Veris result. `{}` when nothing was extracted. */
+export interface OcrScanSource {
+  local_inspection?: Record<string, unknown>
+  source_sha256?: string
+  selected_pages?: number[]
+  [key: string]: unknown
+}
+
 export interface OcrScan {
   fields: OcrFields
   warnings: string[]
-  /** The Veris output itself, saved on the candidate with the form. */
+  /** The verbatim Veris result, sent back unchanged with the save. Its page numbers are Veris's own 1..n. */
   raw: Record<string, unknown>
+  /** Provenance for `raw`, sent back as `ocr_data._sources[kind]`. Absent on older responses, which kept it inside `raw`. */
+  source?: OcrScanSource
   /** Optional while passport and older deployments retain the existing response. */
   inspection?: OcrInspection
   extraction_status?: 'complete' | 'needs_review' | 'no_resume'
 }
 
+export type MailProvider = 'gmail' | 'microsoft' | 'imap' | 'zoho'
+
 export interface InboxAccount {
   id: string
   address: string
-  provider: 'gmail' | 'microsoft' | 'imap' | 'zoho'
+  provider: MailProvider
+  providerLabel?: string
+  messageCount?: number
+  unreadCount?: number
   autoIngest: boolean
   lastSyncAt: string | null
   configured: boolean
@@ -277,7 +292,7 @@ export interface InboxJob {
 export interface InboxSnapshot {
   accounts: InboxAccount[]
   availableAccounts: string[]
-  providers?: { provider: 'gmail' | 'microsoft'; ready: boolean; message: string }[]
+  providers?: { provider: MailProvider; label: string; ready: boolean; message: string }[]
   total?: number
   offset?: number
   limit?: number
@@ -293,6 +308,40 @@ export interface InboxHealth {
   accounts: Pick<InboxAccount, 'id' | 'address' | 'lastSyncAt' | 'lastError' | 'autoIngest'>[]
   counts: Record<InboxJob['status'], number>
   worker: InboxSnapshot['worker']
+}
+
+export type AttentionSource = 'email' | 'whatsapp' | 'manual'
+
+/** One failed or needs-review intake, whichever channel it arrived through. */
+export interface AttentionItem {
+  id: string
+  source: AttentionSource
+  jobId: string
+  messageId: string | null
+  groupId?: string
+  status: 'failed' | 'needs_review'
+  title: string
+  sender: string
+  channel: string
+  files: string[]
+  reason: string
+  attempts: number
+  updatedAt: string
+  candidateId: string | null
+  /** Server-decided: admin only, and only where the matching retry route will accept it. */
+  retryable: boolean
+}
+
+export interface InboxAttention {
+  items: AttentionItem[]
+  totals: Record<AttentionSource | 'all', number>
+  limit: number
+  canRetry: boolean
+}
+
+export interface InboxUnreadCount {
+  total: number
+  accounts: Record<string, number>
 }
 
 /** Reads a resume or passport. Nothing is saved; the result only pre-fills the form. */
@@ -312,6 +361,8 @@ export const api = {
     get: (options?: RequestOptions) => request<InboxSnapshot>('GET', '/inbox', undefined, options),
     revision: (options?: RequestOptions) => request<{ revision?: string }>('GET', '/inbox/revision', undefined, options),
     health: (options?: RequestOptions) => request<InboxHealth>('GET', '/inbox/health', undefined, options),
+    unreadCount: (options?: RequestOptions) => request<InboxUnreadCount>('GET', '/inbox/unread-count', undefined, options),
+    attention: (options?: RequestOptions) => request<InboxAttention>('GET', '/inbox/attention', undefined, options),
     connect: (autoIngest: boolean, address?: string) => request<InboxAccount>('POST', '/inbox/connect', {
       auto_ingest: autoIngest, ...(address ? { address } : {}),
     }),

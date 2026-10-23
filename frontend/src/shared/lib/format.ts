@@ -14,18 +14,18 @@ export function slaState(createdAt: string | Date, now: Date = new Date()) {
   const ratio = elapsedMs / totalMs
   const hoursLeft = (dueAt.getTime() - now.getTime()) / 3600_000
 
-  const urgency: Urgency = ratio >= 1 ? 'over' : ratio >= WARN_AT || isToday(dueAt) ? 'due' : 'ok'
+  const urgency: Urgency = ratio > 1 ? 'over' : ratio >= WARN_AT || isToday(dueAt) ? 'due' : 'ok'
 
   return {
     dueAt,
     urgency,
     /** 0–1, clamped for the bar; may exceed 1 internally. */
     fill: Math.min(ratio, 1),
-    overdue: ratio >= 1,
+    overdue: ratio > 1,
     hoursLeft,
     hoursOverdue: Math.max(0, -hoursLeft),
     label:
-      ratio >= 1
+      ratio > 1
         ? `${Math.floor(-hoursLeft)}h overdue`
         : hoursLeft < 1
           ? `${Math.round(hoursLeft * 60)}m left`

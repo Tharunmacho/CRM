@@ -11,7 +11,7 @@ async function loadSource(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 }
 
-const { mergeOcrForm, hasOcrExtraction, inspectedPageCount, scanWarnings } = await loadSource('../src/features/candidates/ocr-form.ts')
+const { mergeOcrForm, hasOcrExtraction, inspectedPageCount, scanWarnings, ocrSavePayload } = await loadSource('../src/features/candidates/ocr-form.ts')
 const { api, ApiError } = await loadSource('../src/shared/api/client.ts')
 const defaults = { name: '', phone: '', dob: '', nationality: 'Indian', skills: '', totalExperience: '' }
 const scan = (fields, extra = {}) => ({
@@ -74,6 +74,44 @@ test('empty raw data and an inspection-only record are not valid scans', () => {
     assert.deepEqual(mergeOcrForm(defaults, defaults, { resume: result }, new Set()), defaults)
   }
   assert.equal(hasOcrExtraction(scan({ name: 'Older response' }, { extraction_status: undefined })), true)
+})
+
+const verisRaw = (kind) => ({ pages: [{ page_number: 1, text: `${kind} text` }], document: { type: kind }, usage: { pages: 1 } })
+const source = (kind) => ({ local_inspection: { page_count: 3 }, source_sha256: `sha-${kind}`, selected_pages: [2] })
+
+test('new-shape scans (verbatim raw, provenance in source) are present, and an empty raw is not', () => {
+  assert.equal(hasOcrExtraction(scan({ name: 'A' }, { raw: verisRaw('resume'), source: source('resume') })), true)
+  assert.equal(hasOcrExtraction(scan({ name: 'A' }, { raw: {}, source: {} })), false)
+  assert.equal(hasOcrExtraction(scan({ name: 'A' }, { raw: {}, source: source('resume') })), false)
+  const merged = mergeOcrForm(defaults, defaults, { resume: scan({ name: 'New shape' }, { raw: verisRaw('resume'), source: source('resume') }) }, new Set())
+  assert.equal(merged.name, 'New shape')
+})
+
+test('old-shape scans with provenance inside raw keep working', () => {
+  const old = scan({ name: 'Old shape' }, { raw: { ...verisRaw('resume'), local_inspection: { page_count: 1 }, source_sha256: 'abc' } })
+  assert.equal(hasOcrExtraction(old), true)
+  assert.deepEqual(ocrSavePayload({ resume: old }), { resume: old.raw }) // no _sources, raw untouched
+  const provenanceOnly = scan({ name: 'x' }, { raw: { local_inspection: { page_count: 1 }, source_sha256: 'abc', source_file: 'a.pdf' } })
+  assert.equal(hasOcrExtraction(provenanceOnly), false)
+  assert.equal(ocrSavePayload({ resume: provenanceOnly }), undefined)
+})
+
+test('the save payload carries each scanned kind verbatim raw plus _sources, and skips unscanned or unextracted kinds', () => {
+  const resume = scan({ name: 'R' }, { raw: verisRaw('resume'), source: source('resume') })
+  const passport = scan({ name: 'P' }, { raw: verisRaw('passport'), source: source('passport') })
+  const aadhaar = scan({}, { raw: {}, source: {}, extraction_status: 'needs_review' })
+  const payload = ocrSavePayload({ resume, passport, aadhaar })
+  assert.deepEqual(payload, {
+    resume: resume.raw,
+    passport: passport.raw,
+    _sources: { resume: resume.source, passport: passport.source },
+  })
+  assert.equal(payload.resume, resume.raw) // not copied or altered
+  assert.equal('aadhaar' in payload, false)
+  assert.equal('aadhaar' in payload._sources, false)
+  assert.equal(ocrSavePayload({}), undefined)
+  // Round trip through JSON keeps the Veris page numbers exactly.
+  assert.deepEqual(JSON.parse(JSON.stringify(payload)).passport.pages[0].page_number, 1)
 })
 
 test('warnings remain available when inspection prevents extraction, without duplicate messages', () => {
@@ -179,4 +217,10 @@ test('a normal attachment upload does not acquire the OCR deadline', async () =>
   assert.deepEqual(await api.upload('candidate', 'synthetic-id', 'resume', new File(['test'], 'synthetic.txt')), {
     id: 'synthetic-attachment',
   })
+})
+
+test('the Add candidate save sends ocr_data from ocrSavePayload, not a hand-built raw-only object', async () => {
+  const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
+  assert.match(page, /ocr_data:\s*ocrSavePayload\(scans\)/)
+  assert.doesNotMatch(page, /scans\[kind\]!\.raw/)
 })

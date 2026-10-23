@@ -4,7 +4,7 @@ import { format } from 'date-fns'
 import { CalendarCheck2, CalendarClock, CheckCheck, LockKeyhole, Pencil, Plus, TimerOff, Trash2 } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
-import { dateTimeLabel, isSameDay, smartTime } from '@/shared/lib/format'
+import { dateTimeLabel, isSameDay } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import type { Priority, TodoItem } from '@/shared/model/types'
 import { Badge, EmptyState, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
@@ -12,6 +12,7 @@ import { SummaryCards } from '@/shared/ui/workspace'
 import { Button, Checkbox, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog, Tabs } from '@/shared/ui/overlay'
 import { DatePicker } from '@/shared/ui/date-picker'
+import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
 
 type TabKey = 'today' | 'upcoming' | 'overdue' | 'done'
 
@@ -23,6 +24,8 @@ const PRIORITY_TONE: Record<Priority, 'stamp' | 'neutral' | 'navy'> = {
 
 export default function TodoPage() {
   const store = useStore()
+  const todoRead = useWorkspaceRead()
+  const clock = useDeadlineClock()
   const [tab, setTab] = useState<TabKey>('today')
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<TodoItem | null>(null)
@@ -33,7 +36,7 @@ export default function TodoPage() {
   )
 
   const buckets = useMemo(() => {
-    const now = new Date()
+    const now = new Date(clock)
     const open = mine.filter((t) => !t.done)
     return {
       today: open.filter((t) => isSameDay(t.dueAt, now) && new Date(t.dueAt) >= now),
@@ -41,10 +44,16 @@ export default function TodoPage() {
       overdue: open.filter((t) => new Date(t.dueAt) < now),
       done: mine.filter((t) => t.done),
     }
-  }, [mine])
+  }, [mine, clock])
 
   const rows = [...buckets[tab]].sort((a, b) => +new Date(a.dueAt) - +new Date(b.dueAt))
   const completion = mine.length ? Math.round((buckets.done.length / mine.length) * 100) : 0
+
+  if (todoRead.loading || todoRead.error) return <div className="todo-screen">
+    <PageHeader title="To-do List" eyebrow="Your personal workspace" description="Plan your day, track follow-ups, and keep every commitment in view." />
+    <Panel>{todoRead.error ? <div className="space-y-3"><p role="alert" className="text-sm text-stamp-700">{todoRead.error}</p><Button onClick={todoRead.refresh}>Retry to-do list</Button></div>
+      : <p role="status" className="text-sm text-ink-500">Loading your current reminders…</p>}</Panel>
+  </div>
 
   return (
     <div className="todo-screen">
@@ -53,9 +62,10 @@ export default function TodoPage() {
         eyebrow="Your personal workspace"
         description="Plan your day, track follow-ups, and keep every commitment in view."
         actions={
+          <><Button onClick={todoRead.refresh}>Refresh list</Button>
           <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>
             Add item
-          </Button>
+          </Button></>
         }
       />
 
@@ -178,11 +188,21 @@ export default function TodoPage() {
 function Row({ item, onEdit }: { item: TodoItem; onEdit: () => void }) {
   const store = useStore()
   const [busy, setBusy] = useState(false)
-  const perform = async (action: () => Promise<void>) => { setBusy(true); try { await action() } catch (e) { store.notify(e instanceof Error ? e.message : 'Could not save the change', 'warn') } finally { setBusy(false) } }
+  const [deleting, setDeleting] = useState(false)
+  const perform = async (action: () => Promise<unknown>) => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await action()
+      try { await store.refresh({ keepCurrent: true }) }
+      catch { store.notify('Saved. Refresh the list to see the latest reminders.', 'warn') }
+    } catch (e) { store.notify(e instanceof Error ? e.message : 'Could not save the change. Refresh the list before trying again.', 'warn') }
+    finally { setBusy(false) }
+  }
   const overdue = !item.done && new Date(item.dueAt) < new Date()
 
   return (
-    <li
+    <><li
       className={cn(
         'workspace-todo-row flex items-start gap-3 border-b border-rule-soft px-4 py-3 last:border-0',
         overdue && 'bg-stamp-50/40',
@@ -190,10 +210,10 @@ function Row({ item, onEdit }: { item: TodoItem; onEdit: () => void }) {
     >
       <div className="pt-0.5">
         <Checkbox
-          aria-label={`Complete ${item.title}`}
+          aria-label={`${item.done ? 'Reopen' : 'Complete'} ${item.title}`}
           checked={item.done}
           disabled={busy}
-          onChange={() => void perform(() => store.toggleTodo(item.id))}
+          onChange={() => void perform(() => api.patch(`/todos/${item.id}`, { done: !item.done }))}
         />
       </div>
 
@@ -229,13 +249,19 @@ function Row({ item, onEdit }: { item: TodoItem; onEdit: () => void }) {
       ><Pencil className="h-3.5 w-3.5" /></button>
       <button
         disabled={busy}
-        onClick={() => void perform(() => store.deleteTodo(item.id))}
+        onClick={() => setDeleting(true)}
         aria-label={`Delete ${item.title}`}
         className="shrink-0 rounded-control p-1.5 text-ink-300 hover:bg-stamp-50 hover:text-stamp-600"
       >
         <Trash2 className="h-3.5 w-3.5" />
       </button>
     </li>
+      <Dialog open={deleting} onClose={() => { if (!busy) setDeleting(false) }} title="Delete this to-do?"
+        description="This removes the reminder from your private list. Linked candidate, client and order records remain available."
+        footer={<><Button disabled={busy} variant="ghost" onClick={() => setDeleting(false)}>Keep item</Button><Button disabled={busy} variant="danger" onClick={() => void perform(async () => { await api.del(`/todos/${item.id}`); setDeleting(false) })}>{busy ? 'Deleting…' : 'Delete item'}</Button></>}>
+        <p className="text-sm font-medium">{item.title}</p><p className="mt-2 text-sm text-ink-500">This cannot be undone.</p>
+      </Dialog>
+    </>
   )
 }
 
@@ -261,24 +287,27 @@ function AddDialog({ open, onClose, item }: { open: boolean; onClose: () => void
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!busy) onClose() }}
       title={item ? 'Edit to-do' : 'Add a to-do'}
       description="Only you see this item. You will get a reminder in the notification bell when it is due."
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
           <Button
             variant="primary"
             disabled={busy || !form.title.trim() || !form.dueAt}
             onClick={async () => {
+              if (busy) return
+              const due = new Date(form.dueAt)
+              if (!Number.isFinite(due.getTime())) { setError('Choose a valid due date and time.'); return }
               setBusy(true); setError('')
               const chosen = linkOptions.find((o) => o.value === form.link)
               const payload = {
                 title: form.title.trim(),
                 notes: form.notes.trim() || undefined,
-                dueAt: new Date(form.dueAt).toISOString(),
+                dueAt: due.toISOString(),
                 priority: form.priority,
                 linkTo: chosen?.value,
                 linkLabel: chosen?.label.split(' — ')[1],
@@ -297,10 +326,11 @@ function AddDialog({ open, onClose, item }: { open: boolean; onClose: () => void
       }
     >
       {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <fieldset disabled={busy} className="grid min-w-0 gap-4 sm:grid-cols-2">
         <Field label="Title" required className="sm:col-span-2">
           <Input
             value={form.title}
+            maxLength={300}
             autoFocus
             onChange={(e) => set('title', e.target.value)}
             placeholder="Call the client about the interview slot"
@@ -329,7 +359,7 @@ function AddDialog({ open, onClose, item }: { open: boolean; onClose: () => void
         <Field label="Notes" className="sm:col-span-2">
           <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
         </Field>
-      </div>
+      </fieldset>
     </Dialog>
   )
 }

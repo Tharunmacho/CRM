@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.schemas import NotificationOut, TaskOut
 from app.core.config import get_settings
 from app.core.deps import current_user, require_role
-from app.db.models import AuditEntry, Notification, Role, Task, TaskEvent, User
+from app.db.models import AuditEntry, Notification, Role, Task, TaskEvent, User, WorkflowSettings
 from app.db.session import get_db
 from app.services.workflow_scheduler import add_event, settings_row
 
@@ -19,11 +19,11 @@ router = APIRouter(prefix="/api", tags=["workflow"])
 
 @router.get("/workflow/settings")
 def workflow_settings(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
-    config = settings_row(db)
+    # Reading the row is one statement; it is only created (an idempotent insert) the first time.
+    config = db.scalar(select(WorkflowSettings).where(WorkflowSettings.id == 1)) or settings_row(db)
     result = {"escalationRepeatHours": config.escalation_repeat_hours,
               "lastRunAt": config.last_run_at, "lastDailyCheckDate": config.last_daily_check_date,
               "agencyTimezone": get_settings().agency_timezone}
-    db.commit()
     return result
 
 
