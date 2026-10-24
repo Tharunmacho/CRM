@@ -27,7 +27,7 @@ def lock_staff(db, user_id, *, clock=False):
     user = db.scalar(select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True))
     allowed = (Role.staff, Role.manager) if clock else (Role.staff,)
     if user is None or not user.active or user.role not in allowed:
-        raise HTTPException(403, "Only eligible active employee accounts can record this activity")
+        raise HTTPException(403, "Only active staff accounts can clock in or out")
     return user
 
 
@@ -39,7 +39,7 @@ def lock_staff_login(db, user, session_id, *, at=None, clock=False):
         LoginSession.id == session_id, LoginSession.user_id == user.id,
     ).with_for_update().execution_options(populate_existing=True)) if session_id else None
     if login is None or login.expires_at <= now:
-        raise HTTPException(401, "Session expired or revoked. Sign in again.")
+        raise HTTPException(401, "Your session has ended. Please sign in again.")
     return now
 
 
@@ -161,7 +161,7 @@ def _request_session(db, user, kind, request_key, attendance_id=None):
     if request is None:
         return None
     if request.user_id != user.id or (attendance_id is not None and request.attendance_id != attendance_id):
-        raise HTTPException(409, "Use a new request identifier")
+        raise HTTPException(409, "Something went wrong. Refresh the page and try again.")
     return db.get(Attendance, request.attendance_id)
 
 
@@ -207,7 +207,7 @@ def heartbeat(db, user, client_id, auth_session_id, visible, interaction_age_sec
     client = db.get(PresenceClient, (user.id, client_id))
     if client is not None:
         if client.auth_session_id != auth_session_id:
-            raise HTTPException(409, "This presence client belongs to a previous login. Reload the page.")
+            raise HTTPException(409, "You signed in again since this page opened. Reload the page.")
         if sequence <= client.last_sequence:
             return False
         client.last_sequence, client.updated_at = sequence, at
@@ -284,7 +284,7 @@ def correct_session(db, actor, session_id, checked_in_at, checked_out_at, reason
     other = db.scalar(select(Attendance.id).where(Attendance.user_id == row.user_id, Attendance.id != row.id,
         or_(Attendance.checked_out_at.is_(None), Attendance.checked_out_at > checked_in_at),
         Attendance.checked_in_at < (checked_out_at or datetime.max.replace(tzinfo=timezone.utc))).limit(1))
-    if other: raise HTTPException(409, "Attendance sessions cannot overlap")
+    if other: raise HTTPException(409, "Attendance times cannot overlap")
     before = {"checkedInAt": row.checked_in_at.isoformat(), "checkedOutAt": row.checked_out_at.isoformat() if row.checked_out_at else None}
     row.checked_in_at, row.checked_out_at, row.corrected_by, row.correction_reason = checked_in_at, checked_out_at, actor.id, reason
     db.add(AuditEntry(actor_id=actor.id, action="Corrected staff attendance", entity_type="attendance", entity_id=row.id,

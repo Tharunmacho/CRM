@@ -49,7 +49,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     # Previously accepted sends must still reconcile after intake/sending is
     # disabled. A signature secret and configured phone are sufficient here.
     if not settings.whatsapp_phone_number_id or not settings.whatsapp_app_secret:
-        raise HTTPException(503, "WhatsApp is not configured")
+        raise HTTPException(503, "WhatsApp is not set up on the server yet")
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
@@ -129,7 +129,7 @@ class ChannelIn(BaseModel):
 def connect_channel(db: Session = Depends(get_db), user: User = Depends(admin)):
     settings = get_settings()
     if not settings.whatsapp_enabled or missing_settings(settings):
-        raise HTTPException(503, "Configure the WhatsApp Business credentials on the server before connecting.")
+        raise HTTPException(503, "The WhatsApp details are missing on the server. Ask your administrator to add them before you connect.")
     phone_id = settings.whatsapp_phone_number_id
     db.execute(insert(WhatsAppChannel).values(phone_number_id=phone_id, enabled=True)
                .on_conflict_do_update(index_elements=["phone_number_id"], set_={"enabled": True, "last_error": None}))
@@ -154,7 +154,7 @@ def disconnect_channel(phone_number_id: str, db: Session = Depends(get_db), user
 def update_channel(phone_number_id: str, body: ChannelIn, db: Session = Depends(get_db), user: User = Depends(admin)):
     channel = db.get(WhatsAppChannel, phone_number_id)
     if channel is None: raise HTTPException(404, "Channel not found")
-    if not channel.enabled: raise HTTPException(409, "Reconnect this channel before changing automatic intake.")
+    if not channel.enabled: raise HTTPException(409, "Reconnect this WhatsApp number before you change automatic import.")
     channel.auto_ingest = body.autoIngest
     db.add(AuditEntry(actor_id=user.id, action="Changed WhatsApp auto-ingest", entity_type="whatsapp_channel", target=channel.display_number, meta=body.model_dump()))
     db.commit()
@@ -164,9 +164,9 @@ def update_channel(phone_number_id: str, body: ChannelIn, db: Session = Depends(
 @router.get("/messages/{message_id}/file")
 def attachment(message_id: str, download: bool = False, db: Session = Depends(get_db), user: User = Depends(current_user)):
     row = db.get(WhatsAppMessage, message_id)
-    if not row or not row.object_key: raise HTTPException(404, "The original media has not been retrieved yet")
+    if not row or not row.object_key: raise HTTPException(404, "The original file has not been downloaded yet")
     try: return file_response(get_settings(), row.object_key, row.file_name or "WhatsApp document", row.content_type or "application/octet-stream", download)
-    except Exception: raise HTTPException(503, "The original document is temporarily unavailable") from None
+    except Exception: raise HTTPException(503, "We cannot open the original file right now. Try again soon.") from None
 
 
 @router.post("/messages/{message_id}/retry")
@@ -177,10 +177,10 @@ def retry(message_id: str, db: Session = Depends(get_db), user: User = Depends(a
     row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
     if row is None: raise HTTPException(404, "Message not found")
     channel = db.get(WhatsAppChannel, row.phone_number_id)
-    if not channel or not channel.enabled: raise HTTPException(409, "Reconnect this channel before queuing document processing.")
+    if not channel or not channel.enabled: raise HTTPException(409, "Reconnect this WhatsApp number before you process this file.")
     if row.status == "completed": raise HTTPException(409, "This message is already linked to a candidate")
-    if row.status in {"pending", "processing", "retry"}: raise HTTPException(409, "This message is already queued for processing")
-    if not row.media_id: raise HTTPException(422, "This message has no supported document or image")
+    if row.status in {"pending", "processing", "retry"}: raise HTTPException(409, "This message is already waiting to be processed")
+    if not row.media_id: raise HTTPException(422, "This message has no document or photo we can use")
     state = dict(row.processing_state or {})
     extraction = dict(state.get("extraction", {}))
     request_extraction_retry(extraction, automatic=False)
@@ -209,10 +209,10 @@ def resolve(message_id: str, body: ResolveIn, db: Session = Depends(get_db), use
     if candidate is None: raise HTTPException(404, "Candidate not found")
     row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
     if row is None: raise HTTPException(404, "Message not found")
-    if row.status in {"pending", "processing", "retry"}: raise HTTPException(409, "Wait for document processing before resolving this message")
-    if row.candidate_id: raise HTTPException(409, "This message has already been resolved")
+    if row.status in {"pending", "processing", "retry"}: raise HTTPException(409, "Wait until the file has been read before you finish this message")
+    if row.candidate_id: raise HTTPException(409, "This message has already been handled")
     if not row.object_key:
-        raise HTTPException(422, "Retrieve the original document before linking this message to a candidate.")
+        raise HTTPException(422, "Download the original file before you link this message to a candidate.")
     attach_original(db, row, candidate)
     row.candidate_id, row.status, row.last_error = candidate.id, "completed", None
     queue_intake_acknowledgement(db, "whatsapp", row.id)

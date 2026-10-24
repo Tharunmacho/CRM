@@ -1,0 +1,187 @@
+/*
+ * Application shell: sidebar rail, top bar, command palette. Everything is written against the
+ * design tokens in theme.css, so the palette picker and the light/dark switch restyle it live.
+ */
+.app-shell { --rail-w: 248px; display: flex; min-height: 100vh; background: var(--bg-main); color: var(--text-main); }
+.app-shell.is-collapsed { --rail-w: 66px; }
+.shell-body { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+
+/* ---------- Rail ---------- */
+.rail { position: sticky; top: 0; z-index: 40; display: flex; flex: none; flex-direction: column; width: var(--rail-w); height: 100vh; border-right: 1px solid var(--border-main); background: var(--bg-sidebar); transition: width .18s ease; }
+.rail-backdrop { display: none; }
+.rail-brand { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 56px; min-height: 56px; padding: 0 12px 0 16px; }
+.rail-logo { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text-main); }
+.rail-logo-mark { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--primary); color: var(--on-primary); }
+.rail-logo-text { display: grid; min-width: 0; line-height: 1.2; }
+.rail-logo-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
+.rail-logo-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-light); }
+.rail-toggle { display: grid; place-items: center; flex: none; width: 24px; height: 26px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.rail-toggle:hover { background: var(--tint-2); color: var(--text-main); }
+.rail-mobile-close { display: none; }
+
+.rail-search { display: flex; align-items: center; gap: 8px; height: 36px; margin: 0 12px 10px; padding: 0 10px; border: 1px solid var(--border-main); border-radius: 7px; background: var(--bg-card); color: var(--text-muted); font-size: 13.5px; cursor: pointer; transition: border-color .15s; }
+.rail-search:hover { border-color: var(--border-hover); }
+.rail-search span { flex: 1; text-align: left; }
+.rail-search kbd { padding: 1px 6px; border: 1px solid var(--border-main); border-radius: 4px; background: var(--tint-1); color: var(--text-light); font: inherit; font-size: 10.5px; }
+
+.rail-scroll { flex: 1; min-height: 0; padding: 4px 12px 12px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-hover) transparent; }
+.rail-group { margin: 0 0 clamp(8px, calc((100vh - 560px) / 14), 18px); }
+.rail-group.is-main { margin-bottom: clamp(10px, calc((100vh - 560px) / 10), 22px); }
+.rail-section-label { margin: 0 8px 8px; font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--text-light); }
+.rail-item { position: relative; display: flex; align-items: center; gap: 10px; height: clamp(32px, calc((100vh - 338px) / 10), 42px); padding: 0 8px; border-radius: 7px; color: var(--text-main); font-size: 14.5px; font-weight: 450; transition: background .12s; }
+.rail-item:hover { background: var(--tint-2); }
+.rail-item.is-active { background: color-mix(in srgb, var(--primary) 15%, var(--bg-sidebar)); font-weight: 600; }
+.rail-nav-icon { --nav-icon-color: #6366f1; display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; color: var(--nav-icon-color); background: color-mix(in srgb, var(--nav-icon-color) 13%, transparent); }
+[data-theme="dark"] .rail-nav-icon { color: color-mix(in srgb, var(--nav-icon-color) 68%, white); background: color-mix(in srgb, var(--nav-icon-color) 22%, transparent); }
+.rail-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+.rail-dot.is-alert { background: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, .16); }
+
+.rail-foot { display: grid; gap: 10px; padding: 10px 14px 14px; border-top: 1px solid var(--border-faint); }
+.rail-workspace-note { display: none; }
+.rail-workspace-name { white-space: nowrap; }
+.rail-workspace-note small { margin-left: auto; white-space: nowrap; font-size: 11px; color: var(--text-light); }
+.rail-workspace-dot { width: 6px; height: 6px; border-radius: 50%; background: #63b994; }
+.palette-picker { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 2px; }
+.palette-picker-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; line-height: 1.25; font-size: 12px; color: var(--text-muted); }
+.palette-picker-label strong { display: none; font-weight: 500; color: var(--text-main); }
+.palette-swatches { display: flex; gap: 2px; }
+/* The button is the tap area; the dot inside is the colour. The selected one gets a ring with a gap. */
+.palette-swatch { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #fff; cursor: pointer; }
+.palette-dot { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .14); transition: transform .12s; }
+.palette-swatch:hover .palette-dot { transform: scale(1.1); }
+.palette-swatch:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; }
+.palette-swatch.is-on .palette-dot { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .14), 0 0 0 2px var(--bg-sidebar), 0 0 0 3.5px var(--text-muted); }
+/* White: a white dot needs a visible ring on a white sidebar (light) and stays clear on a black one (dark). */
+.palette-swatch[data-palette-id="white"] .palette-dot { color: #111827; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text-main) 32%, transparent); }
+.palette-swatch.is-on[data-palette-id="white"] .palette-dot { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text-main) 32%, transparent), 0 0 0 2px var(--bg-sidebar), 0 0 0 3.5px var(--text-muted); }
+.theme-switch { display: flex; padding: 2px; border: 1px solid var(--border-main); border-radius: 7px; }
+.theme-switch-btn { display: flex; flex: 1; align-items: center; justify-content: center; gap: 6px; padding: 5px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 12.5px; cursor: pointer; }
+.theme-switch-btn.is-on { background: var(--bg-card); color: var(--text-main); box-shadow: 0 1px 3px rgba(0, 0, 0, .1); }
+.rail-theme-mini { display: grid; place-items: center; width: 34px; height: 34px; margin: 0 auto; border: 1px solid var(--border-main); border-radius: 8px; background: var(--bg-card); color: var(--text-main); cursor: pointer; }
+
+.rail.is-collapsed .rail-brand { justify-content: center; padding: 0 8px; }
+.rail.is-collapsed .rail-logo-text, .rail.is-collapsed .rail-search span, .rail.is-collapsed .rail-search kbd, .rail.is-collapsed .rail-section-label,
+.rail.is-collapsed .rail-workspace-note, .rail.is-collapsed .palette-picker, .rail.is-collapsed .theme-switch, .rail.is-collapsed .rail-item-label { display: none; }
+.rail.is-collapsed .rail-logo { display: none; }
+.rail.is-collapsed .rail-search { justify-content: center; margin-inline: 14px; padding: 0; }
+.rail.is-collapsed .rail-item { justify-content: center; padding: 0; }
+.rail.is-collapsed .rail-dot { position: absolute; top: 8px; right: 12px; }
+
+/* ---------- Top bar ---------- */
+.topbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 14px; flex: none; height: 64px; padding: 0 32px; border-bottom: 1px solid var(--border-faint); background: var(--bg-main); }
+.topbar-menu { position: relative; display: none; flex: none; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--bg-card); color: var(--text-main); cursor: pointer; }
+.topbar-welcome { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; font-size: 22px; font-weight: 500; line-height: 1.3; letter-spacing: -.03em; white-space: nowrap; color: var(--text-main); }
+.topbar-menu-dot { position: absolute; top: 3px; right: 3px; width: 9px; height: 9px; border-radius: 50%; background: #dc2626; border: 2px solid var(--bg-card); box-sizing: content-box; }
+.topbar-actions { display: flex; align-items: center; gap: 9px; margin-left: auto; }
+.topbar-icon-btn { position: relative; display: grid; flex: none; place-items: center; width: 36px; height: 36px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--bg-card); color: var(--text-main); cursor: pointer; transition: border-color .15s, background .15s; }
+.topbar-icon-btn:hover { border-color: var(--border-hover); background: var(--tint-1); }
+.topbar-search-btn { display: none; }
+.topbar-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 10px; font-weight: 600; line-height: 1; border: 2px solid var(--bg-main); }
+.topbar-profile-trigger { display: flex; align-items: center; gap: 10px; padding: 3px 4px 3px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--text-main); cursor: pointer; }
+.topbar-profile-trigger:hover { background: var(--tint-2); }
+.topbar-profile-avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--primary); color: var(--on-primary); font-size: 12px; font-weight: 600; }
+.topbar-profile-copy { display: grid; min-width: 96px; text-align: left; line-height: 1.25; }
+.topbar-profile-copy strong { font-size: 14px; font-weight: 500; }
+.topbar-profile-copy small { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-muted); }
+.topbar-profile-trigger > svg { color: var(--text-muted); }
+
+/* ---------- Workspace ---------- */
+.workspace { flex: 1; min-width: 0; padding: 22px 32px 48px; background: var(--bg-main); }
+.workspace-inner { width: 100%; max-width: 1600px; margin: 0 auto; }
+
+/* ---------- Command palette ---------- */
+.cmdk-layer { position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px 16px; background: rgba(8, 10, 14, .46); animation: fade-in 120ms ease-out; }
+.cmdk { width: 100%; max-width: 560px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); color: var(--text-main); box-shadow: 0 24px 60px -16px rgba(0, 0, 0, .35); animation: sheet-in 160ms cubic-bezier(.2, .8, .3, 1); }
+.cmdk-input { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--border-main); color: var(--text-muted); }
+.cmdk-input input { flex: 1; min-width: 0; height: 52px; border: 0; outline: 0; background: transparent; color: var(--text-main); font: inherit; font-size: 15px; }
+.cmdk-close { display: none; flex: none; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.cmdk-close:hover { background: var(--tint-2); color: var(--text-main); }
+.cmdk kbd { padding: 1px 6px; border: 1px solid var(--border-main); border-radius: 4px; background: var(--tint-1); color: var(--text-light); font: inherit; font-size: 10.5px; }
+.cmdk-results { max-height: 340px; padding: 8px; overflow-y: auto; list-style: none; margin: 0; }
+.cmdk-empty { padding: 28px 12px; text-align: center; font-size: 13.5px; color: var(--text-muted); }
+.cmdk-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.cmdk-item.is-active { background: var(--tint-2); }
+.cmdk-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--tint-2); color: var(--text-muted); }
+.cmdk-copy { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.cmdk-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.cmdk-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-muted); }
+.cmdk-foot { display: flex; align-items: center; gap: 16px; padding: 9px 16px; border-top: 1px solid var(--border-main); font-size: 11.5px; color: var(--text-light); }
+.cmdk-foot span { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ---------- Small screens ---------- */
+@media (max-width: 1023px) {
+  .rail { position: fixed; inset: 0 auto 0 0; width: 272px; transform: translateX(-100%); visibility: hidden; border-right: 0; transition: transform .2s, visibility 0s .2s; }
+  .rail.is-open { transform: none; visibility: visible; border-right: 1px solid var(--border-main); transition: transform .2s, visibility 0s; }
+  .rail.is-collapsed { width: 272px; }
+  .rail.is-collapsed .rail-logo-text, .rail.is-collapsed .rail-search span, .rail.is-collapsed .rail-search kbd, .rail.is-collapsed .rail-section-label,
+  .rail.is-collapsed .rail-workspace-note, .rail.is-collapsed .palette-picker, .rail.is-collapsed .theme-switch, .rail.is-collapsed .rail-item-label, .rail.is-collapsed .rail-logo { display: revert; }
+  .rail.is-collapsed .rail-logo-text { display: grid; }
+  .rail.is-collapsed .rail-logo { display: flex; }
+  .rail.is-collapsed .rail-item { justify-content: flex-start; padding: 0 9px; }
+  .rail.is-collapsed .rail-search { justify-content: flex-start; margin-inline: 12px; padding: 0 10px; }
+  .rail-backdrop.is-open { position: fixed; inset: 0; z-index: 35; display: block; background: rgba(8, 10, 14, .46); }
+  .rail-desktop-toggle { display: none; }
+  .rail-mobile-close { display: grid; }
+  .topbar { padding: 0 16px; gap: 10px; }
+  .topbar-menu { display: grid; }
+  .topbar-search-btn { display: grid; }
+  .topbar-welcome { font-size: 17px; }
+  .workspace { padding: 8px 16px 40px; }
+  /* The drawer is as tall as the visible window (dvh), so the palette and theme switch are never below the fold. */
+  .rail { height: 100dvh; max-width: 88vw; }
+  .rail-toggle { width: 40px; height: 40px; border-radius: 8px; }
+  .rail-search { height: 44px; font-size: 15px; }
+  .rail-search kbd { display: none; }
+  .rail-item { height: 44px; }
+  .palette-picker { flex-direction: column; align-items: stretch; gap: 2px; }
+  .palette-picker-label { font-size: 12.5px; }
+  .palette-picker-label strong { display: inline; }
+  .palette-swatches { justify-content: space-between; }
+  .palette-swatch { width: 44px; height: 44px; }
+  .palette-dot { width: 28px; height: 28px; }
+  .theme-switch-btn { min-height: 44px; font-size: 14px; }
+  .topbar-icon-btn, .topbar .att-chip { min-width: 40px; height: 40px; }
+  .topbar .att-chip { justify-content: center; padding: 0 10px; }
+  .topbar-actions { gap: 8px; }
+  .topbar-profile-trigger { padding: 0; }
+  .topbar-profile-avatar { width: 40px; height: 40px; }
+  .topbar-badge { top: -5px; right: -5px; }
+}
+@media (max-width: 760px) {
+  .topbar-profile-copy, .topbar-profile-trigger > svg { display: none; }
+}
+@media (max-width: 640px) {
+  /* Two short lines: a small greeting over the first name, so the name is never cut mid-word. */
+  .topbar-welcome { display: grid; flex: 1 1 auto; align-content: center; line-height: 1.2; letter-spacing: -.01em; }
+  .topbar-welcome-lead { overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; font-weight: 400; letter-spacing: 0; color: var(--text-muted); }
+  .topbar-welcome-comma { display: none; }
+  .topbar-welcome-name { overflow: hidden; text-overflow: ellipsis; font-size: 15px; font-weight: 600; }
+  /* Notification list: titles wrap instead of being cut. */
+  .notif-title { overflow-wrap: anywhere; }
+}
+@media (max-width: 640px), (max-height: 520px) and (max-width: 1023px) {
+  /* The search opens as a full-screen sheet with a big input and a Close button. */
+  .cmdk-layer { padding: 0; align-items: stretch; background: var(--bg-card); }
+  .cmdk { display: flex; flex-direction: column; max-width: none; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
+  .cmdk-input { flex: none; padding: 0 8px 0 16px; }
+  .cmdk-input input { height: 60px; font-size: 16px; }
+  .cmdk-input > kbd { display: none; }
+  .cmdk-close { display: grid; }
+  .cmdk-results { flex: 1; min-height: 0; max-height: none; padding: 8px 8px 16px; overscroll-behavior: contain; }
+  .cmdk-item { min-height: 56px; padding: 8px 10px; }
+  .cmdk-foot .cmdk-keys { display: none; }
+  .cmdk-foot { flex: none; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); font-size: 12.5px; }
+}
+@media (max-width: 480px) {
+  /* Messages are one tap away in the drawer (the menu button shows a dot when there is something unread), so the top bar keeps room for the name. */
+  .topbar-mail-btn { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .rail, .cmdk, .cmdk-layer { transition: none; animation: none; } }
+@media (max-height: 660px) and (min-width: 1024px) { .rail-search { display: none; } }
+@media (max-height: 660px) { .rail-brand { height: 48px; min-height: 48px; } .rail-foot { gap: 6px; padding: 6px 14px 8px; } }
+@media (max-width: 400px) {
+  /* The drawer opens the same search sheet, so the small screens give the top bar's room to the name. */
+  .topbar-search-btn { display: none; }
+}
+.theme-switch-btn .rail-item-label { flex: none; }

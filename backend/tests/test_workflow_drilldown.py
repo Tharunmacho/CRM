@@ -207,3 +207,38 @@ def test_manager_reassignment_preserves_candidate_progress_and_every_task_deadli
         assert (attachment.version, attachment.object_key, attachment.uploaded_by) == (2, 'synthetic/resume-v2.pdf', 'owner')
         events = list(db.scalars(select(TaskEvent).where(TaskEvent.kind == 'assignment')))
         assert {event.task_id for event in events} == {'open-one', 'open-two'}
+
+
+def test_reassignment_restarts_clock_only_when_admin_chooses(workspace):
+    with workspace() as db:
+        task = add_task(db, due_at=NOW - timedelta(hours=3), escalated=True, escalated_at=NOW)
+        deadline = task.due_at
+        # Default: the clock keeps running.
+        reassign(ReassignIn(candidateIds=["candidate"], toUserId="other", reason="Cover the recruiter workload"), db, db.get(User, "admin"))
+        assert task.due_at == deadline and task.escalated is True
+        assert db.scalar(select(TaskEvent).where(TaskEvent.kind == "sla_reset")) is None
+        # Admin ticks the box: deadline restarts, escalation flag clears, reset is audited with the reason.
+        reassign(ReassignIn(candidateIds=["candidate"], toUserId="owner", reason="Back to the original recruiter",
+                            restartClock=True, restartReason="Employer asked for more time"), db, db.get(User, "admin"))
+        assert task.owner_id == "owner" and task.escalated is False and task.escalated_at is None
+        assert task.due_at - task.sla_started_at == timedelta(hours=48) and task.due_at > deadline
+        event = db.scalar(select(TaskEvent).where(TaskEvent.kind == "sla_reset"))
+        assert event.meta["reason"] == "Employer asked for more time" and event.meta["actorId"] == "admin"
+        audit = db.scalar(select(AuditEntry).where(AuditEntry.action == "Reset task SLA", AuditEntry.entity_id == "task"))
+        assert audit.meta["reason"] == "Employer asked for more time"
+
+
+def test_reassignment_clock_restart_is_admin_only_and_needs_a_reason(workspace):
+    from fastapi import HTTPException
+    with workspace() as db:
+        task = add_task(db, due_at=NOW - timedelta(hours=3))
+        deadline = task.due_at
+        with pytest.raises(HTTPException) as denied:
+            reassign(ReassignIn(candidateIds=["candidate"], toUserId="other", reason="Cover workload",
+                                restartClock=True, restartReason="Needs more time"), db, db.get(User, "manager"))
+        assert denied.value.status_code == 403
+        with pytest.raises(HTTPException) as missing:
+            reassign(ReassignIn(candidateIds=["candidate"], toUserId="other", reason="Cover workload", restartClock=True), db, db.get(User, "admin"))
+        assert missing.value.status_code == 422
+        db.rollback()
+        assert db.get(Task, "task").owner_id == "owner" and db.get(Task, "task").due_at == deadline

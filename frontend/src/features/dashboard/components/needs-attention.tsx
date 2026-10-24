@@ -4,7 +4,6 @@ import { CheckCheck, FileUp, Mail, MessageCircle, RefreshCw, RotateCw } from 'lu
 import { api, type AttentionItem, type AttentionSource, type InboxAttention } from '@/shared/api/client'
 import { ago } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
-import { Button } from '@/shared/ui/primitives'
 import { attentionDetail, attentionReason, hiddenCount, openPath, retryPath, SOURCE_LABEL } from '@/features/dashboard/attention'
 
 const ICON: Record<AttentionSource, typeof Mail> = { email: Mail, whatsapp: MessageCircle, manual: FileUp }
@@ -35,14 +34,14 @@ export function NeedsAttention() {
       setData(result); setError('')
     } catch (failure) {
       if (!controller.signal.aborted && session.isCurrentSession()) {
-        setError(failure instanceof Error ? failure.message : 'The attention list is unavailable.')
+        setError(failure instanceof Error ? failure.message : 'We could not load this list. Check your internet and try again.')
       }
     } finally { if (pending.current === controller) pending.current = null }
   }, [])
 
   useEffect(() => {
     void load()
-    const timer = window.setInterval(() => void load(), 30_000)
+    const timer = window.setInterval(() => void load(), 60_000)
     const visible = () => void load()
     document.addEventListener('visibilitychange', visible)
     return () => {
@@ -57,9 +56,9 @@ export function NeedsAttention() {
     setRowErrors(({ [item.id]: _cleared, ...rest }) => rest)
     try {
       await api.post(retryPath(item))
-      store.notify(`${item.title} queued for another attempt.`)
+      store.notify(`We will try ${item.title} again.`)
     } catch (failure) {
-      const message = failure instanceof Error ? failure.message : 'Retry failed.'
+      const message = failure instanceof Error ? failure.message : 'We could not try again. Please wait a moment and try once more.'
       setRowErrors(previous => ({ ...previous, [item.id]: message }))
       store.notify(message, 'warn')
     } finally {
@@ -74,38 +73,40 @@ export function NeedsAttention() {
   const hidden = hiddenCount(items.length, total)
 
   return (
-    <section className="analytics-card" aria-labelledby="attention-title">
-      <header className="analytics-card-heading">
-        <h2 id="attention-title">Needs attention{total > 0 && <span className="ml-2 text-sm font-medium text-amber-700">{total}</span>}</h2>
-        <button className="dashboard-icon-link" aria-label="Refresh attention list" onClick={() => void load()}><RefreshCw size={14} /></button>
+    <section className="dr-card dr-intake" aria-labelledby="attention-title">
+      <header className="dr-card-head">
+        <div><h2 id="attention-title">Imports that need a look{total > 0 && <span className="dr-count">{total}</span>}</h2><p>Files we could not read, or that need a person to check them.</p></div>
+        <button className="dr-icon-btn" aria-label="Refresh this list" title="Refresh" onClick={() => void load()}><RefreshCw size={15} /></button>
       </header>
-      {error && <p role="alert" className="px-6 py-2 text-xs text-amber-900">{error} {data && 'Showing the last loaded list.'}</p>}
-      {!data && !error && <p role="status" className="px-6 py-4 text-xs text-ink-500">Loading failed intake…</p>}
+      {error && <p role="alert" className="dr-intake-note is-warn">{error} {data && 'Showing the last loaded list.'}</p>}
+      {!data && !error && <p role="status" className="dr-intake-note">Loading…</p>}
       {data && items.length === 0 && (
-        <p className="flex items-center gap-2 px-6 py-4 text-sm text-ink-500"><CheckCheck size={16} />Nothing needs attention. Email, WhatsApp and uploaded documents are processing normally.</p>
+        <div className="dr-empty is-small"><span><CheckCheck size={18} /></span><strong>Nothing needs attention</strong><p>Emails, WhatsApp messages and uploaded files are being imported normally.</p></div>
       )}
-      {items.length > 0 && <ul className="divide-y divide-rule-soft">
+      {items.length > 0 && <ul className="dr-intake-list">
         {items.map(item => {
           const Icon = ICON[item.source]
           const to = openPath(item)
           const failure = rowErrors[item.id]
-          return <li key={item.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-field text-ink-600" title={SOURCE_LABEL[item.source]}><Icon size={16} aria-hidden="true" /><span className="sr-only">{SOURCE_LABEL[item.source]}</span></span>
-            <div className="min-w-0 flex-1 basis-64">
-              <strong className="block truncate text-sm font-medium text-ink">{item.title}</strong>
-              <span className="block truncate text-xs text-ink-500">{attentionDetail(item)}</span>
-              <span className={item.status === 'failed' ? 'block text-xs text-stamp-700' : 'block text-xs text-amber-700'}>{attentionReason(item)}</span>
-              {failure && <span role="alert" className="block text-xs text-stamp-700">{failure}</span>}
+          return <li key={item.id}>
+            <span className={`dr-intake-icon${item.status === 'failed' ? ' is-failed' : ''}`} title={SOURCE_LABEL[item.source]}><Icon size={16} aria-hidden="true" /><span className="sr-only">{SOURCE_LABEL[item.source]}</span></span>
+            <div className="dr-intake-copy">
+              <strong>{item.title}</strong>
+              <span>{attentionDetail(item)}</span>
+              <span className={item.status === 'failed' ? 'dr-intake-reason is-failed' : 'dr-intake-reason'}>{attentionReason(item)}</span>
+              {failure && <span role="alert" className="dr-intake-reason is-failed">{failure}</span>}
             </div>
-            <span className="shrink-0 text-xs text-ink-400">{ago(item.updatedAt)}</span>
-            <div className="flex shrink-0 gap-2">
-              {to && <Button size="sm" aria-label={`Open ${item.title}`} onClick={() => navigate(to)}>Open</Button>}
-              {data?.canRetry && item.retryable && <Button size="sm" variant="primary" aria-label={`Retry ${item.title}`} icon={<RotateCw size={13} />} disabled={!!busy} onClick={() => void retry(item)}>{busy === item.id ? 'Retrying…' : 'Retry'}</Button>}
+            <div className="dr-intake-side">
+              <span className="dr-intake-time">{ago(item.updatedAt)}</span>
+              <div className="dr-intake-actions">
+                {to && <button className="dr-mini" aria-label={`Open ${item.title}`} onClick={() => navigate(to)}>Open</button>}
+                {data?.canRetry && item.retryable && <button className="dr-mini is-primary" aria-label={`Try ${item.title} again`} disabled={!!busy} onClick={() => void retry(item)}><RotateCw size={12} />{busy === item.id ? 'Trying…' : 'Try again'}</button>}
+              </div>
             </div>
           </li>
         })}
       </ul>}
-      {hidden > 0 && <p className="px-6 pb-4 pt-2 text-xs text-ink-500">Showing the {items.length} most recent of {total}. Resolve these to see older items.</p>}
+      {hidden > 0 && <p className="dr-intake-note">Showing the {items.length} newest of {total}. Fix these to see older ones.</p>}
     </section>
   )
 }

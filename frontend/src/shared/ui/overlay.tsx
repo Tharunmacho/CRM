@@ -61,7 +61,7 @@ export function Dialog({
   children,
   footer,
   width = 'md',
-  scroll = 'page',
+  scroll = 'inside',
   appearance = 'default',
 }: {
   open: boolean
@@ -74,7 +74,7 @@ export function Dialog({
   appearance?: 'default' | 'clean'
   /** `full` takes the whole window: the header stays put and the body scrolls under it. */
   width?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
-  /** Keep the title and actions visible while a long form scrolls inside its card. */
+  /** `inside` (default) keeps the title and actions visible while a long form scrolls within its card. */
   scroll?: 'page' | 'inside'
 }) {
   const root = useRef<HTMLDivElement>(null)
@@ -88,11 +88,12 @@ export function Dialog({
   return createPortal(
     <div
       className={cn(
-        'fixed inset-0 z-50 flex',
-        full ? '' : scroll === 'inside' ? 'items-center justify-center overflow-hidden p-3 sm:p-6' : 'items-start justify-center overflow-y-auto p-4 sm:p-8',
+        'dialog-layer fixed inset-0 z-50 flex',
+        // Phones (under 640px): every dialog is a bottom sheet that only scrolls its body. Wider windows keep the centred card.
+        full ? '' : scroll === 'inside' ? 'items-end justify-center overflow-hidden p-0 sm:items-center sm:p-6' : 'items-end justify-center overflow-hidden p-0 sm:items-start sm:overflow-y-auto sm:p-8',
       )}
     >
-      <div className={cn('fixed inset-0 animate-fade-in', appearance === 'clean' ? 'bg-white/75 backdrop-blur-[3px]' : 'bg-ink-900/40')} onClick={onClose} aria-hidden />
+      <div className={cn('ui-backdrop fixed inset-0 animate-fade-in', appearance === 'clean' && 'ui-backdrop-clean')} onClick={onClose} aria-hidden />
       <div
         ref={root}
         tabIndex={-1}
@@ -100,24 +101,23 @@ export function Dialog({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          'workspace-dialog relative z-10 w-full overflow-hidden bg-white shadow-overlay animate-sheet-in',
-          appearance === 'clean' && 'border border-rule-soft shadow-[0_24px_70px_-20px_rgba(20,38,66,0.28)]',
-          full ? 'flex h-full flex-col' : scroll === 'inside' ? 'flex max-h-[calc(100dvh-1.5rem)] flex-col rounded-panel sm:max-h-[calc(100dvh-3rem)]' : 'rounded-panel',
+          'workspace-dialog relative z-10 w-full min-w-0 overflow-hidden border border-rule bg-white shadow-overlay animate-sheet-in',
+          full ? 'flex h-full flex-col' : scroll === 'inside' ? 'flex max-h-[calc(100dvh-0.75rem)] flex-col rounded-b-none rounded-t-[16px] sm:max-h-[calc(100dvh-3rem)] sm:rounded-[12px]' : 'flex max-h-[calc(100dvh-0.75rem)] flex-col rounded-b-none rounded-t-[16px] sm:block sm:max-h-none sm:rounded-[12px]',
           widths,
         )}
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-6 py-5">
+        <header className="dialog-head flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-6 py-5">
           <div className="min-w-0">
-            <h2 className="text-h3 font-semibold text-ink">{title}</h2>
-            {description && <p className="mt-0.5 text-sm text-ink-500">{description}</p>}
+            <h2 className="text-[19px] font-semibold leading-snug tracking-[-0.02em] text-ink">{title}</h2>
+            {description && <p className="mt-1 text-[14px] leading-6 text-ink-500">{description}</p>}
           </div>
           <IconButton label="Close" onClick={onClose}>
             <X className="h-4 w-4" />
           </IconButton>
         </header>
-        <div className={cn('px-6 py-5', contained && 'dialog-scroll-body scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain')}>{children}</div>
+        <div className={cn('dialog-body px-6 py-5', contained ? 'dialog-scroll-body scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain sm:flex-none sm:overflow-visible')}>{children}</div>
         {footer && (
-          <footer className={cn('flex shrink-0 items-center justify-end gap-2 border-t border-rule-soft px-6 py-4', appearance === 'clean' ? 'bg-white' : 'bg-field/40')}>
+          <footer className="dialog-foot flex shrink-0 items-center justify-end gap-2 border-t border-rule-soft bg-white px-6 py-4">
             {footer}
           </footer>
         )}
@@ -154,20 +154,20 @@ export function Sheet({
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="fixed inset-0 bg-ink-900/40 animate-fade-in" onClick={onClose} aria-hidden />
+      <div className="ui-backdrop fixed inset-0 animate-fade-in" onClick={onClose} aria-hidden />
       <div
         ref={root}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={cn('workspace-sheet relative z-10 flex h-full w-full flex-col bg-white shadow-overlay', widths)}
+        className={cn('workspace-sheet relative z-10 flex h-[100dvh] w-full flex-col border-l border-rule bg-white shadow-overlay', widths)}
         style={{ animation: 'sheet-in 200ms cubic-bezier(.2,.8,.3,1)' }}
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-rule px-5 py-4">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-5 py-4">
           <div className="min-w-0">
-            <h2 className="text-h3 font-semibold text-ink">{title}</h2>
-            {description && <p className="mt-0.5 text-sm text-ink-500">{description}</p>}
+            <h2 className="text-[18px] font-semibold leading-snug tracking-[-0.02em] text-ink">{title}</h2>
+            {description && <p className="mt-1 text-[14px] leading-6 text-ink-500">{description}</p>}
           </div>
           <IconButton label="Close" onClick={onClose}>
             <X className="h-4 w-4" />
@@ -175,7 +175,7 @@ export function Sheet({
         </header>
         <div className="scrollbar-thin flex-1 overflow-y-auto">{children}</div>
         {footer && (
-          <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-rule bg-field/50 px-5 py-3">
+          <footer className="dialog-foot flex shrink-0 items-center justify-end gap-2 border-t border-rule-soft bg-white px-5 py-3">
             {footer}
           </footer>
         )}
@@ -192,11 +192,14 @@ export function Dropdown({
   children,
   align = 'right',
   width = 'w-64',
+  label,
 }: {
   trigger: (props: { open: boolean; toggle: () => void }) => ReactNode
   children: (close: () => void) => ReactNode
   align?: 'left' | 'right'
   width?: string
+  /** Names the open panel for screen readers. */
+  label?: string
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -220,8 +223,9 @@ export function Dropdown({
       {trigger({ open, toggle: () => setOpen((v) => !v) })}
       {open && (
         <div
+          aria-label={label}
           className={cn(
-            'absolute top-[calc(100%+6px)] z-40 rounded-panel border border-rule bg-white py-1 shadow-pop animate-sheet-in',
+            'ui-menu absolute top-[calc(100%+6px)] z-40 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-[10px] border border-rule bg-white p-1 shadow-pop animate-sheet-in',
             align === 'right' ? 'right-0' : 'left-0',
             width,
           )}
@@ -248,7 +252,7 @@ export function MenuItem({
     <button
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors',
+        'ui-menu-item flex w-full items-center gap-2.5 rounded-[6px] px-3 py-2 text-left text-[14px] transition-colors',
         tone === 'danger' ? 'text-stamp-600 hover:bg-stamp-50' : 'text-ink-700 hover:bg-field',
       )}
     >
@@ -265,18 +269,51 @@ export function Tabs({
   active,
   onChange,
   className,
+  variant = 'line',
 }: {
+  /**
+   * `count` and `tone` are accepted so existing callers keep compiling, but a tab never shows a
+   * number (product decision: counts belong on KPI cards, not on tabs and filter chips).
+   */
   tabs: { key: string; label: string; count?: number; tone?: 'stamp' | 'amber' }[]
   active: string
   onChange: (key: string) => void
   className?: string
+  /** `line` (default): a clean strip with a dark underline. `pill`: a bordered segmented control with a dark active segment. */
+  variant?: 'line' | 'pill'
 }) {
+  const strip = useRef<HTMLDivElement>(null)
+
+  // A strip wider than its space scrolls inside itself (never the page) and fades at the edge that has more tabs.
+  useEffect(() => {
+    const element = strip.current
+    if (!element) return undefined
+    const update = () => {
+      const more = element.scrollWidth - element.clientWidth > 2
+      element.dataset.fadeStart = more && element.scrollLeft > 2 ? '1' : '0'
+      element.dataset.fadeEnd = more && element.scrollLeft + element.clientWidth < element.scrollWidth - 2 ? '1' : '0'
+    }
+    update()
+    element.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null
+    observer?.observe(element)
+    return () => { element.removeEventListener('scroll', update); observer?.disconnect() }
+  }, [tabs.length])
+
+  // Keep the chosen tab in view without moving the page.
+  useEffect(() => {
+    const element = strip.current
+    const chosen = element?.querySelector<HTMLElement>('[aria-selected="true"]')
+    if (!element || !chosen) return
+    const left = chosen.offsetLeft - element.offsetLeft
+    if (left < element.scrollLeft + 24) element.scrollLeft = Math.max(0, left - 24)
+    else if (left + chosen.offsetWidth > element.scrollLeft + element.clientWidth - 24) element.scrollLeft = left + chosen.offsetWidth - element.clientWidth + 24
+  }, [active])
+
   return (
     <div
-      className={cn(
-        'ui-tabs scrollbar-thin flex items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-rule',
-        className,
-      )}
+      ref={strip}
+      className={cn('ui-tabs scrollbar-thin', variant === 'pill' ? 'ui-tabs-pill' : 'ui-tabs-line', className)}
       role="tablist"
     >
       {tabs.map((t) => {
@@ -284,30 +321,13 @@ export function Tabs({
         return (
           <button
             key={t.key}
+            type="button"
             role="tab"
             aria-selected={on}
             onClick={() => onChange(t.key)}
-            className={cn(
-              'relative shrink-0 px-3 py-2.5 text-sm font-medium transition-colors',
-              on ? 'text-ink' : 'text-ink-400 hover:text-ink-600',
-            )}
+            className="ui-tab"
           >
-            <span className="flex items-center gap-1.5">
-              {t.label}
-              {t.count != null && (
-                <span
-                  className={cn(
-                    'rounded-[3px] px-1 py-px text-micro tnum',
-                    on ? 'bg-ink-800 text-white' : 'bg-field text-ink-500',
-                    t.tone === 'stamp' && t.count > 0 && 'bg-stamp-100 text-stamp-700',
-                    t.tone === 'amber' && t.count > 0 && 'bg-amber-100 text-amber-700',
-                  )}
-                >
-                  {t.count}
-                </span>
-              )}
-            </span>
-            {on && <span className="absolute inset-x-1.5 bottom-0 h-0.5 rounded-full bg-navy-600" />}
+            {t.label}
           </button>
         )
       })}
@@ -332,16 +352,16 @@ export function Toast({
   }, [message, onDismiss])
 
   return createPortal(
-    <div className="pointer-events-none fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 px-4">
+    <div className="ui-toast-layer pointer-events-none fixed inset-x-0 bottom-5 z-[60] flex justify-center px-4">
       <div
         role="status"
         className={cn(
-          'pointer-events-auto flex items-center gap-3 rounded-panel px-4 py-2.5 text-sm text-white shadow-overlay animate-sheet-in',
-          tone === 'warn' ? 'bg-stamp-700' : 'bg-ink-800',
+          'ui-toast pointer-events-auto flex max-w-full items-center gap-3 rounded-[10px] border px-4 py-2.5 text-[14px] shadow-overlay animate-sheet-in',
         )}
+        data-tone={tone}
       >
-        <span>{message}</span>
-        <button onClick={onDismiss} aria-label="Dismiss" className="-mr-1 opacity-60 hover:opacity-100">
+        <span className="min-w-0 break-words">{message}</span>
+        <button type="button" onClick={onDismiss} aria-label="Dismiss message" className="ui-toast-close -mr-1 grid shrink-0 place-items-center opacity-70 hover:opacity-100">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>

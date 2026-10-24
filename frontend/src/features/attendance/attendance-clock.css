@@ -1,0 +1,42 @@
+/* The attendance clock: the top-bar chip and the "Your attendance today" card. Tokens only. */
+
+/* ---- top bar chip: same height and radius as the neighbouring 36px icon buttons ---- */
+.att-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); font-size: 13px; line-height: 1.2; white-space: nowrap; transition: border-color .14s, background-color .14s; }
+.att-chip:hover { border-color: var(--border-hover); background: var(--tint-1); }
+.att-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.att-chip > svg { flex: none; margin-left: 4px; }
+.att-chip-icon { position: relative; display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--tint-2); color: var(--text-muted); }
+.att-chip[data-state='in'] .att-chip-icon { background: var(--success-fill); color: var(--success-ink); }
+.att-chip[data-state='in'] .att-chip-icon::after { content: ''; position: absolute; right: -1px; top: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--success-ink); border: 2px solid var(--bg-card); }
+.att-chip[data-state='error'] .att-chip-icon { background: var(--warning-fill); color: var(--warning-ink); }
+.att-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.att-chip-text strong { color: var(--text-main); font-weight: 600; font-variant-numeric: tabular-nums; }
+.att-chip-extra { display: inline-flex; align-items: center; }
+.att-chip-warn { color: var(--warning-ink); font-size: 12px; }
+@media (max-width: 1100px) { .att-chip-extra { display: none; } }
+@media (max-width: 639px) { .att-chip-text { display: none; } .att-chip { padding: 0 6px; } }
+
+/* ---- the full card ---- */
+.att-clock { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px 28px; margin-bottom: 20px; padding: 20px 24px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.att-clock-who { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.att-clock-icon { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary); }
+.att-clock[data-state='in'] .att-clock-icon { background: var(--success-fill); color: var(--success-ink); }
+.att-clock-label { font-size: 13px; line-height: 1.4; color: var(--text-muted); }
+.att-clock-time { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 2px; }
+.att-clock-time > strong { font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.03em; color: var(--text-main); font-variant-numeric: tabular-nums; }
+.att-clock-progress { display: grid; gap: 6px; min-width: 0; max-width: 460px; }
+.att-clock-progress small { font-size: 12.5px; line-height: 1.4; color: var(--text-muted); }
+.att-clock-meter { height: 8px; overflow: hidden; border-radius: 999px; background: var(--tint-2); }
+.att-clock-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .3s; }
+.att-clock[data-state='in'] .att-clock-meter > span { background: var(--success-ink); }
+.att-clock-action { display: flex; justify-content: flex-end; }
+.att-clock-foot { grid-column: 1 / -1; display: grid; gap: 4px; padding-top: 12px; border-top: 1px solid var(--border-faint); font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.att-clock-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: var(--error-ink); }
+.att-clock-warn { color: var(--warning-ink); }
+@media (max-width: 899px) {
+  .att-clock { grid-template-columns: minmax(0, 1fr); padding: 18px 16px; gap: 14px; }
+  .att-clock-progress { max-width: none; }
+  .att-clock-action > .ui-button { width: 100%; }
+  .att-clock-time > strong { font-size: 25px; }
+}
+@media (prefers-reduced-motion: reduce) { .att-clock-meter > span { transition: none; } }

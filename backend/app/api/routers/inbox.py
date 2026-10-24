@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, defer, load_only
 
 from app.core.config import get_settings
 from app.core.deps import current_user, require_role
-from app.db.models import EmailIngestionJob, MailAccount, MailAttachment, MailMessage, Role, User
+from app.db.models import AuditEntry, EmailIngestionJob, MailAccount, MailAttachment, MailMessage, Role, User
 from app.db.session import get_db
 from app.integrations.mail.imap import (
     IMAPMailbox, MailAdapterError, UIDVALIDITY_RECOVERY_REQUIRED, mailbox_source_id, require_cursor_source,
@@ -72,6 +72,31 @@ def account_out(account, configured, counts=None, has_secrets=None):
     }
 
 
+def audit(db: Session, user: User, action: str, *, target: str | None, entity_type: str, entity_id: str, detail: dict | None = None) -> None:
+    """Who did it and when; the entry is saved in the same commit as the change."""
+    db.add(AuditEntry(actor_id=user.id, action=action, target=target, entity_type=entity_type, entity_id=entity_id, meta=detail or {}))
+
+
+RETRYABLE_JOB_STATES = {"failed", "needs_review", "ignored"}
+
+
+def requeue_job(db: Session, job: EmailIngestionJob, message: MailMessage) -> None:
+    """Put a failed, skipped or needs-review job back in the queue (the caller commits)."""
+    ensure_single_person_source(db, "email", message.id)
+    require_intake_account(db, message.account_id)
+    state = deepcopy(job.state or {})
+    if state.get("receive_error"):
+        raise HTTPException(422, "We could not read this email. Fix the attachment or ask the sender to send it again.")
+    job.status, job.last_error, job.attempts = "pending", None, 0
+    job.next_attempt_at = datetime.now(timezone.utc)
+    for document in state.values():
+        if isinstance(document, dict):
+            request_extraction_retry(document)
+            for key in ("output", "inspection", "inspection_signature", "extractions", "extraction_status", "warnings"):
+                document.pop(key, None)
+    job.state = state
+
+
 def require_intake_account(db: Session, account_id: str) -> None:
     account = db.get(MailAccount, account_id)
     if not account:
@@ -79,9 +104,9 @@ def require_intake_account(db: Session, account_id: str) -> None:
     # Match the receiving/extraction worker's supported source set. Retained
     # historical receipts can still be read and reviewed without queueing work.
     if not mail_providers.is_live(account.provider):
-        raise HTTPException(409, "This provider is archived. Stored history is read only; connect the mailbox again for new candidate intake. Original attachments remain available to download.")
+        raise HTTPException(409, "This mail provider is no longer supported. Old emails can still be read and their attachments downloaded. Connect the mailbox again to import new candidates.")
     if account.disconnected_at:
-        raise HTTPException(409, "Reconnect this mailbox before creating or retrying candidate processing. Stored messages, processing results and downloads remain available.")
+        raise HTTPException(409, "Reconnect this mailbox before you create a candidate from an email. Saved emails, results and downloads are still available.")
 
 
 PREVIEW_CHARS = 180
@@ -226,6 +251,17 @@ def revision(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return {"revision": read_revision(db)}
 
 
+@router.get("/pulse")
+def pulse(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """The two cheap change signals the desk polls, in one request: the intake revision and the unread badge.
+
+    Replaces separate /revision and /unread-count polls: one request, one sign-in check, and the two reads
+    run side by side, so a poll costs one database round trip instead of two requests of one each.
+    """
+    revision_token, unread = parallel_reads(db, read_revision, unread_counts)
+    return {"revision": revision_token, "unread": unread}
+
+
 @router.get("/unread-count")
 def unread_count(db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Sidebar badge: unread INBOX mail across connected live mailboxes, without loading messages."""
@@ -245,7 +281,7 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
         raise HTTPException(503, "Set IMAP_SERVER, IMAP_PORT, IMAP_USERNAME, IMAP_PASSWORD, IMAP_USE_SSL and IMAP_FOLDER in backend environment settings.")
     address = body.address.strip().lower() if body.address else next(iter(available))
     if address not in available:
-        raise HTTPException(422, "This address has no server-side mailbox configuration.")
+        raise HTTPException(422, "This email address is not set up on the server.")
     try:
         mail_providers.validate_config(available[address])
     except MailAdapterError as exc:
@@ -273,9 +309,10 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
                 raise HTTPException(502, str(exc)) from None
             existing = db.scalar(select(MailAccount).where(MailAccount.id == saved_id).with_for_update())
             if not existing or dict(existing.sync_state) != saved_cursor:
-                raise HTTPException(409, "The mailbox changed during reconnect. Refresh and try again.")
+                raise HTTPException(409, "The mailbox changed while it was reconnecting. Refresh the page and try again.")
             existing.disconnected_at, existing.last_error, existing.sync_requested = None, None, True
             existing.auto_ingest, existing.connected_by = body.auto_ingest, user.id
+            audit(db, user, "Reconnected mailbox", target=existing.address, entity_type="mail_account", entity_id=existing.id, detail={"autoIngest": body.auto_ingest})
             db.commit()
         return account_out(existing, available)
     db.rollback()
@@ -291,6 +328,8 @@ def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends
                           sync_requested=True)
     db.add(account)
     try:
+        db.flush()
+        audit(db, user, "Connected mailbox", target=account.address, entity_type="mail_account", entity_id=account.id, detail={"provider": "imap", "autoIngest": body.auto_ingest})
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -307,27 +346,39 @@ def update_account(account_id: str, body: AccountIn, db: Session = Depends(get_d
     if not account:
         raise HTTPException(404, "Mailbox not found")
     if not mail_providers.is_live(account.provider):
-        raise HTTPException(409, "This provider is archived. Reconnect the mailbox before changing automatic intake.")
+        raise HTTPException(409, "This mail provider is no longer supported. Reconnect the mailbox before you change automatic import.")
     if account.disconnected_at:
-        raise HTTPException(409, "Reconnect this mailbox before changing automatic processing.")
+        raise HTTPException(409, "Reconnect this mailbox before you change automatic import.")
+    previous = account.auto_ingest
     account.auto_ingest = body.auto_ingest
+    audit(db, user, "Turned automatic candidate import " + ("on" if body.auto_ingest else "off"), target=account.address,
+          entity_type="mail_account", entity_id=account.id, detail={"autoIngest": {"before": previous, "after": body.auto_ingest}})
     db.commit()
     return account_out(account, configs())
 
 
 @router.post("/messages/{message_id}/ingest", status_code=202)
 def ingest(message_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Manual "Create candidate from attachment" for any role: starts a job, or restarts a failed, skipped or needs-review one."""
     message = db.get(MailMessage, message_id)
     if not message:
         raise HTTPException(404, "Message not found")
     ensure_single_person_source(db, "email", message_id)
-    job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.message_id == message_id))
+    job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.message_id == message_id).with_for_update())
     if job:
-        return {"status": job.status}
+        if job.status not in RETRYABLE_JOB_STATES:
+            return {"status": job.status}
+        if not db.scalar(select(MailAttachment.id).where(MailAttachment.message_id == message_id).limit(1)):
+            raise HTTPException(422, "This email has no attachments to work with.")
+        requeue_job(db, job, message)
+        audit(db, user, "Restarted candidate creation from email", target=(message.subject or "Email")[:300], entity_type="mail_message", entity_id=message.id, detail={"job": job.id})
+        db.commit()
+        return {"status": "queued"}
     require_intake_account(db, message.account_id)
     if not db.scalar(select(MailAttachment.id).where(MailAttachment.message_id == message_id).limit(1)):
-        raise HTTPException(422, "This message has no imported attachments.")
+        raise HTTPException(422, "This email has no attachments to work with.")
     db.add(EmailIngestionJob(message_id=message_id, state={}))
+    audit(db, user, "Started candidate creation from email", target=(message.subject or "Email")[:300], entity_type="mail_message", entity_id=message.id)
     try:
         db.commit()
     except IntegrityError:
@@ -344,24 +395,12 @@ def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(admin
     job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Ingestion job not found")
-    if job.status not in {"failed", "needs_review", "ignored"}:
-        raise HTTPException(409, "This job is already queued, running or complete.")
+    if job.status not in RETRYABLE_JOB_STATES:
+        raise HTTPException(409, "This is already waiting, running or finished.")
     message = db.get(MailMessage, job.message_id)
     if not message:
         raise HTTPException(404, "Source message not found")
-    ensure_single_person_source(db, "email", message.id)
-    require_intake_account(db, message.account_id)
-    state = deepcopy(job.state or {})
-    if state.get("receive_error"):
-        raise HTTPException(422, "The source message could not be imported. Correct or resend the attachment.")
-    job.status, job.last_error, job.attempts = "pending", None, 0
-    job.next_attempt_at = datetime.now(timezone.utc)
-    for document in state.values():
-        if isinstance(document, dict):
-            request_extraction_retry(document)
-            for key in ("output", "inspection", "inspection_signature", "extractions", "extraction_status", "warnings"):
-                document.pop(key, None)
-    job.state = state
+    requeue_job(db, job, message)
     # The explicit retry authorizes a new generation only for confirmed failed
     # or invalid completed jobs. Pending/unknown accepted IDs remain resumable.
     db.commit()

@@ -37,17 +37,17 @@ export function SourceHealth() {
         ])
         if (!live || !session.isCurrentSession()) return
         if (mailResult.status === 'fulfilled') { setData(mailResult.value); setError('') }
-        else if (!controller.signal.aborted) setError(mailResult.reason instanceof Error ? mailResult.reason.message : 'Email status is unavailable.')
+        else if (!controller.signal.aborted) setError(mailResult.reason instanceof Error ? mailResult.reason.message : 'We could not load the email status. Try again later.')
         if (whatsappResult.status === 'fulfilled') { setWhatsapp(whatsappResult.value); setWhatsappError('') }
-        else if (!controller.signal.aborted) setWhatsappError(whatsappResult.reason instanceof Error ? whatsappResult.reason.message : 'WhatsApp status is unavailable.')
+        else if (!controller.signal.aborted) setWhatsappError(whatsappResult.reason instanceof Error ? whatsappResult.reason.message : 'We could not load the WhatsApp status. Try again later.')
       } catch (failure) {
         if (live && session.isCurrentSession() && !controller.signal.aborted) {
-          setError(failure instanceof Error ? failure.message : 'Source status is unavailable.')
+          setError(failure instanceof Error ? failure.message : 'We could not load the status. Try again later.')
         }
       } finally { if (pending === controller) pending = null }
     }
     void read()
-    const timer = window.setInterval(() => void read(), 30_000)
+    const timer = window.setInterval(() => void read(), 60_000)
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     return () => {
@@ -63,54 +63,55 @@ export function SourceHealth() {
   const waiting = data ? data.counts.pending + data.counts.retry : 0
   const attention = data ? data.counts.needs_review + data.counts.failed : 0
 
+  const stats = (queued: number, processing: number, needs: number, done: number) => <dl className="dr-intake-stats">
+    <div><dt>Waiting</dt><dd>{queued}</dd></div><div><dt>In progress</dt><dd>{processing}</dd></div>
+    <div className={needs ? 'is-warn' : ''}><dt>Needs a look</dt><dd>{needs}</dd></div><div><dt>Done</dt><dd>{done}</dd></div>
+  </dl>
+
   return (
-    <section className="analytics-card" aria-labelledby="sources-title">
-      <header className="analytics-card-heading">
-        <h2 id="sources-title">Connected sources</h2>
-        <button className="dashboard-icon-link" aria-label="Open inbox" onClick={() => navigate('/inbox')}><ArrowUpRight size={14} /></button>
+    <section className="dr-card dr-intake" aria-labelledby="sources-title">
+      <header className="dr-card-head">
+        <div><h2 id="sources-title">Connected email and WhatsApp</h2><p>When each email account and WhatsApp number last checked for new messages.</p></div>
+        <button className="dr-icon-btn" aria-label="Open inbox" title="Open inbox" onClick={() => navigate('/inbox')}><ArrowUpRight size={15} /></button>
       </header>
-      {error && <p role="alert" className="px-4 py-2 text-xs text-amber-900">{error} {data && 'Showing last loaded status.'}</p>}
-      {!data && !error && <p role="status" className="px-4 py-4 text-xs text-ink-500">Loading source status…</p>}
-      {data && <>
-        <h3 className="px-4 pt-4 text-xs font-semibold text-ink-700">Email accounts</h3>
-        <p className="px-4 pt-3 text-xs text-ink-500">
-          {!data.worker.enabled ? 'Automatic processing is disabled.' : recent ? 'Worker checked in recently.' : 'Worker activity is not confirmed. Open Inbox to check processing.'}
-        </p>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-3 text-xs text-ink-600">
-          <span>Queued: {waiting}</span><span>Processing: {data.counts.processing}</span>
-          <span>Needs attention: {attention}</span><span>Completed: {data.counts.completed}</span>
-        </div>
-        {data.accounts.length > 0 ? <ul className="operational-list source-list">
-          {data.accounts.map((account) => <li key={account.id}>
-            <i className={account.autoIngest && !account.lastError && recent && data.worker.enabled ? 'is-connected' : ''} />
-            <span><strong>{account.address}</strong><span>
-              {account.lastError || (account.lastSyncAt ? `Synced ${ago(account.lastSyncAt)}` : 'No completed sync yet')}
-              {!account.autoIngest && ' · Auto-ingest off'}
-            </span></span>
-          </li>)}
-        </ul> : <p className="px-4 py-4 text-xs text-ink-500">No mailbox connected. Connect a mailbox in Inbox to start receiving applications.</p>}
-        <button className="m-4 text-xs font-medium text-navy-700 underline" onClick={() => navigate('/inbox')}>Review messages and processing</button>
-      </>}
-      <div className="border-t border-rule">
-        <h3 className="px-4 pt-4 text-xs font-semibold text-ink-700">WhatsApp Business</h3>
-        {whatsappError && <p role="alert" className="px-4 py-2 text-xs text-amber-900">{whatsappError} {whatsapp && 'Showing last loaded status.'}</p>}
-        {!whatsapp && !whatsappError && <p role="status" className="px-4 py-3 text-xs text-ink-500">Loading WhatsApp status…</p>}
+      <div className="dr-intake-block">
+        <h3>Email accounts</h3>
+        {error && <p role="alert" className="dr-intake-note is-warn">{error} {data && 'Showing the status as it was last loaded.'}</p>}
+        {!data && !error && <p role="status" className="dr-intake-note">Loading…</p>}
+        {data && <>
+          <p className="dr-intake-hint">
+            {!data.worker.enabled ? 'Automatic import is turned off.' : recent ? 'The import service checked in recently.' : 'We cannot confirm the import service is running. Open Inbox to check.'}
+          </p>
+          {stats(waiting, data.counts.processing, attention, data.counts.completed)}
+          {data.accounts.length > 0 ? <ul className="dr-source-list">
+            {data.accounts.map((account) => <li key={account.id}>
+              <i className={account.autoIngest && !account.lastError && recent && data.worker.enabled ? 'is-connected' : account.lastError ? 'is-error' : ''} />
+              <span><strong>{account.address}</strong><small className={account.lastError ? 'is-error' : ''}>
+                {account.lastError || (account.lastSyncAt ? `Checked ${ago(account.lastSyncAt)}` : 'Not checked yet')}
+                {!account.autoIngest && ' · Automatic import is off'}
+              </small></span>
+            </li>)}
+          </ul> : <p className="dr-intake-hint">No email account connected. Connect one in Inbox to start getting applications.</p>}
+          <button className="dr-link" onClick={() => navigate('/inbox')}>Review emails<ArrowUpRight size={12} /></button>
+        </>}
+      </div>
+      <div className="dr-intake-block">
+        <h3>WhatsApp Business</h3>
+        {whatsappError && <p role="alert" className="dr-intake-note is-warn">{whatsappError} {whatsapp && 'Showing the status as it was last loaded.'}</p>}
+        {!whatsapp && !whatsappError && <p role="status" className="dr-intake-note">Loading…</p>}
         {whatsapp && <>
-          {!whatsapp.configured ? <p className="px-4 pt-3 text-xs text-ink-500">WhatsApp is not connected.</p> : <>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-3 text-xs text-ink-600">
-              <span>Queued: {whatsapp.counts.pending + whatsapp.counts.retry}</span><span>Processing: {whatsapp.counts.processing}</span>
-              <span>Needs attention: {whatsapp.counts.needs_review + whatsapp.counts.failed}</span><span>Completed: {whatsapp.counts.completed}</span>
-            </div>
-            {whatsapp.channels.length ? <ul className="operational-list source-list">{whatsapp.channels.map((channel) => {
+          {!whatsapp.configured ? <p className="dr-intake-hint">WhatsApp is not connected.</p> : <>
+            {stats(whatsapp.counts.pending + whatsapp.counts.retry, whatsapp.counts.processing, whatsapp.counts.needs_review + whatsapp.counts.failed, whatsapp.counts.completed)}
+            {whatsapp.channels.length ? <ul className="dr-source-list">{whatsapp.channels.map((channel) => {
               const checked = channel.workerSeenAt ? Date.parse(channel.workerSeenAt) : NaN
               const live = Number.isFinite(checked) && Date.now() - checked <= 15 * 60_000
-              return <li key={channel.id}><i className={channel.enabled && channel.autoIngest && !channel.lastError && live ? 'is-connected' : ''} /><span><strong>{channel.displayNumber || channel.id}</strong><span>
-                {channel.lastError || (channel.lastReceivedAt ? `Last receipt ${ago(channel.lastReceivedAt)}` : 'No receipts yet')}
-                {!channel.enabled ? ' · Disconnected' : live ? ' · Worker checked in' : ' · Worker activity unconfirmed'}{!channel.autoIngest && ' · Auto-ingest off'}
-              </span></span></li>
-            })}</ul> : <p className="px-4 py-3 text-xs text-ink-500">Server setup is ready. Connect the business number in WhatsApp to begin receiving messages.</p>}
+              return <li key={channel.id}><i className={channel.enabled && channel.autoIngest && !channel.lastError && live ? 'is-connected' : channel.lastError ? 'is-error' : ''} /><span><strong>{channel.displayNumber || channel.id}</strong><small className={channel.lastError ? 'is-error' : ''}>
+                {channel.lastError || (channel.lastReceivedAt ? `Last message ${ago(channel.lastReceivedAt)}` : 'No messages yet')}
+                {!channel.enabled ? ' · Disconnected' : live ? ' · Import service running' : ' · Import service not confirmed'}{!channel.autoIngest && ' · Automatic import is off'}
+              </small></span></li>
+            })}</ul> : <p className="dr-intake-hint">Setup is ready. Connect the business number in WhatsApp to start receiving messages.</p>}
           </>}
-          <button className="m-4 text-xs font-medium text-navy-700 underline" onClick={() => navigate('/whatsapp')}>Review WhatsApp messages and processing</button>
+          <button className="dr-link" onClick={() => navigate('/whatsapp')}>Review WhatsApp messages<ArrowUpRight size={12} /></button>
         </>}
       </div>
     </section>

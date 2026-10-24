@@ -61,7 +61,7 @@ def _http_error(exc: VerisOCRError) -> HTTPException:
             "The OCR could not read this file. Check the selected pages or enter the details manually.",
         )
     if isinstance(exc, VerisOCRRateLimitError):
-        return HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "The OCR is busy. Try the file again in a minute.")
+        return HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "The document reader is busy. Try this file again in a minute.")
     if isinstance(exc, VerisOCRTimeoutError):
         return HTTPException(
             status.HTTP_504_GATEWAY_TIMEOUT,

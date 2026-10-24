@@ -1,32 +1,48 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CalendarClock, CheckCheck, ClipboardList, MessageSquarePlus, TimerOff, UserRound } from 'lucide-react'
+import { ArrowRight, CalendarClock, CheckCheck, ClipboardList, MessageSquare, MessageSquarePlus, MessageSquareOff, RefreshCw, ShieldAlert, Sparkles, TimerOff, TriangleAlert } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { api } from '@/shared/api/client'
 import { agencyDay, taskClockStart } from '@/shared/lib/task-time'
-import { dateTimeLabel, isSameDay, slaState, smartTime, urgencyText } from '@/shared/lib/format'
+import { format } from 'date-fns'
+import { dateTimeLabel, slaState, smartTime } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import { parseStageNumber, stageByNo } from '@/shared/workflow/stages'
 import type { Task } from '@/shared/model/types'
-import {
-  Badge,
-  EmptyState,
-  PageHeader,
-  Panel,
-  StageDot,
-  TimeBar,
-} from '@/shared/ui/display'
-import { Button, Field, Input, SearchInput, Select, Textarea } from '@/shared/ui/primitives'
+import { EmptyState, PageHeader } from '@/shared/ui/display'
+import { Button, Field, SearchInput, Select, Textarea, Input } from '@/shared/ui/primitives'
 import { Dialog, Tabs } from '@/shared/ui/overlay'
-import { DataTable, type Column } from '@/shared/ui/table'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
 import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
 import { completedInPeriod, taskViewFromParams, validDateFilter, type TaskView } from '@/features/staff/task-filters'
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
+import { ClockCell, RemarkPanel, clockOf } from './task-parts'
+import { Flag, OwnerTag, StageTrack } from './task-identity'
 import '@/styles/tasks-page.css'
 
 type TabKey = TaskView
+type SortKey = 'due' | 'newest' | 'candidate' | 'owner'
+
+const PAGE_SIZE = 20
+const COLUMNS = [
+  { key: 'candidate', header: 'Candidate', width: 17 },
+  { key: 'order', header: 'Order', width: 13 },
+  { key: 'stage', header: 'Stage', width: 12 },
+  { key: 'owner', header: 'Assigned to', width: 9 },
+  { key: 'created', header: 'Created', width: 7 },
+  { key: 'due', header: 'Due', width: 7 },
+  { key: 'remaining', header: 'Time remaining', width: 12 },
+  { key: 'update', header: 'Daily update', width: 14 },
+  { key: 'actions', header: 'Actions', width: 9 },
+] as const
+
+/** Two lines: the day and the time, so the date columns stay narrow. */
+function Stamp({ value, empty }: { value?: string | Date; empty?: boolean }) {
+  if (!value || empty) return <span className="tk-muted">—</span>
+  const date = new Date(value)
+  return <span className="tk-stamp" title={dateTimeLabel(date)}><b>{format(date, 'd MMM')}</b><small>{format(date, 'HH:mm')}</small></span>
+}
 
 export default function TasksPage() {
   const store = useStore()
@@ -35,10 +51,13 @@ export default function TasksPage() {
   const stageFilter = parseStageNumber(params.get('stage'))
 
   const [openApp, setOpenApp] = useState<string | null>(null)
-  const [remarking, setRemarking] = useState<string | null>(null)
+  const [openStage, setOpenStage] = useState<number | undefined>()
+  const [expanded, setExpanded] = useState<string | null>(null)
   const [resetting, setResetting] = useState<Task | null>(null)
   const [reassigning, setReassigning] = useState<Task | null>(null)
   const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<SortKey>('due')
+  const [shown, setShown] = useState(PAGE_SIZE)
   const taskRead = useWorkspaceRead(params.toString())
   const clock = useDeadlineClock()
   const taskReadReady = !taskRead.loading && !taskRead.error
@@ -89,14 +108,15 @@ export default function TasksPage() {
 
   const buckets = useMemo(() => {
     const open = scope.filter((t) => !t.completedAt && !t.cancelledAt)
+    const now = new Date(clock)
     return {
       open,
       history: scope,
       due: open.filter((t) => {
-        const s = slaState(taskClockStart(t))
-        return !s.overdue && agencyDay(s.dueAt, store.agencyTimezone) === agencyDay(new Date(), store.agencyTimezone)
+        const s = slaState(taskClockStart(t), now)
+        return !s.overdue && agencyDay(s.dueAt, store.agencyTimezone) === agencyDay(now, store.agencyTimezone)
       }),
-      overdue: open.filter((t) => slaState(taskClockStart(t)).overdue),
+      overdue: open.filter((t) => slaState(taskClockStart(t), now).overdue),
       escalated: open.filter((t) => t.escalated),
       initial: open.filter((t) => t.kind === 'initial_call'),
       missing: open.filter((t) => !store.updatedToday(t.id)),
@@ -104,220 +124,288 @@ export default function TasksPage() {
     }
   }, [scope, completedFrom, completedTo, store.agencyTimezone, store.updatedToday, clock])
 
+  const orderOf = (t: Task) => {
+    const app = store.applications.find((a) => a.id === t.applicationId)
+    return app ? store.order(app.orderId) ?? null : null
+  }
   const term = query.trim().toLowerCase()
   const matches = (task: Task) => {
     if (!term) return true
-    const app = store.applications.find((a) => a.id === task.applicationId)
-    return [task.title, store.candidate(task.candidateId)?.name, app ? store.orderLabel(app.orderId) : '', store.user(task.ownerId)?.name]
+    const order = orderOf(task)
+    return [task.title, store.candidate(task.candidateId)?.name, order ? store.orderLabel(order.id) : '', store.user(task.ownerId)?.name]
       .some((value) => value?.toLowerCase().includes(term))
   }
-  const rows = buckets[tab].filter(matches).sort((a, b) =>
-    tab === 'completed'
-      ? +new Date(b.completedAt!) - +new Date(a.completedAt!)
-      : +new Date(taskClockStart(a)) - +new Date(taskClockStart(b)),
-  )
+  const dueMs = (t: Task) => +new Date(taskClockStart(t)) + 48 * 3600_000
+  const rows = buckets[tab].filter(matches).sort((a, b) => {
+    if (tab === 'completed') return +new Date(b.completedAt!) - +new Date(a.completedAt!)
+    if (sort === 'newest') return +new Date(b.createdAt) - +new Date(a.createdAt)
+    if (sort === 'candidate') return (store.candidate(a.candidateId)?.name ?? '').localeCompare(store.candidate(b.candidateId)?.name ?? '')
+    if (sort === 'owner') return (store.user(a.ownerId)?.name ?? '').localeCompare(store.user(b.ownerId)?.name ?? '') || dueMs(a) - dueMs(b)
+    return dueMs(a) - dueMs(b)
+  })
+  useEffect(() => { setShown(PAGE_SIZE) }, [tab, term, staffFilter, sort, stageFilter])
 
   const tabs = [
-    ...(historyDay ? [{ key: 'history', label: 'Missing updates on this date' }] : []),
+    ...(historyDay ? [{ key: 'history', label: 'No update on this date' }] : []),
     { key: 'open', label: 'Open' },
     { key: 'due', label: 'Due today' },
     { key: 'overdue', label: 'Overdue' },
+    ...(isSupervisor ? [{ key: 'escalated', label: 'Escalated' }] : []),
     { key: 'completed', label: 'Completed' },
   ]
-  const moreViews = [
-    { key: 'initial', label: 'Initial calls' },
-    { key: 'missing', label: 'No update today' },
-    ...(isSupervisor ? [{ key: 'escalated', label: 'Escalated' }] : []),
-  ]
-
   const notUpdated = buckets.open.filter((t) => !store.updatedToday(t.id)).length
-
-  if (!taskReadReady || (historyDay && (historyLoading || historyError))) return <>
-    <PageHeader title="Tasks" description="Follow-ups and deadlines across the recruitment workflow." />
-    <Panel><div className="space-y-3 p-5">
-      {taskReadError || historyError ? <><p role="alert" className="text-sm text-stamp-700">{taskReadError || historyError}</p><p className="text-sm text-ink-500">Refresh this view to load current tasks. Previous counts are hidden until the check succeeds.</p><Button onClick={taskRead.refresh}>Retry task refresh</Button></>
-        : <p role="status" className="text-sm text-ink-500">Loading current ownership and task status…</p>}
-    </div></Panel>
-  </>
-
-  const orderOf = (t: Task) => {
-    const app = store.applications.find((a) => a.id === t.applicationId)
-    return app ? store.orderLabel(app.orderId) : null
-  }
-  const statusOf = (t: Task) => t.completedAt ? 'Completed' : t.escalated ? 'Escalated' : store.updatedToday(t.id) ? 'Open' : 'No update today'
-  const taskColumns: Column<Task>[] = [
-    {
-      key: 'title',
-      header: 'Task',
-      sortable: true,
-      width: '24%',
-      value: (t) => t.title,
-      render: (t) => <RecordIdentity name={store.candidate(t.candidateId)?.name ?? t.title} detail={t.title} />,
-    },
-    {
-      key: 'order',
-      header: 'Order & stage',
-      width: '20%',
-      value: (t) => orderOf(t) ?? 'Not mapped',
-      render: (t) => (
-        <div className="min-w-[10rem]">
-          <p className="leading-snug text-ink">{orderOf(t) ?? <span className="text-ink-400">Not mapped to an order</span>}</p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-ink-500">
-            {t.stage ? <><StageDot no={t.stage} />{stageByNo(t.stage).title}</> : 'Initial call'}
-          </p>
-        </div>
-      ),
-    },
-    {
-      key: 'owner',
-      header: 'Assigned to',
-      sortable: true,
-      className: 'whitespace-nowrap',
-      value: (t) => store.user(t.ownerId)?.name ?? '',
-      render: (t) => <span className="inline-flex items-center gap-1.5"><UserRound size={14} className="text-ink-400" aria-hidden />{store.user(t.ownerId)?.name ?? '—'}</span>,
-    },
-    {
-      key: 'sla',
-      header: 'Deadline',
-      sortable: true,
-      width: '14%',
-      value: (t) => t.createdAt,
-      render: (t) =>
-        t.completedAt ? (
-          <span className="text-[13px] text-ink-500">Completed {smartTime(t.completedAt)}</span>
-        ) : (
-          <TimeBar createdAt={taskClockStart(t)} />
-        ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      className: 'whitespace-nowrap',
-      value: statusOf,
-      render: (t) => <Badge dot tone={t.completedAt ? 'neutral' : t.escalated ? 'stamp' : store.updatedToday(t.id) ? 'navy' : 'amber'}>{statusOf(t)}</Badge>,
-    },
-    {
-      key: 'remarks',
-      header: 'Latest remark',
-      width: '20%',
-      value: (t) => store.remarksFor(t.id)[0]?.body ?? '',
-      render: (t) => {
-        const latest = store.remarksFor(t.id)[0]
-        if (t.completedAt && !latest) return <span className="text-ink-300">—</span>
-        return (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setRemarking(t.id)
-            }}
-            className="group w-full text-left"
-          >
-            {latest ? (
-              <>
-                <span className="line-clamp-2 leading-snug text-ink-700 group-hover:text-ink">{latest.body}</span>
-                <span className="mt-0.5 block text-[12.5px] text-ink-400">
-                  {store.user(latest.authorId)?.name} · {smartTime(latest.createdAt)}
-                </span>
-              </>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 font-medium text-navy-700 group-hover:text-navy-600">
-                <MessageSquarePlus className="h-3.5 w-3.5" />
-                Add remark
-              </span>
-            )}
-          </button>
-        )
-      },
-    },
-  ]
   const canReassign = store.can('reassign')
   const canReset = store.me.role === 'admin'
-  if (canReassign || canReset) taskColumns.push({
-    key: 'actions', header: '',
-    render: (task) => (!task.completedAt && !task.cancelledAt) ? (
-      <div className="flex items-center justify-end gap-1 whitespace-nowrap">
-        {canReassign && <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setReassigning(task) }}>Reassign</Button>}
-        {canReset && <Button size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); setResetting(task) }}>Reset SLA</Button>}
-      </div>
-    ) : null,
-  })
+
+  // How many closed tasks were finished inside their 48 hours (real completion times only).
+  const closed = scope.filter((t) => t.completedAt)
+  const onTime = closed.filter((t) => +new Date(t.completedAt!) <= dueMs(t)).length
+  const onTimeRate = closed.length ? Math.round((onTime / closed.length) * 100) : null
+
+  if (!taskReadReady || (historyDay && (historyLoading || historyError))) return <div className="tk">
+    <PageHeader title="Tasks" description="Each stage a candidate reaches becomes a task with a 48-hour limit." />
+    <section className="tk-panel tk-state" aria-busy={!taskReadError && !historyError}>
+      {taskReadError || historyError ? <>
+        <TriangleAlert size={22} aria-hidden="true" />
+        <p role="alert" className="tk-state-title">{taskReadError || historyError}</p>
+        <p>We could not load your tasks, so the counts are hidden. Check your internet and try again.</p>
+        <Button variant="primary" onClick={taskRead.refresh}>Try again</Button>
+      </> : <>
+        <div className="tk-skeleton" aria-hidden="true"><i /><i /><i /><i /></div>
+        <p role="status">Loading your tasks…</p>
+      </>}
+    </section>
+  </div>
+
+  const tiles = [
+    { key: 'open', label: 'Open tasks', value: buckets.open.length, detail: 'Waiting for the next step', icon: ClipboardList, tone: 'blue' as const },
+    { key: 'due', label: 'Due today', value: buckets.due.length, detail: 'Time runs out today', icon: CalendarClock, tone: 'amber' as const },
+    { key: 'overdue', label: 'Overdue', value: buckets.overdue.length, detail: 'Past 48 hours', icon: TimerOff, tone: 'red' as const },
+    ...(isSupervisor ? [{ key: 'escalated', label: 'Escalated', value: buckets.escalated.length, detail: 'Sent to admin', icon: ShieldAlert, tone: 'red' as const }] : []),
+    { key: 'missing', label: 'Not updated today', value: notUpdated, detail: 'No remark added yet', icon: MessageSquareOff, tone: 'amber' as const },
+    { key: 'completed', label: 'Completed', value: buckets.completed.length, detail: completedFrom || completedTo ? 'In the selected period' : 'Stage finished', icon: CheckCheck, tone: 'green' as const },
+  ]
+
+  const openTask = (t: Task) => { if (t.applicationId) { setOpenStage(t.stage || undefined); setOpenApp(t.applicationId) } else navigate(`/candidates/${t.candidateId}`) }
+  const onRowKey = (event: KeyboardEvent<HTMLElement>, t: Task) => {
+    if (event.target !== event.currentTarget) return
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openTask(t) }
+  }
+  const now = new Date(clock)
+  const visible = rows.slice(0, shown)
+  const nextUp = [...buckets.open].sort((a, b) => dueMs(a) - dueMs(b))[0]
+  const nextName = nextUp ? store.candidate(nextUp.candidateId)?.name ?? nextUp.title : ''
+  const quickViews = [
+    { key: 'initial', label: 'Initial calls' },
+    { key: 'missing', label: 'Not updated today' },
+  ]
+  const view = viewInfo(tab, historyDay)
 
   return (
-    <>
+    <div className="tk">
       <PageHeader
         title="Tasks"
-        description="Follow-ups and deadlines across the recruitment workflow."
-        actions={<Button onClick={taskRead.refresh}>Refresh tasks</Button>}
+        description="Each time a candidate moves to a new stage, a task is created with a 48-hour limit. The task closes when that stage is finished. Add one remark a day to every open task."
+        actions={<>
+          <Button variant="primary" disabled={!nextUp} onClick={() => nextUp && openTask(nextUp)} title={nextUp ? `Open the task closest to its deadline: ${nextName}` : 'No open tasks'}>
+            <Sparkles size={15} aria-hidden="true" />Open next task<ArrowRight size={15} aria-hidden="true" />
+          </Button>
+          <Button onClick={taskRead.refresh}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
+        </>}
       />
 
-      <SummaryCards
-        items={[
-          { label: 'Open tasks', value: buckets.open.length, detail: 'In your current workflow', icon: ClipboardList },
-          { label: 'Due today', value: buckets.due.length, detail: 'Prioritise these next', icon: CalendarClock, tone: 'violet' },
-          { label: 'Overdue', value: buckets.overdue.length, detail: 'Past the 48-hour limit', icon: TimerOff, tone: 'amber' },
-          { label: 'Completed', value: buckets.completed.length, detail: completedFrom || completedTo ? 'In the selected period' : 'Finished tasks', icon: CheckCheck, tone: 'green' },
-        ]}
-      />
-      {store.me.role === 'admin' && <AutomationSettings />}
+      <SummaryCards items={tiles.map(({ key, label, value, detail, icon, tone }) => ({ label, value, detail, icon, tone, active: tab === key, onSelect: () => changeTab(key) }))} />
 
-      <div className="tasks-notices">
-        {historyDay && <p className="is-warn">Daily updates missing on {historyDay}, for the recruiter responsible on that date. <button onClick={() => navigate('/tasks')}>Show current tasks</button></p>}
+      <div className={cn('tk-strips', store.me.role === 'admin' && 'has-two')}>
+        <div className="tk-meter">
+          <span className="tk-meter-icon"><CheckCheck size={18} aria-hidden="true" /></span>
+          <div className="tk-meter-body">
+            <p>On-time completion</p>
+            {onTimeRate === null
+              ? <small>Shows after tasks are finished. A task is on time if its stage is finished within 48 hours.</small>
+              : <small><b className="tnum">{onTimeRate}%</b> of {closed.length} finished {closed.length === 1 ? 'task was' : 'tasks were'} done within 48 hours</small>}
+            <span className="tk-meter-track" role="img" aria-label={onTimeRate === null ? 'No completed tasks yet' : `${onTimeRate} percent completed on time`}>
+              <i className={cn(onTimeRate !== null && onTimeRate < 50 && 'is-low', onTimeRate !== null && onTimeRate >= 50 && onTimeRate < 80 && 'is-mid')} style={{ width: `${onTimeRate ?? 0}%` }} />
+            </span>
+          </div>
+        </div>
+        {store.me.role === 'admin' && <AutomationSettings />}
+      </div>
+
+      <div className="tk-notices">
+        {historyDay && <p className="is-warn">Tasks with no daily update on {historyDay}, for the recruiter in charge that day. <button onClick={() => navigate('/tasks')}>Show current tasks</button></p>}
         {params.get('task') && notificationTask && <p>Showing the task from your notification. <button onClick={() => navigate('/tasks')}>Show all tasks</button></p>}
         {notificationTask?.completedAt && <p>Completed {dateTimeLabel(notificationTask.completedAt)}. {tab !== 'completed' && <button onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.set('view', 'completed'); next.delete('from'); next.delete('to'); next.delete('date'); return next })}>View completed task</button>}</p>}
         {notificationTask?.cancelledAt && <p>Cancelled {dateTimeLabel(notificationTask.cancelledAt)}. <button onClick={() => navigate(`/candidates/${notificationTask.candidateId}`)}>View candidate history</button></p>}
-        {params.get('task') && !notificationTask && <p role="status">This task is no longer available in your current access.</p>}
+        {params.get('task') && !notificationTask && <p role="status">You can no longer see this task.</p>}
         {stageFilter !== null && <p>Stage {stageFilter} — {stageByNo(stageFilter).title}. <button onClick={() => navigate('/tasks')}>Clear</button></p>}
-        {notUpdated > 0 && tab !== 'completed' && tab !== 'history' && <p className="is-warn"><MessageSquarePlus size={15} aria-hidden="true" />{notUpdated} open {notUpdated === 1 ? 'task has' : 'tasks have'} no remark today. Each open task needs a daily update.</p>}
+        {notUpdated > 0 && tab !== 'completed' && tab !== 'history' && tab !== 'missing' && <p className="is-warn"><TriangleAlert size={15} aria-hidden="true" />{notUpdated} open {notUpdated === 1 ? 'task has' : 'tasks have'} no remark today. Each open task needs a daily update. <button onClick={() => changeTab('missing')}>Show them</button></p>}
       </div>
 
-      <Panel flush>
-        <Tabs tabs={tabs} active={tab} onChange={changeTab} className="px-2" />
-        <div className="tasks-toolbar">
-          <SearchInput value={query} onChange={setQuery} placeholder="Search task, candidate, order or recruiter" className="tasks-search" />
+      <section className="tk-panel">
+        <div className="tk-panel-head">
+          <div className="tk-panel-title">
+            <h2>{view.title}</h2>
+            <p>{view.description}</p>
+          </div>
+          <SearchInput value={query} onChange={setQuery} placeholder="Search candidate, order or task" className="tk-search" />
+        </div>
+        <Tabs tabs={tabs} active={tab} onChange={changeTab} />
+        <div className="tk-toolbar">
           {isSupervisor && (
-            <Select value={staffFilter} onChange={(e) => updateFilter('staff', e.target.value)} className="w-48" aria-label="Filter by staff">
-              <option value="all">Whole team</option>
+            <Select value={staffFilter} onChange={(e) => updateFilter('staff', e.target.value)} className="tk-select" aria-label="Filter by staff">
+              <option value="all">All staff</option>
               {store.users
                 .filter((u) => u.role !== 'admin' || u.id === staffFilter)
                 .map((u) => <option key={u.id} value={u.id}>{u.name}{!u.active ? ' (inactive)' : ''}</option>)}
             </Select>
           )}
-          <Select className="w-44" aria-label="More task views" value={moreViews.some(view => view.key === tab) ? tab : ''} onChange={(e) => { if (e.target.value) changeTab(e.target.value) }}>
-            <option value="">More views</option>
-            {moreViews.map((view) => <option key={view.key} value={view.key}>{view.label}</option>)}
-          </Select>
+          {tab !== 'completed' && (
+            <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="tk-select" aria-label="Sort tasks">
+              <option value="due">Due soonest</option>
+              <option value="newest">Newest first</option>
+              <option value="candidate">Candidate A-Z</option>
+              <option value="owner">Assigned to</option>
+            </Select>
+          )}
+          {tab !== 'completed' && <div className="tk-chips" role="group" aria-label="Quick views">
+            {quickViews.map((item) => (
+              <button key={item.key} type="button" className={cn('tk-chip', tab === item.key && 'is-active')} aria-pressed={tab === item.key} onClick={() => changeTab(tab === item.key ? 'open' : item.key)}>
+                {item.label}
+              </button>
+            ))}
+          </div>}
           {tab === 'completed' && <>
-            <label className="tasks-date">From<Input type="date" value={completedFrom} max={completedTo || undefined} onChange={event => updateFilter('from', event.target.value)} aria-label="Completed from" /></label>
-            <label className="tasks-date">To<Input type="date" value={completedTo} min={completedFrom || undefined} onChange={event => updateFilter('to', event.target.value)} aria-label="Completed to" /></label>
+            <label className="tk-date">From<Input type="date" value={completedFrom} max={completedTo || undefined} onChange={event => updateFilter('from', event.target.value)} aria-label="Completed from" /></label>
+            <label className="tk-date">To<Input type="date" value={completedTo} min={completedFrom || undefined} onChange={event => updateFilter('to', event.target.value)} aria-label="Completed to" /></label>
           </>}
-          <span className="tasks-count" role="status">{rows.length} {rows.length === 1 ? 'task' : 'tasks'}</span>
+          <span className="tk-count" role="status">{rows.length} {rows.length === 1 ? 'task' : 'tasks'}</span>
         </div>
 
         {rows.length === 0 ? (
-          <EmptyState title={emptyTitle(tab)} description={term ? 'Try a different search.' : emptyBody(tab)} />
+          <EmptyState title={term ? 'No matching tasks' : emptyTitle(tab)} description={term ? 'Try a different search.' : emptyBody(tab)} />
         ) : (
-          <DataTable
-            rows={rows}
-            columns={taskColumns}
-            rowKey={(t) => t.id}
-            pageSize={20}
-            resetPageKey={`${tab}:${term}:${staffFilter}`}
-            onRowClick={(t) =>
-              t.applicationId ? setOpenApp(t.applicationId) : navigate(`/candidates/${t.candidateId}`)
-            }
-            rowClassName={(t) =>
-              !t.completedAt && slaState(taskClockStart(t)).overdue ? 'bg-stamp-50/40' : undefined
-            }
-          />
+          <div className="tk-table-wrap">
+            <table className="tk-table" aria-label="Tasks">
+              <colgroup>{COLUMNS.map((c) => <col key={c.key} style={{ width: `${c.width}%` }} />)}</colgroup>
+              <thead>
+                <tr>{COLUMNS.map((c) => <th key={c.key} scope="col" className={cn(c.key === 'actions' && 'is-actions')}><span>{c.header}</span></th>)}</tr>
+              </thead>
+              <tbody>
+                {visible.map((t) => {
+                  const clockState = clockOf(t, now)
+                  const open = !t.completedAt && !t.cancelledAt
+                  const dueAt = new Date(dueMs(t))
+                  const remarks = store.remarksFor(t.id)
+                  const updated = store.updatedToday(t.id)
+                  const isOpen = expanded === t.id
+                  const order = orderOf(t)
+                  const candidateName = store.candidate(t.candidateId)?.name ?? t.title
+                  const owner = store.user(t.ownerId)
+                  return (
+                    <Fragment key={t.id}>
+                      <tr
+                        className={cn('tk-row', `is-${clockState.tone}`, isOpen && 'is-expanded')}
+                        tabIndex={0}
+                        onClick={() => openTask(t)}
+                        onKeyDown={(event) => onRowKey(event, t)}
+                        aria-label={`${candidateName}, ${t.title}`}
+                      >
+                        <td className="tk-cell-candidate" data-label="">
+                          <RecordIdentity name={candidateName} detail={t.title} />
+                        </td>
+                        <td data-label="Order">
+                          {order
+                            ? <span className="tk-order" title={store.orderLabel(order.id)}>
+                                <Flag country={order.country} />
+                                <span className="tk-order-text"><b>{store.designation(order.designationId)?.title ?? 'Job'}</b><small>{store.company(order.companyId)?.name ?? 'Company'}</small></span>
+                              </span>
+                            : <span className="tk-muted">Not matched to an order</span>}
+                        </td>
+                        <td data-label="Stage"><StageTrack no={t.stage} /></td>
+                        <td data-label="Assigned to">
+                          <OwnerTag name={owner?.name} />
+                          {open && canReassign && (t.escalated || clockState.tone === 'over') && <button type="button" className="tk-link" onClick={(event) => { event.stopPropagation(); setReassigning(t) }}>Reassign</button>}
+                        </td>
+                        <td data-label="Created"><Stamp value={t.createdAt} /></td>
+                        <td data-label="Due"><Stamp value={dueAt} empty={!!t.cancelledAt} /></td>
+                        <td data-label="Time remaining"><ClockCell clock={clockState} /></td>
+                        <td data-label="Daily update">
+                          {open ? (
+                            <span className={cn('tk-pill', updated ? 'is-ok' : 'is-warn')}>{updated ? 'Updated today' : 'Not updated today'}</span>
+                          ) : <span className="tk-pill is-muted">{t.completedAt ? 'Closed' : 'Cancelled'}</span>}
+                          {remarks.length > 0 && <small className="tk-sub">{remarks.length} {remarks.length === 1 ? 'remark' : 'remarks'}</small>}
+                                                  </td>
+                        <td className="tk-cell-actions" data-label="">
+                          <span className="tk-acts">
+                            <button
+                              type="button"
+                              className={cn('tk-act', isOpen && 'is-on')}
+                              aria-expanded={isOpen}
+                              aria-label={`${open ? 'Add remark for' : 'Remarks for'} ${candidateName}, ${remarks.length} so far`}
+                              title={`${open ? 'Add a daily remark' : 'View remarks'} (${remarks.length} so far)`}
+                              onClick={(event) => { event.stopPropagation(); setExpanded(isOpen ? null : t.id) }}
+                            >
+                              {open ? <MessageSquarePlus size={16} aria-hidden="true" /> : <MessageSquare size={16} aria-hidden="true" />}
+                              <span className="tk-act-label">{open ? 'Add remark' : 'Remarks'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="tk-act"
+                              aria-label={t.applicationId ? `Open stage for ${candidateName}` : `Open ${candidateName}`}
+                              title={t.applicationId ? 'Open this stage' : 'Open candidate'}
+                              onClick={(event) => { event.stopPropagation(); openTask(t) }}
+                            >
+                              <ArrowRight size={16} aria-hidden="true" />
+                              <span className="tk-act-label">Open</span>
+                            </button>
+                          </span>
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="tk-expand-row">
+                          <td colSpan={COLUMNS.length}>
+                            <RemarkPanel
+                              task={t}
+                              onReassign={open && canReassign ? () => setReassigning(t) : undefined}
+                              onReset={open && canReset ? () => setResetting(t) : undefined}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </Panel>
+        {rows.length > 0 && (
+          <div className="tk-foot">
+            <span className="tnum" aria-live="polite">Showing {Math.min(shown, rows.length)} of {rows.length}</span>
+            {rows.length > shown && <Button size="sm" onClick={() => setShown((n) => n + PAGE_SIZE)}>Show more ({rows.length - shown} left)</Button>}
+          </div>
+        )}
+      </section>
 
-      <RemarksDialog key={remarking} taskId={remarking} onClose={() => setRemarking(null)} />
       {resetting && <ResetDeadline task={resetting} onClose={() => setResetting(null)} />}
       {reassigning && <ReassignCandidatesDialog key={reassigning.candidateId} candidateIds={[reassigning.candidateId]} onClose={() => setReassigning(null)} description={`${store.candidate(reassigning.candidateId)?.name || 'Candidate'} · ${reassigning.title}`} />}
-      <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
-    </>
+      <StageModal applicationId={openApp} open={!!openApp} focusStage={openStage} onClose={() => setOpenApp(null)} />
+    </div>
   )
+}
+
+function viewInfo(tab: TabKey, historyDay: string | null) {
+  return {
+    history: { title: 'Tasks with no daily update', description: historyDay ? `Open tasks with no remark on ${historyDay}.` : 'Open tasks with no remark on the chosen day.' },
+    open: { title: 'Open tasks', description: 'All tasks waiting for the next step. Closest deadline first.' },
+    due: { title: 'Due today', description: 'Tasks whose 48 hours run out today.' },
+    overdue: { title: 'Overdue', description: 'Tasks past their 48-hour limit. Give them to someone else or finish the stage.' },
+    escalated: { title: 'Escalated', description: 'Overdue tasks that were sent on to the admin.' },
+    initial: { title: 'Initial calls', description: 'First calls waiting for a result before a stage starts.' },
+    missing: { title: 'Not updated today', description: 'Open tasks that still need today\'s remark.' },
+    completed: { title: 'Completed', description: 'Tasks closed by finishing their stage. Newest first.' },
+  }[tab]
 }
 
 function emptyTitle(tab: TabKey) {
@@ -333,6 +421,19 @@ function emptyTitle(tab: TabKey) {
   }[tab]
 }
 
+function emptyBody(tab: TabKey) {
+  return {
+    history: 'No task was missing a daily update on this date.',
+    open: 'Tasks show here as candidates are assigned and move to new stages.',
+    due: 'Every open task still has time left.',
+    overdue: 'Everything is on time. Keep adding daily remarks.',
+    escalated: 'No task has been sent to the admin.',
+    initial: 'Initial call tasks show here when a candidate is assigned. They close when the call result is saved.',
+    missing: 'All open tasks here have a remark today.',
+    completed: 'A task closes when its stage is completed.',
+  }[tab]
+}
+
 function AutomationSettings() {
   const store = useStore()
   const [settings, setSettings] = useState<{ escalationRepeatHours: 0 | 24; lastRunAt?: string } | null>(null)
@@ -343,16 +444,18 @@ function AutomationSettings() {
     void api.get<typeof settings>('/workflow/settings', { signal: controller.signal }).then(setSettings).catch((e) => { if (!controller.signal.aborted) setError(e.message) })
     return () => controller.abort()
   }, [])
-  return <div className="tasks-automation">
-    <div className="min-w-0 flex-1"><p className="font-medium text-ink">Task monitoring</p><p className="text-xs text-ink-500">48-hour deadline · 15-minute checks · {settings?.lastRunAt ? `Last checked ${smartTime(settings.lastRunAt)}` : 'Waiting for the scheduler'}</p></div>
-    <Select aria-label="Escalation reminders" disabled={!settings || busy} value={settings?.escalationRepeatHours ?? 0} onChange={async (e) => {
+  return <div className="tk-automation">
+    <span className="tk-meter-icon"><ShieldAlert size={18} aria-hidden="true" /></span>
+    <div className="tk-automation-text"><p>Task monitoring</p><small>48-hour limit · checked every 15 minutes · {settings?.lastRunAt ? `Last checked ${smartTime(settings.lastRunAt)}` : 'Waiting for the first check'}</small>
+    <Select className="tk-auto-select" aria-label="Alerts to the admin for overdue tasks" disabled={!settings || busy} value={settings?.escalationRepeatHours ?? 0} onChange={async (e) => {
       const hours = Number(e.target.value) as 0 | 24
       setBusy(true); setError('')
-      try { await api.patch('/workflow/settings', { escalationRepeatHours: hours }); setSettings((old) => old ? { ...old, escalationRepeatHours: hours } : old); store.notify('Escalation reminders updated') }
-      catch (e) { setError(e instanceof Error ? e.message : 'Settings could not be saved') }
+      try { await api.patch('/workflow/settings', { escalationRepeatHours: hours }); setSettings((old) => old ? { ...old, escalationRepeatHours: hours } : old); store.notify('Saved') }
+      catch (e) { setError(e instanceof Error ? e.message : 'We could not save this setting. Please try again.') }
       finally { setBusy(false) }
-    }}><option value={0}>One escalation per task</option><option value={24}>Repeat every 24 hours</option></Select>
-    {error && <p className="w-full text-xs text-stamp-700" role="alert">{error}</p>}
+    }}><option value={0}>Tell the admin once per task</option><option value={24}>Tell the admin every 24 hours</option></Select>
+    </div>
+    {error && <p className="tk-automation-error" role="alert">{error}</p>}
   </div>
 }
 
@@ -361,114 +464,16 @@ function ResetDeadline({ task, onClose }: { task: Task; onClose: () => void }) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  return <Dialog open onClose={() => { if (!busy) onClose() }} title="Reset the task deadline" description="Start a new 48-hour window. Previous escalations and this reason remain in the audit history." footer={<><Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || reason.trim().length < 3} onClick={async () => {
+  return <Dialog open onClose={() => { if (!busy) onClose() }} title="Restart the 48-hour clock" description="This gives the task a fresh 48 hours. Earlier overdue alerts and your reason stay in the history." footer={<><Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || reason.trim().length < 3} onClick={async () => {
     setBusy(true); setError('')
     try {
       await api.post(`/tasks/${task.id}/reset-sla`, { reason: reason.trim() })
-      try { await store.refresh({ keepCurrent: true }) } catch { store.notify('Deadline reset. Refresh the task list to see it.', 'warn') }
+      try { await store.refresh({ keepCurrent: true }) } catch { store.notify('The clock was restarted. Refresh the list to see it.', 'warn') }
       onClose()
-    } catch (e) { setError(e instanceof Error ? e.message : 'Deadline could not be reset') }
+    } catch (e) { setError(e instanceof Error ? e.message : 'We could not restart the clock. Please try again.') }
     finally { setBusy(false) }
-  }}>{busy ? 'Saving…' : 'Reset deadline'}</Button></>}>
+  }}>{busy ? 'Saving…' : 'Restart clock'}</Button></>}>
     {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
-    <Field label="Reason" required><Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000} /></Field>
+    <Field label="Reason" required><Textarea className="tk-reset-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000} /></Field>
   </Dialog>
-}
-
-function emptyBody(tab: TabKey) {
-  return {
-    history: 'There are no recorded missing updates for the selected recruiter and agency date.',
-    open: 'Tasks appear here as candidates are assigned and stages complete.',
-    due: 'Every open task still has time on its 48-hour clock.',
-    overdue: 'The desk is inside its limits. Keep the daily remarks going.',
-    escalated: 'Nothing has passed 48 hours without being completed.',
-    initial: 'Initial-call tasks appear when candidates are assigned and close after a call outcome is recorded.',
-    missing: 'There are no open tasks missing a daily remark in the selected scope.',
-    completed: 'A task closes when its stage is completed.',
-  }[tab]
-}
-
-/**
- * Daily updates. Every open task needs a remark each day, and remarks are permanent —
- * so this is a write-and-read panel, never an edit form.
- */
-function RemarksDialog({ taskId, onClose }: { taskId: string | null; onClose: () => void }) {
-  const store = useStore()
-  const [body, setBody] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const task = store.tasks.find((t) => t.id === taskId)
-
-  if (!task) return null
-  const cand = store.candidate(task.candidateId)
-  const remarks = store.remarksFor(task.id)
-  const sla = slaState(taskClockStart(task))
-  const canWork = !task.completedAt && !task.cancelledAt && (store.can('work_any_candidate') || task.ownerId === store.me.id)
-
-  return (
-    <Dialog
-      open={!!taskId}
-      onClose={() => { if (!busy) onClose() }}
-      title="Daily updates"
-      description={`${task.title} · ${cand?.name ?? ''}`}
-      footer={
-        <>
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Close
-          </Button>
-          <Button
-            variant="primary"
-            disabled={busy || !canWork || !body.trim()}
-            onClick={async () => {
-              if (busy || !canWork || !body.trim()) return
-              setBusy(true); setError('')
-              try { await store.addRemark(task.id, body.trim()); setBody('') }
-              catch (e) { setError(e instanceof Error ? e.message : 'Remark could not be saved') }
-              finally { setBusy(false) }
-            }}
-          >
-            Add remark
-          </Button>
-        </>
-      }
-    >
-      {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
-      {canWork && !store.updatedToday(task.id) && (
-        <p className="mb-3 rounded-control border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          This task has no remark today.
-        </p>
-      )}
-
-      <Textarea
-        rows={3}
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        placeholder="What happened today? e.g. Waiting for client feedback"
-        maxLength={10000}
-        disabled={!canWork || busy}
-      />
-
-      {remarks.length > 0 ? (
-        <ul className="mt-4 space-y-3 border-t border-rule-soft pt-4">
-          {remarks.map((r) => (
-            <li key={r.id}>
-              <p className="text-sm leading-snug text-ink-700">{r.body}</p>
-              <p className="mt-0.5 text-micro text-ink-400">
-                {store.user(r.authorId)?.name} · {smartTime(r.createdAt)}
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-4 border-t border-rule-soft pt-4 text-micro text-ink-400">
-          No remarks yet. Remarks are timestamped and cannot be edited or deleted.
-        </p>
-      )}
-
-      <p className="mt-4 border-t border-rule-soft pt-3 text-micro text-ink-400">
-        Raised {dateTimeLabel(task.createdAt)} · due {dateTimeLabel(sla.dueAt)} ·{' '}
-        <span className={urgencyText[sla.urgency]}>{sla.label}</span>
-      </p>
-    </Dialog>
-  )
 }

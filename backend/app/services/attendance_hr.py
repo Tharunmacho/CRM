@@ -408,34 +408,34 @@ def create_request(db, actor, body, *, at=None):
     existing = db.scalar(select(AttendanceHRRequest).where(AttendanceHRRequest.request_key == key))
     if existing:
         if existing.user_id != actor.id:
-            raise HTTPException(409, "Use a new request identifier")
+            raise HTTPException(409, "Something went wrong. Refresh the page and try again.")
         requested_minutes = body.get("minutes", 0) if body["kind"] in HOUR_KINDS else 0
         requested_cover = body.get("coverUserId") if body["kind"] in LEAVE_KINDS else None
         if (existing.attendance_date != as_date(body["date"]) or existing.kind != body["kind"] or
             existing.minutes != requested_minutes or existing.reason != body["reason"].strip() or
             existing.cover_user_id != requested_cover):
-            raise HTTPException(409, "This request was already saved with different details. Close this form and review request history before creating another.")
+            raise HTTPException(409, "This request was already saved with different details. Close this form and check your past requests before you make a new one.")
         return _request_json(db, actor, existing)
     at, p = at or utcnow(), policy()
     day, kind = as_date(body["date"]), body["kind"]
     shift, _ = _shift_for(db, person.id, day)
     start, end = shift_bounds(day, shift, p.timezone_name)
     if kind in {"late", "early_check_in", "work_from_home"} and at >= start:
-        raise HTTPException(422, "This permission must be requested before the shift starts")
+        raise HTTPException(422, "This permission has to be requested before your shift starts")
     if kind == "early_exit":
         cutoff = datetime.combine(day, time.min, ZoneInfo(p.timezone_name)).astimezone(timezone.utc)
         checked_out = db.scalar(select(StaffAttendanceSession.id).where(StaffAttendanceSession.user_id == person.id,
             StaffAttendanceSession.checked_in_at >= cutoff, StaffAttendanceSession.checked_in_at < cutoff + timedelta(days=1),
             StaffAttendanceSession.checked_out_at.is_not(None)).limit(1))
         if at >= end or checked_out:
-            raise HTTPException(422, "Early-exit permission must be requested before leaving")
+            raise HTTPException(422, "Permission to leave early has to be requested before you leave")
     if kind == "weekly_off":
         week = day - timedelta(days=day.weekday())
         duplicate = db.scalar(select(AttendanceHRRequest.id).where(AttendanceHRRequest.user_id == person.id,
             AttendanceHRRequest.kind == "weekly_off", AttendanceHRRequest.attendance_date.between(week, week + timedelta(days=6)),
             AttendanceHRRequest.status.in_(["pending", "approved"])).limit(1))
         if day.weekday() == 6 or duplicate:
-            raise HTTPException(422, "Choose one rotational day other than Sunday for this week")
+            raise HTTPException(422, "Choose one off day for this week. It cannot be a Sunday")
     if kind in LEAVE_KINDS:
         duplicate = db.scalar(select(AttendanceHRRequest.id).where(AttendanceHRRequest.user_id == person.id,
             AttendanceHRRequest.attendance_date == day, AttendanceHRRequest.kind.in_(LEAVE_KINDS),
@@ -496,17 +496,17 @@ def decide_request(db, actor, request_id, body, *, at=None):
     person = _employee(db, actor, row.user_id)
     stages = _decision_stages(actor, person, row)
     if not stages:
-        raise HTTPException(403 if row.status == "pending" else 409, "This request has no approval stage available to you")
+        raise HTTPException(403 if row.status == "pending" else 409, "You cannot approve this request right now")
     if body.get("emergencyOverride"):
         if actor.role != Role.admin:
-            raise HTTPException(403, "Only Admin can allow an extra permission occasion")
+            raise HTTPException(403, "Only an admin can allow an extra permission")
         if row.kind not in {"late", "early_exit"} or not body["approved"]:
-            raise HTTPException(422, "An extra permission occasion applies only when approving late arrival or early exit")
+            raise HTTPException(422, "An extra permission only applies when you approve coming in late or leaving early")
     at = at or utcnow()
     if body["approved"] and row.kind == "work_from_home":
         shift, _ = _shift_for(db, person.id, row.attendance_date)
         if at >= shift_bounds(row.attendance_date, shift, policy().timezone_name)[0]:
-            raise HTTPException(422, "Work from home must be approved before the shift starts")
+            raise HTTPException(422, "Work from home has to be approved before the shift starts")
     approvals = dict(row.approvals or {})
     record = {"actorId": actor.id, "name": actor.name, "approved": body["approved"], "reason": body["reason"].strip(), "at": at.isoformat()}
     for stage in stages:
@@ -696,12 +696,12 @@ def create_adjustment(db, actor, body, *, at=None):
         occurred = datetime.fromisoformat(occurred.replace("Z", "+00:00"))
     if kind == "add_punch":
         if not occurred or not body.get("action") or occurred.tzinfo is None or occurred > at:
-            raise HTTPException(422, "Provide a valid past punch time including timezone")
+            raise HTTPException(422, "Enter a clock-in or clock-out time from the past")
         shift, _ = _shift_for(db, body["userId"], day)
         _, end = shift_bounds(day, shift, policy().timezone_name)
         first = datetime.combine(day, time.min, ZoneInfo(policy().timezone_name))
         if occurred < first or occurred > max(first + timedelta(days=1), end + timedelta(hours=1)):
-            raise HTTPException(422, "The punch must belong to this attendance date or its overnight shift")
+            raise HTTPException(422, "The time must fall on this attendance date or in its night shift")
     row = AttendanceAdjustment(user_id=body["userId"], attendance_date=day, kind=kind, reason=body["reason"].strip(),
         actor_id=actor.id, status=body.get("status") if kind == "status_override" else None,
         minutes=body.get("minutes", 0) if kind == "time_recovery" else 0,

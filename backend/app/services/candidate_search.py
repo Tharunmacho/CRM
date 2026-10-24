@@ -1,12 +1,16 @@
 """Bounded Data Bank query and export use the same parameterized predicates."""
 import json
+import re
 from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import String, and_, case, cast, exists, func, literal_column, or_, select, true
 from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import set_committed_value
 from app.api.schemas import CandidateOut
+from app.core.config import get_settings
 from app.db.models import Application, Candidate, Order, User
 from app.services.candidate_identity import normalized_labels
 from app.services.parallel_reads import parallel_reads
@@ -15,6 +19,29 @@ from app.services.report_exports import xlsx_rows
 Pool = Literal["all", "unmapped", "not_interested", "unassigned", "needs_review"]
 STATUS_LABELS = {"new": "New", "in_process": "In process", "not_interested": "Not interested", "deployed": "Deployed", "needs_review": "Needs review"}
 UNASSIGNED_LABEL = "Needs assignment"
+# Extra column_filters keys: a range on Experience (whole years) and on Date added (YYYY-MM-DD, agency timezone).
+# "experience" (exact years) and "added" (one day, or text) keep working as before.
+RANGE_KEYS = {"experience_min", "experience_max", "added_from", "added_to"}
+ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def agency_midnight(value: str, label: str, days: int = 0) -> datetime:
+    """Midnight at the start of the given calendar day (plus `days`) in the agency timezone, as an aware datetime."""
+    try:
+        day = date.fromisoformat(value.strip())
+    except ValueError:
+        raise HTTPException(422, f"{label} must be a date written as YYYY-MM-DD.")
+    return datetime.combine(day + timedelta(days=days), time.min, tzinfo=ZoneInfo(get_settings().agency_timezone))
+
+
+def whole_years(value: str, label: str) -> int:
+    try:
+        years = int(value.strip())
+    except ValueError:
+        raise HTTPException(422, f"{label} must be a whole number of years.")
+    if years < 0 or years > 80:
+        raise HTTPException(422, f"{label} must be between 0 and 80 years.")
+    return years
 
 
 @dataclass
@@ -83,7 +110,7 @@ def search_statement(filters: Search):
     elif filters.pool == "needs_review":
         query = query.where(or_(Candidate.needs_review.is_(True), Candidate.status == "needs_review"))
     elif filters.pool != "all":
-        raise HTTPException(422, "Unknown candidate pool.")
+        raise HTTPException(422, "We do not recognise this candidate list.")
     term = filters.q.strip()
     if term:
         query = query.where(or_(
@@ -100,12 +127,26 @@ def search_statement(filters: Search):
         query = query.where(~exists(select(1).select_from(elements).where(normalized(elements.c.value) != "")).correlate(Candidate))
     try:
         column_filters = json.loads(filters.column_filters)
-        if not isinstance(column_filters, dict) or any(key not in expressions or not isinstance(val, str) or len(val) > 200 for key, val in column_filters.items()):
+        if not isinstance(column_filters, dict) or any((key not in expressions and key not in RANGE_KEYS) or not isinstance(val, str) or len(val) > 200 for key, val in column_filters.items()):
             raise ValueError()
     except (ValueError, TypeError):
-        raise HTTPException(422, "Column filters must contain recognized column names and text values.")
+        raise HTTPException(422, "One of the column filters is not valid. Clear the filters and try again.")
     for key, term in column_filters.items():
         if not term.strip():
+            continue
+        if key in RANGE_KEYS:
+            if key == "experience_min":
+                query = query.where(Candidate.total_experience >= whole_years(term, "Minimum experience"))
+            elif key == "experience_max":
+                query = query.where(Candidate.total_experience <= whole_years(term, "Maximum experience"))
+            elif key == "added_from":
+                query = query.where(Candidate.created_at >= agency_midnight(term, "Added from"))
+            else:
+                query = query.where(Candidate.created_at < agency_midnight(term, "Added to", days=1))
+            continue
+        if key == "added" and ISO_DAY.match(term.strip()):
+            # One calendar day in the agency timezone (the old filter compared text in the database timezone).
+            query = query.where(Candidate.created_at >= agency_midnight(term, "Added on"), Candidate.created_at < agency_midnight(term, "Added on", days=1))
             continue
         expression = expressions[key]
         if key in ("owner", "status"):
@@ -127,7 +168,7 @@ def search_statement(filters: Search):
             expression = cast(expression, String)
             query = query.where(literal_contains(expression, term.strip()))
     if filters.sort not in expressions:
-        raise HTTPException(422, "Unknown sort column.")
+        raise HTTPException(422, "We cannot sort by this column.")
     ordering = expressions[filters.sort]
     return query.order_by(ordering.desc().nullslast() if filters.direction == "desc" else ordering.asc().nullslast(), Candidate.id)
 

@@ -128,7 +128,7 @@ def messages(conversation_id: str, response: Response, before: str | None = Quer
             timestamp, direction, identifier = before.split("|", 2)
             stamp = datetime.fromisoformat(timestamp)
             if stamp.tzinfo is None or direction not in {"inbound", "outbound"} or not identifier: raise ValueError()
-        except (ValueError, TypeError): raise HTTPException(422, "Invalid message cursor. Reload the conversation.") from None
+        except (ValueError, TypeError): raise HTTPException(422, "We could not load more messages. Reload the conversation and try again.") from None
         query = query.where(or_(timeline.c.at < stamp, (timeline.c.at == stamp) & (timeline.c.direction < direction),
             (timeline.c.at == stamp) & (timeline.c.direction == direction) & (timeline.c.id < identifier)))
     settings = get_settings()
@@ -172,13 +172,13 @@ def _queue(db, user, conversation_id, body, request_key, *, kind="text", templat
         return {"message": chat.outbound_json(row)}
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "A send with this request key already exists. Reload its send status before continuing.") from None
+        raise HTTPException(409, "This message was already sent. Reload the conversation to see it.") from None
 
 
 @router.post("/conversations/{conversation_id}/send")
 def send(conversation_id: str, body: SendIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     if body.type == "text" and body.template is not None: raise HTTPException(422, "Text messages cannot include a template.")
-    if body.type == "template" and body.body: raise HTTPException(422, "Use the approved template values instead of a custom message body.")
+    if body.type == "template" and body.body: raise HTTPException(422, "Fill in the approved template instead of typing your own message.")
     return _queue(db, user, conversation_id, body.body, body.requestKey, kind=body.type,
         template=body.template.model_dump() if body.template else None)
 
@@ -189,11 +189,11 @@ def send_media(conversation_id: str, requestKey: str = Form(...), caption: str =
     conversation = chat.get_conversation(db, conversation_id)
     allowed, reason = chat._send_permission(db, conversation, user)
     if not allowed: raise HTTPException(403, reason)
-    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", requestKey): raise HTTPException(422, "Use a valid send request key.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", requestKey): raise HTTPException(422, "Something went wrong while sending. Reload the page and try again.")
     content_type = (file.content_type or "").lower().strip()
     mime = content_type.split(";", 1)[0]
     supported = provider.CHAT_TYPES.get(mime)
-    if not supported: raise HTTPException(422, "Choose a supported image, PDF/Office document, audio or video.")
+    if not supported: raise HTTPException(422, "Choose a photo, PDF, Office document, audio or video file.")
     payload = file.file.read(supported[1] + 1)
     if not payload or len(payload) > supported[1]: raise HTTPException(422, f"The file must be nonempty and no larger than {supported[1] // (1024 * 1024)} MB.")
     filename = re.sub(r"[^A-Za-z0-9._ -]", "-", (file.filename or "attachment").replace("\\", "/").rsplit("/", 1)[-1])[:200] or "attachment"
@@ -206,7 +206,7 @@ def send_media(conversation_id: str, requestKey: str = Form(...), caption: str =
         media["object_key"] = existing.object_key
         return _queue(db, user, conversation_id, caption, requestKey, kind=supported[0], media=media)
     chat._channel(db, conversation.phone_number_id, get_settings(), sending=True)
-    if not chat.window(conversation)[0]: raise HTTPException(409, "The reply window is closed. Choose an approved template.")
+    if not chat.window(conversation)[0]: raise HTTPException(409, "The 24-hour reply time has ended. Send an approved template instead.")
     if len(caption.strip()) > 1024: raise HTTPException(422, "Keep the media caption within 1,024 characters.")
     if supported[0] == "audio" and caption.strip(): raise HTTPException(422, "Audio messages do not support captions.")
     # The deterministic immutable key also makes an upload replay safe. It never
@@ -221,7 +221,7 @@ def recover_send(conversation_id: str, request_key: str, response: Response, db:
     row = db.scalar(select(WhatsAppSendAttempt).where(WhatsAppSendAttempt.conversation_id == conversation_id, WhatsAppSendAttempt.request_key == request_key))
     if row is None: raise HTTPException(404, "Send request not found")
     if row.sender_user_id != user.id and user.role not in (Role.admin, Role.manager):
-        raise HTTPException(403, "You can recover only your own send requests.")
+        raise HTTPException(403, "You can only retry messages that you sent yourself.")
     response.headers["Cache-Control"] = "private, no-store"
     return {"message": chat.outbound_json(row)}
 
@@ -239,7 +239,7 @@ def outbound_file(attempt_id: str, download: bool = False, db: Session = Depends
     row = db.get(WhatsAppSendAttempt, attempt_id)
     if row is None or not row.object_key: raise HTTPException(404, "Attachment not found")
     try: return file_response(get_settings(), row.object_key, row.file_name, row.content_type, download)
-    except Exception: raise HTTPException(503, "The attachment is temporarily unavailable.") from None
+    except Exception: raise HTTPException(503, "We cannot open this attachment right now. Try again soon.") from None
 
 
 @router.get("/chat-media/{message_id}")
@@ -260,9 +260,9 @@ def inbound_file(message_id: str, download: bool = False, db: Session = Depends(
             db.commit()
         except Exception:
             db.rollback()
-            raise HTTPException(503, "WhatsApp media is unavailable or expired. Ask the sender to send it again.") from None
+            raise HTTPException(503, "This file is no longer available on WhatsApp. Ask the sender to send it again.") from None
     try: return file_response(settings, row.object_key, row.file_name or "WhatsApp attachment", row.content_type or "application/octet-stream", download)
-    except Exception: raise HTTPException(503, "The attachment is temporarily unavailable.") from None
+    except Exception: raise HTTPException(503, "We cannot open this attachment right now. Try again soon.") from None
 
 
 @router.get("/templates")
@@ -276,7 +276,7 @@ def templates(phone_number_id: str | None = None, db: Session = Depends(get_db),
 @router.post("/templates/sync")
 def sync_templates(body: SyncIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
     settings = get_settings()
-    if body.phoneNumberId != settings.whatsapp_phone_number_id: raise HTTPException(409, "Choose the configured WhatsApp channel.")
+    if body.phoneNumberId != settings.whatsapp_phone_number_id: raise HTTPException(409, "Choose the WhatsApp number that is set up for this CRM.")
     try: result = chat.sync_templates(db, settings)
     except provider.WhatsAppError as exc: raise HTTPException(503, str(exc)) from None
     db.add(AuditEntry(actor_id=user.id, action="Synchronized WhatsApp templates", entity_type="whatsapp_channel", entity_id=body.phoneNumberId))

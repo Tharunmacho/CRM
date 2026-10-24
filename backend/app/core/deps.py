@@ -19,8 +19,9 @@ from app.db.session import get_db
 # against a hosted database). A short-lived in-process memo removes it from the hot path. Any write to
 # the account or session tables, from any code path in this process, empties it first, so sign-out,
 # deactivation, role changes and force-logout still take effect at once; another process (the CLI,
-# a second server) is picked up within AUTH_CACHE_SECONDS.
-AUTH_CACHE_SECONDS = 10
+# a second server) is picked up within AUTH_CACHE_SECONDS. The page polls every 10-30 s, so a 10 s memo
+# expired before most polls and each paid the lookup again; 30 s keeps an active desk on the memo.
+AUTH_CACHE_SECONDS = 30
 _AUTH_CACHE_LIMIT = 500
 _AUTH_TABLES = ("auth_sessions", "auth_users")
 _AUTH_CACHE: dict[str, tuple[float, datetime, dict]] = {}
@@ -37,6 +38,16 @@ def _forget_signins_on_account_writes(conn, cursor, statement, parameters, conte
 
 def _snapshot(user: User) -> dict:
     return {attr.key: getattr(user, attr.key) for attr in inspect(User).column_attrs}
+
+
+def remember_signin(session_id: str, expires_at: datetime, user: User) -> None:
+    """Seed the memo for a session created in this process (sign-in), so its first request skips the lookup.
+
+    Call after the commit that created the session: that commit's INSERT empties the memo.
+    """
+    if len(_AUTH_CACHE) >= _AUTH_CACHE_LIMIT:
+        _AUTH_CACHE.clear()
+    _AUTH_CACHE[session_id] = (time.monotonic(), expires_at, _snapshot(user))
 
 
 def _restore(db: Session, values: dict) -> User:

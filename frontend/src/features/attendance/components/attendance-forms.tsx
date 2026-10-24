@@ -14,7 +14,7 @@ function SaveDialog({ title, description, onClose, onSaved, children, save, labe
   const submit = async () => {
     if (saving.current) return
     saving.current = true; setBusy(true); setError('')
-    try { await save(); onSaved() } catch (cause) { setError(cause instanceof Error ? cause.message : 'The change could not be saved. Please retry.') }
+    try { await save(); onSaved() } catch (cause) { setError(cause instanceof Error ? cause.message : 'We could not save that. Try again.') }
     finally { saving.current = false; setBusy(false) }
   }
   return <Dialog open title={title} description={description} onClose={() => { if (!busy) onClose() }} footer={<><Button disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" form="attendance-policy-form" type="submit" disabled={busy}>{busy ? 'Saving…' : label}</Button></>}>
@@ -34,13 +34,13 @@ export function RequestAttendanceDialog({ today, settings, onClose, onSaved }: F
   const requestKey = useRef(crypto.randomUUID())
   const timed = ['late', 'early_exit', 'early_check_in', 'extra_ot'].includes(kind)
   const leave = ['paid_leave', 'unpaid_leave'].includes(kind)
-  return <SaveDialog title="New attendance request" description="Your request is recorded and sent to the required approvers." onClose={onClose} onSaved={onSaved} label="Submit request" save={() => api.post('/attendance/requests', { requestKey: requestKey.current, date, kind, minutes: timed ? Number(minutes) : 0, reason: reason.trim(), ...(leave && cover ? { coverUserId: cover } : {}) })}>
+  return <SaveDialog title="New attendance request" description="Your request is saved and sent to the people who must approve it." onClose={onClose} onSaved={onSaved} label="Submit request" save={() => api.post('/attendance/requests', { requestKey: requestKey.current, date, kind, minutes: timed ? Number(minutes) : 0, reason: reason.trim(), ...(leave && cover ? { coverUserId: cover } : {}) })}>
     <Field label="Date" required><DatePicker value={date} onChange={setDate} required /></Field>
     <Field label="Request type" required><Select value={kind} onChange={(event) => setKind(event.target.value as RequestKind)}>{Object.entries(requestLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Field>
     {timed && <Field label={kind === 'extra_ot' ? 'Overtime minutes' : 'Requested minutes'} required><Input type="number" min={1} max={1440} step={1} value={minutes} onChange={(event) => setMinutes(event.target.value)} required /></Field>}
     {leave && <Field label="Colleague to cover your work" required={settings.coverColleagues.length > 0} hint={settings.coverColleagues.length ? 'Your colleague must accept the cover before this leave reaches approvers.' : 'No eligible colleague is currently available.'}><Select value={cover} onChange={(event) => setCover(event.target.value)} required={settings.coverColleagues.length > 0}><option value="">Choose a colleague</option>{settings.coverColleagues.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>}
     <Field label="Reason" required className="attendance-form-wide"><Textarea required minLength={3} maxLength={1000} rows={3} value={reason} onChange={(event) => setReason(event.target.value)} /></Field>
-    <p className="attendance-form-wide attendance-help">Leave and extra overtime require the approval stages shown in request history. The server checks attendance limits and request timing before saving.</p>
+    <p className="attendance-form-wide attendance-help">Leave and extra overtime need the approvals shown in your request history. We also check your limits and the timing before saving.</p>
   </SaveDialog>
 }
 
@@ -55,9 +55,9 @@ export function DecisionDialog({ request, action, settings, onClose, onSaved }: 
   return <SaveDialog title={title} description={`${request.name} · ${request.date} · ${requestLabels[request.kind]}`} onClose={onClose} onSaved={onSaved} label={title} save={() => action === 'nominate' ? api.post(`/attendance/requests/${request.id}/cover`, { coverUserId: cover }) : coverAction ? api.post(`/attendance/requests/${request.id}/cover-response`, { accepted: action === 'accept_cover', note: reason.trim() }) : api.post(`/attendance/requests/${request.id}/decision`, { approved: action === 'approve', reason: reason.trim(), emergencyOverride: canAllowExtraOccasion && extraOccasion })}>
     <p className="attendance-form-wide attendance-help">{request.reason}</p>
     {action === 'nominate' ? <Field label="Colleague" required className="attendance-form-wide"><Select required value={cover} onChange={(event) => setCover(event.target.value)}><option value="">Choose a colleague</option>{settings.coverColleagues.filter((person) => person.id !== request.userId && person.id !== request.coverUserId).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field> : <>
-      {!coverAction && <p className="attendance-form-wide attendance-help">Your decision applies to: {request.decisionStages.map(approvalLabel).join(', ')}. Other required approvals remain separate.</p>}
-      {canAllowExtraOccasion && <div className="attendance-form-wide"><Checkbox checked={extraOccasion} onChange={setExtraOccasion} label="Allow an extra permission occasion" /><p className="attendance-help mt-2">This still uses the remaining monthly grace. It does not increase the paid-minute allowance. Your reason is recorded with this exception.</p></div>}
-      <Field label={coverAction ? 'Note' : 'Decision reason'} required={!coverAction} className="attendance-form-wide"><Textarea value={reason} onChange={(event) => setReason(event.target.value)} required={!coverAction} minLength={coverAction ? undefined : 3} maxLength={coverAction ? 500 : 1000} rows={3} /></Field>
+      {!coverAction && <p className="attendance-form-wide attendance-help">Your decision counts for: {request.decisionStages.map(approvalLabel).join(', ')}. Other approvals are separate.</p>}
+      {canAllowExtraOccasion && <div className="attendance-form-wide"><Checkbox checked={extraOccasion} onChange={setExtraOccasion} label="Allow one extra permission" /><p className="attendance-help mt-2">This still uses the free minutes left this month. It does not add more paid minutes. Your reason is saved with it.</p></div>}
+      <Field label={coverAction ? 'Note' : 'Reason for your decision'} required={!coverAction} className="attendance-form-wide"><Textarea value={reason} onChange={(event) => setReason(event.target.value)} required={!coverAction} minLength={coverAction ? undefined : 3} maxLength={coverAction ? 500 : 1000} rows={3} /></Field>
     </>}
   </SaveDialog>
 }
@@ -76,7 +76,7 @@ export function AttendanceScheduleDialog({ kind, today, userId, settings, canCor
   const [minutes, setMinutes] = useState('0')
   const [action, setAction] = useState('check_in')
   const [occurredAt, setOccurredAt] = useState(`${today}T10:00`)
-  const title = { duty: 'Plan a duty shift', timing: 'Set work timings', calendar: 'Set a calendar day', adjustment: 'Correct an attendance record' }[kind]
+  const title = { duty: 'Plan a shift', timing: 'Set work timings', calendar: 'Set a special day', adjustment: 'Fix an attendance record' }[kind]
   const save = async () => {
     const common = { userId: employee, date, reason: reason.trim() }
     const shift = { start, end, breakMinutes: Number(breakMinutes) }
@@ -85,19 +85,19 @@ export function AttendanceScheduleDialog({ kind, today, userId, settings, canCor
     if (kind === 'calendar') return api.post('/attendance/calendar', { ...common, status })
     return api.post('/attendance/adjustments', { ...common, kind: adjustment, ...(adjustment === 'status_override' ? { status } : adjustment === 'time_recovery' ? { minutes: Number(minutes) } : { action, occurredAt: new Date(occurredAt).toISOString() }) })
   }
-  return <SaveDialog title={title} description="Changes retain the actor and reason in attendance history." onClose={onClose} onSaved={onSaved} save={save}>
+  return <SaveDialog title={title} description="Your name and reason are saved in the attendance history." onClose={onClose} onSaved={onSaved} save={save}>
     <Field label="Employee" required><Select required value={employee} onChange={(event) => setEmployee(event.target.value)}><option value="">Choose an employee</option>{eligibleEmployees.map((person) => <option key={person.id} value={person.id}>{person.name}{!person.active ? ' (inactive)' : ''}</option>)}</Select></Field>
     <Field label={kind === 'timing' ? 'Effective from' : 'Date'} required><DatePicker value={date} onChange={setDate} required /></Field>
     {(kind === 'duty' || kind === 'timing') && <><Field label="Shift start" required><Input type="time" value={start} onChange={(event) => setStart(event.target.value)} required /></Field><Field label="Shift end" required><Input type="time" value={end} onChange={(event) => setEnd(event.target.value)} required /></Field><Field label="Break (minutes)" required><Input type="number" min={0} max={480} value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} required /></Field></>}
-    {kind === 'adjustment' && <Field label="Correction type" required><Select value={adjustment} onChange={(event) => setAdjustment(event.target.value)}>{canCorrect && <option value="status_override">Override attendance status</option>}<option value="time_recovery">Recover unpaid minutes</option><option value="add_punch">Add a missing punch</option></Select></Field>}
+    {kind === 'adjustment' && <Field label="What do you want to fix?" required><Select value={adjustment} onChange={(event) => setAdjustment(event.target.value)}>{canCorrect && <option value="status_override">Change the day's status</option>}<option value="time_recovery">Give back unpaid minutes</option><option value="add_punch">Add a missing check-in or check-out</option></Select></Field>}
     {(kind === 'calendar' || (kind === 'adjustment' && adjustment === 'status_override')) && <Field label="Attendance status" required><Select value={status} onChange={(event) => setStatus(event.target.value)}>{Object.entries(attendanceLabels).filter(([code]) => kind !== 'calendar' || (canCorrect ? ['H', 'WO', 'PL', 'UL'] : ['H', 'WO']).includes(code)).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</Select></Field>}
-    {kind === 'adjustment' && adjustment === 'time_recovery' && <Field label="Minutes to recover" required><Input type="number" min={1} max={1440} value={minutes} onChange={(event) => setMinutes(event.target.value)} required /></Field>}
-    {kind === 'adjustment' && adjustment === 'add_punch' && <><Field label="Punch type"><Select value={action} onChange={(event) => setAction(event.target.value)}><option value="check_in">Check in</option><option value="check_out">Check out</option></Select></Field><Field label="Punch time" required hint={`Device timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`}><Input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></Field></>}
-    {kind === 'adjustment' && adjustment === 'status_override' && <p className="attendance-help attendance-form-wide">A status override changes the recorded classification. Use recovered minutes to correct unpaid time.</p>}
+    {kind === 'adjustment' && adjustment === 'time_recovery' && <Field label="Minutes to give back" required><Input type="number" min={1} max={1440} value={minutes} onChange={(event) => setMinutes(event.target.value)} required /></Field>}
+    {kind === 'adjustment' && adjustment === 'add_punch' && <><Field label="Type"><Select value={action} onChange={(event) => setAction(event.target.value)}><option value="check_in">Check in</option><option value="check_out">Check out</option></Select></Field><Field label="Time" required hint={`Your device time zone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`}><Input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></Field></>}
+    {kind === 'adjustment' && adjustment === 'status_override' && <p className="attendance-help attendance-form-wide">This changes the status saved for the day. To fix unpaid time, choose Give back unpaid minutes instead.</p>}
     <Field label="Reason" required className="attendance-form-wide"><Textarea required minLength={3} maxLength={1000} rows={3} value={reason} onChange={(event) => setReason(event.target.value)} /></Field>
   </SaveDialog>
 }
 
 export function RemoveDutyDialog({ id, name, date, onClose, onSaved }: FormProps & { id: string; name: string; date: string }) {
-  return <SaveDialog title="Remove duty plan" description={`${name} · ${date}`} onClose={onClose} onSaved={onSaved} label="Remove duty plan" save={() => api.del(`/attendance/duty-plans/${id}`)}><p className="attendance-help attendance-form-wide">The date will use the employee’s normal shift and weekly-off rules again.</p></SaveDialog>
+  return <SaveDialog title="Remove planned shift" description={`${name} · ${date}`} onClose={onClose} onSaved={onSaved} label="Remove planned shift" save={() => api.del(`/attendance/duty-plans/${id}`)}><p className="attendance-help attendance-form-wide">The date will use the employee’s normal shift and weekly-off rules again.</p></SaveDialog>
 }

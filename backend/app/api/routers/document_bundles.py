@@ -78,7 +78,7 @@ def mutate(db, callback):
         db.rollback()
         # A lost commit response is recovered by GET or replaying the same bundle;
         # never instruct the reviewer to make a new intake after uncertainty.
-        raise HTTPException(503, "The saved review could not be confirmed. Reload this same review before retrying; its saved people and originals are retained.") from None
+        raise HTTPException(503, "We could not confirm that this review was saved. Reload it and try again. Your saved people and files are safe.") from None
 
 
 @router.post("", status_code=202)
@@ -129,6 +129,6 @@ def preview(identifier: UUID, source_id: UUID, page_number: int, db: Session = D
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(503, "This saved page preview is unavailable. Restore document storage before confirming ownership.") from None
+        raise HTTPException(503, "We cannot show this page right now because file storage is not reachable. Try again later.") from None
     return Response(data, media_type="application/pdf", headers={"Cache-Control": "private, no-store",
         "Content-Disposition": f'inline; filename="page-{page_number}.pdf"', "X-Content-Type-Options": "nosniff"})

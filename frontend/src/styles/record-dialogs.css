@@ -1,0 +1,71 @@
+/*
+ * Dialogs and drawers of Clients, Companies and Jobs on phones. Each one contains a hidden .rd-mark
+ * (DialogMark), which is how these rules reach a dialog that is drawn in a portal by shared code.
+ *  - up to 640px wide a dialog is a bottom sheet: header and footer stay put, only the body scrolls,
+ *    the buttons stack full width (main action on top), the close button is 40px;
+ *  - --rd-keyboard is how much of the window the on-screen keyboard covers (set by DialogMark), so the
+ *    sheet sits above the keyboard and its main button stays reachable.
+ * Tokens only: no colours of its own.
+ */
+@media (max-width: 1023px) {
+  /* Touch screens (tablets and sideways phones): 40px close button, 16px fields so iOS does not zoom. */
+  .workspace-dialog:has(.rd-mark) > header button[aria-label='Close'], .workspace-sheet:has(.rd-mark) > header button[aria-label='Close'] { width: 40px; height: 40px; }
+  .workspace-dialog:has(.rd-mark) :is(.ui-input, textarea, select, .custom-select-trigger, .date-picker-trigger),
+  .workspace-sheet:has(.rd-mark) :is(.ui-input, textarea, select, .custom-select-trigger, .date-picker-trigger) { font-size: 16px; }
+  .workspace-dialog:has(.rd-mark) .ui-button, .workspace-sheet:has(.rd-mark) .ui-button { min-height: 40px; }
+}
+@media (max-width: 640px) {
+  .workspace-dialog:has(.rd-mark) {
+    align-self: flex-end;
+    width: calc(100% + 24px);
+    max-width: none;
+    margin: 0 -12px calc(-12px + var(--rd-keyboard, 0px));
+    max-height: calc(100dvh - 12px - var(--rd-keyboard, 0px));
+    border-width: 1px 0 0;
+    border-radius: 16px 16px 0 0;
+  }
+  .workspace-dialog:has(.rd-mark) > header { padding-top: 14px; padding-bottom: 12px; }
+  .workspace-dialog:has(.rd-mark) > header h2 { font-size: 18px; }
+  .workspace-dialog:has(.rd-mark) > header p { font-size: 13.5px; line-height: 1.5; }
+  .workspace-dialog:has(.rd-mark) > header button[aria-label='Close'] { width: 40px; height: 40px; margin: -4px -6px 0 0; }
+  .workspace-dialog:has(.rd-mark) > .dialog-scroll-body { padding-top: 16px; padding-bottom: 16px; }
+  .workspace-dialog:has(.rd-mark) > footer { flex-direction: column-reverse; align-items: stretch; gap: 8px; padding-top: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .workspace-dialog:has(.rd-mark) > footer > * { width: 100%; min-height: 44px; justify-content: center; }
+  .workspace-dialog:has(.rd-mark) .ui-button { min-height: 44px; }
+  .workspace-dialog:has(.rd-mark) .ui-button.ui-button-sm,
+  .workspace-dialog:has(.rd-mark) .ui-button[class*='h-8'] { min-height: 40px; }
+  .workspace-dialog:has(.rd-mark) .ui-input,
+  .workspace-dialog:has(.rd-mark) textarea,
+  .workspace-dialog:has(.rd-mark) select,
+  .workspace-dialog:has(.rd-mark) .custom-select-trigger,
+  .workspace-dialog:has(.rd-mark) .date-picker-trigger { min-height: 44px; font-size: 16px; }
+  .workspace-dialog:has(.rd-mark) .custom-checkbox { width: 22px; height: 22px; }
+  .workspace-dialog:has(.rd-mark) .form-chips { gap: 8px; }
+  .workspace-dialog:has(.rd-mark) .form-chips button { min-height: 40px; }
+  /* The shared file row (view, download, replace, history): 40px targets with room between them. */
+  .workspace-dialog:has(.rd-mark) .ui-file-drop :is(a[href], button) { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; min-width: 40px; padding-inline: 10px; }
+  .workspace-dialog:has(.rd-mark) .ui-file-drop :is(p, span) a[href]:not([download]):not(.text-xs) { display: inline; min-height: 0; min-width: 0; padding: 0; }
+  .workspace-dialog:has(.rd-mark) .ui-file-drop .flex-wrap { gap: 8px; }
+
+  /* Drawers are already full screen; keep their footer above the keyboard and stack its buttons. */
+  .workspace-sheet:has(.rd-mark) { height: calc(100% - var(--rd-keyboard, 0px)); align-self: flex-start; }
+  .workspace-sheet:has(.rd-mark) > header { padding-top: 12px; padding-bottom: 12px; }
+  .workspace-sheet:has(.rd-mark) > header button[aria-label='Close'] { width: 40px; height: 40px; }
+  .workspace-sheet:has(.rd-mark) > footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .workspace-sheet:has(.rd-mark) > footer > div { flex-direction: column; align-items: stretch; }
+  .workspace-sheet:has(.rd-mark) > footer > div > p { order: 0; margin: 0 0 4px; }
+  .workspace-sheet:has(.rd-mark) > footer > div > .ui-button-primary { order: 1; }
+  .workspace-sheet:has(.rd-mark) > footer > div > .ui-button:not(.ui-button-primary) { order: 2; }
+  .workspace-sheet:has(.rd-mark) > footer .ui-button { width: 100%; min-height: 44px; }
+  .workspace-sheet:has(.rd-mark) .ui-button { min-height: 40px; }
+}
+
+/* A phone turned sideways has little height: keep the header slim so the body has room. */
+@media (max-height: 500px) and (max-width: 940px) {
+  .workspace-dialog:has(.rd-mark) > header { padding-top: 10px; padding-bottom: 8px; }
+  .workspace-dialog:has(.rd-mark) > header p { display: none; }
+  .workspace-dialog:has(.rd-mark) > .dialog-scroll-body { padding-top: 12px; padding-bottom: 12px; }
+  .workspace-dialog:has(.rd-mark) > footer { flex-direction: row-reverse; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
+  .workspace-dialog:has(.rd-mark) > footer > * { width: auto; flex: 1 1 140px; min-height: 40px; }
+  .workspace-sheet:has(.rd-mark) > header p { display: none; }
+}

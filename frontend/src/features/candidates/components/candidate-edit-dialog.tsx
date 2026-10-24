@@ -31,8 +31,8 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
   const fields: [keyof typeof form, string, string?][] = [
     ['name', 'Full name'], ['phone', 'Phone'], ['whatsapp', 'WhatsApp'], ['email', 'Email', 'email'],
     ['dob', 'Date of birth', 'date'], ['gender', 'Gender'], ['nationality', 'Nationality'], ['current_city', 'Current city'],
-    ['languages', 'Languages, separated by commas'], ['passport_no', 'Passport number'], ['passport_issue', 'Passport issue', 'date'],
-    ['passport_expiry', 'Passport expiry', 'date'], ['passport_place', 'Place of issue'], ['designations', 'Designations, separated by commas'],
+    ['languages', 'Languages (separate with commas)'], ['passport_no', 'Passport number'], ['passport_issue', 'Passport issue date', 'date'],
+    ['passport_expiry', 'Passport expiry date', 'date'], ['passport_place', 'Place of issue'], ['designations', 'Job titles (separate with commas)'],
     ['total_experience', 'Total experience (years)', 'number'], ['gulf_experience', 'Gulf experience (years)', 'number'], ['expected_salary', 'Expected salary', 'number'],
   ]
   const save = async () => {
@@ -43,7 +43,7 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
         expectedSalary: form.expected_salary })
       const names: Record<string, string> = { passportExpiry: 'passport_expiry', totalExperience: 'total_experience', gulfExperience: 'gulf_experience', expectedSalary: 'expected_salary' }
       setErrors(Object.fromEntries(Object.entries(problems).map(([key, message]) => [names[key] || key, message])))
-      if (Object.keys(problems).length) { setError('Review the highlighted fields before saving your corrections.'); return }
+      if (Object.keys(problems).length) { setError('Please fix the fields marked in red, then save again.'); return }
     }
     setSaving(true); setError('')
     let committed = saved
@@ -62,18 +62,18 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
       if (store.isCurrentSession()) onClose()
     } catch (error) {
       if (store.isCurrentSession()) setError(committed
-        ? 'Your corrections are saved. Refresh the profile to see them; retrying will not save them again.'
-        : error instanceof Error ? error.message : 'Your corrections could not be saved.')
+        ? 'Your changes are saved. Refresh the profile to see them. You do not need to save again.'
+        : error instanceof Error ? error.message : 'We could not save your changes. Please try again.')
     } finally { setSaving(false) }
   }
-  return <Dialog open onClose={() => { if (!saving) onClose() }} title="Correct candidate details" description="Update the reviewed profile. Original documents and OCR evidence stay available." width="lg" footer={<><Button disabled={saving} onClick={onClose}>{saved ? 'Close' : 'Cancel'}</Button><Button disabled={saving || !form.name.trim() || !form.phone.trim()} variant="primary" onClick={() => void save()}>{saving ? saved ? 'Refreshing…' : 'Saving…' : saved ? 'Refresh saved profile' : 'Save corrections'}</Button></>}>
+  return <Dialog open onClose={() => { if (!saving) onClose() }} title="Edit candidate details" description="Change the details on this profile. The original documents stay saved." width="lg" footer={<><Button disabled={saving} onClick={onClose}>{saved ? 'Close' : 'Cancel'}</Button><Button disabled={saving || !form.name.trim() || !form.phone.trim()} variant="primary" onClick={() => void save()}>{saving ? saved ? 'Refreshing…' : 'Saving…' : saved ? 'Refresh profile' : 'Save changes'}</Button></>}>
     <fieldset disabled={saving || saved} className="min-w-0">
     <div className="grid gap-4 sm:grid-cols-2">{fields.map(([key, label, type]) => <Field key={key} label={label} error={errors[key]} required={key === 'name' || key === 'phone'}><Input type={type || 'text'} value={form[key]} min={type === 'number' ? 0 : undefined} step={key === 'expected_salary' ? '0.01' : undefined} onChange={event => set(key, event.target.value)} /></Field>)}
-      <Field className="sm:col-span-2" label="Skills, separated by commas"><Textarea value={form.skills} onChange={event => set('skills', event.target.value)} /></Field>
+      <Field className="sm:col-span-2" label="Skills (separate with commas)"><Textarea value={form.skills} onChange={event => set('skills', event.target.value)} /></Field>
     </div>
     {candidate.needsReview && (candidate.ownerId
-      ? <label className="mt-5 flex items-center gap-2 text-sm"><CheckboxInput checked={reviewed} onChange={setReviewed} />I checked the profile and documents; mark review complete.</label>
-      : <p className="mt-5 text-sm text-amber-700">You can save corrections now. Assign a recruiter before marking the candidate review complete.</p>)}
+      ? <label className="mt-5 flex items-center gap-2 text-sm"><CheckboxInput checked={reviewed} onChange={setReviewed} />I checked the profile and documents. Mark the review as done.</label>
+      : <p className="mt-5 text-sm text-amber-700">You can save your changes now. Give this candidate a recruiter before you mark the review as done.</p>)}
     </fieldset>
     {error && <p role="alert" className="mt-4 text-sm text-stamp-600">{error}</p>}
   </Dialog>

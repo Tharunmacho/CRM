@@ -1,37 +1,31 @@
-import { useMemo, useState } from 'react'
-import { CircleCheck, Clock3, GitBranch, Pencil, TimerOff } from 'lucide-react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { CircleCheck, Clock3, Eye, GitBranch, Pencil, Search, TimerOff, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, slaState } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
-import { STAGES, closureLabels, stageByNo } from '@/shared/workflow/stages'
+import { STAGES, closureLabels } from '@/shared/workflow/stages'
 import type { Application } from '@/shared/model/types'
-import { DataTable, type Column } from '@/shared/ui/table'
-import {
-  EmptyState,
-  PageHeader,
-  Panel,
-  StageDot,
-} from '@/shared/ui/display'
-import { Button, SearchInput, Select } from '@/shared/ui/primitives'
-import { Tabs } from '@/shared/ui/overlay'
+import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
+import { Button, Select } from '@/shared/ui/primitives'
 import { StageModal } from '@/features/workflow/components/stage-modal'
-import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
+import { ownerLabel } from '@/features/candidates/data-bank-pools'
+import { arrivalTrend, weeklyArrivals } from '@/features/candidates/data-bank-trends'
+import { OwnerText, SOURCE_LABEL, SourceDot, SourceIcon, StageChip, shortDate } from '@/features/candidates/components/data-bank-columns'
+import { CountryFlag, KpiCards, Pager, StatusDot, ViewToggle, Who, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
+import { DbTable, TABLE_MIN_WIDTH, useElementWidth, type DbColumn } from '@/features/candidates/components/db-table'
+import '@/styles/data-bank-v2.css'
 
 type TabKey = 'active' | 'deployed' | 'closed'
-
-const SOURCE_LABEL: Record<string, string> = {
-  email: 'Email',
-  whatsapp: 'WhatsApp',
-  walk_in: 'Walk-in',
-  referral: 'Referral',
-  other: 'Other',
-}
 
 const STATUS_TEXT: Record<string, string> = {
   active: 'Active',
   deployed: 'Deployed',
   closed: 'Closed',
 }
+
+const TAB_TITLE: Record<TabKey, string> = { active: 'In progress', deployed: 'Deployed', closed: 'Closed' }
+const PAGE_SIZE = 20
+const Dash = () => <span className="db-muted" aria-label="None">–</span>
 
 /**
  * Every candidate mapped to an order. This is the only place a stage can be worked —
@@ -43,9 +37,20 @@ export default function MappedCandidatesPage() {
   const [query, setQuery] = useState('')
   const [stageFilter, setStageFilter] = useState('all')
   const [ownerFilter, setOwnerFilter] = useState('all')
+  const [designationFilter, setDesignationFilter] = useState('all')
+  const [companyFilter, setCompanyFilter] = useState('all')
+  const [sourceFilter, setSourceFilter] = useState('all')
   const [editing, setEditing] = useState<string | null>(null)
+  const [view, setView] = useState<DbView>(() => readView('mapped'))
+  const [page, setPage] = useState(0)
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
+  const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>()
 
   const isSupervisor = store.can('all_reports')
+
+  const designationOf = (a: Application) => { const o = store.order(a.orderId); return o ? (store.designation(o.designationId)?.title ?? '') : '' }
+  const companyOf = (a: Application) => { const o = store.order(a.orderId); return o ? (store.company(o.companyId)?.name ?? '') : '' }
+  const sourceOf = (a: Application) => store.candidate(a.candidateId)?.source ?? ''
 
   const scoped = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -53,6 +58,9 @@ export default function MappedCandidatesPage() {
       const cand = store.candidate(a.candidateId)
       if (!cand) return false
       if (ownerFilter !== 'all' && cand.ownerId !== ownerFilter) return false
+      if (designationFilter !== 'all' && designationOf(a) !== designationFilter) return false
+      if (companyFilter !== 'all' && companyOf(a) !== companyFilter) return false
+      if (sourceFilter !== 'all' && cand.source !== sourceFilter) return false
       if (!q) return true
       const order = store.order(a.orderId)
       return (
@@ -63,7 +71,7 @@ export default function MappedCandidatesPage() {
         store.orderLabel(a.orderId).toLowerCase().includes(q)
       )
     })
-  }, [store.applications, store.candidates, query, ownerFilter])
+  }, [store.applications, store.candidates, query, ownerFilter, designationFilter, companyFilter, sourceFilter])
 
   const buckets = useMemo(
     () => ({
@@ -74,285 +82,229 @@ export default function MappedCandidatesPage() {
     [scoped],
   )
 
-  // Most recently mapped first, which is the order the desk works in.
+  // Real mapping history per card: when each application was created.
+  const history = useMemo(() => {
+    const make = (status: string) => {
+      const dates = scoped.filter((a) => a.status === status).map((a) => a.createdAt)
+      return { trend: arrivalTrend(dates), spark: weeklyArrivals(dates) }
+    }
+    return { active: make('active'), deployed: make('deployed'), closed: make('closed') }
+  }, [scoped])
+
+  // Distinct choices for the designation, company and source filters, from every mapped application.
+  const choices = useMemo(() => {
+    const all = store.applications.filter((a) => store.candidate(a.candidateId))
+    const uniq = (values: string[]) => [...new Set(values.filter(Boolean))].sort((x, y) => x.localeCompare(y))
+    return { designations: uniq(all.map(designationOf)), companies: uniq(all.map(companyOf)), sources: uniq(all.map(sourceOf)) }
+  }, [store.applications, store.candidates, store.orders])
+
+  const sorters: Record<string, (a: Application) => string | number> = {
+    candidate: (a) => store.candidate(a.candidateId)?.name ?? '',
+    passport: (a) => store.candidate(a.candidateId)?.passportNo ?? '',
+    order: (a) => store.order(a.orderId)?.ref ?? '',
+    designation: designationOf,
+    company: companyOf,
+    owner: (a) => ownerLabel(store.user(store.candidate(a.candidateId)?.ownerId ?? '')?.name),
+    stage: (a) => a.currentStage,
+    mapped: (a) => a.createdAt,
+  }
+
+  // Most recently mapped first, which is the order the desk works in, unless a header is chosen.
   const rows = useMemo(() => {
     const base =
       tab === 'active' && stageFilter !== 'all'
         ? buckets.active.filter((a) => String(a.currentStage) === stageFilter)
         : buckets[tab]
-    return [...base].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-  }, [buckets, tab, stageFilter])
+    const list = [...base].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
+    if (!sort || !sorters[sort.key]) return list
+    const value = sorters[sort.key]
+    const factor = sort.dir === 'asc' ? 1 : -1
+    return list.sort((a, b) => {
+      const x = value(a)
+      const y = value(b)
+      return factor * (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true }))
+    })
+  }, [buckets, tab, stageFilter, sort, store.candidates, store.orders])
 
-  const columns: Column<Application>[] = [
+  useEffect(() => { setPage(0) }, [tab, stageFilter, ownerFilter, designationFilter, companyFilter, sourceFilter, query, sort])
+  const changeView = (next: DbView) => { setView(next); saveView('mapped', next) }
+  const onFile = store.applications.filter((a) => a.status === tab && store.candidate(a.candidateId)).length
+  const hasFilters = Boolean(query.trim()) || stageFilter !== 'all' || ownerFilter !== 'all' || designationFilter !== 'all' || companyFilter !== 'all' || sourceFilter !== 'all'
+  const clearFilters = () => { setQuery(''); setStageFilter('all'); setOwnerFilter('all'); setDesignationFilter('all'); setCompanyFilter('all'); setSourceFilter('all') }
+  const forceCards = boxWidth > 0 && boxWidth < TABLE_MIN_WIDTH
+  const showCards = forceCards || view === 'cards'
+
+  const taskOf = (a: Application) => store.tasks.find((t) => t.applicationId === a.id && !t.completedAt && !t.cancelledAt)
+  const isOverdue = (a: Application) => { const task = taskOf(a); return task ? slaState(task.createdAt).overdue : false }
+  const statusLabel = (a: Application) => (a.status === 'closed' ? (a.closureReason ? closureLabels[a.closureReason] : STATUS_TEXT.closed) : isOverdue(a) ? 'Overdue' : STATUS_TEXT[a.status])
+  const statusDot = (a: Application) => (
+    <StatusDot title={statusLabel(a)} tone={a.status === 'closed' || isOverdue(a) ? 'bad' : a.status === 'deployed' ? 'ok' : 'info'}>{statusLabel(a)}</StatusDot>
+  )
+  const canWork = (a: Application) => {
+    const c = store.candidate(a.candidateId)
+    return a.status === 'active' && !!c && (store.can('work_any_candidate') || c.ownerId === store.me.id)
+  }
+  const openButton = (a: Application) => (
+    <Button size="sm" variant={a.status === 'active' ? 'primary' : 'secondary'} icon={canWork(a) ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />} onClick={() => setEditing(a.id)}>
+      {canWork(a) ? 'Open' : 'View'}
+    </Button>
+  )
+
+  const columns: DbColumn<Application>[] = [
     {
-      key: 'candidate',
-      header: 'Candidate',
-      sortable: true,
-      width: '20%',
-      value: (a) => store.candidate(a.candidateId)?.name ?? '',
-      render: (a) => {
-        const c = store.candidate(a.candidateId)!
-        return (
-          <RecordIdentity name={c.name} detail={<span className="ident">{c.phone}</span>} />
-        )
-      },
+      key: 'candidate', header: 'Candidate', sortKey: 'candidate', width: 132,
+      render: (a) => { const c = store.candidate(a.candidateId)!; return <Who compact name={c.name} sub={<span className="ident" title={c.phone}>{c.phone}</span>} /> },
     },
     {
-      key: 'passport',
-      header: 'Passport',
-      sortable: true,
-      className: 'whitespace-nowrap',
-      value: (a) => store.candidate(a.candidateId)?.passportNo ?? '',
-      render: (a) => {
-        const c = store.candidate(a.candidateId)!
-        return c.passportNo ? (
-          <span className="ident text-ink-600">{c.passportNo}</span>
-        ) : (
-          <span className="text-ink-300">Not on file</span>
-        )
-      },
+      key: 'passport', header: 'Passport', sortKey: 'passport', width: 92,
+      render: (a) => { const c = store.candidate(a.candidateId)!; return c.passportNo ? <span className="ident db-nowrap" title={`Passport ${c.passportNo}`}>{c.passportNo}</span> : <Dash /> },
     },
+    { key: 'order', header: 'Order', sortKey: 'order', width: 92, render: (a) => <span className="db-order-chip ident" title={store.orderLabel(a.orderId)}>{store.order(a.orderId)?.ref ?? '–'}</span> },
+    { key: 'designation', header: 'Job title', sortKey: 'designation', width: 112, render: (a) => <span className="db-wrap" title={designationOf(a)}>{designationOf(a) || <Dash />}</span> },
     {
-      key: 'designation',
-      header: 'Designation',
-      sortable: true,
-      filterable: true,
-      className: 'whitespace-nowrap',
-      value: (a) => {
+      key: 'company', header: 'Company', sortKey: 'company', width: 156,
+      render: (a) => {
         const o = store.order(a.orderId)
-        return o ? (store.designation(o.designationId)?.title ?? '') : ''
+        const name = companyOf(a)
+        return <span className="db-with-flag" title={name}><CountryFlag country={o?.country ?? (o ? store.company(o.companyId)?.country : undefined)} /><span className="db-wrap">{name || <Dash />}</span></span>
       },
     },
+    { key: 'source', header: 'Source', width: 60, render: (a) => <SourceIcon source={sourceOf(a) || 'other'} /> },
+    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 104, render: (a) => <OwnerText candidate={store.candidate(a.candidateId)!} store={store} /> },
     {
-      key: 'company',
-      header: 'Company',
-      sortable: true,
-      filterable: true,
-      className: 'whitespace-nowrap',
-      value: (a) => {
-        const o = store.order(a.orderId)
-        return o ? (store.company(o.companyId)?.name ?? '') : ''
-      },
+      key: 'stage', header: 'Stage', sortKey: 'stage', width: 128,
+      render: (a) => (a.status === 'closed' && a.closureReason ? <span className="db-wrap">{closureLabels[a.closureReason]}</span> : <StageChip stage={a.currentStage} />),
     },
-    {
-      key: 'source',
-      header: 'Source',
-      filterable: true,
-      className: 'whitespace-nowrap',
-      value: (a) => SOURCE_LABEL[store.candidate(a.candidateId)?.source ?? ''] ?? '',
-    },
-    {
-      key: 'owner',
-      header: 'Assigned to',
-      sortable: true,
-      filterable: true,
-      className: 'whitespace-nowrap',
-      value: (a) => store.user(store.candidate(a.candidateId)?.ownerId ?? '')?.name ?? '',
-    },
-    {
-      key: 'stage',
-      header: 'Stage',
-      sortable: true,
-      filterable: true,
-      width: '15%',
-      value: (a) =>
-        a.status === 'closed' && a.closureReason
-          ? closureLabels[a.closureReason]
-          : `${a.currentStage}. ${stageByNo(a.currentStage).title}`,
-      render: (a) => {
-        if (a.status === 'closed' && a.closureReason) {
-          return <span className="text-stamp-700">{closureLabels[a.closureReason]}</span>
-        }
-        return (
-          <span className="flex items-center gap-2 whitespace-nowrap">
-            <StageDot no={a.currentStage} />
-            <span className="text-ink-700">{stageByNo(a.currentStage).title}</span>
-          </span>
-        )
-      },
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      filterable: true,
-      className: 'whitespace-nowrap',
-      value: (a) => STATUS_TEXT[a.status] ?? a.status,
-      render: (a) => {
-        const task = store.tasks.find(
-          (t) => t.applicationId === a.id && !t.completedAt && !t.cancelledAt,
-        )
-        const overdue = task ? slaState(task.createdAt).overdue : false
-        return (
-          <span className={cn(overdue ? 'font-medium text-stamp-700' : 'text-ink-600')}>
-            {overdue ? 'Overdue' : STATUS_TEXT[a.status]}
-          </span>
-        )
-      },
-    },
-    {
-      key: 'mapped',
-      header: 'Mapped',
-      sortable: true,
-      className: 'whitespace-nowrap',
-      value: (a) => a.createdAt,
-      render: (a) => <span className="text-ink-500">{dateLabel(a.createdAt)}</span>,
-    },
-    {
-      key: 'action',
-      header: '',
-      align: 'right',
-      render: (a) => {
-        const c = store.candidate(a.candidateId)!
-        const canWork = store.can('work_any_candidate') || c.ownerId === store.me.id
-        return (
-          <Button
-            size="sm"
-            variant={a.status === 'active' ? 'primary' : 'secondary'}
-            icon={<Pencil className="h-3.5 w-3.5" />}
-            onClick={() => setEditing(a.id)}
-          >
-            {a.status === 'active' && canWork ? 'Edit' : 'View'}
-          </Button>
-        )
-      },
-    },
+    { key: 'status', header: 'Status', width: 96, render: (a) => statusDot(a) },
+    { key: 'mapped', header: 'Matched', sortKey: 'mapped', width: 82, render: (a) => <span className="db-nowrap" title={dateLabel(a.createdAt)}>{shortDate(a.createdAt)}</span> },
+    { key: 'action', header: '', width: 92, align: 'right', render: (a) => openButton(a) },
   ]
 
+  const emptyState = (
+    <EmptyState
+      title={
+        hasFilters ? 'No matches found'
+          : tab === 'active' ? 'Nobody is in progress'
+            : tab === 'deployed' ? 'Nobody deployed yet' : 'No closed applications'
+      }
+      description={
+        hasFilters ? 'Try another search or filter, or clear them to see everything.'
+          : tab === 'active' ? 'Match candidates to an order from the Jobs page and they will show up here.'
+            : tab === 'deployed' ? 'A candidate shows up here once stage 11 is done.'
+              : 'Matches that ended at prescreening, interview or medical show up here.'
+      }
+      action={hasFilters ? <Button onClick={clearFilters}>Clear filters</Button> : undefined}
+    />
+  )
+
+  const pageRows = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
+  const overdueTasks = store.visibleTasks.filter(
+    (task) =>
+      !task.completedAt &&
+      !task.cancelledAt &&
+      slaState(task.createdAt).overdue &&
+      buckets.active.some((application) => application.id === task.applicationId),
+  ).length
+  const selects: { label: string; value: string; onChange: (value: string) => void; any: string; options: [string, string][] }[] = []
+  if (tab === 'active') selects.push({ label: 'Filter by stage', value: stageFilter, onChange: setStageFilter, any: 'Every stage', options: STAGES.map((s) => [String(s.no), `${s.no}. ${s.title}`]) })
+  selects.push({ label: 'Filter by job title', value: designationFilter, onChange: setDesignationFilter, any: 'Any job title', options: choices.designations.map((d) => [d, d]) })
+  selects.push({ label: 'Filter by company', value: companyFilter, onChange: setCompanyFilter, any: 'Any company', options: choices.companies.map((d) => [d, d]) })
+  selects.push({ label: 'Filter by source', value: sourceFilter, onChange: setSourceFilter, any: 'Any source', options: choices.sources.map((d) => [d, SOURCE_LABEL[d] ?? d]) })
+  if (isSupervisor) selects.push({ label: 'Filter by recruiter', value: ownerFilter, onChange: setOwnerFilter, any: 'All recruiters', options: store.users.filter((u) => u.role === 'staff' && u.active).map((u) => [u.id, u.name]) })
+
   return (
-    <>
+    <div className="db mc">
       <PageHeader
         title="Mapped candidates"
-        eyebrow="Recruitment pipeline"
-        description="Every match, every milestone. Move candidates from their first screening to deployment."
-        actions={
-          isSupervisor && (
-            <Select
-              value={ownerFilter}
-              onChange={(e) => setOwnerFilter(e.target.value)}
-              className="w-52"
-              aria-label="Filter by staff"
-            >
-              <option value="all">Whole team</option>
-              {store.users
-                .filter((u) => u.role === 'staff' && u.active)
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-            </Select>
-          )
-        }
+        description="Candidates who are matched to an order. Open one to work on its 11 stages, from prescreening to deployment."
       />
 
-      <SummaryCards
+      <KpiCards
         items={[
-          {
-            label: 'In progress',
-            value: buckets.active.length,
-            detail: 'Moving through the pipeline',
-            icon: GitBranch,
-          },
-          {
-            label: 'Deployed',
-            value: buckets.deployed.length,
-            detail: 'Successfully placed overseas',
-            icon: CircleCheck,
-            tone: 'green',
-          },
-          {
-            label: 'Closed',
-            value: buckets.closed.length,
-            detail: 'Completed application records',
-            icon: Clock3,
-            tone: 'violet',
-          },
-          {
-            label: 'Overdue tasks',
-            value: store.visibleTasks.filter(
-              (task) =>
-                !task.completedAt &&
-                !task.cancelledAt &&
-                slaState(task.createdAt).overdue &&
-                buckets.active.some((application) => application.id === task.applicationId),
-            ).length,
-            detail: 'Active matches needing attention',
-            icon: TimerOff,
-            tone: 'amber',
-          },
+          { label: 'In progress', value: buckets.active.length, detail: 'Being worked on now', icon: GitBranch, ...history.active, active: tab === 'active', onSelect: () => setTab('active') },
+          { label: 'Deployed', value: buckets.deployed.length, detail: 'Placed in a job abroad', icon: CircleCheck, tone: 'ok', ...history.deployed, active: tab === 'deployed', onSelect: () => setTab('deployed') },
+          { label: 'Closed', value: buckets.closed.length, detail: 'Ended before a placement', icon: Clock3, tone: 'quiet', ...history.closed, active: tab === 'closed', onSelect: () => setTab('closed') },
+          { label: 'Overdue tasks', value: overdueTasks, detail: 'Past their 48-hour deadline', icon: TimerOff, tone: 'bad' },
         ]}
       />
 
-      <Panel flush>
-        <Tabs
-          tabs={[
-            { key: 'active', label: 'In progress', count: buckets.active.length },
-            { key: 'deployed', label: 'Deployed', count: buckets.deployed.length },
-            { key: 'closed', label: 'Closed', count: buckets.closed.length, tone: 'stamp' },
-          ]}
-          active={tab}
-          onChange={(k) => setTab(k as TabKey)}
-          className="px-3"
-        />
-
-        <div className="workspace-list-toolbar">
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            placeholder="Search candidates, passports, or orders..."
-            className="min-w-0 flex-1"
-          />
-          {tab === 'active' && (
-            <Select
-              value={stageFilter}
-              onChange={(e) => setStageFilter(e.target.value)}
-              className="w-56"
-              aria-label="Filter by stage"
-            >
-              <option value="all">Every stage</option>
-              {STAGES.map((s) => (
-                <option key={s.no} value={s.no}>
-                  {s.no}. {s.title}
-                </option>
-              ))}
-            </Select>
-          )}
-          <span className="ml-auto text-xs text-ink-400 tnum">{rows.length} candidates</span>
+      <Panel flush className="db-panel">
+        <div className="db-panel-head">
+          <div className="min-w-0">
+            <h2 className="db-panel-title">{TAB_TITLE[tab]}</h2>
+            <p className="db-panel-sub tnum">Showing {rows.length} of {onFile} matches</p>
+          </div>
+          <div className="db-panel-tools">
+            <label className="db-search">
+              <Search size={15} aria-hidden="true" />
+              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, passports or orders" aria-label="Search candidates, passports or orders" />
+            </label>
+            {!forceCards && <ViewToggle view={view} onChange={changeView} />}
+          </div>
         </div>
 
-        <DataTable
-          rows={rows}
-          columns={columns}
-          rowKey={(a) => a.id}
-          pageSize={20}
-          rowClassName={(a) => {
-            const task = store.tasks.find(
-              (t) => t.applicationId === a.id && !t.completedAt && !t.cancelledAt,
-            )
-            return task && slaState(task.createdAt).overdue ? 'bg-stamp-50/40' : undefined
-          }}
-          empty={
-            <EmptyState
-              title={
-                tab === 'active'
-                  ? 'Nobody is in progress'
-                  : tab === 'deployed'
-                    ? 'Nobody deployed yet'
-                    : 'No closed applications'
-              }
-              description={
-                tab === 'active'
-                  ? 'Match candidates to an order from Jobs / Positions and they appear here.'
-                  : tab === 'deployed'
-                    ? 'A candidate lands here once stage 11 is complete.'
-                    : 'Applications closed at prescreening, interview or medical show up here.'
-              }
+        <div className="db-filters" aria-label="Filters">
+          <div className="db-filterbar" style={{ '--db-cols': selects.length } as CSSProperties}>
+            <span className="db-filterbar-label">Filters</span>
+            {selects.map((select, index) => (
+              <span className={cn('db-sel', index === selects.length - 1 && selects.length % 2 === 1 && 'is-last-odd')} key={select.label}>
+                <Select aria-label={select.label} value={select.value} onChange={(e) => select.onChange(e.target.value)}>
+                  <option value="all">{select.any}</option>
+                  {select.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </Select>
+              </span>
+            ))}
+            <span className="db-more-cell">
+              {hasFilters && <button type="button" className="db-clear" onClick={clearFilters}><X size={13} aria-hidden="true" />Clear all</button>}
+            </span>
+          </div>
+        </div>
+
+        <div ref={boxRef} className="db-box">
+          {rows.length === 0 ? emptyState : showCards ? (
+            <ul className="db-grid" aria-label="Mapped candidates">
+              {pageRows.map((a) => {
+                const c = store.candidate(a.candidateId)!
+                const o = store.order(a.orderId)
+                return (
+                  <li key={a.id} className={cn('db-mini', isOverdue(a) && 'is-overdue')} tabIndex={0} onClick={() => setEditing(a.id)}
+                    onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(a.id) } }}>
+                    <div className="db-mini-head">
+                      <Who name={c.name} sub={<span className="ident">{c.phone}</span>} />
+                      {statusDot(a)}
+                    </div>
+                    <dl className="db-mini-meta">
+                      <div><dt>Order</dt><dd><span className="db-order-chip ident">{o?.ref ?? '—'}</span></dd></div>
+                      <div><dt>Stage</dt><dd>{a.status === 'closed' && a.closureReason ? closureLabels[a.closureReason] : <StageChip stage={a.currentStage} />}</dd></div>
+                      <div><dt>Job title</dt><dd>{designationOf(a) || '—'}</dd></div>
+                      <div><dt>Company</dt><dd className="db-with-flag"><CountryFlag country={o?.country ?? (o ? store.company(o.companyId)?.country : undefined)} /><span className="db-ellip" title={companyOf(a)}>{companyOf(a) || '—'}</span></dd></div>
+                      <div><dt>Recruiter</dt><dd><OwnerText candidate={c} store={store} /></dd></div>
+                      <div><dt>Source</dt><dd><SourceDot source={c.source} /></dd></div>
+                    </dl>
+                    <div className="db-mini-foot">
+                      <span className="db-mini-when">Matched {dateLabel(a.createdAt)}</span>
+                      <span onClick={(event) => event.stopPropagation()}>{openButton(a)}</span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <DbTable
+              label="Mapped candidates"
+              rows={pageRows}
+              columns={columns}
+              rowKey={(a) => a.id}
+              sort={sort}
+              onSort={(key) => setSort((current) => ({ key, dir: current?.key === key && current.dir === 'asc' ? 'desc' : 'asc' }))}
+              rowClassName={(a) => (isOverdue(a) ? 'is-overdue' : undefined)}
             />
-          }
-        />
+          )}
+        </div>
+        {rows.length > 0 && <Pager page={page} pageSize={PAGE_SIZE} total={rows.length} noun="matches" onPage={setPage} />}
       </Panel>
 
       <StageModal applicationId={editing} open={!!editing} onClose={() => setEditing(null)} />
-    </>
+    </div>
   )
 }

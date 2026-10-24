@@ -19,11 +19,7 @@ export function Panel({
   return (
     <section
       id={id}
-      className={cn(
-        'ui-panel rounded-panel border border-rule-soft bg-white shadow-soft',
-        !flush && 'p-5',
-        className,
-      )}
+      className={cn('ui-panel rounded-[12px] border border-rule bg-white', !flush && 'p-5', className)}
     >
       {children}
     </section>
@@ -42,12 +38,17 @@ export function PanelHeader({
   className?: string
 }) {
   return (
-    <header className={cn('ui-panel-header flex items-center justify-between gap-3 border-b border-rule-soft px-5 py-4', className)}>
+    <header
+      className={cn(
+        'ui-panel-header flex flex-wrap items-center justify-between gap-3 border-b border-rule-soft px-5 py-4',
+        className,
+      )}
+    >
       <div className="min-w-0">
-        <h2 className="truncate text-h3 font-semibold text-ink">{title}</h2>
-        {meta && <p className="mt-0.5 truncate text-xs text-ink-400">{meta}</p>}
+        <h2 className="truncate text-[17px] font-semibold tracking-[-0.02em] text-ink">{title}</h2>
+        {meta && <p className="mt-0.5 truncate text-[13px] text-ink-500">{meta}</p>}
       </div>
-      {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
+      {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
     </header>
   )
 }
@@ -82,36 +83,34 @@ export function PageHeader({
 
 /* ------------------------------------------------------------------ Badge */
 
-export type Tone = 'neutral' | 'navy' | 'stamp' | 'amber' | 'ink'
+export type Tone = 'neutral' | 'navy' | 'stamp' | 'amber' | 'ink' | 'green'
 
-const TONES: Record<Tone, string> = {
-  neutral: 'bg-field text-ink-600 border-rule',
-  navy: 'bg-navy-50 text-navy-700 border-navy-100',
-  stamp: 'bg-stamp-50 text-stamp-700 border-stamp-100',
-  amber: 'bg-amber-50 text-amber-700 border-amber-100',
-  ink: 'bg-ink-800 text-white border-ink-800',
-}
+/**
+ * Two looks, both token based (styles/depth.css):
+ * - `dot` (default for every coloured tone, and for StatusPill): a small coloured dot and plain
+ *   text, the reference product's status style.
+ * - `chip` (default for the neutral tone): a quiet bordered label for tags, skills and categories.
+ */
+export type BadgeVariant = 'dot' | 'chip'
 
 export function Badge({
   children,
   tone = 'neutral',
   className,
   dot,
+  variant,
 }: {
   children: ReactNode
   tone?: Tone
   className?: string
+  /** Show the coloured dot (on a neutral chip it adds a dot to the chip). */
   dot?: boolean
+  variant?: BadgeVariant
 }) {
+  const look: BadgeVariant = variant ?? (tone === 'neutral' && !dot ? 'chip' : 'dot')
   return (
-    <span
-      className={cn(
-        'ui-badge inline-flex items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-1.5 py-0.5 text-micro font-medium',
-        TONES[tone],
-        className,
-      )}
-    >
-      {dot && <span className={cn('h-1.5 w-1.5 rounded-full', tone === 'stamp' ? 'bg-stamp-600' : tone === 'amber' ? 'bg-amber-600' : tone === 'navy' ? 'bg-navy-600' : 'bg-ink-400')} />}
+    <span className={cn('ui-badge', `ui-badge-${look}`, className)} data-tone={tone}>
+      {(look === 'dot' || dot) && <i className="ui-badge-mark" aria-hidden="true" />}
       {children}
     </span>
   )
@@ -121,13 +120,13 @@ const STATUS_TONE: Record<string, Tone> = {
   new: 'navy',
   in_process: 'neutral',
   not_interested: 'amber',
-  deployed: 'ink',
+  deployed: 'green',
   needs_review: 'amber',
-  active: 'navy',
+  active: 'green',
   closed: 'stamp',
-  open: 'navy',
+  open: 'green',
   on_hold: 'amber',
-  filled: 'ink',
+  filled: 'green',
   inactive: 'neutral',
 }
 
@@ -145,9 +144,9 @@ const STATUS_LABEL: Record<string, string> = {
   inactive: 'Inactive',
 }
 
-export function StatusPill({ status, className, dot }: { status: string; className?: string; dot?: boolean }) {
+export function StatusPill({ status, className }: { status: string; className?: string; dot?: boolean }) {
   return (
-    <Badge tone={STATUS_TONE[status] ?? 'neutral'} className={className} dot={dot}>
+    <Badge tone={STATUS_TONE[status] ?? 'neutral'} variant="dot" className={className}>
       {STATUS_LABEL[status] ?? status}
     </Badge>
   )
@@ -172,7 +171,7 @@ export function StatTile({
     neutral: 'text-ink',
     amber: 'text-amber-700',
     stamp: 'text-stamp-700',
-    navy: 'text-navy-700',
+    navy: 'text-ink',
   }[tone]
 
   const Tag = onClick ? 'button' : 'div'
@@ -180,13 +179,13 @@ export function StatTile({
     <Tag
       onClick={onClick}
       className={cn(
-        'flex min-h-[9.5rem] flex-col justify-between rounded-panel border border-rule-soft bg-white p-6 text-left shadow-soft',
-        onClick && 'transition-shadow hover:shadow-pop',
+        'ui-stat-tile flex min-h-[8.5rem] flex-col justify-between rounded-[12px] border border-rule bg-white p-5 text-left',
+        onClick && 'transition-colors hover:border-[color:var(--border-hover)]',
       )}
     >
-      <span className="text-sm font-medium text-ink-500">{label}</span>
-      <span className={cn('mt-3 block text-stat font-semibold tnum', accent)}>{value}</span>
-      {sub && <span className="mt-2 text-xs text-ink-400">{sub}</span>}
+      <span className="text-[14px] text-ink-500">{label}</span>
+      <span className={cn('mt-3 block text-[36px] font-semibold leading-none tracking-[-0.04em] tnum', accent)}>{value}</span>
+      {sub && <span className="mt-2 text-[13px] text-ink-500">{sub}</span>}
     </Tag>
   )
 }
@@ -210,7 +209,7 @@ export function TimeBar({
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <div
-        className="h-1 w-full min-w-[40px] overflow-hidden rounded-full bg-rule-soft"
+        className="h-1 w-full min-w-[40px] overflow-hidden rounded-full bg-field"
         role="img"
         aria-label={`48-hour limit: ${sla.label}`}
       >
@@ -220,7 +219,7 @@ export function TimeBar({
         />
       </div>
       {showLabel && (
-        <span className={cn('hidden shrink-0 whitespace-nowrap text-micro tnum font-medium sm:inline', urgencyText[sla.urgency])}>
+        <span className={cn('hidden shrink-0 whitespace-nowrap text-[12.5px] tnum font-medium sm:inline', urgencyText[sla.urgency])}>
           {sla.label}
         </span>
       )}
@@ -243,9 +242,11 @@ export function EmptyState({
 }) {
   return (
     <div className="ui-empty-state flex flex-col items-center justify-center px-6 py-14 text-center">
-      <div className="empty-state-icon mb-3 text-ink-300">{icon ?? <FolderOpen size={26} strokeWidth={1.4} />}</div>
-      <p className="text-sm font-medium text-ink">{title}</p>
-      {description && <p className="mt-1 max-w-[46ch] text-sm text-ink-400">{description}</p>}
+      <div className="empty-state-icon mb-3 flex h-11 w-11 items-center justify-center rounded-[10px] border border-rule bg-white text-ink-500">
+        {icon ?? <FolderOpen size={20} strokeWidth={1.6} />}
+      </div>
+      <p className="text-[16px] font-semibold tracking-[-0.01em] text-ink">{title}</p>
+      {description && <p className="mt-1 max-w-[46ch] text-[14px] leading-6 text-ink-500">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   )
@@ -257,7 +258,7 @@ export function DefList({ children, cols = 2 }: { children: ReactNode; cols?: 1 
   return (
     <dl
       className={cn(
-        'grid gap-x-6 gap-y-3.5',
+        'ui-def-list grid gap-x-6 gap-y-4',
         cols === 1 ? 'grid-cols-1' : cols === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-3',
       )}
     >
@@ -277,8 +278,8 @@ export function Def({
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-micro text-ink-400">{label}</dt>
-      <dd className={cn('mt-0.5 truncate text-sm text-ink', ident && 'ident')}>{children}</dd>
+      <dt className="text-[13px] text-ink-500">{label}</dt>
+      <dd className={cn('mt-0.5 truncate text-[14px] text-ink', ident && 'ident')}>{children}</dd>
     </div>
   )
 }
@@ -286,7 +287,7 @@ export function Def({
 /** The stage number, identical wherever a stage is named in a table or list. */
 export function StageDot({ no }: { no: number }) {
   return (
-    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy-100 text-micro font-semibold text-navy-700 tnum">
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-rule bg-field text-[12.5px] font-semibold text-ink tnum">
       {no}
     </span>
   )
@@ -303,18 +304,19 @@ export function StageChip({
   state: 'done' | 'current' | 'closed' | 'future'
   className?: string
 }) {
-  // Plain number; colour alone carries the state. The fixed width keeps the
-  // numbers in a tidy column wherever several rows stack.
+  // A small bordered tile; fill and ink carry the state. The fixed width keeps the numbers in
+  // a tidy column wherever several rows stack.
   const styles = {
-    done: 'text-navy-700',
-    current: 'text-ink font-semibold',
-    closed: 'text-stamp-700',
-    future: 'text-ink-300',
+    done: 'border-rule bg-field text-ink',
+    current: 'border-navy-600 bg-navy-600 text-[color:var(--on-primary)]',
+    closed: 'border-stamp-100 bg-stamp-50 text-stamp-700',
+    future: 'border-rule bg-white text-ink-400',
   }[state]
   return (
     <span
+      data-state={state}
       className={cn(
-        'inline-flex w-6 shrink-0 justify-center text-sm font-medium tnum',
+        'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] border text-[12.5px] font-semibold tnum',
         styles,
         className,
       )}

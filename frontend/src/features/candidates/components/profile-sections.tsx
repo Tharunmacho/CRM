@@ -1,13 +1,13 @@
-import { useState, type ReactNode } from 'react'
-import { ShieldCheck } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Award, BookUser, Briefcase, FileText, FolderKanban, GraduationCap, Info, Sparkles, Trophy, UserRound, Wallet } from 'lucide-react'
 import type { Candidate } from '@/shared/model/types'
+import { dateLabel, money } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/display'
-import { Button } from '@/shared/ui/primitives'
-import { BulletSection, ProfileCard, ProfileRows } from './fact-section'
+import { BulletSection, FactGrid, ProfileCard, ProfileRows, type Fact } from './fact-section'
 import type { AadhaarOcr, CandidateOcr, PassportOcr } from './ocr-types'
 import { AadhaarReading, PassportReading } from './ocr-sections'
 import { primaryDocument } from '../ocr-view'
-import type { ProfileModel } from '../profile-view'
+import { SOURCE_LABEL, type ProfileModel } from '../profile-view'
 
 export type { CandidateOcr, ResumeOcr } from './ocr-types'
 
@@ -20,11 +20,26 @@ function TabGroup({ id, label, children }: { id: string; label: string; children
     <div
       id={`profile-${id}`}
       data-profile-tab={label}
-      className="flex scroll-mt-40 flex-col gap-6 empty:hidden"
+      className="flex scroll-mt-32 flex-col gap-5 empty:hidden"
     >
       {children}
     </div>
   )
+}
+
+/**
+ * The Add Candidate fields the Veris sections do not already show: overseas experience and expected
+ * salary (work profile) and where the candidate came from (source). Read from the saved record.
+ */
+function workProfileFacts(cand: Candidate): Fact[] {
+  const years = (value: number | null | undefined) => (value == null ? 'Not recorded' : `${value} ${value === 1 ? 'year' : 'years'}`)
+  return [
+    ['Gulf or overseas experience', years(cand.gulfExperience)],
+    ['Expected salary', cand.expectedSalary != null ? money(cand.expectedSalary) : 'Not recorded'],
+    ['Source', SOURCE_LABEL[cand.source] ?? cand.source],
+    ['More about the source', cand.sourceDetail || 'Not recorded'],
+    ['Added on', dateLabel(cand.addedAt)],
+  ]
 }
 
 /**
@@ -47,48 +62,50 @@ export function CandidateSections({
   const aadhaar = primaryDocument(ocr, 'aadhaar')?.payload as AadhaarOcr | undefined
 
   return (
-    <div className="flex min-w-0 flex-col gap-6">
+    <div className="flex min-w-0 flex-col gap-5">
       <TabGroup id="details" label="Details">
         {model.details.length > 0 && (
-          <ProfileCard title="Candidate details">
+          <ProfileCard title="Candidate details" icon={<UserRound size={18} />} meta="Who they are and how to reach them">
             <ProfileRows rows={model.details} />
           </ProfileCard>
         )}
+        <ProfileCard title="Work profile and source" icon={<Wallet size={18} />} meta="Work abroad, the salary they want, and how they found us">
+          <FactGrid facts={workProfileFacts(cand)} />
+        </ProfileCard>
       </TabGroup>
 
       <TabGroup id="summary" label="Summary">
         {model.summary && (
-          <ProfileCard title="Summary">
-            <p className="whitespace-pre-line pt-5 text-[17px] leading-7 text-ink-700">{model.summary}</p>
+          <ProfileCard title="Summary" icon={<FileText size={18} />}>
+            <p className="cp-prose">{model.summary}</p>
           </ProfileCard>
         )}
       </TabGroup>
 
       <TabGroup id="experience" label="Experience">
         {model.jobs.length > 0 && (
-          <ProfileCard title="Experience" meta={model.experienceMeta || undefined}>
-            <ol className="pt-6">
+          <ProfileCard title="Experience" icon={<Briefcase size={18} />} meta={model.experienceMeta || undefined}>
+            <ol className="cp-timeline">
               {model.jobs.map((j, i) => (
-                <li key={i} className="relative border-l-2 border-rule pb-8 pl-7 last:border-transparent last:pb-1">
-                  <span className="absolute -left-[7px] top-2 h-3 w-3 rounded-full bg-ink-700 ring-4 ring-white" />
-                  <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1">
+                <li key={i}>
+                  <div className="cp-item">
                     <div className="min-w-0">
-                      <p className="break-words text-[17px] font-semibold leading-7 text-ink">{j.title || 'Role not stated'}</p>
+                      <p className="cp-item-title">{j.title || 'Job title not given'}</p>
                       {(j.company || j.location || j.overseas) && (
-                        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[16px] leading-6 text-ink-600">
+                        <p className="cp-item-sub">
                           {[j.company, j.location].filter(Boolean).join(' · ')}
-                          {j.overseas && <Badge tone="navy" className="rounded-full px-2.5 py-0.5 text-[14px]">Overseas</Badge>}
+                          {j.overseas && <Badge tone="navy">Overseas</Badge>}
                         </p>
                       )}
                     </div>
                     {(j.period || j.duration) && (
-                      <div className="text-[15px] leading-6 text-ink-600 tnum sm:text-right">
-                        {j.period && <p className="font-medium text-ink-700">{j.period}</p>}
+                      <div className="cp-item-when tnum">
+                        {j.period && <p className="cp-item-when-main">{j.period}</p>}
                         {j.duration && <p>{j.duration}</p>}
                       </div>
                     )}
                   </div>
-                  {j.description && <p className="mt-3 whitespace-pre-line text-[16px] leading-7 text-ink-700">{j.description}</p>}
+                  {j.description && <p className="cp-note-row whitespace-pre-line">{j.description}</p>}
                 </li>
               ))}
             </ol>
@@ -98,12 +115,10 @@ export function CandidateSections({
 
       <TabGroup id="skills" label="Skills">
         {model.skills.length > 0 && (
-          <ProfileCard title="Skills">
-            <ul className="flex flex-wrap gap-2.5 pt-5">
+          <ProfileCard title="Skills" icon={<Sparkles size={18} />}>
+            <ul className="cp-tags">
               {model.skills.map((s) => (
-                <li key={s} className="max-w-full break-words rounded-full border border-rule bg-field/70 px-4 py-1.5 text-[16px] font-medium leading-6 text-ink-700">
-                  {s}
-                </li>
+                <li key={s}>{s}</li>
               ))}
             </ul>
           </ProfileCard>
@@ -112,17 +127,17 @@ export function CandidateSections({
 
       <TabGroup id="education" label="Education">
         {model.education.length > 0 && (
-          <ProfileCard title="Education">
-            <ul className="space-y-3 pt-5">
+          <ProfileCard title="Education" icon={<GraduationCap size={18} />}>
+            <ul className="cp-stack">
               {model.education.map((e, i) => (
-                <li key={i} className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1 rounded-xl border border-rule-soft bg-field/50 px-5 py-4">
+                <li key={i} className="cp-item">
                   <div className="min-w-0">
-                    <p className="break-words text-[17px] font-semibold leading-6 text-ink">{e.degree || e.institution}</p>
+                    <p className="cp-item-title">{e.degree || e.institution}</p>
                     {(e.degree ? [e.institution, e.grade] : [e.grade]).filter(Boolean).length > 0 && (
-                      <p className="mt-0.5 break-words text-[16px] text-ink-600">{(e.degree ? [e.institution, e.grade] : [e.grade]).filter(Boolean).join(' · ')}</p>
+                      <p className="cp-item-sub">{(e.degree ? [e.institution, e.grade] : [e.grade]).filter(Boolean).join(' · ')}</p>
                     )}
                   </div>
-                  {e.period && <p className="text-[15px] font-medium leading-6 text-ink-600 tnum">{e.period}</p>}
+                  {e.period && <p className="cp-item-when tnum"><span className="cp-item-when-main">{e.period}</span></p>}
                 </li>
               ))}
             </ul>
@@ -133,7 +148,7 @@ export function CandidateSections({
       <TabGroup id="passport" label="Passport">
         {/* The stated details only earn a card of their own when no passport scan was read. */}
         {!passport && model.passport.length > 0 && (
-          <ProfileCard title="Passport">
+          <ProfileCard title="Passport" icon={<BookUser size={18} />}>
             <ProfileRows rows={model.passport} />
           </ProfileCard>
         )}
@@ -145,21 +160,21 @@ export function CandidateSections({
       </TabGroup>
 
       <TabGroup id="achievements" label="Achievements">
-        <BulletSection title="Achievements" items={model.achievements} />
+        <BulletSection title="Achievements" icon={<Trophy size={18} />} items={model.achievements} />
       </TabGroup>
 
       <TabGroup id="certifications" label="Certifications">
-        <BulletSection title="Certifications" items={model.certifications} />
+        <BulletSection title="Certifications" icon={<Award size={18} />} items={model.certifications} />
       </TabGroup>
 
       <TabGroup id="projects" label="Projects">
         {model.projects.length > 0 && (
-          <ProfileCard title="Projects">
+          <ProfileCard title="Projects" icon={<FolderKanban size={18} />}>
             <ul className="divide-y divide-rule-soft">
               {model.projects.map((p, i) => (
-                <li key={i} className="py-4 last:pb-1">
-                  <p className="break-words text-[17px] font-semibold text-ink-700">{p.name}</p>
-                  {p.description && <p className="mt-1 whitespace-pre-line text-[16px] leading-7 text-ink-700">{p.description}</p>}
+                <li key={i} className="py-3 first:pt-0 last:pb-0">
+                  <p className="cp-item-title">{p.name}</p>
+                  {p.description && <p className="cp-prose is-small">{p.description}</p>}
                 </li>
               ))}
             </ul>
@@ -169,7 +184,7 @@ export function CandidateSections({
 
       <TabGroup id="additional" label="Additional">
         {model.additional.length > 0 && (
-          <ProfileCard title="Additional information">
+          <ProfileCard title="Additional information" icon={<Info size={18} />}>
             <ProfileRows rows={model.additional} />
           </ProfileCard>
         )}

@@ -5,15 +5,19 @@ import {
   Briefcase,
   Building2,
   Check,
+  CheckCircle2,
   ChevronDown,
+  CircleDot,
   CircleSlash,
   FileText,
+  ListChecks,
   Lock,
   MessageSquarePlus,
   Phone,
   PhoneCall,
-  PlaneTakeoff,
   RotateCcw,
+  ShieldCheck,
+  Trophy,
   User,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
@@ -21,7 +25,7 @@ import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { applicationFileSlot, applicationFileVersions, newestFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { ApiError, api, fileHref } from '@/shared/api/client'
+import { ApiError, api } from '@/shared/api/client'
 import { taskClockStart } from '@/shared/lib/task-time'
 import {
   STAGES,
@@ -35,7 +39,7 @@ import {
 } from '@/shared/workflow/stages'
 import type { Application, FileVersion, StageRecord } from '@/shared/model/types'
 import { Dialog } from '@/shared/ui/overlay'
-import { Badge, StatusPill, TimeBar } from '@/shared/ui/display'
+import { Badge } from '@/shared/ui/display'
 import {
   Button,
   Checkbox,
@@ -47,6 +51,10 @@ import {
 } from '@/shared/ui/primitives'
 import { DocumentSlotRow, FileDrop, type StoredFile } from '@/shared/ui/file-drop'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
+import { PersonAvatar } from './person-avatar'
+import { CertificateSlotRow, MULTI_DOCUMENT_KEYS } from '@/features/candidates/components/certificate-slot-row'
+import { SlaMeter, StageRail } from './stage-rail'
+import '@/styles/candidate-v2.css'
 
 /**
  * One scrolling application: completed sections are collapsed, the current stage
@@ -56,13 +64,26 @@ export function StageModal({
   applicationId,
   open,
   onClose,
+  focusStage,
 }: {
   applicationId: string | null
   open: boolean
   onClose: () => void
+  /** Open this stage's section (expanded) and scroll to it, e.g. when a task for that stage was clicked. */
+  focusStage?: number
 }) {
   const store = useStore()
   const snapshot = useWorkspaceReady(open && applicationId ? `stage:${applicationId}` : null)
+  useEffect(() => {
+    if (!open || !focusStage || !snapshot.ready) return
+    const timer = window.setTimeout(() => {
+      const section = document.querySelector<HTMLElement>(`[data-sm-stage="${focusStage}"]`)
+      if (!section) return
+      section.querySelector('details')?.setAttribute('open', '')
+      section.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [open, focusStage, snapshot.ready, applicationId])
   const app = store.applications.find((a) => a.id === applicationId)
   const [files, setFiles] = useState<ApplicationFile[]>([])
   const [fileError, setFileError] = useState(false)
@@ -86,74 +107,90 @@ export function StageModal({
   const order = app ? store.order(app.orderId) : undefined
   const client = order ? store.company(order.companyId) : undefined
   const designation = order ? store.designation(order.designationId) : undefined
-  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title="Recruitment application"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the latest application and ownership…' : 'This application or its linked records are no longer available. Refresh to check your access.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" onClick={snapshot.retry}>Refresh application</Button>}</Dialog>
+  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" onClick={snapshot.retry}>Refresh</Button>}</Dialog>
   const owner = store.user(cand.ownerId)
 
   const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
   const effective = app.stages.filter((record) => !record.reopenedReason)
   const superseded = app.stages.filter((record) => record.reopenedReason)
   const live = app.status === 'active' ? app.currentStage : null
+  const doneStages = STAGES.filter((definition) => effective.some((record) => record.stage === definition.no) && definition.no !== live)
+  const recorded = new Set(effective.map((record) => record.stage)).size
 
   return (
     <Dialog
       open={open}
-      onClose={() => { if (!pending && !reopening && (!dirty || window.confirm('Discard unsaved stage changes?'))) onClose() }}
+      onClose={() => { if (!pending && !reopening && (!dirty || window.confirm('Throw away changes you have not saved?'))) onClose() }}
       width="full"
       title={cand.name}
       description={`${designation.title} · ${client.name} · ${order.ref}`}
     >
-      <div className="-mx-6 -my-5">
-        <div className="border-b border-rule-soft bg-field/50 px-4 py-5 sm:px-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="workspace-eyebrow">Recruitment progress</p><h2 className="mt-1 text-xl font-semibold">{app.status === 'active' ? `Stage ${app.currentStage}: ${stageByNo(app.currentStage).title}` : app.status === 'deployed' ? 'Deployment completed' : 'Application closed'}</h2><p className="mt-2 text-sm text-ink-500">{app.status === 'active' ? 'Complete the current stage below. Earlier decisions and documents remain available in history.' : 'Review the saved decisions and documents below.'}</p></div><Badge tone={app.status === 'active' ? 'navy' : 'neutral'}>{new Set(effective.map(record => record.stage)).size} of {STAGES.length} stages recorded</Badge></div><ol className="mt-4 flex gap-1.5" aria-label="Eleven recruitment stages">{STAGES.map(stage => <li key={stage.no} title={`${stage.no}. ${stage.title}${stage.no === live ? ' (current)' : ''}`} aria-current={stage.no === live ? 'step' : undefined} className={cn('flex h-8 min-w-0 flex-1 items-center justify-center rounded-control text-xs font-semibold', stage.no === live ? 'bg-navy-600 text-white' : effective.some(record => record.stage === stage.no) ? 'bg-navy-100 text-navy-800' : 'bg-white text-ink-400')}>{stage.no}</li>)}</ol></div>
-        <CandidateDetails app={app} />
-        {!owner?.active && <p role="status" className="border-b border-amber-100 bg-amber-50 px-6 py-3 text-sm text-amber-800">Assign an active recruiter from the candidate profile before completing or reopening stages. Authorized users can still save draft details.</p>}
+      <div className="sm">
+        <div className="sm-wrap">
+          <ApplicationHeader app={app} recorded={recorded} effective={effective} />
 
-        {!canWork && (
-          <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-6 py-3 text-xs text-amber-700">
-            <Lock className="h-3.5 w-3.5 shrink-0" />
-            This candidate belongs to {owner?.name ?? 'an unassigned recruiter'}. You can read the record but not record
-            stages.
-          </div>
-        )}
-
-        <div className="space-y-4 px-4 py-5 sm:px-6" aria-label="Application stage history">
-          {fileError && <p role="alert" className="mb-3 text-xs text-stamp-700">File history could not be loaded. <button type="button" className="underline" onClick={() => setFileRetry((v) => v + 1)}>Retry</button></p>}
-          {STAGES.filter((definition) => effective.some((record) => record.stage === definition.no) && definition.no !== live).map((definition) => {
-            const records = effective.filter((record) => record.stage === definition.no)
-            const latest = records[records.length - 1]
-            return <details key={`${definition.no}-${latest.attempt}`} className="group rounded-panel border border-rule bg-white">
-              <summary className="flex cursor-pointer list-none flex-wrap items-center gap-3 px-4 py-4">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-50 text-sm font-semibold text-navy-700">{definition.no}</span>
-                <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{definition.title}</span><span className="text-xs text-ink-500">{store.user(latest.completedBy)?.name ?? 'Former team member'} · {dateTimeLabel(latest.completedAt)}</span></span>
-                <Badge tone="navy">{latest.outcome}</Badge>
-                <ChevronDown className="h-4 w-4 text-ink-400 transition-transform group-open:rotate-180" />
-              </summary>
-              <div className="space-y-5 border-t border-rule px-4 py-4">{records.map((record) => <CompletedStage key={`${record.stage}-${record.attempt}`} record={record} files={files} app={app} />)}
-                <ReopenStage app={app} stage={definition.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Reopening replaces the current stage and discards its unsaved changes. Continue?')} />
-              </div>
-            </details>
-          })}
-          {live === 6 && effective.some((record) => record.stage === 6) && <details className="rounded-panel border border-amber-200 bg-amber-50/40 p-4">
-            <summary className="cursor-pointer text-sm font-semibold">Previous medical attempts ({effective.filter((record) => record.stage === 6).length})</summary>
-            <div className="mt-4 space-y-5">{effective.filter((record) => record.stage === 6).map((record) => <CompletedStage key={record.attempt} record={record} files={files} app={app} />)}</div>
-          </details>}
-          {app.status === 'active' ? (
-            <CurrentStage
-              key={`${app.id}-${app.currentStage}-${app.stages.length}`}
-              app={app}
-              canWork={canWork && !reopening}
-              onDirtyChange={setDirty}
-              onBusyChange={setPending}
-              files={files}
-              onUploaded={(file) => setFiles((current) => [...current.filter((item) => item.id !== file.id), file])}
-            />
-          ) : app.status === 'deployed' ? (
-            <DeployedRow />
-          ) : (
-            <ClosedRow app={app} />
+          {!owner?.active && <p role="status" className="sm-note"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Give this candidate an active recruiter (on their profile) before you finish or reopen a stage. You can still save drafts.</p>}
+          {!canWork && (
+            <p className="sm-note">
+              <Lock className="h-4 w-4" aria-hidden="true" />
+              {owner ? `${owner.name} looks after this candidate` : 'This candidate has no recruiter yet'}. You can read the stages, but you cannot fill them in.
+            </p>
           )}
-          {superseded.length > 0 && <details className="rounded-panel border border-rule bg-field/30 p-4">
-            <summary className="cursor-pointer text-sm font-medium text-ink-600">History retained after reopening ({superseded.length} attempts)</summary>
-            <p className="mt-2 text-xs text-ink-500">These earlier attempts remain on record. They are excluded from the current application progress.</p>
+
+          <ol className="sm-timeline" aria-label="Stages so far">
+            {fileError && <li className="sm-alert" role="alert">We could not load the files. <button type="button" className="underline" onClick={() => setFileRetry((v) => v + 1)}>Try again</button></li>}
+            {doneStages.map((definition) => {
+              const records = effective.filter((record) => record.stage === definition.no)
+              const latest = records[records.length - 1]
+              const negative = NEGATIVE_OUTCOMES.includes(latest.outcome)
+              return <li key={`${definition.no}-${latest.attempt}`} data-sm-stage={definition.no} className={cn('sm-step', negative ? 'is-closed' : 'is-done')}>
+                <span className="sm-node" aria-hidden="true">{negative ? definition.no : <Check className="h-4 w-4" />}</span>
+                <details className="sm-card group">
+                  <summary className="sm-summary">
+                    <span className="sm-summary-copy"><b>{definition.no}. {definition.title}</b><span>Completed by {store.user(latest.completedBy)?.name ?? 'Former team member'} · {dateTimeLabel(latest.completedAt)}</span></span>
+                    <Badge tone={negative ? 'stamp' : 'green'} variant="dot">{latest.outcome}</Badge>
+                    <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
+                  </summary>
+                  <div className="sm-done-body">{records.map((record) => <CompletedStage key={`${record.stage}-${record.attempt}`} record={record} files={files} app={app} />)}
+                    <ReopenStage app={app} stage={definition.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Reopening replaces the stage you are on and throws away changes you have not saved. Continue?')} />
+                  </div>
+                </details>
+              </li>
+            })}
+            {live === 6 && effective.some((record) => record.stage === 6) && <li className="sm-step is-done">
+              <span className="sm-node" aria-hidden="true">6</span>
+              <details className="sm-card">
+                <summary className="sm-summary">
+                  <span className="sm-summary-copy"><b>Previous medical attempts ({effective.filter((record) => record.stage === 6).length})</b><span>The medical is being done again. Earlier tries stay on record.</span></span>
+                  <Badge tone="amber" variant="dot">Unfit: reapplying</Badge>
+                  <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
+                </summary>
+                <div className="sm-done-body">{effective.filter((record) => record.stage === 6).map((record) => <CompletedStage key={record.attempt} record={record} files={files} app={app} />)}</div>
+              </details>
+            </li>}
+            {app.status === 'active' ? (
+              <li className="sm-step is-current" data-sm-stage={app.currentStage}>
+                <span className="sm-node" aria-hidden="true">{app.currentStage}</span>
+                <CurrentStage
+                  key={`${app.id}-${app.currentStage}-${app.stages.length}`}
+                  app={app}
+                  canWork={canWork && !reopening}
+                  onDirtyChange={setDirty}
+                  onBusyChange={setPending}
+                  files={files}
+                  onUploaded={(file) => setFiles((current) => [...current.filter((item) => item.id !== file.id), file])}
+                />
+              </li>
+            ) : app.status === 'deployed' ? (
+              <li className="sm-step is-deployed"><span className="sm-node" aria-hidden="true"><Trophy className="h-4 w-4" /></span><DeployedRow /></li>
+            ) : (
+              <li className="sm-step is-closed"><span className="sm-node" aria-hidden="true"><CircleSlash className="h-4 w-4" /></span><ClosedRow app={app} /></li>
+            )}
+          </ol>
+
+          {superseded.length > 0 && <details className="sm-extra">
+            <summary>Earlier tries kept after reopening ({superseded.length})</summary>
+            <p className="sm-hint">These earlier tries stay on record. They do not count towards the progress now.</p>
             <div className="mt-4 space-y-6">{superseded.map((record) => <div key={`${record.stage}-${record.attempt}`}>
               <p className="mb-2 text-xs text-amber-700">Reopened: {record.reopenedReason}</p>
               <CompletedStage record={record} files={files} app={app} />
@@ -165,244 +202,163 @@ export function StageModal({
   )
 }
 
-/**
- * The full candidate record, in segments. Collapsed by default so the stage work
- * stays the first thing you see; opening it reveals everything on file.
- */
-function CandidateDetails({ app }: { app: Application }) {
-  const store = useStore()
-  const [open, setOpen] = useState(false)
+const NEGATIVE_OUTCOMES = ['Failed', 'Rejected', 'Unfit', 'Not forwarded']
 
+/**
+ * Header: candidate name, photo, phone, passport number, client, order, designation, owner,
+ * current stage and overall status, with a numbered progress strip for the stages reached.
+ * The full candidate record opens below it on request.
+ */
+function ApplicationHeader({ app, recorded, effective }: { app: Application; recorded: number; effective: StageRecord[] }) {
+  const store = useStore()
+  const [record, setRecord] = useState(false)
   const cand = store.candidate(app.candidateId)!
   const order = store.order(app.orderId)!
   const client = store.company(order.companyId)!
   const designation = store.designation(order.designationId)!
   const owner = store.user(cand.ownerId)
   const photo = newestFileVersions(cand.documents.find(document => document.key === 'photo')?.versions ?? [])[0]
-
+  const stageText = app.status === 'deployed' ? 'Deployed' : app.status === 'closed' ? `Closed at stage ${app.currentStage}` : `${app.currentStage}. ${stageByNo(app.currentStage).title}`
+  const facts: [string, React.ReactNode, React.ReactNode, boolean?][] = [
+    ['Phone', <Phone key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.phone, true],
+    ['Passport', <BookUser key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.passportNo ?? 'Not saved', !!cand.passportNo],
+    ['Client', <Building2 key="i" className="h-3.5 w-3.5" aria-hidden="true" />, client.name],
+    ['Order', <FileText key="i" className="h-3.5 w-3.5" aria-hidden="true" />, order.ref, true],
+    ['Job title', <Briefcase key="i" className="h-3.5 w-3.5" aria-hidden="true" />, designation.title],
+    ['Recruiter', <User key="i" className="h-3.5 w-3.5" aria-hidden="true" />, owner?.name ?? 'Not assigned'],
+    ['Current stage', <ListChecks key="i" className="h-3.5 w-3.5" aria-hidden="true" />, stageText],
+    ['Status', <ShieldCheck key="i" className="h-3.5 w-3.5" aria-hidden="true" />, app.status === 'closed' && app.closureReason ? `Closed: ${closureLabels[app.closureReason]}` : app.status === 'deployed' ? 'Deployed' : 'Active'],
+  ]
   return (
-    <section className="border-b border-rule-soft">
-      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-4 px-6 py-4 min-[641px]:flex min-[641px]:flex-wrap">
-        <span className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-navy-50 text-xl font-semibold text-navy-700" aria-hidden="true">{cand.name.slice(0, 1)}{photo?.url && <img className="absolute inset-0 h-full w-full object-cover" src={fileHref(photo.url)} alt="" onError={(event) => { event.currentTarget.style.display = 'none' }} />}</span>
-        <dl className="order-3 col-span-2 grid w-full min-w-0 grid-cols-2 gap-x-4 gap-y-3 min-[641px]:order-2 min-[641px]:w-auto min-[641px]:flex-1 min-[641px]:grid-cols-4 min-[641px]:gap-x-8">
-          <Cell label="Phone" value={cand.phone} ident />
-          <Cell label="Passport" value={cand.passportNo ?? 'Not on file'} ident={!!cand.passportNo} />
-          <Cell label="Owner" value={owner?.name ?? '—'} />
-          <Cell
-            label="Stage"
-            value={
-              app.status === 'deployed'
-                ? 'Deployed'
-                : app.status === 'closed'
-                  ? 'Closed'
-                  : `${app.currentStage} of ${STAGES.length}`
-            }
-          />
-        </dl>
-        <div className="order-2 flex min-w-0 flex-wrap items-center justify-end gap-3 min-[641px]:order-3 min-[641px]:shrink-0">
-          <div className="flex flex-col items-end gap-1.5">
-            <StatusPill status={app.status} />
-            {app.status === 'closed' && app.closureReason && (
-              <Badge tone="stamp">{closureLabels[app.closureReason]}</Badge>
-            )}
+    <>
+      <header className="sm-head">
+        <div className="sm-head-top">
+          <div className="sm-person">
+            <PersonAvatar name={cand.name} photoUrl={photo?.url} size={56} />
+            <div className="min-w-0">
+              <p className="sm-eyebrow">Candidate · <span className="tnum">{cand.ref}</span></p>
+              <p className="sm-person-role" title={`${designation.title} · ${client.name}`}>{designation.title} · {client.name}</p>
+            </div>
           </div>
-          <button
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            className="flex items-center gap-1.5 rounded-control border border-rule px-3 py-2 text-xs font-medium text-ink-600 transition-colors hover:border-ink-300 hover:text-ink"
-          >
-            {open ? 'Hide details' : 'Details'}
-            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
-          </button>
+          <div className="sm-head-side">
+            <Badge tone={app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'} variant="dot">{app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'}</Badge>
+            <Badge className="tnum">{recorded} of {STAGES.length} stages done</Badge>
+          </div>
         </div>
-      </div>
-
-      {open && (
-        <div className="space-y-7 border-t border-rule-soft bg-field/20 px-6 py-6">
-          <Segment
-            icon={<User className="h-4 w-4" />}
-            title="Personal Information"
-            subtitle="Basic candidate details and background"
-          >
-            <Fact label="Name" value={cand.name} />
-            <Fact label="Reference" value={cand.ref} ident />
-            <Fact label="Date of Birth" value={dateLabel(cand.dob)} />
-            <Fact label="Gender" value={cand.gender ?? 'Not provided'} className="capitalize" />
-            <Fact label="Nationality" value={cand.nationality} />
-            <Fact label="Current Location" value={cand.currentCity || 'Not provided'} />
-            <Fact label="Languages Known" value={cand.languages.join(', ') || 'Not provided'} />
-            <Fact label="Date Added" value={dateLabel(cand.addedAt)} />
-          </Segment>
-
-          <Segment
-            icon={<Phone className="h-4 w-4" />}
-            title="Contact"
-            subtitle="How to reach this candidate"
-          >
-            <Fact label="Mobile" value={cand.phone} ident />
-            <Fact label="WhatsApp" value={cand.whatsapp ?? 'Not provided'} ident={!!cand.whatsapp} />
-            <Fact label="Email" value={cand.email ?? 'Not provided'} />
-            <Fact
-              label="Source"
-              value={
-                cand.source.replace('_', '-') +
-                (cand.sourceDetail ? ` · ${cand.sourceDetail}` : '')
-              }
-              className="capitalize"
-            />
-          </Segment>
-
-          <Segment
-            icon={<BookUser className="h-4 w-4" />}
-            title="Passport"
-            subtitle="Saved passport details. Original collection is recorded separately at stage 7."
-          >
-            <Fact label="Passport Number" value={cand.passportNo ?? 'Not on file'} ident={!!cand.passportNo} />
-            <Fact label="Place of Issue" value={cand.passportPlace ?? 'Not provided'} />
-            <Fact label="Issue Date" value={dateLabel(cand.passportIssue)} />
-            <Fact label="Expiry Date" value={dateLabel(cand.passportExpiry)} />
-          </Segment>
-
-          <Segment
-            icon={<Briefcase className="h-4 w-4" />}
-            title="Work Profile"
-            subtitle="Trade, experience and expectations"
-          >
-            <Fact label="Preferred Designation" value={cand.designations.join(', ') || 'Not provided'} />
-            <Fact label="Total Experience" value={cand.totalExperience == null ? 'Not recorded' : `${cand.totalExperience} years`} />
-            <Fact
-              label="Gulf / Overseas Experience"
-              value={cand.gulfExperience == null ? 'Not recorded' : `${cand.gulfExperience} years`}
-            />
-            <Fact label="Expected Salary" value={money(cand.expectedSalary, 'AED')} />
-            <div className="sm:col-span-4">
-              <p className="mb-1.5 text-xs font-semibold text-ink">Skills</p>
-              <div className="flex flex-wrap gap-1.5">
-                {cand.skills.length ? (
-                  cand.skills.map((sk) => <Badge key={sk}>{sk}</Badge>)
-                ) : (
-                  <span className="text-sm text-ink-400">Not provided</span>
-                )}
-              </div>
-            </div>
-          </Segment>
-
-          <Segment
-            icon={<Building2 className="h-4 w-4" />}
-            title="Order"
-            subtitle="The opening this candidate is mapped to"
-          >
-            <Fact label="Employer" value={client.name} />
-            <Fact label="Client contact" value={store.client(client.clientId)?.name ?? 'Not available'} />
-            <Fact label="Designation" value={designation.title} />
-            <Fact label="Order Reference" value={order.ref} ident />
-            <Fact label="Location" value={[order.city, order.country].filter(Boolean).join(', ') || 'Not recorded'} />
-            <Fact label="Salary" value={money(order.salary, order.currency)} />
-            <Fact label="Contract Period" value={order.contractPeriod} />
-            <Fact label="Interview Date" value={dateLabel(order.interviewDate)} />
-            <Fact label="Order Deadline" value={dateLabel(order.deadline)} />
-          </Segment>
-
-          {cand.callOutcome && (
-            <Segment
-              icon={<PhoneCall className="h-4 w-4" />}
-              title="Initial Call"
-              subtitle="Outcome of the first call with the candidate"
-            >
-              <Fact
-                label="Interested"
-                value={
-                  cand.callOutcome.interested === 'yes'
-                    ? 'Yes'
-                    : cand.callOutcome.interested === 'no'
-                      ? 'No'
-                      : 'Not reachable'
-                }
-              />
-              <Fact label="Recorded" value={dateTimeLabel(cand.callOutcome.recordedAt)} />
-              <div className="sm:col-span-2">
-                <p className="mb-1.5 text-xs font-semibold text-ink">Remarks</p>
-                <p className="rounded-control border border-rule-soft bg-white px-3 py-2.5 text-sm text-ink">
-                  {cand.callOutcome.remarks || 'Not provided'}
-                </p>
-              </div>
-            </Segment>
-          )}
-
-          <Segment
-            icon={<FileText className="h-4 w-4" />}
-            title="Documents"
-            subtitle="Nothing is overwritten — replacing a file adds a version"
-          >
-            <div className="sm:col-span-2 lg:col-span-4">
-              {cand.documents.map((d) => <DocumentSlotRow key={d.key} label={d.label} versions={d.versions} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />)}
-            </div>
-          </Segment>
-        </div>
-      )}
-    </section>
+        <dl className="sm-facts">
+          {facts.map(([label, icon, value, ident]) => <div key={label}><dt>{icon}{label}</dt><dd className={cn(ident && 'ident')} title={typeof value === 'string' ? value : undefined}>{value}</dd></div>)}
+        </dl>
+        <StageRail status={app.status} currentStage={app.currentStage} reached={[...new Set(effective.map(item => item.stage))]} numbered />
+        <p className="sm-progress-label">{app.status === 'active' ? `Stage ${app.currentStage} of ${STAGES.length}: ${stageByNo(app.currentStage).title}. Finish it below to open the next stage.` : app.status === 'deployed' ? 'All 11 stages are done.' : 'This order is closed for this candidate. Saved results and documents are below.'}</p>
+      </header>
+      <button type="button" className="sm-record-toggle" aria-expanded={record} onClick={() => setRecord((value) => !value)}>
+        <User className="h-4 w-4" aria-hidden="true" />{record ? 'Hide full candidate details' : 'See full candidate details'}<ChevronDown className="h-4 w-4" aria-hidden="true" />
+      </button>
+      {record && <CandidateRecord app={app} />}
+    </>
   )
 }
 
-function Segment({
-  icon,
-  title,
-  subtitle,
-  children,
-}: {
-  icon: React.ReactNode
-  title: string
-  subtitle: string
-  children: React.ReactNode
-}) {
+/**
+ * The full candidate record, in segments. Collapsed by default so the stage work
+ * stays the first thing you see; opening it reveals everything on file.
+ */
+function CandidateRecord({ app }: { app: Application }) {
+  const store = useStore()
+  const cand = store.candidate(app.candidateId)!
+  const order = store.order(app.orderId)!
+  const client = store.company(order.companyId)!
+  const designation = store.designation(order.designationId)!
+
   return (
-    <section>
-      <header className="border-b border-rule-soft pb-3">
-        <h4 className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <span className="text-ink-400">{icon}</span>
-          {title}
-        </h4>
-        <p className="mt-0.5 text-xs text-ink-400">{subtitle}</p>
+    <div className="sm-record">
+      <Segment icon={<User className="h-4 w-4" />} title="Personal information" subtitle="Basic details">
+        <Fact label="Name" value={cand.name} />
+        <Fact label="Reference" value={cand.ref} ident />
+        <Fact label="Date of birth" value={dateLabel(cand.dob)} />
+        <Fact label="Gender" value={cand.gender ?? 'Not provided'} className="capitalize" />
+        <Fact label="Nationality" value={cand.nationality || 'Not provided'} />
+        <Fact label="Current location" value={cand.currentCity || 'Not provided'} />
+        <Fact label="Languages known" value={cand.languages.join(', ') || 'Not provided'} half />
+      </Segment>
+
+      <Segment icon={<Phone className="h-4 w-4" />} title="Contact and source" subtitle="How to reach this candidate and where they came from">
+        <Fact label="Mobile" value={cand.phone} ident />
+        <Fact label="WhatsApp" value={cand.whatsapp ?? 'Not provided'} ident={!!cand.whatsapp} />
+        <Fact label="Email" value={cand.email ?? 'Not provided'} half />
+        <Fact label="Source" value={cand.source.replace('_', '-') + (cand.sourceDetail ? ` · ${cand.sourceDetail}` : '')} className="capitalize" half />
+        <Fact label="Date added" value={dateLabel(cand.addedAt)} />
+      </Segment>
+
+      <Segment icon={<BookUser className="h-4 w-4" />} title="Passport" subtitle="Passport details we have saved. The original passport is collected at stage 7.">
+        <Fact label="Passport number" value={cand.passportNo ?? 'Not on file'} ident={!!cand.passportNo} />
+        <Fact label="Place of issue" value={cand.passportPlace ?? 'Not provided'} />
+        <Fact label="Issue date" value={dateLabel(cand.passportIssue)} />
+        <Fact label="Expiry date" value={dateLabel(cand.passportExpiry)} />
+      </Segment>
+
+      <Segment icon={<Briefcase className="h-4 w-4" />} title="Work profile" subtitle="Trade, experience and expectations">
+        <Fact label="Preferred job title" value={cand.designations.join(', ') || 'Not provided'} half />
+        <Fact label="Total experience" value={cand.totalExperience == null ? 'Not recorded' : `${cand.totalExperience} years`} />
+        <Fact label="Gulf or overseas experience" value={cand.gulfExperience == null ? 'Not recorded' : `${cand.gulfExperience} years`} />
+        <Fact label="Expected salary" value={money(cand.expectedSalary, 'AED')} />
+        <div className="sm-fact is-wide">
+          <dt>Skills</dt>
+          <dd className="mt-1.5 flex flex-wrap gap-1.5">
+            {cand.skills.length ? cand.skills.map((sk) => <Badge key={sk}>{sk}</Badge>) : <span className="text-ink-400">Not provided</span>}
+          </dd>
+        </div>
+      </Segment>
+
+      <Segment icon={<Building2 className="h-4 w-4" />} title="Order" subtitle="The order this candidate is matched to">
+        <Fact label="Employer" value={client.name} />
+        <Fact label="Client contact" value={store.client(client.clientId)?.name ?? 'Not available'} />
+        <Fact label="Job title" value={designation.title} />
+        <Fact label="Order number" value={order.ref} ident />
+        <Fact label="Location" value={[order.city, order.country].filter(Boolean).join(', ') || 'Not recorded'} />
+        <Fact label="Salary" value={money(order.salary, order.currency)} />
+        <Fact label="Contract period" value={order.contractPeriod || 'Not recorded'} />
+        <Fact label="Interview date" value={dateLabel(order.interviewDate)} />
+        <Fact label="Order deadline" value={dateLabel(order.deadline)} />
+      </Segment>
+
+      {cand.callOutcome && (
+        <Segment icon={<PhoneCall className="h-4 w-4" />} title="Initial call" subtitle="Result of the first call">
+          <Fact label="Interested" value={cand.callOutcome.interested === 'yes' ? 'Yes' : cand.callOutcome.interested === 'no' ? 'No' : 'Not reachable'} />
+          <Fact label="Recorded" value={dateTimeLabel(cand.callOutcome.recordedAt)} />
+          <Fact label="Remarks" value={cand.callOutcome.remarks || 'Not provided'} half />
+        </Segment>
+      )}
+
+      <Segment icon={<FileText className="h-4 w-4" />} title="Documents" subtitle="Nothing is overwritten. A new file is saved as a new version.">
+        <div className="sm-fact is-wide">
+          {cand.documents.map((d) => MULTI_DOCUMENT_KEYS.includes(d.key)
+            ? <CertificateSlotRow key={d.key} label={d.label} files={d.versions} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
+            : <DocumentSlotRow key={d.key} label={d.label} versions={d.versions} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />)}
+        </div>
+      </Segment>
+    </div>
+  )
+}
+
+function Segment({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <section className="sm-seg">
+      <header>
+        <span className="sm-seg-icon">{icon}</span>
+        <div className="min-w-0"><h4>{title}</h4><p>{subtitle}</p></div>
       </header>
-      <div className="mt-4 grid gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
+      <dl className="sm-seg-body">{children}</dl>
     </section>
   )
 }
 
 /** A read-only field, boxed so the record scans like a filled-in form. */
-function Fact({
-  label,
-  value,
-  ident,
-  className,
-}: {
-  label: string
-  value: React.ReactNode
-  ident?: boolean
-  className?: string
-}) {
+function Fact({ label, value, ident, className, half }: { label: string; value: React.ReactNode; ident?: boolean; className?: string; half?: boolean }) {
   return (
-    <div className="min-w-0">
-      <p className="mb-1.5 text-xs font-semibold text-ink">{label}</p>
-      <p
-        className={cn(
-          'truncate rounded-control border border-rule-soft bg-white px-3 py-2.5 text-sm text-ink',
-          ident && 'ident',
-          className,
-        )}
-        title={typeof value === 'string' ? value : undefined}
-      >
-        {value}
-      </p>
-    </div>
-  )
-}
-
-function Cell({ label, value, ident }: { label: string; value: string; ident?: boolean }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-micro text-ink-400">{label}</dt>
-      <dd className={cn('mt-0.5 break-words text-sm text-ink min-[641px]:truncate', ident && 'ident')}>{value}</dd>
+    <div className={cn('sm-fact', half && 'is-half')}>
+      <dt>{label}</dt>
+      <dd className={cn(ident && 'ident', className)}>{value}</dd>
     </div>
   )
 }
@@ -413,27 +369,25 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   const store = useStore()
   const def = stageByNo(record.stage)
   const by = store.user(record.completedBy)
-  const negative = ['Failed', 'Rejected', 'Unfit', 'Not forwarded'].includes(record.outcome)
+  const negative = NEGATIVE_OUTCOMES.includes(record.outcome)
 
   return (
     <section>
-      <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+      <header className="sm-attempt-head">
         <div>
-          <h3 className="text-h3 font-semibold text-ink">{def.title}</h3>
-          <p className="mt-0.5 text-xs text-ink-500">
-            Attempt {record.attempt} · Recorded by {by?.name ?? 'Former team member'} on {dateTimeLabel(record.completedAt)}
-          </p>
+          <h3>Attempt {record.attempt}</h3>
+          <p>Recorded by {by?.name ?? 'Former team member'} on {dateTimeLabel(record.completedAt)}</p>
         </div>
-        <Badge tone={negative ? 'stamp' : 'navy'}>{record.outcome}</Badge>
+        <Badge tone={negative ? 'stamp' : 'green'} variant="dot">{record.outcome}</Badge>
       </header>
 
-      <dl className="grid gap-x-8 gap-y-4 rounded-control border border-rule-soft bg-field/30 p-5 sm:grid-cols-2">
+      <dl className="sm-record-fields">
         {def.fields
           .filter((f) => fieldVisible(f, record.data) && record.data[f.name] != null)
           .map((f) => (
-            <div key={f.name} className="min-w-0">
-              <dt className="text-micro text-ink-400">{f.label}</dt>
-              <dd className={cn('mt-0.5 text-sm text-ink-700', f.ident && 'ident')}>
+            <div key={f.name} className={cn('sm-fact', (f.type === 'file' || f.type === 'textarea') && 'is-wide')}>
+              <dt>{f.label}</dt>
+              <dd className={cn(f.ident && 'ident', f.type === 'textarea' && 'whitespace-pre-line')}>
                 {f.type === 'file' && (record.data[f.name] as StoredFile).url ? (
                   <FileDrop value={record.data[f.name] as StoredFile} versions={applicationFileVersions(files, app, record.stage, f.name)} disabled uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
                 ) : (
@@ -444,7 +398,7 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
           ))}
       </dl>
 
-      <p className="mt-3 text-micro text-ink-400">Recorded attempts are read-only. Reopening retains their evidence and audit history.</p>
+      <p className="sm-hint">Saved attempts cannot be changed. If an admin reopens the stage, these details and files stay on record.</p>
     </section>
   )
 }
@@ -465,19 +419,19 @@ function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen }: { app
       await api.post(`/applications/${app.id}/reopen`, { stage, reason: reason.trim(), lock_version: app.lockVersion })
       if (!store.isCurrentSession()) return
       setSaved(true)
-      store.notify(`Stage ${stage} reopened. Earlier attempts remain in history.`)
+      store.notify(`Stage ${stage} reopened. Earlier tries stay on record.`)
       try { await store.refresh({ keepCurrent: true }) }
-      catch { setError('Reopening was saved. Refresh the application to load the current stage.') }
+      catch { setError('Reopened. Refresh to see the current stage.') }
     } catch (cause) {
-      if (store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'The stage could not be reopened.')
+      if (store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'We could not reopen the stage. Please try again.')
     } finally { setBusy(false) }
   }
-  return <div className="border-t border-rule pt-4">
+  return <div className="sm-reopen">
     {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
-    {saved ? <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(() => setError('The application could not refresh. Please try again.'))}>Refresh saved application</Button>
+    {saved ? <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(() => setError('We could not refresh. Please try again.'))}>Refresh</Button>
       : editing ? <div className="space-y-3">
-        <p className="text-xs text-ink-600">This restarts stage {stage}, supersedes later completed stages and replaces the current open task. Original records and files remain in history. Reopening a deployment also updates the order count.</p>
-        <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy || disabled} placeholder="Describe the correction needed" /></Field>
+        <p className="text-[13px] leading-5 text-ink-600">Admin only. This starts stage {stage} again, sets aside the results of any later stages, and replaces the task that is open now. Earlier records and files stay on record. Reopening a deployment also changes the order's deployed count.</p>
+        <Field label="Reason for reopening" required><Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={2000} disabled={busy || disabled} placeholder="What needs to be corrected?" /></Field>
         <div className="flex flex-wrap gap-2"><Button variant="primary" disabled={busy || disabled || !reason.trim()} onClick={() => void reopen()}>{busy ? 'Reopening…' : `Reopen stage ${stage}`}</Button><Button disabled={busy || disabled} onClick={() => { setEditing(false); setError('') }}>Cancel</Button></div>
       </div> : <Button variant="secondary" size="sm" disabled={disabled} icon={<RotateCcw className="h-4 w-4" />} onClick={() => setEditing(true)}>Reopen stage {stage}</Button>}
   </div>
@@ -522,7 +476,13 @@ function CurrentStage({
 
   // Edits are held locally until Save. Nothing is written as you type, so the form has
   // a dirty state and leaving with unsaved work is a deliberate act, not an accident.
-  const [data, setData] = useState<Record<string, unknown>>(app.draft ?? {})
+  const candidate = store.candidate(app.candidateId)
+  const profilePassport = newestFileVersions(candidate?.documents.find((document) => document.key === 'passport')?.versions ?? [])[0]
+  // Stage 7 starts from the passport copy already on the profile; the recruiter may replace it.
+  const withPassportCopy = (draft: Record<string, unknown>) => app.currentStage === 7 && !draft.copy && profilePassport
+    ? { ...draft, copy: { id: profilePassport.id, name: profilePassport.name, sizeKb: profilePassport.sizeKb, url: profilePassport.url, version: profilePassport.version } }
+    : draft
+  const [data, setData] = useState<Record<string, unknown>>(() => withPassportCopy(app.draft ?? {}))
   const [lockVersion, setLockVersion] = useState(app.lockVersion ?? 0)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -543,7 +503,7 @@ function CurrentStage({
   }, [busy, uploading, remarkBusy, onBusyChange])
 
   useEffect(() => {
-    if (!dirty) { setData(app.draft ?? {}); setLockVersion(app.lockVersion ?? 0) }
+    if (!dirty) { setData(withPassportCopy(app.draft ?? {})); setLockVersion(app.lockVersion ?? 0) }
   }, [app.lockVersion, app.currentStage])
 
   const task = store.tasks.find(
@@ -561,13 +521,13 @@ function CurrentStage({
     if (!store.isCurrentSession()) return
     const details = cause instanceof ApiError && cause.detail && typeof cause.detail === 'object'
       ? cause.detail as { missing?: string[]; draft?: Record<string, unknown>; lock_version?: number; current_stage?: number; status?: string } : null
-    setError([cause instanceof Error ? cause.message : 'This change could not be saved.', ...(details?.missing ?? [])].join(' '))
+    setError([cause instanceof Error ? cause.message : 'We could not save this. Please try again.', ...(details?.missing ?? [])].join(' '))
     if (cause instanceof ApiError && cause.isConflict) setConflict(details)
   }
 
   const refreshAfterWrite = async () => {
     try { await store.refresh({ keepCurrent: true }); setRefreshRequired(false); setError('') }
-    catch { if (store.isCurrentSession()) { setRefreshRequired(true); setError('Your change was saved. Refresh the application to load the latest history.') } }
+    catch { if (store.isCurrentSession()) { setRefreshRequired(true); setError('Your change is saved. Refresh to see the latest.') } }
   }
 
   const save = async () => {
@@ -579,7 +539,7 @@ function CurrentStage({
       if (!store.isCurrentSession()) return
       setData(saved.draft); setLockVersion(saved.lockVersion)
       setDirty(false)
-      store.notify('Stage draft saved')
+      store.notify('Draft saved')
       await refreshAfterWrite()
     } catch (cause) { reportFailure(cause) } finally {
       setBusy(false)
@@ -598,47 +558,64 @@ function CurrentStage({
       if (!store.isCurrentSession()) return
       setDirty(false)
       setCompleted(true)
-      store.notify(result.repeats ? 'Medical attempt recorded. Follow-up task created.' : result.closes ? 'Application closed; history retained.' : 'Stage completed')
+      store.notify(result.repeats ? 'Medical result saved. A follow-up task was created.' : result.closes ? 'This order is closed for the candidate. Everything stays on record.' : 'Stage done')
       await refreshAfterWrite()
     } catch (cause) { reportFailure(cause) } finally {
       setBusy(false)
     }
   }
 
+  // Half-width fields sit in pairs; one left without a partner takes the full row so no cell is orphaned.
+  const visibleFields = def.fields.filter((f) => fieldVisible(f, data))
+  const fieldSpan: string[] = []
+  let halfRun = 0
+  visibleFields.forEach((f, index) => {
+    if (f.width !== 'half') { fieldSpan.push('is-full'); halfRun = 0; return }
+    if (halfRun % 2 === 1) { fieldSpan.push('is-half'); halfRun += 1; return }
+    if (visibleFields[index + 1]?.width === 'half') { fieldSpan.push('is-half'); halfRun += 1 } else { fieldSpan.push('is-full'); halfRun = 0 }
+  })
+  const ready = result.canComplete && !result.closes && !result.repeats
+  const checkState = result.canComplete ? (result.closes ? 'is-closes' : 'is-ready') : ''
+
   return (
-    <section>
-      {error && <div role="alert" className="mb-3 rounded-control border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+    <div>
+      {error && <div role="alert" className="sm-alert">
         <p>{error}</p>
-        {conflict && <div className="mt-3 flex flex-wrap gap-2">
-          {conflict.current_stage === app.currentStage && conflict.status === 'active' && <Button size="sm" onClick={() => { setData(conflict.draft ?? {}); setLockVersion(conflict.lock_version ?? lockVersion); setDirty(false); setConflict(null); setError('') }}>Load saved values</Button>}
-          <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(reportFailure)}>Refresh application</Button>
+        {conflict && <div className="sm-alert-actions">
+          {conflict.current_stage === app.currentStage && conflict.status === 'active' && <Button size="sm" onClick={() => { setData(conflict.draft ?? {}); setLockVersion(conflict.lock_version ?? lockVersion); setDirty(false); setConflict(null); setError('') }}>Use the saved version</Button>}
+          <Button size="sm" onClick={() => void store.refresh({ keepCurrent: true }).catch(reportFailure)}>Refresh</Button>
         </div>}
-        {refreshRequired && !completed && <Button className="mt-3" size="sm" disabled={busy} onClick={() => void refreshAfterWrite()}>Refresh saved stage</Button>}
+        {refreshRequired && !completed && <Button className="mt-3" size="sm" disabled={busy} onClick={() => void refreshAfterWrite()}>Refresh</Button>}
       </div>}
-      {completed && <div role="status" className="mb-3 rounded-control border border-navy-100 bg-navy-50 p-3 text-sm text-navy-800">This result was saved. <button className="underline" onClick={() => void refreshAfterWrite()}>Refresh history</button></div>}
-      <div className="rounded-panel border border-ink-300 bg-white">
-        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rule-soft px-4 py-3">
+      {completed && <div role="status" className="sm-alert is-info">Saved. <button className="underline" onClick={() => void refreshAfterWrite()}>Refresh to see the history</button></div>}
+
+      <section className="sm-card sm-current" aria-label={`Current stage ${def.no}: ${def.title}`}>
+        <header>
           <div className="min-w-0">
-            <h3 className="text-h3 font-semibold text-ink">{def.title}</h3>
-            <p className="mt-1 max-w-[60ch] text-sm text-ink-500">{def.summary}</p>
+            <p className="sm-current-label"><CircleDot className="h-3.5 w-3.5" aria-hidden="true" />Current stage · {def.no} of {STAGES.length}</p>
+            <h3>{def.title}</h3>
+            <p>{def.summary}</p>
           </div>
           {task && (
-            <div className="w-full sm:w-56 shrink-0">
-              <TimeBar createdAt={taskClockStart(task)} />
-              <p className="mt-2 text-sm text-ink-500 sm:text-right">Due {dateTimeLabel(task.dueAt)}</p>
+            <div className="sm-sla">
+              <SlaMeter startedAt={taskClockStart(task)} title={task.title} due={dateTimeLabel(task.dueAt)} />
             </div>
           )}
         </header>
 
-        <div className={cn('border-b border-rule-soft px-4 py-4', result.canComplete ? 'bg-navy-50/50' : 'bg-field/50')} aria-live="polite">
-          <p className="text-sm font-semibold text-ink">{result.canComplete ? 'Ready to record this outcome' : 'Before completing this stage'}</p>
-          {result.missing.length > 0 ? <ul className="mt-2 flex flex-wrap gap-x-6 gap-y-1 pl-4 text-sm text-ink-600 list-disc">{result.missing.map(item => <li key={item}>{item}</li>)}</ul> : <p className="mt-1 text-sm text-ink-600">{result.repeats ? 'This records the medical attempt and starts the next medical follow-up.' : result.closes ? `This closes the application: ${result.closes.label}. The previous work remains in history.` : def.no < STAGES.length ? `Next: stage ${def.no + 1}, ${stageByNo(def.no + 1).title}. A new task starts after completion.` : 'This completes deployment and updates the order’s filled openings.'}</p>}
-          <p className="mt-2 text-xs text-ink-500">Save keeps a draft. Complete records the decision and advances the workflow.</p>
+        <div className={cn('sm-check', checkState)} aria-live="polite">
+          <span className="sm-check-icon" aria-hidden="true">{result.closes ? <AlertTriangle className="h-4 w-4" /> : ready || result.repeats ? <CheckCircle2 className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}</span>
+          <div className="min-w-0">
+            <b>{result.canComplete ? 'Ready to save the result' : 'Before you can finish this stage'}</b>
+            {result.missing.length > 0
+              ? <ul>{result.missing.map(item => <li key={item}>{item}</li>)}</ul>
+              : <p>{result.repeats ? 'This saves the medical result and sets up the next medical task.' : result.closes ? `This closes the order for this candidate: ${result.closes.label}. Work done so far stays on record.` : def.no < STAGES.length ? `Next: stage ${def.no + 1}, ${stageByNo(def.no + 1).title}. A new task is created when you finish this stage.` : 'This finishes the deployment and adds one to the order’s filled openings.'}</p>}
+          </div>
         </div>
 
-        <div className="grid gap-4 px-4 py-4 sm:grid-cols-2">
-          {def.fields.filter((f) => fieldVisible(f, data)).map((f) => (
-            <div key={f.name} className={f.width === 'half' ? 'sm:col-span-1' : 'sm:col-span-2'}>
+        <div className="sm-form">
+          {visibleFields.map((f, index) => (
+            <div key={f.name} className={fieldSpan[index]}>
               <StageFieldInput
                 field={f}
                 value={data[f.name]}
@@ -655,54 +632,51 @@ function CurrentStage({
         </div>
 
         {def.closer && (
-          <p className="flex items-start gap-2 border-t border-rule-soft px-4 py-2.5 text-micro text-ink-400">
-            <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-600" />
-            A negative outcome here closes the application. The candidate returns to the Data Bank
-            and can be mapped to another order.
+          <p className="sm-form-note">
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+            A “no” result here closes this order for the candidate. They go back to the Data Bank and can be matched to another order.
           </p>
         )}
 
         {attempted && result.missing.length > 0 && (
-          <p className="border-t border-stamp-100 bg-stamp-50 px-4 py-2.5 text-xs text-stamp-700">
+          <p className="sm-still">
             Still needed: {result.missing.join(', ')}.
           </p>
         )}
 
-        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-rule-soft bg-field/40 px-4 py-3">
-          <span className="text-micro text-ink-400">
-            Stage {def.no} of {STAGES.length}
-            {def.repeatable && ' · can repeat'}
+        <footer className="sm-foot">
+          <span className="sm-foot-meta">
+            Save draft keeps what you typed. Complete stage saves the result and moves to the next stage.
+            {def.repeatable && ' This stage can be done again.'}
           </span>
-          <div className="flex flex-wrap items-center gap-2">
-            {uploading ? <span role="status" className="text-micro text-amber-700">Uploading documents…</span> : dirty && <span className="text-micro text-amber-700">Unsaved changes</span>}
+          <div className="sm-foot-actions">
+            {uploading ? <span role="status" className="sm-unsaved">Uploading files…</span> : dirty && <span className="sm-unsaved">Changes not saved</span>}
             <Button variant="secondary" onClick={save} disabled={!canWork || !dirty || busy || uploading || completed || refreshRequired}>
-              {busy ? 'Saving…' : 'Save'}
+              {busy ? 'Saving…' : 'Save draft'}
             </Button>
-          <Button
-            variant={result.closes ? 'danger' : 'primary'}
-            onClick={complete}
-            disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive}
-            icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
-          >
-            {result.repeats ? 'Record attempt and schedule re-medical' : result.closes ? `Complete and close — ${result.closes.label}` : 'Complete stage'}
-          </Button>
+            <Button
+              variant={result.closes ? 'danger' : 'primary'}
+              onClick={complete}
+              disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive}
+              icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+            >
+              {result.repeats ? 'Save result and plan another medical' : result.closes ? `Finish and close: ${result.closes.label}` : 'Complete stage'}
+            </Button>
           </div>
         </footer>
-      </div>
+      </section>
 
       {/* Daily remarks live beside the stage, because that is where staff are working. */}
       {task && (
-        <div className="mt-3 rounded-panel border border-rule bg-white">
-          <div className="flex items-center justify-between gap-2 border-b border-rule-soft px-4 py-2.5">
-            <h4 className="text-xs font-medium text-ink">Daily updates</h4>
+        <section className="sm-card sm-remarks" aria-label="Daily updates">
+          <header>
+            <h4>Daily updates</h4>
             {!store.updatedToday(task.id) && (
-              <Badge tone="amber" dot>
-                Not updated today
-              </Badge>
+              <Badge tone="amber" variant="dot">Not updated today</Badge>
             )}
-          </div>
-          <div className="px-4 py-3">
-            <div className="flex gap-2">
+          </header>
+          <div className="sm-remarks-body">
+            <div className="sm-remarks-form">
               <Textarea
                 rows={2}
                 value={remark}
@@ -722,30 +696,27 @@ function CurrentStage({
                 }}
                 disabled={!canWork || !remark.trim() || remarkBusy || completed}
                 icon={<MessageSquarePlus className="h-4 w-4" />}
-                className="shrink-0 self-start"
+                className="shrink-0"
               >
-                {remarkBusy ? 'Saving…' : 'Add'}
+                {remarkBusy ? 'Saving…' : 'Add note'}
               </Button>
             </div>
+            <p className="sm-hint">Notes show the time they were added and cannot be changed or deleted. Add one every day for each open task.</p>
 
             {remarks.length > 0 && (
-              <ul className="mt-3 space-y-2.5 border-t border-rule-soft pt-3">
+              <ul className="sm-remarks-list">
                 {remarks.map((r) => (
-                  <li key={r.id} className="flex gap-2.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm leading-snug text-ink-700">{r.body}</p>
-                      <p className="mt-0.5 text-micro text-ink-400">
-                        {store.user(r.authorId)?.name} · {smartTime(r.createdAt)}
-                      </p>
-                    </div>
+                  <li key={r.id}>
+                    <p>{r.body}</p>
+                    <small>{store.user(r.authorId)?.name} · {smartTime(r.createdAt)}</small>
                   </li>
                 ))}
               </ul>
             )}
           </div>
-        </div>
+        </section>
       )}
-    </section>
+    </div>
   )
 }
 
@@ -793,7 +764,7 @@ function StageFieldInput({
   switch (field.type) {
     case 'radio':
       return (
-        <Field label={field.label} hint={field.help}>
+        <Field label={field.label} hint={field.help} required={field.required}>
           <RadioRow
             name={field.name}
             value={value as string}
@@ -805,7 +776,7 @@ function StageFieldInput({
       )
     case 'select':
       return (
-        <Field label={field.label} hint={field.help}>
+        <Field label={field.label} hint={field.help} required={field.required}>
           <Select
             value={selectedValue}
             onChange={(e) => {
@@ -828,7 +799,7 @@ function StageFieldInput({
       )
     case 'textarea':
       return (
-        <Field label={field.label} hint={field.help}>
+        <Field label={field.label} hint={field.help} required={field.required}>
           <Textarea
             value={(value as string) ?? ''}
             placeholder={field.placeholder}
@@ -840,7 +811,7 @@ function StageFieldInput({
     case 'file':
       return (
         <FileDrop
-          label={field.label}
+          label={field.required ? `${field.label} (required)` : field.label}
           help={field.help}
           value={value as StoredFile | null}
           versions={versions}
@@ -878,13 +849,13 @@ function StageFieldInput({
       )
     case 'date':
       return (
-        <Field label={field.label} hint={field.help}>
+        <Field label={field.label} hint={field.help} required={field.required}>
           <DatePicker value={(value as string) ?? ''} onChange={onChange} disabled={disabled} />
         </Field>
       )
     default:
       return (
-        <Field label={field.label} hint={field.help}>
+        <Field label={field.label} hint={field.help} required={field.required}>
           <Input
             type={field.type === 'number' ? 'number' : field.type === 'time' ? 'time' : 'text'}
             ident={field.ident}
@@ -904,21 +875,27 @@ function StageFieldInput({
 
 function DeployedRow() {
   return (
-    <section>
-      <div className="rounded-panel border border-ink-800 bg-ink-800 px-4 py-3 animate-stamp-in">
-        <p className="text-sm font-semibold text-white">Deployed</p>
-        <p className="mt-0.5 text-xs text-ink-300">
-          The order's deployed count went up by one. When deployed equals openings the order moves
-          to Filled.
-        </p>
+    <section className="sm-card sm-end is-deployed animate-stamp-in">
+      <span className="sm-end-icon" aria-hidden="true"><Trophy className="h-5 w-5" /></span>
+      <div>
+        <b>Deployed</b>
+        <p>All 11 stages are done. The order's deployed count went up by one. When deployed equals openings, the order becomes Filled.</p>
       </div>
     </section>
   )
 }
 
 function ClosedRow({ app }: { app: Application }) {
-  return <section className="rounded-panel border border-stamp-100 bg-stamp-50 px-4 py-3">
-    <p className="text-sm font-semibold text-stamp-700">Application closed: {app.closureReason ? closureLabels[app.closureReason] : 'Closed'}</p>
-    <p className="mt-1 text-xs text-stamp-700/80">The candidate is back in the Data Bank. Completed stages and files remain available above; an administrator can reopen a completed stage with a reason.</p>
+  const notInterested = app.closureReason === 'not_interested' || app.closureReason === 'resume_not_received'
+  return <section className="sm-card sm-end is-closed">
+    <span className="sm-end-icon" aria-hidden="true"><CircleSlash className="h-5 w-5" /></span>
+    <div>
+      <b>Closed: {app.closureReason ? closureLabels[app.closureReason] : 'Closed'}</b>
+      <p>{app.closureReason === 'unmapped'
+        ? 'The candidate was removed from this order and its open tasks were cancelled. They can be matched to another order.'
+        : notInterested
+          ? 'The candidate is marked Not interested. They stay in the Not interested group and can be offered other orders.'
+          : 'The candidate is back in the Data Bank and can be matched to another order.'} Finished stages and files are above. An admin can reopen a finished stage, and must give a reason.</p>
+    </div>
   </section>
 }

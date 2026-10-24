@@ -52,8 +52,8 @@ def export_report(report: str, format: Literal["xlsx", "pdf"], filters: Filters 
 
 @dashboard_router.get("")
 def dashboard(staff_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if user.role != "admin" and staff_id not in (None, "", user.id):
-        raise HTTPException(403, "Only administrators can change dashboard staff scope.")
+    if user.role not in ("admin", "manager") and staff_id not in (None, "", user.id):
+        raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
     zone = get_settings().agency_timezone
     now = datetime.now(ZoneInfo(zone))
     return dashboard_data(read_dashboard_data(db, user, staff_id or None, zone, now), user, staff_id or None, zone, now)

@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, Notification, Role, Task, TaskEvent, User, WorkflowSettings
 from app.db.session import get_db
-from app.services.workflow_scheduler import add_event, settings_row
+from app.services.workflow_scheduler import add_event, restart_sla, settings_row
 
 router = APIRouter(prefix="/api", tags=["workflow"])
 
@@ -51,11 +51,9 @@ def reset_sla(task_id: str, body: ResetIn, db: Session = Depends(get_db), user: 
     if task is None:
         raise HTTPException(404, "Task not found")
     if task.completed_at or task.cancelled_at:
-        raise HTTPException(409, "A closed task cannot have its deadline reset")
+        raise HTTPException(409, "A closed task cannot get a new deadline")
     now = datetime.now(timezone.utc)
-    task.sla_started_at, task.due_at = now, now + timedelta(hours=48)
-    task.escalated, task.escalated_at = False, None
-    add_event(db, task, "sla_reset", f"reset:{task.id}:{now.isoformat()}", now, {"reason": body.reason, "actorId": user.id})
+    restart_sla(db, task, now, user.id, body.reason)
     db.add(AuditEntry(actor_id=user.id, action="Reset task SLA", entity_type="task", entity_id=task.id, target=task.title, meta={"reason": body.reason}))
     db.commit()
     return TaskOut.model_validate(task)

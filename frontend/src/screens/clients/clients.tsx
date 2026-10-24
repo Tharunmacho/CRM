@@ -1,22 +1,30 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Eye, Plus, Target, UserCheck, Users, Zap } from 'lucide-react'
+import { ArrowRight, Building2, Download, FileWarning, MessageCircle, Plus, Search, Target, Users, X, Zap } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import type { Client } from '@/shared/model/types'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { EmptyState, PageHeader, Panel, StatusPill } from '@/shared/ui/display'
-import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
-import { Button, IconButton, SearchInput, Select } from '@/shared/ui/primitives'
+import { KpiStrip, RecordIdentity } from '@/shared/ui/workspace'
+import { Button, SearchInput, Select } from '@/shared/ui/primitives'
 import { Tabs } from '@/shared/ui/overlay'
+import { SnapshotState } from '@/shared/ui/page-loading'
 import { ClientDialog } from '@/features/clients/components/client-dialog'
+import {
+  AgreementPill, Avatar, CopyButton, DemandCell, Place, ViewToggle, demandByClient, downloadCsv, useMediaQuery, useSavedView,
+  type Demand,
+} from '@/features/clients/components/parts'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import '@/styles/clients.css'
 
 type Sort = 'recent' | 'name' | 'demand'
 
+const CARD_PAGE = 12
+
 /**
- * Clients are people. The businesses they own are companies, and an order is placed
- * for a company — so one client can appear behind several employers.
+ * The directory reads company-first, as the PRD describes a client: the employer, its
+ * industry, contact person, location, agreement and hiring demand on one row. The contact
+ * person is the client record; the employers behind it are its companies.
  */
 export default function ClientsPage() {
   const store = useStore()
@@ -26,118 +34,160 @@ export default function ClientsPage() {
   const [adding, setAdding] = useState(false)
   const [tab, setTab] = useState<'all' | 'active' | 'inactive'>('all')
   const [hiring, setHiring] = useState(false)
+  const [noAgreement, setNoAgreement] = useState(false)
   const [country, setCountry] = useState('')
+  const [industry, setIndustry] = useState('')
   const [sort, setSort] = useState<Sort>('recent')
+  const [savedView, setView] = useSavedView('crm-clients-view')
+  const [shown, setShown] = useState(CARD_PAGE)
+  // The table needs about 1150px of content; below that the same records read as cards.
+  const narrow = useMediaQuery('(max-width: 1279px)')
+  const view = narrow ? 'cards' : savedView
 
-  // Open orders and seats per client, through the companies each client owns.
-  const demand = useMemo(() => {
-    const owner = new Map(store.companies.map((company) => [company.id, company.clientId]))
-    const byClient = new Map<string, { orders: number; seats: number }>()
-    for (const order of store.orders) {
-      if (order.status !== 'open') continue
-      const clientId = owner.get(order.companyId)
-      if (!clientId) continue
-      const entry = byClient.get(clientId) ?? { orders: 0, seats: 0 }
-      entry.orders += 1
-      entry.seats += order.openings
-      byClient.set(clientId, entry)
+  const companiesByClient = useMemo(() => {
+    const grouped = new Map<string, typeof store.companies>()
+    for (const company of store.companies) {
+      const list = grouped.get(company.clientId)
+      if (list) list.push(company)
+      else grouped.set(company.clientId, [company])
     }
-    return byClient
-  }, [store.companies, store.orders])
-  const sectors = (client: Client) => [...new Set(store.companies.filter((company) => company.clientId === client.id).map((company) => company.industry?.trim()).filter(Boolean) as string[])]
-  const companyCount = (client: Client) => store.companies.filter((company) => company.clientId === client.id).length
-  const countries = useMemo(() => [...new Set(store.clients.map((client) => client.country?.trim()).filter(Boolean) as string[])].sort(), [store.clients])
-  const hasFilters = Boolean(query.trim() || hiring || country || tab !== 'all')
-  const clear = () => { setQuery(''); setHiring(false); setCountry(''); setTab('all') }
+    return grouped
+  }, [store.companies])
+  const companiesOf = (client: Client) => companiesByClient.get(client.id) ?? []
+
+  // Open orders, their openings and what is already deployed, per client.
+  const demand = useMemo(() => demandByClient(store.companies, store.orders, store.applications), [store.companies, store.orders, store.applications])
+
+  const agreementOf = (client: Client) => {
+    const own = companiesOf(client)
+    return { total: own.length, filed: own.filter((company) => company.agreement).length }
+  }
+  const lacksAgreement = (client: Client) => { const { total, filed } = agreementOf(client); return total > 0 && filed < total }
+  const headline = (client: Client) => companiesOf(client)[0]?.name ?? client.name
+  const title = (client: Client) => { const own = companiesOf(client); return own.length > 1 ? `${headline(client)} +${own.length - 1}` : headline(client) }
+  const sectorsOf = (client: Client) => [...new Set(companiesOf(client).map((company) => company.industry?.trim()).filter(Boolean) as string[])]
+  const placeOf = (client: Client) => {
+    const home = companiesOf(client)[0]
+    return { country: client.country || home?.country, city: client.city || home?.city }
+  }
+
+  const countries = useMemo(() => [...new Set([
+    ...store.clients.map((client) => client.country?.trim()),
+    ...store.companies.map((company) => company.country?.trim()),
+  ].filter(Boolean) as string[])].sort(), [store.clients, store.companies])
+  const industries = useMemo(() => [...new Set(store.companies.map((company) => company.industry?.trim()).filter(Boolean) as string[])].sort(), [store.companies])
+  const hasFilters = Boolean(query.trim() || hiring || noAgreement || country || industry || tab !== 'all')
+  const clear = () => { setQuery(''); setHiring(false); setNoAgreement(false); setCountry(''); setIndustry(''); setTab('all'); setShown(CARD_PAGE) }
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const matched = store.clients.filter((c) =>
-      (tab === 'all' || c.status === tab)
-      && (!hiring || (demand.get(c.id)?.orders ?? 0) > 0)
-      && (!country || c.country?.trim() === country)
-      && (!q
-        || c.name.toLowerCase().includes(q)
-        || (c.email ?? '').toLowerCase().includes(q)
-        || (c.phone ?? '').includes(q)
-        || (c.city ?? '').toLowerCase().includes(q)
-        || (c.country ?? '').toLowerCase().includes(q)
-        || store.companies.some((co) => co.clientId === c.id && [co.name, co.industry, co.contactPerson, co.contactEmail].some((value) => (value ?? '').toLowerCase().includes(q)))))
-    if (sort === 'name') return [...matched].sort((a, b) => a.name.localeCompare(b.name))
-    if (sort === 'demand') return [...matched].sort((a, b) => (demand.get(b.id)?.seats ?? 0) - (demand.get(a.id)?.seats ?? 0) || a.name.localeCompare(b.name))
+    const matched = store.clients.filter((c) => {
+      const own = companiesByClient.get(c.id) ?? []
+      const filed = own.filter((company) => company.agreement).length
+      return (tab === 'all' || c.status === tab)
+        && (!hiring || (demand.get(c.id)?.orders ?? 0) > 0)
+        && (!noAgreement || (own.length > 0 && filed < own.length))
+        && (!country || c.country?.trim() === country || own.some((co) => co.country?.trim() === country))
+        && (!industry || own.some((co) => co.industry?.trim() === industry))
+        && (!q
+          || c.name.toLowerCase().includes(q)
+          || (c.email ?? '').toLowerCase().includes(q)
+          || (c.phone ?? '').includes(q)
+          || (c.city ?? '').toLowerCase().includes(q)
+          || (c.country ?? '').toLowerCase().includes(q)
+          || own.some((co) => [co.name, co.industry, co.contactPerson, co.contactEmail, co.city].some((value) => (value ?? '').toLowerCase().includes(q))))
+    })
+    const label = (c: Client) => (companiesByClient.get(c.id)?.[0]?.name ?? c.name)
+    if (sort === 'name') return [...matched].sort((a, b) => label(a).localeCompare(label(b)))
+    if (sort === 'demand') return [...matched].sort((a, b) => (demand.get(b.id)?.toFill ?? 0) - (demand.get(a.id)?.toFill ?? 0) || label(a).localeCompare(label(b)))
     // The directory is stored oldest first, so the newest clients come last.
     return [...matched].reverse()
-  }, [store.clients, store.companies, query, tab, hiring, country, sort, demand])
+  }, [store.clients, companiesByClient, query, tab, hiring, noAgreement, country, industry, sort, demand])
 
-  if (!snapshot.ready) return <Panel><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || 'Loading client contacts…'}</p>{snapshot.error && <Button className="mt-3" onClick={snapshot.retry}>Retry clients</Button>}</Panel>
+  if (!snapshot.ready) return <SnapshotState error={snapshot.error} onRetry={snapshot.retry} retryLabel="Try again" label="Loading clients" />
+
+  const idleCaption = (c: Client) => { const count = companiesOf(c).length; return `${count} ${count === 1 ? 'company' : 'companies'}` }
 
   const columns: Column<Client>[] = [
     {
       key: 'name',
-      header: 'Client',
-      width: '26%',
+      header: 'Company',
+      width: '24%',
       render: (c) => {
-        const industries = sectors(c)
-        return <RecordIdentity name={c.name} detail={industries.length ? industries.slice(0, 2).join(' · ') : 'No sector recorded'} />
+        const sectors = sectorsOf(c)
+        const detail = sectors.length ? sectors.slice(0, 2).join(' · ') : companiesOf(c).length ? 'No industry added' : 'No company added yet'
+        return <RecordIdentity name={title(c)} detail={<span title={detail}>{detail}</span>} />
       },
     },
     {
       key: 'contact',
-      header: 'Contact',
-      width: '26%',
+      header: 'Contact person',
+      width: '22%',
       render: (c) => (
-        <div className="clients-cell">
-          {c.phone ? <span className="primary ident whitespace-nowrap">{c.phone}</span> : <span className="text-ink-300">—</span>}
-          {c.email && <span className="secondary" title={c.email}>{c.email}</span>}
-          {c.whatsapp && c.whatsapp !== c.phone && <span className="secondary">WhatsApp · {c.whatsapp}</span>}
+        <div className="cl-cell">
+          <b title={c.name}>{c.name}</b>
+          {c.phone && <span className="cl-line ident">{c.whatsapp && <MessageCircle size={12} className="cl-wa" aria-label="Has WhatsApp" />}<a href={`tel:${c.phone}`} title={c.phone} onClick={(event) => event.stopPropagation()}>{c.phone}</a></span>}
+          {c.email && <span className="cl-line"><a href={`mailto:${c.email}`} title={c.email} onClick={(event) => event.stopPropagation()}>{c.email}</a><CopyButton value={c.email} label={`Copy email of ${c.name}`} /></span>}
         </div>
       ),
     },
     {
       key: 'location',
       header: 'Location',
-      width: '16%',
-      render: (c) => (
-        <div className="clients-cell">
-          {c.country ? <span className="primary">{c.country}</span> : <span className="text-ink-300">—</span>}
-          {c.city && <span className="secondary">{c.city}</span>}
-        </div>
-      ),
+      width: '12%',
+      render: (c) => { const place = placeOf(c); return <Place country={place.country} city={place.city} empty="—" stacked /> },
+    },
+    {
+      key: 'agreement',
+      header: 'Agreement',
+      width: '12%',
+      render: (c) => { const { total, filed } = agreementOf(c); return <AgreementPill filed={filed} total={total} /> },
     },
     {
       key: 'demand',
       header: 'Open orders',
-      align: 'right',
-      width: '14%',
-      render: (c) => {
-        const entry = demand.get(c.id)
-        const companies = companyCount(c)
-        return (
-          <span className="clients-demand">
-            <span className="primary tnum">{entry?.orders ?? 0} {(entry?.orders ?? 0) === 1 ? 'order' : 'orders'}</span>
-            <span className="secondary tnum">{entry ? `${entry.seats} open seats` : `${companies} ${companies === 1 ? 'company' : 'companies'}`}</span>
-          </span>
-        )
-      },
+      width: '12%',
+      render: (c) => <DemandCell demand={demand.get(c.id)} empty={idleCaption(c)} />,
     },
-    { key: 'status', header: 'Status', width: '10%', render: (c) => <StatusPill status={c.status} dot /> },
+    { key: 'status', header: 'Status', width: '8%', render: (c) => <StatusPill status={c.status} /> },
     {
-      key: 'actions',
-      header: '',
-      width: '56px',
-      render: (c) => <div className="flex justify-end" onClick={(event) => event.stopPropagation()}><IconButton label={`Open ${c.name}`} onClick={() => navigate(`/clients/${c.id}`)}><Eye className="h-4 w-4" /></IconButton></div>,
+      key: 'open',
+      header: 'Open',
+      actions: true,
+      render: (c) => <span className="cl-open" aria-label={`Open ${title(c)}`}>Open<ArrowRight size={14} aria-hidden="true" /></span>,
     },
   ]
 
-  const openOrders = [...demand.values()].reduce((total, entry) => total + entry.orders, 0)
-  const openSeats = [...demand.values()].reduce((total, entry) => total + entry.seats, 0)
+  const totals = [...demand.values()].reduce((sum: Demand, entry) => ({ orders: sum.orders + entry.orders, openings: sum.openings + entry.openings, deployed: sum.deployed + entry.deployed, toFill: sum.toFill + entry.toFill }), { orders: 0, openings: 0, deployed: 0, toFill: 0 })
+  const activeCount = store.clients.filter((client) => client.status === 'active').length
+  const missing = store.clients.filter(lacksAgreement).length
+
+  const exportCsv = () => downloadCsv(
+    `clients-${new Date().toISOString().slice(0, 10)}.csv`,
+    ['Company', 'Industry', 'Contact person', 'Email', 'Phone', 'WhatsApp', 'Country', 'City', 'Agreement', 'Open orders', 'Openings left', 'Status'],
+    rows.map((c) => {
+      const place = placeOf(c)
+      const { total, filed } = agreementOf(c)
+      const entry = demand.get(c.id)
+      return [title(c), sectorsOf(c).join('; '), c.name, c.email, c.phone, c.whatsapp, place.country, place.city, !total ? '' : filed === total ? 'Uploaded' : filed ? `${filed} of ${total} uploaded` : 'Missing', entry?.orders ?? 0, entry?.toFill ?? 0, c.status]
+    }),
+  )
+
+  const emptyState = (
+    <EmptyState
+      icon={hasFilters ? <Search size={20} strokeWidth={1.6} /> : <Building2 size={20} strokeWidth={1.6} />}
+      title={hasFilters ? 'No clients found' : 'No clients yet'}
+      description={hasFilters ? 'Try a different name, email, phone number, industry or place.' : 'Add your first client with its company and contact person. Then you can create orders for it.'}
+      action={hasFilters ? <Button onClick={clear}>Clear filters</Button> : <Button variant="primary" onClick={() => setAdding(true)}>New client</Button>}
+    />
+  )
 
   return (
-    <>
+    <div className="clients-v2">
       <PageHeader
         title="Clients"
-        eyebrow="Client relationships"
-        description="Clients who submit hiring requirements, with their employers and open orders."
+        eyebrow="Your clients"
+        description="Clients you hire for, with their contact people, companies and open orders."
         actions={
           <>
             <Button variant="secondary" icon={<Building2 className="h-4 w-4" />} onClick={() => navigate('/companies')}>
@@ -150,55 +200,104 @@ export default function ClientsPage() {
         }
       />
 
-      <SummaryCards
+      <KpiStrip
         items={[
-          { label: 'Clients', value: store.clients.length, detail: `${store.clients.filter((client) => client.status === 'active').length} active`, icon: Users },
-          { label: 'Hiring now', value: demand.size, detail: 'Clients with open orders', icon: Zap, tone: 'amber', active: hiring, onSelect: () => setHiring((value) => !value) },
-          { label: 'Live job orders', value: openOrders, detail: 'Open orders awaiting candidates', icon: UserCheck, tone: 'violet' },
-          { label: 'Open seats', value: openSeats, detail: 'Positions still to be filled', icon: Target, tone: 'green' },
+          { label: 'Clients', value: store.clients.length, detail: `${activeCount} active · ${store.companies.length} ${store.companies.length === 1 ? 'company' : 'companies'}`, icon: Users },
+          { label: 'Hiring now', value: demand.size, detail: `${totals.orders} open ${totals.orders === 1 ? 'order' : 'orders'}`, icon: Zap, tone: 'amber', active: hiring, onSelect: () => setHiring((value) => !value) },
+          { label: 'Openings left', value: totals.toFill, detail: totals.deployed ? `${totals.deployed} of ${totals.openings} already deployed` : 'Jobs still to fill', icon: Target, tone: 'green' },
+          { label: 'Agreement missing', value: missing, detail: missing ? 'Get a signed agreement' : 'Every client has an agreement', icon: FileWarning, tone: missing ? 'red' : 'green', active: noAgreement, onSelect: () => setNoAgreement((value) => !value) },
         ]}
       />
 
       <Panel flush>
         <Tabs tabs={[
-          { key: 'all', label: 'Everyone', count: store.clients.length },
-          { key: 'active', label: 'Active', count: store.clients.filter((client) => client.status === 'active').length },
-          { key: 'inactive', label: 'Inactive', count: store.clients.filter((client) => client.status === 'inactive').length },
-        ]} active={tab} onChange={(key) => setTab(key as typeof tab)} />
-        <div className="clients-filters">
-          <SearchInput value={query} onChange={setQuery} placeholder="Search name, contact, email, sector…" />
-          <button type="button" className="clients-chip" aria-pressed={hiring} onClick={() => setHiring((value) => !value)}><Zap size={15} />Hiring now</button>
-          <Select aria-label="Filter by country" value={country} onChange={(event) => setCountry(event.target.value)}>
+          { key: 'all', label: 'All clients' },
+          { key: 'active', label: 'Active' },
+          { key: 'inactive', label: 'Inactive' },
+        ]} active={tab} onChange={(key) => { setTab(key as typeof tab); setShown(CARD_PAGE) }} />
+        <div className="cl-toolbar">
+          <SearchInput value={query} onChange={(value) => { setQuery(value); setShown(CARD_PAGE) }} placeholder="Search company or contact" />
+          <Select aria-label="Filter by industry" value={industry} onChange={(event) => { setIndustry(event.target.value); setShown(CARD_PAGE) }}>
+            <option value="">All industries</option>
+            {industries.map((name) => <option key={name} value={name}>{name}</option>)}
+          </Select>
+          <Select aria-label="Filter by country" value={country} onChange={(event) => { setCountry(event.target.value); setShown(CARD_PAGE) }}>
             <option value="">All countries</option>
             {countries.map((name) => <option key={name} value={name}>{name}</option>)}
           </Select>
           <Select aria-label="Sort clients" value={sort} onChange={(event) => setSort(event.target.value as Sort)}>
             <option value="recent">Recently added</option>
-            <option value="name">Name A–Z</option>
-            <option value="demand">Most open seats</option>
+            <option value="name">Company name A to Z</option>
+            <option value="demand">Most openings left</option>
           </Select>
+          {!narrow && <ViewToggle view={savedView} onChange={setView} />}
         </div>
-        <div className="clients-count" role="status">
-          <span>{rows.length} of {store.clients.length} clients</span>
-          {hasFilters && <Button size="sm" variant="ghost" onClick={clear}>Clear filters</Button>}
+        <div className="cl-resultbar">
+          <div className="cl-resultbar-main">
+            <span role="status">Showing {rows.length} of {store.clients.length} clients</span>
+            {hiring && <button type="button" className="cl-chip" onClick={() => setHiring(false)} aria-label="Remove the hiring now filter">Hiring now<X size={12} aria-hidden="true" /></button>}
+            {noAgreement && <button type="button" className="cl-chip" onClick={() => setNoAgreement(false)} aria-label="Remove the agreement missing filter">Agreement missing<X size={12} aria-hidden="true" /></button>}
+          </div>
+          <div className="cl-resultbar-actions">
+            {hasFilters && <Button size="sm" variant="ghost" onClick={clear}>Clear filters</Button>}
+            {rows.length > 0 && <Button size="sm" variant="secondary" icon={<Download className="h-3.5 w-3.5" />} onClick={exportCsv} title="Download the clients shown here as a spreadsheet (CSV) file">Download CSV</Button>}
+          </div>
         </div>
-        <DataTable
-          resetPageKey={`${query}:${tab}:${hiring}:${country}:${sort}`}
-          rows={rows}
-          columns={columns}
-          rowKey={(c) => c.id}
-          onRowClick={(c) => navigate(`/clients/${c.id}`)}
-          empty={
-            <EmptyState
-              title={hasFilters ? 'No client contacts match' : 'No clients yet'}
-              description={hasFilters ? 'Try another name, email, phone number, sector or location.' : 'Add the client contact, then the employer companies and their recruitment orders.'}
-              action={hasFilters ? <Button onClick={clear}>Clear filters</Button> : <Button variant="primary" onClick={() => setAdding(true)}>New client</Button>}
-            />
-          }
-        />
+
+        {view === 'list' ? (
+          <DataTable
+            compact
+            stackBelow={false}
+            resetPageKey={`${query}:${tab}:${hiring}:${noAgreement}:${country}:${industry}:${sort}`}
+            rows={rows}
+            columns={columns}
+            rowKey={(c) => c.id}
+            onRowClick={(c) => navigate(`/clients/${c.id}`)}
+            empty={emptyState}
+          />
+        ) : rows.length === 0 ? emptyState : (
+          <>
+            <div className="cl-grid">
+              {rows.slice(0, shown).map((c) => {
+                const { total, filed } = agreementOf(c)
+                const place = placeOf(c)
+                const sectors = sectorsOf(c)
+                return (
+                  <article key={c.id} className="cl-card">
+                    <header>
+                      <Avatar name={title(c)} size="lg" />
+                      <div className="cl-card-title">
+                        <h3><button type="button" onClick={() => navigate(`/clients/${c.id}`)} title={title(c)}>{title(c)}</button></h3>
+                        <p title={sectors.join(' · ')}>{sectors.length ? sectors.slice(0, 2).join(' · ') : companiesOf(c).length ? 'No industry added' : 'No company added yet'}</p>
+                      </div>
+                      <StatusPill status={c.status} />
+                    </header>
+                    <dl className="cl-facts">
+                      <div><dt>Contact</dt><dd title={c.name}>{c.name}</dd></div>
+                      <div><dt>Phone</dt><dd>{c.phone ? <a className="ident" href={`tel:${c.phone}`}>{c.phone}</a> : <span className="cl-quiet">Not added</span>}</dd></div>
+                      <div><dt>Email</dt><dd>{c.email ? <><a href={`mailto:${c.email}`} title={c.email}>{c.email}</a><CopyButton value={c.email} label={`Copy email of ${c.name}`} /></> : <span className="cl-quiet">Not added</span>}</dd></div>
+                      <div><dt>Location</dt><dd><Place country={place.country} city={place.city} /></dd></div>
+                      <div><dt>Agreement</dt><dd><AgreementPill filed={filed} total={total} /></dd></div>
+                      <div><dt>Open orders</dt><dd><DemandCell demand={demand.get(c.id)} empty={idleCaption(c)} /></dd></div>
+                    </dl>
+                    <footer>
+                      <Button size="sm" variant="secondary" icon={<ArrowRight className="h-3.5 w-3.5" />} onClick={() => navigate(`/clients/${c.id}`)}>Open client</Button>
+                    </footer>
+                  </article>
+                )
+              })}
+            </div>
+            {rows.length > shown && (
+              <div className="cl-more">
+                <span className="tnum">Showing {shown} of {rows.length}</span>
+                <Button size="sm" onClick={() => setShown((value) => value + CARD_PAGE)}>Show more</Button>
+              </div>
+            )}
+          </>
+        )}
       </Panel>
 
       {adding && <ClientDialog onClose={() => setAdding(false)} />}
-    </>
+    </div>
   )
 }

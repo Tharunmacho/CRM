@@ -7,13 +7,15 @@ export type Fact = [label: string, value: ReactNode]
 export const isFilled = (v: ReactNode) => v !== null && v !== undefined && v !== false && v !== ''
 
 /**
- * The one card every profile section uses: a small letter-spaced heading with a thin dark rule
- * beneath it, then the content. `meta` is a quiet line under the heading.
+ * The one card every profile section uses: a flat card with a hairline under its header (optional
+ * soft icon circle, title, quiet description, actions) and the content below. Styles: candidate-v2.css.
  */
 export function ProfileCard({
   title,
   meta,
   action,
+  icon,
+  accent,
   children,
   className,
   id,
@@ -21,21 +23,25 @@ export function ProfileCard({
   title: ReactNode
   meta?: ReactNode
   action?: ReactNode
+  icon?: ReactNode
+  accent?: boolean
   children: ReactNode
   className?: string
   id?: string
 }) {
   return (
-    <section id={id} className={cn('min-w-0 rounded-2xl border border-rule-soft bg-white p-5 shadow-soft sm:p-7', className)}>
-      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0">
-          <h2 className="text-[14px] font-semibold uppercase leading-5 tracking-[0.16em] text-ink-700">{title}</h2>
-          {meta && <p className="mt-1 text-[15px] leading-6 text-ink-500">{meta}</p>}
+    <section id={id} className={cn('cp-card', accent && 'is-accent', className)}>
+      <header>
+        <div className="cp-card-title">
+          {icon && <span className="cp-card-icon" aria-hidden="true">{icon}</span>}
+          <div className="min-w-0">
+            <h2>{title}</h2>
+            {meta && <p className="cp-card-meta">{meta}</p>}
+          </div>
         </div>
-        {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
+        {action && <div className="cp-card-action">{action}</div>}
       </header>
-      <div className="mt-3 h-px bg-ink-700" />
-      <div>{children}</div>
+      <div className="cp-card-body">{children}</div>
     </section>
   )
 }
@@ -43,27 +49,27 @@ export function ProfileCard({
 /** A titled strip inside a card, separated from the content above by a thin rule. */
 export function CardBlock({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="mt-5 border-t border-rule-soft pt-5">
-      <p className="mb-3 text-[14px] font-semibold uppercase tracking-[0.12em] text-ink-600">{title}</p>
+    <div className="cp-block">
+      <p className="cp-block-title">{title}</p>
       {children}
     </div>
   )
 }
 
 /**
- * Label on the left (about a third of the row), bold value on the right, a thin divider between
- * rows. Pairs without a value are dropped.
+ * Label above the value in a soft tile, two tiles to a row on wide screens. Pairs without a value
+ * are dropped; long values (addresses, names) wrap rather than truncate.
  */
 export function FactGrid({ facts }: { facts: Fact[] }) {
   const shown = facts.filter(([, v]) => isFilled(v))
   if (shown.length === 0) return null
   return (
-    <dl className="divide-y divide-rule-soft">
-      {shown.map(([label, value]) => (
-        <div key={label} className="grid min-w-0 gap-1 py-3 sm:grid-cols-[35%_minmax(0,1fr)] sm:gap-6">
-          <dt className="text-[16px] leading-6 text-ink-600">{label}</dt>
-          {/* Wraps rather than truncating: addresses and names run long. */}
-          <dd className="min-w-0 break-words text-[17px] font-semibold leading-6 text-ink-700">{value}</dd>
+    <dl className="cp-facts">
+      {shown.map(([label, value], index) => (
+        // A last tile left alone in a two-column grid takes the full row, so no cell is orphaned.
+        <div key={label} className={cn('cp-fact', shown.length % 2 === 1 && index === shown.length - 1 && 'is-wide')}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
         </div>
       ))}
     </dl>
@@ -86,7 +92,7 @@ export function FactSection({ title, meta, action, facts }: { title: string; met
 function ExternalLink({ href }: { href: string }) {
   const url = /^https?:\/\//i.test(href) ? href : `https://${href}`
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="break-all text-navy-700 hover:underline">
+    <a href={url} target="_blank" rel="noreferrer" className="cp-link break-all">
       {href}
     </a>
   )
@@ -131,14 +137,14 @@ export function ProfileRows({ rows }: { rows: ProfileRow[] }) {
   return <FactGrid facts={rows.map((r): Fact => [r.label, rowValue(r)])} />
 }
 
-export function BulletSection({ title, items }: { title: string; items?: string[] }) {
+export function BulletSection({ title, items, icon }: { title: string; items?: string[]; icon?: ReactNode }) {
   const shown = (items ?? []).map((s) => s.trim()).filter(Boolean)
   if (shown.length === 0) return null
   return (
-    <ProfileCard title={title}>
-      <ul className="list-disc space-y-2.5 pb-1 pl-6 pt-4 text-[17px] leading-7 text-ink-700 marker:text-ink-400">
+    <ProfileCard title={title} icon={icon}>
+      <ul className="cp-bullets">
         {shown.map((s, i) => (
-          <li key={i} className="break-words pl-1">{s}</li>
+          <li key={i}>{s}</li>
         ))}
       </ul>
     </ProfileCard>

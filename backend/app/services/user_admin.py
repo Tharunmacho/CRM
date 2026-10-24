@@ -38,7 +38,7 @@ def _directory(db: Session, actor: User) -> list[User]:
     users = list(db.scalars(select(User).order_by(User.id).with_for_update().execution_options(populate_existing=True)))
     current = next((row for row in users if row.id == actor.id), None)
     if current is None or not current.active or current.role != Role.admin:
-        raise HTTPException(403, 'Only an active administrator can manage accounts.')
+        raise HTTPException(403, 'Only an active admin can manage accounts.')
     return users
 
 
@@ -59,7 +59,7 @@ def _commit(db: Session) -> None:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, 'An account with this email already exists. Refresh and try again.')
+        raise HTTPException(409, 'An account with this email already exists. Refresh the page and try again.')
 
 
 def _check_email(users: list[User], email: str, except_id: str | None = None) -> None:
@@ -102,11 +102,11 @@ def _transfer(db: Session, actor: User, user: User, users: list[User], target_id
     if not candidates and not open_count:
         return {'candidates': 0, 'tasks': 0}, [], []
     if not target_id:
-        raise HTTPException(422, 'Choose a staff member to receive all owned candidates and open tasks.')
+        raise HTTPException(422, 'Choose a staff member to take over all of this person\'s candidates and open tasks.')
     target = _find(users, target_id)
     from app.services.attendance_availability import unavailable_staff_ids
     if target.id == user.id or not target.active or target.role != Role.staff or target.on_leave or target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, 'Choose another active staff member who is not on leave.')
+        raise HTTPException(422, 'Choose a different active staff member who is not on leave.')
     ids = [candidate.id for candidate in candidates]
     for candidate in candidates:
         candidate.owner_id = target.id
@@ -143,9 +143,9 @@ def update_user(db: Session, actor: User, user_id: str, values: dict) -> User:
     next_role = values.get('role', user.role)
     loses_admin = user.role == Role.admin and (not next_active or next_role != Role.admin)
     if loses_admin and sum(row.active and row.role == Role.admin for row in users) <= 1:
-        raise HTTPException(409, 'The last active administrator must remain active with the Admin role.')
+        raise HTTPException(409, 'There must always be at least one active admin. This account has to stay active as an admin.')
     if user.id == actor.id and (not next_active or next_role != Role.admin):
-        raise HTTPException(409, 'You cannot deactivate your own account or remove your own Admin role.')
+        raise HTTPException(409, 'You cannot turn off your own account or remove your own admin role.')
     if 'email' in values:
         _check_email(users, values['email'], user.id)
     if next_role != Role.staff:

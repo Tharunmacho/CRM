@@ -92,7 +92,7 @@ def create(body: CreateUserIn, db: Session = Depends(get_db), user: User = Depen
 def update(user_id: str, body: UpdateUserIn, db: Session = Depends(get_db), user: User = Depends(admin)):
     values = body.model_dump(exclude_unset=True)
     if any(value is None and key not in ('phone', 'reassign_to_user_id') for key, value in values.items()):
-        raise HTTPException(422, 'Name, email, role and availability fields cannot be empty.')
+        raise HTTPException(422, 'Name, email, role and availability cannot be left empty.')
     return user_admin.update_user(db, user, user_id, values)
 
 
@@ -118,7 +118,7 @@ def audit(user_id: str, response: Response, limit: int = Query(50, ge=1, le=100)
             if not identifier or len(identifier) > 36:
                 raise ValueError()
         except (ValueError, TypeError):
-            raise HTTPException(422, 'The audit cursor is invalid. Reload the history.')
+            raise HTTPException(422, 'We could not load more history. Reload the page and try again.')
         statement = statement.where(or_(AuditEntry.at < timestamp,
             (AuditEntry.at == timestamp) & (AuditEntry.id < identifier)))
     known, rows = parallel_reads(

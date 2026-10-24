@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useStore, type Capability } from '@/shared/state/crm-store'
 import { EmptyState } from '@/shared/ui/display'
@@ -8,22 +8,84 @@ import { PageBoundary, PageLoading } from '@/shared/ui/page-loading'
 import LoginPage from '@/screens/auth/login'
 import NotFoundPage from '@/screens/not-found/not-found'
 
-const AppShell = lazy(() =>
-  import('@/app/layout/app-shell').then((module) => ({ default: module.AppShell })),
-)
-const DashboardPage = lazy(() => import('@/screens/dashboard/dashboard'))
-const InboxPage = lazy(() => import('@/screens/inbox/inbox'))
+const loaders = {
+  'inbox/inbox': () => import('@/screens/inbox/inbox'),
+  'clients/clients': () => import('@/screens/clients/clients'),
+  'clients/client-detail': () => import('@/screens/clients/client-detail'),
+  'companies/companies': () => import('@/screens/companies/companies'),
+  'jobs/jobs': () => import('@/screens/jobs/jobs'),
+  'jobs/order-detail': () => import('@/screens/jobs/order-detail'),
+  'candidates/add-candidate': () => import('@/screens/candidates/add-candidate'),
+  'candidates/data-bank': () => import('@/screens/candidates/data-bank'),
+  'candidates/candidate-profile': () => import('@/screens/candidates/candidate-profile'),
+  'tasks/tasks': () => import('@/screens/tasks/tasks'),
+  'dashboard/dashboard': () => import('@/screens/dashboard/dashboard'),
+}
+
+const loadShell = () => import('@/app/layout/app-shell').then((module) => ({ default: module.AppShell }))
+
+/** The screen chunk each top-level URL needs first. */
+const FIRST_SCREEN: [RegExp, keyof typeof loaders][] = [
+  [/^\/?$/, 'dashboard/dashboard'],
+  [/^\/inbox\/?$/, 'inbox/inbox'],
+  [/^\/clients\/?$/, 'clients/clients'],
+  [/^\/clients\/[^/]+\/?$/, 'clients/client-detail'],
+  [/^\/companies\/?$/, 'companies/companies'],
+  [/^\/jobs\/?$/, 'jobs/jobs'],
+  [/^\/orders\/[^/]+\/?$/, 'jobs/order-detail'],
+  [/^\/add-candidate\/?$/, 'candidates/add-candidate'],
+  [/^\/data-bank\/?$/, 'candidates/data-bank'],
+  [/^\/candidates\/[^/]+\/?$/, 'candidates/candidate-profile'],
+  [/^\/tasks\/?$/, 'tasks/tasks'],
+]
+
+// Start downloading the shell and the screen for the URL being opened right now, in parallel with the
+// session request, instead of waiting for the session answer and then for the shell and then for the screen
+// (the screen is rendered inside the shell, so it was requested last).
+if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+  void loadShell().catch(() => {})
+  const first = FIRST_SCREEN.find(([pattern]) => pattern.test(window.location.pathname))
+  if (first) void loaders[first[1]]().catch(() => {})
+}
+
+/**
+ * Download the remaining screens once the shell is idle, one at a time and only when the browser has
+ * nothing better to do, so they never compete with the data the user is waiting for.
+ */
+function preloadScreens() {
+  const saveData = Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData)
+  if (saveData) return () => {}
+  let stopped = false
+  let timer = 0
+  const queue = Object.values(loaders)
+  const idle = (work: () => void) => {
+    const request = (window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback
+    if (request) request.call(window, work, { timeout: 3_000 })
+    else window.setTimeout(work, 0)
+  }
+  const next = () => {
+    const load = queue.shift()
+    if (stopped || !load) return
+    load().catch(() => {}).finally(() => { if (!stopped) timer = window.setTimeout(() => idle(next), 100) })
+  }
+  timer = window.setTimeout(() => idle(next), 2_500)
+  return () => { stopped = true; window.clearTimeout(timer) }
+}
+
+const AppShell = lazy(loadShell)
+const DashboardPage = lazy(loaders['dashboard/dashboard'])
+const InboxPage = lazy(loaders['inbox/inbox'])
 const WhatsAppPage = lazy(() => import('@/screens/inbox/whatsapp'))
-const ClientsPage = lazy(() => import('@/screens/clients/clients'))
-const ClientDetailPage = lazy(() => import('@/screens/clients/client-detail'))
-const CompaniesPage = lazy(() => import('@/screens/companies/companies'))
-const JobsPage = lazy(() => import('@/screens/jobs/jobs'))
-const OrderDetailPage = lazy(() => import('@/screens/jobs/order-detail'))
-const AddCandidatePage = lazy(() => import('@/screens/candidates/add-candidate'))
-const DataBankPage = lazy(() => import('@/screens/candidates/data-bank'))
+const ClientsPage = lazy(loaders['clients/clients'])
+const ClientDetailPage = lazy(loaders['clients/client-detail'])
+const CompaniesPage = lazy(loaders['companies/companies'])
+const JobsPage = lazy(loaders['jobs/jobs'])
+const OrderDetailPage = lazy(loaders['jobs/order-detail'])
+const AddCandidatePage = lazy(loaders['candidates/add-candidate'])
+const DataBankPage = lazy(loaders['candidates/data-bank'])
 const MappedCandidatesPage = lazy(() => import('@/screens/workflow/mapped-candidates'))
-const CandidateProfilePage = lazy(() => import('@/screens/candidates/candidate-profile'))
-const TasksPage = lazy(() => import('@/screens/tasks/tasks'))
+const CandidateProfilePage = lazy(loaders['candidates/candidate-profile'])
+const TasksPage = lazy(loaders['tasks/tasks'])
 const AttendancePage = lazy(() => import('@/screens/attendance/attendance'))
 const TodoPage = lazy(() => import('@/screens/todos/todo'))
 const ReportsPage = lazy(() => import('@/screens/reports/reports'))
@@ -53,6 +115,11 @@ function RequireAuth() {
   }
   if (!ready) return <PageLoading fullScreen onRetry={() => void retryStartup()} />
   if (!authenticated) return <Navigate to="/login" replace />
+  return <PreloadedShell />
+}
+
+function PreloadedShell() {
+  useEffect(preloadScreens, [])
   return <AppShell />
 }
 

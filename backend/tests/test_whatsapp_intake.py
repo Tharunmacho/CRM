@@ -12,14 +12,14 @@ import httpx
 import pytest
 from sqlalchemy import func, select
 
-from app.db.models import Attachment, Candidate, Task, User, WhatsAppChannel, WhatsAppMessage
+from app.db.models import Attachment, AuditEntry, Candidate, IntakeAcknowledgement, Task, User, WhatsAppChannel, WhatsAppMessage
 from app.integrations.whatsapp import download_media, verify_signature, WhatsAppError
 from app.services.document_extraction import ExtractionFailure, ExtractionPending
 from app.services.whatsapp_intake import process_message, receive_payload
 from app.services.document_storage import _local
 from test_workflow_scheduler import workspace
 from test_database_naming import schema_database
-from test_email_intake import extraction, ORIGINAL
+from test_email_intake import extraction, ORIGINAL, pdf as make_pdf
 
 
 @pytest.fixture
@@ -297,7 +297,7 @@ def test_cached_selected_document_corruption_blocks_candidate_commit(setup, monk
         assert db.scalar(select(func.count()).select_from(Attachment)) == 0
 
 
-def test_duplicate_content_reuses_validated_extraction_and_keeps_new_receipt(setup):
+def test_duplicate_content_reuses_validated_extraction_and_keeps_new_receipt_on_admin_retry(setup):
     sessions, settings = setup
     with sessions() as db:
         db.get(Candidate, "candidate").phone = "919999999999"
@@ -318,6 +318,20 @@ def test_duplicate_content_reuses_validated_extraction_and_keeps_new_receipt(set
                     fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
                     extract=lambda *_, **__: pytest.fail("Identical bytes must not repeat paid extraction"))
     with sessions() as db:
+        # PRD: a file whose hash was already processed is skipped: receipt kept, nothing created.
+        row = db.get(WhatsAppMessage, second)
+        assert row.status == "ignored" and "Duplicate file" in row.last_error
+        assert row.candidate_id is None and row.content_hash == db.get(WhatsAppMessage, first).content_hash
+        audit = db.scalar(select(AuditEntry).where(AuditEntry.entity_id == second, AuditEntry.action == "Ignored duplicate WhatsApp file"))
+        assert audit.meta["providerMessageId"] == "wamid.second-receipt" and audit.meta["matched"]["candidateId"] == candidate_id
+        assert db.scalar(select(func.count()).select_from(Task).where(Task.candidate_id == candidate_id)) == 1
+        # An admin retry overrides the skip and reuses the validated extraction without a paid rescan.
+        row.status = "pending"
+        db.commit()
+    process_message(second, sessions=sessions, settings=settings,
+                    fetch_media=lambda *_: pytest.fail("The stored original is reused"),
+                    extract=lambda *_, **__: pytest.fail("Identical bytes must not repeat paid extraction"))
+    with sessions() as db:
         row = db.get(WhatsAppMessage, second)
         assert row.status == "completed" and row.candidate_id == candidate_id
         assert row.processing_state["reusedReceiptId"] == first
@@ -325,6 +339,33 @@ def test_duplicate_content_reuses_validated_extraction_and_keeps_new_receipt(set
         candidate = db.get(Candidate, candidate_id)
         assert (candidate.owner_id, candidate.intake_owner_id, candidate.name, candidate.whatsapp) == ("other", "owner", "Human name", "971555555555")
         assert db.scalar(select(func.count()).select_from(Task).where(Task.candidate_id == candidate_id)) == 1
+
+
+def test_duplicate_file_is_skipped_without_candidate_ack_or_ocr_but_new_version_is_attached(setup):
+    sessions, settings = setup
+    first = receipt(sessions, settings)
+    process_message(first, sessions=sessions, settings=settings, fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
+                    extract=lambda *_, **__: extraction(fields={"phone": "9000000002"}))
+    with sessions() as db:
+        candidate_id = db.get(WhatsAppMessage, first).candidate_id
+        resume_versions = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.entity_id == candidate_id, Attachment.slot == "source_bundle"))
+        receive_payload(db, payload("wamid.same-bytes"), settings)
+        receive_payload(db, payload("wamid.new-version"), settings)
+        same = db.scalar(select(WhatsAppMessage.id).where(WhatsAppMessage.provider_message_id == "wamid.same-bytes"))
+        newer = db.scalar(select(WhatsAppMessage.id).where(WhatsAppMessage.provider_message_id == "wamid.new-version"))
+    process_message(same, sessions=sessions, settings=settings, fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
+                    extract=lambda *_, **__: pytest.fail("A duplicate file must not be read"))
+    # Different bytes (a revised resume) are processed, matched to the same person and attached as the latest version.
+    process_message(newer, sessions=sessions, settings=settings, fetch_media=lambda *_: (make_pdf("Page one: certificate", "Page two: resume revised", "Page three: passport"), "application/pdf"),
+                    extract=lambda *_, **__: extraction(fields={"phone": "9000000002"}))
+    with sessions() as db:
+        assert db.get(WhatsAppMessage, same).status == "ignored"
+        assert db.scalar(select(func.count()).select_from(Candidate)) == 2  # seeded candidate + one from the first file
+        assert db.get(WhatsAppMessage, newer).status == "completed" and db.get(WhatsAppMessage, newer).candidate_id == candidate_id
+        versions = list(db.scalars(select(Attachment.version).where(Attachment.entity_id == candidate_id, Attachment.slot == "source_bundle").order_by(Attachment.version)))
+        assert versions == list(range(1, resume_versions + 2))
+        # The ignored duplicate queued nothing of its own.
+        assert db.scalar(select(func.count()).select_from(IntakeAcknowledgement).where(IntakeAcknowledgement.source_id == same)) == 0
 
 
 def test_changed_cached_original_does_not_reuse_extraction(setup):
@@ -341,6 +382,13 @@ def test_changed_cached_original_does_not_reuse_extraction(setup):
     def fresh_extract(*_, **__):
         calls.append(True)
         return extraction(fields={"phone": "9000000002"})
+    process_message(second, sessions=sessions, settings=settings,
+                    fetch_media=lambda *_: (ORIGINAL, "application/pdf"), extract=fresh_extract)
+    with sessions() as db:
+        # Identical bytes are skipped first; the admin retry then decides whether the cached read is trustworthy.
+        assert db.get(WhatsAppMessage, second).status == "ignored" and calls == []
+        db.get(WhatsAppMessage, second).status = "pending"
+        db.commit()
     process_message(second, sessions=sessions, settings=settings,
                     fetch_media=lambda *_: (ORIGINAL, "application/pdf"), extract=fresh_extract)
     with sessions() as db:
@@ -413,7 +461,8 @@ def test_admin_connect_disconnect_stops_receipts_and_queued_work_but_retains_fil
                         fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
                         extract=lambda *_, **__: pytest.fail("Retained identical extraction should be reused"))
         with sessions() as session:
-            assert session.get(WhatsAppMessage, queued).status == "completed"
+            # Identical bytes to the first receipt: skipped as an already-processed file after reconnecting.
+            assert session.get(WhatsAppMessage, queued).status == "ignored"
             assert session.scalar(select(func.count()).select_from(Task)) == 1
 
 

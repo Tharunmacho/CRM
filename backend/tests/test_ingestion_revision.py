@@ -113,6 +113,19 @@ def test_revision_sql_compiles_to_private_data_free_scalar():
         assert excluded not in sql
 
 
+def test_pulse_returns_revision_and_unread_badge_in_one_request(intake, revision_client):
+    revision = request_revision(revision_client, intake.engine)
+    with recorded_statements(intake.engine) as statements:
+        response = revision_client.get("/api/inbox/pulse")
+    assert response.status_code == 200
+    assert_select_budget(statements, 3)  # Session check plus the revision and the unread count, read side by side.
+    body = response.json()
+    assert set(body) == {"revision", "unread"}
+    assert body["revision"] == revision
+    assert set(body["unread"]) == {"total", "accounts"}
+    assert_no_private_data(body)
+
+
 def test_empty_revision_agrees_with_bootstrap_without_extra_queries(intake, revision_client):
     revision = request_revision(revision_client, intake.engine)
     assert revision == EMPTY_REVISION

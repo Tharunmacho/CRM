@@ -58,7 +58,7 @@ test('a record with no stored reading shows only what was saved and invents noth
   assert.equal(model.summary, '')
   assert.deepEqual(model.contacts, [{ kind: 'phone', value: '9876543210' }])
   assert.deepEqual([model.jobs, model.skills, model.education, model.certifications, model.projects, model.passport], [[], [], [], [], [], []])
-  assert.deepEqual(model.meta, ['Email', 'Ingested on 2026-10-01'])
+  assert.deepEqual(model.meta, ['Email', 'Added on 2026-10-01'])
 })
 
 test('the Veris reading fills what the record lacks, tidies dates, and the record wins when it has a value', () => {
@@ -75,7 +75,7 @@ test('the Veris reading fills what the record lacks, tidies dates, and the recor
   assert.deepEqual(model.details.find((r) => r.label === 'Websites').items, ['a.example.test', 'b.example.test'])
   assert.equal(model.designation, 'Site Engineer')
   // Veris dashboard order: identity and role first, contact after.
-  assert.deepEqual(model.details.slice(0, 6).map((r) => r.label), ['Name', 'Designation', 'Industry', 'Highest qualification', 'Total experience', 'Languages'])
+  assert.deepEqual(model.details.slice(0, 6).map((r) => r.label), ['Name', 'Job title', 'Industry', 'Highest qualification', 'Total experience', 'Languages'])
   assert.equal(row(model.details, 'Name'), 'Asha Rao')
   assert.equal(row(model.details, 'Industry'), 'Construction')
   assert.equal(row(model.details, 'Highest qualification'), 'B.E. Civil')
@@ -99,7 +99,7 @@ test('the Veris reading fills what the record lacks, tidies dates, and the recor
 test('identity header: source file, channel, nationality and contact chips come only from data', () => {
   const model = buildProfileModel(candidate({ currentCity: 'Madurai', whatsapp: '98765 43210' }), veris, fmt)
   assert.equal(model.sourceFileName, 'asha-cv.pdf')
-  assert.deepEqual(model.meta, ['asha-cv.pdf', 'Email', 'Ingested on 2026-10-01'])
+  assert.deepEqual(model.meta, ['asha-cv.pdf', 'Email', 'Added on 2026-10-01'])
   // WhatsApp equal to the phone number is not repeated.
   assert.deepEqual(model.contacts.map((c) => c.kind), ['email', 'phone', 'location'])
   assert.equal(model.contacts[2].value, 'Madurai')

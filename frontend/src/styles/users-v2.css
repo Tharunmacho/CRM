@@ -1,0 +1,239 @@
+/*
+ * User Management: flat, token based. Cards are white with a 1px hairline (no shadow, no gradient),
+ * the directory is a compact DataTable that keeps every column visible from 1280px up and becomes
+ * stacked cards below. The dialog and sheet classes (.uv-*) are global because those render in a
+ * portal outside .uv; every name carries the uv- prefix so nothing else is affected.
+ */
+.uv { min-width: 0; font-family: inherit; }
+.uv :is(button, input, select, textarea), .uv-timeline, .uv-target, .uv-once { font-family: inherit; }
+
+/* ---------- Section cards ---------- */
+.uv-panel { margin-bottom: 20px; }
+.uv-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 18px 20px 16px; border-bottom: 1px solid var(--border-faint); }
+.uv-head > div:first-child { min-width: 0; flex: 1 1 360px; }
+.uv-head h2 { font-size: 17px; line-height: 1.35; font-weight: 600; letter-spacing: -.02em; color: var(--text-main); }
+.uv-head p { margin-top: 2px; max-width: 80ch; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.uv-head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.uv-directory .uv-head { border-bottom: 0; padding-bottom: 12px; }
+.uv-state { margin-bottom: 20px; }
+.uv-state > div { display: grid; justify-items: center; padding: 28px 16px; text-align: center; }
+.uv-state-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 12px; border-radius: 50%; background: var(--error-fill); color: var(--error-ink); }
+.uv-state h2 { font-size: 17px; font-weight: 600; color: var(--text-main); }
+.uv-state p { margin: 6px auto 16px; max-width: 52ch; font-size: 13.5px; color: var(--text-muted); }
+
+/* ---------- Notes ---------- */
+.uv-note { font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.uv-note strong { color: var(--text-main); font-weight: 600; }
+.uv-warn { padding: 10px 12px; border: 1px solid var(--warning-edge); border-radius: 8px; background: var(--warning-fill); font-size: 13px; line-height: 1.5; color: var(--warning-ink); }
+.uv-error { padding: 10px 12px; border: 1px solid var(--error-edge); border-radius: 8px; background: var(--error-fill); font-size: 13px; line-height: 1.5; color: var(--error-ink); }
+.uv-banner { margin-bottom: 20px; }
+
+/* ---------- Avatars (circles, soft hue per name; the hue classes come from the shared sheet) ---------- */
+.uv-avatar { width: 32px; height: 32px; font-size: 11.5px; transition: filter .12s, opacity .12s; }
+.uv-avatar.is-sm { width: 26px; height: 26px; font-size: 10px; }
+.uv-avatar.is-lg { width: 44px; height: 44px; font-size: 14px; }
+.uv-avatar.is-muted { filter: grayscale(1); opacity: .6; }
+
+/* ---------- Role and chips ---------- */
+.uv-role.is-manager { --b-ink: color-mix(in srgb, hsl(262 58% 56%) 70%, var(--text-main)); --b-fill: color-mix(in srgb, hsl(262 58% 56%) 12%, var(--bg-card)); --b-edge: color-mix(in srgb, hsl(262 58% 56%) 24%, var(--bg-card)); --b-dot: hsl(262 58% 56%); }
+.uv-chip-label { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--bg-card)); border-radius: 999px; background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); font-size: 12.5px; font-weight: 500; color: var(--primary); }
+
+/* ---------- Candidate assignment ---------- */
+.uv-rotation-body { display: grid; gap: 16px; padding: 18px 20px 20px; }
+.uv-rotation-group h3 { margin-bottom: 8px; font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.uv-rotation-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.uv-rotation-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 6px 4px 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 13px; font-weight: 500; line-height: 1.3; color: var(--text-main); }
+.uv-rotation-chip > span:not(.uv-avatar) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uv-rotation-chip > small { flex: none; min-width: 24px; padding: 1px 8px; border-radius: 999px; background: var(--tint-2); font-size: 12px; font-weight: 500; text-align: center; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.uv-rotation-chip.is-paused { background: var(--tint-1); color: var(--text-muted); }
+.uv-rotation-chip.is-paused > small { background: var(--warning-fill); color: var(--warning-ink); }
+.uv-foot { font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+
+/* ---------- Directory toolbar ---------- */
+.uv-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) 200px; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border-faint); }
+.uv-toolbar.has-clear { grid-template-columns: minmax(220px, 1fr) 200px auto; }
+.uv .uv-toolbar .ui-search { width: 100%; max-width: none; min-width: 0; }
+.uv-toolbar > .custom-select { min-width: 0; }
+.uv-directory > .ui-tabs { padding: 0 12px; }
+
+/* ---------- Directory table ---------- */
+.uv .ui-data-table .ui-table-scroll { overflow: visible; }
+.uv .ui-data-table th.ui-actions-cell { width: auto; }
+.uv .ui-data-table td { vertical-align: middle; }
+/* The table starts and ends on the same 20px edge as the card header, toolbar and tabs. */
+@media (min-width: 1280px) {
+.uv .ui-data-table.is-compact :is(th, td):first-child { padding-left: 20px; }
+.uv .ui-data-table.is-compact :is(th, td):last-child { padding-right: 20px; }
+}
+.uv .ui-table-pagination { padding-left: 20px; padding-right: 20px; }
+.uv .ui-data-table tbody tr { transition: background-color .12s; }
+.uv .ui-data-table tbody tr:hover { background: var(--tint-1); }
+.uv .ui-data-table tr.uv-row-off { background: color-mix(in srgb, var(--tint-1) 70%, transparent); }
+.uv-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.uv-person > div { min-width: 0; }
+.uv-name { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 13.5px; font-weight: 600; line-height: 1.3; color: var(--text-main); }
+.uv-name > span { min-width: 0; overflow-wrap: anywhere; }
+.uv-name > em { flex: none; padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); font-size: 11px; font-style: normal; font-weight: 600; line-height: 1.6; color: var(--primary); }
+.uv-email { margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+.uv-row-off .uv-name > span { color: var(--text-muted); }
+.uv-phone { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text-main); transition: color .12s; }
+a.uv-phone:hover { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+a.uv-phone:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
+.uv-none { font-size: 12.5px; color: var(--text-light); }
+.uv-status { display: grid; justify-items: start; gap: 4px; }
+.uv-status small { font-size: 12px; line-height: 1.35; color: var(--text-muted); }
+.uv-status small.is-ok { color: var(--success-ink); font-weight: 500; }
+.uv-status small.is-leave { color: var(--warning-ink); font-weight: 500; }
+.uv-flags { display: grid; gap: 6px; }
+.uv-flags label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.uv-flags label > span { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.uv-work { display: grid; gap: 2px; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.uv-work b { font-weight: 600; color: var(--text-main); font-variant-numeric: tabular-nums; }
+.uv-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.uv-edit { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); font-size: 13px; font-weight: 500; color: var(--text-main); transition: border-color .12s, color .12s, background-color .12s; }
+.uv-edit:hover { border-color: var(--primary); color: var(--primary); }
+.uv-menu-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-muted); transition: background-color .12s, color .12s, border-color .12s; }
+.uv-menu-btn:hover, .uv-menu-btn[aria-expanded='true'] { border-color: var(--border-control); background: var(--tint-2); color: var(--text-main); }
+:is(.uv-edit, .uv-menu-btn):focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.uv-actions .ui-menu { text-align: left; }
+
+/* ---------- Stacked cards below 1280px ---------- */
+@media (max-width: 1279px) {
+  .uv .ui-table-stack-1280 tbody tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; }
+  .uv .ui-table-stack-1280 tbody td { display: block; min-width: 0; padding: 0; text-align: left; }
+  .uv .ui-table-stack-1280 tbody td::before { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-muted); }
+  .uv .ui-table-stack-1280 tbody td[data-label='Team member'] { grid-column: 1 / -1; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Team member']::before, .uv .ui-table-stack-1280 tbody td[data-label='Actions']::before { display: none; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Actions'] { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 10px; border-top: 1px solid var(--border-faint); }
+  .uv .ui-table-stack-1280 .uv-email { white-space: normal; overflow-wrap: anywhere; }
+  .uv-toolbar, .uv-toolbar.has-clear { grid-template-columns: minmax(0, 1fr) 180px 190px; }
+  .uv-toolbar.has-clear > .ui-button { grid-column: 1 / -1; justify-self: start; }
+}
+@media (max-width: 767px) { .uv .ui-table-stack-1280 tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- Dialogs and sheets ---------- */
+.uv-fs { display: grid; gap: 14px; min-width: 0; }
+.uv-fs > header { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border-faint); }
+.uv-fs > header > span { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary); }
+.uv-fs > header h3 { font-size: 15px; font-weight: 600; line-height: 1.3; letter-spacing: -.01em; color: var(--text-main); }
+.uv-fs > header p { font-size: 13px; line-height: 1.4; color: var(--text-muted); }
+.uv-fs-grid { display: grid; gap: 14px; min-width: 0; }
+.uv-fs-grid.is-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.uv-fs-grid > * { min-width: 0; }
+.uv-fs-grid.is-two > .sm\:col-span-2 { grid-column: 1 / -1; }
+.uv-toggle { display: grid; gap: 14px; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); }
+.uv-generate { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; font-size: 12.5px; color: var(--text-muted); }
+.uv-secret { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.uv-secret code { min-width: 0; padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--bg-card)); border-radius: 8px; background: color-mix(in srgb, var(--primary) 7%, var(--bg-card)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; letter-spacing: .04em; color: var(--text-main); overflow-wrap: anywhere; }
+.uv-once { display: grid; justify-items: center; gap: 8px; padding: 8px 0; text-align: center; }
+.uv-once-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--success-fill); color: var(--success-ink); }
+.uv-once h3 { font-size: 16px; font-weight: 600; color: var(--text-main); }
+.uv-once p { font-size: 13px; color: var(--text-muted); overflow-wrap: anywhere; }
+.uv-once .uv-secret { justify-content: center; margin: 6px 0 2px; }
+.uv-once .uv-once-note { max-width: 46ch; padding: 10px 12px; border: 1px solid var(--warning-edge); border-radius: 8px; background: var(--warning-fill); font-size: 12.5px; line-height: 1.55; color: var(--warning-ink); }
+.uv-transfer-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.uv-transfer-counts > div { display: flex; align-items: baseline; gap: 8px; padding: 12px 14px; border: 1px solid var(--warning-edge); border-radius: 12px; background: var(--warning-fill); }
+.uv-transfer-counts strong { font-size: 24px; line-height: 1.1; font-weight: 600; color: var(--warning-ink); font-variant-numeric: tabular-nums; }
+.uv-transfer-counts span { font-size: 13px; color: var(--warning-ink); }
+.uv-target { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); }
+.uv-target > div { min-width: 0; flex: 1; }
+.uv-target p { font-size: 14px; font-weight: 600; color: var(--text-main); overflow-wrap: anywhere; }
+.uv-target span:not(.uv-avatar):not(.ui-badge):not(.ui-badge-mark) { display: block; font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+.uv-target .uv-avatar { width: 40px; height: 40px; font-size: 13px; }
+
+/* ---------- Audit timeline ---------- */
+.uv-audit { display: grid; gap: 16px; padding: 20px; }
+.uv-audit > .uv-target { margin: 0; }
+.uv-timeline { position: relative; display: grid; gap: 12px; margin: 0; padding: 0 0 0 40px; list-style: none; }
+.uv-timeline::before { content: ''; position: absolute; left: 13px; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--border-main); }
+.uv-timeline > li { --tone: var(--primary); --tone-fill: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); position: relative; padding: 12px 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.uv-timeline > li.is-green { --tone: var(--success-ink); --tone-fill: var(--success-fill); }
+.uv-timeline > li.is-red { --tone: var(--error-ink); --tone-fill: var(--error-fill); }
+.uv-timeline > li.is-amber { --tone: var(--warning-ink); --tone-fill: var(--warning-fill); }
+.uv-tl-dot { position: absolute; left: -40px; top: 10px; display: grid; place-items: center; width: 28px; height: 28px; border: 3px solid var(--bg-card); border-radius: 50%; background: var(--tone-fill); color: var(--tone); box-sizing: content-box; margin: -3px; }
+.uv-tl-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.uv-tl-head p { font-size: 14px; font-weight: 600; color: var(--text-main); }
+.uv-tl-head time { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.uv-tl-target { margin-top: 2px; font-size: 13px; color: var(--text-muted); overflow-wrap: anywhere; }
+.uv-changes { display: grid; gap: 6px; margin-top: 8px; }
+.uv-changes > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; border-radius: 8px; background: var(--tint-1); font-size: 12.5px; }
+.uv-changes dt { font-weight: 600; color: var(--text-main); }
+.uv-changes dd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text-muted); }
+.uv-changes dd s { color: var(--text-light); text-decoration-color: var(--border-hover); }
+.uv-changes dd b { font-weight: 600; color: var(--text-main); }
+.uv-tl-meta { margin-top: 6px; font-size: 12.5px; color: var(--text-muted); }
+.uv-tl-actor { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.uv-audit-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 4px; font-size: 12.5px; color: var(--text-muted); }
+.uv-skeleton-list { display: grid; gap: 12px; }
+.uv-skeleton-list > .sk { height: 64px; border-radius: 12px; }
+
+/* ---------- Narrow screens ---------- */
+@media (max-width: 767px) {
+  .uv-head { padding: 16px; }
+  .uv-rotation-body { padding: 16px; }
+  .uv-toolbar, .uv-toolbar.has-clear { grid-template-columns: 1fr; padding: 12px 16px; }
+  .uv-toolbar.has-clear { grid-template-columns: 1fr; }
+  .uv-fs-grid.is-two { grid-template-columns: 1fr; }
+  .uv-transfer-counts { grid-template-columns: 1fr; }
+  .uv-audit { padding: 16px; }
+  .uv-head-actions, .uv-head-actions > .ui-button { max-width: 100%; }
+}
+@media (min-width: 640px) { .uv-fs-grid.is-two > .sm\:col-span-2 { grid-column: 1 / -1; } }
+@media (max-width: 639px) { .uv-fs-grid.is-two > * { grid-column: auto !important; } }
+
+/* Row menus in the lower rows open upward so they are never cut off by the bottom of the card or window. */
+.uv tbody tr:nth-last-child(-n+3):nth-child(n+4) .uv-actions .ui-menu { top: auto; bottom: calc(100% + 6px); }
+
+/* Stacked cards drop the header row (labels come from each cell, sorting from the Sort select in the toolbar). */
+@media (max-width: 1279px) { .uv .ui-table-stack-1280 thead { display: none; } }
+.uv-rotation-body > *, .uv-rotation-group { min-width: 0; }
+.uv-sort-narrow { display: none; }
+@media (max-width: 1279px) { .uv-sort-narrow { display: block; } }
+@media (max-width: 767px) {
+  .uv-directory > .ui-tabs { padding: 0 4px; gap: 0; }
+  .uv-directory > .ui-tabs .ui-tab { padding: 0 9px; font-size: 13.5px; }
+  .uv-directory > .ui-tabs .ui-tab[aria-selected='true']::after { left: 6px; right: 6px; }
+}
+
+/* ---------- Phones: 40px tap targets, tabs scroll inside themselves with an edge shade ---------- */
+@media (max-width: 767px) {
+  .uv .ui-button, .uv .ui-data-table td .ui-button { min-height: 40px; height: auto; }
+  .uv .workspace-header-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .uv-edit { height: 40px; padding: 0 14px; }
+  .uv-menu-btn { width: 40px; height: 40px; }
+  .uv a.uv-phone { display: inline-flex; align-items: center; min-height: 40px; margin: -10px 0; }
+  .uv-flags { gap: 0; }
+  .uv-flags label { min-height: 40px; }
+  .uv .ui-switch, .uv-toggle .ui-switch { position: relative; }
+  .uv .ui-switch::after { content: ''; position: absolute; inset: -9px -6px; }
+  .uv-directory > .ui-tabs { padding-right: 28px; --fade: var(--bg-card);
+    background:
+      linear-gradient(90deg, var(--fade) 30%, transparent) left center / 36px 100% no-repeat local,
+      linear-gradient(270deg, var(--fade) 30%, transparent) right center / 36px 100% no-repeat local,
+      linear-gradient(90deg, rgba(0, 0, 0, .12), transparent) left center / 12px 100% no-repeat scroll,
+      linear-gradient(270deg, rgba(0, 0, 0, .12), transparent) right center / 12px 100% no-repeat scroll; }
+  .uv-directory > .ui-tabs .ui-tab { min-width: 44px; }
+  .uv-head-actions { width: 100%; }
+  .uv-head-actions .ui-button { flex: 1 1 auto; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Actions'] { gap: 8px; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Actions'] .uv-actions { width: 100%; }
+  .uv-actions .uv-edit { flex: 1; justify-content: center; }
+  .uv .uv-toolbar input, .uv .uv-toolbar select { font-size: 16px; }
+  .uv-audit .ui-button { min-height: 40px; }
+}
+@media (max-width: 359px) { .uv .workspace-summary { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) {
+  .workspace-dialog:has(#user-form) > footer, .workspace-dialog:has(#security-form) > footer { flex-direction: column-reverse; align-items: stretch; }
+  .workspace-dialog:has(#user-form) > footer > .ui-button, .workspace-dialog:has(#security-form) > footer > .ui-button { width: 100%; min-height: 44px; }
+  .uv-secret .ui-button { min-height: 40px; }
+}
+
+@media (pointer: coarse) and (min-width: 768px) and (max-width: 1279px) {
+  .uv .ui-button, .uv .ui-data-table td .ui-button { min-height: 40px; height: auto; }
+  .uv-edit { height: 40px; }
+  .uv-menu-btn { width: 40px; height: 40px; }
+  .uv .ui-switch { position: relative; }
+  .uv .ui-switch::after { content: ''; position: absolute; inset: -9px -6px; }
+  .uv :is(input, select) { font-size: 16px; }
+}
+@media (pointer: coarse) and (min-width: 768px) and (max-width: 1279px) { .uv a.uv-phone { display: inline-flex; align-items: center; min-height: 40px; margin: -10px 0; } }

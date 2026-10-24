@@ -13,6 +13,12 @@ def task_deadline(task):
     return task.due_at or (task.sla_started_at or task.created_at) + timedelta(hours=48)
 
 
+def overdue_detail(candidate, task, owner, hours):
+    """Candidate, stage, owner and hours overdue (PRD p11), for the escalation and its reminders."""
+    stage = f"Stage {task.stage} · " if task.stage is not None else ""
+    return f"{candidate} · {stage}{task.title} · Owner: {owner} · {hours} hours overdue"
+
+
 def settings_row(db):
     db.execute(insert(WorkflowSettings).values(id=1).on_conflict_do_nothing(index_elements=["id"]))
     return db.scalar(select(WorkflowSettings).where(WorkflowSettings.id == 1).with_for_update())
@@ -24,6 +30,13 @@ def add_event(db, task, kind, key, at, meta=None, *, owner_id=None):
         kind=kind, event_key=key, occurred_at=at, meta=meta,
     ).on_conflict_do_nothing(index_elements=["event_key"]).returning(TaskEvent.id))
     return bool(event_id)
+
+
+def restart_sla(db, task, now, actor_id, reason):
+    """Admin-chosen restart of the 48-hour clock (shared by reset-sla and reassignment)."""
+    task.sla_started_at, task.due_at = now, now + timedelta(hours=48)
+    task.escalated, task.escalated_at = False, None
+    add_event(db, task, "sla_reset", f"reset:{task.id}:{now.isoformat()}", now, {"reason": reason, "actorId": actor_id})
 
 
 def notify(db, recipients, kind, title, detail, link):
@@ -52,6 +65,7 @@ def scan_workflow(db, *, now=None, agency_timezone="Asia/Kolkata"):
     config = settings_row(db)
     supervisors = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
     names = dict(db.execute(select(Candidate.id, Candidate.name)).all())
+    owner_names = dict(db.execute(select(User.id, User.name)).all())
     counts = {"escalations": 0, "reminders": 0, "missedUpdates": 0, "todos": 0}
     tasks = list(db.scalars(select(Task).where(Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.id).with_for_update(skip_locked=True)))
     for task in tasks:
@@ -72,9 +86,11 @@ def scan_workflow(db, *, now=None, agency_timezone="Asia/Kolkata"):
             task.escalated, task.escalated_at = True, now
         counts["escalations" if kind == "escalation" else "reminders"] += 1
         overdue = max(0, int((now - due).total_seconds() // 3600))
-        notify(db, [*supervisors, task.owner_id], "escalation",
+        # PRD role table: only Admin and Manager receive 48-hour escalations; Staff do not
+        # (the owner still sees the task overdue in Tasks / Dashboard).
+        notify(db, supervisors, "escalation",
                "Task overdue" if kind == "escalation" else "Overdue task reminder",
-               f"{names.get(task.candidate_id, 'Candidate')} · {task.title} · {overdue} hours overdue",
+               overdue_detail(names.get(task.candidate_id, "Candidate"), task, owner_names.get(task.owner_id, "Unassigned"), overdue),
                f"/tasks?task={task.id}")
 
     zone = ZoneInfo(agency_timezone)

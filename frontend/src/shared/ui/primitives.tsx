@@ -16,19 +16,26 @@ export { Select } from './select'
 type Variant = 'primary' | 'accent' | 'secondary' | 'ghost' | 'danger' | 'dangerGhost'
 type Size = 'sm' | 'md'
 
+/* Variant colours are token based (--primary, --on-primary, --tint-*, --error-*), so the primary button
+   follows the palette and dark mode. They are utilities, so a className on one button still overrides. */
+const PRIMARY =
+  'border-[color:var(--primary)] bg-[color:var(--primary)] text-[color:var(--on-primary)] hover:border-[color:var(--primary-hover)] hover:bg-[color:var(--primary-hover)] disabled:border-[color:var(--tint-3)] disabled:bg-[color:var(--tint-3)] disabled:text-[color:var(--text-light)]'
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-navy-600 text-white hover:bg-navy-700 disabled:bg-ink-300',
-  accent: 'bg-navy-600 font-semibold text-white hover:bg-navy-700 disabled:bg-ink-300',
+  primary: PRIMARY,
+  accent: PRIMARY,
   secondary:
-    'bg-white text-ink border border-rule hover:bg-field hover:border-ink-300 disabled:text-ink-300',
-  ghost: 'text-ink-600 hover:bg-field hover:text-ink disabled:text-ink-300',
-  danger: 'bg-stamp-600 text-white hover:bg-stamp-700 disabled:bg-ink-300',
-  dangerGhost: 'text-stamp-600 hover:bg-stamp-50 border border-transparent hover:border-stamp-100',
+    'border-[color:var(--border-control)] bg-[color:var(--bg-card)] text-[color:var(--text-main)] hover:border-[color:var(--border-hover)] hover:bg-[color:var(--tint-1)] disabled:bg-[color:var(--tint-1)] disabled:text-[color:var(--text-light)]',
+  ghost:
+    'border-transparent bg-transparent text-[color:var(--text-muted)] hover:bg-[color:var(--tint-2)] hover:text-[color:var(--text-main)] disabled:text-[color:var(--text-light)]',
+  danger:
+    'border-[color:var(--error-ink)] bg-[color:var(--error-ink)] text-[color:var(--bg-card)] hover:opacity-90 disabled:border-[color:var(--tint-3)] disabled:bg-[color:var(--tint-3)] disabled:text-[color:var(--text-light)]',
+  dangerGhost:
+    'border-transparent bg-transparent text-[color:var(--error-ink)] hover:border-[color:var(--error-edge)] hover:bg-[color:var(--error-fill)]',
 }
 
 const SIZES: Record<Size, string> = {
-  sm: 'h-8 px-3 text-xs gap-1.5',
-  md: 'h-10 px-4 text-sm gap-2',
+  sm: 'h-8 px-3 text-[13px] gap-1.5',
+  md: 'h-10 px-4 text-[14px] gap-2',
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -46,10 +53,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type="button"
       className={cn(
-        'ui-button inline-flex items-center justify-center rounded-control font-medium transition-colors',
+        'ui-button inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border font-medium transition-colors [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0',
         `ui-button-${variant}`,
-        'disabled:cursor-not-allowed',
         VARIANTS[variant],
+        'disabled:cursor-not-allowed',
         SIZES[size],
         className,
       )}
@@ -77,10 +84,10 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       aria-label={label}
       title={label}
       className={cn(
-        'inline-flex h-8 w-8 items-center justify-center rounded-control transition-colors',
+        'ui-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors',
         tone === 'danger'
           ? 'text-stamp-600 hover:bg-stamp-50'
-          : 'text-ink-400 hover:bg-field hover:text-ink',
+          : 'text-ink-500 hover:bg-field hover:text-ink',
         className,
       )}
       {...rest}
@@ -111,21 +118,21 @@ export function Field({
     <FieldLabelContext.Provider value={label}>
       <label className={cn('ui-field block', className)}>
         {label && (
-          <span className="mb-1.5 flex items-baseline gap-1 text-xs font-medium text-ink-600">
+          <span className="mb-1.5 flex items-baseline gap-1 text-[13px] font-medium text-ink-700">
             {label}
             {required && <span className="text-stamp-600">*</span>}
           </span>
         )}
         {children}
-        {hint && !error && <span className="mt-1 block text-micro text-ink-400">{hint}</span>}
-        {error && <span className="mt-1 block text-micro text-stamp-600">{error}</span>}
+        {hint && !error && <span className="mt-1.5 block text-[12.5px] leading-5 text-ink-500">{hint}</span>}
+        {error && <span className="mt-1.5 block text-[12.5px] leading-5 text-stamp-600">{error}</span>}
       </label>
     </FieldLabelContext.Provider>
   )
 }
 
-const inputBase =
-  'ui-input w-full rounded-control border border-rule bg-white px-3 text-sm text-ink transition-colors placeholder:text-ink-300 hover:border-ink-300 focus:border-navy-500 disabled:bg-field disabled:text-ink-400'
+/* Border, hover, focus and disabled colours live in styles/depth.css (.ui-input), token based. */
+const inputBase = 'ui-input w-full rounded-[8px] border bg-white px-3 text-[14px] text-ink transition-colors'
 
 export const Input = forwardRef<
   HTMLInputElement,
@@ -144,7 +151,7 @@ export const Textarea = forwardRef<
     <textarea
       ref={ref}
       rows={rows}
-      className={cn(inputBase, 'py-2.5 leading-relaxed', className)}
+      className={cn(inputBase, 'min-h-[88px] py-2.5 leading-relaxed', className)}
       {...rest}
     />
   )
@@ -200,7 +207,7 @@ export function Checkbox({
   return (
     <label
       className={cn(
-        'inline-flex cursor-pointer items-start gap-2 text-sm',
+        'inline-flex cursor-pointer items-start gap-2 text-[14px]',
         disabled && 'cursor-not-allowed opacity-50',
       )}
     >
@@ -230,7 +237,7 @@ export function RadioRow({
   disabled?: boolean
 }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-1.5" data-name={name}>
       {options.map((o) => {
         const active = value === o.value
         return (
@@ -241,10 +248,8 @@ export function RadioRow({
             aria-pressed={active}
             onClick={() => onChange(o.value)}
             className={cn(
-              'h-10 rounded-control border px-4 text-sm font-medium transition-colors',
-              active
-                ? 'border-navy-600 bg-navy-50 text-navy-700'
-                : 'border-rule bg-white text-ink-600 hover:border-ink-300 hover:text-ink',
+              'ui-radio-chip h-10 rounded-[8px] border px-4 text-[14px] font-medium transition-colors',
+              active && 'is-on',
               disabled && 'cursor-not-allowed opacity-60',
             )}
           >
@@ -285,14 +290,14 @@ export function Switch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors',
+        'ui-switch inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors',
         checked ? 'bg-navy-600' : 'bg-ink-300',
         disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
       )}
     >
       <span
         className={cn(
-          'h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-150',
+          'ui-switch-knob h-5 w-5 rounded-full bg-white transition-transform duration-150',
           checked ? 'translate-x-5' : 'translate-x-0',
         )}
       />
@@ -310,10 +315,10 @@ export function Switch({
     >
       {control}
       <span className="min-w-0">
-        <span className={cn('block text-sm leading-6', disabled ? 'text-ink-400' : 'text-ink-700')}>
+        <span className={cn('block text-[14px] leading-6', disabled ? 'text-ink-400' : 'text-ink-700')}>
           {label}
         </span>
-        {description && <span className="mt-0.5 block text-micro text-ink-400">{description}</span>}
+        {description && <span className="mt-0.5 block text-[12.5px] text-ink-500">{description}</span>}
       </span>
     </label>
   )
@@ -335,7 +340,7 @@ export function SearchInput({
   return (
     <div className={cn('ui-search relative', className)}>
       <svg
-        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-300"
+        className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -349,7 +354,7 @@ export function SearchInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={placeholder}
-        className={cn(inputBase, 'h-10 pl-9')}
+        className={cn(inputBase, 'h-10 pl-10')}
       />
     </div>
   )

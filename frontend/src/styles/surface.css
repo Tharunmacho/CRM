@@ -1,0 +1,41 @@
+/* Card surfaces: the light page is a very light neutral and every card is pure white with a soft shadow, so each
+   card reads as its own shape. Coloured top accent bars and tinted borders are switched off everywhere. */
+html body :is(
+  .ui-panel, .summary-card, .dr-metric, .dr-stat, .dr-card, .dr-mcard, .db-kpi, .db .db-panel, .db-mini, .rv-card, .rv-mini,
+  .cp-card, .cp-head, .cp-app, .cl-card, .jv-order, .jv-mcard, .tk-panel, .td-card, .td-block, .ac .ac-card, .ac .ac-report,
+  .staff-card, .att-clock, .att-req, .att-card, .mb-card, .mb-acct, .mb-acct-card, .wa-workspace, .uv-card, .tk-meter, .tk-automation
+) {
+  border-color: var(--border-card);
+  box-shadow: var(--shadow-card);
+}
+html body :is(
+  .summary-card, .dr-metric, .dr-stat, .db-kpi, .rv-mini, .cp-card.is-accent, .workspace-page .jv .workspace-summary .summary-card
+)::before {
+  content: none;
+  display: none;
+}
+html body .topbar { background: var(--bg-card); }
+
+/* ---- Hover and press feedback: every control answers the pointer ---- */
+html body :is(button, a[href], [role="button"], [role="tab"], select, summary) {
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease, opacity .15s ease;
+}
+html body .ui-button:not(:disabled):active { transform: translateY(1px); }
+html body .ui-button-primary:not(:disabled):hover, html body .ui-button-accent:not(:disabled):hover { box-shadow: 0 4px 12px rgba(var(--primary-rgb), .28); }
+html body .rail-logo:hover { opacity: .82; }
+html body .rail-item:hover:not(.is-active):not([aria-current="page"]) { background: color-mix(in srgb, var(--primary) 8%, var(--bg-sidebar)); }
+html body .rail .rail-search, html body .rail .theme-switch { background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-sidebar)); }
+html body .rail .theme-switch-btn.is-on { background: var(--bg-card); }
+html body .theme-switch-btn:not(.is-on):hover { background: var(--tint-2); color: var(--text-main); }
+html body .theme-switch-btn.is-on:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, .16); }
+html body .dr-stat:hover, html body .mb-acct-main:hover, html body .jv-option:hover, html body .db-kpi:hover {
+  background: var(--tint-1); border-color: var(--border-hover);
+}
+html body .dr-stat:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16, 24, 40, .1); }
+html body .ui-tab:not([aria-selected="true"]):hover { color: var(--text-main); background: var(--tint-1); }
+html body .ui-switch:not(:disabled):hover { box-shadow: 0 0 0 4px var(--primary-glow); }
+html body .db-seg-btn:not(.is-on):not([aria-pressed="true"]):hover,
+html body button[aria-label$=" view"]:not([aria-pressed="true"]):hover { background: var(--tint-2); color: var(--text-main); }
+html body .custom-select-trigger:hover { border-color: var(--border-hover); background: var(--tint-1); }
+html body .record-identity:hover strong, html body .record-identity:hover b { color: var(--primary); }
+html body a[href]:not([class]):hover { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }

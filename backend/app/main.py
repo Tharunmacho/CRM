@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
@@ -30,6 +31,30 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 app.add_middleware(ApiTimingMiddleware)
+
+
+class _CompressWorkspaceSnapshot:
+    """Gzip the large JSON snapshots and the built JS/CSS; documents and streams are left untouched.
+
+    The built bundle is ~1.4 MB of JavaScript (~465 kB gzipped). Behind a proxy that does not compress,
+    the first visit downloaded all of it uncompressed; hashed asset files never change, so compressing them
+    on the way out costs little and each browser fetches each file once (see the immutable cache header).
+    """
+
+    paths = ("/api/bootstrap", "/api/auth/session")
+    text_assets = (".js", ".css", ".svg", ".json", ".html")
+
+    def __init__(self, app):
+        self.app = app
+        self.compressed = GZipMiddleware(app, minimum_size=1024, compresslevel=5)
+
+    async def __call__(self, scope, receive, send):
+        path = scope["path"] if scope["type"] == "http" else ""
+        wanted = path in self.paths or (path.startswith("/assets/") and path.endswith(self.text_assets))
+        await (self.compressed if wanted else self.app)(scope, receive, send)
+
+
+app.add_middleware(_CompressWorkspaceSnapshot)
 
 # Only needed when the SPA is served from a different origin, i.e. `npm run dev`.
 app.add_middleware(
@@ -173,8 +198,24 @@ if _stamp.is_file():
 
 static_dir = Path(settings.static_dir).resolve()
 
+# Vite names every file under /assets after its content hash, so a changed file always has a new URL and
+# the old one can be cached for good: a revisit then makes no request (and no 304 round trip) per chunk.
+# index.html and the un-hashed public files must be re-checked, or a deploy would never reach returning users.
+_IMMUTABLE = "public, max-age=31536000, immutable"
+_REVALIDATE = "no-cache"
+_PUBLIC_FILE = "public, max-age=86400"
+
+
+class _HashedAssets(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = _IMMUTABLE
+        return response
+
+
 if static_dir.is_dir():
-    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+    app.mount("/assets", _HashedAssets(directory=static_dir / "assets"), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> FileResponse:
@@ -193,7 +234,7 @@ if static_dir.is_dir():
         if not candidate.is_relative_to(static_dir) or not index.is_relative_to(static_dir):
             raise HTTPException(404, "Not found")
         if full_path and candidate.is_file():
-            return FileResponse(candidate)
+            return FileResponse(candidate, headers={"Cache-Control": _REVALIDATE if candidate == index else _PUBLIC_FILE})
         if not index.is_file():
             raise HTTPException(404, "Not found")
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": _REVALIDATE})

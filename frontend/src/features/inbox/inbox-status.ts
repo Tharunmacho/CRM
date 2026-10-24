@@ -6,13 +6,13 @@ export const isLiveAccount = (account: Pick<InboxAccount, 'provider' | 'connecti
   !!account && LIVE_PROVIDERS.includes(account.provider) && account.connectionStatus !== 'disconnected'
 
 export const JOB_LABEL: Record<InboxJob['status'], string> = {
-  pending: 'Queued',
+  pending: 'Waiting',
   processing: 'Reading attachments',
-  retry: 'Retry scheduled',
+  retry: 'Will try again',
   needs_review: 'Needs review',
-  completed: 'Completed',
-  ignored: 'No candidate created',
-  failed: 'Failed',
+  completed: 'Done',
+  ignored: 'No candidate made',
+  failed: 'Did not work',
 }
 
 export function canRetryJob(job: InboxJob): boolean {
@@ -24,12 +24,12 @@ export function isJobPending(job: InboxJob): boolean {
 }
 
 export function intakeUnavailable(account: InboxAccount | undefined): string | null {
-  if (!account) return 'Mailbox details are unavailable. Refresh before processing these attachments.'
+  if (!account) return 'We cannot see the mailbox details. Refresh before processing these attachments.'
   if (!LIVE_PROVIDERS.includes(account.provider)) {
-    return 'This provider is archived. Stored history is read only; connect the mailbox again for new candidate intake. Original attachments remain available to download.'
+    return 'This mailbox type is archived. Saved mail history is read only. Connect the mailbox again to make candidates from new mail. You can still download the original attachments.'
   }
   if (account.connectionStatus === 'disconnected' || account.disconnectedAt) {
-    return 'An administrator must reconnect this mailbox before creating or retrying candidate processing. Stored messages, processing results and downloads remain available.'
+    return 'An admin must reconnect this mailbox before candidates can be created or read again. Saved messages, results and downloads stay available.'
   }
   return null
 }

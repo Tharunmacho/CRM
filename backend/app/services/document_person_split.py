@@ -35,7 +35,7 @@ def ensure_single_person_source(db, source_type, source_id, *, check_evidence=Tr
     bundle = db.scalar(select(MultiPersonIntake.id).where(MultiPersonIntake.source_type == source_type,
                                                          MultiPersonIntake.source_id == str(source_id)))
     if bundle:
-        raise HTTPException(409, {"message": "This source is being separated by person. Open its saved document review instead of attaching the whole original.", "bundleId": bundle})
+        raise HTTPException(409, {"message": "This file is being split person by person. Open its saved review instead of attaching the whole file.", "bundleId": bundle})
     if not check_evidence:
         return
     if source_type == "manual":
@@ -50,7 +50,7 @@ def ensure_single_person_source(db, source_type, source_id, *, check_evidence=Tr
     identities = [item for state in states for item in (state or {}).get("person_identities", [])]
     known_mixed = any((state or {}).get("splitSuggested") or ((state or {}).get("output") or {}).get("splitSuggested") for state in states)
     if known_mixed or any(incompatible(left, right) for index, left in enumerate(identities) for right in identities[index + 1:]):
-        raise HTTPException(409, {"message": "Different candidate identities were detected. Open Review people and pages; do not attach this whole source to one person.", "splitSuggested": True})
+        raise HTTPException(409, {"message": "This file seems to hold more than one person. Open Review people and pages instead of attaching the whole file to one person.", "splitSuggested": True})
 
 
 def get_bundle(db, identifier, user, *, lock=False):
@@ -171,7 +171,7 @@ def prepare_bundle(db, source_type, source_id, user):
     if not sources or len(sources) > 20:
         raise HTTPException(422, "Use between one and twenty saved documents for one review.")
     if any(not source["object_key"] or not source["hash"] for source in sources):
-        raise HTTPException(409, "Some originals have not been saved yet. Finish receiving the documents before separating people.")
+        raise HTTPException(409, "Some files are still being received. Wait until they finish before you split them by person.")
     bundle = MultiPersonIntake(source_type=source_type, source_id=source_id,
         owner_id=user.id if source_type == "manual" else None, created_by=user.id,
         status="pending", revision=0, sources=sources, pages=[], ignored_pages=[])
@@ -257,7 +257,7 @@ def validate_selections(bundle, groups, ignored, *, complete=False):
     seen = set()
     for group in groups:
         if complete and not group["pages"]:
-            raise HTTPException(422, "Every person needs at least one page. Remove an empty person before confirming.")
+            raise HTTPException(422, "Every person needs at least one page. Remove any person who has no pages before you confirm.")
         for page in group["pages"]:
             key = _page_key(page)
             if key not in available or key in seen:
@@ -283,7 +283,7 @@ def save_review(db, identifier, user, revision, groups, ignored):
     if bundle.source_type != "manual" and user.role != Role.admin:
         raise HTTPException(403, "Only Admin can resolve a shared email or WhatsApp intake.")
     if bundle.status != "review" or bundle.revision != revision:
-        raise HTTPException(409, "This review changed or was already completed. Reload the saved review before changing it.")
+        raise HTTPException(409, "This review was changed or is already finished. Reload it before you make changes.")
     validate_selections(bundle, groups, ignored)
     existing = {group.id: group for group in groups_for(db, bundle)}
     identifiers = [group.get("id") for group in groups if group.get("id")]
@@ -315,7 +315,7 @@ def save_review(db, identifier, user, revision, groups, ignored):
 def _pdf_subset(settings, source, numbers):
     data = read_bytes(settings, source["pdf_key"])
     if hashlib.sha256(data).hexdigest() != source["pdf_hash"]:
-        raise HTTPException(409, "A saved page document failed its integrity check. No candidates were changed.")
+        raise HTTPException(409, "A saved page looks damaged. No candidates were changed.")
     with fitz.open(stream=data, filetype="pdf") as original, fitz.open() as selected:
         for number in sorted(set(numbers)):
             selected.insert_pdf(original, from_page=number - 1, to_page=number - 1)
@@ -416,7 +416,7 @@ def extract_groups(db, identifier, user, revision, settings):
     def persist(group_id, record):
         current = get_bundle(db, identifier, user, lock=True)
         if current.status != "review" or current.revision != revision:
-            raise HTTPException(409, "This review changed. Reload the saved review before confirming.")
+            raise HTTPException(409, "This review was changed. Reload it before you confirm.")
         sources = deepcopy(current.sources)
         sources[0].setdefault("group_extractions", {})[group_id] = deepcopy(record)
         current.sources = sources
@@ -447,7 +447,7 @@ def extract_groups(db, identifier, user, revision, settings):
                           else "The document could not be read automatically.")
         persist(group_id, record)
     if waiting:
-        raise HTTPException(409, {"message": "The documents are still being read. Their progress is saved; confirm again in a minute.", "code": "extraction_pending"})
+        raise HTTPException(409, {"message": "The files are still being read. Nothing is lost. Try again in a minute.", "code": "extraction_pending"})
 
 
 def _ocr_for_group(bundle, group):
@@ -479,7 +479,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
     if bundle.status == "completed":
         return bundle_out(db, bundle)
     if bundle.status != "review" or bundle.revision != revision:
-        raise HTTPException(409, "This review changed. Reload the saved review before confirming.")
+        raise HTTPException(409, "This review was changed. Reload it before you confirm.")
     groups = groups_for(db, bundle)
     if not groups:
         raise HTTPException(422, "Add at least one person and assign their pages before confirming.")
@@ -541,7 +541,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 raise HTTPException(409, f"{group.label}: these details conflict with the retained profile: {exc}") from None
         prepared.append((group, values, target))
     if duplicates:
-        raise HTTPException(409, {"message": "Existing candidates match these people. Review each duplicate and explicitly choose whether to merge its evidence.", "code": "duplicate_candidates", "duplicates": duplicates})
+        raise HTTPException(409, {"message": "Some of these people are already in the system. Check each duplicate and choose whether to merge it.", "code": "duplicate_candidates", "duplicates": duplicates})
     supervisors = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
     for group, values, candidate in prepared:
         ocr_raw, notes = extraction.get(group.id, (None, []))

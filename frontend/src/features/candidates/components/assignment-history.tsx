@@ -23,7 +23,7 @@ export function CandidateAssignmentHistory({ candidateId }: { candidateId: strin
     setPage(null); setError(''); setLoading(true)
     api.get<HistoryPage>(`/candidates/${candidateId}/assignment-history`, { signal: controller.signal })
       .then((result) => { if (!controller.signal.aborted) setPage(result) })
-      .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'Could not load ownership history.') })
+      .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'We could not load the history.') })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => { controller.abort(); generation.current += 1 }
   }, [open, candidateId, revision])
@@ -35,21 +35,21 @@ export function CandidateAssignmentHistory({ candidateId }: { candidateId: strin
       const next = await api.get<HistoryPage>(`/candidates/${candidateId}/assignment-history?before=${encodeURIComponent(page.nextBefore)}`)
       if (requestGeneration !== generation.current) return
       setPage((current) => current ? { items: [...current.items, ...next.items], nextBefore: next.nextBefore } : next)
-    } catch (err) { if (requestGeneration === generation.current) setError(err instanceof Error ? err.message : 'Could not load more history.') }
+    } catch (err) { if (requestGeneration === generation.current) setError(err instanceof Error ? err.message : 'We could not load more.') }
     finally { if (requestGeneration === generation.current) setLoading(false) }
   }
   return <>
     <Button size="sm" className="ml-auto" icon={<History size={16} />} onClick={() => setOpen(true)}>History</Button>
-    <Dialog open={open} onClose={() => setOpen(false)} title="Ownership history"
-      description="Recorded owner changes, the person who made them, and their reasons. Older changes may not have a recorded history.">
+    <Dialog open={open} onClose={() => setOpen(false)} title="Recruiter history"
+      description="Each time the recruiter changed: who changed it, and why. Older changes may not be listed.">
       {error && <p role="alert" className="mb-4 text-sm text-stamp-700">{error} <button className="underline" onClick={() => page?.nextBefore ? void more() : setRevision((value) => value + 1)}>Try again</button></p>}
-      {!page && loading && <p role="status" className="text-sm text-ink-500">Loading ownership history…</p>}
-      {page?.items.length === 0 && <EmptyState title="No recorded owner changes" description="Future reassignment and attendance-cover changes will appear here." />}
+      {!page && loading && <p role="status" className="text-sm text-ink-500">Loading history…</p>}
+      {page?.items.length === 0 && <EmptyState title="The recruiter has not changed" description="Future changes, including cover when a recruiter is absent, will show up here." />}
       <ol className="space-y-4">{page?.items.map((entry) => <li key={entry.id} className="rounded-xl border border-rule p-4">
         <p className="text-sm font-medium text-ink">{entry.fromName} → {entry.toName}</p>
-        <p className="mt-2 whitespace-pre-wrap text-sm text-ink-600">{entry.reason || 'Reason not recorded'}</p>
+        <p className="mt-2 whitespace-pre-wrap text-sm text-ink-600">{entry.reason || 'No reason given'}</p>
         <p className="mt-3 text-xs text-ink-400">{entry.actorName} · {dateTimeLabel(entry.at)}</p>
-        <p className="mt-1 text-xs text-ink-400">{entry.action}</p>
+        <p className="mt-1 text-xs text-ink-400">{entry.action.replace(/_/g, ' ')}</p>
       </li>)}</ol>
       {page?.nextBefore && <Button className="mt-4" disabled={loading} onClick={() => void more()}>{loading ? 'Loading…' : 'Load older changes'}</Button>}
     </Dialog>

@@ -94,8 +94,39 @@ def test_company_whatsapp_roundtrip_is_independent_from_phone(desk):
     assert cleared.status_code == 200 and cleared.json()["whatsapp"] is None
 
 
+def test_new_client_form_saves_contact_and_employer_together(desk):
+    payload = {"name": "Khalid Rahman", "email": "KHALID@EXAMPLE.TEST", "phone": "+97140000001", "whatsapp": "+97150000001",
+               "country": "UAE", "city": "Dubai", "notes": "Prefers calls",
+               "company": {"name": "Gulf Build LLC", "industry": "Construction", "country": "UAE", "city": "Dubai", "address": "Plot 4, Al Quoz"}}
+    created = post(desk, "clients", payload)
+    company = created["company"]
+    assert created["name"] == "Khalid Rahman" and "company" in created
+    assert company["clientId"] == created["id"] and company["name"] == "Gulf Build LLC"
+    assert company["industry"] == "Construction" and company["address"] == "Plot 4, Al Quoz"
+    assert company["contactPerson"] == "Khalid Rahman" and company["contactEmail"] == "khalid@example.test"
+    assert company["phone"] == "+97140000001" and company["whatsapp"] == "+97150000001" and company["notes"] == "Prefers calls"
+    with desk.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.action.in_(["Created client", "Created company"]))) == 2
+    rejected = desk.client.put("/api/clients/" + created["id"], json={**payload})
+    assert rejected.status_code == 422
+
+
+def test_failed_employer_save_leaves_no_client_behind(desk, monkeypatch):
+    original = subject._master_save
+    def fail_on_company(db, user, row, body, kind, *args, **kwargs):
+        if kind == "company":
+            raise subject.HTTPException(409, "A related record changed while saving. Refresh and try again.")
+        return original(db, user, row, body, kind, *args, **kwargs)
+    monkeypatch.setattr(subject, "_master_save", fail_on_company)
+    response = desk.client.post("/api/clients", json={"name": "Orphan", "company": {"name": "Never saved"}})
+    assert response.status_code == 409
+    with desk.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Client).where(Client.name == "Orphan")) == 0
+
+
 @pytest.mark.parametrize("path,payload", [
-    ("clients", {"name": "   "}), ("clients", {"name": "Valid", "email": 123}),
+    ("clients", {"name": "   "}),
+    ("clients", {"name": "Valid", "company": {"name": "  "}}), ("clients", {"name": "Valid", "email": 123}),
     ("clients", {"name": "Valid", "email": "invalid"}), ("clients", {"name": "Valid", "status": "archived"}),
     ("designations", {"title": "Welder", "minExperience": -1}),
     ("orders", {"companyId": "x", "designationId": "y", "openings": 0}),

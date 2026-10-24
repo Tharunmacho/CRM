@@ -56,9 +56,9 @@ def change_settings(source_kind: SourceKind, channel_id: str, body: SettingsIn,
     config = configuration(db, source_kind, channel_id)
     if body.enabled:
         if not connected(source_kind, account):
-            raise HTTPException(409, "Connect this mailbox or WhatsApp channel before enabling acknowledgements.")
+            raise HTTPException(409, "Connect this mailbox or WhatsApp number before you turn on automatic replies.")
         if (config is None or not config.enabled or config.body != body.body) and body.previewedBody != body.body:
-            raise HTTPException(422, "Preview and confirm this exact acknowledgement text before enabling it.")
+            raise HTTPException(422, "Preview this reply and confirm the exact text before you turn it on.")
     changed_text = bool(config and config.body != body.body)
     was_enabled = bool(config and config.enabled)
     if config is None:
@@ -97,16 +97,16 @@ def retry(attempt_id: str, db=Depends(get_db), user=Depends(admin)):
     row = db.scalar(select(IntakeAcknowledgement).where(IntakeAcknowledgement.id == attempt_id)
         .with_for_update().execution_options(populate_existing=True))
     if row.source_kind != "email":
-        raise HTTPException(409, "Review this acknowledgement in the WhatsApp conversation's outgoing messages.")
+        raise HTTPException(409, "Check this reply in the sent messages of the WhatsApp conversation.")
     if row.status == "pending":
         return attempt_out(db, row)  # Replay of a successful retry request.
     if row.status not in {"failed", "paused"}:
-        raise HTTPException(409, "Only a definitely failed or paused acknowledgement can be retried. Unknown delivery must be checked with the provider.")
+        raise HTTPException(409, "Only a reply that failed or was paused can be sent again. If you are not sure it was delivered, check with the email provider first.")
     config = configuration(db, row.source_kind, row.channel_id)
     if not connected(row.source_kind, account) or not config or not config.enabled:
-        raise HTTPException(409, "Reconnect the channel and enable acknowledgements before retrying.")
+        raise HTTPException(409, "Reconnect the channel and turn on automatic replies before you try again.")
     if row.body != config.body:
-        raise HTTPException(409, "The approved message has changed. This older confirmation cannot be retried; review the source and send an explicit reply if needed.")
+        raise HTTPException(409, "The approved message has changed, so this older reply cannot be sent again. Check the original message and send a new reply if needed.")
     source = completed_source(db, "email", row.source_id)
     reason = email_suppression(db, source, account) if source else "The source intake is not fully saved."
     if reason:
@@ -130,7 +130,7 @@ def resolve(attempt_id: str, body: ResolveIn, db=Depends(get_db), user=Depends(a
     if row is None:
         raise HTTPException(404, "Acknowledgement not found.")
     if row.source_kind != "email" or attempt_out(db, row)["status"] != "unknown" or not body.providerChecked:
-        raise HTTPException(409, "Check the email provider first; only an unknown email acknowledgement can be resolved here.")
+        raise HTTPException(409, "Check with the email provider first. You can only settle a reply here when it is not clear whether it was sent.")
     row.status = "sent" if body.outcome == "sent" else "suppressed"
     row.last_error = None if body.outcome == "sent" else "Stopped after administrator reviewed the provider; no resend was queued."
     if body.outcome == "sent":

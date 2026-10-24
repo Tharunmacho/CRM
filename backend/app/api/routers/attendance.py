@@ -66,7 +66,7 @@ def clock_context(session_id):
 
 def check_clock_context(body, session_id):
     if body.clockContext is not None and body.clockContext != clock_context(session_id):
-        raise HTTPException(409, "Your login changed. Refresh attendance before recording a new action.")
+        raise HTTPException(409, "You signed in again since this page opened. Refresh the page before you clock in or out.")
 
 
 @router.get("/attendance")

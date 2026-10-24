@@ -1,44 +1,35 @@
-import { useEffect, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { BarChart3, Download, FileSpreadsheet, GitBranch, RefreshCw, Users, Plane } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Activity, Banknote, ClipboardList, Download, FileSpreadsheet, Filter, GitBranch, Inbox, Plane, RefreshCw, RotateCcw, UserX, Users, type LucideIcon } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
-import { PageHeader, Panel } from '@/shared/ui/display'
+import { PageHeader } from '@/shared/ui/display'
 import { Tabs } from '@/shared/ui/overlay'
 import { SummaryCards } from '@/shared/ui/workspace'
-import { DataTable, type Column } from '@/shared/ui/table'
 import { agencyDay } from '@/shared/lib/task-time'
 import { downloadReport, useReportData, type ReportResult } from '@/features/reports/report-api'
+import { REPORTS, type ReportKey } from '@/features/reports/report-config'
+import { AdvanceReport, FunnelReport, OrdersReport, RejectionsReport, SourceReport, StaffReport } from '@/features/reports/report-views'
 import { validDateFilter } from '@/features/staff/task-filters'
 import '@/styles/reports-page.css'
+import '@/styles/reports-v2.css'
 
-type ReportKey = 'funnel' | 'staff' | 'source' | 'orders' | 'rejections' | 'advance'
-const REPORTS: { key: ReportKey; label: string; note: string }[] = [
-  { key: 'funnel', label: 'Pipeline', note: 'Applications mapped in the period. Closures show actual drop-off; waiting candidates stay active.' },
-  { key: 'staff', label: 'Staff performance', note: 'Assignments, completed tasks and recorded events in the period.' },
-  { key: 'source', label: 'Sources', note: 'Candidates first added in the period, by source and email account.' },
-  { key: 'orders', label: 'Order status', note: 'Applications mapped in the period against each order’s openings.' },
-  { key: 'rejections', label: 'Rejections', note: 'Applications closed in the period, by stage and reason.' },
-  { key: 'advance', label: 'Advance collections', note: 'Stage 8 collections in the period. Each currency is totalled separately.' },
-]
-function initialFrom(today: string) { const date = new Date(`${today}T12:00:00Z`); date.setUTCDate(date.getUTCDate() - 89); return date.toISOString().slice(0, 10) }
+const ICONS: Record<ReportKey, LucideIcon> = { funnel: GitBranch, staff: Activity, source: Inbox, orders: ClipboardList, rejections: UserX, advance: Banknote }
 
-function Table<T extends object>({ rows, columns, rowKey, onRowClick }: { rows: T[]; columns: [keyof T & string, string][]; rowKey: (row: T) => string; onRowClick?: (row: T) => void }) {
-  const defs: Column<T>[] = columns.map(([key, header]) => ({ key, header, sortable: true, align: typeof rows[0]?.[key] === 'number' ? 'right' : undefined, value: row => {
-    const val = row[key]; return typeof val === 'number' ? val : val == null ? '—' : String(val)
-  } }))
-  return <DataTable rows={rows} columns={defs} rowKey={rowKey} pageSize={15} onRowClick={onRowClick} />
-}
+function shiftDay(day: string, days: number) { const date = new Date(`${day}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10) }
+const FIELDS = [['client_id', 'Client', 'clients'], ['order_id', 'Order', 'orders'], ['designation_id', 'Job title', 'designations']] as const
+const PRESETS: { label: string; days: number | 'ytd' }[] = [{ label: '30 days', days: 30 }, { label: '90 days', days: 90 }, { label: 'This year', days: 'ytd' }]
 
 export default function ReportsPage() {
   const store = useStore()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const linkedStaff = store.can('all_reports') ? params.get('staff') || '' : ''
+  const supervisor = store.can('all_reports')
+  const linkedStaff = supervisor ? params.get('staff') || '' : ''
   // The server's agency day, not the browser's zone or a compiled-in constant.
   const today = agencyDay(new Date(), store.agencyTimezone)
-  const linkedFrom = validDateFilter(params.get('from')) || initialFrom(today)
+  const defaultFrom = shiftDay(today, -89)
+  const linkedFrom = validDateFilter(params.get('from')) || defaultFrom
   const linkedTo = validDateFilter(params.get('to')) || today
   const [report, setReport] = useState<ReportKey>(linkedStaff ? 'staff' : 'funnel')
   const [filters, setFilters] = useState({ from_date: linkedFrom, to_date: linkedTo, client_id: '', order_id: '', designation_id: '', staff_id: linkedStaff })
@@ -48,50 +39,92 @@ export default function ReportsPage() {
   }, [linkedStaff, linkedFrom, linkedTo])
   const [exporting, setExporting] = useState('')
   const [exportError, setExportError] = useState('')
+  const [exported, setExported] = useState('')
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => !!value)).toString()
-  const { data, error, refresh, refreshing } = useReportData<ReportResult>(`/reports?${query}`, store.me.id)
+  const { data: fresh, error, refresh, refreshing } = useReportData<ReportResult>(`/reports?${query}`, store.me.id)
+  // Keep the previous result on screen (dimmed) while new filters load, so the page does not jump.
+  const last = useRef<{ user: string; data: ReportResult } | null>(null)
+  if (fresh) last.current = { user: store.me.id, data: fresh }
+  const data = fresh ?? (last.current?.user === store.me.id ? last.current.data : null)
+  const stale = !fresh && !!data
   const [options, setOptions] = useState<ReportResult['options'] | null>(null)
-  useEffect(() => { if (data) setOptions(data.options) }, [data])
+  useEffect(() => { if (fresh) setOptions(fresh.options) }, [fresh])
   const active = REPORTS.find(item => item.key === report)!
-  const update = (key: keyof typeof filters, value: string) => setFilters(previous => ({ ...previous, [key]: value }))
+  const update = (key: keyof typeof filters, value: string) => { setExported(''); setFilters(previous => ({ ...previous, [key]: value })) }
+  const changed = filters.client_id || filters.order_id || filters.designation_id || (supervisor && filters.staff_id) || filters.from_date !== defaultFrom || filters.to_date !== today
+  const activeCount = [filters.client_id, filters.order_id, filters.designation_id, supervisor ? filters.staff_id : ''].filter(Boolean).length + (filters.from_date !== defaultFrom || filters.to_date !== today ? 1 : 0)
+  const reset = () => { setExported(''); setFilters({ from_date: defaultFrom, to_date: today, client_id: '', order_id: '', designation_id: '', staff_id: '' }) }
+  const presetFrom = (days: number | 'ytd') => days === 'ytd' ? `${today.slice(0, 4)}-01-01` : shiftDay(today, -(days - 1))
+  const preset = (days: number | 'ytd') => { setExported(''); setFilters(previous => ({ ...previous, from_date: presetFrom(days), to_date: today })) }
   async function exportFile(format: 'xlsx' | 'pdf') {
-    setExporting(format); setExportError('')
-    try { await downloadReport(report, format, query) } catch (error) { setExportError(error instanceof Error ? error.message : 'Export failed.') } finally { setExporting('') }
+    setExporting(format); setExportError(''); setExported('')
+    try { await downloadReport(report, format, query); setExported(`${active.title} downloaded as ${format === 'xlsx' ? 'Excel' : 'PDF'}.`) }
+    catch (failure) { setExportError(failure instanceof Error ? failure.message : 'We could not create the file. Please try again.') }
+    finally { setExporting('') }
   }
-  return <div className="reports-page">
-    <PageHeader title="Reports" description="Recruitment outcomes, workload and collections." actions={<div className="flex flex-wrap gap-2">
-      <Button size="sm" icon={<RefreshCw size={14} />} disabled={refreshing} onClick={refresh}>{refreshing ? 'Refreshing…' : 'Refresh'}</Button>
-      <Button size="sm" disabled={!data || !!exporting} icon={<FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing…' : 'Excel'}</Button>
-      <Button size="sm" disabled={!data || !!exporting} icon={<Download size={14} />} onClick={() => void exportFile('pdf')}>{exporting === 'pdf' ? 'Preparing…' : 'PDF'}</Button>
-    </div>} />
-    <div className="reports-toolbar" aria-label="Report filters">
-      <label className="reports-date">From<Input type="date" aria-label="From date" value={filters.from_date} max={filters.to_date} onChange={e => update('from_date', e.target.value)} /></label>
-      <label className="reports-date">To<Input type="date" aria-label="To date" value={filters.to_date} min={filters.from_date} onChange={e => update('to_date', e.target.value)} /></label>
-      {([['client_id', 'Client', 'clients'], ['order_id', 'Order', 'orders'], ['designation_id', 'Designation', 'designations']] as const).map(([key, label, group]) => <Select key={key} aria-label={label} className="reports-select" value={filters[key]} onChange={e => update(key, e.target.value)}><option value="">All {label.toLowerCase()}s</option>{options?.[group].map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select>)}
-      {store.can('all_reports')
-        ? <Select aria-label="Staff" className="reports-select" value={filters.staff_id} onChange={e => update('staff_id', e.target.value)}><option value="">All staff</option>{options?.staff.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select>
-        : <span className="reports-own">Your own numbers · {store.me.name}</span>}
-    </div>
-    {(error || exportError) && <div role="alert" className="reports-alert">{error || exportError}{error && data && ' Showing the last loaded result.'}</div>}
-    {!data && !error && <Panel><p role="status" className="p-8 text-sm text-ink-500">Loading reports…</p></Panel>}
-    {data && <>
-      <SummaryCards items={[
-        { label: 'Applications mapped', value: data.summary.applications, detail: 'In the selected period', icon: GitBranch },
-        { label: 'Currently active', value: data.summary.active, detail: 'From mapped applications', icon: BarChart3, tone: 'violet' },
-        { label: 'Deployed', value: data.summary.deployed, detail: 'From mapped applications', icon: Plane, tone: 'green' },
-        { label: 'Candidates added', value: data.summary.intake, detail: 'Matching intake and filters', icon: Users, tone: 'amber' },
+  const go = (path: string) => navigate(path)
+  const Icon = ICONS[report]
+  return <div className="reports-page rv">
+    <PageHeader title="Reports" description={supervisor ? 'How recruitment is going, how busy each person is, and advance money collected, for the whole team.' : 'How your recruitment is going, how busy you are, and advance money collected.'} actions={
+      <Button size="sm" icon={<RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />} disabled={refreshing} onClick={refresh}>{refreshing ? 'Refreshing' : 'Refresh'}</Button>} />
+
+    {data
+      ? <SummaryCards items={[
+        { label: 'Matched to orders', value: data.summary.applications.toLocaleString(), detail: 'Candidates in this period', icon: GitBranch, tone: 'blue' },
+        { label: 'Still in progress', value: data.summary.active.toLocaleString(), detail: 'Of those matched to orders', icon: Activity, tone: 'violet' },
+        { label: 'Deployed', value: data.summary.deployed.toLocaleString(), detail: 'Of those matched to orders', icon: Plane, tone: 'green' },
+        { label: 'Candidates added', value: data.summary.intake.toLocaleString(), detail: 'New in this period, with your filters', icon: Users, tone: 'amber' },
       ]} />
-      <Panel flush>
-        <Tabs tabs={REPORTS.map(({ key, label }) => ({ key, label }))} active={report} onChange={key => { setReport(key as ReportKey); setExportError('') }} className="px-2" />
-        <div className="reports-section-head"><h2>{active.label}</h2><p>{active.note}</p></div>
-        {report === 'funnel' && <><div className="h-72 px-5 pb-5"><ResponsiveContainer><BarChart data={data.pipeline}><CartesianGrid vertical={false} stroke="#e4eaf2" /><XAxis dataKey="stage" tickFormatter={n => `S${n}`} /><YAxis allowDecimals={false} /><Tooltip /><Bar isAnimationActive={false} dataKey="active" name="Active / waiting" fill="#3b6be3" stackId="status" /><Bar isAnimationActive={false} dataKey="progressed" name="Progressed" fill="#6e56cf" stackId="status" /><Bar isAnimationActive={false} dataKey="closed" name="Closed here" fill="#e9a23b" stackId="status" /></BarChart></ResponsiveContainer></div><Table rows={data.pipeline} rowKey={r => String(r.stage)} columns={[["stage", "Stage"], ["label", "Name"], ["reached", "Reached"], ["active", "Active / waiting"], ["progressed", "Progressed"], ["closed", "Closed here"], ["dropOffPercent", "Closure rate %"]]} /></>}
-        {report === 'staff' && <><Table rows={data.staff} rowKey={r => r.id} columns={[["name", "Staff"], ["assigned", "Initial assignments"], ["completedTasks", "Tasks completed"], ["averageStageHours", "Avg stage hours"], ["durationSamples", "Stage samples"], ["escalations", "Escalations"], ["missedUpdates", "Missed daily updates"]]} /><h3 className="reports-subhead">Average time by stage</h3><Table rows={data.stageHours} rowKey={r => String(r.stage)} columns={[["stage", "Stage"], ["label", "Name"], ["completed", "Samples"], ["averageHours", "Average hours"]]} /></>}
-        {report === 'source' && <div className="grid lg:grid-cols-2"><div><Table rows={data.sources} rowKey={r => r.source} columns={[["label", "Source"], ["count", "Candidates"]]} /></div><div className="border-t border-rule lg:border-l lg:border-t-0"><Table rows={data.accounts} rowKey={r => r.account} columns={[["account", "Email account"], ["count", "Candidates"]]} /></div></div>}
-        {report === 'orders' && <Table rows={data.orders} rowKey={r => r.id} onRowClick={r => navigate(`/orders/${r.id}`)} columns={[["ref", "Order"], ["client", "Client"], ["company", "Company"], ["designation", "Designation"], ["status", "Status"], ["openings", "Openings"], ["matched", "Matched"], ["selected", "Selected"], ["deployed", "Deployed"]]} />}
-        {report === 'rejections' && <Table rows={data.rejections} rowKey={r => `${r.stage}:${r.reason}`} columns={[["stage", "Stage"], ["label", "Reason"], ["count", "Closures"]]} />}
-        {report === 'advance' && <><div className="reports-totals">{data.advanceTotals.length ? data.advanceTotals.map(total => <div key={total.currency}><p>{total.currency}</p><strong className="tnum">{Number(total.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>) : <p className="text-sm text-ink-500">No collections in this period.</p>}</div><Table rows={data.advances} rowKey={r => r.id} onRowClick={r => navigate(`/candidates/${r.candidateId}`)} columns={[["candidate", "Candidate"], ["order", "Order"], ["date", "Collected"], ["currency", "Currency"], ["amount", "Amount"]]} /><h3 className="reports-subhead">Collections by month and currency</h3><Table rows={data.advanceMonths} rowKey={r => `${r.month}:${r.currency}`} columns={[["month", "Month"], ["currency", "Currency"], ["amount", "Amount"]]} /></>}
-      </Panel>
-      <details className="reports-notes"><summary>Scope and calculation notes</summary><p>Dates are inclusive in {data.timezone}. Updated {new Date(data.generatedAt).toLocaleString()}.</p><ul>{data.notes.map(note => <li key={note}>{note}</li>)}</ul></details>
-    </>}
+      : !error && <div className="rv-skeleton" role="status" aria-label="Loading reports"><div className="rv-skeleton-tiles">{[0, 1, 2, 3].map(i => <i key={i} />)}</div></div>}
+
+    <section className="rv-card rv-filters" aria-label="Report filters">
+      <header>
+        <div className="rv-filters-title"><span className="rv-icon"><Filter size={16} /></span><div><h2>Filters</h2><p>{activeCount ? `${activeCount} filter${activeCount === 1 ? '' : 's'} in use for every report and file` : 'Used for every report and file you download'}</p></div></div>
+        <div className="rv-filters-actions">
+          <div className="rv-presets" role="group" aria-label="Date range shortcuts">
+            {PRESETS.map(item => { const on = filters.from_date === presetFrom(item.days) && filters.to_date === today
+              return <button key={item.label} type="button" aria-pressed={on} onClick={() => preset(item.days)}>{item.label}</button> })}
+          </div>
+          <Button size="sm" icon={<RotateCcw size={13} />} disabled={!changed} onClick={reset}>Reset</Button>
+        </div>
+      </header>
+      <div className="rv-filter-grid">
+        <label>From<Input type="date" aria-label="From date" value={filters.from_date} max={filters.to_date} onChange={e => update('from_date', e.target.value)} /></label>
+        <label>To<Input type="date" aria-label="To date" value={filters.to_date} min={filters.from_date} onChange={e => update('to_date', e.target.value)} /></label>
+        {FIELDS.map(([key, label, group]) => <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={e => update(key, e.target.value)}><option value="">All {label.toLowerCase()}s</option>{options?.[group].map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></label>)}
+        {supervisor
+          ? <label>Staff<Select aria-label="Staff" value={filters.staff_id} onChange={e => update('staff_id', e.target.value)}><option value="">All staff</option>{options?.staff.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></label>
+          : <div className="rv-own"><span>Staff</span><p title={`Reports are limited to ${store.me.name}`}><Users size={14} /><span>Your own numbers</span></p></div>}
+      </div>
+    </section>
+
+    {!data && !error && <div className="rv-skeleton" aria-hidden="true"><i className="rv-skeleton-block" /><span>Loading reports…</span></div>}
+
+    {(error || exportError) && <div role="alert" className="reports-alert rv-alert"><span>{error || exportError}{error && data && ' Showing the last loaded result.'}</span>{error && <button type="button" onClick={refresh}>Try again</button>}</div>}
+
+    {data && <div className={stale ? 'rv-body is-stale' : 'rv-body'} aria-busy={stale}>
+      <section className="rv-card rv-report-head" aria-label="Choose a report">
+        <Tabs tabs={REPORTS.map(item => ({ key: item.key, label: item.label }))} active={report} onChange={key => { setReport(key as ReportKey); setExportError(''); setExported('') }} />
+        <header>
+          <div className="rv-report-title"><span className="rv-icon is-lg"><Icon size={20} strokeWidth={1.8} /></span><div><h2>{active.title}</h2><p>{active.note}</p></div></div>
+          <div className="rv-export">
+            <div role="group" aria-label="Export this report">
+              <Button size="sm" disabled={!!exporting} icon={<FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing…' : 'Export Excel'}</Button>
+              <Button size="sm" disabled={!!exporting} icon={<Download size={14} />} onClick={() => void exportFile('pdf')}>{exporting === 'pdf' ? 'Preparing…' : 'Export PDF'}</Button>
+            </div>
+            <p className="rv-export-note" role="status">{exported || 'Files use the filters above.'}</p>
+          </div>
+        </header>
+      </section>
+      <div className="rv-report-body" role="tabpanel" aria-label={active.title}>
+        {report === 'funnel' && <FunnelReport data={data} />}
+        {report === 'staff' && <StaffReport data={data} />}
+        {report === 'source' && <SourceReport data={data} />}
+        {report === 'orders' && <OrdersReport data={data} go={go} />}
+        {report === 'rejections' && <RejectionsReport data={data} />}
+        {report === 'advance' && <AdvanceReport data={data} go={go} />}
+      </div>
+      <details className="reports-notes"><summary>How these numbers are worked out</summary><p>Dates include the first and last day. Times are in {data.timezone}. Updated {new Date(data.generatedAt).toLocaleString()}.</p><ul>{data.notes.map(note => <li key={note}>{note}</li>)}</ul></details>
+    </div>}
   </div>
 }

@@ -21,9 +21,9 @@ export function EmailEvidenceHistory({ candidateId }: { candidateId: string }) {
     return () => { live = false }
   }, [candidateId, retry, store.isCurrentSession])
   if (!rows.length && !error) return null
-  return <section className="mt-5 border-t border-rule pt-4" aria-label="Email source history">
-    <h3 className="mb-3 text-sm font-semibold text-ink">Email source history</h3>
-    {error && <p className="text-xs text-stamp-700">Source history could not load. <button className="underline" onClick={() => setRetry((value) => value + 1)}>Retry</button></p>}
+  return <section className="mt-5 border-t border-rule pt-4" aria-label="Emails this candidate came from">
+    <h3 className="mb-3 text-sm font-semibold text-ink">Emails this candidate came from</h3>
+    {error && <p className="text-xs text-stamp-700">We could not load this list. <button className="underline" onClick={() => setRetry((value) => value + 1)}>Retry</button></p>}
     <div className="space-y-3">{rows.map((row) => <div key={row.messageId} className="rounded-control border border-rule bg-field/30 p-3 text-xs">
       <Link className="font-medium text-navy-700 underline" to={`/inbox?message=${encodeURIComponent(row.messageId)}`}>{row.subject}</Link>
       <p className="mt-1 break-words text-ink-500">{row.fromAddress} to {row.mailbox} · {dateTimeLabel(row.receivedAt)}</p>

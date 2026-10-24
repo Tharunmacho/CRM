@@ -117,7 +117,7 @@ def assignment_history(candidate_id: str, response: Response, limit: int = Query
             if moment.tzinfo is None or not identifier or len(identifier) > 36:
                 raise ValueError()
         except (ValueError, TypeError):
-            raise HTTPException(422, "Invalid history cursor. Reload ownership history.")
+            raise HTTPException(422, "We could not load more history. Reload the page and try again.")
         statement = statement.where(or_(AuditEntry.at < moment, (AuditEntry.at == moment) & (AuditEntry.id < identifier)))
     exists_, rows = parallel_reads(
         db,
@@ -295,7 +295,7 @@ class CandidateOut(Wire):
 def find_duplicate(db: Session, phone: str, dob: date | None, passport_no: str | None, email: str | None = None):
     matches = identity_matches(db, {"phone": phone, "email": email, "passport_no": passport_no})
     if len(matches) > 1:
-        raise HTTPException(409, "Phone, email or passport match different candidates. Resolve the identity conflict before merging.")
+        raise HTTPException(409, "The phone, email or passport belong to different candidates. Sort out the duplicate before you merge.")
     return matches[0] if matches else None
 
 
@@ -316,27 +316,30 @@ def next_owner(db: Session, *, pointer: AssignmentPointer | None = None) -> User
     from app.services.attendance_availability import unavailable_staff_ids
     absent = unavailable_staff_ids(db)
 
-    eligible = list(
-        db.scalars(
-            select(User)
-            .where(
-                User.role == Role.staff,
-                User.active.is_(True),
-                User.receives_auto_assign.is_(True),
-                User.on_leave.is_(False),
-                User.id.not_in(absent),
-            )
-            .order_by(User.created_at, User.id)
-        )
-    )
-    if not eligible:
+    # The pointer is located in the FULL staff ring (not only the eligible subset), so a
+    # pointer user who has since gone on leave / switched auto-assign off / been deactivated
+    # still marks a position: we continue with the next eligible person after that position
+    # instead of restarting at the top (which would hand the first person two in a row and
+    # skip the one after the pointer). Deactivated staff stay in the ring for the same reason.
+    ring = list(db.scalars(select(User).where(User.role == Role.staff).order_by(User.created_at, User.id)))
+    absent = set(absent)
+
+    def is_eligible(u: User) -> bool:
+        return bool(u.active and u.receives_auto_assign and not u.on_leave and u.id not in absent)
+
+    if not any(is_eligible(u) for u in ring):
         return None
 
-    ids = [u.id for u in eligible]
-    if pointer.last_user_id in ids:
-        nxt = eligible[(ids.index(pointer.last_user_id) + 1) % len(ids)]
-    else:
-        nxt = eligible[0]
+    ids = [u.id for u in ring]
+    # If the pointer user no longer exists at all (hard-deleted/FK nulled) or was never set,
+    # there is no position to continue from, so start at the first eligible person.
+    start = ids.index(pointer.last_user_id) + 1 if pointer.last_user_id in ids else 0
+    nxt = None
+    for step in range(len(ring)):
+        candidate = ring[(start + step) % len(ring)]
+        if is_eligible(candidate):
+            nxt = candidate
+            break
 
     pointer.last_user_id = nxt.id
     return nxt
@@ -608,9 +611,9 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
                             owner_name=owner.name if owner else None, task_id=None)
     matches = identity_matches(db, body.model_dump())
     if len(matches) != 1 or matches[0][0].id != candidate.id:
-        raise HTTPException(409, "The candidate identity changed. Check duplicates again before merging.")
+        raise HTTPException(409, "This candidate has changed. Check for duplicates again before you merge.")
     if candidate.dob and body.dob and candidate.dob != body.dob:
-        raise HTTPException(409, "The date of birth conflicts with the existing record. Review the documents before merging.")
+        raise HTTPException(409, "The date of birth does not match the existing record. Check the documents before you merge.")
     values = body.model_dump(exclude={"ocr_data", "source", "source_detail", "intake_group_id"})
     combined = {key: getattr(candidate, key) for key in PROFILE_CHECK_FIELDS}
     for key in PROFILE_CHECK_FIELDS:
@@ -641,16 +644,16 @@ class CandidateCorrection(CandidateIn):
 @router.patch("/{candidate_id}")
 def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session = Depends(get_db), user: User = Depends(current_user)):
     if body.intake_group_id is not None:
-        raise HTTPException(422, "Resume saved document intake from Add Candidate before attaching its documents.")
+        raise HTTPException(422, "Open the saved upload from Add Candidate before you attach its documents.")
     lock_assignment_cursor(db)
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if not candidate:
         raise HTTPException(404, "Candidate not found.")
     ensure_candidate_edit(candidate, user)
     if identity_matches(db, body.model_dump(), exclude_id=candidate.id):
-        raise HTTPException(409, "The corrected phone, email or passport belongs to another candidate.")
+        raise HTTPException(409, "The corrected phone, email or passport already belongs to another candidate.")
     if body.mark_reviewed and not candidate.owner_id:
-        raise HTTPException(422, "Assign this candidate to an eligible recruiter before clearing review.")
+        raise HTTPException(422, "Give this candidate to a recruiter who can take them before you clear the review.")
     # Patch only explicitly sent editable fields. Ownership, source provenance and
     # OCR evidence are never replaced by a profile correction.
     changes = normalize_candidate_values(body.model_dump(exclude_unset=True, exclude={"source", "source_detail", "ocr_data", "mark_reviewed", "intake_group_id"}))

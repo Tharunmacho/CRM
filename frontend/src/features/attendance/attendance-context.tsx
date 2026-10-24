@@ -57,13 +57,13 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
         try { intent.current = readClockIntent(sessionStorage, me.id, result.clockContext) } catch { /* Storage may be blocked. */ }
         if (intent.current) {
           setPendingKind(intent.current.kind)
-          setError('An earlier attendance action was not confirmed in this tab. Use Retry to confirm the original action safely.')
+          setError('An earlier check-in or check-out was not confirmed. Press Retry to check it.')
         }
       }
       setOwn(result.staff.find((row) => row.userId === me.id) ?? null)
       setRefreshedAt(performance.now()); if (!intent.current) setError('')
     } catch (err) {
-      if (active.current && !controller.signal.aborted) setError(err instanceof Error ? err.message : 'Could not load attendance.')
+      if (active.current && !controller.signal.aborted) setError(err instanceof Error ? err.message : 'We could not load attendance.')
     } finally { if (active.current && !controller.signal.aborted) setLoading(false) }
   }, [me.id, me.role])
 
@@ -97,14 +97,14 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
         void fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {})
       },
       onResult: (result) => { setPresenceError(''); setOwn((row) => row ? { ...row, presence: result } : row) },
-      onError: (error) => setPresenceError(error instanceof Error ? error.message : 'Presence could not sync.'),
+      onError: (error) => setPresenceError(error instanceof Error ? error.message : 'CRM use could not be updated.'),
     })
     const interaction = (event: Event) => {
       if (!event.isTrusted || !visible()) return
       if (reporter.recordInteraction()) reporter.publish(true)
     }
     const visibility = () => reporter.publish(visible())
-    const offline = () => { setPresenceError('Your browser is offline. The last received presence state may be out of date.'); reporter.leave() }
+    const offline = () => { setPresenceError('You are offline. The status shown may be out of date.'); reporter.leave() }
     const leave = () => reporter.leave()
     const events = ['pointerdown', 'pointermove', 'keydown', 'touchstart', 'scroll']
     for (const type of events) window.addEventListener(type, interaction, { passive: true })
@@ -134,7 +134,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     if (busyRef.current || !own) return
     if (!intent.current) {
       const sessionId = activeAttendanceSession(own)
-      if (own.attendance.status === 'checked_in' && !sessionId) { setError('Refresh attendance before checking out.'); return }
+      if (own.attendance.status === 'checked_in' && !sessionId) { setError('Refresh attendance, then check out.'); return }
       intent.current = { kind: sessionId ? 'check-out' : 'check-in', requestKey: crypto.randomUUID(), ...(sessionId ? { sessionId } : {}) }
       try { writeClockIntent(sessionStorage, me.id, clockContext.current, intent.current) } catch { /* Storage may be blocked. */ }
     }
@@ -149,7 +149,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
       intent.current = null; setPendingKind(undefined)
       try { writeClockIntent(sessionStorage, me.id, clockContext.current, null) } catch { /* Storage may be blocked. */ }
     } catch (err) {
-      if (active.current && lifecycle === lifecycleVersion.current) setError(err instanceof Error ? err.message : 'The attendance change could not be confirmed. Retry safely.')
+      if (active.current && lifecycle === lifecycleVersion.current) setError(err instanceof Error ? err.message : 'We could not confirm that. Press Retry. It will not be saved twice.')
     } finally { if (active.current && lifecycle === lifecycleVersion.current) { busyRef.current = false; setBusy(false); setLoading(false) } }
   }
 

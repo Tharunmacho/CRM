@@ -294,7 +294,7 @@ export const Select = forwardRef<
         aria-describedby={rest['aria-describedby']}
         disabled={disabled}
         style={style}
-        className={cn('custom-select-trigger', compact ? 'h-8' : 'h-10', className)}
+        className={cn('custom-select-trigger', compact ? 'h-9' : 'h-10', className)}
         onClick={() => (open ? close() : show())}
         onKeyDown={handleKeys}
       >
@@ -317,7 +317,7 @@ export const Select = forwardRef<
                   ref={searchRef}
                   aria-label={`Search ${label}`}
                   autoComplete="off"
-                  placeholder="Search options..."
+                  placeholder="Search"
                   value={query}
                   onChange={(event) => {
                     setQuery(event.target.value)
@@ -367,7 +367,7 @@ export const Select = forwardRef<
                   </div>
                 ))
               ) : (
-                <p className="custom-select-empty">No matching options</p>
+                <p className="custom-select-empty">No matches found</p>
               )}
             </div>
           </div>,

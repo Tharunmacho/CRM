@@ -8,7 +8,7 @@ from decimal import Decimal
 
 
 REPORTS = {
-    "funnel": ("Pipeline funnel", [("Pipeline", "pipeline", ["stage", "label", "reached", "active", "progressed", "closed", "dropOffPercent"])]),
+    "funnel": ("Pipeline funnel", [("Pipeline", "pipeline", ["stage", "label", "reached", "active", "progressed", "closed", "dropOffPercent", "lostToNext", "lostToNextPercent"])]),
     "staff": ("Staff performance", [("Staff", "staff", ["name", "assigned", "completedTasks", "averageStageHours", "durationSamples", "escalations", "missedUpdates"]),
                                     ("Stage durations", "stageHours", ["stage", "label", "completed", "averageHours"])]),
     "source": ("Candidate sources", [("Sources", "sources", ["label", "count"]), ("Email accounts", "accounts", ["account", "count"])]),
@@ -20,7 +20,8 @@ REPORTS = {
 }
 LABELS = {"label": "Description", "ref": "Order", "name": "Staff", "assigned": "Initial assignments",
           "completedTasks": "Tasks completed", "averageStageHours": "Average stage hours", "durationSamples": "Stage samples",
-          "missedUpdates": "Missed daily updates", "averageHours": "Average hours", "dropOffPercent": "Closure rate (%)"}
+          "missedUpdates": "Missed daily updates", "averageHours": "Average hours", "dropOffPercent": "Closure rate (%)",
+          "lostToNext": "Lost before next stage", "lostToNextPercent": "Lost before next stage (%)"}
 
 
 def heading(key):

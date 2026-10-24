@@ -45,6 +45,8 @@ export interface StageField {
   /** Render the value in mono — identifiers read character by character. */
   ident?: boolean
   width?: 'full' | 'half'
+  /** Needed before the stage can be completed (shown with an asterisk). */
+  required?: boolean
   showWhen?: { field: string; in: string[] }
 }
 
@@ -94,6 +96,7 @@ export const STAGES: StageDef[] = [
     fields: [
       {
         name: 'result',
+        required: true,
         label: 'Result',
         type: 'radio',
         options: [
@@ -128,7 +131,7 @@ export const STAGES: StageDef[] = [
     summary: 'Send the CV to the employer and record the date it went out.',
     closer: true,
     fields: [
-      { name: 'forwarded', label: 'Forwarded to client', type: 'radio', options: YES_NO },
+      { name: 'forwarded', required: true, label: 'Forwarded to client', type: 'radio', options: YES_NO },
       {
         name: 'dateForwarded',
         label: 'Date forwarded',
@@ -138,6 +141,7 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'reason',
+        required: true,
         label: 'Reason not forwarded',
         type: 'select',
         showWhen: { field: 'forwarded', in: ['no'] },
@@ -180,9 +184,10 @@ export const STAGES: StageDef[] = [
     summary: 'Fix a date with the client and tell the candidate where to be.',
     closer: false,
     fields: [
-      { name: 'scheduled', label: 'Interview scheduled', type: 'radio', options: YES_NO },
+      { name: 'scheduled', required: true, label: 'Interview scheduled', type: 'radio', options: YES_NO },
       {
         name: 'date',
+        required: true,
         label: 'Date',
         type: 'date',
         width: 'half',
@@ -232,6 +237,7 @@ export const STAGES: StageDef[] = [
     fields: [
       {
         name: 'result',
+        required: true,
         label: 'Result',
         type: 'radio',
         options: [
@@ -241,6 +247,7 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'remarks',
+        required: true,
         label: 'Interview remarks',
         type: 'textarea',
         placeholder: 'What the client said',
@@ -270,9 +277,10 @@ export const STAGES: StageDef[] = [
     summary: 'Collect the signed offer from the employer and file it.',
     closer: false,
     fields: [
-      { name: 'obtained', label: 'Offer letter obtained', type: 'radio', options: YES_NO },
+      { name: 'obtained', required: true, label: 'Offer letter obtained', type: 'radio', options: YES_NO },
       {
         name: 'file',
+        required: true,
         label: 'Offer letter',
         type: 'file',
         showWhen: { field: 'obtained', in: ['yes'] },
@@ -295,7 +303,7 @@ export const STAGES: StageDef[] = [
     closer: true,
     repeatable: true,
     fields: [
-      { name: 'applied', label: 'Applied for medical', type: 'radio', options: YES_NO },
+      { name: 'applied', required: true, label: 'Applied for medical', type: 'radio', options: YES_NO },
       {
         name: 'appliedDate',
         label: 'Date applied',
@@ -305,6 +313,7 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'result',
+        required: true,
         label: 'Result',
         type: 'radio',
         showWhen: { field: 'applied', in: ['yes'] },
@@ -315,6 +324,7 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'reapplying',
+        required: true,
         label: 'Reapplying',
         type: 'radio',
         options: YES_NO,
@@ -323,6 +333,7 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'retestDate',
+        required: true,
         label: 'New medical date',
         type: 'date',
         width: 'half',
@@ -357,7 +368,7 @@ export const STAGES: StageDef[] = [
     no: 7,
     key: 'passport',
     title: 'Passport',
-    taskTitle: 'Collect the original passport',
+    taskTitle: 'Collect original passport',
     summary: 'Take custody of the original passport and record who is holding it.',
     closer: false,
     fields: [
@@ -367,7 +378,7 @@ export const STAGES: StageDef[] = [
         type: 'file',
         help: 'Pre-filled from the profile. Replace it if you have a clearer scan.',
       },
-      { name: 'collected', label: 'Original passport collected', type: 'radio', options: YES_NO },
+      { name: 'collected', required: true, label: 'Original passport collected', type: 'radio', options: YES_NO },
       {
         name: 'collectedDate',
         label: 'Date collected',
@@ -399,9 +410,10 @@ export const STAGES: StageDef[] = [
     summary: 'Collect the agreed advance and file the receipt.',
     closer: false,
     fields: [
-      { name: 'collected', label: 'Advance collected', type: 'radio', options: YES_NO },
+      { name: 'collected', required: true, label: 'Advance collected', type: 'radio', options: YES_NO },
       {
         name: 'amount',
+        required: true,
         label: 'Amount',
         type: 'number',
         width: 'half',
@@ -459,6 +471,7 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'receipt',
+        required: true,
         label: 'Receipt',
         type: 'file',
         showWhen: { field: 'collected', in: ['yes'] },
@@ -477,12 +490,12 @@ export const STAGES: StageDef[] = [
   {
     no: 9,
     key: 'visa_arrival',
-    title: 'Visa arrival',
+    title: 'Visa arrival + Google review',
     taskTitle: 'Follow up the visa',
     summary: 'Record the visa once it arrives, and ask the candidate for a Google review.',
     closer: false,
     fields: [
-      { name: 'arrived', label: 'Visa arrived', type: 'radio', options: YES_NO },
+      { name: 'arrived', required: true, label: 'Visa arrived', type: 'radio', options: YES_NO },
       {
         name: 'date',
         label: 'Date',
@@ -512,7 +525,7 @@ export const STAGES: StageDef[] = [
     summary: 'Get the visa stamped into the passport and file the stamped copy.',
     closer: false,
     fields: [
-      { name: 'done', label: 'Stamping done', type: 'radio', options: YES_NO },
+      { name: 'done', required: true, label: 'Stamping done', type: 'radio', options: YES_NO },
       {
         name: 'date',
         label: 'Date',
@@ -522,6 +535,7 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'file',
+        required: true,
         label: 'Stamped visa copy',
         type: 'file',
         showWhen: { field: 'done', in: ['yes'] },
@@ -560,7 +574,7 @@ export const STAGES: StageDef[] = [
         placeholder: 'EK 545',
       },
       { name: 'pnr', label: 'PNR', type: 'text', width: 'half', ident: true, placeholder: 'A1B2C3' },
-      { name: 'file', label: 'Ticket copy', type: 'file' },
+      { name: 'file', required: true, label: 'Ticket copy', type: 'file' },
     ],
     evaluate: (d) => {
       const missing = need(d, [

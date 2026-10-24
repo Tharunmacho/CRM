@@ -124,7 +124,7 @@ def receive_account(account_id, *, sessions, settings):
                             object_key=key, content_hash=part.content_hash,
                         ))
                 if auto and stored and not db.scalar(select(EmailIngestionJob.id).where(EmailIngestionJob.message_id == message.id)):
-                    db.add(EmailIngestionJob(message_id=message.id, state={}))
+                    _receive_job(db, message, stored)
                 account = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
                 account.sync_state = {**account.sync_state, "last_uid": uid}
                 account.worker_seen_at = now()
@@ -135,6 +135,28 @@ def receive_account(account_id, *, sessions, settings):
         account.last_sync_at, account.last_error, account.sync_requested = now(), None, False
         account.worker_seen_at = now()
         db.commit()
+
+
+def _receive_job(db: Session, message: MailMessage, stored) -> None:
+    """Queue the message for OCR, unless every attachment was already processed.
+
+    PRD: "Skip a file whose hash was already processed." When all attachments are byte-identical
+    to files that were committed before, the receipt is kept for the audit trail (sender, message
+    id, time) as ``ignored`` with the reason, and nothing is read, created or acknowledged.
+    A message that also carries any new file is processed as usual.
+    """
+    from app.services.duplicate_files import DUPLICATE_REASON, processed_hashes
+    hashes = {part.content_hash for part, _ in stored}
+    known = processed_hashes(db, hashes, exclude_mail_message_id=message.id)
+    if hashes and set(known) == hashes:
+        db.add(EmailIngestionJob(message_id=message.id, status="ignored", state={}, last_error=DUPLICATE_REASON))
+        db.add(AuditEntry(action="Ignored duplicate email file", target=(message.subject or "")[:300],
+                          entity_type="email_message", entity_id=message.id,
+                          meta={"channel": "email", "fromAddress": message.from_address, "receivedAt": message.received_at.isoformat(),
+                                "providerMessageId": message.provider_message_id, "contentHashes": sorted(hashes),
+                                "matched": {h: known[h] for h in sorted(known)}}))
+        return
+    db.add(EmailIngestionJob(message_id=message.id, state={}))
 
 
 _PASSPORT_KEYS = ("passport_no", "passport_issue", "passport_expiry", "passport_place")
@@ -163,7 +185,7 @@ def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
                     else str(value or "").strip().casefold()
                 )
                 if normalized and key in identity and identity[key] != normalized:
-                    raise IntakeReviewError("The attachments contain conflicting identities. Review them before creating a candidate.")
+                    raise IntakeReviewError("The attachments seem to belong to different people. Check them before you create a candidate.")
                 if normalized:
                     identity[key] = normalized
             document = extraction["raw"]
@@ -196,7 +218,7 @@ def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
     # between a passport (given names + surname), a resume and an Aadhaar card.
     relations = {name_relation(a, b) for index, a in enumerate(names) for b in names[index + 1:]}
     if "different" in relations:
-        raise IntakeReviewError("The documents name different people. Review and separate their files before retrying.")
+        raise IntakeReviewError("The documents name different people. Check them and split the files by person before trying again.")
     if "partial" in relations:
         needs_review = True
     return fields, raw, needs_review
@@ -248,7 +270,7 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
         return
     matches = _duplicates(db, fields)
     if len(matches) > 1:
-        raise IntakeReviewError("Phone, email or passport match different existing candidates. Review the conflict.")
+        raise IntakeReviewError("The phone, email or passport match different candidates already in the system. Check which one is right.")
     created = not matches
     values = candidate_values(fields, raw)
     review = review or not values.get("name") or not values.get("phone")
@@ -277,9 +299,9 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
     else:
         candidate = matches[0]
         if candidate.dob and values.get("dob") and candidate.dob != values["dob"]:
-            raise IntakeReviewError("The date of birth conflicts with the existing candidate. Review the source documents.")
+            raise IntakeReviewError("The date of birth does not match the candidate already in the system. Check the documents.")
         if candidate.gender and values.get("gender") and candidate.gender.casefold() != values["gender"].casefold():
-            raise IntakeReviewError("The gender conflicts with the existing candidate. Review the source documents.")
+            raise IntakeReviewError("The gender does not match the candidate already in the system. Check the documents.")
         enrich_empty(candidate, values, raw)
         # Existing ownership, status and human-corrected populated fields are preserved.
     text = "\n".join(page.get("text", "") for result in results
@@ -412,10 +434,10 @@ def _save_selected_documents(settings, account_id, attachment, data, result):
     documents = {}
     for kind, extraction in result["extractions"].items():
         if kind not in {"resume", "passport", "aadhaar"}:
-            raise IntakeReviewError("An unrecognized document type needs review.")
+            raise IntakeReviewError("We could not tell what kind of document this is. Please check it.")
         selected = extraction["selected_pages"]
         if selected != getattr(inspected, f"{kind}_pages"):
-            raise IntakeReviewError("The extracted document pages do not match the saved inspection.")
+            raise IntakeReviewError("The pages we read do not match the saved check. Please check the document.")
         content = inspected.pdf_for_pages(selected)
         key = store_original(
             settings, account_id, f"{attachment.message_id}:{attachment.id}:{kind}", 0, content,
@@ -445,7 +467,7 @@ def process_job(job_id, *, sessions, settings):
         with sessions() as db:
             job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
             if not job:
-                raise IntakeReviewError("This receipt is now being reviewed or already saved.")
+                raise IntakeReviewError("This email is being checked or is already saved.")
             paused = job.status not in {"pending", "processing", "retry"}
             job.state = copy.deepcopy(state)
             job.inspection = _inspection_summary(state, attachments)
@@ -453,7 +475,7 @@ def process_job(job_id, *, sessions, settings):
             db.get(MailAccount, account_id).extraction_seen_at = now()
             db.commit()
             if paused:
-                raise IntakeReviewError("This receipt is now being reviewed or already saved.")
+                raise IntakeReviewError("This email is being checked or is already saved.")
 
     try:
         results = []

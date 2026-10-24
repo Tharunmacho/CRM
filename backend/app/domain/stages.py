@@ -277,9 +277,9 @@ _DEFINITIONS = [
     ("interview_result", "Interview result", "Record the interview result", True, False, _stage4),
     ("offer_letter", "Offer letter", "Obtain the offer letter", False, False, _stage5),
     ("medical", "Medical", "Complete the medical", True, True, _stage6),
-    ("passport", "Passport", "Collect the original passport", False, False, _stage7),
+    ("passport", "Passport", "Collect original passport", False, False, _stage7),
     ("advance", "Advance payment", "Collect the advance", False, False, _stage8),
-    ("visa_arrival", "Visa arrival", "Follow up the visa", False, False, _stage9),
+    ("visa_arrival", "Visa arrival + Google review", "Follow up the visa", False, False, _stage9),
     ("visa_stamping", "Visa stamping", "Get the visa stamped", False, False, _stage10),
     ("air_ticket", "Air ticket", "Book the air ticket", False, False, _stage11),
 ]

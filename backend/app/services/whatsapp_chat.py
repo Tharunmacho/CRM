@@ -24,7 +24,7 @@ def peer_number(value):
     value = str(value or "").strip()
     if value.startswith("+"): value = value[1:]
     if not re.fullmatch(r"[1-9][0-9]{6,14}", value):
-        raise HTTPException(422, "Enter a WhatsApp number with country code and 7–15 digits.")
+        raise HTTPException(422, "Enter a WhatsApp number with the country code, 7 to 15 digits long.")
     return value
 
 
@@ -41,7 +41,7 @@ def _channel(db, phone_id, settings=None, *, sending=False):
     if channel is None: raise HTTPException(404, "WhatsApp channel not found")
     if sending and (not channel.enabled or (settings is not None and (not settings.whatsapp_enabled or
             phone_id != settings.whatsapp_phone_number_id or provider.missing_settings(settings)))):
-        raise HTTPException(409, "Reconnect and configure this WhatsApp channel before sending.")
+        raise HTTPException(409, "Reconnect and set up this WhatsApp number before you send.")
     return channel
 
 
@@ -85,13 +85,13 @@ def open_conversation(db, phone_id, number, *, candidate_id=None, actor=None):
         WhatsAppConversation.peer_number == number))
     if actor and actor.role == Role.staff:
         if not existing or not _send_permission(db, existing, actor)[0]:
-            raise HTTPException(403, "Ask a supervisor to link this conversation to your candidate first.")
+            raise HTTPException(403, "Ask a manager or admin to link this conversation to your candidate first.")
     if candidate_id and (not actor or actor.role not in (Role.admin, Role.manager)):
-        raise HTTPException(403, "Only a supervisor can link a candidate to a conversation.")
+        raise HTTPException(403, "Only a manager or admin can link a candidate to a conversation.")
     if candidate_id and db.scalar(select(Candidate.id).where(Candidate.id == candidate_id)) is None: raise HTTPException(404, "Candidate not found")
     if existing:
         if candidate_id and existing.candidate_id != candidate_id:
-            raise HTTPException(409, "This conversation already exists. Use Link candidate with a reason to change its association.")
+            raise HTTPException(409, "This conversation already exists. Use Link candidate and give a reason to change who it belongs to.")
         return existing
     identifier = str(uuid4())
     db.execute(insert(WhatsAppConversation).values(id=identifier, phone_number_id=phone_id, peer_number=number,
@@ -227,7 +227,7 @@ def enqueue(db, channel_id, recipient, body, request_key, source_message_id=None
     """Create once in caller's transaction. The outbox worker owns dispatch."""
     at = at or utcnow()
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", str(request_key or "")):
-        raise HTTPException(422, "Use a new valid send request key.")
+        raise HTTPException(422, "Something went wrong while sending. Reload the page and try again.")
     actor = db.scalar(select(User).where(User.id == actor_id).execution_options(populate_existing=True)) if actor_id else None
     if actor_id and (actor is None or not actor.active): raise HTTPException(403, "Your account is no longer active.")
     if actor_id is None:
@@ -237,7 +237,7 @@ def enqueue(db, channel_id, recipient, body, request_key, source_message_id=None
     conversation = get_conversation(db, conversation_id, lock=True) if conversation_id else open_conversation(db, channel_id, recipient)
     if not conversation_id: conversation = get_conversation(db, conversation.id, lock=True)
     if conversation.phone_number_id != channel_id or conversation.peer_number != peer_number(recipient):
-        raise HTTPException(409, "Conversation recipient changed. Reload before sending.")
+        raise HTTPException(409, "The person in this conversation changed. Reload the page before you send.")
     if actor_id:
         permitted, reason = _send_permission(db, conversation, actor)
         if not permitted: raise HTTPException(403, reason)
@@ -256,11 +256,11 @@ def enqueue(db, channel_id, recipient, body, request_key, source_message_id=None
     existing = db.scalar(select(WhatsAppSendAttempt).where(WhatsAppSendAttempt.request_key == request_key))
     if existing:
         if existing.payload_hash != digest or existing.sender_user_id != actor_id:
-            raise HTTPException(409, "This send request already has different content. Review the conversation before sending again.")
+            raise HTTPException(409, "This message was already sent with different text. Check the conversation before you send again.")
         return existing
     _channel(db, channel_id, settings, sending=True)
     if kind != "template" and not window(conversation, at)[0]:
-        raise HTTPException(409, "The 24-hour reply window is closed. Choose an approved template or wait for a new customer message.")
+        raise HTTPException(409, "The 24-hour reply time has ended. Send an approved template, or wait for a new message from the candidate.")
     if kind == "template":
         approved = _approved_template(db, channel_id, template)
         # Persist the readable approved content, rather than resolving it from
@@ -319,7 +319,7 @@ def _approved_template(db, phone_id, value):
     if not isinstance(value, dict): raise HTTPException(422, "Choose an approved template.")
     row = db.scalar(select(WhatsAppTemplate).where(WhatsAppTemplate.phone_number_id == phone_id,
         WhatsAppTemplate.name == value.get("name"), WhatsAppTemplate.language == value.get("language")))
-    if row is None or row.status != "APPROVED": raise HTTPException(409, "This template is not approved. Refresh templates before sending.")
+    if row is None or row.status != "APPROVED": raise HTTPException(409, "This template is not approved. Refresh the templates before you send.")
     description = template_description(row)
     parameters = value.get("parameters", [])
     if not description["supported"]: raise HTTPException(422, description["unsupportedReason"])

@@ -3,16 +3,14 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    color-scheme: light;
-  }
-
+  /* color-scheme is set per theme in theme.css (light or dark). */
   html {
     -webkit-text-size-adjust: 100%;
   }
 
   body {
-    @apply bg-field text-ink font-sans text-base font-normal antialiased;
+    @apply text-ink font-sans text-base font-normal antialiased;
+    background-color: var(--bg-main);
     font-feature-settings: 'tnum' 0;
   }
 
@@ -28,12 +26,20 @@
     font-size: 0.9em;
   }
 
+  /* One keyboard-focus ring everywhere: the palette's primary colour. Filled fields replace it
+     with a primary border and halo (see depth.css). */
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-    @apply outline-none ring-2 ring-navy-500 ring-offset-1 ring-offset-white rounded-[3px];
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
   }
 
   ::placeholder {
-    @apply text-ink-300;
+    color: var(--text-light);
+    opacity: 1;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
   }
 }
 

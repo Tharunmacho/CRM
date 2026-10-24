@@ -94,6 +94,52 @@ def test_approved_leave_excludes_round_robin_without_changing_manual_leave(db):
     assert db.get(m.User, 'b').on_leave is False
 
 
+def _rr_pick(db, n=1):
+    picked = []
+    for _ in range(n):
+        picked.append(route.next_owner(db).id)
+    db.commit()
+    return picked
+
+
+def test_round_robin_continues_after_pointer_user_became_ineligible(db):
+    db.add(m.User(id='c', name='C', email='c@example.test', role=m.Role.staff, receives_auto_assign=True))
+    db.commit()
+    assert _rr_pick(db, 2) == ['a', 'b']
+    # b (the pointer) goes on leave: the next candidate goes to c, not back to a.
+    db.get(m.User, 'b').on_leave = True
+    db.commit()
+    assert _rr_pick(db) == ['c']
+    # b is back; strict rotation resumes a, b, c.
+    db.get(m.User, 'b').on_leave = False
+    db.commit()
+    assert _rr_pick(db, 3) == ['a', 'b', 'c']
+
+
+@pytest.mark.parametrize('change', [{'receives_auto_assign': False}, {'active': False}])
+def test_round_robin_pointer_user_switched_off_or_deactivated_does_not_double_up_first_user(db, change):
+    db.add(m.User(id='c', name='C', email='c@example.test', role=m.Role.staff, receives_auto_assign=True))
+    db.commit()
+    assert _rr_pick(db, 2) == ['a', 'b']
+    for key, value in change.items():
+        setattr(db.get(m.User, 'b'), key, value)
+    db.commit()
+    assert _rr_pick(db, 3) == ['c', 'a', 'c']
+
+
+def test_round_robin_wraps_past_ineligible_tail_and_handles_unknown_pointer(db):
+    db.add(m.User(id='c', name='C', email='c@example.test', role=m.Role.staff, receives_auto_assign=True))
+    db.commit()
+    assert _rr_pick(db, 3) == ['a', 'b', 'c']
+    db.get(m.User, 'c').on_leave = True       # pointer on the last user, who is now out
+    db.commit()
+    assert _rr_pick(db) == ['a']
+    pointer = db.get(m.AssignmentPointer, 1)
+    pointer.last_user_id = None               # no position known: start at the first eligible user
+    db.commit()
+    assert _rr_pick(db) == ['a']
+
+
 @pytest.mark.parametrize('fields', [{'phone': '+91 90000 00001'}, {'phone': '9000000009', 'email': ' PERSON@EXAMPLE.TEST '}, {'phone': '9000000009', 'passport_no': ' p 123 4567 '}])
 def test_duplicate_or_identity_without_date_of_birth(db, fields):
     original = create(db, email='person@example.test', passport_no='P1234567')

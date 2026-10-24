@@ -21,6 +21,6 @@ export function AttachmentPreview({ file, onClose }: { file: PreviewFile; onClos
     footer={<><Button onClick={onClose}>Close</Button><a href={download}><Button variant="primary" icon={<Download size={15} />}>Download</Button></a></>}>
     {type === 'pdf' && <iframe title={file.name} src={href} className="h-[70vh] w-full rounded-control border border-rule bg-white" />}
     {type === 'image' && <img alt={file.name} src={href} className="mx-auto max-h-[70vh] max-w-full rounded-control border border-rule bg-white object-contain" />}
-    {type === 'other' && <p className="py-10 text-center text-sm text-ink-500">This file type cannot be previewed in the browser. Download it to open it.</p>}
+    {type === 'other' && <p className="py-10 text-center text-sm text-ink-500">We cannot show this type of file here. Download it to open it.</p>}
   </Dialog>
 }

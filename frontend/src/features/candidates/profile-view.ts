@@ -43,7 +43,7 @@ export interface ContactChip {
 
 export interface ProfileModel {
   designation: string
-  /** Muted line under the designation: source file, channel, nationality, ingested date. */
+  /** Muted line under the job title: source file, channel, nationality, date added. */
   meta: string[]
   contacts: ContactChip[]
   /** The Veris "Candidate details" card: who they are and how to reach them. */
@@ -190,7 +190,7 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
   const meta = [
     sourceFileName,
     channel && (cand.source === 'other' && docChannel ? capitalise(docChannel) : channel),
-    cand.addedAt ? `Ingested ${fmt.date(cand.addedAt)}` : '',
+    cand.addedAt ? `Added ${fmt.date(cand.addedAt)}` : '',
   ].filter(Boolean)
 
   const languages = cand.languages.length ? cand.languages : (personal?.languages_known ?? [])
@@ -204,7 +204,7 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
   // Same order as the Veris dashboard: identity and role first, then how to reach them.
   const details = present([
     row('Name', cand.name),
-    row('Designation', designation),
+    row('Job title', designation),
     row('Industry', industry),
     row('Highest qualification', qualification),
     row('Total experience', totalExperience),

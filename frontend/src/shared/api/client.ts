@@ -44,22 +44,21 @@ interface RequestOptions {
   signal?: AbortSignal
 }
 
-async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  options: RequestOptions = {},
-): Promise<T> {
-  const controller = new AbortController()
-  const cancel = () => controller.abort()
-  if (options.signal?.aborted) cancel()
-  else options.signal?.addEventListener('abort', cancel, { once: true })
-  let timedOut = false
-  const timeout = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, 30_000)
+/** What a GET returned before it is turned into a value or an error. Shared by every caller of the same read. */
+interface RawResponse { status: number; ok: boolean; statusText: string; text: string }
 
+interface SharedRead { startedAt: number; refs: number; controller: AbortController; done: Promise<RawResponse> }
+
+/**
+ * Identical GETs that overlap share one network request (React StrictMode replays effects in development,
+ * and two components can mount wanting the same list). Each caller keeps its own AbortSignal: the request is
+ * cancelled only when every caller has gone. A read is joined only within JOIN_WINDOW_MS of starting, and any
+ * write empties the table, so a read that began before a write is never handed to a caller that asked after it.
+ */
+const JOIN_WINDOW_MS = 300
+const reads = new Map<string, SharedRead>()
+
+async function fetchRaw(method: string, path: string, body: unknown, controller: AbortController, timeout: { fired: boolean }): Promise<RawResponse> {
   try {
     const res = await fetch(`${BASE}/api${path}`, {
       method,
@@ -68,33 +67,135 @@ async function request<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     })
-
-    if (res.status === 204) return undefined as T
-
-    const text = await res.text()
-    const payload = text ? safeParse(text) : null
-
-    if (!res.ok) {
-      const detail = (payload as { detail?: unknown } | null)?.detail
-      throw new ApiError(res.status, messageFrom(detail) ?? res.statusText, detail)
-    }
-
-    if (typeof payload === 'string') {
-      throw new ApiError(502, 'The server returned an unexpected response. Please try again.')
-    }
-    return payload as T
+    if (res.status === 204) return { status: 204, ok: true, statusText: res.statusText, text: '' }
+    return { status: res.status, ok: res.ok, statusText: res.statusText, text: await res.text() }
   } catch (error) {
-    if (error instanceof ApiError) throw error
-    if (options.signal?.aborted) throw error
+    if (controller.signal.aborted && !timeout.fired) throw error // cancelled by the caller, not a failure
     throw new ApiError(
       0,
-      timedOut
+      timeout.fired
         ? 'The server took too long to respond. Please try again.'
         : 'Cannot reach the server. Check your connection and try again.',
     )
+  }
+}
+
+function startRead(method: string, path: string, body: unknown): SharedRead {
+  const controller = new AbortController()
+  const timeout = { fired: false }
+  const timer = setTimeout(() => {
+    timeout.fired = true
+    controller.abort()
+  }, 30_000)
+  const done = fetchRaw(method, path, body, controller, timeout).finally(() => clearTimeout(timer))
+  done.catch(() => {}) // a read every caller abandoned must not surface as an unhandled rejection
+  return { startedAt: Date.now(), refs: 0, controller, done }
+}
+
+function interpret<T>(raw: RawResponse): T {
+  if (raw.status === 204) return undefined as T
+  const payload = raw.text ? safeParse(raw.text) : null
+
+  if (!raw.ok) {
+    const detail = (payload as { detail?: unknown } | null)?.detail
+    throw new ApiError(raw.status, messageFrom(detail) ?? raw.statusText, detail)
+  }
+
+  if (typeof payload === 'string') {
+    throw new ApiError(502, 'The server returned an unexpected response. Please try again.')
+  }
+  return payload as T
+}
+
+function abortError() {
+  return new DOMException('The operation was aborted.', 'AbortError')
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  const signal = options.signal
+  if (signal?.aborted) throw abortError()
+
+  if (method !== 'GET') {
+    reads.clear()
+    const write = startRead(method, path, body)
+    const cancel = () => write.controller.abort()
+    signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      return interpret<T>(await write.done)
+    } finally {
+      signal?.removeEventListener('abort', cancel)
+      reads.clear()
+    }
+  }
+
+  const key = `${BASE}/api${path}`
+  let read = reads.get(key)
+  if (!read || read.controller.signal.aborted || Date.now() - read.startedAt > JOIN_WINDOW_MS) {
+    read = startRead(method, path, undefined)
+    reads.set(key, read)
+    const created = read
+    created.done.then(() => {}, () => {}).finally(() => { if (reads.get(key) === created) reads.delete(key) })
+  }
+  const shared = read
+  shared.refs += 1
+  let leave = () => {}
+  const gone = new Promise<never>((_, reject) => {
+    if (!signal) return
+    const onAbort = () => {
+      reject(abortError())
+      shared.refs -= 1
+      if (shared.refs <= 0) {
+        shared.controller.abort()
+        if (reads.get(key) === shared) reads.delete(key)
+      }
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    leave = () => signal.removeEventListener('abort', onAbort)
+  })
+  gone.catch(() => {})
+  try {
+    return interpret<T>(await (signal ? Promise.race([shared.done, gone]) : shared.done))
   } finally {
-    clearTimeout(timeout)
-    options.signal?.removeEventListener('abort', cancel)
+    leave()
+  }
+}
+
+/** A read the page started from index.html before this code had loaded (session + workspace, dashboard). */
+interface EarlyRead { path: string; startedAt: number; response: Promise<Response> }
+
+declare global {
+  interface Window { __crmEarly?: Record<string, EarlyRead | undefined> }
+}
+
+/**
+ * Take the response of a request that index.html already started, so the first screen does not wait for the
+ * JavaScript bundle before the server begins working. It is handed over once, only for the same path and only
+ * shortly after page load. Any problem (not OK, not JSON, slow) returns null and the caller makes the normal
+ * request, so this can only make startup faster, never different.
+ */
+export async function takeEarlyRead<T>(key: string, path: string): Promise<T | null> {
+  const early = typeof window === 'undefined' ? undefined : window.__crmEarly?.[key]
+  if (!early) return null
+  delete window.__crmEarly![key]
+  if (early.path !== path || Date.now() - early.startedAt > 20_000) return null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const res = await Promise.race([
+      early.response,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 30_000) }),
+    ])
+    if (!res.ok || res.status === 204) return null
+    const payload = safeParse(await res.text())
+    return payload !== null && typeof payload === 'object' ? (payload as T) : null
+  } catch {
+    return null
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -344,6 +445,12 @@ export interface InboxUnreadCount {
   accounts: Record<string, number>
 }
 
+/** The two change signals the desk polls, in one response: the intake revision and the unread badge. */
+export interface InboxPulse {
+  revision?: string
+  unread?: InboxUnreadCount
+}
+
 /** Reads a resume or passport. Nothing is saved; the result only pre-fills the form. */
 async function ocr(kind: 'resume' | 'passport', file: File, options: RequestOptions = {}): Promise<OcrScan> {
   const form = new FormData()
@@ -361,6 +468,7 @@ export const api = {
     get: (options?: RequestOptions) => request<InboxSnapshot>('GET', '/inbox', undefined, options),
     revision: (options?: RequestOptions) => request<{ revision?: string }>('GET', '/inbox/revision', undefined, options),
     health: (options?: RequestOptions) => request<InboxHealth>('GET', '/inbox/health', undefined, options),
+    pulse: (options?: RequestOptions) => request<InboxPulse>('GET', '/inbox/pulse', undefined, options),
     unreadCount: (options?: RequestOptions) => request<InboxUnreadCount>('GET', '/inbox/unread-count', undefined, options),
     attention: (options?: RequestOptions) => request<InboxAttention>('GET', '/inbox/attention', undefined, options),
     connect: (autoIngest: boolean, address?: string) => request<InboxAccount>('POST', '/inbox/connect', {

@@ -31,7 +31,7 @@ export function useStaffDirectory() {
         const data = await api.get<StaffDirectoryResponse>(`/staff-directory?${new URLSearchParams({ from, to })}`, { signal: controller.signal })
         if (!controller.signal.aborted) { setSnapshot({ key, sessionKey, data }); setFailure(null) }
       } catch (cause) {
-        if (!controller.signal.aborted) setFailure({ key, message: cause instanceof Error ? cause.message : 'Could not load the staff directory. Try again.' })
+        if (!controller.signal.aborted) setFailure({ key, message: cause instanceof Error ? cause.message : 'We could not load the staff directory. Try again.' })
       } finally {
         running = false
         if (!controller.signal.aborted) setBusyKey(previous => previous === key ? null : previous)

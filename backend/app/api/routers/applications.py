@@ -89,12 +89,12 @@ def _mutation(db: Session):
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(409, "This record changed during the operation. Refresh and try again.") from exc
+        raise HTTPException(409, "Someone else changed this record while you were working. Refresh the page and try again.") from exc
     except OperationalError as exc:
         db.rollback()
         code = getattr(exc.orig, "sqlstate", None)
         if code in {"40001", "40P01", "55P03"}:
-            raise HTTPException(409, "Another update is in progress. Refresh and try again.") from exc
+            raise HTTPException(409, "Another change is being saved right now. Refresh the page and try again.") from exc
         raise HTTPException(503, "The change could not be confirmed. Refresh the record before retrying.") from exc
     except Exception:
         db.rollback()
@@ -137,7 +137,7 @@ def _check_version(app: Application, sent: int) -> None:
 
 def _active(app: Application):
     if app.status != ApplicationStatus.active:
-        raise HTTPException(409, "This application is no longer active. Refresh its history.")
+        raise HTTPException(409, "This candidate is no longer active on this order. Refresh the page to see the latest.")
 
 
 def _owner(db: Session, candidate: Candidate) -> User:
@@ -230,14 +230,14 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
                 return ((isinstance(value, dict) and value.get("id") == attachment.id)
                         or value in (attachment.object_key, f"/api/files/{attachment.id}"))
             if not any(refers(value) for value in old_values):
-                raise HTTPException(422, "Replace this legacy document in the current stage before using it.")
+                raise HTTPException(422, "This is an old file. Upload it again in this stage before you use it.")
         if require_bytes:
             try:
                 available = document_storage.exists(get_settings(), attachment.object_key)
             except (ValueError, FileNotFoundError):
                 available = False
             except Exception:
-                raise HTTPException(503, "Document storage is unavailable. Retry completion after storage recovers.") from None
+                raise HTTPException(503, "We cannot reach file storage right now. Try again in a few minutes.") from None
             if not available:
                 raise HTTPException(422, {"message": f"The stored {field} is unavailable. Upload a replacement before completing.", "missing": [field]})
         data[field] = {"id": attachment.id, "name": attachment.file_name,
@@ -252,7 +252,7 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
             matches = list(db.scalars(select(User).where(User.name == raw.strip())))
             keeper = matches[0] if len(matches) == 1 else None
         if keeper is None or not keeper.active or keeper.role != Role.staff:
-            raise HTTPException(422, "Choose an active staff member holding the passport.")
+            raise HTTPException(422, "Choose an active staff member who is holding the passport.")
         data["heldBy"] = {"id": keeper.id, "name": keeper.name}
     try:
         return validate_payload(app.current_stage, data)
@@ -355,7 +355,7 @@ def complete_stage(application_id: str, body: CompleteIn,
                 Application.order_id == order.id, Application.status == ApplicationStatus.deployed,
             )) or 0
             if deployed >= order.openings:
-                raise HTTPException(409, "All order openings are already deployed. Increase the order openings or resolve an existing placement before completing this stage.")
+                raise HTTPException(409, "All openings on this order are already filled. Add more openings, or sort out an existing placement, before you finish this stage.")
         at = datetime.now(timezone.utc)
         attempt = (db.scalar(select(func.max(ApplicationStage.attempt)).where(
             ApplicationStage.application_id == app.id, ApplicationStage.stage == app.current_stage,
@@ -409,7 +409,7 @@ def reopen_stage(application_id: str, body: ReopenIn, db: Session = Depends(get_
                  user: User = Depends(require_role(Role.admin))):
     reason = body.reason.strip()
     if not reason:
-        raise HTTPException(422, "A reason is required to reopen a completed stage.")
+        raise HTTPException(422, "Please give a reason for reopening a completed stage.")
     with _mutation(db):
         app, candidate, order = _locked_application(db, application_id)
         _check_version(app, body.lock_version)
@@ -418,7 +418,7 @@ def reopen_stage(application_id: str, body: ReopenIn, db: Session = Depends(get_
         if blocker:
             raise HTTPException(409, blocker)
         if app.status == ApplicationStatus.active and body.stage >= app.current_stage:
-            raise HTTPException(409, "Choose a completed stage before the current stage.")
+            raise HTTPException(409, "Choose a stage that was completed before the current stage.")
         if db.scalar(select(Application.id).where(
             Application.candidate_id == candidate.id, Application.id != app.id,
             Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed]),
@@ -430,7 +430,7 @@ def reopen_stage(application_id: str, body: ReopenIn, db: Session = Depends(get_
         ).order_by(ApplicationStage.stage, ApplicationStage.attempt).with_for_update()))
         targets = [row for row in records if row.stage == body.stage and row.outcome != "Unfit: reapplying"]
         if not targets:
-            raise HTTPException(409, "That stage has no effective completed attempt to reopen.")
+            raise HTTPException(409, "That stage has not been completed, so there is nothing to reopen.")
         at = datetime.now(timezone.utc)
         previous_status = app.status.value
         app.draft = dict(targets[-1].data)

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/ocr/jobs", tags=["document-intake"])
 
 def _group(value):
     try: return str(UUID(value))
-    except (ValueError, TypeError): raise HTTPException(422, "A valid intake group ID is required")
+    except (ValueError, TypeError): raise HTTPException(422, "Something went wrong with this upload. Refresh the page and try again.")
 
 
 @router.post("", status_code=202)
@@ -77,7 +77,7 @@ def create(kind: Literal["resume", "passport", "aadhaar", "photo", "education", 
             try: delete_bytes(settings, key)
             except Exception: pass
         if existing is not None: return job_out(existing, detail=True)
-        raise HTTPException(409, "The intake changed while uploading. Please retry.")
+        raise HTTPException(409, "This upload changed while it was being sent. Please try again.")
     except Exception:
         try: db.rollback()
         except SQLAlchemyError: pass
@@ -88,11 +88,11 @@ def create(kind: Literal["resume", "passport", "aadhaar", "photo", "education", 
                 existing = db.scalar(statement)
                 if existing is not None: return job_out(existing, detail=True)
             except Exception: pass
-            raise HTTPException(503, "The upload could not be confirmed. Its original is retained; retry the same intake.") from None
+            raise HTTPException(503, "We could not confirm the upload. Your file is safe. Try the same upload again.") from None
         if key:
             try: delete_bytes(settings, key)
             except Exception: pass
-        raise HTTPException(503, "The original could not be saved. Keep this file and retry.") from None
+        raise HTTPException(503, "We could not save your file. Keep it and try again.") from None
 
 
 @router.get("")
@@ -147,13 +147,13 @@ def save_draft(group_id: str, body: DraftIn, db: Session = Depends(get_db), user
     # Keep split provenance intact even if an older tab still has autosave queued.
     from app.db.models import MultiPersonIntake
     if db.scalar(select(MultiPersonIntake.id).where(MultiPersonIntake.source_type == "manual", MultiPersonIntake.source_id == _group(group_id))):
-        raise HTTPException(409, "This intake is being reviewed by person. Save details in its people-and-pages review.")
+        raise HTTPException(409, "This upload is being checked person by person. Save the details in the review of people and pages.")
     if set(body.jobIds) - {job.id for job in jobs}: raise HTTPException(422, "The selected documents do not belong to this intake")
     # A queued pre-save draft must never erase the binding committed with the
     # candidate. This is also what makes an interrupted save recoverable.
     existing_id = saved_candidate_id(jobs)
     if existing_id and body.savedCandidateId and body.savedCandidateId != existing_id:
-        raise HTTPException(409, "This intake is already linked to a saved candidate.")
+        raise HTTPException(409, "This upload is already linked to a saved candidate.")
     if body.savedCandidateId and not existing_id:
         from app.db.models import Candidate
         candidate = db.get(Candidate, body.savedCandidateId)
@@ -180,7 +180,7 @@ def detail(job_id: str, response: Response, db: Session = Depends(get_db), user:
 def original(job_id: str, download: bool = False, db: Session = Depends(get_db), user: User = Depends(current_user)):
     job = owned_job(db, job_id, user.id)
     try: return file_response(get_settings(), job.object_key, job.filename, job.content_type, download)
-    except Exception: raise HTTPException(503, "The saved original is unavailable. Restore its storage before retrying.") from None
+    except Exception: raise HTTPException(503, "We cannot open the saved file right now because file storage is not reachable. Try again later.") from None
 
 
 @router.post("/{job_id}/retry")
@@ -190,7 +190,7 @@ def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(curre
     ensure_single_person_source(db, "manual", job.group_id)
     if job.status in READY: return job_out(job, detail=True)
     if job.kind not in {"resume", "passport", "aadhaar"}:
-        raise HTTPException(422, "This document is stored as an attachment and does not need identity extraction")
+        raise HTTPException(422, "This file is kept as an attachment. Nothing needs to be read from it.")
     if job.status == "attached": raise HTTPException(409, "These documents are already on the saved candidate")
     saved = deepcopy(job.state or {})
     request_extraction_retry(saved)
@@ -209,7 +209,7 @@ def dismiss(job_id: str, db: Session = Depends(get_db), user: User = Depends(cur
     job = owned_job(db, job_id, user.id, lock=True)
     from app.db.models import MultiPersonIntake
     if db.scalar(select(MultiPersonIntake.id).where(MultiPersonIntake.source_type == "manual", MultiPersonIntake.source_id == job.group_id)):
-        raise HTTPException(409, "This source belongs to a saved people-and-pages review. Exclude pages with a reason inside that review.")
+        raise HTTPException(409, "This file is part of a review of people and pages. Leave pages out from inside that review and give a reason.")
     if job.status != "attached":
         job.status, job.updated_at = "dismissed", now()
         db.commit()
@@ -227,4 +227,4 @@ def attach(job_id: str, body: AttachIn, db: Session = Depends(get_db), user: Use
     except HTTPException: raise
     except Exception:
         db.rollback()
-        raise HTTPException(503, "The saved documents could not be attached. The original is retained; retry for this candidate.") from None
+        raise HTTPException(503, "We could not attach the saved files. They are safe. Try again for this candidate.") from None

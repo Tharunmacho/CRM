@@ -154,8 +154,7 @@ def row_count(db, model):
     return db.scalar(select(func.count()).select_from(model))
 
 
-def mailbox(monkeypatch, *, error=None):
-    data = ORIGINAL
+def mailbox(monkeypatch, *, error=None, data=ORIGINAL):
     part = InboundAttachment("part:2", "certificate.pdf", "application/pdf", data, hashlib.sha256(data).hexdigest())
     message = InboundMessage(provider_id=provider_message_id("INBOX", "100", 11),
                              subject="Synthetic application", from_name="Example Applicant",
@@ -395,6 +394,53 @@ def test_candidate_evidence_assignment_task_and_notifications_commit_once(intake
         assert "SECRET RAW DOCUMENT TEXT" not in json.dumps(job.inspection)
         assert db.get(AssignmentPointer, 1).last_user_id == "staff-a"
     assert calls == [ORIGINAL]
+
+
+def test_file_whose_hash_was_already_processed_is_skipped_with_audit_but_a_new_version_is_attached(intake, monkeypatch):
+    job_id, _ = receipt(intake)
+    fake_extraction(monkeypatch)
+    run(intake, job_id)
+    with intake.sessions() as db:
+        candidate_id = db.get(EmailIngestionJob, job_id).candidate_id
+        assert row_count(db, Candidate) == row_count(db, Task) == 1
+        notices = row_count(db, Notification)
+    # The same bytes arrive again in another message: kept as an ignored receipt, nothing is read or created.
+    monkeypatch.setattr(subject, "extract_attachment", lambda *a, **kw: pytest.fail("A duplicate file must not be read"))
+    mailbox(monkeypatch)
+    subject.receive_account("account-b", sessions=intake.sessions, settings=intake.settings)
+    with intake.sessions() as db:
+        duplicate = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id != job_id))
+        assert duplicate.status == "ignored" and "Duplicate file" in duplicate.last_error
+        message = db.get(MailMessage, duplicate.message_id)
+        assert message.subject == "Synthetic application" and message.from_address == "sender@example.test"
+        assert row_count(db, MailAttachment) == 2  # the receipt keeps its attachment rows
+        audit = db.scalar(select(AuditEntry).where(AuditEntry.action == "Ignored duplicate email file"))
+        assert audit.entity_id == message.id and audit.meta["fromAddress"] == "sender@example.test"
+        assert audit.meta["matched"][hashlib.sha256(ORIGINAL).hexdigest()]["candidateId"] == candidate_id
+        assert row_count(db, Candidate) == row_count(db, Task) == 1
+        assert row_count(db, Notification) == notices
+        from app.db.models import IntakeAcknowledgement
+        assert db.scalar(select(func.count()).select_from(IntakeAcknowledgement).where(IntakeAcknowledgement.source_id == message.id)) == 0
+    # A revised resume has different bytes: it is processed and attached to the same person as the latest version.
+    revised = pdf("Page one: certificate", "Page two: resume revised", "Page three: passport")
+    calls = fake_extraction(monkeypatch)
+    mailbox(monkeypatch, data=revised)
+    with intake.sessions() as db:
+        db.get(MailAccount, "account-a").sync_state = {**db.get(MailAccount, "account-a").sync_state, "last_uid": 10}
+        db.commit()
+    subject.receive_account("account-a", sessions=intake.sessions, settings=intake.settings)
+    with intake.sessions() as db:
+        fresh = db.scalar(select(EmailIngestionJob).join(MailMessage, MailMessage.id == EmailIngestionJob.message_id)
+                          .where(MailMessage.account_id == "account-a", EmailIngestionJob.id != job_id))
+        assert fresh.status == "pending"
+        fresh_id = fresh.id
+    run(intake, fresh_id)
+    with intake.sessions() as db:
+        assert calls == [revised]
+        assert db.get(EmailIngestionJob, fresh_id).candidate_id == candidate_id
+        versions = list(db.scalars(select(Attachment.version).where(Attachment.entity_id == candidate_id, Attachment.slot == "source_bundle").order_by(Attachment.version)))
+        assert versions == [1, 2]
+        assert row_count(db, Candidate) == 1
 
 
 def test_pending_provider_job_survives_retry_and_creates_one_candidate(intake, monkeypatch):

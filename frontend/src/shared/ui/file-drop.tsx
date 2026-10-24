@@ -158,7 +158,7 @@ export function FileDrop({
                 {shown.url ? <FileLink url={shown.url} className="text-ink hover:text-navy-700">{shown.name}</FileLink> : shown.name}
                 <span className="text-ink-400"> · {shown.sizeKb} KB{shown.version ? ` · v${shown.version}` : ''}</span>
                 {busy || working ? <span className="text-amber-700"> · {busyLabel}</span>
-                  : shown.id ? <span className="text-navy-700"> · saved</span>
+                  : shown.id ? <span className="text-accent-700"> · saved</span>
                   : <span className="text-amber-700"> · selected, not yet saved</span>}
               </p>
             ) : (
@@ -232,7 +232,7 @@ export function FileDrop({
               {busy || working ? (
                 <span className="text-amber-700"> · {busyLabel}</span>
               ) : shown.id ? (
-                <span className="text-navy-700"> · saved</span>
+                <span className="text-accent-700"> · saved</span>
               ) : (
                 <span className="text-amber-700"> · selected, not yet saved</span>
               )}
@@ -276,10 +276,10 @@ export function FileDrop({
             void take(e.dataTransfer.files)
           }}
           className={cn(
-            'file-drop-target flex w-full items-center justify-center gap-2 rounded-control border border-dashed px-3 py-3.5 text-sm transition-colors',
+            'file-drop-target flex w-full items-center justify-center gap-2 rounded-control border border-dashed px-3 py-3.5 text-[14px] transition-colors',
             dragging
-              ? 'border-navy-500 bg-navy-50 text-navy-700'
-              : 'border-rule bg-field/40 text-ink-400 hover:border-ink-300 hover:text-ink-600',
+              ? 'border-navy-600 bg-navy-50 text-ink'
+              : 'border-[color:var(--border-control)] bg-white text-ink-500 hover:border-navy-600 hover:text-ink',
             locked && 'cursor-not-allowed opacity-60',
           )}
         >

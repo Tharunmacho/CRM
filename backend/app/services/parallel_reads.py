@@ -6,6 +6,7 @@ its own short-lived session on the caller's engine and they run together; the pa
 the slowest one instead of the sum.
 """
 from collections.abc import Callable
+from contextvars import copy_context
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -32,5 +33,8 @@ def parallel_reads(db, *reads: Callable[[Any], Any]) -> list:
         with _SLOTS, Session(engine, autoflush=False, expire_on_commit=False) as session:
             return read(session)
 
+    # Each read runs in a copy of the caller's context, so per-request bookkeeping (the Server-Timing
+    # query count) still sees the statements that ran on these worker threads.
+    contexts = [copy_context() for _ in reads]
     with ThreadPoolExecutor(max_workers=len(reads)) as pool:
-        return list(pool.map(run, reads))
+        return list(pool.map(lambda pair: pair[0].run(run, pair[1]), zip(contexts, reads)))

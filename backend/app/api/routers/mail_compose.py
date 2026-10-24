@@ -139,7 +139,7 @@ def create(body: CreateIn, db: Session = Depends(get_db), user: User = Depends(c
             content = "\n\n---------- Forwarded message ----------\nFrom: " + (source.from_address or "") + "\nSubject: " + (source.subject or "") + "\n\n" + (source.body or "")
         else:
             if not source.remote_uid or not source.uid_validity:
-                raise HTTPException(409, "Refresh this draft from the mailbox Drafts folder before editing it.")
+                raise HTTPException(409, "Refresh this draft from the mailbox Drafts folder before you edit it.")
             try:
                 with WritableMailbox(config) as mailbox:
                     folders = mailbox.folders()
@@ -154,7 +154,7 @@ def create(body: CreateIn, db: Session = Depends(get_db), user: User = Depends(c
             if existing:
                 if existing.actor_id == user.id:
                     return service.draft_out(db, existing)
-                raise HTTPException(409, "Another CRM user is editing this provider draft.")
+                raise HTTPException(409, "Another user is editing this draft.")
             to, cc, bcc, content = list(source.to_addresses or []), list(source.cc_addresses or []), list(source.bcc_addresses or []), source.body or ""
     row = MailDraft(account_id=account.id, actor_id=user.id, mode=body.mode, source_message_id=source.id if source else None,
         to_addresses=to, cc_addresses=cc, bcc_addresses=bcc, subject=subject[:990], body=content[:100_000], status="draft", lock_version=0)
@@ -167,14 +167,14 @@ def create(body: CreateIn, db: Session = Depends(get_db), user: User = Depends(c
         total = 0
         for item in originals:
             if not item.object_key:
-                raise HTTPException(409, "A source attachment is unavailable. Refresh the original message first.")
+                raise HTTPException(409, "An attachment from the original email is not available. Refresh the original email first.")
             try:
                 data = read_bytes(get_settings(), item.object_key)
             except Exception:
                 raise HTTPException(503, "A source attachment could not be read. The original message has been retained.") from None
             total += len(data)
             if total > service.MAX_TOTAL_BYTES or len(originals) > service.MAX_ATTACHMENTS:
-                raise HTTPException(422, "The source attachments exceed the 18 MB/20-file compose limit.")
+                raise HTTPException(422, "The attachments are too big. Use at most 20 files and 18 MB in total.")
             import mimetypes
             db.add(MailDraftAttachment(draft_id=row.id, file_name=item.file_name,
                 content_type=mimetypes.guess_type(item.file_name)[0] or "application/octet-stream", size_bytes=len(data),
@@ -279,7 +279,7 @@ def discard(draft_id: str, lock_version: int, db: Session = Depends(get_db), use
         except MailAdapterError as exc:
             row.remote_state, row.last_error = "error", str(exc)
             db.commit()
-            raise HTTPException(502, "The provider draft could not be removed. Your CRM draft is retained for retry.") from None
+            raise HTTPException(502, "We could not remove the draft from the mailbox. Your draft here is safe. Try again.") from None
     row.status, row.lock_version = "discarded", row.lock_version + 1
     db.commit()
     return service.draft_out(db, row)
@@ -297,7 +297,7 @@ def send(draft_id: str, body: SendIn, db: Session = Depends(get_db), user: User 
     previous = db.scalar(select(MailSendAttempt).where(MailSendAttempt.request_key == body.request_key))
     if previous:
         if previous.draft_id != row.id or previous.actor_id != user.id or previous.snapshot.get("lock_version") != body.lock_version:
-            raise HTTPException(409, "This send request identifier belongs to a different draft version.")
+            raise HTTPException(409, "This draft changed after you pressed Send. Check the draft and send it again.")
         service.expire_sending(db, row)
         return {"attempt": service.attempt_out(previous), "draft": service.draft_out(db, row)}
     service.check_edit(row, body.lock_version)
@@ -323,7 +323,7 @@ def send(draft_id: str, body: SendIn, db: Session = Depends(get_db), user: User 
         db.commit()  # Send intent and recipients become durable before contacting SMTP.
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "This send request was already recorded. Check draft status.") from None
+        raise HTTPException(409, "This email was already sent. Check the status of the draft.") from None
     try:
         refused = deliver(config, outgoing, recipients)
         attempt.status, attempt.sent_at = ("partial" if refused else "sent"), service.now()

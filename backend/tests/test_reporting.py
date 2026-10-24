@@ -6,7 +6,7 @@ from unittest.mock import patch
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import pymupdf
 import pytest
@@ -16,7 +16,7 @@ from app.api.routers import reports
 from app.core.deps import current_user
 from app.db.session import get_db
 from app.db import models as m
-from app.services.reporting import Filters, dashboard_data, read_dashboard_data, read_reporting_data, report_data
+from app.services.reporting import Filters, dashboard_data, order_counts, read_dashboard_data, read_reporting_data, report_data
 from app.services.report_exports import REPORTS, pdf, xlsx
 from test_database_naming import schema_database, _migrate
 
@@ -95,7 +95,8 @@ def test_waiting_is_not_dropoff_and_reopened_receipts_do_not_count(dataset):
     assert {r["id"] for r in result["advances"]} == {"receipt-inr", "receipt-aed"}
     # The old application still contributes its actual receipt and task event this day.
     assert result["summary"]["applications"] == 4
-    assert result["orders"][0]["selected"] == 2
+    # matched = still active, selected = active and past stage 4, deployed = finished; closed never counts.
+    assert {k: result["orders"][0][k] for k in ("matched", "selected", "deployed")} == {"matched": 2, "selected": 1, "deployed": 1}
 
 
 @pytest.mark.parametrize("keyword,match,other", [("client_id", "cl1", "cl2"), ("order_id", "o1", "o2"), ("designation_id", "d1", "d2"), ("staff_id", "a", "b")])
@@ -137,15 +138,24 @@ def test_dashboard_current_ownership_deadlines_and_roles(dataset):
     assert own["taskCounts"] == {"open": 1, "dueToday": 1, "overdue": 0, "escalated": 0, "notUpdated": 0}
     assert len(own["pipeline"]) == 11
     assert own["tasks"][0]["id"] == "t2"  # reset due_at wins over original creation+48h.
+    # A manager sees the whole team, like the admin; only the private to-do card and "my tasks" stay personal.
     manager = dashboard_data(dataset, MANAGER, now=NOW)
-    assert manager["today"]["total"] == 0
+    assert manager["today"]["total"] == 6
     assert [row["id"] for row in manager["myTasks"]] == ["tm"]
+    assert [row["id"] for row in manager["tasks"]] == ["t3", "tm", "t2"]
+    assert {option["id"] for option in manager["staffOptions"]} >= {"a", "b"}
+    filtered = dashboard_data(dataset, MANAGER, "a", now=NOW)
+    assert filtered["staffId"] == "a" and filtered["today"]["total"] == 4
+    assert all(row["ownerId"] == "a" for row in filtered["tasks"])
+    assert dashboard_data(dataset, STAFF, now=NOW)["staffOptions"] == []
+    with pytest.raises(HTTPException):
+        dashboard_data(dataset, STAFF, "b", now=NOW)
     admin = dashboard_data(dataset, ADMIN, now=NOW)
     assert [row["id"] for row in admin["tasks"]] == ["t3", "tm", "t2"]
     assert admin["taskCounts"]["escalated"] == 1
 
 
-@pytest.mark.parametrize("user,scope", [(STAFF, None), (MANAGER, None), (ADMIN, None), (ADMIN, "a"), (ADMIN, "b")])
+@pytest.mark.parametrize("user,scope", [(STAFF, None), (MANAGER, None), (MANAGER, "a"), (ADMIN, None), (ADMIN, "a"), (ADMIN, "b")])
 def test_dashboard_order_metrics_match_historical_report_definitions(dataset, user, scope):
     # Repeated, reopened, future and closed records must keep their previous meaning.
     dataset["stages"].extend([
@@ -154,7 +164,7 @@ def test_dashboard_order_metrics_match_historical_report_definitions(dataset, us
     ])
     dataset["applications"].append({**dataset["applications"][2], "id": "future-app", "created_at": NOW + timedelta(days=1)})
     dataset["orders"].append({**dataset["orders"][0], "id": "future-order", "created_at": NOW + timedelta(days=1)})
-    effective_scope = scope if user.role == m.Role.admin else user.id
+    effective_scope = scope if user.role in (m.Role.admin, m.Role.manager) else user.id
     ids = {c["id"] for c in dataset["candidates"] if not effective_scope or c["owner_id"] == effective_scope}
     report_input = {**dataset, "applications": [{**a, "owner_id": effective_scope} for a in dataset["applications"] if a["candidate_id"] in ids]}
     previous = report_data(report_input, user, Filters(date(1970, 1, 1), DAY, staff_id=effective_scope), now=NOW)
@@ -166,7 +176,7 @@ def test_late_stage_labels_identify_work_still_due_not_deployment(dataset):
     dataset["applications"][0]["created_at"] = NOW
     dashboard = dashboard_data(dataset, ADMIN, now=NOW)
     report = report_data(dataset, ADMIN, FILTERS, now=NOW)
-    expected = ["Visa arrival", "Visa stamping", "Air ticket"]
+    expected = ["Visa arrival + Google review", "Visa stamping", "Air ticket"]
     assert [row["label"] for row in dashboard["pipeline"][8:]] == expected
     assert [row["label"] for row in report["pipeline"][8:]] == expected
     assert dashboard["pipeline"][9]["count"] == 1
@@ -188,6 +198,14 @@ def test_scope_tampering_is_rejected_before_database_access(dataset, path):
         response = make_client(dataset).get(path)
     assert response.status_code == 403
     read.assert_not_called()
+
+
+def test_manager_may_use_the_dashboard_staff_filter_but_staff_may_not(dataset):
+    with patch.object(reports, "read_dashboard_data", return_value=dataset) as read:
+        response = make_client(dataset, user=MANAGER).get("/api/dashboard?staff_id=b")
+    assert response.status_code == 200
+    assert response.json()["staffId"] == "b"
+    read.assert_called_once()
 
 
 def test_reports_require_authentication(dataset):
@@ -286,3 +304,37 @@ def test_real_postgres_report_contract_and_export_authorization(schema_database,
         with pymupdf.open(stream=exported.content, filetype='pdf') as document:
             text = ''.join(page.get_text() for page in document)
             assert 'Candidate 2' not in text and '100.25' in text
+
+
+def test_order_counts_use_one_definition_for_matched_selected_and_deployed():
+    def app(status, stage):
+        return {"status": status, "current_stage": stage}
+    apps = [app("active", 1), app("active", 4), app("active", 5), app("active", 9), app("deployed", 11),
+            app("closed", 2), app("closed", 7), app(m.ApplicationStatus.active, 6)]
+    # closed applications (unmapped, rejected, ...) never count; deployed ones count only as deployed
+    assert order_counts(apps) == {"matched": 5, "selected": 3, "deployed": 1}
+    assert order_counts([]) == {"matched": 0, "selected": 0, "deployed": 0}
+
+
+def test_pipeline_reports_drop_off_between_consecutive_stages(dataset):
+    pipeline = report_data(dataset, STAFF, FILTERS, now=NOW)["pipeline"]
+    for index, row in enumerate(pipeline[:-1]):
+        lost = max(0, row["reached"] - pipeline[index + 1]["reached"])
+        assert row["lostToNext"] == lost
+        assert row["lostToNextPercent"] == (round(lost / row["reached"] * 100, 1) if row["reached"] else 0)
+    # The last stage has no next stage; the closure-rate field keeps its old meaning.
+    assert pipeline[-1]["lostToNext"] is None and pipeline[-1]["lostToNextPercent"] is None
+    assert all("dropOffPercent" in row and "closed" in row for row in pipeline)
+    assert (pipeline[1]["reached"], pipeline[1]["lostToNext"], pipeline[1]["lostToNextPercent"]) == (4, 2, 50.0)
+    assert (pipeline[7]["reached"], pipeline[7]["lostToNext"], pipeline[7]["lostToNextPercent"]) == (2, 1, 50.0)
+
+
+def test_funnel_export_carries_stage_to_stage_drop_off(dataset):
+    result = report_data(dataset, STAFF, FILTERS, now=NOW)
+    keys = REPORTS["funnel"][1][0][2]
+    assert keys[-3:] == ["dropOffPercent", "lostToNext", "lostToNextPercent"]
+    with ZipFile(BytesIO(xlsx("funnel", result))) as archive:
+        text = ''.join(archive.read(name).decode() for name in archive.namelist())
+    assert "Lost before next stage" in text and "Lost before next stage (%)" in text and "Closure rate (%)" in text
+    with pymupdf.open(stream=pdf("funnel", result), filetype='pdf') as doc:
+        assert "Lost before next stage" in ''.join(page.get_text() for page in doc)

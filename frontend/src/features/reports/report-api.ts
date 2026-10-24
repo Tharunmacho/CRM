@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, fileHref } from '@/shared/api/client'
+import { api, fileHref, takeEarlyRead } from '@/shared/api/client'
+import { peekReport, rememberReport } from '@/shared/state/snapshot-cache'
 
 export interface Option { id: string; label: string }
 export interface OrderMetrics { id: string; ref: string; company: string; client: string; designation: string; status: string; openings: number; matched: number; selected: number; deployed: number }
@@ -9,7 +10,7 @@ export interface ReportResult {
   notes: string[]
   summary: { applications: number; active: number; deployed: number; intake: number }
   options: { clients: Option[]; orders: Option[]; designations: Option[]; staff: Option[] }
-  pipeline: { stage: number; label: string; reached: number; active: number; progressed: number; closed: number; dropOffPercent: number }[]
+  pipeline: { stage: number; label: string; reached: number; active: number; progressed: number; closed: number; dropOffPercent: number; lostToNext?: number | null; lostToNextPercent?: number | null }[]
   staff: { id: string; name: string; assigned: number; completedTasks: number; averageStageHours: number | null; durationSamples: number; escalations: number; missedUpdates: number }[]
   stageHours: { stage: number; label: string; completed: number; averageHours: number | null }[]
   sources: { source: string; label: string; count: number }[]
@@ -32,7 +33,16 @@ export interface DashboardResult {
   orders: OrderMetrics[]; tasks: DashboardTask[]; myTasks: DashboardTask[]
 }
 
-/** Clear prior scope immediately, abort on navigation, and refresh visible desks. */
+/** How often a visible report re-reads, and the least time between two reads triggered by focus. */
+const REFRESH_MS = 60_000
+const FOCUS_REFRESH_MIN_MS = 15_000
+
+/**
+ * Clear prior scope immediately, abort on navigation, and refresh visible desks.
+ *
+ * The newest answer for each user and query is remembered, so returning to a screen (or reloading the page,
+ * for the dashboard) shows the previous numbers at once while the server confirms them.
+ */
 export function useReportData<T>(path: string, sessionId: string, revision = '') {
   const [snapshot, setSnapshot] = useState<{ key: string; data: T } | null>(null)
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null)
@@ -42,25 +52,32 @@ export function useReportData<T>(path: string, sessionId: string, revision = '')
   useEffect(() => {
     let active = true
     let request: AbortController | null = null
-    const read = async () => {
+    let finishedAt = 0
+    let first = true
+    const read = async (force = false) => {
       if (request || document.visibilityState === 'hidden') return
+      if (!force && Date.now() - finishedAt < FOCUS_REFRESH_MIN_MS) return
       const controller = new AbortController(); request = controller
       setReading(key)
       try {
-        const data = await api.get<T>(path, { signal: controller.signal })
-        if (active) { setSnapshot({ key, data }); setFailure(null) }
+        // index.html starts the default dashboard read before the app loads; use it for the first read.
+        const early = first && path === '/dashboard' ? await takeEarlyRead<T>('dashboard', path) : null
+        first = false
+        const data = early ?? await api.get<T>(path, { signal: controller.signal })
+        if (active) { rememberReport(sessionId, path, revision, data); setSnapshot({ key, data }); setFailure(null) }
       } catch (error) {
         if (active && !controller.signal.aborted) setFailure({ key, message: error instanceof Error ? error.message : 'Unable to load this view.' })
-      } finally { if (request === controller) request = null; if (active) setReading(null) }
+      } finally { finishedAt = Date.now(); if (request === controller) request = null; if (active) setReading(null) }
     }
-    void read()
-    const interval = window.setInterval(() => void read(), 30_000)
+    void read(true)
+    const interval = window.setInterval(() => void read(true), REFRESH_MS)
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     window.addEventListener('focus', visible)
     return () => { active = false; request?.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [key, path, reload])
-  return { data: snapshot?.key === key ? snapshot.data : null, error: failure?.key === key ? failure.message : '', refreshing: reading === key, refresh: () => setReload(n => n + 1) }
+  const remembered = snapshot?.key === key ? snapshot.data : peekReport<T>(sessionId, path, revision)
+  return { data: remembered, error: failure?.key === key ? failure.message : '', refreshing: reading === key, refresh: () => setReload(n => n + 1) }
 }
 
 export async function downloadReport(report: string, format: 'xlsx' | 'pdf', query: string) {

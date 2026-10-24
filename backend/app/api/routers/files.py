@@ -75,9 +75,9 @@ def _safe_name(name: str) -> str:
 def _entity(db: Session, entity_type: str, entity_id: str, *, lock: bool = False):
     model = ENTITIES.get(entity_type)
     if model is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown entity type {entity_type!r}")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Files cannot be added to this kind of record ({entity_type}).")
     if not entity_id or not entity_id.strip() or len(entity_id) > 36:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A valid record ID is required.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "We could not tell which record this file belongs to.")
     statement = select(model).where(model.id == entity_id)
     if lock:
         # Lock the parent even when the slot has no versions yet. Locking only a
@@ -113,12 +113,12 @@ def upload(
     user: User = Depends(current_user),
 ) -> dict:
     if entity_type not in ENTITIES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown entity type {entity_type!r}")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Files cannot be added to this kind of record ({entity_type}).")
     if not entity_id or not entity_id.strip() or len(entity_id) > 36:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A valid record ID is required.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "We could not tell which record this file belongs to.")
     slot = slot.strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", slot):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A valid document slot is required.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose which document this file is for.")
 
     # FastAPI runs this synchronous handler in its worker pool, including the
     # database and filesystem work below. Read one extra byte to detect oversized
@@ -153,7 +153,7 @@ def upload(
             if not initial_upload:
                 raise HTTPException(403, "Only the assigned recruiter or a supervisor can upload documents for this candidate")
         if entity_type == "candidate" and slot == "source_bundle":
-            raise HTTPException(422, "Original source bundles are retained by the intake worker and cannot be replaced manually")
+            raise HTTPException(422, "The original upload is kept as it was received and cannot be replaced by hand")
         previous = db.scalar(
             select(Attachment)
             .where(
@@ -251,7 +251,7 @@ def download(
         try:
             return document_storage.file_response(settings, row.object_key, row.file_name, _content_type(row.content_type, row.file_name), download)
         except (BotoCoreError, ClientError):
-            raise HTTPException(503, "Document storage is unavailable. Please try again.") from None
+            raise HTTPException(503, "We cannot reach file storage right now. Please try again in a few minutes.") from None
 
     path = (STORAGE / row.object_key).resolve()
     if not path.is_relative_to(STORAGE.resolve()) or not path.is_file():

@@ -105,7 +105,7 @@ def commit_candidate(db, message, output):
         return
     matches = identity_matches(db, fields)
     if len(matches) > 1:
-        raise IntakeReviewError("The document matches multiple candidates. Review the original and choose the correct profile.")
+        raise IntakeReviewError("This document matches more than one candidate. Check it and choose the right profile.")
     values = {key: fields[key] for key in ("name", "phone", "whatsapp", "email", "gender", "nationality", "current_city", "languages", "passport_no", "passport_place", "skills", "total_experience", "gulf_experience") if fields.get(key) is not None}
     for key in ("dob", "passport_issue", "passport_expiry"):
         if fields.get(key): values[key] = parse_loose_date(str(fields[key]))
@@ -133,9 +133,9 @@ def commit_candidate(db, message, output):
     else:
         candidate = matches[0][0]
         if candidate.dob and values.get("dob") and candidate.dob != values["dob"]:
-            raise IntakeReviewError("Date of birth conflicts with the existing candidate. Review the documents.")
+            raise IntakeReviewError("The date of birth does not match the candidate already in the system. Check the documents.")
         if candidate.gender and values.get("gender") and candidate.gender.casefold() != values["gender"].casefold():
-            raise IntakeReviewError("Gender conflicts with the existing candidate. Review the documents.")
+            raise IntakeReviewError("The gender does not match the candidate already in the system. Check the documents.")
         enrich_empty(candidate, values, raw)
     if not candidate.resume_text:
         candidate.resume_text = resume_text_from(raw)
@@ -176,12 +176,12 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         with sessions() as db:
             row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
             if not row:
-                raise WhatsAppError("This message is being reviewed or already saved.")
+                raise WhatsAppError("This message is being checked or is already saved.")
             paused = row.status not in {"pending", "processing", "retry"}
             row.processing_state = deepcopy(value)
             db.commit()
             if paused:
-                raise WhatsAppError("This message is being reviewed or already saved.")
+                raise WhatsAppError("This message is being checked or is already saved.")
             connected_channel(db, phone_id, settings)
     try:
         with sessions() as db:
@@ -200,6 +200,18 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                 if not row or row.status not in {"pending", "processing", "retry"}:
                     return
                 row.object_key, row.content_hash, row.content_type, row.processing_state = key, digest, mime, deepcopy(state)
+                # PRD: skip a file whose hash was already processed. The receipt and original stay for the
+                # audit trail, but nothing is read, no candidate or acknowledgement is created.
+                from app.services.duplicate_files import DUPLICATE_REASON, processed_hashes
+                known = processed_hashes(db, [digest], exclude_whatsapp_id=message_id).get(digest)
+                if known:
+                    row.status, row.last_error = "ignored", DUPLICATE_REASON
+                    db.add(AuditEntry(action="Ignored duplicate WhatsApp file", target=row.file_name, entity_type="whatsapp_message",
+                                      entity_id=row.id, meta={"channel": "whatsapp", "senderNumber": row.sender_number,
+                                                              "providerMessageId": row.provider_message_id,
+                                                              "receivedAt": row.received_at.isoformat(), "contentHash": digest, "matched": known}))
+                    db.commit()
+                    return
                 db.commit()
                 connected_channel(db, phone_id, settings)
         output = state.get("output")
@@ -241,7 +253,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         state["output"] = output
         checkpoint(state)
         if output.get("status") == "needs_review":
-            raise WhatsAppError("Some pages need review. Open the original document before resolving this message.")
+            raise WhatsAppError("Some pages need a check. Open the original file before you finish this message.")
         if not output.get("extractions"):
             with sessions() as db:
                 connected_channel(db, phone_id, settings, lock=True)
@@ -256,7 +268,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             documents = {}
             for kind, part in output["extractions"].items():
                 if kind not in {"resume", "passport", "aadhaar"} or part["selected_pages"] != getattr(inspected, f"{kind}_pages"):
-                    raise WhatsAppError("Document page selections need review")
+                    raise WhatsAppError("The pages chosen need a check")
                 content = inspected.pdf_for_pages(part["selected_pages"])
                 digest = hashlib.sha256(content).hexdigest()
                 documents[kind] = {"object_key": put_bytes(settings, f"whatsapp/{message_id}/{kind}-{digest}.pdf", content, "application/pdf"),

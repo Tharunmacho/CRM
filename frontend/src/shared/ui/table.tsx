@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListFilter } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListFilter } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from './primitives'
 import { EmptyState } from './display'
@@ -14,6 +14,12 @@ export interface Column<T> {
   /** Renders a distinct-value filter dropdown in the header. */
   filterable?: boolean
   width?: string
+  /** Never narrower than this (CSS length, e.g. '12rem'); key columns use it so they are not cut. */
+  minWidth?: string
+  /** Columns marked `low` fold away below 1280px, `medium` below 1024px (put the fact in the identity cell's second line instead). */
+  priority?: 'high' | 'medium' | 'low'
+  /** A row-actions column: fixed to its content, right-aligned, never wrapped or clipped. */
+  actions?: boolean
   align?: 'left' | 'right' | 'center'
   className?: string
 }
@@ -32,6 +38,22 @@ interface DataTableProps<T> {
   rowClassName?: (row: T) => string | undefined
   dense?: boolean
   gridLines?: boolean
+  /** Appends the reference product's bordered arrow button as the last cell of every row. */
+  openColumn?: boolean
+  /** Compact density: 13px text and tighter cells, so every column fits (use with column widths). */
+  compact?: boolean
+  /**
+   * Keeps the header row in view while the rows scroll vertically inside a bounded container
+   * (header and rows share one scroll box, so they can never misalign). Pass a CSS height with
+   * `maxHeight` (default 70vh).
+   */
+  sticky?: boolean
+  maxHeight?: string
+  /**
+   * Below this viewport width the table becomes stacked label/value cards instead of a squeezed
+   * table. 768 (default), 1024 or 1280; `false` keeps a table at every width.
+   */
+  stackBelow?: 768 | 1024 | 1280 | false
   /** Reset pagination for an external search without losing column filters or sort. */
   resetPageKey?: string
   /** For bounded endpoints: sort/filter/page decisions are delegated to the server. */
@@ -55,6 +77,11 @@ export function DataTable<T>({
   rowClassName,
   dense,
   gridLines = false,
+  openColumn = false,
+  compact = false,
+  sticky = false,
+  maxHeight = '70vh',
+  stackBelow = 768,
   resetPageKey,
   server,
 }: DataTableProps<T>) {
@@ -125,7 +152,9 @@ export function DataTable<T>({
       a.localeCompare(b, undefined, { numeric: true }),
     )
 
-  const pad = dense ? 'px-4 py-2' : 'px-4 py-3.5'
+  const pad = compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3.5'
+  const headPad = compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3'
+  const fixedLayout = columns.some((col) => col.width)
   const rule = gridLines ? 'border-r border-rule-soft last:border-r-0' : ''
 
   if (!rows.length && !server) {
@@ -133,13 +162,13 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="ui-data-table">
-      <div className="ui-table-scroll scrollbar-thin overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+    <div className={cn('ui-data-table min-w-0 max-w-full', compact && 'is-compact', stackBelow && `ui-table-stack-${stackBelow}`)}>
+      <div className={cn('ui-table-scroll scrollbar-thin max-w-full overflow-x-auto', sticky && 'is-sticky overflow-y-auto')} style={sticky ? { maxHeight } : undefined}>
+        <table className={cn('w-full border-collapse', compact ? 'text-[13px]' : 'text-[14px]', fixedLayout && 'is-fixed')}>
           <thead>
-            <tr className="border-b border-rule bg-field/60">
+            <tr className="border-b border-rule">
               {selectable && (
-                <th className={cn('w-9 text-left', pad)}>
+                <th className={cn('w-9 text-left', headPad)}>
                   <Checkbox
                     checked={allOnPageSelected}
                     indeterminate={
@@ -163,11 +192,13 @@ export function DataTable<T>({
                           : 'none'
                         : undefined
                     }
-                    style={{ width: col.width }}
+                    style={{ width: col.actions ? undefined : col.width, minWidth: col.minWidth }}
                     className={cn(
-                      'relative whitespace-nowrap font-medium text-ink-500',
-                      pad,
+                      'relative align-middle text-[13px] font-medium text-ink-500',
+                      headPad,
                       rule,
+                      col.priority && `col-p-${col.priority}`,
+                      col.actions && 'ui-actions-cell text-right',
                       col.align === 'right'
                         ? 'text-right'
                         : col.align === 'center'
@@ -186,7 +217,7 @@ export function DataTable<T>({
                           else setLocalSort(next)
                         }}
                         className={cn(
-                          'text-xs font-medium',
+                          'text-[13px] font-medium',
                           col.sortable && 'cursor-pointer hover:text-ink',
                           isSorted && 'text-ink',
                         )}
@@ -205,10 +236,10 @@ export function DataTable<T>({
                           aria-label={`Filter by ${col.header}`}
                           onClick={() => setOpenFilter((k) => (k === col.key ? null : col.key))}
                           className={cn(
-                            'rounded-[3px] p-0.5 transition-colors',
+                            'ui-th-filter rounded-[4px] p-0.5 transition-colors',
                             active
-                              ? 'bg-navy-100 text-navy-700'
-                              : 'text-ink-300 hover:bg-white hover:text-ink-600',
+                              ? 'bg-navy-600 text-[color:var(--on-primary)]'
+                              : 'text-ink-400 hover:bg-field hover:text-ink',
                           )}
                         >
                           <ListFilter className="h-3 w-3" />
@@ -217,12 +248,12 @@ export function DataTable<T>({
                     </span>
 
                     {openFilter === col.key && (
-                      <div className="absolute left-2 top-full z-30 mt-1 w-56 rounded-panel border border-rule bg-white p-1 shadow-pop">
-                        {server ? <div className="p-2"><label className="block text-xs text-ink-500">Filter {col.header}<input autoFocus value={server.filters[col.key] || ''} onChange={event => server.onFilterChange(col.key, event.target.value)} className="mt-2 w-full rounded-control border border-rule px-2 py-2 text-sm" placeholder={['experience', 'stage'].includes(col.key) ? 'Exact number' : 'Contains…'} /></label><button className="mt-2 text-xs text-navy-600" onClick={() => setOpenFilter(null)}>Done</button></div> : <div className="scrollbar-thin max-h-64 overflow-y-auto">
+                      <div className="absolute left-2 top-full z-30 mt-1 w-56 rounded-[10px] border border-rule bg-white p-1 shadow-pop">
+                        {server ? <div className="p-2"><label className="block text-[13px] text-ink-500">Filter {col.header}<input autoFocus value={server.filters[col.key] || ''} onChange={event => server.onFilterChange(col.key, event.target.value)} className="ui-input mt-2 h-9 w-full rounded-control border bg-white px-2.5 text-[14px] text-ink" placeholder={['experience', 'stage'].includes(col.key) ? 'Type a number' : 'Type to filter'} /></label><button className="mt-2 text-[13px] font-medium text-ink underline-offset-2 hover:underline" onClick={() => setOpenFilter(null)}>Done</button></div> : <div className="scrollbar-thin max-h-64 overflow-y-auto">
                           {distinct(col).map((v) => {
                             const on = (filters[col.key] ?? []).includes(v)
                             return (
-                              <div key={v} className="px-2 py-1.5 hover:bg-field">
+                              <div key={v} className="rounded-[6px] px-2 py-1.5 hover:bg-field">
                                 <Checkbox
                                   checked={on}
                                   label={<span className="truncate">{v}</span>}
@@ -242,9 +273,9 @@ export function DataTable<T>({
                         {active && (
                           <button
                             onClick={() => server ? server.onFilterChange(col.key, '') : setFilters((f) => ({ ...f, [col.key]: [] }))}
-                            className="mt-1 w-full border-t border-rule-soft px-2 py-1.5 text-left text-xs text-ink-500 hover:text-ink"
+                            className="mt-1 w-full border-t border-rule-soft px-2 py-1.5 text-left text-[13px] text-ink-500 hover:text-ink"
                           >
-                            Clear this filter
+                            Clear filter
                           </button>
                         )}
                       </div>
@@ -252,6 +283,7 @@ export function DataTable<T>({
                   </th>
                 )
               })}
+              {openColumn && <th className={cn('w-14', headPad)} aria-label="Open" />}
             </tr>
           </thead>
           <tbody>
@@ -275,13 +307,13 @@ export function DataTable<T>({
                   }}
                   className={cn(
                     'border-b border-rule-soft transition-colors last:border-0',
-                    onRowClick && 'cursor-pointer hover:bg-field/70',
-                    isSelected && 'bg-navy-50/60',
+                    onRowClick && 'cursor-pointer hover:bg-navy-50',
+                    isSelected && 'bg-field/50',
                     rowClassName?.(row),
                   )}
                 >
                   {selectable && (
-                    <td className={pad} onClick={(e) => e.stopPropagation()}>
+                    <td className={cn('align-middle', pad)} data-label="" data-select onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={isSelected}
                         aria-label={`Select row ${id}`}
@@ -296,18 +328,27 @@ export function DataTable<T>({
                   {columns.map((col) => (
                     <td
                       key={col.key}
+                      data-label={col.header}
+                      style={{ minWidth: col.minWidth }}
                       className={cn(
-                        'text-ink-700',
+                        'align-middle text-ink-700',
                         pad,
                         rule,
+                        col.priority && `col-p-${col.priority}`,
+                        col.actions && 'ui-actions-cell text-right',
                         col.align === 'right' && 'text-right',
                         col.align === 'center' && 'text-center',
                         col.className,
                       )}
                     >
-                      {col.render ? col.render(row) : valueOf(col, row) || '—'}
+                      {col.render ? col.render(row) : <span className="block max-w-full break-words line-clamp-2" title={valueOf(col, row) || undefined}>{valueOf(col, row) || '—'}</span>}
                     </td>
                   ))}
+                  {openColumn && (
+                    <td className={cn('ui-actions-cell w-14 align-middle text-right', pad)} data-label="">
+                      <RowOpen />
+                    </td>
+                  )}
                 </tr>
               )
             })}
@@ -317,23 +358,23 @@ export function DataTable<T>({
 
       {!sorted.length && (
         empty ?? <EmptyState
-          title="No rows match these filters"
-          description="Clear a filter to widen the search."
+          title="Nothing matches your filters"
+          description="Remove a filter to see more results."
         />
       )}
 
       {sorted.length > 0 && (
-        <div className="ui-table-pagination flex items-center justify-between border-t border-rule-soft px-3 py-2.5 text-xs text-ink-500">
+        <div className="ui-table-pagination flex items-center justify-between border-t border-rule-soft px-4 py-3 text-[13px] text-ink-500">
           <span className="tnum" aria-live="polite">
             <span className="pagination-label">Showing </span>
             {safePage * pageSize + 1}–{Math.min(total, (safePage + 1) * pageSize)} of{' '}
             {total}
           </span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => changePage(Math.max(0, safePage - 1))}
               disabled={safePage === 0}
-              className="flex h-7 w-7 items-center justify-center rounded-control hover:bg-field disabled:opacity-40"
+              className="ui-page-button flex h-8 w-8 items-center justify-center rounded-control border border-rule bg-white hover:bg-field disabled:opacity-40"
               aria-label="Previous page"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -344,7 +385,7 @@ export function DataTable<T>({
             <button
               onClick={() => changePage(Math.min(pageCount - 1, safePage + 1))}
               disabled={safePage >= pageCount - 1}
-              className="flex h-7 w-7 items-center justify-center rounded-control hover:bg-field disabled:opacity-40"
+              className="ui-page-button flex h-8 w-8 items-center justify-center rounded-control border border-rule bg-white hover:bg-field disabled:opacity-40"
               aria-label="Next page"
             >
               <ChevronRight className="h-4 w-4" />
@@ -353,5 +394,17 @@ export function DataTable<T>({
         </div>
       )}
     </div>
+  )
+}
+
+/** The reference product's bordered arrow, drawn as the last cell of a clickable row. Decorative: the row itself is the control. */
+export function RowOpen({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn('ui-row-open inline-flex h-[34px] w-[34px] items-center justify-center rounded-control border border-rule bg-white text-ink-500', className)}
+      aria-hidden="true"
+    >
+      <ArrowRight className="h-4 w-4" />
+    </span>
   )
 }

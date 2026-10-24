@@ -1,8 +1,8 @@
 /** Wording for profile actions that are unavailable until the candidate has a working recruiter. */
 
-/** Why "Map to an order" cannot be used right now, or null when it can. */
+/** Why "Match to an order" cannot be used right now, or null when it can. */
 export function mapToOrderBlocker(candidate: { ownerId: string | null }, ownerActive: boolean): string | null {
-  if (!candidate.ownerId) return 'Assign an active recruiter first. A candidate needs an owner before being mapped to an order.'
+  if (!candidate.ownerId) return 'Assign an active recruiter first. A candidate needs a recruiter before they can be matched to an order.'
   if (!ownerActive) return 'The assigned recruiter is inactive. Reassign this candidate to an active recruiter first.'
   return null
 }

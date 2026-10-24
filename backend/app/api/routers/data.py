@@ -187,7 +187,20 @@ class MasterInput(BaseModel):
         return result
 
 
+class ClientCompanyIn(MasterInput):
+    """The employer saved together with a new client contact."""
+
+    name: str = Field(min_length=1, max_length=200)
+    country: str | None = Field(default=None, max_length=100)
+    city: str | None = Field(default=None, max_length=100)
+    industry: str | None = Field(default=None, max_length=120)
+    address: str | None = Field(default=None, max_length=2000)
+
+
 class ClientIn(MasterInput):
+    # Only honoured on create: the contact's details become the employer's contact
+    # details, so one form captures the whole PRD client record in one transaction.
+    company: ClientCompanyIn | None = None
     name: str = Field(min_length=1, max_length=200)
     email: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=40)
@@ -254,7 +267,7 @@ def _master_values(body: MasterInput):
                "requiredSkills": "required_skills", "minExperience": "min_experience",
                "companyId": "company_id", "designationId": "designation_id",
                "contractPeriod": "contract_period", "interviewDate": "interview_date"}
-    return {aliases.get(key, key): value for key, value in body.model_dump().items()}
+    return {aliases.get(key, key): value for key, value in body.model_dump(exclude={"company"}).items()}
 
 
 def _master_json(value):
@@ -263,7 +276,7 @@ def _master_json(value):
     return value
 
 
-def _master_save(db, user, row, body, kind, schema, *, new=False):
+def _master_save(db, user, row, body, kind, schema, *, new=False, commit=True):
     changes = {}
     for key, value in _master_values(body).items():
         previous = getattr(row, key)
@@ -277,7 +290,8 @@ def _master_save(db, user, row, body, kind, schema, *, new=False):
             db.add(AuditEntry(actor_id=user.id, action=f"{'Created' if new else 'Updated'} {kind}",
                               target=getattr(row, "name", getattr(row, "title", getattr(row, "ref", kind))),
                               entity_type=kind, entity_id=row.id, meta={"changes": changes}))
-        db.commit()
+        if commit:
+            db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "A related record changed while saving. Refresh and try again.")
@@ -289,11 +303,29 @@ def _master_save(db, user, row, body, kind, schema, *, new=False):
 
 @router.post("/clients", status_code=status.HTTP_201_CREATED)
 def create_client(body: ClientIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return _master_save(db, user, Client(), body, "client", ClientOut, new=True)
+    if body.company is None:
+        return _master_save(db, user, Client(), body, "client", ClientOut, new=True)
+    # Client contact and first employer commit together, so a failure never leaves a
+    # contact without the company the form described.
+    client = _master_save(db, user, Client(), body, "client", ClientOut, new=True, commit=False)
+    employer = CompanyIn(clientId=client["id"], status=body.status, contactPerson=body.name, contactEmail=body.email,
+                         phone=body.phone, whatsapp=body.whatsapp, notes=body.notes,
+                         **body.company.model_dump())
+    try:
+        company = _master_save(db, user, Company(), employer, "company", CompanyOut, new=True, commit=False)
+        db.commit()
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(503, "The record could not be saved. Please try again.")
+    return {**client, "company": company}
 
 
 @router.put("/clients/{client_id}")
 def update_client(client_id: str, body: ClientIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if body.company is not None:
+        raise HTTPException(422, "Employer details are saved on the company, not here")
     return _master_save(db, user, _master_row(db, Client, client_id), body, "client", ClientOut)
 
 
@@ -333,14 +365,14 @@ def update_designation(designation_id: str, body: DesignationIn, db: Session = D
 def delete_designation(designation_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
     row = _master_row(db, Designation, designation_id)
     if db.scalar(select(Order.id).where(Order.designation_id == row.id).limit(1)):
-        raise HTTPException(409, "This designation has linked orders and cannot be deleted")
+        raise HTTPException(409, "This job title is used by orders, so it cannot be deleted")
     db.add(AuditEntry(actor_id=user.id, action="Deleted designation", target=row.title, entity_type="designation", entity_id=row.id))
     try:
         db.delete(row)
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "This designation is now used by an order. Refresh and try again.")
+        raise HTTPException(409, "This job title is now used by an order. Refresh the page and try again.")
 
 
 def _order_requirements(db, body, row=None):
@@ -354,16 +386,16 @@ def _order_requirements(db, body, row=None):
     counts = dict(db.execute(select(Application.status, func.count()).where(
         Application.order_id == row.id).group_by(Application.status)).all()) if row is not None else {}
     if counts and (row.company_id != body.companyId or row.designation_id != body.designationId):
-        raise HTTPException(409, "An order with candidate history must keep its company and designation")
+        raise HTTPException(409, "An order that already has candidates must keep its company and job title")
     deployed = counts.get(ApplicationStatus.deployed, 0)
     if body.openings < deployed:
         raise HTTPException(409, f"This order already has {deployed} deployments; openings cannot be lower")
     if body.status == OrderStatus.filled and deployed < body.openings:
-        raise HTTPException(409, "An order is filled only when all openings have a deployed candidate")
+        raise HTTPException(409, "An order can be marked Filled only when every opening has a deployed candidate")
     if body.status == OrderStatus.open and deployed >= body.openings:
-        raise HTTPException(409, "All openings are deployed. Increase openings before reopening this order")
+        raise HTTPException(409, "All openings are filled. Add more openings before you reopen this order")
     if body.status == OrderStatus.closed and counts.get(ApplicationStatus.active, 0):
-        raise HTTPException(409, "Unmap or complete active candidates before closing; use On hold to pause new matching")
+        raise HTTPException(409, "Unmap or finish the active candidates before closing this order. Use On hold to stop new matching for now")
 
 
 @router.post("/orders", status_code=status.HTTP_201_CREATED)
@@ -426,7 +458,7 @@ def _refuse_if_placed(db: Session, order_ids: list[str]) -> None:
     if not placed:
         history = db.scalar(select(Application.id).where(Application.order_id.in_(order_ids)).limit(1))
         if history:
-            raise HTTPException(409, "Can't delete: retained candidate application history belongs to this record. Close the order or mark the company/client inactive instead.")
+            raise HTTPException(409, "This cannot be deleted because candidate history is kept for it. Close the order, or mark the company or client Inactive instead.")
         return
 
     name, ref, state = placed[0]
@@ -539,7 +571,7 @@ def add_remark(task_id: str, body: RemarkIn, db: Session = Depends(get_db), user
     if user.role == Role.staff and task.owner_id != user.id:
         raise HTTPException(403, "Only the assigned recruiter or a supervisor can update this task")
     if task.completed_at or task.cancelled_at:
-        raise HTTPException(409, "This task is closed; its remark history is read-only")
+        raise HTTPException(409, "This task is closed, so its notes can no longer be changed")
     row = Remark(task_id=task_id, body=body.body.strip(), author_id=user.id)
     db.add(row)
     db.add(AuditEntry(actor_id=user.id, action="Added task remark", entity_type="task", entity_id=task.id, target=task.title))
@@ -557,7 +589,7 @@ class CallIn(BaseModel):
     @model_validator(mode="after")
     def validate_outcome(self):
         if not self.called and self.interested != "unreachable":
-            raise ValueError("Record a call before confirming interest")
+            raise ValueError("Record a call before you confirm interest")
         return self
 
 
@@ -569,7 +601,7 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
     if user.role == Role.staff and c.owner_id != user.id:
         raise HTTPException(403, "This candidate belongs to another recruiter")
     if db.scalar(select(Application.id).where(Application.candidate_id == c.id, Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed])).limit(1)):
-        raise HTTPException(409, "Record the outcome in the candidate's application workflow")
+        raise HTTPException(409, "Record the result in the candidate's stages on the order")
 
     now = datetime.now(timezone.utc)
     c.call_called = body.called
@@ -684,19 +716,28 @@ class ReassignIn(BaseModel):
     candidateIds: list[str]
     toUserId: str
     reason: str = Field(min_length=1, max_length=1000)
+    # PRD p11: the 48-hour clock does not reset on reassignment unless the admin chooses to.
+    restartClock: bool = False
+    restartReason: str | None = Field(default=None, max_length=2000)
 
 
 @router.post("/candidates/reassign")
 def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
     reason = body.reason.strip()
     if not reason:
-        raise HTTPException(422, "Explain why these candidates are being reassigned")
+        raise HTTPException(422, "Give a reason for moving these candidates to another person")
+    restart_reason = (body.restartReason or "").strip()
+    if body.restartClock:
+        if user.role != Role.admin:
+            raise HTTPException(403, "Only an admin can restart the 48-hour timer when moving candidates")
+        if len(restart_reason) < 3:
+            raise HTTPException(422, "Give a reason for restarting the 48-hour timer")
     from app.api.routers.candidates import lock_assignment_cursor
     lock_assignment_cursor(db)
     target = db.get(User, body.toUserId)
     from app.services.attendance_availability import unavailable_staff_ids
     if target is None or target.role != Role.staff or not target.active or target.on_leave or target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, "Choose an active Staff account that is not on leave")
+        raise HTTPException(422, "Choose an active staff member who is not on leave")
     ids = sorted(set(body.candidateIds))
     if not ids:
         raise HTTPException(422, "Select at least one candidate")
@@ -726,7 +767,7 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
         if not db.scalar(select(Task.id).where(Task.candidate_id == c.id).limit(1)) and not c.call_recorded_at:
             db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=c.id,
                         owner_id=target.id, created_at=now, sla_started_at=now, due_at=now + timedelta(hours=48)))
-    from app.services.workflow_scheduler import add_event
+    from app.services.workflow_scheduler import add_event, restart_sla
     changed_candidate_ids = {change[0] for change in ownership_changes}
     task_only_changes = []
 
@@ -744,6 +785,10 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
             add_event(db, t, "assignment", f"assignment:{t.id}:{now.isoformat()}", now,
                       {"fromOwnerId": t.owner_id, "toOwnerId": target.id, "actorId": user.id, "reason": reason})
             t.owner_id = target.id
+        if body.restartClock:
+            restart_sla(db, t, now, user.id, restart_reason)
+            db.add(AuditEntry(actor_id=user.id, action="Reset task SLA", entity_type="task", entity_id=t.id, target=t.title,
+                              meta={"reason": restart_reason, "viaReassignment": True}))
 
     from app.services.assignment_notifications import notify_assignment_changes, notify_task_assignment_changes
     notification_reason = f"Reassigned by {user.name}: {reason}"
@@ -756,7 +801,7 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
             action="Reassigned candidates",
             target=f"{len(ids)} to {target.name}",
             entity_type="candidate",
-            meta={"candidateIds": ids, "toUserId": target.id, "reason": reason},
+            meta={"candidateIds": ids, "toUserId": target.id, "reason": reason, "restartClock": body.restartClock},
         )
     )
     db.commit()

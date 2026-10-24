@@ -55,7 +55,7 @@ class Filters:
         if self.from_date > self.to_date:
             raise HTTPException(422, "The start date must be on or before the end date.")
         if value(user.role) == "staff" and self.staff_id not in (None, user.id):
-            raise HTTPException(403, "Staff can report only their own numbers.")
+            raise HTTPException(403, "Staff can only see their own numbers.")
         return Filters(self.from_date, self.to_date, self.client_id, self.order_id,
                        self.designation_id, user.id if value(user.role) == "staff" else self.staff_id)
 
@@ -126,11 +126,16 @@ def read_reporting_data(db, filters: Filters | None = None, zone="Asia/Kolkata")
     return {key: rows or [] for key, rows in db.execute(select(*collections)).mappings().one().items()}
 
 
+def sees_team(user):
+    """Admin and manager see the whole team on the dashboard; staff only their own work."""
+    return value(user.role) in ("admin", "manager")
+
+
 def read_dashboard_data(db, user, staff_id=None, zone="Asia/Kolkata", now=None):
     """One fresh projection of operational data, excluding historical report input."""
-    if value(user.role) != "admin" and staff_id not in (None, user.id):
-        raise HTTPException(403, "Only administrators can change dashboard staff scope.")
-    scope = staff_id if value(user.role) == "admin" else user.id
+    if not sees_team(user) and staff_id not in (None, user.id):
+        raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
+    scope = staff_id if sees_team(user) else user.id
     today = aware(now or datetime.now(timezone.utc)).astimezone(ZoneInfo(zone)).date()
     start = datetime.combine(today, time.min, ZoneInfo(zone))
     end = datetime.combine(today + timedelta(days=1), time.min, ZoneInfo(zone))
@@ -185,6 +190,24 @@ def _effective_stages(stages):
     return effective
 
 
+SELECTED_PAST_STAGE = 4  # stage 4 is "Interview result": past it, the client has picked the candidate
+
+
+def order_counts(applications):
+    """The one definition of an order's matched / selected / deployed numbers (PRD p.2 "Active orders").
+
+    The PRD names the three numbers but does not define them, so: matched = applications still active on the
+    order (not closed, not yet deployed); selected = active applications past stage 4; deployed = applications
+    that finished stage 11. Closed applications never count. The frontend keeps the same rule in
+    frontend/src/features/jobs/order-counts.ts, so the dashboard, reports, client page, order page and order
+    cards all show identical numbers.
+    """
+    statuses = [(value(app["status"]), app["current_stage"]) for app in applications]
+    return {"matched": sum(status == "active" for status, _ in statuses),
+            "selected": sum(status == "active" and stage > SELECTED_PAST_STAGE for status, stage in statuses),
+            "deployed": sum(status == "deployed" for status, _ in statuses)}
+
+
 def _order_rows(orders, cohort, companies, clients, designations, effective, staff_id, inside):
     by_order = defaultdict(list)
     for app in cohort:
@@ -198,10 +221,7 @@ def _order_rows(orders, cohort, companies, clients, designations, effective, sta
         output.append({"id": order["id"], "ref": order["ref"], "company": company.get("name", ""),
             "client": clients.get(company.get("client_id"), {}).get("name", ""),
             "designation": designations.get(order["designation_id"], {}).get("title", ""),
-            "status": value(order["status"]), "openings": order["openings"], "matched": len(order_apps),
-            "selected": sum((effective.get(a["id"], {}).get(4, {}).get("data") or {}).get("result") == "selected"
-                or a["current_stage"] > 4 or value(a["status"]) == "deployed" for a in order_apps),
-            "deployed": sum(value(a["status"]) == "deployed" for a in order_apps)})
+            "status": value(order["status"]), "openings": order["openings"], **order_counts(order_apps)})
     return output
 
 
@@ -250,6 +270,17 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
         pipeline.append({"stage": no, "label": title, "reached": len(reached), "active": waiting,
                          "progressed": passed, "closed": closed,
                          "dropOffPercent": round(closed / len(reached) * 100, 1) if reached else 0})
+    # Drop-off BETWEEN stages (same definition as the screen's stageDropOff): candidates that reached
+    # stage n but never reached stage n + 1. The last stage has no next stage, so these are null.
+    for index, row in enumerate(pipeline):
+        following = pipeline[index + 1] if index + 1 < len(pipeline) else None
+        if following is None:
+            row["lostToNext"] = row["lostToNextPercent"] = None
+            continue
+        lost = max(0, row["reached"] - following["reached"])
+        row["lostToNext"] = lost
+        # Round half up to one decimal, like the screen (integer arithmetic avoids float drift).
+        row["lostToNextPercent"] = (lost * 2000 + row["reached"]) // (2 * row["reached"]) / 10 if row["reached"] else 0
 
     def task_matches(task):
         if not staff_matches(task["owner_id"]):
@@ -390,10 +421,10 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
 
 
 def dashboard_data(data, user, staff_id=None, zone="Asia/Kolkata", now=None):
-    """The admin can inspect the team; everyone else lands on their own workload."""
-    if value(user.role) != "admin" and staff_id not in (None, user.id):
-        raise HTTPException(403, "Only administrators can change dashboard staff scope.")
-    scope = staff_id if value(user.role) == "admin" else user.id
+    """Admin and manager see the team (optionally one person); staff land on their own workload."""
+    if not sees_team(user) and staff_id not in (None, user.id):
+        raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
+    scope = staff_id if sees_team(user) else user.id
     now = aware(now or datetime.now(timezone.utc))
     tz = ZoneInfo(zone)
     today = now.astimezone(tz).date()
@@ -432,7 +463,7 @@ def dashboard_data(data, user, staff_id=None, zone="Asia/Kolkata", now=None):
         {d["id"]: d for d in data["designations"]}, _effective_stages(data["stages"]), scope, inside)
     active_apps = [a for a in apps if value(a["status"]) == "active"]
     return {"generatedAt": now.isoformat(), "timezone": zone, "date": today.isoformat(), "staffId": scope,
-            "staffOptions": [{"id": u["id"], "label": u["name"]} for u in users.values()] if value(user.role) == "admin" else [],
+            "staffOptions": [{"id": u["id"], "label": u["name"]} for u in users.values()] if sees_team(user) else [],
             "today": {"total": len(today_candidates), **{key: sum(value(c["source"]) == key for c in today_candidates) for key in SOURCE_LABELS}},
             "taskCounts": {"open": len(scoped_task_rows), "dueToday": sum(t["dueToday"] for t in scoped_task_rows),
                            "overdue": sum(t["overdue"] for t in scoped_task_rows), "escalated": sum(t["escalated"] for t in scoped_task_rows),

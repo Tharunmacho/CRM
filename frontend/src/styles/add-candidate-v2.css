@@ -1,0 +1,366 @@
+/*
+ * Add Candidate: Care India's own flat look. White 12px cards with a 1px hairline border, primary-tinted circle
+ * icons, soft-filled status pills, circular avatars with a soft hue and a primary stepper and button. No shadows
+ * and no gradients; every colour is a theme token so the palettes and dark mode follow.
+ *
+ * Layout rules (the user complained about stuck panels and ragged alignment):
+ *  - Nothing on this screen is sticky. Documents, the form and the save bar all flow with the page, so content
+ *    can never be trapped or covered, however tall it gets.
+ *  - Sections sit on one 12-column grid. Cards that share a row hold the same number of field rows, so they
+ *    end at the same height with no empty cell. The grid follows the width of the screen's own box (container
+ *    queries), so a collapsed or expanded sidebar cannot push it out of shape.
+ * Everything is scoped under .ac (the dialog's duplicate card is the only thing outside it).
+ */
+.ac {
+  container: ac / inline-size;
+  min-width: 0;
+  font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--text-main);
+}
+.ac :is(button, input, select, textarea) { font-family: inherit; }
+
+/* ---------- Steps: a slim primary stepper ---------- */
+.ac .ac-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0 0 24px; padding: 4px 16px; list-style: none; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.ac .ac-steps li { position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+.ac .ac-steps li + li { border-top: 1px solid var(--border-faint); }
+.ac .ac-steps li > span { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 1.5px solid var(--border-control); border-radius: 999px; background: var(--bg-card); color: var(--text-muted); font-size: 12.5px; font-weight: 600; transition: background-color .14s, border-color .14s, color .14s; }
+.ac .ac-steps li.is-current > span { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.ac .ac-steps li.is-done > span { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+.ac .ac-steps strong { display: block; font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--text-muted); }
+.ac .ac-steps li.is-current strong, .ac .ac-steps li.is-done strong { color: var(--text-main); }
+.ac .ac-steps small { display: block; margin-top: 1px; font-size: 12.5px; line-height: 1.4; color: var(--text-light); }
+@container ac (min-width: 720px) {
+  .ac .ac-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 4px 24px; }
+  .ac .ac-steps li + li { padding-left: 20px; border-top: 0; border-left: 1px solid var(--border-main); }
+}
+/* ---------- Layout: one 12-column grid, nothing sticky ---------- */
+.ac .ac-stack { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.ac .ac-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 24px; align-items: stretch; min-width: 0; margin: 0; padding: 0; border: 0; }
+.ac .ac-grid > .ac-card { grid-column: span 12; }
+@container ac (min-width: 900px) {
+  .ac .ac-grid > .ac-s-7 { grid-column: span 7; }
+  .ac .ac-grid > .ac-s-5 { grid-column: span 5; }
+}
+
+/* ---------- Section cards ---------- */
+.ac .ac-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: none; }
+.ac .ac-card-head { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border-main); }
+.ac .ac-tile { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.ac .ac-card-title { min-width: 0; flex: 1; }
+.ac .ac-card-title h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; color: var(--text-main); overflow-wrap: anywhere; }
+.ac .ac-card-title p { margin-top: 1px; font-size: 13px; line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
+.ac .ac-card-title p strong { font-weight: 600; color: var(--text-main); }
+.ac .ac-card-action { flex: none; }
+.ac .ac-body { padding: 24px; }
+.ac .ac-muted { font-size: 13.5px; line-height: 1.55; color: var(--text-muted); }
+.ac .ac-small { font-size: 12.5px; }
+.ac .ac-subhead { margin: 0 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-light); }
+
+.ac .ac-saved { border-color: var(--success-edge); }
+.ac .ac-saved .ac-tile { background: var(--success-fill); color: var(--success-ink); }
+.ac .ac-saved { scroll-margin-top: 96px; }
+.ac .ac-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ac .ac-failed { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; color: var(--warning-ink); }
+
+.ac .ac-alert { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 16px; border: 1px solid var(--warning-edge); border-radius: 12px; background: var(--warning-fill); color: var(--warning-ink); font-size: 13.5px; line-height: 1.5; }
+.ac .ac-alert svg { flex: none; margin-top: 2px; }
+
+/* status dots, shared by the recovery list, reports and save bar */
+.ac .ac-dot, .ac-dup .ac-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--text-light); }
+.ac .ac-dot.is-good { background: var(--success-ink); }
+.ac .ac-dot.is-warn { background: var(--warning-ink); }
+.ac .ac-dot.is-bad { background: var(--error-ink); }
+.ac .ac-dot.is-busy { background: var(--primary); }
+
+/* ---------- Field grid (12 columns inside every card) ---------- */
+.ac .ac-fields { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px 24px; align-items: start; padding: 24px; }
+.ac .ac-fields > * { grid-column: span 12; min-width: 0; }
+.ac .ac-fields .ui-field > span:first-child, .ac .ac-tag-label { display: flex; align-items: baseline; gap: 4px; margin: 0 0 6px; font-size: 13px; font-weight: 500; line-height: 18px; color: var(--text-main); }
+.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { min-height: 40px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); box-shadow: none; transition: border-color .14s, box-shadow .14s; }
+.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger):hover:not(:disabled) { border-color: var(--border-hover); }
+.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger):focus-visible,
+.ac .ac-fields .ui-input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger)::placeholder { color: var(--text-light); }
+.ac .ac-fields textarea.ui-input { min-height: 96px; }
+.ac .ac-fields .date-picker-trigger.is-empty { color: var(--text-light); }
+
+@container ac (min-width: 640px) {
+  .ac .ac-fields-basic > *, .ac .ac-fields-passport > * { grid-column: span 6; }
+  .ac .ac-fields-basic > .ac-lang { grid-column: span 12; }
+  .ac .ac-fields-source > .ac-src-a { grid-column: span 5; }
+  .ac .ac-fields-source > .ac-src-b { grid-column: span 7; }
+  .ac .ac-fields-work > :is(.ac-w-tot, .ac-w-gulf, .ac-w-sal) { grid-column: span 4; }
+}
+@container ac (min-width: 900px) {
+  /* nine details fill three even rows; the passport/source pair holds two field rows each */
+  .ac .ac-fields-basic > *, .ac .ac-fields-basic > .ac-lang { grid-column: span 4; }
+  .ac .ac-fields-source > .ac-src-a { grid-column: span 4; }
+  .ac .ac-fields-source > .ac-src-b { grid-column: span 8; }
+  /* every card breaks on the same quarter lines (4 and 8 of 12): details 4/4/4, work 4/4/4, source 4/8, passport 4/4/2/2 */
+  .ac .ac-fields-work > :is(.ac-w-tot, .ac-w-gulf, .ac-w-sal) { grid-column: span 4; }
+}
+
+/* ---------- Tag field (languages, designations) ---------- */
+.ac .ac-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 40px; padding: 4px 8px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); cursor: text; transition: border-color .14s, box-shadow .14s; }
+.ac .ac-tags:hover { border-color: var(--border-hover); }
+.ac .ac-tags:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.ac .ac-tags input { flex: 1 1 60px; min-width: 60px; min-height: 30px; padding: 0 4px; border: 0; background: transparent; font-size: 14px; color: var(--text-main); outline: none; box-shadow: none; }
+.ac .ac-tags input::placeholder { color: var(--text-light); }
+.ac .ac-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 4px 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); font-size: 12.5px; font-weight: 500; line-height: 1.4; color: var(--primary); overflow-wrap: anywhere; }
+.ac .ac-tag button { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 999px; color: var(--primary); }
+.ac .ac-tag button:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.ac .ac-hint { display: block; margin-top: 5px; font-size: 12px; line-height: 1.5; color: var(--text-light); }
+
+/* ---------- Documents: three even slots per row, equal heights ---------- */
+.ac .ac-docs .ac-doc-group { margin-top: 18px; }
+.ac .ac-docs .ac-muted + .ac-doc-group { margin-top: 12px; }
+.ac .ac-slots { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@container ac (min-width: 900px) { .ac .ac-slots { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.ac .ac-slot { position: relative; display: flex; min-width: 0; }
+.ac .ac-slot > .ui-file-row { flex: 1; }
+.ac .ac-slots .ui-file-row { display: flex; height: 100%; padding: 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: none; transform: none; transition: border-color .14s, background-color .14s; flex-direction: column; }
+.ac .ac-slots .ui-file-row:hover:not(.is-locked) { border-color: var(--border-hover); }
+.ac .ac-slots .ui-file-row.is-dragging { border: 1px dashed var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.ac .ac-slots .ui-file-row-main { display: grid; flex: 1; grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: 1fr auto; align-items: start; gap: 12px; }
+.ac .ac-slots .ui-file-row-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); box-shadow: none; }
+.ac .ac-slots .ui-file-row-icon.is-filled { background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); }
+.ac .ac-slots .ui-file-row-main > .min-w-0 { min-width: 0; }
+.ac .ac-slots .ui-file-row-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; align-self: end; grid-column: 1 / -1; gap: 6px; margin: 0; }
+.ac .ac-slots .ui-file-row-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text-main); }
+.ac .ac-slots .ui-file-row-badge { padding: 1px 8px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 10.5px; font-weight: 500; letter-spacing: .02em; text-transform: none; }
+.ac .ac-slots .ui-file-row-main p:not(.ui-file-row-title) { margin: 1px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
+.ac .ac-slots .ui-file-row-main .truncate { white-space: normal; overflow-wrap: anywhere; }
+.ac .ac-slots .ui-file-row-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 13px; font-weight: 500; box-shadow: none; transition: border-color .14s, background-color .14s; }
+.ac .ac-slots .ui-file-row-button:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
+.ac .ac-slots .ui-file-row-button:disabled { opacity: .55; }
+@container ac (min-width: 640px) and (max-width: 899px) {
+  /* Middle widths: one slot per row, button bottom-right under the status pill. */
+  .ac .ac-slots .ui-file-row { min-height: 88px; }
+  .ac .ac-slots .ui-file-row-main { grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-rows: auto; align-items: start; }
+  .ac .ac-slots .ui-file-row-actions { grid-column: auto; align-self: end; justify-content: flex-end; }
+}
+@media (max-width: 639px) { .ac-head-save { display: none; } }
+
+.ac .ac-doc-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-faint); }
+.ac .ac-doc-status { display: flex; flex: 1 1 280px; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.ac .ac-doc-status > span:not(.ac-progress) { display: inline-flex; align-items: flex-start; gap: 8px; }
+.ac .ac-doc-status svg { flex: none; margin-top: 3px; }
+.ac .ac-doc-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.ac .ac-progress { position: relative; display: block; width: min(260px, 100%); height: 4px; overflow: hidden; border-radius: 999px; background: var(--tint-3); }
+.ac .ac-progress i { position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 999px; background: var(--primary); animation: ac-slide 1.2s ease-in-out infinite; }
+@keyframes ac-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+.ac .ac-spin { animation: ac-rotate .9s linear infinite; }
+@keyframes ac-rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ac .ac-progress i, .ac .ac-spin { animation: none; } .ac .ac-progress i { width: 100%; opacity: .5; } }
+
+/* ---------- Reading results: auto-fit so two reports never leave a gap ---------- */
+.ac .ac-reports { display: grid; gap: 12px; margin-top: 16px; }
+.ac .ac-read-message { margin: 0; }
+.ac .ac-report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; align-items: stretch; }
+.ac .ac-report { margin: 0; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); font-size: 13px; line-height: 1.5; color: var(--text-main); }
+.ac .ac-report.is-warn { border-color: var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); }
+.ac .ac-report-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
+.ac .ac-report-head strong { font-weight: 600; }
+.ac .ac-report-copy { margin: 4px 0 0; color: var(--text-muted); }
+.ac .ac-report.is-warn .ac-report-copy { color: inherit; }
+.ac .ac-applied { margin-top: 10px; }
+.ac .ac-applied-label { display: block; margin-bottom: 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-light); }
+.ac .ac-applied ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ac .ac-applied li { padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); font-size: 12px; font-weight: 500; color: var(--primary); }
+.ac .ac-report-warnings { display: grid; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; color: var(--warning-ink); }
+.ac .ac-report-warnings li { display: flex; align-items: flex-start; gap: 8px; }
+.ac .ac-report-warnings svg { flex: none; margin-top: 3px; }
+.ac .ac-report-details { margin-top: 10px; font-size: 12.5px; color: var(--text-muted); }
+
+.ac .ac-report-details dl { display: grid; gap: 8px 16px; margin: 10px 0 0; }
+@container ac (min-width: 640px) { .ac .ac-report-details dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ac .ac-report-details dt { font-weight: 500; color: var(--text-main); }
+.ac .ac-report-details dd { margin: 0; overflow-wrap: anywhere; }
+.ac .ac-report-details > p { margin-top: 8px; }
+.ac .ac-report-pages { display: grid; gap: 6px; max-height: 240px; margin: 8px 0 0; padding: 0 4px 0 0; overflow-y: auto; list-style: none; }
+.ac .ac-report-pages li { padding: 6px 10px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--bg-card); }
+.ac .ac-report-pages li p { margin: 2px 0 0; }
+
+/* ---------- Saved document intake ---------- */
+.ac .ac-recovery-body { display: grid; gap: 12px; }
+.ac .ac-job-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ac .ac-job { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.ac .ac-job-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.ac .ac-job-main { min-width: 0; flex: 1 1 200px; }
+.ac .ac-job-name { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.4; color: var(--text-main); overflow-wrap: anywhere; }
+.ac .ac-job-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.ac .ac-job-error { margin: 4px 0 0; font-size: 12.5px; color: var(--warning-ink); }
+.ac .ac-job-links, .ac .ac-job-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; }
+.ac .ac-inline-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border: 1px solid var(--warning-edge); border-radius: 10px; background: var(--warning-fill); color: var(--warning-ink); font-size: 13px; }
+.ac .ac-inline-alert.is-bad { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.ac .ac-inline-alert p { margin: 0; }
+
+/* ---------- Save bar: a normal card at the end of the form ---------- */
+.ac .ac-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 24px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.ac .ac-savebar-copy { display: flex; flex: 1 1 320px; align-items: flex-start; gap: 10px; min-width: 0; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.ac .ac-savebar-copy .ac-pill { margin-top: 1px; }
+.ac .ac-savebar-copy strong { font-weight: 600; color: var(--text-main); }
+.ac .ac-savebar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.ac .ac-savebar-actions .ui-button-primary { min-width: 150px; }
+@container ac (max-width: 639px) {
+  .ac .ac-card-head { padding: 16px; gap: 12px; }
+  .ac .ac-body { padding: 16px; }
+  .ac .ac-fields { padding: 16px; }
+  .ac .ac-steps small { display: none; }
+  .ac .ac-savebar { padding: 14px 16px; }
+  .ac .ac-savebar-actions { width: 100%; }
+  .ac .ac-savebar-actions .ui-button { flex: 1 1 0; }
+  .ac .ac-doc-buttons { width: 100%; margin-left: 0; }
+  .ac .ac-doc-buttons .ui-button { flex: 1 1 auto; }
+}
+
+/* ---------- Duplicate dialog (rendered in a portal, so not under .ac) ---------- */
+.ac-dup { display: grid; gap: 10px; }
+@media (min-width: 560px) { .ac-dup { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ac-dup-card { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.ac-dup-card.is-existing { border-color: var(--primary); box-shadow: inset 0 0 0 .5px var(--primary); }
+.ac-dup-avatar { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--tint-1); color: var(--text-main); font-size: 13px; font-weight: 600; }
+.ac-dup-body { min-width: 0; flex: 1; }
+.ac-dup-label { margin: 0; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-light); }
+.ac-dup-name { margin: 3px 0 0; font-size: 15px; font-weight: 600; color: var(--text-main); overflow-wrap: anywhere; }
+.ac-dup-meta { margin: 1px 0 0; overflow: hidden; font-size: 12.5px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.ac-dup-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ac-dup-note { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+.ac-dup-note svg { flex: none; margin-top: 3px; color: var(--warning-ink); }
+.ac-dup-note.is-warn { color: var(--warning-ink); }
+
+/* ---------- Buttons ----------
+ * The shared button colours (depth.css) sit in :where() and lose to Tailwind's border/background utilities on
+ * the button itself, so a primary button rendered without its fill. These scoped copies keep this screen's
+ * buttons correct whatever the shared sheet does; they use the same tokens, so they cannot drift visually. */
+:is(.ac, .ac-dialog-actions, .ac-head-save) .ui-button-primary, .ac-head-save.ui-button-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+:is(.ac, .ac-dialog-actions) .ui-button-primary:hover:not(:disabled), .ac-head-save.ui-button-primary:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); }
+:is(.ac, .ac-dialog-actions) .ui-button-primary:disabled, .ac-head-save.ui-button-primary:disabled { border-color: var(--tint-3); background: var(--tint-3); color: var(--text-light); }
+:is(.ac, .ac-dialog-actions) .ui-button-secondary { border-color: var(--border-control); background: var(--bg-card); color: var(--text-main); }
+:is(.ac, .ac-dialog-actions) .ui-button-secondary:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
+:is(.ac, .ac-dialog-actions) .ui-button-secondary:disabled { background: var(--tint-1); color: var(--text-light); }
+:is(.ac, .ac-dialog-actions) .ui-button-ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
+:is(.ac, .ac-dialog-actions) .ui-button-ghost:hover:not(:disabled) { background: var(--tint-1); color: var(--text-main); }
+.ac-dialog-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; }
+@media (max-width: 559px) { .ac-dialog-actions { flex-direction: column-reverse; align-items: stretch; } .ac-dialog-actions .ui-button { width: 100%; } }
+
+/* ---------- Status pills (soft fill, tiny dot) ---------- */
+.ac .ac-pill, .ac-dup .ac-pill { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 2px 10px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 18px; white-space: nowrap; }
+.ac .ac-pill > i { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.ac .ac-pill.is-good { background: var(--success-fill); color: var(--success-ink); }
+.ac .ac-pill.is-warn { background: var(--warning-fill); color: var(--warning-ink); }
+.ac .ac-pill.is-bad { background: var(--error-fill); color: var(--error-ink); }
+.ac .ac-pill.is-busy { background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); }
+.ac .ac-pill.is-busy > i { animation: ac-pulse 1.1s ease-in-out infinite; }
+@keyframes ac-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .ac .ac-pill.is-busy > i { animation: none; } }
+.ac .ac-slot-pill { position: absolute; top: 16px; right: 16px; }
+.ac .ac-slot.has-pill .ui-file-row-main > .min-w-0 { padding-right: 84px; }
+@container ac (min-width: 640px) and (max-width: 899px) {
+  .ac .ac-slot-pill { top: 12px; }
+  .ac .ac-slot.has-pill .ui-file-row-main > .min-w-0 { padding-right: 0; }
+}
+
+/* ---------- Avatars: circles with a soft hue per name ---------- */
+.ac-avatar { --hue: #2f55d4; display: inline-grid; place-items: center; flex: none; border-radius: 999px; background: color-mix(in srgb, var(--hue) 16%, var(--bg-card)); color: color-mix(in srgb, var(--hue) 72%, black); font-weight: 600; letter-spacing: .02em; }
+[data-theme='dark'] .ac-avatar { background: color-mix(in srgb, var(--hue) 28%, var(--bg-card)); color: color-mix(in srgb, var(--hue) 55%, white); }
+.ac-avatar-sm { width: 28px; height: 28px; font-size: 11px; }
+.ac-avatar-md { width: 34px; height: 34px; font-size: 12.5px; }
+.ac-avatar-lg { width: 42px; height: 42px; font-size: 14px; }
+.ac-hue-0 { --hue: #2f55d4; } .ac-hue-1 { --hue: #0f8a5f; } .ac-hue-2 { --hue: #b45309; }
+.ac-hue-3 { --hue: #7c3aed; } .ac-hue-4 { --hue: #db2777; } .ac-hue-5 { --hue: #0e7490; }
+
+/* ---------- Result card after saving ---------- */
+.ac .ac-result { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 16px; }
+@container ac (min-width: 640px) { .ac .ac-result { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ac .ac-result-tile { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.ac .ac-result-label { font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-light); }
+.ac .ac-result-owner { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 15px; color: var(--text-main); }
+.ac .ac-result-owner strong { font-weight: 600; overflow-wrap: anywhere; }
+.ac .ac-result-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.ac .ac-result-tile small { font-size: 12.5px; line-height: 1.45; color: var(--text-muted); }
+
+/* One control height everywhere (the shared sheet makes date pickers 42px on phones). */
+.ac .ac-fields :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { height: 40px; min-height: 40px; }
+
+.ac .ac-unfinished { display: grid; gap: 8px; justify-items: start; }
+.ac .ac-unfinished .ac-job-list { width: 100%; }
+
+/* ---------- Optional-documents hint at the top of the form ---------- */
+.ac .ac-grid > .ac-hint-bar { grid-column: span 12; }
+.ac .ac-hint-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px 10px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.ac .ac-hint-bar > svg { flex: none; color: var(--primary); }
+.ac .ac-hint-bar p { margin: 0; flex: 1 1 260px; min-width: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-muted); }
+.ac .ac-hint-bar button { flex: none; min-height: 32px; padding: 0 12px; border-radius: 8px; color: var(--primary); font-size: 13px; font-weight: 600; transition: background-color .14s; }
+.ac .ac-hint-bar button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.ac .ac-hint-bar button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Page details toggle (a real button, so nothing hidden sits in the layout while closed) */
+.ac .ac-report-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 4px 0 0; border-radius: 6px; color: var(--text-main); font-size: 12.5px; font-weight: 500; }
+.ac .ac-report-toggle svg { transition: transform .14s; }
+.ac .ac-report-toggle[aria-expanded='true'] svg { transform: rotate(90deg); }
+.ac .ac-report-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ac .ac-report-more { margin-top: 6px; }
+
+/* Stored-file line: each part is its own flex item, so a wrapped name never overprints "saved". */
+.ac .ac-slots .ui-file-row-main .truncate { display: flex; flex-wrap: wrap; column-gap: 4px; min-width: 0; white-space: normal; }
+.ac .ac-slots .ui-file-row-main .truncate > a { min-width: 0; overflow-wrap: anywhere; }
+/* Screen-reader-only text: overflow: clip hides it without adding scrollable area (overflow: hidden would be reported as clipped text). */
+.ac .sr-only { overflow: clip; }
+
+/* Passport: two rows of two until the date pickers have room for a narrow column, then one row on the quarter lines. */
+@container ac (min-width: 1100px) {
+  .ac .ac-fields-passport > :is(.ac-pp-no, .ac-pp-pl) { grid-column: span 4; }
+  .ac .ac-fields-passport > :is(.ac-pp-is, .ac-pp-ex) { grid-column: span 2; }
+}
+
+/* ---------- Slot that takes several files (education and experience certificates) ---------- */
+.ac .ac-slot-multi > .ac-multi { flex: 1; }
+.ac .ac-multi { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); transition: border-color .14s, background-color .14s; }
+.ac .ac-multi:hover:not(.is-locked) { border-color: var(--border-hover); }
+.ac .ac-multi.is-dragging { border: 1px dashed var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.ac .ac-multi-head { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 12px; }
+.ac .ac-multi-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); }
+.ac .ac-multi-icon.is-filled { background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); }
+.ac .ac-multi-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text-main); }
+.ac .ac-multi-badge { padding: 1px 8px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 10.5px; font-weight: 500; }
+.ac .ac-multi-help { margin: 1px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
+.ac .ac-multi-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ac .ac-multi-item { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; border: 1px solid var(--border-faint); border-radius: 10px; background: var(--tint-1); }
+.ac .ac-multi-file-icon { color: var(--primary); }
+.ac .ac-multi-item-main { min-width: 0; }
+.ac .ac-multi-name { margin: 0; font-size: 13px; font-weight: 500; line-height: 1.4; color: var(--text-main); overflow-wrap: anywhere; }
+.ac .ac-multi-meta { margin: 0; font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+.ac .ac-multi-state.is-good { color: var(--success-ink); }
+.ac .ac-multi-state.is-warn, .ac .ac-multi-state.is-busy { color: var(--warning-ink); }
+.ac .ac-multi-state.is-bad { color: var(--error-ink); }
+.ac .ac-multi-remove { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color .14s, color .14s, border-color .14s; }
+.ac .ac-multi-remove:hover:not(:disabled) { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.ac .ac-multi-remove:focus-visible, .ac .ac-multi-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ac .ac-multi-remove:disabled { opacity: .55; cursor: default; }
+.ac .ac-multi-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: auto; }
+.ac .ac-multi-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 13px; font-weight: 500; cursor: pointer; transition: border-color .14s, background-color .14s; }
+.ac .ac-multi-add:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
+.ac .ac-multi-add:disabled { opacity: .55; cursor: default; }
+.ac .ac-multi-note { font-size: 12px; line-height: 1.4; color: var(--text-light); }
+.ac .ac-multi-errors { margin: 0; padding: 0; list-style: none; font-size: 12.5px; line-height: 1.45; color: var(--error-ink); overflow-wrap: anywhere; }
+
+/* ---------- Phones: comfortable tap targets, 16px fields (no iOS zoom), buttons full width ---------- */
+@media (max-width: 640px) {
+  .ac :is(input, select, textarea, .ui-input, .custom-select-trigger) { font-size: 16px; }
+  .ac .ac-tags input { min-height: 40px; font-size: 16px; }
+  .ac .ac-hint-bar button, .ac .ac-report-toggle, .ac .ac-multi-remove, .ac .ac-multi-add, .ac .ac-slots .ui-file-row-button, .ac .ac-slots .ac-multi-add { min-height: 44px; }
+  .ac .ac-multi-remove span { display: none; }
+  .ac .ac-multi-remove { min-width: 44px; justify-content: center; }
+  .ac .ac-multi-add { width: 100%; }
+  .ac .ac-multi-note { flex-basis: 100%; }
+  .ac .ac-slots .ui-file-row-actions { gap: 8px; }
+}
+
+/* Touch screens of any width (tablets, phones turned sideways): the same comfortable targets and no-zoom fields. */
+@media (pointer: coarse) and (min-width: 641px) {
+  .ac :is(input, select, textarea, .ui-input, .custom-select-trigger) { font-size: 16px; }
+  .ac .ac-tags input { min-height: 40px; font-size: 16px; }
+  .ac .ac-hint-bar button, .ac .ac-report-toggle, .ac .ac-multi-remove, .ac .ac-multi-add, .ac .ac-slots .ui-file-row-button { min-height: 44px; }
+}

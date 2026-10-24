@@ -130,7 +130,7 @@ class Inspection:
         if not page_numbers:
             raise InspectionError("No matching pages were identified in this document.")
         if any(type(n) is not int or n < 1 or n > self.page_count for n in page_numbers):
-            raise InspectionError("Selected page numbers are outside this document.")
+            raise InspectionError("You chose page numbers that this document does not have.")
         wanted = sorted(set(page_numbers))
         if any(self.pages[n - 1].status != "read" or self.pages[n - 1].document_type == "unknown" for n in wanted):
             raise InspectionError("Only successfully read and classified pages can be selected.")
@@ -264,7 +264,7 @@ def _word_pdf(data: bytes, suffix: str, deadline: float) -> bytes:
 
 def _normalize(data: bytes, deadline: float) -> tuple[bytes, str]:
     if not data:
-        raise InspectionError("The uploaded document is empty.")
+        raise InspectionError("The file you uploaded is empty.")
     if b"%PDF-" in data[:1024]:
         return data, "pdf"
     if data.startswith(b"PK"):
@@ -296,7 +296,7 @@ def _normalize(data: bytes, deadline: float) -> tuple[bytes, str]:
     except InspectionError:
         raise
     except Exception:
-        raise InspectionError("Unsupported or damaged document. Upload a valid PDF, Word document or single-frame image.") from None
+        raise InspectionError("We cannot open this file. Upload a PDF, a Word document or a normal photo.") from None
 
 
 def inspect_document(
@@ -316,12 +316,12 @@ def inspect_document(
     try:
         source = fitz.open(stream=normalized, filetype="pdf")
     except Exception:
-        raise InspectionError("The PDF cannot be opened. Export a valid, unlocked PDF and retry.") from None
+        raise InspectionError("We cannot open this PDF. Save it again as a PDF without a password and try again.") from None
     with source:
         if source.needs_pass:
             raise InspectionError("Password-protected PDFs must be unlocked before inspection.")
         if not source.page_count:
-            raise InspectionError("The document has no pages.")
+            raise InspectionError("This document has no pages.")
         for index in range(source.page_count):
             number = index + 1
             reason = ""
@@ -438,15 +438,15 @@ def restore_inspection(
                 also=list(also), inherited=bool(entry.get("inherited", False)),
             ))
     except (KeyError, TypeError, ValueError):
-        raise InspectionError("Saved page inspection is incomplete or invalid.") from None
+        raise InspectionError("The saved page check is incomplete. Please upload the document again.") from None
     normalized, source_format = _normalize(data, time.monotonic() + document_timeout)
     try:
         with fitz.open(stream=normalized, filetype="pdf") as source:
             if source.needs_pass or source.page_count != count or source_format != report["source_format"]:
-                raise InspectionError("Saved inspection no longer matches the original document.")
+                raise InspectionError("The saved check no longer matches the file. Please upload the document again.")
     except InspectionError:
         raise
     except Exception:
-        raise InspectionError("The original document could not be reopened.") from None
+        raise InspectionError("We could not open the original file again.") from None
     return Inspection(pages, count, source_format, list(report.get("warnings", [])), normalized,
                       allow_partial=allow_partial)

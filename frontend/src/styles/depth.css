@@ -1,0 +1,311 @@
+/*
+ * The shared look, in the reference product's flat style. This sheet loads last and is the single
+ * source of truth for the shared components (buttons, fields, badges, cards, KPI cards, tabs,
+ * tables, empty states, dialogs, sheets, menus, toasts). Everything is written against the design
+ * tokens in theme.css, so the palette picker and dark mode apply everywhere. Cards are white with
+ * a 1px hairline and no shadow; only floating layers (dialog, sheet, menu, popover, toast) cast a
+ * soft shadow.
+ */
+
+/* ---------- Reading scale inside screens, dialogs and sheets ---------- */
+.workspace-page { font-size: 14px; line-height: 1.6; color: var(--text-main); }
+:is(.workspace-page, .workspace-dialog, .workspace-sheet) .text-sm { font-size: 14px; }
+:is(.workspace-page, .workspace-dialog, .workspace-sheet) .text-xs { font-size: 13px; line-height: 1.5; }
+:is(.workspace-page, .workspace-dialog, .workspace-sheet) .text-micro { font-size: 12.5px; line-height: 1.5; }
+:is(.workspace-page, .workspace-dialog, .workspace-sheet) .text-ink-300 { color: var(--text-light); }
+:is(.workspace-page, .workspace-dialog, .workspace-sheet) .ident { font-family: inherit; font-variant-numeric: tabular-nums; letter-spacing: .015em; }
+
+/* ---------- Page header ---------- */
+.workspace-page .workspace-page-header { position: static; margin: 0 0 24px; padding: 0; color: var(--text-main); }
+.workspace-page .workspace-page-header-row { align-items: flex-end; gap: 16px; }
+.workspace-page .workspace-heading-copy { flex: 1 1 360px; }
+.workspace-page .workspace-page-header h1 { font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.04em; color: var(--text-main); }
+.workspace-page .workspace-page-header .workspace-eyebrow { display: none; }
+.workspace-page .workspace-page-header .workspace-heading-copy > p:last-child:not(.workspace-eyebrow) { margin-top: 6px; max-width: 70ch; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
+.workspace-header-actions { max-width: 100%; }
+
+/* ---------- Buttons ----------
+ * Variant colours are token utilities set in primitives.tsx; this adds the rest. */
+.ui-button { font-family: inherit; line-height: 1.4; border-radius: 8px; }
+.ui-button:disabled { cursor: not-allowed; }
+.ui-icon-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* ---------- Fields ---------- */
+:where(.ui-input) { border-color: var(--border-control); background-color: var(--bg-card); color: var(--text-main); font-family: inherit; }
+:where(.ui-input)::placeholder { color: var(--text-light); }
+:where(.ui-input):hover:not(:disabled) { border-color: var(--border-hover); }
+:where(.ui-input):focus, :where(.ui-input):focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
+:where(.ui-input):disabled { border-color: var(--border-main); background-color: var(--tint-1); color: var(--text-light); cursor: not-allowed; }
+.ui-input[aria-invalid='true'] { border-color: var(--error-ink); }
+.ui-search input { padding-right: 12px; }
+.workspace-page .ui-search { width: min(100%, 440px); }
+.ui-radio-chip { border-color: var(--border-control); background: var(--bg-card); color: var(--text-muted); }
+.ui-radio-chip:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text-main); }
+.ui-radio-chip.is-on { border-color: var(--primary); background: var(--tint-1); color: var(--text-main); font-weight: 600; box-shadow: inset 0 0 0 1px var(--primary); }
+.ui-switch-knob { box-shadow: none; }
+
+/* ---------- Badges: soft-filled status pills with a tiny dot; a quiet chip for tags ---------- */
+.ui-badge { --b-ink: var(--text-muted); --b-fill: var(--tint-2); --b-edge: transparent; --b-dot: var(--text-light); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12.5px; font-weight: 500; line-height: 1.4; color: var(--b-ink); }
+.ui-badge-mark { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--b-dot); }
+.ui-badge[data-tone='navy'] { --b-ink: color-mix(in srgb, var(--primary) 82%, var(--text-main)); --b-fill: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); --b-edge: color-mix(in srgb, var(--primary) 22%, var(--bg-card)); --b-dot: var(--primary); }
+.ui-badge[data-tone='green'] { --b-ink: var(--success-ink); --b-fill: var(--success-fill); --b-edge: var(--success-edge); --b-dot: var(--success-ink); }
+.ui-badge[data-tone='amber'] { --b-ink: var(--warning-ink); --b-fill: var(--warning-fill); --b-edge: var(--warning-edge); --b-dot: var(--warning-ink); }
+.ui-badge[data-tone='stamp'] { --b-ink: var(--error-ink); --b-fill: var(--error-fill); --b-edge: var(--error-edge); --b-dot: var(--error-ink); }
+.ui-badge[data-tone='ink'] { --b-ink: var(--on-primary); --b-fill: var(--text-main); --b-edge: var(--text-main); --b-dot: var(--on-primary); }
+.ui-badge-dot { padding: 2px 10px 2px 8px; border: 1px solid var(--b-edge); border-radius: 999px; background: var(--b-fill); }
+.ui-badge-chip { padding: 2px 9px; border: 1px solid var(--border-main); border-radius: 6px; background: var(--tint-1); color: var(--text-muted); }
+.ui-badge-chip[data-tone]:not([data-tone='neutral']) { border-color: var(--b-edge); background: var(--b-fill); color: var(--b-ink); }
+
+/* ---------- Cards ---------- */
+.ui-panel { min-width: 0; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: none; }
+.ui-panel-header { min-height: 0; border-color: var(--border-faint); background: none; }
+.ui-stat-tile { box-shadow: none; }
+.ui-stat-tile:is(button):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.workspace-list-toolbar { border-color: var(--border-faint); }
+
+/* KPI cards: a 3px accent line on the top edge, the label with a soft primary-tinted icon circle, a big figure, a muted caption. */
+.workspace-summary { display: grid; grid-template-columns: repeat(var(--summary-columns, 4), minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+.summary-card { --kpi-accent: var(--primary); position: relative; display: flex; flex-direction: column; min-width: 0; padding: 20px 20px 18px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: none; color: inherit; font: inherit; text-align: left; transition: border-color .14s; }
+.summary-card::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--kpi-accent); }
+.summary-card:has(.tone-green) { --kpi-accent: var(--success-ink); }
+.summary-card:has(.tone-amber) { --kpi-accent: var(--warning-ink); }
+.summary-card:has(.tone-red) { --kpi-accent: var(--error-ink); }
+.summary-card.is-action { cursor: pointer; }
+.summary-card.is-action:hover { border-color: var(--border-hover); }
+.summary-card.is-active, .summary-card[aria-pressed='true'] { padding: 19.5px 19.5px 17.5px; border: 1.5px solid var(--primary); }
+.summary-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.summary-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 0; font-size: 14px; font-weight: 500; line-height: 1.4; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+.summary-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary); }
+.summary-icon.tone-green { background: var(--success-fill); color: var(--success-ink); }
+.summary-icon.tone-amber { background: var(--warning-fill); color: var(--warning-ink); }
+.summary-icon.tone-red { background: var(--error-fill); color: var(--error-ink); }
+.summary-value { display: block; margin-top: 10px; font-size: 36px; font-weight: 600; line-height: 1.15; letter-spacing: -.035em; color: var(--text-main); }
+.summary-card > p, .summary-caption { display: block; margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
+
+/* ---------- Tabs ---------- */
+.ui-tabs { display: flex; align-items: center; overflow-x: auto; overflow-y: hidden; }
+.ui-tab { position: relative; flex: none; background: none; border: 0; color: var(--text-muted); font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1.4; white-space: nowrap; transition: color .15s, background-color .15s; }
+.ui-tab:hover { color: var(--text-main); }
+.ui-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 6px; }
+.ui-tab[aria-selected='true'] { color: var(--text-main); }
+/* line: a clean strip, the active tab has a dark underline */
+.ui-tabs-line { gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border-main); }
+.ui-tabs-line .ui-tab { min-height: 44px; padding: 0 14px; }
+.ui-tabs-line .ui-tab[aria-selected='true']::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: var(--primary); }
+/* pill: a bordered segmented control with a dark active segment */
+.ui-tabs-pill { display: inline-flex; max-width: 100%; gap: 4px; padding: 3px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
+.ui-tabs-pill .ui-tab { min-height: 34px; padding: 0 14px; border-radius: 8px; }
+.ui-tabs-pill .ui-tab:hover:not([aria-selected='true']) { background: var(--tint-2); }
+.ui-tabs-pill .ui-tab[aria-selected='true'] { background: var(--primary); color: var(--on-primary); }
+
+/* ---------- Tables ---------- */
+/* One grid: header and body cells share horizontal padding and vertical centring. The table
+ * fills its card and never exceeds it (columns shrink, headers never truncate, values ellipsise);
+ * the 20px card padding applies to the first and last cell. */
+.ui-data-table { min-width: 0; max-width: 100%; }
+.ui-data-table table { width: 100%; min-width: 0; table-layout: auto; }
+.ui-data-table :is(th, td) { vertical-align: middle; }
+.ui-data-table :is(th, td):first-child { padding-left: 20px; }
+.ui-data-table :is(th, td):last-child { padding-right: 20px; }
+.ui-data-table th { white-space: normal; line-height: 1.35; }
+/* Fixed layout (columns carry widths): every column keeps its share of the card, headers wrap instead of clipping. */
+.ui-data-table table.is-fixed { table-layout: fixed; }
+.ui-data-table table.is-fixed th { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.ui-data-table table.is-fixed td { overflow-wrap: anywhere; }
+.ui-data-table table.is-fixed th button { text-align: inherit; }
+.ui-data-table.is-compact :is(th, td):first-child { padding-left: 16px; }
+.ui-data-table.is-compact :is(th, td):last-child { padding-right: 16px; }
+.ui-data-table.is-compact td { font-size: 13px; line-height: 1.45; }
+.ui-data-table.is-compact th { font-size: 12.5px; }
+.ui-data-table.is-compact .record-identity { min-width: 0; gap: 10px; }
+.ui-data-table.is-compact .record-avatar { width: 32px; height: 32px; font-size: 11.5px; }
+.ui-data-table.is-compact .record-name { max-width: none; font-size: 13.5px; }
+.ui-data-table.is-compact .record-detail { max-width: none; font-size: 12px; }
+/* Sticky header inside a bounded vertical scroll box: header and rows share the box, so they cannot misalign. */
+.ui-table-scroll.is-sticky { overflow-x: auto; }
+.ui-table-scroll.is-sticky thead th { position: sticky; top: 0; z-index: 3; background: var(--bg-card); box-shadow: inset 0 -1px 0 var(--border-main); }
+.ui-actions-cell { width: 1%; white-space: nowrap; text-align: right; }
+.ui-actions-cell > * { vertical-align: middle; }
+@media (max-width: 1279px) { .ui-data-table .col-p-low { display: none; } }
+@media (max-width: 1023px) { .ui-data-table .col-p-medium { display: none; } }
+.ui-data-table thead tr { background: none; border-color: var(--border-main); }
+.ui-data-table th { text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--text-muted); }
+.ui-data-table th button svg { width: 12px; height: 12px; }
+.ui-data-table td { font-size: 14px; line-height: 1.5; vertical-align: middle; color: var(--text-main); }
+.ui-data-table tbody tr { border-color: var(--border-faint); }
+.ui-data-table tbody tr:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ui-data-table td .text-micro { color: var(--text-muted); }
+.ui-data-table td .ui-button { min-height: 32px; height: 32px; padding: 0 10px; font-size: 13px; }
+.ui-table-pagination { min-height: 56px; border-color: var(--border-faint); color: var(--text-muted); }
+.ui-page-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ui-row-open { transition: border-color .15s, color .15s; }
+tr:hover .ui-row-open { border-color: var(--border-hover); color: var(--text-main); }
+
+.record-identity { display: flex; min-width: 180px; align-items: center; gap: 12px; }
+.record-avatar { --av: hsl(222 70% 52%); display: flex; flex: none; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; background: color-mix(in srgb, var(--av) 16%, var(--bg-card)); color: color-mix(in srgb, var(--av) 72%, var(--text-main)); font-size: 12.5px; font-weight: 600; letter-spacing: .01em; }
+.avatar-hue-0 { --av: hsl(222 70% 52%); }
+.avatar-hue-1 { --av: hsl(262 58% 56%); }
+.avatar-hue-2 { --av: hsl(162 62% 38%); }
+.avatar-hue-3 { --av: hsl(28 88% 50%); }
+.avatar-hue-4 { --av: hsl(340 68% 54%); }
+.avatar-hue-5 { --av: hsl(192 70% 40%); }
+.record-name { max-width: 260px; overflow: hidden; color: var(--text-main); font-size: 14px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.record-detail { max-width: 230px; overflow: hidden; margin-top: 1px; color: var(--text-muted); font-size: 13px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Empty state ---------- */
+.workspace-page .ui-empty-state { min-height: 240px; }
+
+/* ---------- Dialogs, sheets, menus, toasts: the only layers allowed a soft shadow ---------- */
+.ui-backdrop { background: rgba(0, 0, 0, .42); }
+[data-theme='dark'] .ui-backdrop { background: rgba(0, 0, 0, .62); }
+.ui-backdrop-clean, [data-theme='dark'] .ui-backdrop-clean { background: color-mix(in srgb, var(--bg-main) 78%, transparent); backdrop-filter: blur(3px); }
+.workspace-dialog, .workspace-sheet { font-family: inherit; font-size: 14px; line-height: 1.55; color: var(--text-main); }
+.workspace-dialog { border-color: var(--border-main); }
+.workspace-dialog > footer, .workspace-sheet > footer { background: var(--bg-card); }
+.ui-menu { font-size: 14px; }
+.ui-menu-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ui-toast { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+.ui-toast[data-tone='warn'] { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1199px) {
+  .workspace-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  .workspace-page .workspace-page-header h1 { font-size: 23px; }
+  .workspace-page .workspace-header-actions, .workspace-page .workspace-header-actions > .ui-button { width: 100%; }
+  .workspace-page .workspace-header-actions > .ui-button { flex: 1 1 auto; }
+  .workspace-summary { gap: 12px; }
+  .summary-card { padding: 14px; }
+  .summary-card.is-active, .summary-card[aria-pressed='true'] { padding: 13.5px; }
+  .summary-value { font-size: 30px; }
+  .ui-data-table :is(th, td) { padding-left: 12px; padding-right: 12px; }
+  /* 16px fields stop iOS from zooming the page on focus */
+  .ui-input, .custom-select-trigger, .date-picker-trigger { font-size: 16px; }
+  .workspace-dialog > header, .workspace-dialog > div, .workspace-dialog > footer { padding-left: 16px; padding-right: 16px; }
+  .workspace-dialog > footer { flex-wrap: wrap; }
+  .workspace-dialog > footer > .ui-button { flex: 1 1 auto; }
+}
+
+/* ---------- Phones (under 640px) ---------- */
+@media (max-width: 639px) {
+  /* Dialogs are bottom sheets: header and footer stay put, only the body scrolls, buttons stack full width.
+   * The layer and card sizes come from overlay.tsx (dvh heights); this sets the inside. */
+  .workspace-dialog { border-bottom-width: 0; }
+  .workspace-dialog:not(.h-full) .dialog-head { position: relative; padding-top: 22px; }
+  .workspace-dialog:not(.h-full) .dialog-head::before { content: ''; position: absolute; top: 8px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 4px; background: var(--border-control); }
+  .workspace-dialog .dialog-head, .workspace-sheet > header { padding: 14px 16px; gap: 12px; }
+  .workspace-dialog:not(.h-full) .dialog-head { padding-top: 22px; }
+  .workspace-dialog .dialog-head h2, .workspace-sheet > header h2 { font-size: 18px; }
+  .workspace-dialog .dialog-head .ui-icon-button, .workspace-sheet > header .ui-icon-button { margin: -4px -6px 0 0; }
+  .workspace-dialog .dialog-body { padding: 16px; }
+  .dialog-foot { flex-direction: column-reverse; align-items: stretch; gap: 8px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .dialog-foot > :is(button, a, .ui-button) { width: 100%; min-height: 44px; justify-content: center; margin: 0; }
+  /* Tap targets: at least 40px high everywhere a thumb lands. */
+  .ui-button { min-height: 40px; }
+  .ui-icon-button { width: 40px; height: 40px; }
+  .ui-switch { position: relative; }
+  .ui-switch::after { content: ''; position: absolute; inset: -9px -4px; }
+  label:has(> .custom-checkbox) { min-height: 40px; align-items: center; }
+  .ui-tabs-pill .ui-tab { min-height: 40px; }
+  .ui-menu-item { min-height: 44px; }
+  .ui-table-pagination { flex-wrap: wrap; gap: 8px 12px; padding-left: 16px; padding-right: 16px; }
+  .ui-table-pagination .ui-page-button { width: 40px; height: 40px; }
+  .ui-toast-layer { bottom: max(16px, env(safe-area-inset-bottom)); }
+  .ui-toast-close { width: 36px; height: 36px; margin: -8px -10px -8px 0; }
+}
+/* record-dialogs.css (Clients, Companies, Jobs) was written for the old centred dialog and widens/offsets it by 12px.
+ * The shared dialog is now a full-width bottom sheet itself, so keep its keyboard lift but drop the widening. */
+@media (max-width: 640px) {
+  .dialog-layer > .workspace-dialog:has(.rd-mark) { align-self: auto; width: 100%; margin: 0 0 var(--rd-keyboard, 0px); }
+}
+.ui-menu { max-width: calc(100vw - 16px); }
+.ui-toast-close { width: 24px; height: 24px; margin: -4px -6px -4px 0; border-radius: 6px; }
+.ui-toast-close:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+
+/* ---------- Tabs that scroll inside themselves: a soft fade marks the edge that has more tabs ---------- */
+.ui-tabs[data-fade-end='1'] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.ui-tabs[data-fade-start='1'] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); }
+.ui-tabs[data-fade-start='1'][data-fade-end='1'] { -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); }
+.ui-tabs { max-width: 100%; scrollbar-width: none; overscroll-behavior-x: contain; }
+.ui-tabs::-webkit-scrollbar { display: none; }
+/* Stacked cards (phones and small tablets): each row becomes a card. Opt in per table with stackBelow (768 default, 1024, 1280). */
+@media (max-width: 767px) {
+  .ui-data-table.ui-table-stack-768 table, .ui-data-table.ui-table-stack-768 tbody { display: block; width: 100%; }
+  .ui-data-table.ui-table-stack-768 thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* One card per row: the name first and full width, then label-over-value pairs two to a line, actions last. */
+  .ui-data-table.ui-table-stack-768 tbody tr { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 16px; border-bottom: 1px solid var(--border-faint); }
+  .ui-data-table.ui-table-stack-768 tbody tr:last-child { border-bottom: 0; }
+  .ui-data-table.ui-table-stack-768 tbody td { display: block; min-width: 0 !important; width: auto; padding: 0; text-align: left; border: 0; overflow-wrap: anywhere; }
+  .ui-data-table.ui-table-stack-768 tbody td:is(:first-child, :last-child) { padding-left: 0; padding-right: 0; }
+  .ui-data-table.ui-table-stack-768 tbody td::before { content: attr(data-label); display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 1.4; text-align: left; }
+  .ui-data-table.ui-table-stack-768 tbody td[data-label='']::before { display: none; }
+  .ui-data-table.ui-table-stack-768 tbody tr > td:first-child:not([data-select]), .ui-data-table.ui-table-stack-768 tbody tr > td[data-select] + td { grid-column: 1 / -1; }
+  .ui-data-table.ui-table-stack-768 tbody tr:has(> td[data-select], > td > .ui-row-open) > :is(td:first-child:not([data-select]), td[data-select] + td) { padding-right: 44px; }
+  .ui-data-table.ui-table-stack-768 tbody tr > td:first-child:not([data-select])::before, .ui-data-table.ui-table-stack-768 tbody tr > td[data-select] + td::before { display: none; }
+  .ui-data-table.ui-table-stack-768 tbody td[data-select] { position: absolute; top: 14px; right: 14px; z-index: 1; display: grid; place-items: center; width: 40px; height: 40px; margin: -8px -8px 0 0; }
+  .ui-data-table.ui-table-stack-768 tbody td.ui-actions-cell { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; grid-column: 1 / -1; width: auto; padding-top: 12px; border-top: 1px solid var(--border-faint); text-align: left; white-space: normal; }
+  .ui-data-table.ui-table-stack-768 tbody td.ui-actions-cell:has(> .ui-row-open) { position: absolute; top: 14px; right: 16px; width: auto; padding: 0; border: 0; grid-column: auto; }
+  .ui-data-table.ui-table-stack-768 tbody td.ui-actions-cell::before { display: none; }
+  .ui-data-table.ui-table-stack-768 tbody td.ui-actions-cell > :is(button, a, .ui-button) { min-height: 40px; }
+  .ui-data-table.ui-table-stack-768 td .ui-button { min-height: 40px; height: 40px; }
+  .ui-data-table.ui-table-stack-768 .col-p-low, .ui-data-table.ui-table-stack-768 .col-p-medium { display: block; }
+  .ui-data-table.ui-table-stack-768 td .record-identity { min-width: 0; text-align: left; }
+  .ui-data-table.ui-table-stack-768 td .record-name, .ui-data-table.ui-table-stack-768 td .record-detail { max-width: 100%; }
+  .ui-data-table.ui-table-stack-768 td > span.block { max-width: 100%; }
+}
+@media (max-width: 1023px) {
+  .ui-data-table.ui-table-stack-1024 table, .ui-data-table.ui-table-stack-1024 tbody { display: block; width: 100%; }
+  .ui-data-table.ui-table-stack-1024 thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* One card per row: the name first and full width, then label-over-value pairs two to a line, actions last. */
+  .ui-data-table.ui-table-stack-1024 tbody tr { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 16px; border-bottom: 1px solid var(--border-faint); }
+  .ui-data-table.ui-table-stack-1024 tbody tr:last-child { border-bottom: 0; }
+  .ui-data-table.ui-table-stack-1024 tbody td { display: block; min-width: 0 !important; width: auto; padding: 0; text-align: left; border: 0; overflow-wrap: anywhere; }
+  .ui-data-table.ui-table-stack-1024 tbody td:is(:first-child, :last-child) { padding-left: 0; padding-right: 0; }
+  .ui-data-table.ui-table-stack-1024 tbody td::before { content: attr(data-label); display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 1.4; text-align: left; }
+  .ui-data-table.ui-table-stack-1024 tbody td[data-label='']::before { display: none; }
+  .ui-data-table.ui-table-stack-1024 tbody tr > td:first-child:not([data-select]), .ui-data-table.ui-table-stack-1024 tbody tr > td[data-select] + td { grid-column: 1 / -1; }
+  .ui-data-table.ui-table-stack-1024 tbody tr:has(> td[data-select], > td > .ui-row-open) > :is(td:first-child:not([data-select]), td[data-select] + td) { padding-right: 44px; }
+  .ui-data-table.ui-table-stack-1024 tbody tr > td:first-child:not([data-select])::before, .ui-data-table.ui-table-stack-1024 tbody tr > td[data-select] + td::before { display: none; }
+  .ui-data-table.ui-table-stack-1024 tbody td[data-select] { position: absolute; top: 14px; right: 14px; z-index: 1; display: grid; place-items: center; width: 40px; height: 40px; margin: -8px -8px 0 0; }
+  .ui-data-table.ui-table-stack-1024 tbody td.ui-actions-cell { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; grid-column: 1 / -1; width: auto; padding-top: 12px; border-top: 1px solid var(--border-faint); text-align: left; white-space: normal; }
+  .ui-data-table.ui-table-stack-1024 tbody td.ui-actions-cell:has(> .ui-row-open) { position: absolute; top: 14px; right: 16px; width: auto; padding: 0; border: 0; grid-column: auto; }
+  .ui-data-table.ui-table-stack-1024 tbody td.ui-actions-cell::before { display: none; }
+  .ui-data-table.ui-table-stack-1024 tbody td.ui-actions-cell > :is(button, a, .ui-button) { min-height: 40px; }
+  .ui-data-table.ui-table-stack-1024 td .ui-button { min-height: 40px; height: 40px; }
+  .ui-data-table.ui-table-stack-1024 .col-p-low, .ui-data-table.ui-table-stack-1024 .col-p-medium { display: block; }
+  .ui-data-table.ui-table-stack-1024 td .record-identity { min-width: 0; text-align: left; }
+  .ui-data-table.ui-table-stack-1024 td .record-name, .ui-data-table.ui-table-stack-1024 td .record-detail { max-width: 100%; }
+  .ui-data-table.ui-table-stack-1024 td > span.block { max-width: 100%; }
+}
+@media (max-width: 1279px) {
+  .ui-data-table.ui-table-stack-1280 table, .ui-data-table.ui-table-stack-1280 tbody { display: block; width: 100%; }
+  .ui-data-table.ui-table-stack-1280 thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* One card per row: the name first and full width, then label-over-value pairs two to a line, actions last. */
+  .ui-data-table.ui-table-stack-1280 tbody tr { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 16px; border-bottom: 1px solid var(--border-faint); }
+  .ui-data-table.ui-table-stack-1280 tbody tr:last-child { border-bottom: 0; }
+  .ui-data-table.ui-table-stack-1280 tbody td { display: block; min-width: 0 !important; width: auto; padding: 0; text-align: left; border: 0; overflow-wrap: anywhere; }
+  .ui-data-table.ui-table-stack-1280 tbody td:is(:first-child, :last-child) { padding-left: 0; padding-right: 0; }
+  .ui-data-table.ui-table-stack-1280 tbody td::before { content: attr(data-label); display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 1.4; text-align: left; }
+  .ui-data-table.ui-table-stack-1280 tbody td[data-label='']::before { display: none; }
+  .ui-data-table.ui-table-stack-1280 tbody tr > td:first-child:not([data-select]), .ui-data-table.ui-table-stack-1280 tbody tr > td[data-select] + td { grid-column: 1 / -1; }
+  .ui-data-table.ui-table-stack-1280 tbody tr:has(> td[data-select], > td > .ui-row-open) > :is(td:first-child:not([data-select]), td[data-select] + td) { padding-right: 44px; }
+  .ui-data-table.ui-table-stack-1280 tbody tr > td:first-child:not([data-select])::before, .ui-data-table.ui-table-stack-1280 tbody tr > td[data-select] + td::before { display: none; }
+  .ui-data-table.ui-table-stack-1280 tbody td[data-select] { position: absolute; top: 14px; right: 14px; z-index: 1; display: grid; place-items: center; width: 40px; height: 40px; margin: -8px -8px 0 0; }
+  .ui-data-table.ui-table-stack-1280 tbody td.ui-actions-cell { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; grid-column: 1 / -1; width: auto; padding-top: 12px; border-top: 1px solid var(--border-faint); text-align: left; white-space: normal; }
+  .ui-data-table.ui-table-stack-1280 tbody td.ui-actions-cell:has(> .ui-row-open) { position: absolute; top: 14px; right: 16px; width: auto; padding: 0; border: 0; grid-column: auto; }
+  .ui-data-table.ui-table-stack-1280 tbody td.ui-actions-cell::before { display: none; }
+  .ui-data-table.ui-table-stack-1280 tbody td.ui-actions-cell > :is(button, a, .ui-button) { min-height: 40px; }
+  .ui-data-table.ui-table-stack-1280 td .ui-button { min-height: 40px; height: 40px; }
+  .ui-data-table.ui-table-stack-1280 .col-p-low, .ui-data-table.ui-table-stack-1280 .col-p-medium { display: block; }
+  .ui-data-table.ui-table-stack-1280 td .record-identity { min-width: 0; text-align: left; }
+  .ui-data-table.ui-table-stack-1280 td .record-name, .ui-data-table.ui-table-stack-1280 td .record-detail { max-width: 100%; }
+  .ui-data-table.ui-table-stack-1280 td > span.block { max-width: 100%; }
+}
+@media (max-width: 400px) {
+  .summary-card-top { gap: 6px; }
+  .summary-icon { width: 30px; height: 30px; }
+}
+@media (max-width: 359px) {
+  .workspace-summary { grid-template-columns: minmax(0, 1fr); }
+}

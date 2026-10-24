@@ -14,7 +14,7 @@ def lock_intake_group(db, group_id, user_id):
         DocumentExtractionJob.group_id == str(group_id), DocumentExtractionJob.owner_id == user_id,
     ).order_by(DocumentExtractionJob.id).with_for_update()))
     if not jobs:
-        raise HTTPException(404, "The saved document intake was not found. Resume it before saving.")
+        raise HTTPException(404, "We could not find the saved upload. Open it again before you save.")
     from app.services.document_person_split import ensure_single_person_source
     ensure_single_person_source(db, "manual", group_id)
     return jobs
@@ -25,13 +25,13 @@ def saved_candidate_id(jobs):
         job.candidate_id, (job.draft or {}).get("savedCandidateId"),
     ) if identifier}
     if len(identifiers) > 1:
-        raise HTTPException(409, "This intake refers to different candidates. Review its saved originals before continuing.")
+        raise HTTPException(409, "This upload points to different candidates. Check the saved files before you continue.")
     return next(iter(identifiers), None)
 
 
 def ensure_intake_candidate_access(candidate, user):
     if user.role == Role.staff and candidate.owner_id != user.id and candidate.created_by != user.id:
-        raise HTTPException(403, "Only the candidate creator, assigned recruiter or a supervisor can resume this saved candidate.")
+        raise HTTPException(403, "Only the person who added the candidate, the assigned recruiter, a manager or an admin can open this saved candidate.")
 
 
 def saved_candidate(db, jobs, user):
@@ -40,7 +40,7 @@ def saved_candidate(db, jobs, user):
         return None
     candidate = db.get(Candidate, identifier)
     if candidate is None:
-        raise HTTPException(409, "The saved candidate is no longer available. Review this intake with a supervisor.")
+        raise HTTPException(409, "The saved candidate is no longer there. Ask a manager or admin to check this upload.")
     ensure_intake_candidate_access(candidate, user)
     return candidate
 

@@ -24,7 +24,13 @@ engine = create_engine(
     # closed on return and cost ~1 s to reopen against a hosted database, so keep enough resident.
     pool_size=12,
     max_overflow=6,
-    pool_recycle=240,
+    # Reuse the most recently returned connection first. With the default first-in-first-out queue
+    # a quiet desk rotates through every pooled connection, so each one sits idle past
+    # IDLE_VERIFY_SECONDS and every checkout pays the SELECT 1 ping below (one extra round trip per
+    # request). Last-in-first-out keeps one hot connection for sequential requests; bursts still fan
+    # out over the others. TCP keepalives and the idle ping protect the connections that rest.
+    pool_use_lifo=True,
+    pool_recycle=1800,
     future=True,
     connect_args={"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 4,
                   "connect_timeout": 10},
@@ -36,6 +42,12 @@ IDLE_VERIFY_SECONDS = 10
 
 @event.listens_for(engine, "checkin")
 def _mark_used(dbapi_connection, connection_record):
+    connection_record.info["last_used"] = time.monotonic()
+
+
+@event.listens_for(engine, "connect")
+def _stamp_new_connection(dbapi_connection, connection_record):
+    """A connection that has only just been opened is known to be alive; do not ping it on first use."""
     connection_record.info["last_used"] = time.monotonic()
 
 

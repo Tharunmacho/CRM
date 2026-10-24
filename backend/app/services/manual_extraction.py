@@ -181,10 +181,10 @@ def attach_original(db, user, identifier, candidate_id, settings):
             raise HTTPException(409, "These documents are already attached to another candidate")
         return job_out(job, detail=True)
     if job.status == "dismissed":
-        raise HTTPException(409, "This intake was dismissed. Restore it before attaching.")
+        raise HTTPException(409, "This upload was dismissed. Restore it before you attach it.")
     original = read_bytes(settings, job.object_key)
     if hashlib.sha256(original).hexdigest() != job.content_hash:
-        raise HTTPException(409, "The saved original failed its integrity check")
+        raise HTTPException(409, "The saved file looks damaged. Upload it again.")
     documents = {"source_bundle": {"object_key": job.object_key, "file_name": job.filename,
                   "content_type": job.content_type, "size_kb": job.size_kb, "content_hash": job.content_hash},
                  **deepcopy((job.state or {}).get("documents", {}))}
@@ -194,7 +194,7 @@ def attach_original(db, user, identifier, candidate_id, settings):
     for slot, document in documents.items():
         data = original if slot == "source_bundle" else read_bytes(settings, document["object_key"])
         if hashlib.sha256(data).hexdigest() != document["content_hash"]:
-            raise HTTPException(409, "A selected document failed its integrity check")
+            raise HTTPException(409, "A selected file looks damaged. Upload it again.")
         previous = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate",
             Attachment.entity_id == candidate.id, Attachment.slot == slot).order_by(Attachment.version.desc()).limit(1))
         row = Attachment(id=str(uuid4()), entity_type="candidate", entity_id=candidate.id, slot=slot,

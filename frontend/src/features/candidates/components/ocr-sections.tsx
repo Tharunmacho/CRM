@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Check, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { BookUser, Check, Database, FileText, IdCard, ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import { Badge } from '@/shared/ui/display'
 import { cn } from '@/shared/lib/cn'
 import { CardBlock, FactGrid, ProfileCard, type Fact } from './fact-section'
@@ -29,16 +29,16 @@ const ident = (v?: string | null) => (v ? <span className="ident">{v}</span> : n
 /** An ISO date reads "12 Mar 2030"; free text such as "25th May 1976" is tidied the same way. */
 const dateText = (v?: string | null) => humanDate(v)
 
-const pill = 'rounded-full px-3 py-1 text-[14px]'
+const pill = ''
 
 function WarningList({ warnings }: { warnings?: string[] }) {
   const shown = (warnings ?? []).map((w) => w.trim()).filter(Boolean)
   if (shown.length === 0) return null
   return (
-    <CardBlock title="Warnings from the reader">
+    <CardBlock title="Warnings from reading the file">
       <ul className="space-y-2">
         {shown.map((w, i) => (
-          <li key={i} className="flex items-start gap-2 text-[16px] leading-6 text-amber-700">
+          <li key={i} className="flex items-start gap-2 text-[14px] leading-6 text-amber-700">
             <ShieldAlert className="mt-1 h-4 w-4 shrink-0" />
             <span className="min-w-0 break-words">{w}</span>
           </li>
@@ -67,7 +67,7 @@ const CHECK_LABELS: [keyof MrzCheckDigits, string][] = [
   ['composite', 'Composite'],
 ]
 
-const th = 'pb-2 pr-4 text-[14px] font-semibold text-ink-600'
+const th = 'pb-2 pr-4 text-[13px] font-medium text-ink-500'
 
 /* ---------------------------------------------------------------------- Passport */
 
@@ -93,11 +93,12 @@ export function PassportReading({ passport }: { passport?: PassportOcr }) {
   return (
     <ProfileCard
       title="Passport"
+      icon={<BookUser size={18} />}
       action={
         mrz?.all_check_digits_valid ? (
           <Badge tone="navy" className={pill}>
             <ShieldCheck className="h-3.5 w-3.5" />
-            MRZ verified
+            Passport code checked
           </Badge>
         ) : undefined
       }
@@ -128,7 +129,7 @@ export function AadhaarReading({ aadhaar, canReveal }: { aadhaar?: AadhaarOcr; c
     ['Care of', text(a?.care_of)],
     ['Address', text(a?.address)],
     ['Pincode', ident(a?.pincode)],
-    ['VID', ident(vid)],
+    ['Virtual ID (VID)', ident(vid)],
     ['Enrolment ID', ident(a?.enrollment_id)],
   ]
   if (!facts.some(([, v]) => v)) return null
@@ -136,7 +137,8 @@ export function AadhaarReading({ aadhaar, canReveal }: { aadhaar?: AadhaarOcr; c
   return (
     <ProfileCard
       title="Aadhaar"
-      meta={canReveal ? undefined : 'The Aadhaar number is masked for your role'}
+      icon={<IdCard size={18} />}
+      meta={canReveal ? undefined : 'Part of the Aadhaar number is hidden for your role'}
       action={
         valid === true ? (
           <Badge tone="navy" className={pill}>
@@ -146,7 +148,7 @@ export function AadhaarReading({ aadhaar, canReveal }: { aadhaar?: AadhaarOcr; c
         ) : valid === false ? (
           <Badge tone="amber" className={pill}>
             <ShieldAlert className="h-3.5 w-3.5" />
-            Number failed validation
+            Number did not pass the check
           </Badge>
         ) : undefined
       }
@@ -163,26 +165,26 @@ function InspectionTable({ view }: { view: InspectionView }) {
     .filter(Boolean)
     .join(' · ')
   return (
-    <div className="mt-3 rounded-xl border border-rule-soft">
+    <div className="mt-3 rounded-[10px] border border-rule-soft">
       <Disclosure
         className="px-4"
-        summary="Local page classification"
-        meta={view.complete === false ? 'Needs review' : meta || undefined}
+        summary="How the pages were sorted"
+        meta={view.complete === false ? 'Please check' : meta || undefined}
       >
         <div className="space-y-4 pb-4">
           {view.groups.length > 0 && (
             <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
               {view.groups.map((g) => (
                 <div key={g.label}>
-                  <dt className="text-[15px] text-ink-600">{g.label}</dt>
-                  <dd className="text-[16px] font-semibold text-ink-700 tnum">Page {g.pages}</dd>
+                  <dt className="text-[13px] text-ink-500">{g.label}</dt>
+                  <dd className="text-[14px] font-semibold text-ink-700 tnum">Page {g.pages}</dd>
                 </div>
               ))}
             </dl>
           )}
           {view.rows.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[30rem] text-left text-[16px]">
+              <table className="w-full min-w-[30rem] text-left text-[14px]">
                 <thead>
                   <tr>
                     <th className={th}>Page</th>
@@ -211,7 +213,7 @@ function InspectionTable({ view }: { view: InspectionView }) {
           {view.warnings.length > 0 && (
             <ul className="space-y-1.5">
               {view.warnings.map((w, i) => (
-                <li key={i} className="flex items-start gap-2 text-[16px] text-amber-700">
+                <li key={i} className="flex items-start gap-2 text-[14px] text-amber-700">
                   <ShieldAlert className="mt-1 h-4 w-4 shrink-0" />
                   <span className="min-w-0 break-words">{w}</span>
                 </li>
@@ -240,21 +242,21 @@ function DocumentSource({ entry, canReveal }: { entry: OcrDocumentEntry; canReve
   const received = [
     source.fileName,
     source.channel && `via ${CHANNEL_LABEL[source.channel] ?? humanizeKey(source.channel)}`,
-    source.selectedPages.length > 0 && `pages ${pageList(source.selectedPages)} sent to Veris`,
+    source.selectedPages.length > 0 && `pages ${pageList(source.selectedPages)} sent to the reader`,
   ].filter(Boolean)
   return (
     <li className="py-5 first:pt-4 last:pb-1">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-[17px] font-semibold text-ink-700">{entry.label}</p>
-        <p className="text-[15px] text-ink-600 tnum">
+        <p className="text-[15px] font-semibold text-ink-700">{entry.label}</p>
+        <p className="text-[13px] text-ink-600 tnum">
           {pages.length > 0
             ? `Read from page${pages.length === 1 ? '' : 's'} ${readFrom} of the received file`
             : 'No page text was stored'}
         </p>
       </div>
-      {received.length > 0 && <p className="mt-1 break-words text-[15px] text-ink-500">{received.join(' · ')}</p>}
+      {received.length > 0 && <p className="mt-1 break-words text-[13px] text-ink-500">{received.join(' · ')}</p>}
       {pages.length > 0 && (
-        <div className="mt-3 divide-y divide-rule-soft rounded-xl border border-rule-soft px-4">
+        <div className="mt-3 divide-y divide-rule-soft rounded-[10px] border border-rule-soft px-4">
           {pages.map((p) => (
             <Disclosure
               key={`${p.page}-${p.sent ?? ''}`}
@@ -268,11 +270,11 @@ function DocumentSource({ entry, canReveal }: { entry: OcrDocumentEntry; canReve
                 .join(' · ')}
             >
               {p.text.trim() ? (
-                <pre className="mb-3 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-field px-4 py-3 font-sans text-[16px] leading-relaxed text-ink-700">
+                <pre className="mb-3 max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-field px-4 py-3 font-sans text-[14px] leading-relaxed text-ink-700">
                   {pageText(entry, p.text, canReveal)}
                 </pre>
               ) : (
-                <p className="mb-3 text-[16px] text-ink-500">This page returned no text.</p>
+                <p className="mb-3 text-[14px] text-ink-500">This page returned no text.</p>
               )}
             </Disclosure>
           ))}
@@ -290,7 +292,8 @@ export function SourceDocuments({ ocr, canReveal }: { ocr: CandidateOcr; canReve
   return (
     <ProfileCard
       title="Source documents"
-      meta="Pages read from the received files, with the OCR text of each page and how the pages were classified"
+      icon={<FileText size={18} />}
+      meta="Pages we read from the files, the text found on each page, and how each page was sorted"
     >
       <ul className="divide-y divide-rule-soft">
         {entries.map((e) => (
@@ -322,8 +325,9 @@ export function CompleteData({ ocr, canReveal }: { ocr: CandidateOcr; canReveal:
   if (all.length === 0) return null
   return (
     <ProfileCard
-      title="Complete extracted data"
-      meta="Every value stored from the OCR, field by field. Only the page markup is left out."
+      title="Everything we read"
+      icon={<Database size={18} />}
+      meta="Every detail we read from the documents, one by one."
     >
       <div className="divide-y divide-rule-soft">
         {all.map((d) => (

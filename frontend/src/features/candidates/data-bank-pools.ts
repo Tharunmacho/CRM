@@ -16,6 +16,30 @@ export interface AssignWaitingResult {
   remaining: number
 }
 
+/**
+ * The eleven PRD columns, in order, each with the server filter key it filters on
+ * (`owner` is filtered through the dedicated `staff` id parameter instead).
+ */
+export const PRD_COLUMNS = [
+  { key: 'name', label: 'Name' },
+  { key: 'phone', label: 'Phone' },
+  { key: 'designation', label: 'Job title' },
+  { key: 'experience', label: 'Experience' },
+  { key: 'passport', label: 'Passport' },
+  { key: 'source', label: 'Source' },
+  { key: 'owner', label: 'Recruiter' },
+  { key: 'order', label: 'Order' },
+  { key: 'stage', label: 'Stage' },
+  { key: 'status', label: 'Status' },
+  { key: 'added', label: 'Date added' },
+] as const
+
+/** How many of the filter controls currently narrow the list (column filters, staff, skills, coverage). */
+export function activeFilterCount(columnFilters: Record<string, string>, staff: string, skills: string[], skillStatus: string): number {
+  const columns = Object.entries(columnFilters).filter(([key, value]) => key !== 'owner' && value.trim()).length
+  return columns + (staff ? 1 : 0) + skills.length + (skillStatus !== 'all' ? 1 : 0)
+}
+
 /** What the Assigned-to column shows when a candidate has no recruiter (the server filters on this label too). */
 export const NEEDS_ASSIGNMENT_LABEL = 'Needs assignment'
 
@@ -39,20 +63,20 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 
 export function assignWaitingMessage(result: AssignWaitingResult): { text: string; tone: 'ok' | 'warn' } {
   if (result.assigned === 0) {
-    return { text: 'No recruiter is eligible right now. Candidates stay in the waiting list until one is available.', tone: 'warn' }
+    return { text: 'No recruiter is free right now. Candidates stay on the waiting list until one is.', tone: 'warn' }
   }
-  const rest = result.remaining > 0 ? ` ${plural(result.remaining, 'candidate')} still waiting for an eligible recruiter.` : ''
+  const rest = result.remaining > 0 ? ` ${plural(result.remaining, 'candidate')} still waiting for a free recruiter.` : ''
   return { text: `Assigned ${plural(result.assigned, 'waiting candidate')}.${rest}`, tone: result.remaining > 0 ? 'warn' : 'ok' }
 }
 
 export function emptyPoolCopy(pool: DataBankPool): { title: string; description: string } | null {
   switch (pool) {
     case 'not_interested':
-      return { title: 'Nobody in the not-interested pool', description: 'Candidates who decline land here so you can offer them another order later.' }
+      return { title: 'Nobody is marked not interested', description: 'Candidates who are not interested show up here, so you can offer them another order later.' }
     case 'unassigned':
-      return { title: 'No candidates are waiting for a recruiter', description: 'New candidates are assigned automatically while an eligible recruiter is available.' }
+      return { title: 'No candidates are waiting for a recruiter', description: 'New candidates are given to a free recruiter automatically.' }
     case 'needs_review':
-      return { title: 'Nothing needs review', description: 'Candidates with missing details or document warnings appear here until a recruiter confirms them.' }
+      return { title: 'Nothing needs review', description: 'Candidates with missing details or document problems show up here until a recruiter checks them.' }
     default:
       return null
   }

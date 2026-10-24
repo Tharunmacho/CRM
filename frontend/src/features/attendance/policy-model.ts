@@ -1,6 +1,6 @@
 export type AttendanceCode = 'P' | 'LT' | 'EE' | 'PP' | 'OD' | 'WFH' | 'PL' | 'UL' | 'A' | 'MP' | 'WO' | 'H'
-export const attendanceLabels: Record<AttendanceCode, string> = { P: 'Present', LT: 'Late', EE: 'Early exit', PP: 'Paid permission', OD: 'Official duty', WFH: 'Work from home', PL: 'Paid leave', UL: 'Unpaid leave', A: 'Absent', MP: 'Missing punch', WO: 'Weekly off', H: 'Holiday' }
-export const requestLabels = { late: 'Late arrival', early_exit: 'Early leaving', early_check_in: 'Early check-in', official_duty: 'Official duty', work_from_home: 'Work from home', paid_leave: 'Paid leave', unpaid_leave: 'Unpaid leave', weekly_off: 'Rotational weekly off', extra_ot: 'Extra overtime' } as const
+export const attendanceLabels: Record<AttendanceCode, string> = { P: 'Present', LT: 'Late', EE: 'Early exit', PP: 'Paid permission', OD: 'Official duty', WFH: 'Work from home', PL: 'Paid leave', UL: 'Unpaid leave', A: 'Absent', MP: 'Missed check-in or out', WO: 'Weekly off', H: 'Holiday' }
+export const requestLabels = { late: 'Late arrival', early_exit: 'Early leaving', early_check_in: 'Early check-in', official_duty: 'Official duty', work_from_home: 'Work from home', paid_leave: 'Paid leave', unpaid_leave: 'Unpaid leave', weekly_off: 'Weekly off swap', extra_ot: 'Extra overtime' } as const
 export type RequestKind = keyof typeof requestLabels
 export interface Shift { start: string; end: string; breakMinutes: number }
 export interface AttendancePolicy { workMinutes: number; breakMinutes: number; monthlyPaidLeaveDays: number; monthlyGraceMinutes: number; monthlyPermissionOccasions: number; warningMinutes: number; missingPunchDeadlineDays: number; flexMinutes: number }

@@ -4,6 +4,10 @@ import type { DocumentScans, ScanKind } from './ocr-form'
 
 export type IntakeDraft = { form: Record<string, string>; editedFields: string[]; jobIds?: string[]; savedCandidateId?: string | null; splitCandidateIds?: string[] }
 export type IntakeKind = ScanKind | 'photo' | 'education' | 'experience'
+/** Kinds that take several files (the PRD lists certificates in the plural); every other kind keeps one file and a new one replaces it. */
+export const MULTI_FILE_KINDS: readonly IntakeKind[] = ['education', 'experience']
+export const MAX_FILES_PER_KIND = 6
+export const isMultiFileKind = (kind: IntakeKind) => MULTI_FILE_KINDS.includes(kind)
 export type IntakeJob = {
   id: string; groupId: string; kind: IntakeKind; filename: string; sizeKb: number; status: string;
   lastError: string | null; candidateId: string | null; attachmentId: string | null;
@@ -41,7 +45,7 @@ export function useDocumentIntake(ownerId: string) {
   const list = async () => {
     setLoading(true)
     try { const values = await api.get<IntakeJob[]>('/ocr/jobs'); if (mounted.current) { setAvailable(values); setError('') } }
-    catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : 'Could not load saved intake') }
+    catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : 'We could not load your saved uploads.') }
     finally { if (mounted.current) setLoading(false) }
   }
   useEffect(() => {
@@ -57,10 +61,11 @@ export function useDocumentIntake(ownerId: string) {
     const work = queue.current.catch(() => {}).then(() => api.put('/ocr/jobs/groups/' + identifier + '/draft', payload))
     queue.current = work
     try { await work; if (mounted.current) setDraftError('') }
-    catch (err) { if (mounted.current) setDraftError('Your latest form changes could not be backed up. Keep this page open and retry saving the draft.'); throw err }
+    catch (err) { if (mounted.current) setDraftError('We could not save your latest changes. Keep this page open and try again.'); throw err }
   }
   const upload = async (kind: IntakeKind, file: File) => {
     setUploading(true); setError('')
+    if (isMultiFileKind(kind) && current.current.filter((value) => value.kind === kind).length >= MAX_FILES_PER_KIND) { setUploading(false); const message = `You can add up to ${MAX_FILES_PER_KIND} files here.`; setError(message); throw new Error(message) }
     const form = new FormData()
     form.append('kind', kind); form.append('group_id', group.current); form.append('file', file)
     const controller = new AbortController()
@@ -68,14 +73,20 @@ export function useDocumentIntake(ownerId: string) {
     try {
       const response = await fetch(fileHref('/api/ocr/jobs'), { method: 'POST', credentials: 'include', body: form, signal: controller.signal })
       const payload = await response.json()
-      if (!response.ok) throw new ApiError(response.status, typeof payload.detail === 'string' ? payload.detail : 'The original could not be saved. Please retry.')
+      if (!response.ok) throw new ApiError(response.status, typeof payload.detail === 'string' ? payload.detail : 'We could not save the file. Please try again.')
       const job = payload as IntakeJob
+      if (job.status === 'dismissed') throw new Error('You removed this exact file from this upload earlier. Add it from the candidate profile after saving, or use a different copy.')
+      if (isMultiFileKind(kind)) {
+        // Another file of the same kind is added next to the others; the same file twice returns the job it already has.
+        update([...current.current.filter((value) => value.id !== job.id), job])
+        return job
+      }
       const previous = current.current.find((value) => value.kind === kind)
       update([...current.current.filter((value) => value.kind !== kind), job])
       if (previous && previous.id !== job.id) await api.post('/ocr/jobs/' + previous.id + '/dismiss').catch(() => {})
       return job
     } catch (err) {
-      const message = err instanceof Error && err.name !== 'AbortError' ? err.message : 'The upload could not finish. Keep the original and retry.'
+      const message = err instanceof Error && err.name !== 'AbortError' ? err.message : 'The upload did not finish. Please try again.'
       if (mounted.current) setError(message)
       throw new Error(message)
     } finally { clearTimeout(timeout); if (mounted.current) setUploading(false) }
@@ -86,12 +97,13 @@ export function useDocumentIntake(ownerId: string) {
       const all = await api.get<IntakeJob[]>('/ocr/jobs/groups/' + identifier)
       const draft = [...all].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).find((job) => job.draft?.form)?.draft
       const selected = draft?.jobIds?.length ? all.filter((job) => draft.jobIds!.includes(job.id)) : all.filter((job) => job.status !== 'dismissed')
-      const byKind = new Map<IntakeKind, IntakeJob>()
-      for (const job of selected) byKind.set(job.kind, job)
+      // One file per kind, except the kinds that take several: those keep every selected file.
+      const byKey = new Map<string, IntakeJob>()
+      for (const job of selected) byKey.set(isMultiFileKind(job.kind) ? job.id : job.kind, job)
       group.current = identifier
-      update([...byKind.values()])
+      update([...byKey.values()])
       return { jobs: current.current, draft }
-    } catch (err) { setError(err instanceof Error ? err.message : 'Saved intake could not be opened'); throw err }
+    } catch (err) { setError(err instanceof Error ? err.message : 'We could not open this saved upload.'); throw err }
     finally { setLoading(false) }
   }
   const read = async (signal: AbortSignal) => {
@@ -104,7 +116,7 @@ export function useDocumentIntake(ownerId: string) {
       const values = (await api.get<IntakeJob[]>('/ocr/jobs/groups/' + group.current, { signal })).filter((job) => identifiers.includes(job.id))
       update(values)
       if (!values.some((job) => active.has(job.status))) return values
-      if (Date.now() > stopAt) throw new Error('Reading is still in progress. Your originals and progress are saved; resume this intake later.')
+      if (Date.now() > stopAt) throw new Error('We are still reading. Your files are saved. Come back to this upload later.')
       await pause(signal)
     }
     throw new DOMException('Stopped waiting', 'AbortError')
@@ -116,7 +128,7 @@ export function useDocumentIntake(ownerId: string) {
       try {
         const saved = await api.post<IntakeJob>('/ocr/jobs/' + job.id + '/attach', { candidateId })
         update(current.current.map((value) => value.id === saved.id ? saved : value))
-      } catch (err) { failures[job.kind] = job.filename + ': ' + (err instanceof Error ? err.message : 'Saved document could not be attached') }
+      } catch (err) { failures[job.kind] = job.filename + ': ' + (err instanceof Error ? err.message : 'This file could not be added to the candidate') }
     }
     return failures
   }
@@ -125,10 +137,18 @@ export function useDocumentIntake(ownerId: string) {
     await Promise.all(selected.map((job) => api.post('/ocr/jobs/' + job.id + '/dismiss')))
     await list()
   }
+  /** Takes one file out of this upload before the candidate is saved (it is set aside on the server, never deleted). */
+  const remove = async (jobId: string) => {
+    const job = current.current.find((value) => value.id === jobId)
+    if (!job) return
+    await api.post('/ocr/jobs/' + jobId + '/dismiss')
+    update(current.current.filter((value) => value.id !== jobId))
+    void list()
+  }
   const reset = () => {
     group.current = crypto.randomUUID()
     update([])
     setError(''); setDraftError('')
   }
-  return { jobs, available, uploading, loading, error, draftError, upload, recover, read, attach, saveDraft, reload: list, dismiss, reset }
+  return { jobs, available, uploading, loading, error, draftError, upload, remove, recover, read, attach, saveDraft, reload: list, dismiss, reset }
 }

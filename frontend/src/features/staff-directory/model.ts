@@ -27,12 +27,12 @@ export interface StaffDirectoryResponse {
 }
 
 export const availabilityOptions: { value: StaffAvailabilityStatus; label: string }[] = [
-  { value: 'available', label: 'Available for intake' },
+  { value: 'available', label: 'Getting new candidates' },
   { value: 'approved_leave', label: 'Approved leave' },
   { value: 'manual_leave', label: 'Marked on leave' },
-  { value: 'paused', label: 'Automatic intake paused' },
-  { value: 'inactive', label: 'Inactive account' },
-  { value: 'not_assigned', label: 'Outside recruitment rotation' },
+  { value: 'paused', label: 'Not getting new candidates (paused)' },
+  { value: 'inactive', label: 'Account switched off' },
+  { value: 'not_assigned', label: 'Not in the recruiter rotation' },
 ]
 
 export function staffRoleLabel(role: DirectoryEmployee['role']) {
@@ -65,4 +65,9 @@ export function periodLabel(period: { from: string; to: string }) {
 export function completionLabel(hours: number | null) {
   if (hours == null) return '—'
   return `${new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 }).format(hours)} ${hours === 1 ? 'hour' : 'hours'}`
+}
+
+/** Plain-English status text: the words come from here, not from the server's label. */
+export function availabilityWords(status: StaffAvailabilityStatus, fallback: string) {
+  return availabilityOptions.find((option) => option.value === status)?.label ?? fallback
 }

@@ -49,7 +49,7 @@ export function MapToOrderDialog({
       })
   }, [store.orders, store.companies, store.clients, store.designations, query])
 
-  if (!snapshot.ready || !cand) return <Dialog open={open} onClose={onClose} title="Map candidate to an order"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (snapshot.ready ? 'This candidate is no longer available.' : 'Checking the latest candidate and hiring orders…')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" onClick={snapshot.retry}>Retry</Button>}</Dialog>
+  if (!snapshot.ready || !cand) return <Dialog open={open} onClose={onClose} title="Match candidate to an order"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (snapshot.ready ? 'This candidate is no longer available.' : 'Loading orders…')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" onClick={snapshot.retry}>Try again</Button>}</Dialog>
   const eligible = owner?.active && !existing && !candidateDeployed
   const selectedOrder = orders.find(order => order.id === picked)
   const close = () => { if (!saving) onClose() }
@@ -64,13 +64,13 @@ export function MapToOrderDialog({
         if (!store.isCurrentSession() || !result) return
         setMapped(true)
         if (!result.refreshed) {
-          setError('The candidate is mapped. Refresh the workspace to see the application; retrying will not map them again.')
+          setError('The candidate is matched. Refresh to see it. You do not need to match again.')
           return
         }
       }
       if (store.isCurrentSession()) onClose()
     } catch (cause) {
-      if (store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'The candidate could not be mapped. Please retry.')
+      if (store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'We could not match the candidate. Please try again.')
     } finally { setSaving(false) }
   }
 
@@ -79,8 +79,8 @@ export function MapToOrderDialog({
       open={open}
       onClose={close}
       width="lg"
-      title={`Map ${cand.name} to an order`}
-      description="Mapping creates the application and raises the stage 1 prescreening task."
+      title={`Match ${cand.name} to an order`}
+      description="Matching starts stage 1 (prescreening) and creates the prescreening task."
       footer={
         <>
           <Button variant="ghost" disabled={saving} onClick={close}>
@@ -91,7 +91,7 @@ export function MapToOrderDialog({
             disabled={saving || (!mapped && (!selectedOrder || !eligible))}
             onClick={() => void save()}
           >
-            {saving ? mapped ? 'Refreshing…' : 'Mapping…' : mapped ? 'Refresh mapped candidate' : 'Map and start stage 1'}
+            {saving ? mapped ? 'Refreshing…' : 'Matching…' : mapped ? 'Refresh' : 'Match and start stage 1'}
           </Button>
         </>
       }
@@ -99,20 +99,20 @@ export function MapToOrderDialog({
       {existing && !mapped && (
         <p className="mb-3 flex items-start gap-2 rounded-control border border-amber-100 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
-          This candidate is already on {store.order(existing.orderId)?.ref}. Unmap them from that
-          order first — the open tasks are cancelled and a fresh application starts at stage 1.
+          This candidate is already on {store.order(existing.orderId)?.ref}. Remove them from that
+          order first. Its open tasks will be cancelled, and the new order starts at stage 1.
         </p>
       )}
-      {candidateDeployed && <p role="status" className="mb-3 text-sm text-amber-700">Deployed candidates cannot be mapped to another order.</p>}
-      {!owner?.active && <p role="status" className="mb-4 rounded-control bg-amber-50 p-4 text-sm text-amber-800">An active recruiter must own this candidate before mapping. Ask an Admin or Manager to assign a recruiter from the candidate profile or Staff Directory.</p>}
+      {candidateDeployed && <p role="status" className="mb-3 text-sm text-amber-700">Deployed candidates cannot be matched to another order.</p>}
+      {!owner?.active && <p role="status" className="mb-4 rounded-control bg-amber-50 p-4 text-sm text-amber-800">This candidate needs an active recruiter before you can match them to an order. Ask an admin or manager to assign one from the candidate profile or the Staff Directory.</p>}
       {error && <p role="alert" className="mb-3 rounded-control bg-stamp-50 p-3 text-sm text-stamp-700">{error}</p>}
-      <div className="mb-4 rounded-panel border border-rule bg-field/50 p-4"><p className="text-sm font-semibold">Review the job requirements</p><p className="mt-1 text-sm text-ink-500">Saved skills and experience help you decide. A matching designation alone does not confirm suitability. Mapping starts prescreening and closes any pending initial-call task.</p></div>
+      <div className="mb-4 rounded-panel border border-rule bg-field/50 p-4"><p className="text-sm font-semibold">Check the job requirements</p><p className="mt-1 text-sm text-ink-500">Use the saved skills and experience to decide. A matching job title alone does not mean the candidate is suitable. Matching starts prescreening and closes any initial call task that is still open.</p></div>
 
       <fieldset disabled={saving || mapped} className="min-w-0">
       <SearchInput
         value={query}
         onChange={(value) => { setQuery(value); setPicked(null) }}
-        placeholder="Designation, employer, country, or order reference"
+        placeholder="Job title, employer, country or order number"
       />
 
       <ul className="scrollbar-thin mt-3 max-h-[22rem] divide-y divide-rule-soft overflow-y-auto rounded-control border border-rule-soft">
@@ -136,9 +136,9 @@ export function MapToOrderDialog({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium text-ink">{des?.title}</span>
-                    {evidence?.designationMatches && <Badge tone="navy">Designation matches</Badge>}
+                    {evidence?.designationMatches && <Badge tone="navy">Job title matches</Badge>}
                   </span>
-                  {evidence && <span className="mt-3 block text-sm text-ink-600"><span className="block">Experience: {cand.totalExperience} years · {des!.minExperience} required{evidence.experienceMeets ? ' · Meets requirement' : ' · Below requirement'}</span><span className="mt-1 block">Saved skills: {evidence.requiredSkills.length ? `${evidence.matchedSkills.length} of ${evidence.requiredSkills.length} exact matches` : 'No required skills specified'}</span>{evidence.missingSkills.length > 0 && <span className="mt-1 block text-amber-700">Verify: {evidence.missingSkills.join(', ')}</span>}</span>}
+                  {evidence && <span className="mt-3 block text-sm text-ink-600"><span className="block">Experience: {cand.totalExperience} years · {des!.minExperience} required{evidence.experienceMeets ? ' · Meets the requirement' : ' · Below the requirement'}</span><span className="mt-1 block">Skills saved: {evidence.requiredSkills.length ? `${evidence.matchedSkills.length} of ${evidence.requiredSkills.length} exact matches` : 'No skills required'}</span>{evidence.missingSkills.length > 0 && <span className="mt-1 block text-amber-700">Please check: {evidence.missingSkills.join(', ')}</span>}</span>}
                   <span className="mt-0.5 block truncate text-micro text-ink-400">
                     {[store.company(o.companyId)?.name, [o.city, o.country].filter(Boolean).join(', '), o.deadline ? `closes ${dateLabel(o.deadline)}` : ''].filter(Boolean).join(' · ')}
                   </span>
@@ -154,7 +154,7 @@ export function MapToOrderDialog({
           )
         })}
         {orders.length === 0 && (
-          <EmptyState title="No open orders match" description="Try a different search, or create an order under a designation." />
+          <EmptyState title="No open orders match" description="Try a different search, or create an order on the Jobs page." />
         )}
       </ul>
       {selectedOrder && <p role="status" className="mt-4 rounded-control bg-navy-50 p-3 text-sm text-navy-800">Selected: {store.designation(selectedOrder.designationId)?.title} at {store.company(selectedOrder.companyId)?.name} · {selectedOrder.ref}</p>}

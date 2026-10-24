@@ -1,45 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CircleCheck, Download, Eye, FileSearch, RefreshCw, UserCog, UserPlus, UserRound, Users, UserSearch } from 'lucide-react'
-import { dateLabel } from '@/shared/lib/format'
+import { cn } from '@/shared/lib/cn'
+import { CircleCheck, Download, FileSearch, RefreshCw, Search, UserCog, UserPlus, UserRoundX, Users, UserSearch } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { api, fileHref } from '@/shared/api/client'
-import { stageByNo } from '@/shared/workflow/stages'
 import type { Candidate } from '@/shared/model/types'
-import { DataTable, type Column } from '@/shared/ui/table'
-import { EmptyState, PageHeader, Panel, PanelHeader, StatusPill } from '@/shared/ui/display'
-import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
-import { Button, IconButton, SearchInput, Select } from '@/shared/ui/primitives'
-import { Tabs } from '@/shared/ui/overlay'
-import { normalizedSkills } from '@/features/candidates/candidate-skills'
+import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
+import { Button, Select } from '@/shared/ui/primitives'
 import { useSkillFacets } from '@/features/candidates/use-skill-facets'
 import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
+import { StageModal } from '@/features/workflow/components/stage-modal'
+import { dataBankColumns } from '@/features/candidates/components/data-bank-columns'
+import { DataBankFilters } from '@/features/candidates/components/data-bank-filters'
+import { DataBankCards } from '@/features/candidates/components/data-bank-cards'
+import { CandidateEditDialog } from '@/features/candidates/components/candidate-edit-dialog'
+import { DbTable, TABLE_MIN_WIDTH, useElementWidth } from '@/features/candidates/components/db-table'
+import { KpiCards, Pager, ViewToggle, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
+import { arrivalTrend, weeklyArrivals } from '@/features/candidates/data-bank-trends'
 import {
-  NEEDS_ASSIGNMENT_LABEL, assignWaitingLabel, assignWaitingMessage, canAssignWaiting, emptyPoolCopy, ownerLabel, poolCountsPath, togglePool,
+  NEEDS_ASSIGNMENT_LABEL, activeFilterCount, assignWaitingLabel, assignWaitingMessage, canAssignWaiting, emptyPoolCopy, poolCountsPath, togglePool,
   type AssignWaitingResult, type DataBankPool, type PoolCounts,
 } from '@/features/candidates/data-bank-pools'
+import '@/styles/data-bank-v2.css'
 
-const STATUS_LABEL: Record<string, string> = {
-  new: 'New',
-  in_process: 'In process',
-  not_interested: 'Not interested',
-  deployed: 'Deployed',
-  needs_review: 'Needs review',
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  email: 'Email',
-  whatsapp: 'WhatsApp',
-  walk_in: 'Walk-in',
-  referral: 'Referral',
-  other: 'Other',
-}
+const SORT_OPTIONS: [string, string][] = [
+  ['added:desc', 'Newest first'], ['added:asc', 'Oldest first'], ['name:asc', 'Name A–Z'], ['name:desc', 'Name Z–A'],
+  ['phone:asc', 'Phone number'], ['designation:asc', 'Job title A–Z'], ['experience:desc', 'Most experience'], ['experience:asc', 'Least experience'],
+  ['passport:desc', 'Passport saved first'], ['source:asc', 'Source'], ['owner:asc', 'Recruiter'], ['order:asc', 'Order'],
+  ['stage:desc', 'Latest stage first'], ['stage:asc', 'Earliest stage first'], ['status:asc', 'Status'],
+]
 
 export default function DataBankPage() {
   const store = useStore()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const staffFilter = store.can('all_reports') ? searchParams.get('staff') || '' : ''
+  // Every staff user sees every candidate (PRD), so the staff filter is open to all roles.
+  const staffFilter = searchParams.get('staff') || ''
   const changeStaff = (staff: string) => setSearchParams(previous => {
     const next = new URLSearchParams(previous)
     if (staff) next.set('staff', staff)
@@ -50,12 +46,18 @@ export default function DataBankPage() {
   const [pool, setPool] = useState<DataBankPool>('all')
   const [selected, setSelected] = useState<string[]>([])
   const [reassigning, setReassigning] = useState<string[] | null>(null)
+  const [openStage, setOpenStage] = useState<string | null>(null)
   const [skills, setSkills] = useState<string[]>([])
   const [skillMode, setSkillMode] = useState<'all' | 'any'>('all')
   const [skillStatus, setSkillStatus] = useState('all')
   const [page, setPage] = useState(0)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'added', dir: 'desc' })
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [view, setView] = useState<DbView>(() => readView('data-bank'))
+  const [pageSize, setPageSize] = useState(20)
+  const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>()
+  const [editing, setEditing] = useState<Candidate | null>(null)
   const [snapshot, setSnapshot] = useState<{ items: Candidate[]; total: number; page: number; scope: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -73,7 +75,7 @@ export default function DataBankPage() {
     const request = refreshToken ? refreshRef.current.refresh({ keepCurrent: true }) : refreshRef.current.ensureFresh()
     void request
       .then(() => { if (active) setDirectoryRead({ key: staffScopeKey, error: '' }) })
-      .catch(error => { if (active) setDirectoryRead({ key: staffScopeKey, error: error instanceof Error ? error.message : 'Current candidate ownership could not be loaded.' }) })
+      .catch(error => { if (active) setDirectoryRead({ key: staffScopeKey, error: error instanceof Error ? error.message : 'We could not load who looks after each candidate.' }) })
     return () => { active = false }
   }, [staffScopeKey])
   const directoryReady = directoryRead?.key === staffScopeKey && !directoryRead.error
@@ -81,28 +83,29 @@ export default function DataBankPage() {
   const ownedCandidates = useMemo(() => store.candidates.filter(candidate => !staffFilter || candidate.ownerId === staffFilter), [store.candidates, staffFilter])
   const facetParams = new URLSearchParams({ pool, ...(staffFilter ? { staff: staffFilter } : {}) }).toString()
   const coverage = useSkillFacets(facetParams, store.candidates, !!directoryReady)
-  const facets = coverage.data?.skills ?? []
-  const hasFilters = Boolean(staffFilter || query.trim() || skills.length || skillStatus !== 'all' || Object.values(columnFilters).some(Boolean))
-  const resetFilters = () => { setQuery(''); setSkills([]); setSkillStatus('all'); setSkillMode('all'); setColumnFilters({}); changeStaff('') }
+  const filterCount = activeFilterCount(columnFilters, staffFilter, skills, skillStatus)
+  const hasFilters = filterCount > 0 || Boolean(query.trim()) || pool !== 'all'
+  const setColumnFilter = (key: string, value: string) => setColumnFilters(previous => ({ ...previous, [key]: value }))
+  const resetFilters = () => { setQuery(''); setPool('all'); setSkills([]); setSkillStatus('all'); setSkillMode('all'); setColumnFilters({}); changeStaff('') }
 
   const params = new URLSearchParams({ q: query, pool, skill_mode: skillMode, missing_skills: String(skillStatus === 'missing'), column_filters: JSON.stringify(columnFilters), sort: sort.key, direction: sort.dir })
   if (staffFilter) params.set('staff', staffFilter)
   skills.forEach(skill => params.append('skills', skill))
   const filterQuery = params.toString()
   const result = snapshot?.scope === filterQuery ? snapshot : null
-  useEffect(() => { setPage(0); setSelected([]); setReassigning(null) }, [filterQuery])
+  useEffect(() => { setPage(0); setSelected([]); setReassigning(null) }, [filterQuery, pageSize])
   useEffect(() => {
     if (!directoryReady) return
     const controller = new AbortController()
     setLoading(true); setLoadError('')
     const timer = window.setTimeout(() => {
-      api.get<{ items: Candidate[]; total: number; page: number }>(`/candidates?${filterQuery}&page=${page}&page_size=20`, { signal: controller.signal })
+      api.get<{ items: Candidate[]; total: number; page: number }>(`/candidates?${filterQuery}&page=${page}&page_size=${pageSize}`, { signal: controller.signal })
         .then(data => { if (!controller.signal.aborted) setSnapshot({ ...data, scope: filterQuery }) })
-        .catch(error => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : 'Search failed.') })
+        .catch(error => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : 'We could not search. Please try again.') })
         .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     }, 250)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [directoryReady, filterQuery, page, store.candidates, store.me.id])
+  }, [directoryReady, filterQuery, page, pageSize, store.candidates, store.me.id])
   const rows = result?.items ?? []
   const countsScope = `${staffFilter}:${refreshToken}`
   useEffect(() => {
@@ -115,6 +118,22 @@ export default function DataBankPage() {
     return () => controller.abort()
   }, [directoryReady, countsScope, store.candidates])
   const counts = poolCounts?.scope === countsScope ? poolCounts.counts : null
+  const changeView = (next: DbView) => { setView(next); saveView('data-bank', next) }
+  // Arrival history per KPI slice, from the real added dates of the loaded directory.
+  const slices = useMemo(() => {
+    const unmapped = (candidate: Candidate) => !store.activeApplicationFor(candidate.id)
+    const make = (keep: (candidate: Candidate) => boolean) => {
+      const dates = ownedCandidates.filter(keep).map(candidate => candidate.addedAt)
+      return { trend: arrivalTrend(dates), spark: weeklyArrivals(dates) }
+    }
+    return {
+      all: make(() => true),
+      unmapped: make(unmapped),
+      needs_review: make(candidate => !!candidate.needsReview || candidate.status === 'needs_review'),
+      not_interested: make(candidate => candidate.status === 'not_interested'),
+      deployed: make(candidate => candidate.status === 'deployed'),
+    }
+  }, [ownedCandidates, store.applications])
   const assignWaiting = async () => {
     if (assigningWaiting) return
     setAssigningWaiting(true); setMutationError('')
@@ -123,135 +142,65 @@ export default function DataBankPage() {
       const message = assignWaitingMessage(outcome)
       store.notify(message.text, message.tone)
       setSelected([])
-      try { await store.refresh({ keepCurrent: true }) } catch { store.notify('Candidates were assigned. Refresh the directory to see current ownership.', 'warn') }
+      try { await store.refresh({ keepCurrent: true }) } catch { store.notify('Candidates were assigned. Refresh the list to see the changes.', 'warn') }
       setRefreshToken(value => value + 1)
-    } catch (error) { setMutationError(error instanceof Error ? error.message : 'Waiting candidates could not be assigned.') } finally { setAssigningWaiting(false) }
+    } catch (error) { setMutationError(error instanceof Error ? error.message : 'We could not assign the waiting candidates. Please try again.') } finally { setAssigningWaiting(false) }
   }
   const exportExcel = async () => {
     setExporting(true); setMutationError('')
     try {
       const response = await fetch(fileHref(`/api/candidates/export?${filterQuery}`), { credentials: 'include' })
-      if (!response.ok) throw new Error('Unable to export this filtered Data Bank. Please retry.')
+      if (!response.ok) throw new Error('We could not make the Excel file. Please try again.')
       const url = URL.createObjectURL(await response.blob())
       const link = document.createElement('a'); link.href = url; link.download = 'candidate-data-bank.xlsx'
       document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch (error) { setMutationError(error instanceof Error ? error.message : 'Export failed.') } finally { setExporting(false) }
+    } catch (error) { setMutationError(error instanceof Error ? error.message : 'We could not make the Excel file. Please try again.') } finally { setExporting(false) }
   }
 
   // A hidden selection must not be reassigned after changing the talent pool.
-  useEffect(() => { setSelected([]) }, [query, pool, skills, skillMode, skillStatus, page])
+  useEffect(() => { setSelected([]) }, [query, pool, skills, skillMode, skillStatus, page, pageSize])
 
-  if (!directoryReady) return <>
-    <PageHeader title="Data Bank" eyebrow="Talent directory" description="Current candidates and recruiter ownership." />
+  if (!directoryReady) return <div className="db">
+    <PageHeader title="Data Bank" description="Everyone we have on file, who looks after them, and where they are in the 11 stages" />
     <Panel><div className="space-y-3 p-5">
-      {directoryError ? <><p role="alert" className="text-sm text-stamp-700">{directoryError}</p><p className="text-sm text-ink-500">Refresh the directory to load current ownership. Previous summaries and assignment actions stay hidden until this check succeeds.</p><Button onClick={() => setRefreshToken(value => value + 1)}>Retry directory refresh</Button></>
-        : <p role="status" className="text-sm text-ink-500">Loading current candidates and ownership…</p>}
+      {directoryError ? <><p role="alert" className="text-sm text-stamp-700">{directoryError}</p><p className="text-sm text-ink-500">Refresh to load the latest list. The totals and the assign buttons stay hidden until it loads.</p><Button onClick={() => setRefreshToken(value => value + 1)}>Try again</Button></>
+        : <p role="status" className="text-sm text-ink-500">Loading candidates…</p>}
     </div></Panel>
-  </>
+  </div>
 
-  const columns: Column<Candidate>[] = [
-    {
-      key: 'name',
-      header: 'Candidate',
-      sortable: true,
-      value: (c) => c.name,
-      width: '27%',
-      render: (c) => (
-        <RecordIdentity
-          name={c.name}
-          detail={<>
-            <span className="ident block max-w-[16rem] truncate" title={c.ref}>ID · {c.ref}</span>
-            <span className="block whitespace-nowrap text-[12.5px] text-ink-400">Added {dateLabel(c.addedAt)}{c.passportNo ? ' · Passport' : ''}</span>
-          </>}
-        />
-      ),
-    },
-    {
-      key: 'designation',
-      header: 'Role',
-      sortable: true,
-      value: (c) => c.designations[0] ?? '',
-      width: '21%',
-      render: (c) => {
-        const skills = normalizedSkills(c.skills)
-        return (
-          <div className="min-w-[11rem] max-w-[17rem]">
-            <p className="font-medium text-ink">{c.designations[0] || <span className="font-normal text-ink-400">Not recorded</span>}</p>
-            {skills.length > 0 && <p className="mt-0.5 truncate text-[13px] text-ink-500" title={skills.join(', ')}>{skills.slice(0, 2).join(' · ')}{skills.length > 2 ? ` +${skills.length - 2}` : ''}</p>}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'experience',
-      header: 'Experience',
-      sortable: true,
-      align: 'right',
-      width: '96px',
-      className: 'whitespace-nowrap',
-      value: (c) => c.totalExperience,
-      render: (c) => <span className="tnum font-medium text-ink">{c.totalExperience} {c.totalExperience === 1 ? 'yr' : 'yrs'}</span>,
-    },
-    {
-      key: 'phone',
-      header: 'Contact',
-      value: (c) => c.phone,
-      width: '22%',
-      render: (c) => (
-        <div className="min-w-[12rem]">
-          <p className="ident whitespace-nowrap font-medium text-ink">{c.phone}</p>
-          {c.email && <p className="max-w-[15rem] truncate text-[13px] text-ink-500" title={c.email}>{c.email}</p>}
-          <p className="text-[12.5px] text-ink-400">Source · {SOURCE_LABEL[c.source] ?? c.source}</p>
-        </div>
-      ),
-    },
-    {
-      key: 'owner',
-      header: 'Assignment & status',
-      sortable: true,
-      value: (c) => ownerLabel(store.user(c.ownerId)?.name),
-      width: '20%',
-      render: (c) => {
-        const app = store.activeApplicationFor(c.id)
-        const owner = c.ownerId ? store.user(c.ownerId) : undefined
-        return (
-          <div className="min-w-[10rem] space-y-1">
-            <p className="flex items-center gap-1.5 whitespace-nowrap">
-              <UserRound size={14} className="shrink-0 text-ink-400" aria-hidden />
-              {owner ? <span className="font-medium text-ink">{owner.name}</span> : <span className="font-medium text-amber-700">{ownerLabel(null)}</span>}
-            </p>
-            <StatusPill status={c.needsReview && c.status !== 'needs_review' ? 'needs_review' : c.status} dot />
-            <p className="text-[12.5px] text-ink-400">
-              {app ? `${store.order(app.orderId)?.ref ?? 'Order'} · Stage ${app.currentStage} ${stageByNo(app.currentStage).title}` : 'Not mapped to an order'}
-            </p>
-          </div>
-        )
-      },
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: '84px',
-      render: (c) => (
-        <div className="flex items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
-          <IconButton label={`Open ${c.name}`} onClick={() => navigate(`/candidates/${c.id}`)}><Eye className="h-4 w-4" /></IconButton>
-          {store.can('reassign') && <IconButton label={`Reassign ${c.name}`} onClick={() => { setMutationError(''); setReassigning([c.id]) }}><UserCog className="h-4 w-4" /></IconButton>}
-        </div>
-      ),
-    },
-  ]
+  // The eleven columns need about TABLE_MIN_WIDTH; narrower than that the same candidates read as stacked cards.
+  const forceCards = boxWidth > 0 && boxWidth < TABLE_MIN_WIDTH
+  const showCards = forceCards || view === 'cards'
+  const openCandidate = (candidate: Candidate) => navigate(`/candidates/${candidate.id}`)
+  const reassignOne = (candidate: Candidate) => { setMutationError(''); setReassigning([candidate.id]) }
+  const columns = dataBankColumns({ store, onOpen: openCandidate, onReassign: reassignOne, onEdit: setEditing, onOpenStage: setOpenStage })
+  const notMapped = counts?.unmapped ?? ownedCandidates.filter((candidate) => !store.activeApplicationFor(candidate.id)).length
+  const notInterested = counts?.not_interested ?? ownedCandidates.filter((candidate) => candidate.status === 'not_interested').length
+  const needsReview = counts?.needs_review ?? ownedCandidates.filter((candidate) => candidate.needsReview || candidate.status === 'needs_review').length
+  const onFile = counts?.all ?? ownedCandidates.length
+  const total = result?.total ?? 0
+  const POOL_TITLE: Record<DataBankPool, string> = { all: 'All candidates', unmapped: 'No order yet', unassigned: NEEDS_ASSIGNMENT_LABEL, needs_review: 'Needs review', not_interested: 'Not interested' }
+  const narrowed = filterCount > 0 || Boolean(query.trim())
+  const emptyState = (
+    <EmptyState
+      title={loading ? 'Searching candidates…' : narrowed ? 'No matching candidates' : emptyPoolCopy(pool)?.title ?? 'No candidates yet'}
+      description={
+        narrowed ? 'Try another search or filter, or clear the filters to see everyone.'
+          : emptyPoolCopy(pool)?.description ?? 'Add a candidate, or connect an email account so resumes come in on their own.'
+      }
+      action={narrowed ? <Button onClick={resetFilters}>Clear filters</Button> : <Button variant="primary" onClick={() => navigate('/add-candidate')}>Add candidate</Button>}
+    />
+  )
 
   return (
-    <>
+    <div className="db">
       <PageHeader
         title="Data Bank"
-        eyebrow="Talent directory"
-        description="Your next great placement starts here. Find talent across profiles, skills, and resumes."
+        description="Everyone we have on file, who looks after them, and where they are in the 11 stages"
         actions={
           <>
-            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => { setSelected([]); setReassigning(null); setRefreshToken(value => value + 1) }}>Refresh directory</Button>
             {canAssignWaiting(counts, store.can('reassign')) && (
-              <Button variant="primary" disabled={loading || !!loadError || assigningWaiting} icon={<UserCog className="h-4 w-4" />} onClick={() => void assignWaiting()}>
+              <Button variant="secondary" disabled={loading || !!loadError || assigningWaiting} icon={<UserCog className="h-4 w-4" />} onClick={() => void assignWaiting()}>
                 {assignWaitingLabel(counts?.unassigned ?? 0, assigningWaiting)}
               </Button>
             )}
@@ -260,168 +209,94 @@ export default function DataBankPage() {
                 Reassign {selected.length}
               </Button>
             )}
-            {store.can('export') && (
-              <Button variant="secondary" disabled={loading || !!loadError || exporting} icon={<Download className="h-4 w-4" />} onClick={() => void exportExcel()}>
-                {exporting ? 'Preparing Excel…' : 'Export to Excel'}
-              </Button>
-            )}
-            <Button variant="primary" icon={<UserPlus className="h-4 w-4" />} onClick={() => navigate('/add-candidate')}>
+            <Button variant="secondary" icon={<UserPlus className="h-4 w-4" />} onClick={() => navigate('/add-candidate')}>
               Add candidate
             </Button>
+            {store.can('export') && (
+              <Button variant="primary" disabled={loading || !!loadError || exporting} icon={<Download className="h-4 w-4" />} onClick={() => void exportExcel()}>
+                {exporting ? 'Preparing Excel…' : 'Export Excel'}
+              </Button>
+            )}
           </>
         }
       />
-      {(loadError || mutationError) && <p role="alert" className="mb-4 rounded-panel bg-stamp-50 p-4 text-sm text-stamp-600">{loadError || mutationError}{loadError && result && ' Showing the last loaded page.'}</p>}
+      {(loadError || mutationError) && <p role="alert" className="db-alert">{loadError || mutationError}{loadError && result && ' Showing the last loaded page.'}</p>}
 
-      <SummaryCards
+      <KpiCards
         items={[
-          {
-            label: 'Total candidates',
-            value: ownedCandidates.length,
-            detail: staffFilter ? 'Assigned to this staff member' : 'Talent in your database',
-            icon: Users,
-          },
-          {
-            label: 'Not mapped',
-            value: ownedCandidates.filter((candidate) => !store.activeApplicationFor(candidate.id))
-              .length,
-            detail: 'Available to match with an order',
-            icon: UserSearch,
-            tone: 'violet',
-            active: pool === 'unmapped',
-            onSelect: () => setPool(current => togglePool(current, 'unmapped')),
-          },
-          {
-            label: 'Needs review',
-            value: counts?.needs_review ?? ownedCandidates.filter(
-              (candidate) => candidate.needsReview || candidate.status === 'needs_review',
-            ).length,
-            detail: pool === 'needs_review' ? 'Showing these profiles. Select again to show everyone' : 'Select to show profiles that need attention',
-            icon: FileSearch,
-            tone: 'amber',
-            active: pool === 'needs_review',
-            onSelect: () => setPool(current => togglePool(current, 'needs_review')),
-          },
-          {
-            label: 'Deployed',
-            value: ownedCandidates.filter((candidate) => candidate.status === 'deployed').length,
-            detail: 'Successful candidate placements',
-            icon: CircleCheck,
-            tone: 'green',
-          },
+          { label: 'All candidates', value: counts?.all ?? ownedCandidates.length, detail: staffFilter ? 'Assigned to this staff member' : 'Everyone in the Data Bank', icon: Users, ...slices.all, active: pool === 'all', onSelect: () => setPool('all') },
+          { label: 'No order yet', value: notMapped, detail: 'Not matched to an order. Ready to match.', icon: UserSearch, ...slices.unmapped, active: pool === 'unmapped', onSelect: () => setPool(current => togglePool(current, 'unmapped')) },
+          { label: 'Needs review', value: needsReview, detail: pool === 'needs_review' ? 'Select again to show everyone' : 'Profiles that need attention', icon: FileSearch, tone: 'warn', ...slices.needs_review, active: pool === 'needs_review', onSelect: () => setPool(current => togglePool(current, 'needs_review')) },
+          { label: 'Not interested', value: notInterested, detail: pool === 'not_interested' ? 'Select again to show everyone' : 'Offer them another order later', icon: UserRoundX, tone: 'quiet', ...slices.not_interested, active: pool === 'not_interested', onSelect: () => setPool(current => togglePool(current, 'not_interested')) },
+          { label: 'Deployed', value: ownedCandidates.filter((candidate) => candidate.status === 'deployed').length, detail: 'Placed in a job abroad', icon: CircleCheck, tone: 'ok', ...slices.deployed },
         ]}
       />
 
-      <Panel flush>
-        <PanelHeader title="All candidates" meta={loading ? 'Searching…' : `${result?.total ?? 0} matching${counts ? ` of ${counts.all} on file` : ''}`} />
-        <Tabs tabs={[
-          { key: 'all', label: 'Everyone', count: counts?.all ?? ownedCandidates.length },
-          { key: 'unmapped', label: 'Not mapped', count: counts?.unmapped },
-          { key: 'unassigned', label: NEEDS_ASSIGNMENT_LABEL, count: counts?.unassigned, tone: counts?.unassigned ? 'amber' : undefined },
-          { key: 'needs_review', label: 'Needs review', count: counts?.needs_review, tone: counts?.needs_review ? 'amber' : undefined },
-          { key: 'not_interested', label: 'Not interested', count: counts?.not_interested },
-        ]} active={pool} onChange={(key) => setPool(key as DataBankPool)} />
-        <div className="workspace-list-toolbar">
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            placeholder="Search name, role, skills, passport or email"
-            className="min-w-0 max-w-xl flex-1"
-          />
-          {store.can('all_reports') && <Select className="w-full sm:w-52" aria-label="Filter candidates by staff" value={staffFilter} onChange={event => changeStaff(event.target.value)}>
-            <option value="">All staff</option>
-            {store.users.filter(user => user.role !== 'admin' || user.id === staffFilter).map(user => <option key={user.id} value={user.id}>{user.name}{!user.active ? ' (inactive)' : ''}</option>)}
-          </Select>}
-          <Select className="w-full sm:w-44" aria-label="Sort candidates" value={`${sort.key}:${sort.dir}`} onChange={event => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
-            <option value="added:desc">Newest first</option>
-            <option value="added:asc">Oldest first</option>
-            <option value="name:asc">Name A–Z</option>
-            <option value="experience:desc">Most experience</option>
-            {!['added:desc', 'added:asc', 'name:asc', 'experience:desc'].includes(`${sort.key}:${sort.dir}`) && <option value={`${sort.key}:${sort.dir}`}>Sorted by column</option>}
-          </Select>
-        </div>
-        {staffFilter && <p className="border-b border-rule px-4 pb-3 text-sm text-ink-500">Candidates currently owned by <strong className="font-medium text-ink">{store.user(staffFilter)?.name || 'the selected staff member'}</strong>. <button className="font-medium text-navy-700" onClick={() => changeStaff('')}>Show all staff</button></p>}
-
-        <div className="flex flex-wrap items-center gap-2 border-y border-rule-soft bg-field/50 px-4 py-3" aria-label="Candidate filters">
-          <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500">Filters</span>
-          <Select className="w-44" aria-label="Filter by status" value={columnFilters.status ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, status: event.target.value }))}>
-            <option value="">Any status</option>
-            {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </Select>
-          <Select className="w-40" aria-label="Filter by source" value={columnFilters.source ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, source: event.target.value }))}>
-            <option value="">Any source</option>
-            {Object.values(SOURCE_LABEL).map(label => <option key={label} value={label}>{label}</option>)}
-          </Select>
-          <Select className="w-40" aria-label="Filter by passport" value={columnFilters.passport ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, passport: event.target.value }))}>
-            <option value="">Any passport</option>
-            <option value="Yes">Passport on file</option>
-            <option value="No">No passport</option>
-          </Select>
-          <Select className="w-44" aria-label="Filter by recruitment stage" value={columnFilters.stage ?? ''} onChange={event => setColumnFilters(previous => ({ ...previous, stage: event.target.value }))}>
-            <option value="">Any stage</option>
-            <option value="0">Not mapped</option>
-            {Array.from({ length: 11 }, (_, index) => index + 1).map(no => <option key={no} value={String(no)}>Stage {no} · {stageByNo(no).title}</option>)}
-          </Select>
-          <SearchInput className="w-40" value={columnFilters.order ?? ''} onChange={value => setColumnFilters(previous => ({ ...previous, order: value }))} placeholder="Order ref" />
-          <SearchInput className="w-44" value={columnFilters.designation ?? ''} onChange={value => setColumnFilters(previous => ({ ...previous, designation: value }))} placeholder="Role contains" />
-          <Select className="w-52" aria-label="Filter by recorded skill" value="" disabled={coverage.loading || !!coverage.error} onChange={(event) => {
-            if (event.target.value) { setSkills((current) => [...current, event.target.value]); setSkillStatus('all') }
-          }}>
-            <option value="">{coverage.loading ? 'Loading skills…' : 'Any skill'}</option>
-            {facets.filter((facet) => !skills.includes(facet.key)).slice().sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).map((facet) => (
-              <option key={facet.key} value={facet.key}>{facet.label} ({facet.count})</option>
-            ))}
-          </Select>
-          {skills.length > 1 && <Select className="w-44" aria-label="Skill matching" value={skillMode} onChange={(event) => setSkillMode(event.target.value as 'all' | 'any')}>
-            <option value="all">Match all skills</option>
-            <option value="any">Match any skill</option>
-          </Select>}
-          <Select className="w-48" aria-label="Skill coverage" value={skillStatus} onChange={(event) => {
-            setSkillStatus(event.target.value)
-            if (event.target.value === 'missing') setSkills([])
-          }}>
-            <option value="all">All candidates</option>
-            <option value="missing">No skills recorded{coverage.data ? ` (${coverage.data.missing})` : ''}</option>
-          </Select>
-          {skills.map((key) => <Button key={key} size="sm" onClick={() => setSkills((current) => current.filter((skill) => skill !== key))}
-            aria-label={`Remove skill ${facets.find((facet) => facet.key === key)?.label ?? key}`}>
-            {facets.find((facet) => facet.key === key)?.label ?? key} ×
-          </Button>)}
-          {hasFilters && <Button size="sm" variant="ghost" onClick={resetFilters}>Clear filters</Button>}
+      <Panel flush className="db-panel">
+        <div className="db-panel-head">
+          <div className="min-w-0">
+            <h2 className="db-panel-title">{POOL_TITLE[pool]}</h2>
+            <p className="db-panel-sub tnum">{loading && !result ? 'Searching…' : `Showing ${total} of ${onFile} candidates`}</p>
+          </div>
+          <div className="db-panel-tools">
+            <label className="db-search">
+              <Search size={15} aria-hidden="true" />
+              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, phone, skills or resume" aria-label="Search name, phone, passport, skills or resume content" />
+            </label>
+            <Select className="db-sort" aria-label="Sort candidates by" value={`${sort.key}:${sort.dir}`} onChange={event => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
+              {SORT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </Select>
+            <button type="button" className="db-refresh" title="Refresh the list" aria-label="Refresh the list" onClick={() => { setSelected([]); setReassigning(null); setRefreshToken(value => value + 1) }}><RefreshCw size={15} /></button>
+            {!forceCards && <ViewToggle view={view} onChange={changeView} />}
+          </div>
         </div>
 
-        <DataTable
-          resetPageKey={`${staffFilter}:${pool}:${query}:${skills.join('|')}:${skillMode}:${skillStatus}`}
-          rows={rows}
-          columns={columns}
-          rowKey={(c) => c.id}
-          selectable={store.can('reassign')}
-          selected={selected}
-          onSelectedChange={setSelected}
-          onRowClick={(c) => navigate(`/candidates/${c.id}`)}
-          pageSize={20}
-          server={{ page: result?.page ?? page, total: result?.total ?? 0, onPageChange: setPage, sort,
-            onSortChange: next => setSort(next), filters: columnFilters,
-            onFilterChange: (key, value) => setColumnFilters(previous => ({ ...previous, [key]: value })) }}
-          empty={
-            <EmptyState
-              title={loading ? 'Searching candidates…' : hasFilters ? 'No matching candidates' : emptyPoolCopy(pool)?.title ?? 'No candidates yet'}
-              description={
-                hasFilters ? 'Try another search or filter, or clear filters to show the whole directory.'
-                  : emptyPoolCopy(pool)?.description ?? 'Add a candidate, or connect an email account so resumes arrive on their own.'
-              }
-              action={hasFilters ? <Button onClick={resetFilters}>Clear filters</Button> : <Button variant="primary" onClick={() => navigate('/add-candidate')}>Add candidate</Button>}
-            />
-          }
+        <DataBankFilters
+          filters={columnFilters}
+          onFilter={setColumnFilter}
+          pool={pool}
+          onPool={setPool}
+          staff={staffFilter}
+          onStaff={changeStaff}
+          users={store.users}
+          skills={skills}
+          onSkills={setSkills}
+          skillMode={skillMode}
+          onSkillMode={setSkillMode}
+          skillStatus={skillStatus}
+          onSkillStatus={setSkillStatus}
+          coverage={coverage}
+          moreOpen={moreOpen}
+          onMoreToggle={() => setMoreOpen(open => !open)}
+          canClear={hasFilters}
+          onClear={resetFilters}
         />
+
+        <div ref={boxRef} className="db-box">
+          {rows.length === 0 ? emptyState : showCards ? (
+            <DataBankCards rows={rows} store={store} onOpen={openCandidate} onReassign={reassignOne} onEdit={setEditing} onOpenStage={setOpenStage} />
+          ) : (
+            <DbTable
+              label="Candidates"
+              rows={rows}
+              columns={columns}
+              rowKey={(c) => c.id}
+              selectable={store.can('reassign')}
+              selected={selected}
+              onSelectedChange={setSelected}
+              onRowClick={openCandidate}
+              sort={sort}
+              onSort={(key) => setSort(current => ({ key, dir: current.key === key && current.dir === 'asc' ? 'desc' : 'asc' }))}
+            />
+          )}
+        </div>
+        {rows.length > 0 && <Pager page={result?.page ?? page} pageSize={pageSize} total={total} noun="candidates" onPage={setPage} onPageSize={setPageSize} />}
+        <p className="db-hint">Click a row to open the candidate. Click an order to see its 11 stages.</p>
       </Panel>
 
-      <p className="workspace-footnote">
-        Select a candidate to view their profile. Manage recruitment stages from Mapped Candidates.
-      </p>
-
       {reassigning && <ReassignCandidatesDialog candidateIds={reassigning} onClose={() => setReassigning(null)} onSaved={() => setSelected([])} />}
-
-    </>
+      {editing && <CandidateEditDialog candidate={editing} onClose={() => setEditing(null)} />}
+      <StageModal applicationId={openStage} open={!!openStage} onClose={() => setOpenStage(null)} />
+    </div>
   )
 }

@@ -14,10 +14,11 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.api.schemas import UserOut
 from app.db.session import get_db
-from app.core.deps import current_user
+from app.core.deps import current_user, remember_signin
 from app.db.models import Role, Session as SessionRow, User
 from app.core.security import (
     SESSION_COOKIE,
+    SESSION_TTL,
     hash_password,
     needs_rehash,
     session_expiry,
@@ -25,6 +26,18 @@ from app.core.security import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# A readable (not HttpOnly) hint of WHO is signed in: the user id and nothing else. The session cookie is
+# HttpOnly, so the page cannot tell whose account the browser holds until the session request returns.
+# The front end paints a remembered workspace instantly only when this id matches the one it stored, which
+# keeps another person's data off the screen after a sign-out or account switch in a different tab. It is
+# not a credential: it grants nothing and the server never trusts it.
+USER_HINT_COOKIE = "crm_uid"
+
+
+def _set_user_hint(response: Response, user_id: str) -> None:
+    response.set_cookie(USER_HINT_COOKIE, user_id, httponly=False, samesite="lax", secure=True,
+                        max_age=int(SESSION_TTL.total_seconds()), path="/")
 
 
 class LoginIn(BaseModel):
@@ -46,19 +59,26 @@ def session_state(
     response: Response,
     db: DbSession = Depends(get_db),
     crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    user_hint: str | None = Cookie(default=None, alias=USER_HINT_COOKIE),
     workspace: bool = False,
     compact: bool = False,
 ) -> dict[str, Any]:
     """Return the current account, or an anonymous state without an auth error."""
     response.headers["Cache-Control"] = "no-store"
     if not crm_session:
+        if user_hint:
+            response.delete_cookie(USER_HINT_COOKIE, path="/")
         return {"me": None}
     try:
         user = current_user(db=db, crm_session=crm_session)
     except HTTPException as exc:
         if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            if user_hint:
+                response.delete_cookie(USER_HINT_COOKIE, path="/")
             return {"me": None}
         raise
+    if user_hint != user.id:
+        _set_user_hint(response, user.id)  # accounts that signed in before the hint existed
     if workspace:
         # Authenticate once and return the desk in the same response. Anonymous
         # visits still return immediately without loading any CRM collections.
@@ -104,6 +124,9 @@ def login(body: LoginIn, response: Response, db: DbSession = Depends(get_db)) ->
         else 60 * 60 * 24 * 14,
         path="/",
     )
+    _set_user_hint(response, user.id)
+    # The commit above emptied the sign-in memo; seed it so this session's first request skips the lookup.
+    remember_signin(row.id, row.expires_at, user)
     return Me(id=user.id, name=user.name, email=user.email, role=user.role, active=user.active)
 
 
@@ -123,6 +146,7 @@ def logout(
         logout_session(db, crm_session)
         db.commit()
     response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(USER_HINT_COOKIE, path="/")
 
 
 @router.get("/me", response_model=Me)

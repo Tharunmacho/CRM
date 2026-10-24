@@ -1,0 +1,133 @@
+/*
+ * WhatsApp page (.wa-v2): KPI row (shared SummaryCards), line tabs, conversation workspace (see
+ * features/whatsapp/whatsapp-chat.css), candidate-intake table and channel settings. Flat 12px
+ * cards and design tokens only (styles/theme.css); no shadows or gradients. The inbox itself lives
+ * in features/inbox/mailbox.css.
+ */
+.wa-v2 { display: flex; min-width: 0; flex-direction: column; gap: 16px; font-family: inherit; }
+.wa-v2 :is(button, input, select, textarea) { font-family: inherit; }
+.workspace-page .wa-v2 .workspace-page-header { margin-bottom: 0; }
+.wa-v2 .workspace-summary { margin: 0; }
+.wa-v2 .wa-tabs { margin-top: 4px; padding: 0; }
+.wa-v2 .wa-tabs .ui-tab { padding: 0 16px; }
+
+/* ---------- Alerts and setup ---------- */
+.wa-alert { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); color: var(--error-ink); font-size: 13.5px; line-height: 1.55; }
+.wa-alert > svg { flex: none; margin-top: 2px; }
+.wa-alert > .ui-button { flex: none; margin-left: auto; }
+.wa-alert-sub { margin-top: 2px; color: var(--text-muted); font-size: 13px; }
+.wa-setup { display: flex; align-items: flex-start; gap: 14px; }
+.wa-setup-icon, .wa-channel-icon { display: grid; flex: none; width: 36px; height: 36px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); }
+.wa-setup h2, .wa-channel h2 { font-size: 16px; font-weight: 600; letter-spacing: -.01em; color: var(--text-main); }
+.wa-setup p { margin-top: 4px; font-size: 14px; color: var(--text-muted); }
+.wa-setup details { margin-top: 12px; font-size: 13px; color: var(--text-muted); }
+.wa-setup summary { cursor: pointer; font-weight: 500; color: var(--primary); }
+.wa-setup details p { margin-top: 8px; font-size: 12.5px; }
+
+/* ---------- Candidate intake ---------- */
+.wa-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border-faint); }
+.wa-toolbar .ui-search { width: 100%; }
+.wa-intake .ui-table-pagination { display: none; }
+.wa-intake .ui-data-table td { vertical-align: middle; }
+.wa-intake .record-name, .wa-intake .record-detail { max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-intake .ui-data-table .record-identity { min-width: 0; }
+.wa-doc { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
+.wa-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--text-main); }
+.wa-doc-caption { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 12.5px; line-height: 1.4; color: var(--text-muted); }
+.wa-doc-error { margin-top: 2px; font-size: 12.5px; line-height: 1.4; color: var(--error-ink); }
+.wa-when { font-size: 13px; color: var(--text-main); }
+.wa-state { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 6px; }
+.wa-state .mb-chip { max-width: 100%; }
+.wa-doc-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.wa-act { display: inline-flex; height: 32px; align-items: center; gap: 5px; padding: 0 9px; border-radius: 8px; color: var(--primary); font-size: 13px; font-weight: 500; transition: background-color .14s; }
+.wa-act:hover { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); }
+.wa-act.is-icon { width: 32px; justify-content: center; padding: 0; color: var(--text-muted); }
+.wa-act.is-icon:hover { color: var(--text-main); background: var(--tint-2); }
+.wa-act:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.wa-loading { padding: 40px 20px; text-align: center; font-size: 14px; color: var(--text-muted); }
+.wa-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 0 20px; border-top: 1px solid var(--border-faint); font-size: 13px; color: var(--text-muted); }
+.wa-pager > div { display: flex; gap: 8px; }
+.wa-pager .ui-button { width: 36px; padding: 0; }
+.wa-open-original { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 6px 12px 6px 8px; border: 1px solid var(--border-main); border-radius: 999px; color: var(--primary); font-size: 13px; font-weight: 500; }
+.wa-open-original:hover { border-color: var(--border-hover); }
+
+/* ---------- Channel settings ---------- */
+.wa-channels { display: flex; flex-direction: column; gap: 16px; }
+.wa-channel { display: flex; flex-direction: column; gap: 16px; }
+.wa-channel > header { display: flex; align-items: center; gap: 12px; }
+.wa-channel > header p { font-size: 13px; color: var(--text-muted); }
+.wa-channel .mb-kv { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wa-channel-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 10px; }
+.wa-channel-note { font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.wa-channel-error { font-size: 13.5px; color: var(--error-ink); }
+
+@media (max-width: 760px) {
+  .wa-toolbar { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
+  .wa-channel .mb-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wa-channel-actions .ui-button { width: 100%; }
+  .wa-pager { padding: 0 16px; }
+}
+/* The stacked card view of the intake table (below 1280px) keeps its actions on one tidy row. */
+@media (max-width: 1279px) {
+  .wa-intake .wa-doc-actions { justify-content: flex-end; }
+  .wa-intake .wa-state { align-items: flex-end; }
+  .wa-intake td .wa-doc { text-align: left; }
+}
+
+/* KPI row: stays four across until a phone, with a slightly smaller figure so a time still fits. */
+@media (min-width: 761px) {
+  .wa-v2 .workspace-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 761px) and (max-width: 1279px) {
+  .wa-v2 .summary-card { padding: 16px; }
+  .wa-v2 .summary-card .summary-value { font-size: 28px; }
+  .wa-v2 .summary-card > p { font-size: 12.5px; }
+}
+/* Stacked intake cards: identity and document lead the card; the rest are label/value rows. */
+@media (max-width: 1279px) {
+  .wa-v2 .wa-intake .ui-data-table tbody td, .wa-v2 .wa-intake .ui-data-table tbody td:is(:first-child, :last-child) { padding-left: 0; padding-right: 0; }
+  .wa-v2 .wa-intake .ui-data-table tbody td .record-identity { margin: 0; padding: 0; }
+  .wa-intake .ui-data-table tbody td:is([data-label='Sender'], [data-label='Message / document']) { justify-content: flex-start; text-align: left; }
+  .wa-intake .ui-data-table tbody td:is([data-label='Sender'], [data-label='Message / document'])::before { display: none; }
+}
+
+/* ---------- Phones (WhatsApp page) ---------- */
+@media (max-width: 767px) {
+  .wa-v2 .ui-button, .wa-v2 .wa-act { min-height: 40px; }
+  .wa-v2 .wa-act.is-icon { width: 40px; }
+  .wa-pager .ui-button { width: 40px; }
+  .wa-v2 .workspace-page-header .workspace-header-actions > .ui-button { width: 100%; }
+  .wa-v2 .wa-tabs { padding-right: 28px; --fade: var(--bg-main);
+    background:
+      linear-gradient(90deg, var(--fade) 30%, transparent) left center / 36px 100% no-repeat local,
+      linear-gradient(270deg, var(--fade) 30%, transparent) right center / 36px 100% no-repeat local,
+      linear-gradient(90deg, rgba(0, 0, 0, .12), transparent) left center / 12px 100% no-repeat scroll,
+      linear-gradient(270deg, rgba(0, 0, 0, .12), transparent) right center / 12px 100% no-repeat scroll; }
+  .wa-v2 .summary-card .summary-value { font-size: 24px; }
+  .wa-v2 .wa-channel-actions { align-items: stretch; }
+  .wa-v2 .wa-channel-actions .ui-switch { position: relative; }
+  .wa-v2 .wa-channel-actions .ui-switch::after { content: ''; position: absolute; inset: -9px -6px; }
+  .wa-v2:has(.wa-has-selection) .workspace-summary, .wa-v2:has(.wa-has-selection) .workspace-page-header, .wa-v2:has(.wa-has-selection) .wa-tabs, .wa-v2:has(.wa-has-selection) .wa-alert { display: none; }
+  .wa-v2 textarea, .wa-v2 input, .wa-v2 select { font-size: 16px; }
+}
+@media (max-width: 359px) { .wa-v2 .workspace-summary { grid-template-columns: minmax(0, 1fr); } }
+
+/* Phones: each message is one card: who and what first, then Received and Status with the label above, actions last. */
+@media (max-width: 767px) {
+  .wa-v2 .wa-intake .ui-table-stack-1280 tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; padding: 16px; }
+  .wa-v2 .wa-intake .ui-table-stack-1280 tbody td { display: block; min-width: 0; padding: 0; text-align: left; }
+  .wa-v2 .wa-intake .ui-table-stack-1280 tbody td::before { display: block; margin-bottom: 4px; font-size: 12px; }
+  .wa-v2 .wa-intake .ui-table-stack-1280 tbody td:is([data-label='Sender'], [data-label='Message or document'], [data-label='Actions']) { grid-column: 1 / -1; }
+  .wa-v2 .wa-intake .ui-table-stack-1280 tbody td[data-label='Actions']::before { display: none; }
+  .wa-v2 .wa-intake .wa-state { align-items: flex-start; }
+  .wa-v2 .wa-intake .wa-doc-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 10px; border-top: 1px solid var(--border-faint); }
+  .wa-v2 .wa-intake .wa-doc-actions > * { width: 100%; justify-content: center; }
+  .wa-v2 .wa-intake .wa-act { border: 1px solid var(--border-control); border-radius: 8px; }
+}
+@media (max-width: 767px) { .wa-v2 .wa-intake .wa-act.is-icon::after { content: 'Download'; margin-left: 6px; font-size: 13px; font-weight: 500; color: var(--primary); } }
+
+@media (pointer: coarse) and (min-width: 768px) and (max-width: 1279px) {
+  .wa-v2 .ui-button, .wa-v2 .wa-act { min-height: 40px; }
+  .wa-v2 .wa-act.is-icon, .wa-pager .ui-button { width: 40px; }
+  .wa-v2 :is(input, select, textarea) { font-size: 16px; }
+}

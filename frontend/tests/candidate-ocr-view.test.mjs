@@ -78,7 +78,7 @@ test('primary and additional documents are listed in reading order, unknown data
   assert.equal(docs[2].label, 'Passport (additional document 1)')
   const extras = extraEntries(ocr)
   assert.deepEqual(extras.map((e) => e.id), ['person_split', 'future_field'])
-  assert.equal(extras[0].label, 'Document split provenance')
+  assert.equal(extras[0].label, 'How the documents were split')
 })
 
 test('page views keep the original page number and every page text, whitespace included', () => {
@@ -116,7 +116,7 @@ test('the local classification names the identified, unread and unknown pages', 
   assert.deepEqual(v.groups.map((g) => [g.label, g.pages]), [
     ['Identified as resume', '1'],
     ['Identified as Aadhaar', '3–4'],
-    ['Sent to Veris for this document', '1'],
+    ['Sent to the reader for this document', '1'],
     ['Pages that could not be read', '2'],
   ])
   assert.deepEqual(v.warnings, ['One or more pages could not be read.'])

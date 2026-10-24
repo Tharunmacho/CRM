@@ -308,7 +308,7 @@ export function extraEntries(ocr: unknown): OcrExtraEntry[] {
   const out: OcrExtraEntry[] = []
   for (const [key, payload] of Object.entries(ocr)) {
     if (!hasContent(payload)) continue
-    if (key === 'person_split') out.push({ id: key, label: 'Document split provenance', payload })
+    if (key === 'person_split') out.push({ id: key, label: 'How the documents were split', payload })
     else if (!HANDLED_KEYS.has(key)) out.push({ id: key, label: humanizeKey(key), payload })
   }
   const documents = normalizeOcr(ocr)
@@ -316,7 +316,7 @@ export function extraEntries(ocr: unknown): OcrExtraEntry[] {
   if (isRecord(ocr._sources)) {
     for (const [kind, payload] of Object.entries(ocr._sources)) {
       if (hasContent(payload) && !documents.some((d) => d.kind === kind && !d.additional)) {
-        out.push({ id: `source-${kind}`, label: `Source of ${(KIND_LABEL[kind] ?? humanizeKey(kind)).toLowerCase()}`, payload })
+        out.push({ id: `source-${kind}`, label: `Where the ${(KIND_LABEL[kind] ?? humanizeKey(kind)).toLowerCase()} came from`, payload })
       }
     }
   }
@@ -424,7 +424,7 @@ export function inspectionFromReport(report: unknown): InspectionView | null {
     ['Identified as resume', report.resume_pages],
     ['Identified as passport', report.passport_pages],
     ['Identified as Aadhaar', report.aadhaar_pages],
-    ['Sent to Veris for this document', report.selected_pages],
+    ['Sent to the reader for this document', report.selected_pages],
     ['Pages that could not be read', report.unread_pages],
     ['Pages not identified', report.unknown_pages],
   ]

@@ -8,11 +8,12 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ApiError, api } from '@/shared/api/client'
+import { ApiError, api, takeEarlyRead, type InboxUnreadCount } from '@/shared/api/client'
 import { createLatestRequest } from '@/shared/api/latest-request'
 import { createIngestionRefresh } from '@/shared/api/ingestion-refresh'
 import { agencyDay } from '@/shared/lib/task-time'
 import { indexWorkspace } from './workspace-index'
+import { forgetSnapshots, persistSoon, readPersisted, signedInUserHint } from './snapshot-cache'
 import type {
   Application,
   Candidate,
@@ -123,6 +124,8 @@ interface StoreValue extends Data {
   refresh: (options?: { keepCurrent?: boolean }) => Promise<void>
   /** Route-entry read: share current reads and reuse a snapshot loaded in the last five seconds. */
   ensureFresh: () => Promise<void>
+  /** Milliseconds since the workspace snapshot was last read, or Infinity when there is none. */
+  snapshotAge: () => number
   notify: (message: string, tone?: 'ok' | 'warn') => void
   dismissToast: () => void
 
@@ -163,15 +166,35 @@ interface StoreValue extends Data {
   addTodo: (payload: Record<string, unknown>) => Promise<void>
   toggleTodo: (id: string) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
-  reassign: (candidateIds: string[], toUserId: string, reason: string) => Promise<void>
+  reassign: (candidateIds: string[], toUserId: string, reason: string, restartClockReason?: string) => Promise<void>
 }
 
 const Ctx = createContext<StoreValue | null>(null)
 
+/** How often the desk asks whether new mail/intake arrived (and re-reads the unread badge). */
+const PULSE_MS = 20_000
+
+/**
+ * The last workspace this tab saw for the person the browser says is signed in, if any. It is painted
+ * straight away and replaced by the server's answer a moment later (see snapshot-cache.ts for the rules).
+ */
+function remembered(): { payload: Bootstrap; savedAt: number } | null {
+  const userId = signedInUserHint()
+  const found = readPersisted<Bootstrap>('bootstrap', userId)
+  const value = found?.value
+  if (!found || !value || value.me?.id !== userId || !Array.isArray(value.candidates) || !Array.isArray(value.orders)) return null
+  return { payload: value, savedAt: found.savedAt }
+}
+
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<Data>(EMPTY)
-  const [me, setMe] = useState<User | null>(null)
-  const [ready, setReady] = useState(false)
+  const [hydrated] = useState(remembered)
+  const [data, setData] = useState<Data>(() => {
+    if (!hydrated) return EMPTY
+    const { me: _who, ...rest } = hydrated.payload
+    return { ...EMPTY, ...rest }
+  })
+  const [me, setMe] = useState<User | null>(hydrated?.payload.me ?? null)
+  const [ready, setReady] = useState(Boolean(hydrated))
   const [loadError, setLoadError] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast>(null)
   const [inboxUnread, setInboxUnread] = useState(0)
@@ -183,7 +206,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pendingAuthWrites = useRef(0)
   const currentData = useRef(data)
   currentData.current = data
-  const lastLoadedAt = useRef(0)
+  const lastLoadedAt = useRef(hydrated?.savedAt ?? 0)
   const index = useMemo(() => indexWorkspace(data), [data.candidates, data.clients, data.companies,
     data.designations, data.orders, data.users, data.applications, data.tasks, data.remarks])
 
@@ -198,7 +221,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // One round trip for an authenticated startup; anonymous visits still
           // receive only { me: null } and never load CRM collections.
           if (checkSession) {
-            const session = await api.get<Bootstrap | { me: null }>('/auth/session?workspace=true&compact=true', { signal })
+            const sessionPath = '/auth/session?workspace=true&compact=true'
+            // index.html has usually started this request already, before this code loaded.
+            const session = (await takeEarlyRead<Bootstrap | { me: null }>('session', sessionPath))
+              ?? (await api.get<Bootstrap | { me: null }>(sessionPath, { signal }))
             if (session?.me === null) return null
             if (!session?.me?.id || !('candidates' in session)) {
               throw new ApiError(502, 'The server returned an invalid session response.')
@@ -217,8 +243,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (payload) {
             const { me: _who, ...rest } = payload
             setData({ ...EMPTY, ...rest })
+            persistSoon('bootstrap', payload.me.id, () => payload)
           } else {
             setData(EMPTY)
+            forgetSnapshots()
           }
           setLoadError(null)
           setReady(true)
@@ -229,6 +257,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             setMe(null)
             setData(EMPTY)
             setLoadError(null)
+            forgetSnapshots()
           } else if (!background) {
             setLoadError(
               error instanceof Error ? error.message : 'The workspace could not be loaded.',
@@ -267,7 +296,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // StrictMode replays this effect in development. Both setups share one request.
   useEffect(() => {
     mounted.current = true
-    void loadWorkspace(true).catch(() => {
+    // With a remembered workspace on screen, a failed check keeps it instead of replacing it with an error.
+    void loadWorkspace(true, false, Boolean(hydrated)).catch(() => {
       // The failure is displayed by the route/login screen.
     })
     return () => {
@@ -279,16 +309,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       })
     }
-  }, [loadWorkspace, requests])
+  }, [loadWorkspace, requests, hydrated])
 
-  // Email intake can finish while any authenticated screen is open. The small
-  // revision probe avoids repeatedly downloading the full recruitment snapshot.
+  // Email intake can finish while any authenticated screen is open. One small request answers both "did
+  // intake change?" (the revision, compared with the one loaded with the workspace) and "how many unread?"
+  // (the sidebar badge), so the full snapshot is only downloaded when something really changed. The bootstrap
+  // just delivered the current revision, so there is no immediate read: the first one waits a moment.
   useEffect(() => {
-    if (!ready || !me || loadError) return
+    if (!ready || !me || loadError) {
+      if (!me) setInboxUnread(0)
+      return
+    }
     const version = authVersion.current
+    let legacy = false
+    const applyUnread = (unread: InboxUnreadCount | null | undefined, signal: AbortSignal) => {
+      if (!signal.aborted && version === authVersion.current && typeof unread?.total === 'number') setInboxUnread(unread.total)
+    }
+    const readPulse = async (signal: AbortSignal): Promise<{ revision?: string }> => {
+      if (!legacy) {
+        try {
+          const result = await api.inbox.pulse({ signal })
+          applyUnread(result?.unread, signal)
+          return { revision: result?.revision }
+        } catch (error) {
+          // A server without /inbox/pulse answers 404/405, or serves the app shell for unknown paths (502 here).
+          if (!(error instanceof ApiError) || ![404, 405, 502].includes(error.status)) throw error
+          legacy = true
+        }
+      }
+      const [revision, unread] = await Promise.all([
+        api.inbox.revision({ signal }),
+        api.inbox.unreadCount({ signal }).catch(() => null),
+      ])
+      applyUnread(unread, signal)
+      return revision
+    }
     const observer = createIngestionRefresh({
       currentRevision: () => currentData.current.ingestionRevision,
-      readRevision: (signal) => api.inbox.revision({ signal }),
+      readRevision: readPulse,
       refresh: () => loadWorkspace(false, false, true),
       isCurrentSession: () =>
         mounted.current && version === authVersion.current && pendingAuthWrites.current === 0,
@@ -299,48 +357,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         void observer.check().catch(() => {})
       }
     }
-    read()
-    const timer = window.setInterval(read, 10_000)
+    readInboxUnread.current = async () => {
+      if (document.visibilityState !== 'visible') return
+      try { await observer.check() } catch { /* Keep the last known count; the next poll retries. */ }
+    }
+    const first = window.setTimeout(read, 1_200)
+    const timer = window.setInterval(read, PULSE_MS)
     document.addEventListener('visibilitychange', read)
     return () => {
       observer.dispose()
+      window.clearTimeout(first)
       window.clearInterval(timer)
       document.removeEventListener('visibilitychange', read)
-    }
-  }, [me?.id, ready, loadError, loadWorkspace])
-
-  // A small grouped count feeds the sidebar badge and bell dot. It follows the
-  // tab's visibility and re-reads whenever intake changes the workspace revision.
-  useEffect(() => {
-    if (!me || !ready || loadError) {
-      if (!me) setInboxUnread(0)
-      return
-    }
-    const version = authVersion.current
-    const controller = new AbortController()
-    let running = false
-    const read = async () => {
-      if (running || document.visibilityState !== 'visible') return
-      running = true
-      try {
-        const result = await api.inbox.unreadCount({ signal: controller.signal })
-        if (!controller.signal.aborted && version === authVersion.current && typeof result?.total === 'number') setInboxUnread(result.total)
-      } catch {
-        // Keep the last known count; the next poll retries.
-      } finally { running = false }
-    }
-    readInboxUnread.current = read
-    void read()
-    const timer = window.setInterval(() => void read(), 30_000)
-    const visible = () => void read()
-    document.addEventListener('visibilitychange', visible)
-    return () => {
-      controller.abort()
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', visible)
       readInboxUnread.current = () => Promise.resolve()
     }
-  }, [me?.id, ready, loadError, data.ingestionRevision])
+  }, [me?.id, ready, loadError, loadWorkspace])
 
   useEffect(() => {
     if (!me || !ready) return
@@ -407,6 +438,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const version = ++authVersion.current
       requests.invalidate()
+      forgetSnapshots()
       lastLoadedAt.current = 0
       setMe(null)
       setData(EMPTY)
@@ -426,6 +458,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     const version = ++authVersion.current
     requests.invalidate()
+    forgetSnapshots()
     lastLoadedAt.current = 0
     setReady(false)
     setLoadError(null)
@@ -467,6 +500,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // refresh or show notifications in the account that signed in afterward.
       refresh: (options) => (isCurrentSession() ? refresh(options) : Promise.resolve()),
       ensureFresh: () => (isCurrentSession() ? ensureFresh() : Promise.resolve()),
+      snapshotAge: () => (lastLoadedAt.current > 0 ? Date.now() - lastLoadedAt.current : Infinity),
       notify: (message, tone) => {
         if (version === authVersion.current) notify(message, tone)
       },
@@ -583,8 +617,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteTodo: async (id) => {
         await run(() => api.del(`/todos/${id}`))
       },
-      reassign: async (candidateIds, toUserId, reason) => {
-        await run(() => api.post('/candidates/reassign', { candidateIds, toUserId, reason }), 'Reassigned')
+      reassign: async (candidateIds, toUserId, reason, restartClockReason) => {
+        await run(() => api.post('/candidates/reassign', { candidateIds, toUserId, reason, ...(restartClockReason ? { restartClock: true, restartReason: restartClockReason } : {}) }), 'Reassigned')
       },
     }
   }, [data, index, me, ready, loadError, retryStartup, inboxUnread, toast, signIn, signOut, refresh, ensureFresh, notify, run])

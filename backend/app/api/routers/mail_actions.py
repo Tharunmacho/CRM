@@ -43,11 +43,11 @@ def sync_account(account_id: str, db: Session = Depends(get_db), user: User = De
     if not account:
         raise HTTPException(404, "Mailbox not found")
     if not mail_providers.is_live(account.provider):
-        raise HTTPException(409, "This provider is archived. Stored history is read only.")
+        raise HTTPException(409, "This mail provider is no longer supported. Old emails can still be read.")
     if account.disconnected_at:
-        raise HTTPException(409, "Reconnect this mailbox before requesting sync.")
+        raise HTTPException(409, "Reconnect this mailbox before you ask it to check for new emails.")
     if not get_settings().email_ingestion_enabled:
-        raise HTTPException(503, "Enable the email worker on the server before requesting sync.")
+        raise HTTPException(503, "Email checking is switched off on the server. Ask your administrator to turn it on.")
     account.sync_requested = True
     db.commit()
     return {"status": "queued"}
@@ -123,14 +123,14 @@ def reply(message_id: str, body: ReplyIn, db: Session = Depends(get_db), user: U
     existing = db.scalar(select(MailReply).where(MailReply.request_key == body.request_key))
     if existing:
         if existing.message_id != message_id or existing.actor_id != user.id or existing.body != body.body:
-            raise HTTPException(409, "This reply request identifier was already used. Refresh the conversation.")
+            raise HTTPException(409, "This reply was already sent. Refresh the conversation to see it.")
         return reply_out(existing)
     message = db.get(MailMessage, message_id)
     if not message:
         raise HTTPException(404, "Message not found")
     account = db.scalar(select(MailAccount).where(MailAccount.id == message.account_id).with_for_update())
     if account.disconnected_at:
-        raise HTTPException(409, "Reconnect the original mailbox before replying.")
+        raise HTTPException(409, "Reconnect the mailbox this email came from before you reply.")
     try:
         config = mail_providers.account_config(db, get_settings(), account)
         valid_address(message.reply_to or message.from_address)
@@ -147,7 +147,7 @@ def reply(message_id: str, body: ReplyIn, db: Session = Depends(get_db), user: U
         duplicate = db.scalar(select(MailReply).where(MailReply.request_key == body.request_key))
         if duplicate and duplicate.message_id == message_id and duplicate.actor_id == user.id and duplicate.body == body.body:
             return reply_out(duplicate)
-        raise HTTPException(409, "This reply request identifier was already used.") from None
+        raise HTTPException(409, "This reply was already sent.") from None
     try:
         row.provider_message_id = send_reply(config, message, body.body, row.id)
         row.status, row.sent_at = "sent", datetime.now(timezone.utc)
@@ -175,7 +175,7 @@ def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user:
     candidate = None
     if body.decision == "link":
         if not body.candidate_id:
-            raise HTTPException(422, "Choose the existing candidate whose identity you verified.")
+            raise HTTPException(422, "Choose the existing candidate whose details you have checked.")
         candidate = db.scalar(select(Candidate).where(Candidate.id == body.candidate_id).with_for_update())
         if not candidate:
             raise HTTPException(404, "Candidate not found")
@@ -183,7 +183,7 @@ def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user:
     if not job:
         raise HTTPException(404, "Ingestion job not found")
     if job.status not in {"needs_review", "failed", "ignored"}:
-        raise HTTPException(409, "This receipt is already processing or complete. Refresh its current status.")
+        raise HTTPException(409, "This email is already being processed or is done. Refresh the page to see where it stands.")
     message = db.get(MailMessage, job.message_id)
     ensure_single_person_source(db, "email", message.id)
     evidence = list(db.scalars(select(MailAttachment).where(MailAttachment.message_id == message.id)))
@@ -288,11 +288,11 @@ def history_account(db, account_id):
     if not account:
         raise HTTPException(404, "Mailbox not found")
     if not mail_providers.is_live(account.provider):
-        raise HTTPException(409, "This provider is archived. Stored history is read only.")
+        raise HTTPException(409, "This mail provider is no longer supported. Old emails can still be read.")
     if account.disconnected_at:
-        raise HTTPException(409, "Reconnect this mailbox before importing its history.")
+        raise HTTPException(409, "Reconnect this mailbox before you import its old emails.")
     if not get_settings().email_ingestion_enabled:
-        raise HTTPException(503, "Enable the mail receiver on the server before importing history.")
+        raise HTTPException(503, "Receiving email is switched off on the server. Ask your administrator to turn it on.")
     return account
 
 
@@ -301,9 +301,9 @@ def start_history(account_id: str, body: HistoryIn, db: Session = Depends(get_db
     account = history_account(db, account_id)
     cursor = dict(account.sync_state or {})
     if cursor.get("history", {}).get("status") in {"queued", "running"}:
-        raise HTTPException(409, "A history import is already running. Pause it before starting another range.")
+        raise HTTPException(409, "An import of old emails is already running. Pause it before you start another one.")
     if not cursor.get("uid_validity") or "last_uid" not in cursor:
-        raise HTTPException(409, "Reconnect this mailbox to establish a receiving cursor first.")
+        raise HTTPException(409, "Reconnect this mailbox first so it can start receiving new emails.")
     history = {"id": str(uuid4()), "since": body.since, "max_count": body.limit, "auto_ingest": body.auto_ingest,
         "after_uid": 0, "end_uid": cursor["last_uid"], "processed": 0, "imported": 0, "status": "queued", "last_error": None}
     account.sync_state, account.sync_requested = {**cursor, "history": history}, True
@@ -318,7 +318,7 @@ def resume_history(account_id: str, body: HistoryMoreIn, db: Session = Depends(g
     account = history_account(db, account_id)
     progress = dict((account.sync_state or {}).get("history") or {})
     if progress.get("status") not in {"paused", "error", "limited"}:
-        raise HTTPException(409, "This import has no paused or remaining batch to resume.")
+        raise HTTPException(409, "There is nothing left to continue in this import.")
     progress.update(status="queued", max_count=progress.get("processed", 0) + body.limit, last_error=None)
     account.sync_state, account.sync_requested = {**account.sync_state, "history": progress}, True
     db.add(AuditEntry(actor_id=user.id, action="Resumed historical mail import", target=account.address,
@@ -332,7 +332,7 @@ def pause_history(account_id: str, db: Session = Depends(get_db), user: User = D
     account = history_account(db, account_id)
     progress = dict((account.sync_state or {}).get("history") or {})
     if progress.get("status") not in {"queued", "running"}:
-        raise HTTPException(409, "No historical import is currently running.")
+        raise HTTPException(409, "No import of old emails is running right now.")
     progress["status"] = "paused"
     account.sync_state = {**account.sync_state, "history": progress}
     db.commit()

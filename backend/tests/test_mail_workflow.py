@@ -351,3 +351,47 @@ def test_history_provider_failure_retains_checkpoint_and_requires_explicit_resum
     assert result["status"] == "error" and result["processed"] == 0
     mail_history.receive_history("account", sessions=env.sessions, settings=env.settings)
     assert fake.__enter__.return_value.history_uids.call_count == 1
+
+
+@pytest.mark.parametrize("status", ["ignored", "failed", "needs_review"])
+def test_any_role_can_restart_candidate_creation_for_skipped_failed_or_review_mail(mailbox, status):
+    env = mailbox
+    env.actor = SimpleNamespace(id="staff", role=Role.staff)
+    with env.sessions() as db:
+        db.add(EmailIngestionJob(id="skipped-job", message_id="message-0", status=status, attempts=3, last_error="Skipped", state={}))
+        db.commit()
+    response = env.client.post("/api/inbox/messages/message-0/ingest")
+    assert response.status_code == 202, response.text
+    assert response.json() == {"status": "queued"}
+    with env.sessions() as db:
+        job = db.get(EmailIngestionJob, "skipped-job")
+        assert job.status == "pending" and job.attempts == 0 and job.last_error is None
+        entry = db.scalar(select(AuditEntry).where(AuditEntry.entity_id == "message-0"))
+        assert entry is not None and entry.actor_id == "staff" and entry.at is not None
+
+
+@pytest.mark.parametrize("status", ["pending", "processing", "retry", "completed"])
+def test_manual_candidate_creation_does_not_touch_jobs_that_are_queued_running_or_done(mailbox, status):
+    env = mailbox
+    env.actor = SimpleNamespace(id="staff", role=Role.staff)
+    with env.sessions() as db:
+        db.add(EmailIngestionJob(id="active-job", message_id="message-0", status=status, attempts=2, state={}))
+        db.commit()
+    response = env.client.post("/api/inbox/messages/message-0/ingest")
+    assert response.json() == {"status": status}
+    with env.sessions() as db:
+        assert db.get(EmailIngestionJob, "active-job").attempts == 2
+        assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_id == "message-0")) == 0
+
+
+def test_auto_import_toggle_and_first_manual_import_are_audited_with_user_and_time(mailbox):
+    env = mailbox
+    toggled = env.client.patch("/api/inbox/accounts/account", json={"auto_ingest": False})
+    assert toggled.status_code == 200, toggled.text
+    env.actor = SimpleNamespace(id="staff", role=Role.staff)
+    assert env.client.post("/api/inbox/messages/message-0/ingest").status_code == 202
+    with env.sessions() as db:
+        rows = {row.entity_id: row for row in db.scalars(select(AuditEntry))}
+        assert rows["account"].actor_id == "admin" and rows["account"].at is not None
+        assert rows["account"].meta["autoIngest"] == {"before": True, "after": False}
+        assert rows["message-0"].actor_id == "staff"

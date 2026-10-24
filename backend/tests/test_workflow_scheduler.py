@@ -47,8 +47,19 @@ def test_exact_48h_boundary_and_repeat_safe_escalation(workspace):
         db.commit()
         assert task.escalated
         recipients = set(db.scalars(select(Notification.user_id).where(Notification.kind == "escalation")))
-        assert recipients == {"admin", "manager", "owner"}
+        assert recipients == {"admin", "manager"}  # PRD role table: Staff do not receive escalations
         assert db.scalar(select(func.count()).select_from(TaskEvent).where(TaskEvent.kind == "escalation")) == 1
+
+
+def test_overdue_notice_names_candidate_stage_owner_and_hours(workspace):
+    with workspace() as db:
+        add_task(db, due_at=NOW, stage=3)
+        db.get(User, "owner").name = "Asha Owner"
+        db.commit()
+        scan_workflow(db, now=NOW + timedelta(hours=5, minutes=10))
+        db.commit()
+        details = set(db.scalars(select(Notification.detail).where(Notification.kind == "escalation")))
+        assert details == {"Synthetic candidate · Stage 3 · Initial call · Owner: Asha Owner · 5 hours overdue"}
 
 
 def test_repeat_setting_delivers_once_per_24_hour_window(workspace):
@@ -61,6 +72,7 @@ def test_repeat_setting_delivers_once_per_24_hour_window(workspace):
         db.commit()
         assert scan_workflow(db, now=NOW + timedelta(days=1))["reminders"] == 1
         db.commit()
+        assert set(db.scalars(select(Notification.user_id).where(Notification.title == "Overdue task reminder"))) == {"admin", "manager"}
         assert scan_workflow(db, now=NOW + timedelta(days=1, minutes=1))["reminders"] == 0
 
 
