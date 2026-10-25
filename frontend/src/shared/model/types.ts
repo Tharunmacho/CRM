@@ -1,3 +1,32 @@
+/** One entry of the agency's currency list (Users > Agency settings). Inactive codes stay valid on stored records. */
+export interface CurrencyOption {
+  code: string
+  name: string
+  symbol: string | null
+  active: boolean
+  sortOrder: number
+}
+
+/** The agency's identity and defaults, served inside /bootstrap and by GET /api/settings. */
+export interface AgencySettings {
+  name: string
+  shortName: string | null
+  defaultOrderCurrency: string
+  defaultAdvanceCurrency: string
+  /** International calling code with a plus sign, for example "+91"; used when matching phone numbers. */
+  homeCallingCode: string
+  defaultNationality: string | null
+  acknowledgementText: string
+  updatedAt?: string | null
+  updatedBy?: string | null
+  currencies: CurrencyOption[]
+  /** Read only: set by the server, not editable here. */
+  timezone: string
+  slaHours: number
+  /** False when the server has no settings tables yet (the values shown are last-resort defaults). */
+  editable: boolean
+}
+
 export type Role = 'admin' | 'manager' | 'staff'
 
 export interface User {

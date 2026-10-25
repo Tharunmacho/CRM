@@ -1,0 +1,277 @@
+/*
+ * Care India Overseas skin: the one shared visual identity. Loaded last (see main.tsx), it restyles the
+ * shared components and the per-screen class names through tokens only, so every screen looks like one
+ * product and layout, charts and phone behaviour stay exactly as the screen sheets define them.
+ *
+ * Signature parts
+ *   - KPI cards: a rounded-square icon tile at the LEFT of the label, a big tabular figure, a sub line
+ *     that starts with a short coloured dash.
+ *   - Avatars: rounded squares with a per-name hue (company marks a deeper tint).
+ *   - Status: "node chips" (a dot + text inside a thin outline in the status colour), 8px radius.
+ *   - Page title: 28/34 with a short logo-green underline; panel titles start with a small node stub.
+ *   - Tables: text-only header over a 2px rule, hairline rows, a 3px accent bar on the hovered row.
+ *   - Tabs: line style with a 3px underline; controls 40px / 10px radius with a 3px focus ring.
+ *
+ * Every rule is prefixed with :root:root so it wins over the screen sheets, which load later (lazy routes).
+ * Colours are tokens (theme.css plus the brand and chart tokens defined here).
+ */
+
+/* ============================================================ 1. Tokens */
+:root:root {
+  /* Logo colours, sampled from public/brand/care-india-logo.png. */
+  --brand-blue: #015e9b;
+  --brand-green: #5ac419;
+  --accent-2: var(--brand-green);
+  --accent-2-ink: #2f7d10;
+
+  --radius-panel: 16px;
+  --radius-block: 12px;
+  --radius-ctl: 10px;
+  --radius-control: 10px;
+  --radius-dialog: 16px;
+
+  --chart-1: var(--primary);
+  --chart-2: #46a80f;
+  --chart-3: #c97a06;
+  --chart-4: #d6336c;
+  --chart-5: #7c5cdb;
+  --chart-6: #0b8fb0;
+  --chart-grid: var(--border-main);
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, .04), 0 4px 14px rgba(16, 24, 40, .05);
+  --shadow-pop: 0 10px 28px rgba(16, 24, 40, .12);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--primary) 26%, transparent);
+}
+:root:root[data-theme='dark'] {
+  --accent-2: #7ad63c;
+  --accent-2-ink: #7ad63c;
+  --chart-2: #7ad63c;
+  --chart-3: #f5b53a;
+  --chart-4: #f472a6;
+  --chart-5: #a78bfa;
+  --chart-6: #38bdf8;
+  --shadow-card: none;
+  --shadow-pop: 0 14px 34px rgba(0, 0, 0, .55);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+/* Two themes only (light, dark). Light: the primary is the logo blue, the canvas a very light neutral. */
+:root:root:not([data-theme='dark']) {
+  --primary-rgb: 1, 94, 155;
+  --primary-hover: #014c7f;
+  --primary-deep: #013a62;
+  --primary-glow: rgba(var(--primary-rgb), .08);
+  --bg-main: #f5f6f8;
+  --border-card: #edeff3;
+  --border-main: #e3e6eb;
+  --border-hover: #c5cad3;
+  --border-control: #cdd2da;
+  --border-faint: #eef0f3;
+  --tint-1: #f7f8fa;
+  --tint-2: #eff1f4;
+  --tint-3: #e3e6eb;
+  --c-navy: 1 94 155;
+  --c-navy-700: 1 76 127;
+  --c-navy-100: 214 230 242;
+  --c-navy-50: 244 249 252;
+  --c-canvas: 245 246 248;
+  --c-field: 239 241 244;
+  --c-rule: 227 230 235;
+  --c-rule-soft: 238 240 243;
+}
+:root:root[data-theme='dark'] {
+  --primary-rgb: 93, 180, 238;
+  --primary-hover: #8bcaf5;
+  --primary-deep: #3d9fe0;
+  --c-navy: 93 180 238;
+  --c-navy-700: 139 202 245;
+}
+
+/* ============================================================ 2. Surfaces */
+:root:root :is(
+  .ui-panel, .dr-card, .dr-metric, .dr-stat, .db .db-panel, .db-kpi, .rv-card, .rv-mini, .cp-card, .cp-head, .cl-card,
+  .tk-panel, .tk-meter, .tk-automation, .ac .ac-card, .ac .ac-report, .att-clock, .att-card, .mb-card, .uv-card,
+  .wa-workspace, .summary-card, .ui-stat-tile, .jv-order, .todo-progress-panel
+) { border-radius: var(--radius-panel); border-color: var(--border-card); box-shadow: var(--shadow-card); }
+:root:root :is(.dr-mcard, .db-mini, .jv-mcard, .td-card, .td-block, .att-req, .mb-acct, .mb-acct-card, .staff-card, .cp-app) { border-radius: var(--radius-block); }
+:root:root .ui-panel-header, :root:root .dr-card-head { border-color: var(--border-faint); }
+@media (min-width: 640px) {
+  :root:root .workspace-dialog { border-radius: var(--radius-dialog); }
+}
+:root:root .custom-select-popup, :root:root .date-picker-popup, :root:root .ui-menu { border-radius: var(--radius-block); box-shadow: var(--shadow-pop); }
+:root:root .ui-toast { border-radius: var(--radius-block); }
+:root:root .ui-empty-state .empty-state-icon { border-radius: var(--radius-ctl); }
+:root:root[data-theme='dark'] :is(.dr-stat:hover) { box-shadow: none; }
+
+/* ============================================================ 3. KPI cards */
+/* Label row: the icon tile sits LEFT of the label (the markup has it after the label, so the row is reversed). */
+:root:root :is(.summary-card-top, .dr-metric-top, .dr-stat-top, .db-kpi-top) { flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 12px; }
+:root:root :is(.summary-card-top, .dr-metric-top, .dr-stat-top, .db-kpi-top) > :not(:is(.summary-icon, .dr-icon-circle, .db-kpi-icon)) { min-width: 0; flex: 1 1 auto; }
+/* Equal label rows even when a long label wraps to two lines. */
+:root:root :is(.summary-card-top, .dr-stat-top) { min-height: 38px; }
+:root:root :is(.summary-card, .dr-metric, .dr-stat, .db-kpi, .rv-mini) { --kpi-ink: var(--kpi-accent, var(--tone, var(--primary))); }
+/* The tile: 34px rounded square, tinted from the card tone. */
+:root:root :is(.summary-icon, .dr-icon-circle, .db-kpi-icon, .rv-mini-icon) {
+  width: 34px; height: 34px; border-radius: 10px; flex: none;
+  background: color-mix(in srgb, var(--kpi-ink, var(--primary)) 13%, var(--bg-card));
+  color: color-mix(in srgb, var(--kpi-ink, var(--primary)) 88%, var(--text-main));
+}
+:root:root .summary-icon { --kpi-ink: var(--primary); }
+:root:root .summary-icon.tone-green { --kpi-ink: var(--success-ink); }
+:root:root .summary-icon.tone-amber { --kpi-ink: var(--warning-ink); }
+:root:root .summary-icon.tone-red { --kpi-ink: var(--error-ink); }
+:root:root .summary-icon.tone-violet { --kpi-ink: var(--chart-5); }
+:root:root .rv-mini-icon { width: 30px; height: 30px; }
+/* Label and figure. */
+:root:root :is(.summary-card-top, .dr-metric-label, .dr-stat-top, .db-kpi-label, .rv-mini p) { font-size: 13.5px; font-weight: 500; color: var(--text-muted); }
+:root:root :is(.summary-value, .dr-stat-value, .db-kpi-value, .dr-metric-reading > strong, .rv-mini strong) { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; letter-spacing: -.035em; }
+/* Sub line: starts with a short coloured dash. */
+:root:root :is(.summary-card > p, .summary-caption, .dr-stat-detail, .db-kpi-detail, .rv-mini small) { display: block; margin-top: auto; padding-top: 8px; font-size: 13px; line-height: 1.45; color: var(--text-muted); }
+:root:root :is(.summary-card > p, .summary-caption, .dr-stat-detail, .db-kpi-detail, .rv-mini small)::before {
+  content: ''; display: inline-block; width: 10px; height: 3px; margin: 0 8px 3px 0; border-radius: 3px; vertical-align: middle; background: var(--kpi-ink, var(--accent-2));
+}
+:root:root .dr-stat-detail.is-danger { color: var(--error-ink); }
+/* Selected card: an accent outline instead of a coloured bar. */
+:root:root :is(.summary-card.is-active, .summary-card[aria-pressed='true'], .dr-stat.is-selected, .db-kpi.is-on) { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); outline: 0; }
+:root:root :is(.summary-card, .dr-stat, .db-kpi)::before { content: none; display: none; }
+:root:root :is(.summary-card.is-action, .dr-stat, .db-kpi.is-action):focus-visible { outline: 0; box-shadow: var(--ring); }
+:root:root :is(.dr-metric-foot h3) { letter-spacing: -.01em; }
+
+/* ============================================================ 4. Avatars: rounded squares */
+:root:root :is(.record-avatar, .dr-avatar, .db-avatar, .jv-avatar, .cl-avatar, .uv-avatar, .mb-avatar, .wa-avatar, .ac-avatar, .tk-owner-avatar, .sk-avatar, .pa) {
+  position: relative; overflow: hidden; border-radius: 26%;
+}
+:root:root :is(.record-avatar, .dr-avatar, .db-avatar, .jv-avatar, .cl-avatar, .uv-avatar, .mb-avatar, .wa-avatar, .ac-avatar, .tk-owner-avatar, .sk-avatar):is(.is-sm, .ac-avatar-sm) { border-radius: 8px; }
+:root:root :is(.record-avatar, .jv-avatar, .cl-avatar, .uv-avatar, .mb-avatar):is(.is-xl, .is-large) { border-radius: 16px; }
+/* Photos get the same shape (and cover the initials). */
+:root:root :is(.record-avatar, .pa) > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+:root:root[data-theme='dark'] :is(.record-avatar, .jv-avatar, .db-avatar, .dr-avatar) { color: color-mix(in srgb, var(--av, hsl(var(--h, 222) 70% 60%)) 40%, var(--text-main)); }
+/* Company marks: a deeper tint so a firm reads apart from a person. */
+:root:root :is(.record-avatar.is-company, .cl-avatar.is-company, [data-kind='company']) { background: color-mix(in srgb, var(--av, var(--primary)) 28%, var(--bg-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--av, var(--primary)) 30%, transparent); }
+:root:root .companies-v2 .record-avatar, :root:root .cd-head > .cl-avatar { background: color-mix(in srgb, var(--av, var(--primary)) 26%, var(--bg-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--av, var(--primary)) 28%, transparent); }
+/* Other round icon badges become rounded squares too. */
+:root:root :is(
+  .rv-icon, .mb-intake-icon, .mb-draft-icon, .dr-intake-icon, .staff-ownership-icon, .att-clock-icon, .att-chip-icon, .tk-meter-icon,
+  .jv-icon-tile, .jv-option-icon, .client-form-section > header > span, .dr-empty > span, .metric-icon, .mb-prov, .uv-state-icon
+) { border-radius: 10px; }
+:root:root :is(.wa-welcome-icon) { border-radius: 20px; }
+:root:root :is(.rv-fn-name b, .rv-stage b) { border-radius: 8px; }
+
+/* ============================================================ 5. Status: node chips */
+:root:root .ui-badge-dot, :root:root .ui-badge-chip[data-tone]:not([data-tone='neutral']) {
+  gap: 7px; padding: 2px 10px 2px 8px; border: 1px solid color-mix(in srgb, var(--b-dot, var(--text-light)) 38%, transparent);
+  border-radius: 8px; background: color-mix(in srgb, var(--b-dot, var(--text-light)) 6%, transparent); color: var(--b-ink);
+}
+:root:root .ui-badge-dot[data-tone='ink'] { border-color: var(--text-main); background: var(--text-main); color: var(--on-primary); }
+:root:root :is(.ui-badge-chip, .mb-chip, .staff-tag, .att-chip) { border-radius: 8px; }
+:root:root .ui-badge-mark { width: 7px; height: 7px; border-radius: 50%; }
+:root:root :is(.db-pill, .dr-pill, .tk-pill, .cl-pill, .att-pill, .ac .ac-pill, .ac-dup .ac-pill, .jv-status, .td-chip, .td-chips .td-prio-pill, .dr-count, .att-count) {
+  border: 1px solid color-mix(in srgb, currentColor 38%, transparent); border-radius: 8px; background: color-mix(in srgb, currentColor 6%, transparent);
+}
+:root:root :is(.jv-status) { border-color: color-mix(in srgb, var(--tone) 38%, transparent); background: color-mix(in srgb, var(--tone) 6%, transparent); color: color-mix(in srgb, var(--tone) 78%, var(--text-main)); }
+:root:root :is(.att-pill) { border-color: color-mix(in srgb, var(--c) 38%, transparent); background: color-mix(in srgb, var(--c) 6%, transparent); }
+:root:root :is(.cl-pill) { border-color: color-mix(in srgb, var(--p-ink) 38%, transparent); background: color-mix(in srgb, var(--p-ink) 6%, transparent); }
+:root:root :is(.tk-pill) { border-color: color-mix(in srgb, currentColor 38%, transparent); }
+:root:root :is(.db-pill-dot, .dr-pill i, .jv-status i, .att-pill > i, .ac .ac-pill > i) { width: 7px; height: 7px; border-radius: 50%; }
+:root:root .dr-pill.is-accent { color: color-mix(in srgb, var(--chart-5) 80%, var(--text-main)); }
+
+/* ============================================================ 6. Headings */
+:root:root .workspace-page .workspace-page-header h1, :root:root .dr-head h1 {
+  position: relative; padding-bottom: 14px; font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -.03em;
+}
+:root:root .workspace-page .workspace-page-header h1::after, :root:root .dr-head h1::after {
+  content: ''; position: absolute; left: 0; bottom: 0; width: 36px; height: 4px; border-radius: 4px; background: var(--accent-2);
+}
+:root:root :is(.workspace-page-header .workspace-heading-copy > p:last-child, .dr-head p) { margin-top: 2px; }
+@media (max-width: 767px) {
+  :root:root .workspace-page .workspace-page-header h1, :root:root .dr-head h1 { font-size: 24px; line-height: 30px; padding-bottom: 12px; }
+}
+/* Panel titles: a small accent node before the title. */
+:root:root :is(
+  .ui-panel-header h2, .dr-card-head h2, .dr-section-head h2, .tk-panel-title h2, .rv-filters-title h2, .rv-report-title h2, .cp-card h2,
+  .ac .ac-card-title h2, .uv-head h2, .mb-card-head h2, .staff-head h2, .staff-section-title h2, .att-head h2, .candidate-list-toolbar > h2,
+  .cd-orders-head h2, .analytics-card-heading h2, .jv-detail-title h2
+)::before {
+  content: ''; display: inline-block; flex: none; width: 8px; height: 8px; margin: 0 10px 0 0; border-radius: 3px; vertical-align: 2px; background: var(--accent-2);
+}
+:root:root :is(.dr-section-head h2)::before { width: 10px; height: 10px; border-radius: 4px; background: transparent; border: 2.5px solid var(--accent-2); }
+:root:root .ui-panel-header h2 { overflow: hidden; text-overflow: ellipsis; }
+
+/* ============================================================ 7. Tables */
+:root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table, .candidate-table) thead tr { background: none; border-bottom-width: 0; }
+:root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table, .candidate-table) thead th {
+  background: transparent; border-bottom: 0; box-shadow: inset 0 -2px 0 var(--border-main);
+  font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted);
+}
+:root:root .ui-table-scroll.is-sticky thead th { background: var(--bg-card); box-shadow: inset 0 -2px 0 var(--border-main); }
+:root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table) tbody tr { border-color: var(--border-faint); }
+@media (hover: hover) and (min-width: 1280px) {
+  :root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table) tbody tr:hover > td:first-child {
+    box-shadow: inset 3px 0 0 var(--accent-2);
+  }
+  :root:root :is(.tk-row.is-over, .tk-row.is-esc, .dr-row-overdue):hover > td:first-child { box-shadow: inset 3px 0 0 var(--error-ink); }
+  :root:root .tk-row.is-soon:hover > td:first-child { box-shadow: inset 3px 0 0 var(--warning-ink); }
+}
+:root:root :is(.ui-data-table, .db-tbl, .tk-table) tbody tr { transition: background-color .12s ease; }
+:root:root .ui-data-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 3%, transparent); }
+
+/* ============================================================ 8. Tabs */
+:root:root .ui-tabs-line .ui-tab[aria-selected='true']::after { height: 3px; border-radius: 3px 3px 0 0; background: var(--primary); left: 8px; right: 8px; }
+:root:root .ui-tabs-line .ui-tab[aria-selected='true'] { color: var(--text-main); font-weight: 600; }
+:root:root .ui-tabs-pill { border-radius: var(--radius-block); }
+:root:root .ui-tabs-pill .ui-tab { border-radius: 8px; }
+
+/* ============================================================ 9. Buttons and fields */
+:root:root .ui-button { border-radius: var(--radius-ctl); }
+:root:root .ui-button:not(.h-8) { min-height: 40px; }
+:root:root .ui-button-primary, :root:root .ui-button-accent { box-shadow: 0 1px 2px rgba(16, 24, 40, .12); }
+:root:root .ui-button-primary:not(:disabled):hover, :root:root .ui-button-accent:not(:disabled):hover { box-shadow: 0 6px 14px rgba(var(--primary-rgb), .28); }
+:root:root .ui-button:not(:disabled):active { transform: translateY(1px); box-shadow: none; }
+:root:root .ui-icon-button { border-radius: var(--radius-ctl); }
+:root:root :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { border-radius: var(--radius-ctl); }
+:root:root :is(input.ui-input:not([type='checkbox']):not([type='radio']):not([type='file']), .custom-select-trigger, .date-picker-trigger) { min-height: 40px; }
+:root:root .custom-select-compact .custom-select-trigger { min-height: 36px; }
+:root:root :is(.ui-input, .custom-select-trigger, .date-picker-trigger):is(:focus, :focus-visible), :root:root :is(.custom-select-trigger, .date-picker-trigger)[aria-expanded='true'] {
+  outline: none; border-color: var(--primary); box-shadow: var(--ring);
+}
+:root:root :is(.ui-radio-chip) { border-radius: var(--radius-ctl); }
+:root:root .custom-select-option { border-radius: 8px; }
+:root:root .custom-checkbox { border-radius: 6px; }
+:where(a, button, input, select, textarea, summary, [tabindex], [role='button'], [role='tab']):focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 2px; }
+
+/* ============================================================ 10. Charts */
+:root:root .dashref {
+  --dr-green: var(--chart-2);
+  --dr-amber: var(--chart-3);
+  --dr-violet: var(--chart-5);
+  --dr-slate: color-mix(in srgb, var(--text-light) 78%, var(--bg-card));
+}
+:root:root .rv {
+  --rv-c1: var(--chart-1);
+  --rv-c2: var(--chart-2);
+  --rv-c3: var(--chart-3);
+  --rv-c4: var(--chart-5);
+  --rv-c5: var(--chart-4);
+  --rv-c6: var(--chart-6);
+}
+/* Dashboard overview charts: each card draws in its own categorical hue. */
+:root:root .dr-grid-4 > .dr-metric:nth-child(1) { --tone: var(--chart-1); }
+:root:root .dr-grid-4 > .dr-metric:nth-child(2) { --tone: var(--chart-2); }
+:root:root .dr-grid-4 > .dr-metric:nth-child(3) { --tone: var(--chart-5); }
+:root:root .dr-grid-4 > .dr-metric:nth-child(4) { --tone: var(--chart-3); }
+:root:root .dr-metric .dr-line { stroke: var(--tone, var(--chart-1)); stroke-width: 2px; }
+:root:root .dr-metric .dr-area { fill: var(--tone, var(--chart-1)); fill-opacity: .12; }
+:root:root .dr-metric .dr-bar { fill: var(--tone, var(--chart-1)); rx: 4px; }
+:root:root .dr-metric .dr-dot { fill: var(--tone, var(--chart-1)); }
+:root:root .dr-metric .dr-cursor { stroke: var(--tone, var(--chart-1)); }
+:root:root .dr-grid { stroke: var(--chart-grid); stroke-dasharray: 2 5; }
+:root:root .db-kpi-spark-line { stroke-width: 2px; }
+:root:root .db-kpi-spark-fill { opacity: .12; }
+:root:root .recharts-cartesian-grid line { stroke-dasharray: 2 5; }
+:root:root .recharts-line-curve, :root:root .recharts-area-curve { stroke-width: 2px; }
+:root:root .recharts-area-area { fill-opacity: .12; }
+
+/* ============================================================ 11. Phones */
+@media (max-width: 480px) {
+  :root:root :is(.summary-card-top, .dr-metric-top, .dr-stat-top, .db-kpi-top) { gap: 8px; }
+  :root:root :is(.summary-icon, .dr-icon-circle, .db-kpi-icon) { width: 30px; height: 30px; border-radius: 9px; }
+}

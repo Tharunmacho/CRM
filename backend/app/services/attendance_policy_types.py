@@ -28,12 +28,12 @@ class Shift(BaseModel):
     @classmethod
     def distinct(cls, value, info):
         if info.data.get("start") == value:
-            raise ValueError("Shift start and end must differ")
+            raise ValueError("The shift start and end times cannot be the same.")
         return value
 
     @model_validator(mode="after")
     def valid_break(self):
         span = ((self.end.hour * 60 + self.end.minute) - (self.start.hour * 60 + self.start.minute)) % 1440
         if self.break_minutes >= span:
-            raise ValueError("Break must be shorter than the shift")
+            raise ValueError("The break must be shorter than the shift.")
         return self

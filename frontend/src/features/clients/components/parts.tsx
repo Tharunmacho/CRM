@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CheckCircle2, Copy, FileText, FileWarning, Globe2, LayoutGrid, MoreHorizontal, Rows3 } from 'lucide-react'
+import { Check, CheckCircle2, Copy, FileText, FileWarning, LayoutGrid, MoreHorizontal, Rows3 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
+import { CountryFlag } from '@/shared/ui/country-flag'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import type { Application, Company, Order } from '@/shared/model/types'
+import { isDeployed } from '@/features/jobs/order-counts'
 import '@/styles/clients.css'
 
 /**
@@ -14,40 +16,9 @@ import '@/styles/clients.css'
 
 /* ----------------------------------------------------------------- flags */
 
-// Short names must match exactly (so "UK" never matches inside another word); long names may be contained.
-const EXACT: [string, string[]][] = [
-  ['ae', ['uae', 'u.a.e', 'u.a.e.']],
-  ['sa', ['ksa']],
-  ['gb', ['uk', 'u.k', 'u.k.']],
-  ['us', ['us', 'usa', 'u.s.a']],
-  ['in', ['in']],
-]
-const CONTAINS: [string, string[]][] = [
-  ['ae', ['united arab emirates', 'emirates', 'dubai', 'abu dhabi', 'sharjah']],
-  ['sa', ['saudi']],
-  ['qa', ['qatar']],
-  ['kw', ['kuwait']],
-  ['om', ['oman']],
-  ['bh', ['bahrain']],
-  ['de', ['germany']],
-  ['gb', ['united kingdom', 'britain', 'england']],
-  ['in', ['india']],
-  ['sg', ['singapore']],
-  ['us', ['united states', 'america']],
-]
-
-export function countryCode(country?: string | null) {
-  const key = (country ?? '').trim().toLowerCase()
-  if (!key) return null
-  return EXACT.find(([, names]) => names.includes(key))?.[0] ?? CONTAINS.find(([, names]) => names.some((name) => key.includes(name)))?.[0] ?? null
-}
-
-/** Flag from /flags, or a globe when the country is not one we ship (or none is recorded). */
+/** Flag from /flags, or a globe when the country has no flag file (or none is recorded). */
 export function Flag({ country, className }: { country?: string | null; className?: string }) {
-  const code = countryCode(country)
-  return code
-    ? <img src={`/flags/${code}.svg`} alt="" width={20} height={14} className={cn('cl-flag', className)} loading="lazy" />
-    : <Globe2 size={15} aria-hidden="true" className={cn('cl-flag-globe', className)} />
+  return <CountryFlag country={country} className={cn('cl-flag', className)} globeClassName={cn('cl-flag-globe', className)} />
 }
 
 /** Flag, country and (muted) city, as one block. */
@@ -111,7 +82,7 @@ export function demandByClient(companies: Company[], orders: Order[], applicatio
   const owner = new Map(companies.map((company) => [company.id, company.clientId]))
   const deployedPerOrder = new Map<string, number>()
   for (const application of applications) {
-    if (application.status === 'deployed') deployedPerOrder.set(application.orderId, (deployedPerOrder.get(application.orderId) ?? 0) + 1)
+    if (isDeployed(application)) deployedPerOrder.set(application.orderId, (deployedPerOrder.get(application.orderId) ?? 0) + 1)
   }
   const byClient = new Map<string, Demand>()
   for (const order of orders) {
@@ -215,6 +186,24 @@ export function useMediaQuery(query: string) {
   return matches
 }
 
+/**
+ * Width of the element in pixels (0 until measured). Use it to choose table or cards by the room a list really has,
+ * which depends on the sidebar as much as on the window. Attach the returned callback to the element.
+ */
+export function useElementWidth(): [(node: HTMLElement | null) => void, number] {
+  const [node, setNode] = useState<HTMLElement | null>(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    if (!node) return
+    setWidth(Math.round(node.getBoundingClientRect().width))
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [node])
+  return [setNode, width]
+}
+
 export interface MenuEntry { label: string; icon?: ReactNode; danger?: boolean; onSelect: () => void }
 
 /**
@@ -286,9 +275,6 @@ export function FormSection({ icon, title, hint, children, cols = 2 }: { icon: R
     </section>
   )
 }
-
-/** Country names offered while typing, from the records on screen plus the destinations we ship flags for. */
-export const COUNTRY_SUGGESTIONS = ['United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Oman', 'Bahrain', 'Germany', 'United Kingdom', 'India', 'Singapore', 'United States']
 
 /* -------------------------------------------------------------------- CSV */
 

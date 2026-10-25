@@ -27,7 +27,7 @@ def cipher(settings):
     try:
         return Fernet((getattr(settings, "mail_token_encryption_key", None) or "").encode())
     except (ValueError, TypeError):
-        raise MailAdapterError("oauth_configuration", "The server needs a valid MAIL_TOKEN_ENCRYPTION_KEY before connecting mailboxes.") from None
+        raise MailAdapterError("oauth_configuration", "Mailbox connections are not set up on this server yet. Ask your system administrator to finish the setup, then try again.") from None
 
 
 def encrypt(settings, value: dict) -> str:
@@ -38,7 +38,7 @@ def decrypt(settings, value: str) -> dict:
     try:
         return json.loads(cipher(settings).decrypt(value.encode()))
     except (InvalidToken, ValueError, TypeError, AttributeError):
-        raise MailAdapterError("oauth_tokens", "Saved mailbox credentials cannot be read. Restore the server encryption key or reconnect the mailbox.") from None
+        raise MailAdapterError("oauth_tokens", "We could not read the saved sign-in details for this mailbox. Connect the mailbox again to fix this.") from None
 
 
 def provider_config(settings, provider: str):
@@ -48,16 +48,16 @@ def provider_config(settings, provider: str):
     secret = getattr(settings, f"{provider}_client_secret", None)
     redirect = getattr(settings, f"{provider}_redirect_uri", None)
     if not client or not secret or not redirect:
-        raise MailAdapterError("oauth_configuration", f"The server needs {provider.upper()}_CLIENT_ID, {provider.upper()}_CLIENT_SECRET and {provider.upper()}_REDIRECT_URI.")
+        raise MailAdapterError("oauth_configuration", f"{'Gmail' if provider == 'gmail' else 'Microsoft 365'} sign-in is not set up on this server yet. Ask your system administrator to finish the setup, then try again.")
     parsed = urlparse(redirect)
     if (parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"})) or parsed.query or parsed.fragment or parsed.username:
-        raise MailAdapterError("oauth_configuration", "The OAuth callback must use HTTPS (HTTP is allowed only on localhost), with no query or fragment.")
+        raise MailAdapterError("oauth_configuration", "The sign-in return address on this server is not set up correctly. Ask your system administrator to fix it, then try again.")
     if parsed.path != f"/api/inbox/oauth/{provider}/callback":
-        raise MailAdapterError("oauth_configuration", f"The OAuth callback path must be /api/inbox/oauth/{provider}/callback.")
+        raise MailAdapterError("oauth_configuration", "The sign-in return address on this server is not set up correctly. Ask your system administrator to fix it, then try again.")
     cipher(settings)
     tenant = getattr(settings, "microsoft_tenant", "common")
     if not re.fullmatch(r"[A-Za-z0-9.-]+", tenant):
-        raise MailAdapterError("oauth_configuration", "Configure a valid Microsoft tenant identifier.")
+        raise MailAdapterError("oauth_configuration", "Microsoft 365 sign-in is not set up correctly on this server. Ask your system administrator to fix it, then try again.")
     return {
         "client_id": client, "client_secret": secret, "redirect_uri": redirect,
         "authorize": "https://accounts.google.com/o/oauth2/v2/auth" if provider == "gmail" else f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize",
@@ -109,12 +109,12 @@ def exchange(settings, provider, payload, old_refresh=None):
         token = {"access_token": result["access_token"], "refresh_token": result.get("refresh_token") or old_refresh,
             "expires_at": (utcnow() + timedelta(seconds=max(60, int(result.get("expires_in", 3600))))).isoformat()}
         if not token["refresh_token"]:
-            raise MailAdapterError("oauth_offline", "The provider did not grant offline access. Reconnect and approve access for background mail sync.")
+            raise MailAdapterError("oauth_offline", "Your mail provider did not allow us to keep checking this mailbox. Connect again and approve all the access it asks for.")
         return token
     except MailAdapterError:
         raise
     except (httpx.HTTPError, ValueError, TypeError):
-        raise MailAdapterError("oauth_exchange", "The provider could not authorize this mailbox. Reconnect or ask the mailbox administrator to review consent and access policies.") from None
+        raise MailAdapterError("oauth_exchange", "We could not get permission to use this mailbox. Connect it again, or ask the mailbox owner to check that access is allowed.") from None
 
 
 def oauth_mail_config(provider, address, access_token):
@@ -127,16 +127,16 @@ def finish(db, settings, provider, state, code, user_id, session_id, denied=Fals
     row = db.scalar(select(MailOAuthState).where(MailOAuthState.state_hash == hashlib.sha256(state.encode()).hexdigest()).with_for_update())
     if not row or row.provider != provider or row.user_id != user_id or row.consumed_at or row.expires_at <= utcnow():
         db.rollback()
-        raise MailAdapterError("oauth_state", "This mailbox connection expired or was already used. Start a new connection.")
+        raise MailAdapterError("oauth_state", "This mailbox connection has expired or was already used. Start connecting the mailbox again.")
     saved = decrypt(settings, row.verifier_encrypted)
     if not session_id or not secrets.compare_digest(saved["session"], hashlib.sha256(session_id.encode()).hexdigest()):
         db.rollback()
-        raise MailAdapterError("oauth_session", "Finish connecting the mailbox in the same signed-in browser session.")
+        raise MailAdapterError("oauth_session", "Finish connecting the mailbox in the same browser where you started, and stay signed in.")
     address = row.address
     row.consumed_at = utcnow()
     db.commit()  # Consume before exchanging; a callback cannot replay an authorization code.
     if denied or not code:
-        raise MailAdapterError("oauth_denied", "Mailbox authorization was cancelled. No account was connected.")
+        raise MailAdapterError("oauth_denied", "Connecting the mailbox was cancelled. Nothing was connected.")
     config = provider_config(settings, provider)
     token = exchange(settings, provider, {"grant_type": "authorization_code", "code": code,
         "redirect_uri": config["redirect_uri"], "code_verifier": saved["verifier"]})
@@ -147,11 +147,11 @@ def finish(db, settings, provider, state, code, user_id, session_id, denied=Fals
     if account:
         if account.provider != provider:
             db.rollback()
-            raise MailAdapterError("oauth_source", "This address already uses another mail provider. Keep its existing source or connect a different address.")
+            raise MailAdapterError("oauth_source", "This address is already connected through another mail provider. Use that connection, or connect a different address.")
         require_cursor_source(account.sync_state or {}, mailbox_config)
         if str(account.sync_state.get("uid_validity")) != cursor.uid_validity:
             db.rollback()
-            raise MailAdapterError("oauth_cursor", "The mailbox identifiers changed. Restore the original mailbox before reconnecting; the saved receipt history was retained.")
+            raise MailAdapterError("oauth_cursor", "This mailbox was reset by the mail provider, so we cannot carry on where we stopped. Your saved emails are safe. Contact your administrator for help.")
     else:
         account = MailAccount(address=address, provider=provider, sync_state={"uid_validity": cursor.uid_validity,
             "last_uid": cursor.last_uid, "source_id": mailbox_source_id(mailbox_config),
@@ -170,18 +170,18 @@ def account_config(db, settings, account):
     if account.provider == "imap":
         config = configured_mailboxes(settings).get(account.address)
         if config is None:
-            raise MailAdapterError("mail_configuration", "Mailbox credentials are missing from the server configuration.")
+            raise MailAdapterError("mail_configuration", "The sign-in details for this mailbox are missing. An administrator can reconnect it.")
         return config
     # Token refresh is serialized for this mailbox only, so rotated refresh tokens
     # cannot overwrite each other. The provider request has a bounded timeout.
     account = db.scalar(select(MailAccount).where(MailAccount.id == account.id).with_for_update().execution_options(populate_existing=True))
     if account.disconnected_at:
-        raise MailAdapterError("disconnected", "This mailbox is disconnected.")
+        raise MailAdapterError("disconnected", "This mailbox is disconnected. An administrator can reconnect it.")
     token = decrypt(settings, (account.secrets or {}).get("encrypted", ""))
     try:
         expires = datetime.fromisoformat(token["expires_at"])
     except (ValueError, KeyError, TypeError):
-        raise MailAdapterError("oauth_tokens", "Saved mailbox credentials are incomplete. Reconnect this account.") from None
+        raise MailAdapterError("oauth_tokens", "The saved sign-in details for this mailbox are incomplete. Connect the mailbox again.") from None
     if expires <= utcnow() + timedelta(minutes=2):
         token = exchange(settings, account.provider, {"grant_type": "refresh_token", "refresh_token": token.get("refresh_token"),
             "scope": provider_config(settings, account.provider)["scope"]}, old_refresh=token.get("refresh_token"))

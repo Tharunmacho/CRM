@@ -224,7 +224,7 @@ def test_reassignment_restarts_clock_only_when_admin_chooses(workspace):
         assert task.due_at - task.sla_started_at == timedelta(hours=48) and task.due_at > deadline
         event = db.scalar(select(TaskEvent).where(TaskEvent.kind == "sla_reset"))
         assert event.meta["reason"] == "Employer asked for more time" and event.meta["actorId"] == "admin"
-        audit = db.scalar(select(AuditEntry).where(AuditEntry.action == "Reset task SLA", AuditEntry.entity_id == "task"))
+        audit = db.scalar(select(AuditEntry).where(AuditEntry.action == "Restarted the 48-hour clock", AuditEntry.entity_id == "task"))
         assert audit.meta["reason"] == "Employer asked for more time"
 
 

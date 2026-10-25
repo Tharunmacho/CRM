@@ -9,15 +9,15 @@ def validate_config(config):
     incoming = re.fullmatch(r"imap(pro)?\.zoho\.(com|in|eu|com\.au|jp|ca|com\.cn|sa)", config.host.casefold())
     outgoing = re.fullmatch(r"smtp(pro)?\.zoho\.(com|in|eu|com\.au|jp|ca|com\.cn|sa)", (config.smtp_host or "").casefold())
     if not incoming or not outgoing or incoming.groups() != outgoing.groups():
-        raise MailAdapterError("zoho_server", "Use the matching Zoho IMAP and SMTP server names shown in your account's Server Configuration Details.")
+        raise MailAdapterError("zoho_server", "Use the Zoho server names for receiving and sending email shown in your Zoho account settings. Both must be for the same Zoho region.")
     if config.port != 993 or not config.use_ssl or (config.smtp_port, config.smtp_use_ssl) not in {(465, True), (587, False)}:
-        raise MailAdapterError("zoho_tls", "Zoho requires IMAP 993 with SSL and SMTP 465 with SSL or 587 with STARTTLS.")
+        raise MailAdapterError("zoho_tls", "Zoho needs port 993 for receiving email, and port 465 or 587 for sending.")
     return config
 
 
 def make_config(address, password, *, region="com", account_type="organization", imap_host=None, smtp_host=None, smtp_port=465):
     if region not in REGIONS or account_type not in {"personal", "organization"}:
-        raise MailAdapterError("zoho_region", "Select the data center and account type shown in Zoho's Server Configuration Details.")
+        raise MailAdapterError("zoho_region", "Choose the Zoho region and account type shown in your Zoho account settings.")
     suffix = "pro" if account_type == "organization" else ""
     return validate_config(MailConfig(host=imap_host or f"imap{suffix}.zoho.{region}", port=993,
         username=address, password=password, smtp_host=smtp_host or f"smtp{suffix}.zoho.{region}",
@@ -44,4 +44,4 @@ def readiness(settings):
         cipher(settings)
         return [{"provider": "zoho", "ready": True, "message": "Connect using the Zoho server details and app password for your account."}]
     except MailAdapterError:
-        return [{"provider": "zoho", "ready": False, "message": "Configure MAIL_TOKEN_ENCRYPTION_KEY on the CRM server before connecting Zoho Mail."}]
+        return [{"provider": "zoho", "ready": False, "message": "Zoho Mail connections are not set up on this server yet. Ask your system administrator to finish the setup, then try again."}]

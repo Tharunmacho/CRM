@@ -4,7 +4,7 @@ from uuid import uuid4
 from typing import Literal
 import mimetypes
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +19,7 @@ from app.integrations.mail.smtp import MailSendError, address as valid_address, 
 from app.services import mail_providers
 from app.services.parallel_reads import parallel_reads
 from app.services.document_storage import file_response
+from app.services.attachment_preview import PreviewUnavailable, build_preview
 
 router = APIRouter(tags=["inbox"])
 admin = require_role(Role.admin)
@@ -92,6 +93,26 @@ def attachment_file(attachment_id: str, download: bool = False, db: Session = De
         raise HTTPException(503, "The attachment storage is unavailable. Please try again.") from None
 
 
+@router.get("/attachments/{attachment_id}/preview")
+def attachment_preview(attachment_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """A browser-friendly view of a Word or Excel attachment: a PDF when the server can convert it,
+    otherwise (for .docx and .xlsx) a plain, sandboxed HTML view. Same access as the attachment download."""
+    attachment = db.get(MailAttachment, attachment_id)
+    if not attachment or not attachment.object_key:
+        raise HTTPException(404, "Attachment is not available")
+    name, key, digest = attachment.file_name, attachment.object_key, attachment.content_hash
+    db.close()  # conversion can take a while; do not hold a database connection meanwhile
+    try:
+        preview = build_preview(get_settings(), name, key, digest)
+    except PreviewUnavailable as exc:
+        raise HTTPException(exc.status, exc.message) from None
+    except FileNotFoundError:
+        raise HTTPException(404, "The stored attachment is unavailable.") from None
+    except Exception:
+        raise HTTPException(503, "The attachment storage is unavailable. Please try again.") from None
+    return Response(preview.content, media_type=preview.media_type, headers=preview.headers)
+
+
 class ReplyIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     body: str = Field(min_length=1, max_length=50000)
@@ -113,7 +134,7 @@ def replies(message_id: str, db: Session = Depends(get_db), user: User = Depends
     rows = list(db.scalars(select(MailReply).where(MailReply.message_id == message_id).order_by(MailReply.created_at)))
     for row in rows:
         if row.status in {"pending", "sending"} and row.created_at < datetime.now(timezone.utc) - timedelta(minutes=3):
-            row.status, row.last_error = "unknown", "The sending process ended without a confirmed result. Check Sent mail before composing another reply."
+            row.status, row.last_error = "unknown", "We could not confirm this reply was sent. Check the Sent folder before writing another one."
     db.commit()
     return [reply_out(row) for row in rows]
 
@@ -153,7 +174,7 @@ def reply(message_id: str, body: ReplyIn, db: Session = Depends(get_db), user: U
         row.status, row.sent_at = "sent", datetime.now(timezone.utc)
     except MailSendError as exc:
         row.status, row.last_error = "unknown" if exc.unknown else "failed", str(exc)
-    db.add(AuditEntry(actor_id=user.id, action="Email reply " + row.status, target=account.address,
+    db.add(AuditEntry(actor_id=user.id, action={"sent": "Email reply sent", "failed": "Email reply failed"}.get(row.status, "Email reply not confirmed"), target=account.address,
         entity_type="mail_reply", entity_id=row.id, meta={"message_id": message.id, "status": row.status}))
     db.commit()
     return reply_out(row)
@@ -181,7 +202,7 @@ def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user:
             raise HTTPException(404, "Candidate not found")
     job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
     if not job:
-        raise HTTPException(404, "Ingestion job not found")
+        raise HTTPException(404, "We could not find the import for this email.")
     if job.status not in {"needs_review", "failed", "ignored"}:
         raise HTTPException(409, "This email is already being processed or is done. Refresh the page to see where it stands.")
     message = db.get(MailMessage, job.message_id)
@@ -209,14 +230,14 @@ def review_job(job_id: str, body: ReviewIn, db: Session = Depends(get_db), user:
                 db.flush(); linked += 1
         message.candidate_id, job.candidate_id, job.status = candidate.id, candidate.id, "completed"
         queue_intake_acknowledgement(db, "email", message.id)
-        db.add(AuditEntry(actor_id=user.id, action="Linked reviewed email evidence", target=candidate.name,
+        db.add(AuditEntry(actor_id=user.id, action="Linked an email to a candidate", target=candidate.name,
             entity_type="candidate", entity_id=candidate.id, meta={"job_id": job.id, "message_id": message.id, "reason": body.reason, "documents": linked}))
     else:
         job.status = "ignored"
     job.last_error = None
     job.state = {**(job.state or {}), "manual_review": {"decision": body.decision, "reason": body.reason,
         "actor_id": user.id, "at": datetime.now(timezone.utc).isoformat(), "candidate_id": body.candidate_id if candidate else None}}
-    db.add(AuditEntry(actor_id=user.id, action="Reviewed email receipt", target=message.subject or "Email receipt",
+    db.add(AuditEntry(actor_id=user.id, action="Reviewed a received email", target=message.subject or "Email receipt",
         entity_type="email_job", entity_id=job.id, meta=job.state["manual_review"]))
     db.commit()
     return {"status": job.status, "candidateId": job.candidate_id, "documentsLinked": linked}
@@ -307,7 +328,7 @@ def start_history(account_id: str, body: HistoryIn, db: Session = Depends(get_db
     history = {"id": str(uuid4()), "since": body.since, "max_count": body.limit, "auto_ingest": body.auto_ingest,
         "after_uid": 0, "end_uid": cursor["last_uid"], "processed": 0, "imported": 0, "status": "queued", "last_error": None}
     account.sync_state, account.sync_requested = {**cursor, "history": history}, True
-    db.add(AuditEntry(actor_id=user.id, action="Requested historical mail import", target=account.address,
+    db.add(AuditEntry(actor_id=user.id, action="Started importing older emails", target=account.address,
         entity_type="mail_account", entity_id=account.id, meta={"since": body.since, "limit": body.limit, "auto_ingest": body.auto_ingest}))
     db.commit()
     return history_out(account)
@@ -321,7 +342,7 @@ def resume_history(account_id: str, body: HistoryMoreIn, db: Session = Depends(g
         raise HTTPException(409, "There is nothing left to continue in this import.")
     progress.update(status="queued", max_count=progress.get("processed", 0) + body.limit, last_error=None)
     account.sync_state, account.sync_requested = {**account.sync_state, "history": progress}, True
-    db.add(AuditEntry(actor_id=user.id, action="Resumed historical mail import", target=account.address,
+    db.add(AuditEntry(actor_id=user.id, action="Resumed importing older emails", target=account.address,
         entity_type="mail_account", entity_id=account.id, meta={"limit": body.limit, "history_id": progress["id"]}))
     db.commit()
     return history_out(account)

@@ -19,13 +19,13 @@ class MailSendError(MailAdapterError):
 def address(value):
     parsed = parseaddr(value or "")[1]
     if not re.fullmatch(r"[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+", parsed) or any(char in (value or "") for char in "\r\n\x00"):
-        raise MailSendError("This message has no valid reply address.")
+        raise MailSendError("This email has no valid address to reply to.")
     return parsed
 
 
 def send_reply(config, message, body, reply_id):
     if not config.smtp_host:
-        raise MailSendError("Outgoing mail is not configured for this mailbox. Configure SMTP_SERVER or smtp_host for this account.")
+        raise MailSendError("Sending email is not set up for this mailbox. Ask an administrator to add the outgoing mail server.")
     recipient = address(message.reply_to or message.from_address)
     outgoing = EmailMessage()
     outgoing["From"], outgoing["To"] = address(config.username), recipient
@@ -70,7 +70,7 @@ def compose(config, *, message_id, to, cc, bcc, subject, body, attachments=(), i
 
 def deliver(config, outgoing, recipients, *, envelope_from=None):
     if not config.smtp_host:
-        raise MailSendError("Outgoing mail is not configured for this mailbox.")
+        raise MailSendError("Sending email is not set up for this mailbox. Ask an administrator to add the outgoing mail server.")
     server = None
     sending = False
     try:
@@ -91,9 +91,9 @@ def deliver(config, outgoing, recipients, *, envelope_from=None):
         refused = server.send_message(outgoing, from_addr=config.username if envelope_from is None else envelope_from, to_addrs=recipients)
         return list(refused)
     except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError, smtplib.SMTPAuthenticationError, smtplib.SMTPNotSupportedError):
-        raise MailSendError("The mailbox provider refused this reply. Check the recipient and outgoing-mail permissions before trying again.") from None
+        raise MailSendError("The mail provider would not send this reply. Check the recipient's address, then try again.") from None
     except Exception:
-        raise MailSendError("Delivery could not be confirmed. Check the mailbox's Sent folder before composing another reply." if sending else "A secure outgoing-mail connection could not be established. Check this mailbox's SMTP configuration.", unknown=sending) from None
+        raise MailSendError("We could not confirm this reply was sent. Check the Sent folder before writing another one." if sending else "We could not connect to send this reply. Check the mailbox's outgoing mail settings, then try again.", unknown=sending) from None
     finally:
         if server is not None:
             try:

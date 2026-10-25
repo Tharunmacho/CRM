@@ -176,7 +176,7 @@ def prepare_bundle(db, source_type, source_id, user):
         owner_id=user.id if source_type == "manual" else None, created_by=user.id,
         status="pending", revision=0, sources=sources, pages=[], ignored_pages=[])
     db.add(bundle); db.flush()
-    db.add(AuditEntry(actor_id=user.id, action="Started person document review", entity_type="document_person_intake", entity_id=bundle.id,
+    db.add(AuditEntry(actor_id=user.id, action="Started checking documents for several people", entity_type="document_person_intake", entity_id=bundle.id,
         meta={"sourceType": source_type, "sourceId": source_id}))
     db.commit()
     return bundle_out(db, bundle)
@@ -194,11 +194,11 @@ def process_bundle(identifier, *, sessions, settings):
         for source in sources:
             original = read_bytes(settings, source["object_key"])
             if hashlib.sha256(original).hexdigest() != source["hash"]:
-                raise ValueError("A saved original failed its integrity check. Restore its storage before retrying.")
+                raise ValueError("A saved file looks damaged. Restore the original file, then try again.")
             if source.get("pdf_key") and source.get("page_evidence"):
                 normalized = read_bytes(settings, source["pdf_key"])
                 if hashlib.sha256(normalized).hexdigest() != source["pdf_hash"]:
-                    raise ValueError("A saved page preview failed its integrity check. Restore its storage before retrying.")
+                    raise ValueError("A saved page preview looks damaged. Try again, and contact your administrator if it keeps happening.")
             else:
                 inspected = inspect_document(original, tesseract_cmd=settings.tesseract_cmd,
                     languages=settings.ocr_languages, max_pages=min(settings.ocr_max_pages, MAX_PAGES),
@@ -244,7 +244,7 @@ def process_bundle(identifier, *, sessions, settings):
         with sessions() as db:
             bundle = db.scalar(select(MultiPersonIntake).where(MultiPersonIntake.id == identifier).with_for_update())
             if bundle and bundle.status == "pending":
-                bundle.last_error = str(exc)[:400] if isinstance(exc, ValueError) else "Page preparation could not finish. The originals are retained; retry after checking document storage and the worker."
+                bundle.last_error = str(exc)[:400] if isinstance(exc, ValueError) else "We could not get the pages ready. Your original files are safe. Try again, and contact your administrator if it keeps happening."
                 db.commit()
 
 
@@ -306,7 +306,7 @@ def save_review(db, identifier, user, revision, groups, ignored):
         db.delete(group)
     bundle.ignored_pages = deepcopy(ignored)
     bundle.revision += 1
-    db.add(AuditEntry(actor_id=user.id, action="Saved person document review", entity_type="document_person_intake", entity_id=bundle.id,
+    db.add(AuditEntry(actor_id=user.id, action="Saved the document check", entity_type="document_person_intake", entity_id=bundle.id,
         meta={"revision": bundle.revision, "people": len(groups), "excludedPages": len(ignored)}))
     db.commit()
     return bundle_out(db, bundle)
@@ -350,7 +350,7 @@ def _attach_group(db, bundle, group, candidate, user, settings):
                 file_name=f"{group.label[:80]}-{kind}.pdf", object_key=key, content_hash=digest, content_type="application/pdf",
                 size_kb=max(1, (len(payload) + 1023) // 1024), uploaded_by=user.id)
             db.add(attachment); db.flush()
-            db.add(AuditEntry(actor_id=user.id, action="Attached reviewed person pages", target=candidate.name,
+            db.add(AuditEntry(actor_id=user.id, action="Added checked pages to a candidate", target=candidate.name,
                 entity_type="candidate", entity_id=candidate.id, meta={"bundleId": bundle.id, "groupId": group.id,
                 "sourceId": source_id, "sourceHash": sources[source_id]["hash"], "pages": sorted(numbers), "slot": kind, "attachmentId": attachment.id}))
 
@@ -471,7 +471,7 @@ def _ocr_for_group(bundle, group):
 
 
 def commit_review(db, identifier, user, revision, decisions, settings):
-    from app.api.routers.candidates import CandidateIn, ensure_candidate_edit, lock_assignment_cursor, next_owner, PROFILE_CHECK_FIELDS, _validate_profile_relationships
+    from app.api.routers.candidates import CandidateIn, lock_assignment_cursor, next_owner, PROFILE_CHECK_FIELDS, _validate_profile_relationships
     pointer = lock_assignment_cursor(db)
     bundle = get_bundle(db, identifier, user, lock=True)
     if bundle.source_type != "manual" and user.role != Role.admin:
@@ -523,11 +523,10 @@ def commit_review(db, identifier, user, revision, decisions, settings):
         target = matches[0][0] if matches else None
         if target and decisions.get(group.id) != target.id:
             duplicates.append({"groupId": group.id, "label": group.label, "candidateId": target.id, "name": target.name, "ref": target.ref,
-                               "phone": target.phone, "matchedOn": matches[0][1], "canMerge": user.role != Role.staff or target.owner_id == user.id})
+                               "phone": target.phone, "matchedOn": matches[0][1], "canMerge": True})
         elif decisions.get(group.id) and (not target or decisions[group.id] != target.id):
             raise HTTPException(409, "An existing candidate changed. Check duplicate matches again.")
         if target:
-            ensure_candidate_edit(target, user) if decisions.get(group.id) == target.id else None
             for field in ("dob", "passport_no"):
                 if getattr(target, field) and values.get(field) and getattr(target, field) != values[field]:
                     raise HTTPException(409, f"{group.label}: {field.replace('_', ' ')} conflicts with the existing candidate. Review the identity before merging.")
@@ -553,7 +552,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
         resume_text = "\n".join(page.get("text", "") for page in bundle.pages if _page_key(page) in selected_keys)
         if candidate:
             enrich_empty(candidate, values, stored_ocr)
-            if not candidate.resume_text and resume_text:
+            if resume_text:  # the newly confirmed resume is the latest one; Data Bank search follows it
                 candidate.resume_text = resume_text
         else:
             owner = next_owner(db, pointer=pointer)
@@ -572,7 +571,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 db.add(Notification(user_id=recipient, kind="candidate_assignment", title="Candidate assigned" if owner else "Candidate needs assignment", detail=candidate.name, link_to=f"/candidates/{candidate.id}"))
         _attach_group(db, bundle, group, candidate, user, settings)
         group.candidate_id, group.status = candidate.id, "committed"
-        db.add(AuditEntry(actor_id=user.id, action="Confirmed reviewed person", target=candidate.name, entity_type="candidate", entity_id=candidate.id, meta=provenance))
+        db.add(AuditEntry(actor_id=user.id, action="Confirmed a person from a document check", target=candidate.name, entity_type="candidate", entity_id=candidate.id, meta=provenance))
     bundle.status, bundle.last_error = "completed", None
     bundle.revision += 1
     identifiers = list(dict.fromkeys(group.candidate_id for group in groups))
@@ -593,7 +592,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
     if bundle.source_type in {"email", "whatsapp"}:
         from app.services.intake_acknowledgements import queue_intake_acknowledgement
         queue_intake_acknowledgement(db, bundle.source_type, bundle.source_id)
-    db.add(AuditEntry(actor_id=user.id, action="Completed person document review", entity_type="document_person_intake", entity_id=bundle.id,
+    db.add(AuditEntry(actor_id=user.id, action="Finished checking documents for several people", entity_type="document_person_intake", entity_id=bundle.id,
         meta={"candidateIds": identifiers, "excludedPages": bundle.ignored_pages}))
     db.commit()
     return bundle_out(db, bundle)

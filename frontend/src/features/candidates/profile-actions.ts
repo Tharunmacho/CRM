@@ -12,3 +12,23 @@ export function linkedConversationId(response: { conversation?: { id?: unknown }
   const id = response?.conversation?.id
   return typeof id === 'string' ? id : ''
 }
+
+/** Only an admin sees "Delete candidate"; the server refuses everyone else too. */
+export const canDeleteCandidate = (role: string | undefined): boolean => role === 'admin'
+
+/**
+ * Why a candidate cannot be deleted from what the page already knows, or null when they can.
+ * The server decides in the end and its message is shown if it disagrees.
+ */
+export function deleteCandidateBlocker(
+  applications: ReadonlyArray<{ status: string; orderRef?: string }>,
+): string | null {
+  if (applications.some((application) => application.status === 'active')) {
+    return 'This candidate is still on an order. Remove them from the order first.'
+  }
+  const deployed = applications.find((application) => application.status === 'deployed')
+  if (deployed) {
+    return `This candidate was deployed${deployed.orderRef ? ` through ${deployed.orderRef}` : ''}, and a deployed placement is kept on record. They cannot be deleted.`
+  }
+  return null
+}

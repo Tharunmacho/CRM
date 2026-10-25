@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+from app.services import change_feed
 
 settings = get_settings()
 log = logging.getLogger("db")
@@ -114,6 +115,9 @@ def warm_pool(count: int = 6) -> None:
         if connection is not None:
             connection.close()
 
+
+# Announce committed changes to open browsers (hooks on statements, commits and ORM flushes; no-op off PostgreSQL).
+change_feed.install()
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 

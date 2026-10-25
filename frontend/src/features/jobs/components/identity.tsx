@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
-import { Globe2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { CountryFlag } from '@/shared/ui/country-flag'
 import { initials } from '@/shared/lib/format'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 
@@ -18,32 +18,9 @@ export function Avatar({ name, size = 'md', className }: { name: string; size?: 
   )
 }
 
-const FLAGS: [string, string[]][] = [
-  ['ae', ['united arab emirates', 'uae', 'emirates', 'dubai', 'abu dhabi', 'sharjah']],
-  ['sa', ['saudi']],
-  ['qa', ['qatar']],
-  ['kw', ['kuwait']],
-  ['om', ['oman']],
-  ['bh', ['bahrain']],
-  ['de', ['germany']],
-  ['gb', ['united kingdom', 'uk', 'britain', 'england']],
-  ['in', ['india']],
-  ['sg', ['singapore']],
-  ['us', ['united states', 'usa', 'america']],
-]
-
-export const countryCode = (country?: string | null) => {
-  const key = (country ?? '').trim().toLowerCase()
-  if (!key) return null
-  return FLAGS.find(([, names]) => names.some((name) => key === name || key.includes(name)))?.[0] ?? null
-}
-
-/** The country's flag from /flags, or a globe when it is not one we ship (or none is recorded). */
+/** The country's flag from /flags, or a globe when the country has no flag file (or none is recorded). */
 export function Flag({ country, className }: { country?: string | null; className?: string }) {
-  const code = countryCode(country)
-  return code
-    ? <img src={`/flags/${code}.svg`} alt="" width={20} height={14} className={cn('jv-flag-img', className)} loading="lazy" />
-    : <Globe2 size={15} aria-hidden="true" className={cn('jv-flag-globe', className)} />
+  return <CountryFlag country={country} className={cn('jv-flag-img', className)} globeClassName={cn('jv-flag-globe', className)} />
 }
 
 /** Work location with its flag: "Dubai, United Arab Emirates". */

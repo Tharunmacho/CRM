@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '@/shared/api/client'
 import { agencyDay } from '@/shared/lib/task-time'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { validDate, type StaffDirectoryResponse } from './model'
 
 export function useStaffDirectory() {
@@ -22,6 +23,7 @@ export function useStaffDirectory() {
   useEffect(() => {
     const controller = new AbortController()
     let running = false
+    let again = false // a change arrived while a read was running: that read may predate it
     if (!validPeriod) return () => controller.abort()
     const load = async () => {
       if (running || controller.signal.aborted) return
@@ -35,16 +37,20 @@ export function useStaffDirectory() {
       } finally {
         running = false
         if (!controller.signal.aborted) setBusyKey(previous => previous === key ? null : previous)
+        if (again && !controller.signal.aborted) { again = false; void load() }
       }
     }
     reload.current = () => { void load() }
     const visibleRefresh = () => { if (document.visibilityState === 'visible') void load() }
     void load()
-    const timer = window.setInterval(visibleRefresh, 30_000)
+    const stopLive = liveInterval(visibleRefresh, 30_000, ['attendance', 'users', 'tasks', 'candidates', 'applications'], {
+      debounceMs: 1_000,
+      onChange: () => { if (document.visibilityState !== 'visible') return; if (running) again = true; else void load() },
+    })
     window.addEventListener('focus', visibleRefresh)
     document.addEventListener('visibilitychange', visibleRefresh)
     return () => {
-      controller.abort(); window.clearInterval(timer); reload.current = () => {}
+      controller.abort(); stopLive(); reload.current = () => {}
       window.removeEventListener('focus', visibleRefresh)
       document.removeEventListener('visibilitychange', visibleRefresh)
     }
@@ -61,10 +67,15 @@ export function useStaffDirectory() {
   // loads. Period-based metrics must use result, never lastResult.
   const lastResult = snapshot?.sessionKey === sessionKey ? snapshot.data : null
   const error = !validPeriod ? 'The start date must be on or before the end date.' : failure?.key === key ? failure.message : ''
+  const setPeriod = (range: { from: string; to: string } | null) => setParams(previous => {
+    const next = new URLSearchParams(previous)
+    if (range && !(range.from === `${today.slice(0, 7)}-01` && range.to === today)) { next.set('from', range.from); next.set('to', range.to) } else { next.delete('from'); next.delete('to') }
+    return next
+  }, { replace: true })
   const refresh = () => {
     if (!validPeriod) {
       setParams(previous => { const next = new URLSearchParams(previous); next.delete('from'); next.delete('to'); return next }, { replace: true })
     } else reload.current()
   }
-  return { result, lastResult, loading: !result && !error, refreshing: busyKey === key && !!result, error, params, updateParam, period: { from, to }, refresh }
+  return { result, lastResult, loading: !result && !error, refreshing: busyKey === key && !!result, error, params, updateParam, setPeriod, today, period: { from, to }, refresh }
 }

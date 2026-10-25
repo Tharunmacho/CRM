@@ -100,7 +100,7 @@ def parse_message(
     received_at: datetime | None, unread: bool, starred: bool = False,
 ) -> InboundMessage:
     def malformed():
-        return MailMessageError("malformed_message", "The email has damaged MIME content. Review the source message.",
+        return MailMessageError("malformed_message", "This email is damaged and could not be read. Open it in your mail app to check it.",
                                 uid=uid, provider_id=provider_id)
     try:
         message = BytesParser(policy=policy.default).parsebytes(data)
@@ -160,7 +160,7 @@ def parse_message(
                 received_at = parsedate_to_datetime(str(message.get("Date", "")))
             except (TypeError, ValueError, OverflowError):
                 received_at = datetime.now(timezone.utc)
-                warnings.append("The message had no valid received date; the retrieval time was recorded.")
+                warnings.append("This email had no valid date, so the time we downloaded it is shown instead.")
         if received_at.tzinfo is None:
             received_at = received_at.replace(tzinfo=timezone.utc)
         from_name, from_address = parseaddr(str(message.get("From", "")))

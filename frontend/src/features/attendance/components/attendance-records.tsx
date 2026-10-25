@@ -15,7 +15,7 @@ const Shift = ({ shift }: { shift: { start: string; end: string } }) => <span cl
 
 /* ------------------------------------------------------------ employee record */
 
-export function EmployeeRecord({ employee, timezone, canAdjust, onAdjust, onSessions }: { employee: EmployeeMonth; timezone: string; canAdjust: boolean; onAdjust: () => void; onSessions: (date: string) => void }) {
+export function EmployeeRecord({ employee, timezone, canAdjust, onAdjust, onSessions, focusDate }: { employee: EmployeeMonth; timezone: string; canAdjust: boolean; onAdjust: () => void; onSessions: (date: string) => void; focusDate?: string }) {
   const s = employee.summary
   const columns: Column<PolicyDay>[] = [
     { key: 'date', header: 'Date', width: '9%', render: (day) => <div className="att-two"><strong>{dayLabel(day.date)}</strong><small>{weekdayLabel(day.date)}</small></div> },
@@ -37,7 +37,7 @@ export function EmployeeRecord({ employee, timezone, canAdjust, onAdjust, onSess
     </dl>
     {!employee.days.length
       ? <EmptyState title="No attendance records in this month" description="Records start with the first check-in, leave, permission or fix." />
-      : <DataTable compact stackBelow={1280} pageSize={40} rows={employee.days} columns={columns} rowKey={(day) => day.date} rowClassName={(day) => (day.status === 'WO' || day.status === 'H') ? 'att-row-off' : undefined} />}
+      : <DataTable compact stackBelow={1280} pageSize={40} rows={employee.days} columns={columns} rowKey={(day) => day.date} rowClassName={(day) => cn((day.status === 'WO' || day.status === 'H') && 'att-row-off', focusDate === day.date && 'att-row-focus') || undefined} />}
   </Panel>
 }
 

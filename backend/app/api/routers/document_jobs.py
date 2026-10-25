@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.deps import current_user
 from app.db.models import AuditEntry, DocumentExtractionJob, User
 from app.db.session import get_db
+from app.services.audit_log import audit_once
 from app.services.document_extraction import request_extraction_retry
 from app.services.document_storage import delete_bytes, file_response, put_bytes
 from app.services.manual_extraction import READY, attach_original, job_out, now, owned_job
@@ -128,13 +129,13 @@ class DraftIn(BaseModel):
     @classmethod
     def bounded_form(cls, value):
         if set(value) - FORM_KEYS or any(len(item) > 20000 for item in value.values()):
-            raise ValueError("The draft contains unsupported fields or a value that is too long")
+            raise ValueError("The draft has details we do not support, or a value that is too long.")
         return value
 
     @field_validator("editedFields")
     @classmethod
     def bounded_keys(cls, value):
-        if set(value) - FORM_KEYS: raise ValueError("Unsupported edited field")
+        if set(value) - FORM_KEYS: raise ValueError("One of the edited details is not supported.")
         return value
 
 
@@ -166,6 +167,9 @@ def save_draft(group_id: str, body: DraftIn, db: Session = Depends(get_db), user
     for job in jobs:
         job.draft = deepcopy(payload)
         job.updated_at = now()
+    # Autosave runs while typing, so one line per person and intake is enough.
+    audit_once(db, user.id, "Saved candidate details from an uploaded intake", target=jobs[0].filename,
+        entity_type="document_extraction_group", entity_id=_group(group_id), window_minutes=60)
     db.commit()
     return {"saved": True}
 
@@ -199,6 +203,8 @@ def retry(job_id: str, db: Session = Depends(get_db), user: User = Depends(curre
     job.status, job.attempts, job.next_attempt_at = "pending", 0, now()
     job.last_error = None
     job.updated_at = now()
+    db.add(AuditEntry(actor_id=user.id, action="Asked for an uploaded document to be read again", target=job.filename,
+        entity_type="document_extraction_job", entity_id=job.id))
     db.commit()
     return job_out(job, detail=True)
 
@@ -211,7 +217,11 @@ def dismiss(job_id: str, db: Session = Depends(get_db), user: User = Depends(cur
     if db.scalar(select(MultiPersonIntake.id).where(MultiPersonIntake.source_type == "manual", MultiPersonIntake.source_id == job.group_id)):
         raise HTTPException(409, "This file is part of a review of people and pages. Leave pages out from inside that review and give a reason.")
     if job.status != "attached":
+        was_status = job.status
         job.status, job.updated_at = "dismissed", now()
+        if was_status != "dismissed":
+            db.add(AuditEntry(actor_id=user.id, action="Removed an uploaded intake file", target=job.filename,
+                entity_type="document_extraction_job", entity_id=job.id, meta={"kind": job.kind, "previous_status": was_status}))
         db.commit()
     return {"status": job.status}
 

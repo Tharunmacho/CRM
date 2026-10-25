@@ -874,6 +874,46 @@ class WorkflowSettings(Base):
     )
 
 
+class Currency(Base):
+    """A currency the order form and the stage-8 advance offer. Retired codes are switched off, never deleted."""
+
+    __tablename__ = "currencies"
+    code: Mapped[str] = mapped_column(String(3), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(8))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        CheckConstraint("code ~ '^[A-Z]{3}$'", name="ck_currencies_code"),
+        CheckConstraint("length(btrim(name)) > 0", name="ck_currencies_name"),
+        {"comment": "Admin-managed currency list for orders and the stage-8 advance; inactive codes stay valid on stored records."},
+    )
+
+
+class AgencySettings(Base):
+    """The agency's identity and defaults. One row (id 1); every value is administered in the CRM."""
+
+    __tablename__ = "agency_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    short_name: Mapped[str | None] = mapped_column(String(60))
+    default_order_currency: Mapped[str] = mapped_column(ForeignKey("currencies.code"), nullable=False)
+    default_advance_currency: Mapped[str] = mapped_column(ForeignKey("currencies.code"), nullable=False)
+    home_calling_code: Mapped[str] = mapped_column(String(5), nullable=False)
+    default_nationality: Mapped[str | None] = mapped_column(String(80))
+    acknowledgement_text: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_agency_settings_singleton"),
+        CheckConstraint("length(btrim(name)) > 0", name="ck_agency_settings_name"),
+        CheckConstraint(r"home_calling_code ~ '^\+[0-9]{1,4}$'", name="ck_agency_settings_calling_code"),
+        {"comment": "Singleton agency profile and defaults: name, default currencies, home calling code and the default acknowledgement text."},
+    )
+
+
 class MailDraft(Base, PkMixin, TimestampMixin):
     __tablename__ = "email_drafts"
     account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), nullable=False, index=True)
@@ -1183,6 +1223,9 @@ class IntakeAcknowledgementSettings(Base, PkMixin, TimestampMixin):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    # Added by migration 0018. Deferred so that every ordinary read of this row still works on a database
+    # that has not had the migration yet; the template is read and written through intake_acknowledgements.
+    whatsapp_template: Mapped[dict | None] = mapped_column(JSONB, deferred=True)
     __table_args__ = (
         UniqueConstraint("source_kind", "channel_id", name="uq_intake_ack_settings_channel"),
         CheckConstraint("source_kind IN ('email','whatsapp')", name="ck_intake_ack_settings_source"),

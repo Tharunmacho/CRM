@@ -364,3 +364,26 @@
   .ac .ac-tags input { min-height: 40px; font-size: 16px; }
   .ac .ac-hint-bar button, .ac .ac-report-toggle, .ac .ac-multi-remove, .ac .ac-multi-add, .ac .ac-slots .ui-file-row-button { min-height: 44px; }
 }
+
+/* ---------- Resume prefill marker: names the document that filled a field, until the recruiter types over it ---------- */
+.ac .ac-f { min-width: 0; }
+.ac .ac-from { display: inline-flex; align-items: center; gap: 4px; margin-top: 5px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); font-size: 11.5px; font-weight: 500; line-height: 18px; }
+.ac .ac-f[data-from] :is(.ui-input, .custom-select-trigger, .date-picker-trigger, .ac-tags) { border-color: color-mix(in srgb, var(--primary) 40%, var(--border-control)); }
+.ac .ac-hint-bar.is-filled { border-color: color-mix(in srgb, var(--primary) 30%, var(--border-main)); }
+.ac .ac-hint-bar strong { font-weight: 600; color: var(--text-main); }
+
+/* ---------- Live duplicate check: a calm card under the contact fields ---------- */
+.ac .ac-match { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin: 0 24px 24px; padding: 14px 16px; border: 1px solid var(--warning-edge); border-radius: 12px; background: var(--warning-fill); }
+.ac .ac-match-copy { flex: 1 1 260px; min-width: 0; }
+.ac .ac-match-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text-main); overflow-wrap: anywhere; }
+.ac .ac-match-sub { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
+.ac .ac-match-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.ac .ac-match-note { display: flex; align-items: flex-start; gap: 8px; margin: -8px 24px 20px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+.ac .ac-match-note svg { flex: none; margin-top: 3px; }
+.ac .ac-match-note.is-warn { color: var(--warning-ink); }
+@container ac (max-width: 639px) {
+  .ac .ac-match { margin: 0 16px 16px; }
+  .ac .ac-match-note { margin: -4px 16px 16px; }
+  .ac .ac-match-actions { width: 100%; margin-left: 0; }
+  .ac .ac-match-actions .ui-button { flex: 1 1 auto; }
+}

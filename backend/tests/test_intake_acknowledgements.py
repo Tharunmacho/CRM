@@ -11,9 +11,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.routers.intake_acknowledgements import router
 from app.core.security import SESSION_COOKIE
-from app.db.models import (Base, Candidate, DocumentPersonGroup, EmailIngestionJob, IntakeAcknowledgement,
+from app.db.models import (AuditEntry, Base, Candidate, DocumentPersonGroup, EmailIngestionJob, IntakeAcknowledgement,
     IntakeAcknowledgementSettings, MailAccount, MailMessage, MultiPersonIntake, Role,
-    Session as LoginSession, Source, User, WhatsAppChannel, WhatsAppMessage, WhatsAppSendAttempt)
+    Session as LoginSession, Source, User, WhatsAppChannel, WhatsAppMessage, WhatsAppSendAttempt, WhatsAppTemplate)
 from app.db.session import get_db
 from app.integrations.mail.imap import MailConfig
 from app.integrations.mail.mime import parse_message
@@ -284,7 +284,7 @@ def test_whatsapp_expired_window_is_visible_failure_and_candidate_stays_saved(wo
     with workspace() as db:
         message = wa_source(db, received_at=ack.utcnow() - timedelta(days=2))
         row = ack.queue_intake_acknowledgement(db, 'whatsapp', message.id)
-        assert row.status == 'failed' and 'window' in row.last_error and row.outbound_id is None
+        assert row.status == 'failed' and '24-hour' in row.last_error and row.outbound_id is None
         db.commit()
     with workspace() as db:
         assert db.get(WhatsAppMessage, message.id).candidate_id == 'candidate'
@@ -344,3 +344,119 @@ def test_editing_enabled_template_preserves_activation_and_reenable_resets_cutof
     enabled = client.patch('/api/intake-acknowledgements/email/mailbox', json={
         'enabled': True, 'body': changed, 'previewedBody': changed})
     assert enabled.status_code == 200 and datetime.fromisoformat(enabled.json()['enabledAt']) > before
+
+
+# ------------------------------------------------ approved template instead of plain text
+
+ACK_URL = '/api/intake-acknowledgements/whatsapp/123456'
+CHOICE = {'name': 'documents_received', 'language': 'en', 'parameters': ['first_name', 'agency_name']}
+
+
+def add_template(db, *, status='APPROVED', body='Hello {{1}}, {{2}} received your documents.'):
+    db.add(WhatsAppTemplate(phone_number_id='123456', name='documents_received', language='en', category='UTILITY',
+        status=status, components=[{'type': 'BODY', 'text': body}]))
+    db.flush()
+
+
+def choose(db, choice=None):
+    config = db.scalar(select(IntakeAcknowledgementSettings).where(IntakeAcknowledgementSettings.source_kind == 'whatsapp'))
+    assert ack.write_template_choice(db, config, choice or CHOICE)
+
+
+def test_template_is_validated_saved_kept_and_cleared_through_the_settings_api(workspace, client):
+    with workspace() as db:
+        wa_source(db); add_template(db)
+        db.add(WhatsAppTemplate(phone_number_id='123456', name='old_one', language='en', category='UTILITY', status='REJECTED',
+            components=[{'type': 'BODY', 'text': 'Hi'}]))
+        db.commit()
+    base = {'enabled': True, 'body': ack.DEFAULT_BODY, 'previewedBody': ack.DEFAULT_BODY}
+    assert client.get(ACK_URL).json()['template'] is None and client.get(ACK_URL).json()['templateAvailable'] is True
+    missing = client.patch(ACK_URL, json={**base, 'template': {**CHOICE, 'name': 'not_synced'}})
+    assert missing.status_code == 422 and 'synced' in missing.json()['detail']
+    rejected = client.patch(ACK_URL, json={**base, 'template': {'name': 'old_one', 'language': 'en', 'parameters': []}})
+    assert rejected.status_code == 409 and 'not approved' in rejected.json()['detail']
+    wrong_count = client.patch(ACK_URL, json={**base, 'template': {**CHOICE, 'parameters': ['first_name']}})
+    assert wrong_count.status_code == 422 and '2 value' in wrong_count.json()['detail']
+    assert client.patch(ACK_URL, json={**base, 'template': {**CHOICE, 'parameters': ['phone_number', 'x']}}).status_code == 422
+    assert client.patch('/api/intake-acknowledgements/email/mailbox', json={**base, 'template': CHOICE}).status_code == 422
+    saved = client.patch(ACK_URL, json={**base, 'template': CHOICE})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['template'] == CHOICE
+    kept = client.patch(ACK_URL, json=base)  # template left out: unchanged
+    assert kept.json()['template'] == CHOICE
+    cleared = client.patch(ACK_URL, json={**base, 'template': None})
+    assert cleared.json()['template'] is None
+    with workspace() as db:
+        audits = [row.meta for row in db.scalars(select(AuditEntry)
+            .where(AuditEntry.entity_type == 'intake_ack_settings'))]
+    assert [item['templateChanged'] for item in audits] == [True, False, True]
+    client.cookies.set(SESSION_COOKIE, 'ack-staff')
+    assert client.patch(ACK_URL, json={**base, 'template': CHOICE}).status_code == 403
+
+
+def test_configured_template_is_sent_even_after_the_24_hour_window_and_filled_from_the_candidate(workspace):
+    with workspace() as db:
+        message = wa_source(db, received_at=ack.utcnow() - timedelta(days=2))
+        add_template(db); choose(db)
+        row = ack.queue_intake_acknowledgement(db, 'whatsapp', message.id)
+        assert row.status == 'pending' and row.outbound_id, row.last_error
+        db.commit()
+        outgoing = db.get(WhatsAppSendAttempt, row.outbound_id)
+        assert outgoing.message_type == 'template' and outgoing.sender_user_id is None
+        assert outgoing.template == {'name': 'documents_received', 'language': 'en', 'parameters': ['Synthetic', 'our agency']}
+        assert outgoing.body == 'Hello Synthetic, our agency received your documents.' and row.body == outgoing.body
+
+
+def test_template_that_stopped_being_approved_falls_back_to_plain_text_inside_the_window(workspace):
+    with workspace() as db:
+        message = wa_source(db)
+        add_template(db, status='PAUSED'); choose(db)
+        row = ack.queue_intake_acknowledgement(db, 'whatsapp', message.id)
+        assert row.status == 'pending'
+        outgoing = db.get(WhatsAppSendAttempt, row.outbound_id)
+        assert outgoing.message_type == 'text' and outgoing.body == ack.DEFAULT_BODY
+
+
+def test_without_a_template_column_plain_text_still_works_and_choosing_one_is_refused(workspace, client, schema_database):
+    from sqlalchemy import text
+    with workspace() as db:
+        wa_source(db); db.commit()
+    with schema_database.begin() as connection:
+        connection.execute(text('ALTER TABLE intake_acknowledgement_settings DROP COLUMN whatsapp_template'))
+    snapshot = client.get(ACK_URL).json()
+    assert snapshot['template'] is None and snapshot['templateAvailable'] is False
+    base = {'enabled': True, 'body': ack.DEFAULT_BODY, 'previewedBody': ack.DEFAULT_BODY}
+    refused = client.patch(ACK_URL, json={**base, 'template': CHOICE})
+    assert refused.status_code == 409 and 'database update' in refused.json()['detail']
+    assert client.patch(ACK_URL, json=base).status_code == 200
+    with workspace() as db:
+        db.add(WhatsAppMessage(id='second', provider_message_id='wamid.second', phone_number_id='123456', sender_number='919000000001',
+            message_type='document', status='completed', candidate_id='candidate', received_at=ack.utcnow()))
+        db.flush()
+        row = ack.queue_intake_acknowledgement(db, 'whatsapp', 'second')
+        assert row.status == 'pending' and db.get(WhatsAppSendAttempt, row.outbound_id).message_type == 'text'
+
+
+def test_template_migration_is_additive_idempotent_and_reversible(schema_database):
+    from sqlalchemy import inspect, text
+    from test_database_naming import _migrate
+    engine = schema_database
+    _migrate(engine, "0017_agency_settings")
+    def columns():
+        return {column["name"] for column in inspect(engine).get_columns("intake_acknowledgement_settings")}
+    before = columns()
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO intake_acknowledgement_settings (id,source_kind,channel_id,enabled,body) VALUES ('s','whatsapp','1',true,'kept text kept')"))
+    _migrate(engine, "head")
+    assert columns() - before == {"whatsapp_template"}
+    with engine.begin() as connection:
+        assert connection.execute(text("SELECT whatsapp_template, body FROM intake_acknowledgement_settings")).one() == (None, "kept text kept")
+        connection.execute(text("""UPDATE intake_acknowledgement_settings SET whatsapp_template = '{"name":"x"}'"""))
+        connection.execute(text("UPDATE alembic_version SET version_num = '0017_agency_settings'"))
+    _migrate(engine, "head")  # revision lost after the column was made: harmless
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT whatsapp_template->>'name' FROM intake_acknowledgement_settings")) == "x"
+    _migrate(engine, "0017_agency_settings", downgrade=True)
+    assert columns() == before
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT body FROM intake_acknowledgement_settings")) == "kept text kept"

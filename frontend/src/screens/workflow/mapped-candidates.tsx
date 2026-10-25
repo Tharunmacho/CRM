@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { CircleCheck, Clock3, Eye, GitBranch, Pencil, Search, TimerOff, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, slaState } from '@/shared/lib/format'
+import { taskClockStart } from '@/shared/lib/task-time'
 import { useStore } from '@/shared/state/crm-store'
 import { STAGES, closureLabels } from '@/shared/workflow/stages'
 import type { Application } from '@/shared/model/types'
@@ -34,6 +35,7 @@ const Dash = () => <span className="db-muted" aria-label="None">–</span>
 export default function MappedCandidatesPage() {
   const store = useStore()
   const [tab, setTab] = useState<TabKey>('active')
+  const [overdueOnly, setOverdueOnly] = useState(false)
   const [query, setQuery] = useState('')
   const [stageFilter, setStageFilter] = useState('all')
   const [ownerFilter, setOwnerFilter] = useState('all')
@@ -109,12 +111,16 @@ export default function MappedCandidatesPage() {
     mapped: (a) => a.createdAt,
   }
 
+  // The 48-hour clock of the open task runs from its restart (taskClockStart), not from when the task was first created.
+  const taskOf = (a: Application) => store.tasks.find((t) => t.applicationId === a.id && !t.completedAt && !t.cancelledAt)
+  const isOverdue = (a: Application) => { const task = taskOf(a); return task ? slaState(taskClockStart(task)).overdue : false }
+  const hoursLate = (a: Application) => { const task = taskOf(a); return task ? Math.floor(slaState(taskClockStart(task)).hoursOverdue) : 0 }
+
   // Most recently mapped first, which is the order the desk works in, unless a header is chosen.
   const rows = useMemo(() => {
-    const base =
-      tab === 'active' && stageFilter !== 'all'
-        ? buckets.active.filter((a) => String(a.currentStage) === stageFilter)
-        : buckets[tab]
+    let base = buckets[tab]
+    if (tab === 'active' && stageFilter !== 'all') base = base.filter((a) => String(a.currentStage) === stageFilter)
+    if (tab === 'active' && overdueOnly) base = base.filter(isOverdue)
     const list = [...base].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     if (!sort || !sorters[sort.key]) return list
     const value = sorters[sort.key]
@@ -124,21 +130,22 @@ export default function MappedCandidatesPage() {
       const y = value(b)
       return factor * (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true }))
     })
-  }, [buckets, tab, stageFilter, sort, store.candidates, store.orders])
+  }, [buckets, tab, stageFilter, overdueOnly, sort, store.candidates, store.orders, store.tasks])
 
-  useEffect(() => { setPage(0) }, [tab, stageFilter, ownerFilter, designationFilter, companyFilter, sourceFilter, query, sort])
+  useEffect(() => { setPage(0) }, [tab, overdueOnly, stageFilter, ownerFilter, designationFilter, companyFilter, sourceFilter, query, sort])
   const changeView = (next: DbView) => { setView(next); saveView('mapped', next) }
   const onFile = store.applications.filter((a) => a.status === tab && store.candidate(a.candidateId)).length
-  const hasFilters = Boolean(query.trim()) || stageFilter !== 'all' || ownerFilter !== 'all' || designationFilter !== 'all' || companyFilter !== 'all' || sourceFilter !== 'all'
-  const clearFilters = () => { setQuery(''); setStageFilter('all'); setOwnerFilter('all'); setDesignationFilter('all'); setCompanyFilter('all'); setSourceFilter('all') }
+  const hasFilters = Boolean(query.trim()) || stageFilter !== 'all' || ownerFilter !== 'all' || designationFilter !== 'all' || companyFilter !== 'all' || sourceFilter !== 'all' || overdueOnly
+  const clearFilters = () => { setQuery(''); setStageFilter('all'); setOwnerFilter('all'); setDesignationFilter('all'); setCompanyFilter('all'); setSourceFilter('all'); setOverdueOnly(false) }
   const forceCards = boxWidth > 0 && boxWidth < TABLE_MIN_WIDTH
   const showCards = forceCards || view === 'cards'
 
-  const taskOf = (a: Application) => store.tasks.find((t) => t.applicationId === a.id && !t.completedAt && !t.cancelledAt)
-  const isOverdue = (a: Application) => { const task = taskOf(a); return task ? slaState(task.createdAt).overdue : false }
   const statusLabel = (a: Application) => (a.status === 'closed' ? (a.closureReason ? closureLabels[a.closureReason] : STATUS_TEXT.closed) : isOverdue(a) ? 'Overdue' : STATUS_TEXT[a.status])
   const statusDot = (a: Application) => (
-    <StatusDot title={statusLabel(a)} tone={a.status === 'closed' || isOverdue(a) ? 'bad' : a.status === 'deployed' ? 'ok' : 'info'}>{statusLabel(a)}</StatusDot>
+    <span className="db-cell">
+      <StatusDot title={statusLabel(a)} tone={a.status === 'closed' || isOverdue(a) ? 'bad' : a.status === 'deployed' ? 'ok' : 'info'}>{statusLabel(a)}</StatusDot>
+      {a.status === 'active' && isOverdue(a) && <span className="db-late" title="Time past the 48-hour deadline of the open task">{hoursLate(a)}h late</span>}
+    </span>
   )
   const canWork = (a: Application) => {
     const c = store.candidate(a.candidateId)
@@ -202,7 +209,7 @@ export default function MappedCandidatesPage() {
     (task) =>
       !task.completedAt &&
       !task.cancelledAt &&
-      slaState(task.createdAt).overdue &&
+      slaState(taskClockStart(task)).overdue &&
       buckets.active.some((application) => application.id === task.applicationId),
   ).length
   const selects: { label: string; value: string; onChange: (value: string) => void; any: string; options: [string, string][] }[] = []
@@ -215,23 +222,23 @@ export default function MappedCandidatesPage() {
   return (
     <div className="db mc">
       <PageHeader
-        title="Mapped candidates"
+        title="Matched candidates"
         description="Candidates who are matched to an order. Open one to work on its 11 stages, from prescreening to deployment."
       />
 
       <KpiCards
         items={[
-          { label: 'In progress', value: buckets.active.length, detail: 'Being worked on now', icon: GitBranch, ...history.active, active: tab === 'active', onSelect: () => setTab('active') },
-          { label: 'Deployed', value: buckets.deployed.length, detail: 'Placed in a job abroad', icon: CircleCheck, tone: 'ok', ...history.deployed, active: tab === 'deployed', onSelect: () => setTab('deployed') },
-          { label: 'Closed', value: buckets.closed.length, detail: 'Ended before a placement', icon: Clock3, tone: 'quiet', ...history.closed, active: tab === 'closed', onSelect: () => setTab('closed') },
-          { label: 'Overdue tasks', value: overdueTasks, detail: 'Past their 48-hour deadline', icon: TimerOff, tone: 'bad' },
+          { label: 'In progress', value: buckets.active.length, detail: 'Being worked on now', icon: GitBranch, ...history.active, active: tab === 'active' && !overdueOnly, onSelect: () => { setTab('active'); setOverdueOnly(false) } },
+          { label: 'Deployed', value: buckets.deployed.length, detail: 'Placed in a job abroad', icon: CircleCheck, tone: 'ok', ...history.deployed, active: tab === 'deployed', onSelect: () => { setTab('deployed'); setOverdueOnly(false) } },
+          { label: 'Closed', value: buckets.closed.length, detail: 'Ended before a placement', icon: Clock3, tone: 'quiet', ...history.closed, active: tab === 'closed', onSelect: () => { setTab('closed'); setOverdueOnly(false) } },
+          { label: 'Overdue tasks', value: overdueTasks, detail: 'Past their 48-hour deadline', icon: TimerOff, tone: 'bad', active: tab === 'active' && overdueOnly, onSelect: () => { setTab('active'); setOverdueOnly((value) => (tab === 'active' ? !value : true)) } },
         ]}
       />
 
       <Panel flush className="db-panel">
         <div className="db-panel-head">
           <div className="min-w-0">
-            <h2 className="db-panel-title">{TAB_TITLE[tab]}</h2>
+            <h2 className="db-panel-title">{overdueOnly && tab === 'active' ? 'Overdue in progress' : TAB_TITLE[tab]}</h2>
             <p className="db-panel-sub tnum">Showing {rows.length} of {onFile} matches</p>
           </div>
           <div className="db-panel-tools">
@@ -262,12 +269,12 @@ export default function MappedCandidatesPage() {
 
         <div ref={boxRef} className="db-box">
           {rows.length === 0 ? emptyState : showCards ? (
-            <ul className="db-grid" aria-label="Mapped candidates">
+            <ul className="db-grid" aria-label="Matched candidates">
               {pageRows.map((a) => {
                 const c = store.candidate(a.candidateId)!
                 const o = store.order(a.orderId)
                 return (
-                  <li key={a.id} className={cn('db-mini', isOverdue(a) && 'is-overdue')} tabIndex={0} onClick={() => setEditing(a.id)}
+                  <li key={a.id} className={cn('db-mini', isOverdue(a) && 'is-late')} tabIndex={0} onClick={() => setEditing(a.id)}
                     onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); setEditing(a.id) } }}>
                     <div className="db-mini-head">
                       <Who name={c.name} sub={<span className="ident">{c.phone}</span>} />
@@ -291,13 +298,13 @@ export default function MappedCandidatesPage() {
             </ul>
           ) : (
             <DbTable
-              label="Mapped candidates"
+              label="Matched candidates"
               rows={pageRows}
               columns={columns}
               rowKey={(a) => a.id}
               sort={sort}
               onSort={(key) => setSort((current) => ({ key, dir: current?.key === key && current.dir === 'asc' ? 'desc' : 'asc' }))}
-              rowClassName={(a) => (isOverdue(a) ? 'is-overdue' : undefined)}
+              rowClassName={(a) => (isOverdue(a) ? 'is-late' : undefined)}
             />
           )}
         </div>

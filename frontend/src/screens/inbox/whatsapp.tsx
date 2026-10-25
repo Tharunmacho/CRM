@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { AlertTriangle, ChevronLeft, ChevronRight, Clock3, Download, ExternalLink, FileText, MessageCircle, Phone, RefreshCw, UserCheck, Zap } from 'lucide-react'
 import { absoluteApiHref, api, fileHref } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { Button, Field, Select, SearchInput, Switch, Textarea } from '@/shared/ui/primitives'
 import { Badge, EmptyState, PageHeader, Panel, PanelHeader, type Tone } from '@/shared/ui/display'
 import { Dialog, Tabs } from '@/shared/ui/overlay'
@@ -59,6 +60,7 @@ export default function WhatsAppPage() {
     readController.current = controller
     setError('')
     let pending = false
+    let again = false // a change arrived while a read was running: that read may predate it
     const read = async () => {
       if (pending || busyRef.current || document.visibilityState !== 'visible') return
       pending = true
@@ -68,14 +70,17 @@ export default function WhatsAppPage() {
         const result = await api.get<Inbox>(`/whatsapp?${params}`, { signal: controller.signal })
         if (!controller.signal.aborted) { setSnapshot({ key, data: result }); setError('') }
       } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'We could not load the messages. Check your internet and try again.') }
-      finally { pending = false; if (!controller.signal.aborted) setRefreshing(false) }
+      finally {
+        pending = false; if (!controller.signal.aborted) setRefreshing(false)
+        if (again && !controller.signal.aborted) { again = false; void read() }
+      }
     }
     const delay = window.setTimeout(() => void read(), 250)
-    const timer = window.setInterval(() => void read(), 15_000)
+    const stopLive = liveInterval(() => void read(), 15_000, ['whatsapp', 'documents', 'candidates'], { onChange: () => { if (pending) again = true; else void read() } })
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     window.addEventListener('focus', visible)
-    return () => { controller.abort(); window.clearTimeout(delay); window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
+    return () => { controller.abort(); window.clearTimeout(delay); stopLive(); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [key, query, status, page, revision, store.me.id])
   async function act(id: string, action: () => Promise<unknown>) {
     if (busyRef.current) return
@@ -91,12 +96,12 @@ export default function WhatsAppPage() {
     { key: 'sender', header: 'Sender', width: '19%', render: (row) => <RecordIdentity name={row.senderName || row.senderNumber} detail={row.senderNumber} icon={row.senderName ? undefined : Phone} /> },
     { key: 'message', header: 'Message or document', width: '27%', render: (row) => <div className="wa-doc">
       {row.fileName ? <FileIcon name={row.fileName} /> : <span className="mb-file is-doc" aria-hidden="true"><MessageCircle size={17} /></span>}
-      <div className="min-w-0"><p className="wa-doc-name" title={row.fileName || row.type}>{row.fileName || row.type}</p><p className="wa-doc-caption" title={row.body || undefined}>{row.body || 'No caption'}</p>{row.lastError && <p className="wa-doc-error">{row.lastError}</p>}</div>
+      <div className="min-w-0"><p className="wa-doc-name" title={row.fileName || row.type}>{row.fileName || `${row.type.charAt(0).toUpperCase()}${row.type.slice(1)} message`}</p><p className="wa-doc-caption" title={row.body || undefined}>{row.body || 'No caption'}</p>{row.lastError && <p className="wa-doc-error">{row.lastError}</p>}</div>
     </div> },
     { key: 'received', header: 'Received', width: '13%', render: (row) => <span className="wa-when" title={dateTimeLabel(row.receivedAt)}>{smartTime(row.receivedAt)}</span> },
     { key: 'status', header: 'Status', width: '15%', render: (row) => <div className="wa-state"><Badge tone={statusTone(row.status)} variant="dot">{statusLabel(row.status)}</Badge>
       {row.documentBundle?.candidateIds.map((id) => <CandidateChip key={id} label={candidateName(id)} title="Open the candidate" onClick={() => navigate(`/candidates/${id}`)} />)}
-      {row.candidateId && !row.documentBundle && <CandidateChip label="Candidate" title="Open the candidate" onClick={() => navigate(`/candidates/${row.candidateId}`)} />}
+      {row.candidateId && !row.documentBundle && <CandidateChip label={candidateName(row.candidateId)} title="Open the candidate" onClick={() => navigate(`/candidates/${row.candidateId}`)} />}
     </div> },
     { key: 'actions', header: 'Actions', width: '26%', align: 'right', render: (row) => <div className="wa-doc-actions">
       {row.hasFile && <><a className="wa-act" href={fileHref(`/api/whatsapp/messages/${row.id}/file`)} target="_blank" rel="noreferrer" title={`View ${row.fileName ?? 'document'}`}><ExternalLink size={14} />View</a><a className="wa-act is-icon" aria-label={`Download ${row.fileName}`} title="Download" href={fileHref(`/api/whatsapp/messages/${row.id}/file?download=true`)}><Download size={14} /></a></>}
@@ -154,6 +159,7 @@ export default function WhatsAppPage() {
       finally { busyRef.current = false; setBusy(''); setRevision((v) => v + 1) }
     }}>{busy ? 'Saving…' : 'Link candidate'}</Button></>}>
       {dialogError && <p role="alert" className="mb-3 text-sm text-stamp-700">{dialogError}</p>}
+      {selected && <p className="mb-3 text-sm text-ink-500">From {selected.senderName || selected.senderNumber}{selected.body ? ` · ${selected.body}` : ''}</p>}
       {selected?.hasFile && <a className="wa-open-original" href={fileHref(`/api/whatsapp/messages/${selected.id}/file`)} target="_blank" rel="noreferrer"><FileIcon name={selected.fileName || 'file'} size="sm" />Open original document<ExternalLink size={13} /></a>}
       <div className={cn('space-y-4')}><Field label="Candidate" required><Select value={candidateId} onChange={(e) => setCandidateId(e.target.value)}><option value="">Choose the matching candidate</option>{store.candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.ref} · {candidate.name}</option>)}</Select></Field><Field label="Why are you linking this?" required><Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} /></Field><p className="text-xs text-ink-500">For a new person, add them in Add Candidate with WhatsApp as the source, then come back here to link this message.</p></div>
     </Dialog>

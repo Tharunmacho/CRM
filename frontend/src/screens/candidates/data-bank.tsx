@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
-import { CircleCheck, Download, FileSearch, RefreshCw, Search, UserCog, UserPlus, UserRoundX, Users, UserSearch } from 'lucide-react'
+import { CircleCheck, Download, FileSearch, RefreshCw, Search, UserCheck, UserCog, UserPlus, UserRoundX, Users, UserSearch } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { api, fileHref } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
@@ -43,7 +43,7 @@ export default function DataBankPage() {
     return next
   })
   const [query, setQuery] = useState('')
-  const [pool, setPool] = useState<DataBankPool>('all')
+  const [pool, setPool] = useState<DataBankPool>(() => { const wanted = searchParams.get('pool'); return wanted === 'needs_review' || wanted === 'unassigned' ? wanted : 'all' })
   const [selected, setSelected] = useState<string[]>([])
   const [reassigning, setReassigning] = useState<string[] | null>(null)
   const [openStage, setOpenStage] = useState<string | null>(null)
@@ -92,7 +92,9 @@ export default function DataBankPage() {
   if (staffFilter) params.set('staff', staffFilter)
   skills.forEach(skill => params.append('skills', skill))
   const filterQuery = params.toString()
-  const result = snapshot?.scope === filterQuery ? snapshot : null
+  // Keep showing the previous page while a new search loads, so the list never blinks empty and the filters keep their place.
+  const result = snapshot
+  const stale = !!snapshot && snapshot.scope !== filterQuery
   useEffect(() => { setPage(0); setSelected([]); setReassigning(null) }, [filterQuery, pageSize])
   useEffect(() => {
     if (!directoryReady) return
@@ -111,7 +113,7 @@ export default function DataBankPage() {
   useEffect(() => {
     if (!directoryReady) return
     const controller = new AbortController()
-    // Best effort: tabs and cards fall back to the loaded directory when the counts are unavailable.
+    // Best effort: the pools fall back to the loaded directory when the counts are unavailable.
     api.get<PoolCounts>(poolCountsPath(staffFilter || undefined), { signal: controller.signal })
       .then(counts => { if (!controller.signal.aborted) setPoolCounts({ scope: countsScope, counts }) })
       .catch(() => { if (!controller.signal.aborted) setPoolCounts(null) })
@@ -129,6 +131,7 @@ export default function DataBankPage() {
     return {
       all: make(() => true),
       unmapped: make(unmapped),
+      unassigned: make(candidate => !candidate.ownerId),
       needs_review: make(candidate => !!candidate.needsReview || candidate.status === 'needs_review'),
       not_interested: make(candidate => candidate.status === 'not_interested'),
       deployed: make(candidate => candidate.status === 'deployed'),
@@ -177,11 +180,15 @@ export default function DataBankPage() {
   const notMapped = counts?.unmapped ?? ownedCandidates.filter((candidate) => !store.activeApplicationFor(candidate.id)).length
   const notInterested = counts?.not_interested ?? ownedCandidates.filter((candidate) => candidate.status === 'not_interested').length
   const needsReview = counts?.needs_review ?? ownedCandidates.filter((candidate) => candidate.needsReview || candidate.status === 'needs_review').length
+  const waiting = counts?.unassigned ?? ownedCandidates.filter((candidate) => !candidate.ownerId).length
   const onFile = counts?.all ?? ownedCandidates.length
   const total = result?.total ?? 0
   const POOL_TITLE: Record<DataBankPool, string> = { all: 'All candidates', unmapped: 'No order yet', unassigned: NEEDS_ASSIGNMENT_LABEL, needs_review: 'Needs review', not_interested: 'Not interested' }
   const narrowed = filterCount > 0 || Boolean(query.trim())
-  const emptyState = (
+  const busy = loading || stale
+  const emptyState = loadError && !result ? (
+    <EmptyState title="We could not load the candidates" description={loadError} action={<Button variant="primary" onClick={() => setRefreshToken(value => value + 1)}>Try again</Button>} />
+  ) : (
     <EmptyState
       title={loading ? 'Searching candidates…' : narrowed ? 'No matching candidates' : emptyPoolCopy(pool)?.title ?? 'No candidates yet'}
       description={
@@ -220,12 +227,14 @@ export default function DataBankPage() {
           </>
         }
       />
-      {(loadError || mutationError) && <p role="alert" className="db-alert">{loadError || mutationError}{loadError && result && ' Showing the last loaded page.'}</p>}
+      {(loadError || mutationError) && !(loadError && !result) && <p role="alert" className="db-alert">{loadError || mutationError}{loadError && result && ' Showing the last loaded page.'}</p>}
+      {mutationError && loadError && !result && <p role="alert" className="db-alert">{mutationError}</p>}
 
       <KpiCards
         items={[
           { label: 'All candidates', value: counts?.all ?? ownedCandidates.length, detail: staffFilter ? 'Assigned to this staff member' : 'Everyone in the Data Bank', icon: Users, ...slices.all, active: pool === 'all', onSelect: () => setPool('all') },
           { label: 'No order yet', value: notMapped, detail: 'Not matched to an order. Ready to match.', icon: UserSearch, ...slices.unmapped, active: pool === 'unmapped', onSelect: () => setPool(current => togglePool(current, 'unmapped')) },
+          ...(waiting > 0 || pool === 'unassigned' ? [{ label: NEEDS_ASSIGNMENT_LABEL, value: waiting, detail: pool === 'unassigned' ? 'Select again to show everyone' : 'Waiting for a recruiter', icon: UserCheck, tone: 'warn' as const, ...slices.unassigned, active: pool === 'unassigned', onSelect: () => setPool(current => togglePool(current, 'unassigned')) }] : []),
           { label: 'Needs review', value: needsReview, detail: pool === 'needs_review' ? 'Select again to show everyone' : 'Profiles that need attention', icon: FileSearch, tone: 'warn', ...slices.needs_review, active: pool === 'needs_review', onSelect: () => setPool(current => togglePool(current, 'needs_review')) },
           { label: 'Not interested', value: notInterested, detail: pool === 'not_interested' ? 'Select again to show everyone' : 'Offer them another order later', icon: UserRoundX, tone: 'quiet', ...slices.not_interested, active: pool === 'not_interested', onSelect: () => setPool(current => togglePool(current, 'not_interested')) },
           { label: 'Deployed', value: ownedCandidates.filter((candidate) => candidate.status === 'deployed').length, detail: 'Placed in a job abroad', icon: CircleCheck, tone: 'ok', ...slices.deployed },
@@ -236,7 +245,7 @@ export default function DataBankPage() {
         <div className="db-panel-head">
           <div className="min-w-0">
             <h2 className="db-panel-title">{POOL_TITLE[pool]}</h2>
-            <p className="db-panel-sub tnum">{loading && !result ? 'Searching…' : `Showing ${total} of ${onFile} candidates`}</p>
+            <p className="db-panel-sub tnum">{loading && !result ? 'Searching…' : `Showing ${total} of ${onFile} candidates${busy ? ' · updating…' : ''}`}</p>
           </div>
           <div className="db-panel-tools">
             <label className="db-search">
@@ -272,7 +281,7 @@ export default function DataBankPage() {
           onClear={resetFilters}
         />
 
-        <div ref={boxRef} className="db-box">
+        <div ref={boxRef} className={cn('db-box', busy && result && 'is-busy')} aria-busy={busy || undefined}>
           {rows.length === 0 ? emptyState : showCards ? (
             <DataBankCards rows={rows} store={store} onOpen={openCandidate} onReassign={reassignOne} onEdit={setEditing} onOpenStage={setOpenStage} />
           ) : (

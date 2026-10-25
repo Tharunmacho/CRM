@@ -4,7 +4,9 @@ import { Clock3, LogIn, LogOut } from 'lucide-react'
 import { Badge } from '@/shared/ui/display'
 import { Button } from '@/shared/ui/primitives'
 import { useStore } from '@/shared/state/crm-store'
+import { browserTimeZone } from '@/shared/lib/task-time'
 import { useAttendance } from '../attendance-context'
+import { stamp } from '../format'
 import { durationLabel, type PresenceStatus } from '../model'
 import '../attendance-clock.css'
 
@@ -22,6 +24,7 @@ export function AttendanceClock({ compact = false, targetMinutes }: { compact?: 
   const { own, loading, error, presenceError, busy, pendingKind, refreshedAt, refresh, clock } = useAttendance()
   const [now, setNow] = useState(performance.now())
   useEffect(() => { const interval = setInterval(() => setNow(performance.now()), 15_000); return () => clearInterval(interval) }, [])
+  const zone = agencyTimezone || browserTimeZone()
   const checkedIn = own?.attendance.status === 'checked_in'
   // A suspended/background page cannot keep presenting an unverified clock indefinitely.
   const seconds = (own?.attendance.totalSeconds ?? 0) + (checkedIn && refreshedAt && !error ? Math.min(30, Math.max(0, (now - refreshedAt) / 1000)) : 0)
@@ -53,7 +56,7 @@ export function AttendanceClock({ compact = false, targetMinutes }: { compact?: 
       <Button variant={checkedIn ? 'secondary' : 'primary'} disabled={loading || busy || !own || (!!error && !pendingKind)} icon={action === 'check-out' ? <LogOut size={16} /> : <LogIn size={16} />} onClick={() => void clock()}>{busy ? 'Saving…' : label}</Button>
     </div>
     <div className="att-clock-foot">
-      {own?.attendance.checkedInAt && <p>Current session started {new Intl.DateTimeFormat('en-GB', { timeZone: agencyTimezone || 'Asia/Kolkata', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(own.attendance.checkedInAt))} ({agencyTimezone || 'Asia/Kolkata'}).</p>}
+      {own?.attendance.checkedInAt && <p>Current session started {stamp(own.attendance.checkedInAt, zone)}{agencyTimezone ? ` (${agencyTimezone})` : ''}.</p>}
       <p>Check out when your shift ends. Closing the browser or signing out does not check you out.</p>
       {loading && <p role="status">Loading your attendance…</p>}
       {error && <div role="alert" className="att-clock-error"><span>{error}</span><Button size="sm" disabled={busy} onClick={() => void refresh()}>Refresh attendance</Button></div>}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, PhoneCall } from 'lucide-react'
 import { dateLabel } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import { Dialog } from '@/shared/ui/overlay'
@@ -8,6 +8,8 @@ import { Badge, EmptyState } from '@/shared/ui/display'
 import { cn } from '@/shared/lib/cn'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { orderProfileEvidence } from '@/features/jobs/order-profile-evidence'
+import { openInitialCallTask } from '../initial-call'
+import { CallDialog } from './call-dialog'
 
 /** Map one candidate to an open order. A candidate works one order at a time. */
 export function MapToOrderDialog({
@@ -26,10 +28,12 @@ export function MapToOrderDialog({
   const [saving, setSaving] = useState(false)
   const [mapped, setMapped] = useState(false)
   const [error, setError] = useState('')
+  const [calling, setCalling] = useState(false)
 
   const cand = store.candidate(candidateId)
   const owner = cand?.ownerId ? store.user(cand.ownerId) : undefined
   const existing = store.activeApplicationFor(candidateId)
+  const firstCallOpen = !!openInitialCallTask(store.tasks, candidateId)
   const candidateDeployed = cand?.status === 'deployed' || store.applicationsFor(candidateId).some((application) => application.status === 'deployed')
 
   const orders = useMemo(() => {
@@ -75,8 +79,9 @@ export function MapToOrderDialog({
   }
 
   return (
+    <>
     <Dialog
-      open={open}
+      open={open && !calling}
       onClose={close}
       width="lg"
       title={`Match ${cand.name} to an order`}
@@ -91,7 +96,7 @@ export function MapToOrderDialog({
             disabled={saving || (!mapped && (!selectedOrder || !eligible))}
             onClick={() => void save()}
           >
-            {saving ? mapped ? 'Refreshing…' : 'Matching…' : mapped ? 'Refresh' : 'Match and start stage 1'}
+            {saving ? mapped ? 'Refreshing…' : 'Matching…' : mapped ? 'Refresh' : firstCallOpen ? 'Match anyway' : 'Match and start stage 1'}
           </Button>
         </>
       }
@@ -102,6 +107,13 @@ export function MapToOrderDialog({
           This candidate is already on {store.order(existing.orderId)?.ref}. Remove them from that
           order first. Its open tasks will be cancelled, and the new order starts at stage 1.
         </p>
+      )}
+      {firstCallOpen && !mapped && !candidateDeployed && (
+        <div role="note" className="mb-3 flex flex-wrap items-start gap-2 rounded-control border border-amber-100 bg-amber-50 px-3 py-2.5 text-xs text-amber-700">
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">This candidate&apos;s first call has not been recorded. Matching will close the first-call task. Record the call first if you spoke to them.</span>
+          <Button size="sm" icon={<PhoneCall />} disabled={saving} onClick={() => setCalling(true)}>Record call first</Button>
+        </div>
       )}
       {candidateDeployed && <p role="status" className="mb-3 text-sm text-amber-700">Deployed candidates cannot be matched to another order.</p>}
       {!owner?.active && <p role="status" className="mb-4 rounded-control bg-amber-50 p-4 text-sm text-amber-800">This candidate needs an active recruiter before you can match them to an order. Ask an admin or manager to assign one from the candidate profile or the Staff Directory.</p>}
@@ -160,5 +172,7 @@ export function MapToOrderDialog({
       {selectedOrder && <p role="status" className="mt-4 rounded-control bg-navy-50 p-3 text-sm text-navy-800">Selected: {store.designation(selectedOrder.designationId)?.title} at {store.company(selectedOrder.companyId)?.name} · {selectedOrder.ref}</p>}
       </fieldset>
     </Dialog>
+    <CallDialog open={open && calling} onClose={() => setCalling(false)} candidateId={candidateId} />
+    </>
   )
 }

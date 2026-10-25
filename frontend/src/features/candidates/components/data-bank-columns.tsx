@@ -156,7 +156,7 @@ export function CurrentStage({ candidate, store }: { candidate: Candidate; store
 export function dataBankColumns({ store, onOpen, onReassign, onEdit, onOpenStage }: ColumnContext): DbColumn<Candidate>[] {
   return [
     {
-      key: 'name', header: 'Name', sortKey: 'name', width: 120,
+      key: 'name', header: 'Name', sortKey: 'name', width: 104,
       render: (c) => (
         <span className="db-who is-compact">
           <Avatar name={c.name} size="sm" />
@@ -165,11 +165,11 @@ export function dataBankColumns({ store, onOpen, onReassign, onEdit, onOpenStage
       ),
     },
     {
-      key: 'phone', header: 'Phone', sortKey: 'phone', width: 118,
+      key: 'phone', header: 'Phone', sortKey: 'phone', width: 122,
       render: (c) => <span className="ident db-num" title={c.email ? `${c.phone} · ${c.email}` : c.phone}>{c.phone}</span>,
     },
     {
-      key: 'designation', header: 'Job title', sortKey: 'designation', width: 100,
+      key: 'designation', header: 'Job title', sortKey: 'designation', width: 84,
       render: (c) => {
         const skills = normalizedSkills(c.skills)
         return (
@@ -180,14 +180,14 @@ export function dataBankColumns({ store, onOpen, onReassign, onEdit, onOpenStage
         )
       },
     },
-    { key: 'experience', header: 'Exp.', sortKey: 'experience', width: 60, render: (c) => <span className="tnum db-nowrap" title={`${c.totalExperience} years of experience`}>{experienceLabel(c.totalExperience)}</span> },
-    { key: 'passport', header: 'Passport', sortKey: 'passport', width: 72, render: (c) => <PassportIcon candidate={c} /> },
-    { key: 'source', header: 'Source', sortKey: 'source', width: 56, render: (c) => <SourceIcon source={c.source} /> },
-    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 104, render: (c) => <OwnerText candidate={c} store={store} /> },
-    { key: 'order', header: 'Order', sortKey: 'order', width: 100, render: (c) => <MappedOrder candidate={c} store={store} onOpenStage={onOpenStage} withCompany={false} /> },
-    { key: 'stage', header: 'Stage', sortKey: 'stage', width: 124, render: (c) => <CurrentStage candidate={c} store={store} /> },
-    { key: 'status', header: 'Status', sortKey: 'status', width: 122, render: (c) => <StatusText candidate={c} /> },
-    { key: 'added', header: 'Added', sortKey: 'added', width: 76, render: (c) => <span className="db-nowrap" title={dateLabel(c.addedAt)}>{shortDate(c.addedAt)}</span> },
-    { key: 'actions', header: '', width: 92, align: 'right', render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /> },
+    { key: 'experience', header: 'Exp.', sortKey: 'experience', width: 54, render: (c) => <span className="tnum db-nowrap" title={`${c.totalExperience} years of experience`}>{experienceLabel(c.totalExperience)}</span> },
+    { key: 'passport', header: 'Passport', sortKey: 'passport', width: 64, render: (c) => <PassportIcon candidate={c} /> },
+    { key: 'source', header: 'Source', sortKey: 'source', width: 50, render: (c) => <SourceIcon source={c.source} /> },
+    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 106, render: (c) => <OwnerText candidate={c} store={store} /> },
+    { key: 'order', header: 'Order', sortKey: 'order', width: 90, render: (c) => <MappedOrder candidate={c} store={store} onOpenStage={onOpenStage} withCompany={false} /> },
+    { key: 'stage', header: 'Stage', sortKey: 'stage', width: 118, render: (c) => <CurrentStage candidate={c} store={store} /> },
+    { key: 'status', header: 'Status', sortKey: 'status', width: 118, render: (c) => <StatusText candidate={c} /> },
+    { key: 'added', header: 'Added', sortKey: 'added', width: 86, render: (c) => <span className="db-nowrap" title={dateLabel(c.addedAt)}>{shortDate(c.addedAt)}</span> },
+    { key: 'actions', header: '', width: 84, align: 'right', render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /> },
   ]
 }

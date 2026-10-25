@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Activity, Banknote, ClipboardList, Download, FileSpreadsheet, Filter, GitBranch, Inbox, Plane, RefreshCw, RotateCcw, UserX, Users, type LucideIcon } from 'lucide-react'
+import { Activity, AlertCircle, Banknote, Check, ClipboardList, Download, FileSpreadsheet, Filter, GitBranch, Inbox, Loader2, Lock, Plane, RefreshCw, RotateCcw, UserX, Users, type LucideIcon } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
@@ -37,7 +37,8 @@ export default function ReportsPage() {
     setFilters(previous => ({ ...previous, from_date: linkedFrom, to_date: linkedTo, staff_id: linkedStaff }))
     if (linkedStaff) setReport('staff')
   }, [linkedStaff, linkedFrom, linkedTo])
-  const [exporting, setExporting] = useState('')
+  const [exporting, setExporting] = useState<'' | 'xlsx' | 'pdf'>('')
+  const [lastFormat, setLastFormat] = useState<'xlsx' | 'pdf'>('xlsx')
   const [exportError, setExportError] = useState('')
   const [exported, setExported] = useState('')
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => !!value)).toString()
@@ -57,7 +58,7 @@ export default function ReportsPage() {
   const presetFrom = (days: number | 'ytd') => days === 'ytd' ? `${today.slice(0, 4)}-01-01` : shiftDay(today, -(days - 1))
   const preset = (days: number | 'ytd') => { setExported(''); setFilters(previous => ({ ...previous, from_date: presetFrom(days), to_date: today })) }
   async function exportFile(format: 'xlsx' | 'pdf') {
-    setExporting(format); setExportError(''); setExported('')
+    setExporting(format); setLastFormat(format); setExportError(''); setExported('')
     try { await downloadReport(report, format, query); setExported(`${active.title} downloaded as ${format === 'xlsx' ? 'Excel' : 'PDF'}.`) }
     catch (failure) { setExportError(failure instanceof Error ? failure.message : 'We could not create the file. Please try again.') }
     finally { setExporting('') }
@@ -94,13 +95,13 @@ export default function ReportsPage() {
         {FIELDS.map(([key, label, group]) => <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={e => update(key, e.target.value)}><option value="">All {label.toLowerCase()}s</option>{options?.[group].map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></label>)}
         {supervisor
           ? <label>Staff<Select aria-label="Staff" value={filters.staff_id} onChange={e => update('staff_id', e.target.value)}><option value="">All staff</option>{options?.staff.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></label>
-          : <div className="rv-own"><span>Staff</span><p title={`Reports are limited to ${store.me.name}`}><Users size={14} /><span>Your own numbers</span></p></div>}
+          : <div className="rv-own"><span>Staff</span><p title={`Reports are limited to ${store.me.name}`}><Lock size={14} aria-hidden="true" /><span>Only you</span></p></div>}
       </div>
     </section>
 
     {!data && !error && <div className="rv-skeleton" aria-hidden="true"><i className="rv-skeleton-block" /><span>Loading reports…</span></div>}
 
-    {(error || exportError) && <div role="alert" className="reports-alert rv-alert"><span>{error || exportError}{error && data && ' Showing the last loaded result.'}</span>{error && <button type="button" onClick={refresh}>Try again</button>}</div>}
+    {(error || exportError) && <div role="alert" className="reports-alert rv-alert"><span><AlertCircle size={15} aria-hidden="true" />{error || exportError}{error && data && ' Showing the last loaded result.'}</span>{error ? <button type="button" onClick={refresh}>Try again</button> : <button type="button" disabled={!!exporting} onClick={() => void exportFile(lastFormat)}>Try again</button>}</div>}
 
     {data && <div className={stale ? 'rv-body is-stale' : 'rv-body'} aria-busy={stale}>
       <section className="rv-card rv-report-head" aria-label="Choose a report">
@@ -109,10 +110,13 @@ export default function ReportsPage() {
           <div className="rv-report-title"><span className="rv-icon is-lg"><Icon size={20} strokeWidth={1.8} /></span><div><h2>{active.title}</h2><p>{active.note}</p></div></div>
           <div className="rv-export">
             <div role="group" aria-label="Export this report">
-              <Button size="sm" disabled={!!exporting} icon={<FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing…' : 'Export Excel'}</Button>
-              <Button size="sm" disabled={!!exporting} icon={<Download size={14} />} onClick={() => void exportFile('pdf')}>{exporting === 'pdf' ? 'Preparing…' : 'Export PDF'}</Button>
+              <Button size="sm" disabled={!!exporting} icon={exporting === 'xlsx' ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing Excel…' : 'Export Excel'}</Button>
+              <Button size="sm" disabled={!!exporting} icon={exporting === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} onClick={() => void exportFile('pdf')}>{exporting === 'pdf' ? 'Preparing PDF…' : 'Export PDF'}</Button>
             </div>
-            <p className="rv-export-note" role="status">{exported || 'Files use the filters above.'}</p>
+            <p className={exporting ? 'rv-export-note is-busy' : exported && !exportError ? 'rv-export-note is-done' : 'rv-export-note'} role="status">
+              {exporting ? <><span className="rv-progress" aria-hidden="true"><i /></span>Preparing your {exporting === 'xlsx' ? 'Excel' : 'PDF'} file. A long period can take up to a minute.</>
+                : exported && !exportError ? <><Check size={14} aria-hidden="true" />{exported}</> : 'The file uses the same filters and dates as the screen.'}
+            </p>
           </div>
         </header>
       </section>
@@ -124,7 +128,9 @@ export default function ReportsPage() {
         {report === 'rejections' && <RejectionsReport data={data} />}
         {report === 'advance' && <AdvanceReport data={data} go={go} />}
       </div>
-      <details className="reports-notes"><summary>How these numbers are worked out</summary><p>Dates include the first and last day. Times are in {data.timezone}. Updated {new Date(data.generatedAt).toLocaleString()}.</p><ul>{data.notes.map(note => <li key={note}>{note}</li>)}</ul></details>
+      <details className="reports-notes"><summary>How these numbers are worked out</summary>
+        <h3>{active.title}</h3><ul>{active.how.map(line => <li key={line}>{line}</li>)}</ul>
+        <h3>All reports</h3><ul><li>Dates include the first and last day. Times are in {data.timezone}. Updated {new Date(data.generatedAt).toLocaleString()}.</li>{data.notes.map(note => <li key={note}>{note}</li>)}</ul></details>
     </div>}
   </div>
 }

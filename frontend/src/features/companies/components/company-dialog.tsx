@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/shared/api/client'
 import type { Company, FileVersion } from '@/shared/model/types'
 import { newestFileVersions } from '@/shared/lib/document-files'
@@ -11,10 +11,13 @@ import { refreshMasterData } from '@/features/master-data/components/record-audi
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { CountryInput, useCountryOptions } from '@/features/clients/components/client-dialog'
 import { FormSection } from '@/features/clients/components/parts'
+import { frequentValues } from '@/shared/lib/suggestions'
 
 export function CompanyDialog({ company, clientId, onClose }: { company?: Company; clientId?: string; onClose: () => void }) {
   const store = useStore()
   const countries = useCountryOptions()
+  // Industries already saved on companies, most used first. Any other name can still be typed.
+  const industries = useMemo(() => frequentValues(store.companies.map((c) => c.industry)), [store.companies])
   const [form, setForm] = useState({
     clientId: company?.clientId ?? clientId ?? '', name: company?.name ?? '', country: company?.country ?? '',
     city: company?.city ?? '', industry: company?.industry ?? '', contactPerson: company?.contactPerson ?? '',
@@ -74,7 +77,7 @@ export function CompanyDialog({ company, clientId, onClose }: { company?: Compan
         <FormSection icon={<Building2 size={18} />} title="Company" hint="The business you create orders for">
           <Field label="Client" required hint="The client this company belongs to" className="sm:col-span-2"><Select value={form.clientId} onChange={(e) => set('clientId', e.target.value)}><option value="">Choose a client</option>{store.clients.filter((client) => client.status === 'active' || client.id === form.clientId).map((client) => <option key={client.id} value={client.id}>{client.name}{client.status === 'inactive' ? ' (inactive)' : ''}</option>)}</Select></Field>
           <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
-          <Field label="Industry"><Input maxLength={120} value={form.industry} onChange={(e) => set('industry', e.target.value)} /></Field>
+          <Field label="Industry"><Input maxLength={120} list="company-industries" autoComplete="off" value={form.industry} onChange={(e) => set('industry', e.target.value)} /><datalist id="company-industries">{industries.map((name) => <option key={name} value={name} />)}</datalist></Field>
           <Field label="Status"><Select value={form.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></Select></Field>
           <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>
           <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} listId="company-countries" options={countries} /></Field>

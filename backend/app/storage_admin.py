@@ -120,7 +120,7 @@ def migrate_s3(db, settings, *, apply=False, writers_stopped=False):
     # passed verification. Future receipts use this same S3 namespace identity.
     for account in db.scalars(select(MailAccount)):
         account.sync_state = {**(account.sync_state or {}), "storage_id": storage_identity(settings.storage_dir, target)}
-    db.add(AuditEntry(action="Migrated documents to S3", entity_type="storage", target=settings.s3_bucket,
+    db.add(AuditEntry(action="Moved documents to cloud storage", entity_type="storage", target=settings.s3_bucket,
                       meta={"objectsCopied": len(mapping), "originalsRetained": True}))
     db.commit()
     return result

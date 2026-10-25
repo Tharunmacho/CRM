@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.deps import current_user, require_role
 from app.core.config import get_settings
+from app.services import agency_settings
 from app.services.desk_snapshot import read_snapshot
 from app.db.models import (
     Application,
@@ -138,6 +139,7 @@ def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user),
         "me": UserOut.model_validate(user).model_dump(by_alias=True, mode="json"),
         "ingestionRevision": snapshot["ingestionRevision"],
         "agencyTimezone": get_settings().agency_timezone,
+        "settings": agency_settings.build_payload(snapshot.get("agency"), snapshot.get("currencies")),
         "users": [UserOut.model_validate(u).model_dump(by_alias=True, mode="json") for u in snapshot["users"]],
         "clients": [ClientOut.model_validate(c).model_dump(by_alias=True, mode="json") for c in snapshot["clients"]],
         "companies": [company_out(c) for c in snapshot["companies"]],
@@ -241,7 +243,8 @@ class OrderIn(MasterInput):
     country: str | None = Field(default=None, max_length=100)
     city: str | None = Field(default=None, max_length=100)
     salary: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
-    currency: str = Field(default="AED", pattern=r"^[A-Z]{3}$")
+    # Left out, the agency's default order currency applies (see _order_requirements).
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     benefits: list[str] = Field(default_factory=list, max_length=100)
     contractPeriod: str | None = Field(default=None, max_length=60)
     interviewDate: date | None = None
@@ -375,7 +378,17 @@ def delete_designation(designation_id: str, db: Session = Depends(get_db), user:
         raise HTTPException(409, "This job title is now used by an order. Refresh the page and try again.")
 
 
+def _order_currency(db, body, row=None):
+    """A new order's currency must be an active one; an order may keep the currency it already has."""
+    code = body.currency or (row.currency if row is not None else agency_settings.default_order_currency(db))
+    if code != (row.currency if row is not None else None) and code not in agency_settings.active_currency_codes(db):
+        raise HTTPException(422, {"message": "Choose an available currency.",
+                                  "errors": [{"field": "currency", "message": f"{code} is not an available currency. Choose one from the list."}]})
+    body.currency = code
+
+
 def _order_requirements(db, body, row=None):
+    _order_currency(db, body, row)
     company = db.get(Company, body.companyId)
     if company is None: raise HTTPException(404, "Company not found")
     if db.get(Designation, body.designationId) is None: raise HTTPException(404, "Designation not found")
@@ -600,18 +613,23 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
     if user.role == Role.staff and c.owner_id != user.id:
         raise HTTPException(403, "This candidate belongs to another recruiter")
-    if db.scalar(select(Application.id).where(Application.candidate_id == c.id, Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed])).limit(1)):
-        raise HTTPException(409, "Record the result in the candidate's stages on the order")
+    # The call may be recorded after the candidate was already matched to an order
+    # (matching closes the initial-call task, the call result is still worth keeping).
+    # In that case the outcome is stored and audited, but the candidate's status and
+    # the order application are left alone: a "not interested" answer must not close
+    # an active application silently, the recruiter does that in the order's stages.
+    on_order = db.scalar(select(Application.id).where(Application.candidate_id == c.id, Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed])).limit(1)) is not None
 
     now = datetime.now(timezone.utc)
     c.call_called = body.called
     c.call_interested = body.interested
     c.call_remarks = body.remarks
     c.call_recorded_at = now
-    if body.interested == "no":
-        c.status = CandidateStatus.not_interested
-    elif body.interested == "yes" and c.status == CandidateStatus.not_interested:
-        c.status = CandidateStatus.new
+    if not on_order:
+        if body.interested == "no":
+            c.status = CandidateStatus.not_interested
+        elif body.interested == "yes" and c.status == CandidateStatus.not_interested:
+            c.status = CandidateStatus.new
 
     # Recording the outcome is what closes the initial-call task.
     for t in db.scalars(
@@ -625,10 +643,14 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
         if body.called and body.interested in {"yes", "no"}:
             t.completed_at = now
 
-    db.add(AuditEntry(actor_id=user.id, action="Recorded initial call", entity_type="candidate", entity_id=c.id,
-                      target=c.name, meta={"called": body.called, "interested": body.interested}))
+    db.add(AuditEntry(actor_id=user.id, action="Recorded initial call after matching" if on_order else "Recorded initial call",
+                      entity_type="candidate", entity_id=c.id, target=c.name,
+                      meta={"called": body.called, "interested": body.interested, "on_order": on_order}))
     db.commit()
-    return {"ok": True}
+    notice = None
+    if on_order and body.called and body.interested == "no":
+        notice = "Saved. This candidate is still on an order, so nothing on the order was changed. Unmap them or record the result in their stage if they should leave it."
+    return {"ok": True, "onOrder": on_order, "statusChanged": not on_order and body.interested in {"yes", "no"}, "notice": notice}
 
 
 # -------------------------------------------------------------------- todos
@@ -646,7 +668,7 @@ class TodoIn(BaseModel):
     @classmethod
     def aware_date(cls, value):
         if value.tzinfo is None:
-            raise ValueError("Include the timezone with the due date")
+            raise ValueError("Add a time zone to the due date.")
         return value
 
     @field_validator("linkTo")
@@ -787,7 +809,7 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
             t.owner_id = target.id
         if body.restartClock:
             restart_sla(db, t, now, user.id, restart_reason)
-            db.add(AuditEntry(actor_id=user.id, action="Reset task SLA", entity_type="task", entity_id=t.id, target=t.title,
+            db.add(AuditEntry(actor_id=user.id, action="Restarted the 48-hour clock", entity_type="task", entity_id=t.id, target=t.title,
                               meta={"reason": restart_reason, "viaReassignment": True}))
 
     from app.services.assignment_notifications import notify_assignment_changes, notify_task_assignment_changes

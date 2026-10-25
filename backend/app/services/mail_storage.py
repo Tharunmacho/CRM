@@ -10,8 +10,8 @@ from uuid import UUID, uuid4
 
 MARKER_NAME = ".email-storage-id"
 STORAGE_MISMATCH = (
-    "Mailbox files belong to another storage volume. "
-    "Mount/copy the original uploads volume before running this worker."
+    "These mail files belong to a different storage volume than the one in use now. "
+    "Ask your system administrator to reconnect the original storage volume, then try again."
 )
 
 
@@ -26,7 +26,7 @@ def _read_identity(marker: Path) -> str:
         return str(UUID(value))
     except (UnicodeError, ValueError):
         raise StorageIdentityError(
-            "The uploads storage identity is invalid. Restore the original .email-storage-id file."
+            "The marker for the mail file storage is invalid. Ask your system administrator to restore the original one."
         ) from None
 
 
@@ -35,7 +35,7 @@ def storage_identity(storage_dir: str | Path, settings=None) -> str:
     if settings is not None and getattr(settings, "storage_backend", "local") == "s3":
         bucket = getattr(settings, "s3_bucket", "")
         if not bucket:
-            raise StorageIdentityError("An S3 bucket is required before receiving mail.")
+            raise StorageIdentityError("Cloud storage is not fully set up, so we cannot receive mail yet. Ask your system administrator to finish the setup.")
         endpoint = (getattr(settings, "s3_endpoint_url", None) or "aws:s3").rstrip("/")
         prefix = getattr(settings, "s3_prefix", "crm").strip("/")
         namespace = json.dumps([endpoint, bucket, prefix], separators=(",", ":"))

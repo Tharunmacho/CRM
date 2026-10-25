@@ -46,3 +46,16 @@ export function workerHealth(worker: InboxSnapshot['worker'], now = Date.now()) 
   }
   return { healthy: true, label: 'Attachment worker checked in recently' }
 }
+
+/** A short, plain-English line for the message list: where an email stands on its way to a candidate. Null when it needs no mark. */
+export function intakeHeadline(attachments: number, candidates: number, jobs: InboxJob[]): { tone: 'neutral' | 'navy' | 'amber' | 'green' | 'stamp'; text: string } | null {
+  if (candidates > 0 || !jobs.length) return null
+  if (jobs.some((job) => isJobPending(job))) return { tone: 'navy', text: 'Reading attachments' }
+  if (jobs.some((job) => job.status === 'needs_review')) return { tone: 'amber', text: 'Needs review' }
+  if (jobs.every((job) => job.status === 'failed')) return { tone: 'stamp', text: 'Did not work' }
+  if (jobs.every((job) => job.status === 'ignored')) return { tone: 'neutral', text: attachments ? 'No candidate made' : 'No attachment' }
+  return null
+}
+
+/** Folder names come from the mail server ("INBOX", "Sent Items"). The inbox and the mailbox drafts get plain names; every other folder keeps its own. */
+export const folderLabel = (name: string, role?: string) => role === 'drafts' ? 'Mailbox drafts' : role === 'inbox' && name.toUpperCase() === 'INBOX' ? 'Inbox' : name

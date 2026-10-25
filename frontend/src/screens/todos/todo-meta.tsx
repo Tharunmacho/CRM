@@ -1,7 +1,8 @@
-import { format } from 'date-fns'
-import { BriefcaseBusiness, Building2, Globe2, Link2, UserRound } from 'lucide-react'
+import { addDays, format, nextMonday, setHours, setMinutes } from 'date-fns'
+import { BriefcaseBusiness, Building2, Link2, UserRound } from 'lucide-react'
 import type { Priority, TodoItem } from '@/shared/model/types'
 import { isSameDay } from '@/shared/lib/format'
+import { CountryFlag } from '@/shared/ui/country-flag'
 
 export type TabKey = 'today' | 'upcoming' | 'overdue' | 'done'
 export type LinkKind = 'candidate' | 'client' | 'order'
@@ -29,32 +30,9 @@ export const toInputValue = (iso: string) => format(new Date(iso), "yyyy-MM-dd'T
 
 /* ------------------------------------------------------------------ flags */
 
-const FLAGS: [string, string[]][] = [
-  ['ae', ['united arab emirates', 'uae', 'emirates', 'dubai', 'abu dhabi', 'sharjah']],
-  ['sa', ['saudi']],
-  ['qa', ['qatar']],
-  ['kw', ['kuwait']],
-  ['om', ['oman']],
-  ['bh', ['bahrain']],
-  ['de', ['germany']],
-  ['gb', ['united kingdom', 'uk', 'britain', 'england']],
-  ['in', ['india']],
-  ['sg', ['singapore']],
-  ['us', ['united states', 'usa', 'america']],
-]
-
-export const countryCode = (country?: string | null) => {
-  const key = (country ?? '').trim().toLowerCase()
-  if (!key) return null
-  return FLAGS.find(([, names]) => names.some((name) => key === name || key.includes(name)))?.[0] ?? null
-}
-
-/** The country flag from /flags, matched by name, or a globe when the country is unknown or not shipped. */
+/** The country flag from /flags, matched by name, or a globe when the country is unknown or has no flag file. */
 export function Flag({ country }: { country?: string | null }) {
-  const code = countryCode(country)
-  return code
-    ? <img src={`/flags/${code}.svg`} alt="" width={18} height={13} className="td-flag" loading="lazy" title={country ?? undefined} />
-    : <Globe2 size={14} aria-hidden="true" className="td-flag-globe" />
+  return <CountryFlag country={country} width={18} height={13} globeSize={14} className="td-flag" globeClassName="td-flag-globe" title={country ?? undefined} />
 }
 
 export function LinkIcon({ kind }: { kind: LinkKind | null }) {
@@ -104,6 +82,27 @@ export function dueText(item: TodoItem, now: number) {
   const day = dayLabel(due, now)
   const named = ['Today', 'Tomorrow', 'Yesterday'].includes(day) ? day : `${day.slice(0, 3)} ${dayDate(due, now)}`
   return `${named}, ${format(due, 'HH:mm')}`
+}
+
+/* ---------------------------------------------------------- due presets */
+
+export type Preset = 'soon' | 'tomorrow' | 'week'
+
+/** The due time a quick choice stands for: in about 2 hours (never past midnight), tomorrow 09:00, next Monday 09:00. */
+export function presetDue(preset: Preset, now: number) {
+  const base = new Date(now)
+  if (preset === 'tomorrow') return setMinutes(setHours(addDays(base, 1), 9), 0)
+  if (preset === 'week') return setMinutes(setHours(nextMonday(base), 9), 0)
+  const soon = new Date(now)
+  soon.setHours(soon.getHours() + 2, 0, 0, 0)
+  // Keep "today" on today: late in the evening it lands at the last minutes of the day.
+  if (!isSameDay(soon, base)) return new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59)
+  return soon
+}
+
+export function presetLabel(preset: Preset, now: number) {
+  const due = presetDue(preset, now)
+  return `${preset === 'soon' ? 'Today' : preset === 'tomorrow' ? 'Tomorrow' : `Mon ${format(due, 'd MMM')}`}, ${format(due, 'HH:mm')}`
 }
 
 /** Groups already-sorted items by calendar day, keeping the order. */

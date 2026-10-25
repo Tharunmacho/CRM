@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Activity, ArrowDown, Clock3, Coffee, Info, Pencil, RefreshCw, WifiOff } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
-import { agencyDay } from '@/shared/lib/task-time'
+import { liveInterval } from '@/shared/state/live'
+import { agencyDay, browserTimeZone } from '@/shared/lib/task-time'
 import { Badge, EmptyState, Panel } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
@@ -10,7 +11,7 @@ import { DatePicker } from '@/shared/ui/date-picker'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
 import { PresenceBadge } from './attendance-clock'
-import { CardHead } from './attendance-status'
+import { CardHead, Callout } from './attendance-status'
 import { useAttendance } from '../attendance-context'
 import { dayLabel } from '../format'
 import { durationLabel, type AttendanceResponse, type AttendanceSession, type StaffAttendance } from '../model'
@@ -36,6 +37,7 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
   useEffect(() => {
     const controller = new AbortController()
     let running = false
+    let again = false // a change arrived while a read was running: that read may predate it
     const load = async (initial = false) => {
       if (running || !date) return
       running = true
@@ -46,18 +48,23 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
         if (!controller.signal.aborted) { setResult(response); setError('') }
       } catch (err) {
         if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'We could not load attendance records. Press Refresh records to try again.')
-      } finally { running = false; if (!controller.signal.aborted) setLoading(false) }
+      } finally {
+        running = false; if (!controller.signal.aborted) setLoading(false)
+        if (again && !controller.signal.aborted) { again = false; void load() }
+      }
     }
     void load(true)
-    const interval = window.setInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000)
+    const interval = liveInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000, ['attendance', 'users'], {
+      onChange: () => { if (running) again = true; else void load() },
+    })
     const resume = () => { if (document.visibilityState === 'visible') void load() }
     window.addEventListener('focus', resume); window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
-    return () => { controller.abort(); clearInterval(interval); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
+    return () => { controller.abort(); interval(); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [date, staffId, retry, revision, store.me.id])
 
   const rows = result?.staff ?? []
   const detail = rows.find((row) => row.userId === selected) ?? (rows.length === 1 ? rows[0] : null)
-  const timezone = result?.timezone ?? store.agencyTimezone ?? 'Asia/Kolkata'
+  const timezone = result?.timezone ?? store.agencyTimezone ?? browserTimeZone()
   const totals = rows.reduce((sum, row) => ({
     attendance: sum.attendance + row.attendance.totalSeconds,
     active: sum.active + row.presence.activeSeconds,
@@ -89,7 +96,7 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
       </div>
     </div>
     <div className="presence-explanation"><Info size={18} aria-hidden="true" /><p><strong>Check-in time and CRM use are different things.</strong> Check-in and check-out show attendance. Online and Idle show whether the CRM was open on screen. Away or offline means the CRM tab was hidden, the browser was closed or the internet dropped. It does not mean the person was not working. CRM use is tracked for Staff, not Managers.</p></div>
-    {error && <p role="alert" className="att-callout att-callout-error">{error} Press Refresh records to try again.{result && ' What you see may be out of date.'}</p>}
+    {error && <Callout tone="error" role="alert">{error.replace(/[.!?]*$/, '.')} Press Refresh records to try again.{result && ' What you see may be out of date.'}</Callout>}
     {loading ? <p role="status" className="att-loading">Loading attendance records…</p> : result && <>
       <SummaryCards items={[
         { label: 'Checked-in time', value: durationLabel(totals.attendance), detail: 'Checked-in time on this date', icon: Clock3 },
@@ -114,7 +121,7 @@ function PresenceLegend() {
 
 function ActivityBar({ row }: { row: Pick<StaffAttendance['presence'], 'activeSeconds' | 'idleSeconds' | 'offlineSeconds'> }) {
   const total = row.activeSeconds + row.idleSeconds + row.offlineSeconds
-  return <div className="presence-duration-bar" aria-label={`Online ${durationLabel(row.activeSeconds)}, idle ${durationLabel(row.idleSeconds)}, away or no signal ${durationLabel(row.offlineSeconds)}`}>{[[row.activeSeconds, 'online'], [row.idleSeconds, 'idle'], [row.offlineSeconds, 'offline']].map(([seconds, state]) => Number(seconds) > 0 && <span key={state} className={`presence-${state}`} style={{ width: `${Number(seconds) / total * 100}%` }} />)}</div>
+  return <div className="presence-duration-bar" role="img" aria-label={`Online ${durationLabel(row.activeSeconds)}, idle ${durationLabel(row.idleSeconds)}, away or no signal ${durationLabel(row.offlineSeconds)}`}>{[[row.activeSeconds, 'online'], [row.idleSeconds, 'idle'], [row.offlineSeconds, 'offline']].map(([seconds, state]) => Number(seconds) > 0 && <span key={state} className={`presence-${state}`} style={{ width: `${Number(seconds) / total * 100}%` }} />)}</div>
 }
 
 function SessionDetail({ row, timezone, onUpdated }: { row: StaffAttendance; timezone: string; onUpdated: () => void }) {

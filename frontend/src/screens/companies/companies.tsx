@@ -10,12 +10,13 @@ import { Button, IconButton, SearchInput, Select } from '@/shared/ui/primitives'
 import { Tabs } from '@/shared/ui/overlay'
 import { FileLink } from '@/shared/ui/file-drop'
 import { CompanyDialog } from '@/features/companies/components/company-dialog'
+import { CompanyDetail } from '@/features/companies/components/company-detail'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import {
-  Avatar, CopyButton, Place, RowMenu, ViewToggle, downloadCsv, useMediaQuery, useSavedView, type MenuEntry,
+  Avatar, CopyButton, Place, RowMenu, ViewToggle, downloadCsv, useElementWidth, useSavedView, type MenuEntry,
 } from '@/features/clients/components/parts'
 import '@/styles/clients.css'
 
@@ -33,16 +34,19 @@ export default function CompaniesPage() {
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<'all' | 'active' | 'inactive'>('all')
+  const [country, setCountry] = useState('')
   const [savedView, setView] = useSavedView('crm-companies-view')
   const [shown, setShown] = useState(CARD_PAGE)
-  // Eleven columns need about 1150px of content; below that the same records read as cards.
-  const narrow = useMediaQuery('(max-width: 1279px)')
+  // Eleven columns need about 1100px; with less room the same records read as cards.
+  const [panelRef, panelWidth] = useElementWidth()
+  const narrow = panelWidth > 0 && panelWidth < 1100
   const view = narrow ? 'cards' : savedView
   const clientFilter = params.get('client') || 'all'
   const setClientFilter = (value: string) => { setShown(CARD_PAGE); setParams((previous) => { const next = new URLSearchParams(previous); value === 'all' ? next.delete('client') : next.set('client', value); return next }) }
   const canAdd = store.clients.some((client) => client.status === 'active')
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Company | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
   const [history, setHistory] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -52,11 +56,14 @@ export default function CompaniesPage() {
     return counts
   }, [store.orders])
 
+  const countries = useMemo(() => [...new Set(store.companies.map((company) => company.country?.trim()).filter(Boolean) as string[])].sort(), [store.companies])
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
     return store.companies.filter((c) => {
       if (clientFilter !== 'all' && c.clientId !== clientFilter) return false
       if (tab !== 'all' && c.status !== tab) return false
+      if (country && c.country?.trim() !== country) return false
       if (!q) return true
       return (
         c.name.toLowerCase().includes(q) ||
@@ -64,18 +71,20 @@ export default function CompaniesPage() {
         (c.city ?? '').toLowerCase().includes(q) ||
         (c.country ?? '').toLowerCase().includes(q) ||
         (c.contactPerson ?? '').toLowerCase().includes(q) ||
+        (c.contactEmail ?? '').toLowerCase().includes(q) ||
         (store.client(c.clientId)?.name ?? '').toLowerCase().includes(q)
       )
     })
-  }, [store.companies, store.clients, query, clientFilter, tab])
+  }, [store.companies, store.clients, query, clientFilter, tab, country])
 
   if (!snapshot.ready) return <SnapshotState error={snapshot.error} onRetry={snapshot.retry} retryLabel="Try again" label="Loading companies" />
 
-  const hasFilters = Boolean(query.trim() || clientFilter !== 'all' || tab !== 'all')
-  const clear = () => { setQuery(''); setTab('all'); setShown(CARD_PAGE); setClientFilter('all') }
+  const hasFilters = Boolean(query.trim() || clientFilter !== 'all' || tab !== 'all' || country)
+  const clear = () => { setQuery(''); setTab('all'); setCountry(''); setShown(CARD_PAGE); setClientFilter('all') }
   const ordersOf = (company: Company) => `/jobs?view=orders&company=${encodeURIComponent(company.id)}`
   const clientName = (company: Company) => store.client(company.clientId)?.name ?? 'Client not found'
   const menuFor = (company: Company): MenuEntry[] => [
+    { label: 'Open details', icon: <Building2 size={15} />, onSelect: () => setDetailId(company.id) },
     { label: 'View orders', icon: <BriefcaseBusiness size={15} />, onSelect: () => navigate(ordersOf(company)) },
     { label: 'History', icon: <History size={15} />, onSelect: () => setHistory(company.id) },
     ...(store.can('delete_records') ? [{ label: 'Delete company', icon: <Trash2 size={15} />, danger: true, onSelect: () => setDeletingId(company.id) }] : []),
@@ -86,11 +95,11 @@ export default function CompaniesPage() {
 
   const columns: Column<Company>[] = [
     {
-      key: 'name', header: 'Company', width: '16%', sortable: true, value: (c) => c.name,
+      key: 'name', header: 'Company', width: '15%', sortable: true, value: (c) => c.name,
       render: (c) => <RecordIdentity name={c.name} detail={c.industry ?? 'Industry not added'} />,
     },
     {
-      key: 'client', header: 'Client contact', width: '9.6%', sortable: true, filterable: true, value: (c) => store.client(c.clientId)?.name ?? '',
+      key: 'client', header: 'Client contact', width: '8.8%', sortable: true, filterable: true, value: (c) => store.client(c.clientId)?.name ?? '',
       render: (c) => <button type="button" className="cl-link" onClick={(event) => { event.stopPropagation(); navigate(`/clients/${c.clientId}`) }} title={`Open client ${clientName(c)}`}>{clientName(c)}</button>,
     },
     { key: 'city', header: 'City', width: '6%', sortable: true, value: (c) => c.city ?? '' },
@@ -98,13 +107,23 @@ export default function CompaniesPage() {
       key: 'country', header: 'Country', width: '8.8%', sortable: true, filterable: true, value: (c) => c.country ?? '',
       render: (c) => c.country ? <Place country={c.country} /> : <span className="cl-quiet">—</span>,
     },
-    { key: 'contact', header: 'Contact', width: '8.8%', value: (c) => c.contactPerson ?? '' },
     {
-      key: 'phone', header: 'Phone', width: '10.6%', value: (c) => c.phone ?? '',
+      key: 'contact', header: 'Contact', width: '10.4%', value: (c) => c.contactPerson ?? '',
+      render: (c) => (c.contactPerson || c.contactEmail)
+        ? (
+          <div className="cl-cell">
+            <b title={c.contactPerson}>{c.contactPerson || '—'}</b>
+            {c.contactEmail && <span className="cl-line"><a href={`mailto:${c.contactEmail}`} title={c.contactEmail} onClick={(event) => event.stopPropagation()}>{c.contactEmail}</a></span>}
+          </div>
+        )
+        : <span className="cl-quiet">—</span>,
+    },
+    {
+      key: 'phone', header: 'Phone', width: '10%', value: (c) => c.phone ?? '',
       render: (c) => c.phone ? <div className="cl-tel"><a href={`tel:${c.phone}`} onClick={(event) => event.stopPropagation()}>{c.phone}</a></div> : <span className="cl-quiet">—</span>,
     },
     {
-      key: 'whatsapp', header: 'WhatsApp', width: '10.6%', value: (c) => c.whatsapp ?? '',
+      key: 'whatsapp', header: 'WhatsApp', width: '10%', value: (c) => c.whatsapp ?? '',
       render: (c) => c.whatsapp ? <div className="cl-tel"><a href={`https://wa.me/${digits(c.whatsapp)}`} target="_blank" rel="noreferrer" title="Open WhatsApp" onClick={(event) => event.stopPropagation()}>{c.whatsapp}</a></div> : <span className="cl-quiet">—</span>,
     },
     {
@@ -112,7 +131,7 @@ export default function CompaniesPage() {
       render: (c) => <span className="tnum">{openByCompany.get(c.id) ?? 0}</span>,
     },
     {
-      key: 'agreement', header: 'Agreement', width: '8.4%', value: (c) => (c.agreement ? 'Uploaded' : 'Missing'),
+      key: 'agreement', header: 'Agreement', width: '9.4%', value: (c) => (c.agreement ? 'Uploaded' : 'Missing'),
       render: agreementCell,
     },
     { key: 'status', header: 'Status', width: '7.6%', value: (c) => c.status, render: (c) => <StatusPill status={c.status} /> },
@@ -152,6 +171,7 @@ export default function CompaniesPage() {
     />
   )
 
+  const detail = detailId ? store.company(detailId) : undefined
   const openOrdersTotal = store.orders.filter((order) => order.status === 'open').length
   const countryCount = new Set(store.companies.map((company) => company.country?.trim()).filter(Boolean)).size
 
@@ -177,6 +197,7 @@ export default function CompaniesPage() {
         ]}
       />
 
+      <div ref={panelRef} className="cl-measure">
       <Panel flush>
         <Tabs tabs={[
           { key: 'all', label: 'All companies' },
@@ -188,6 +209,10 @@ export default function CompaniesPage() {
           <Select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} aria-label="Filter by client">
             <option value="all">All clients</option>
             {store.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+          </Select>
+          <Select value={country} onChange={(event) => { setCountry(event.target.value); setShown(CARD_PAGE) }} aria-label="Filter by country">
+            <option value="">All countries</option>
+            {countries.map((name) => <option key={name} value={name}>{name}</option>)}
           </Select>
           {!narrow && <ViewToggle view={savedView} onChange={setView} />}
         </div>
@@ -203,11 +228,11 @@ export default function CompaniesPage() {
           <DataTable
             compact
             stackBelow={false}
-            resetPageKey={`${query}:${clientFilter}:${tab}`}
+            resetPageKey={`${query}:${clientFilter}:${tab}:${country}`}
             rows={rows}
             columns={columns}
             rowKey={(c) => c.id}
-            onRowClick={(c) => navigate(ordersOf(c))}
+            onRowClick={(c) => setDetailId(c.id)}
             empty={emptyState}
           />
         ) : rows.length === 0 ? emptyState : (
@@ -218,7 +243,7 @@ export default function CompaniesPage() {
                   <header>
                     <Avatar name={c.name} size="lg" />
                     <div className="cl-card-title">
-                      <h3><button type="button" onClick={() => navigate(ordersOf(c))} title={`View orders of ${c.name}`}>{c.name}</button></h3>
+                      <h3><button type="button" onClick={() => setDetailId(c.id)} title={`Open details of ${c.name}`}>{c.name}</button></h3>
                       <p title={c.industry ?? undefined}>{c.industry ?? 'Industry not added'}</p>
                     </div>
                     <StatusPill status={c.status} />
@@ -249,7 +274,18 @@ export default function CompaniesPage() {
           </>
         )}
       </Panel>
+      </div>
 
+      {detail && !editing && !deletingId && !history && (
+        <CompanyDetail
+          company={detail}
+          onClose={() => setDetailId(null)}
+          onEdit={() => { setDetailId(null); setEditing(detail) }}
+          onHistory={() => { setDetailId(null); setHistory(detail.id) }}
+          onDelete={store.can('delete_records') ? () => { setDetailId(null); setDeletingId(detail.id) } : undefined}
+          onOrders={() => navigate(ordersOf(detail))}
+        />
+      )}
       {(adding || editing) && <CompanyDialog company={editing ?? undefined} clientId={store.client(clientFilter)?.status === 'active' ? clientFilter : undefined} onClose={() => { setAdding(false); setEditing(null) }} />}
       {history && <RecordAudit kind="company" id={history} onClose={() => setHistory(null)} />}
       <DeleteRecordDialog

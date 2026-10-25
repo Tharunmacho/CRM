@@ -106,7 +106,7 @@ class FolderIn(BaseModel):
     @classmethod
     def folder_name(cls, value):
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
-            raise ValueError("Folder names cannot contain control characters.")
+            raise ValueError("Folder names cannot contain hidden special characters.")
         return value
 
 
@@ -121,13 +121,13 @@ def create_folder(account_id: str, body: FolderIn, db: Session = Depends(get_db)
                 mailbox.create_folder(body.name)
                 result = mailbox.folders()
                 if body.name not in {item["name"] for item in result}:
-                    raise MailMutationError("The mailbox has not confirmed the new folder. Refresh before retrying.", unknown=True)
+                    raise MailMutationError("The mailbox has not confirmed the new folder. Refresh the folder list, then try again.", unknown=True)
     except MailAdapterError as exc:
         raise HTTPException(502, str(exc)) from None
     row = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
     row.sync_state = {**row.sync_state, "folders": result}
     if created:
-        audit(db, user, "create_mail_folder", account_id, f"Created mailbox folder {body.name}.")
+        audit(db, user, "Created a mailbox folder", account_id, f"Created mailbox folder {body.name}.")
     db.commit()
     return {"accountId": account_id, "folders": result, "created": created}
 
@@ -222,7 +222,7 @@ def move_message(db, user, row, config, destination):
                 cursor, uids = mailbox.find_message_id(destination, row.message_id_header)
                 outcome = (cursor.uid_validity, uids[0]) if len(uids) == 1 else None
             if outcome is None:
-                raise MailMutationError("The move was accepted but its destination identifier is unconfirmed. Check both folders and reconcile.", unknown=True)
+                raise MailMutationError("The mailbox accepted the move, but we could not confirm where the email went. Check both folders.", unknown=True)
             validity, uid = outcome
             existing = db.scalar(select(MailMessage).where(MailMessage.account_id == row.account_id,
                 MailMessage.provider_message_id == provider_message_id(destination, validity, uid), MailMessage.id != row.id))
@@ -234,7 +234,7 @@ def move_message(db, user, row, config, destination):
             row.previous_folder, row.folder, row.remote_uid, row.uid_validity = original, destination, uid, validity
             row.provider_message_id = provider_message_id(destination, validity, uid)
             row.remote_state, row.remote_error, row.remote_operation = "synced", None, None
-            audit(db, user, "move_mail", row.account_id, f"Moved message {row.id} from {original} to {destination}.")
+            audit(db, user, "Moved an email to another folder", row.account_id, f"Moved message {row.id} from {original} to {destination}.")
             db.commit()
         except MailAdapterError as exc:
             row.remote_state = "unknown" if getattr(exc, "unknown", False) else "error"
@@ -271,7 +271,7 @@ def action(message_id: str, body: ActionIn, db: Session = Depends(get_db), user:
             wanted = "inbox" if body.action == "restore" else body.action
             destination = next((item["name"] for item in available if item["role"] == wanted), None)
         if not destination:
-            raise HTTPException(409, "This mailbox has no matching folder visible over IMAP. Make it visible to IMAP in the mailbox's folder settings.")
+            raise HTTPException(409, "We could not find a matching folder in this mailbox. Make sure the folder is visible in the mailbox's folder settings.")
         return move_message(db, user, row, config, destination)
     except MailAdapterError as exc:
         raise HTTPException(502, str(exc)) from None
@@ -295,7 +295,7 @@ def reconcile(message_id: str, db: Session = Depends(get_db), user: User = Depen
     if operation.get("action") != "move" or row.remote_state not in {"moving", "unknown"}:
         return message_out(db, row)
     if not row.message_id_header:
-        raise HTTPException(409, "This message has no stable Message-ID. Check source and destination folders before further action.")
+        raise HTTPException(409, "We cannot track this email safely. Check both folders before doing anything else with it.")
     try:
         with WritableMailbox(config) as mailbox:
             target, targets = mailbox.find_message_id(operation["target"], row.message_id_header)

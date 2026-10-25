@@ -18,23 +18,47 @@ REPORTS = {
                                          ("Currency totals", "advanceTotals", ["currency", "amount"]),
                                          ("Monthly totals", "advanceMonths", ["month", "currency", "amount"])])
 }
+FILTER_LABELS = {"fromDate": "From date", "toDate": "To date", "clientId": "Client", "orderId": "Order",
+                 "designationId": "Job title", "staffId": "Staff member"}
 LABELS = {"label": "Description", "ref": "Order", "name": "Staff", "assigned": "Initial assignments",
-          "completedTasks": "Tasks completed", "averageStageHours": "Average stage hours", "durationSamples": "Stage samples",
+          "completedTasks": "Tasks completed", "averageStageHours": "Average stage hours", "durationSamples": "Stages timed",
           "missedUpdates": "Missed daily updates", "averageHours": "Average hours", "dropOffPercent": "Closure rate (%)",
           "lostToNext": "Lost before next stage", "lostToNextPercent": "Lost before next stage (%)"}
 
 
-def heading(key):
-    return LABELS.get(key, key[:1].upper() + key[1:])
+# Wording that differs from the shared LABELS for one report: in Rejections the label column is why it closed.
+REPORT_LABELS = {"rejections": {"label": "Reason"}}
+
+
+def heading(key, report=None):
+    return REPORT_LABELS.get(report, {}).get(key) or LABELS.get(key, key[:1].upper() + key[1:])
+
+
+def stage_name(number):
+    """'Stage 2 · Forwarded to client' rather than a bare number. Unknown numbers stay readable."""
+    from app.domain.stages import stage_by_no
+    try:
+        return f"Stage {number} · {stage_by_no(int(number)).title}"
+    except (TypeError, ValueError):
+        return number
+
+
+def cell(report, key, row):
+    value = row.get(key)
+    if key == "amount" and value is not None:
+        return Decimal(value)
+    if report == "rejections" and key == "stage" and value is not None:
+        return stage_name(value)
+    return value
 
 
 def sheets(report, data):
     title, definitions = REPORTS[report]
-    metadata = [["Report", title], ["Generated at", data["generatedAt"]], ["Timezone", data["timezone"]]]
-    metadata.extend([key, val or "All"] for key, val in data["filters"].items())
-    metadata.extend(["Definition", note] for note in data["notes"])
-    return [("Scope and definitions", metadata)] + [
-        (name, [[heading(key) for key in keys]] + [[Decimal(row[key]) if key == "amount" and row.get(key) is not None else row.get(key) for key in keys] for row in data[field]])
+    metadata = [["Report", title], ["Generated at", data["generatedAt"]], ["Time zone", data["timezone"]]]
+    metadata.extend([FILTER_LABELS.get(key, key), val or "All"] for key, val in data["filters"].items())
+    metadata.extend(["Note", note] for note in data["notes"])
+    return [("About this report", metadata)] + [
+        (name, [[heading(key, report) for key in keys]] + [[cell(report, key, row) for key in keys] for row in data[field]])
         for name, field, keys in definitions
     ]
 
@@ -83,7 +107,7 @@ def pdf(report, data):
     for name, rows in sheets(report, data):
         rendered_rows = []
         for i, row in enumerate(rows):
-            tag = "th" if i == 0 and name != "Scope and definitions" else "td"
+            tag = "th" if i == 0 and name != "About this report" else "td"
             rendered_rows.append('<tr>' + ''.join(f'<{tag}>{escape(str(cell if cell is not None else "—"))}</{tag}>' for cell in row) + '</tr>')
         sections.append(f'<h2>{escape(name)}</h2><table>' + ''.join(rendered_rows) + '</table>')
     html = f'<h1>{escape(title)}</h1>' + ''.join(sections)

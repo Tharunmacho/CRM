@@ -64,6 +64,7 @@ class Database:
         self.accounts, self.messages, self.attachments, self.jobs = [], [], [], []
         self.bundles, self.person_groups, self.acknowledgements = [], [], []
         self.pending, self.queries, self.events = [], [], []
+        self.audits = []
         self.collision = None
 
     def __enter__(self):
@@ -77,7 +78,7 @@ class Database:
             "MailAccount": self.accounts, "MailMessage": self.messages,
             "MailAttachment": self.attachments, "EmailIngestionJob": self.jobs,
             "MultiPersonIntake": self.bundles, "DocumentPersonGroup": self.person_groups,
-            "IntakeAcknowledgement": self.acknowledgements,
+            "IntakeAcknowledgement": self.acknowledgements, "AuditEntry": self.audits,
         }[model.__name__]
 
     def _query(self, statement):
@@ -156,6 +157,11 @@ class Database:
 
     def add(self, row):
         self.pending.append(row)
+
+    def flush(self):
+        for row in self.pending:
+            if getattr(row, "id", None) is None:
+                row.id = f"generated-{len(self.table(type(row))) + 1}"
 
     def rollback(self):
         self.events.append("rollback")

@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Eye, EyeOff, Globe2, Layers2, LoaderCircle, Lock, Mail, Moon, Plane, Sun, Timer, Workflow } from 'lucide-react'
+import { AlertCircle, Briefcase, Eye, EyeOff, Globe2, LoaderCircle, Lock, Mail, Moon, Plane, Sun, Workflow } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
 import { useTheme } from '@/shared/lib/theme'
 import { STAGES } from '@/shared/workflow/stages'
-import { agency } from '@/app/config/agency'
+import { useAgency } from '@/shared/state/use-agency'
 import '@/styles/login.css'
 
 const REMEMBER_KEY = 'crm-remember-email'
@@ -100,6 +100,12 @@ function PlacementJourney() {
 
       <div className="lg-j-map">
         <svg viewBox="0 0 640 230" className="lg-j-svg" focusable="false">
+          <defs>
+            <linearGradient id="lg-route-grad" gradientUnits="userSpaceOnUse" x1="124" y1="0" x2="606" y2="0">
+              <stop offset="0" stopColor="var(--lg-blue)" />
+              <stop offset="1" stopColor="var(--lg-green)" />
+            </linearGradient>
+          </defs>
           <path d={ROUTE} className="lg-route-bed" />
           <path ref={routeRef} d={ROUTE} className="lg-route" />
           <path ref={doneRef} d={ROUTE} className="lg-route-done" />
@@ -131,7 +137,7 @@ function PlacementJourney() {
       <div className="lg-j-now">
         <span className="lg-j-token"><Plane size={16} /></span>
         <div className="lg-j-now-text">
-          <small>{arrived ? 'Placement complete' : 'Sample candidate'}</small>
+          <small>{arrived ? 'Example journey complete' : 'Example journey'}</small>
           <strong key={arrived ? 'done' : current?.key} className="lg-j-title">{arrived ? 'First day abroad' : current?.title}</strong>
         </div>
         <ol className="lg-tracker">
@@ -146,6 +152,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
   const { signIn, authenticated, loadError, ready, retryStartup } = useStore()
+  const agency = useAgency()
   const [email, setEmail] = useState(remembered)
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(() => remembered() !== '')
@@ -188,35 +195,35 @@ export default function LoginPage() {
 
   return (
     <main className="lg-page">
-      <section className="lg-story" aria-label={`${agency.name} placement desk`}>
-        <span className="lg-orbit lg-orbit-a" aria-hidden="true" />
-        <span className="lg-orbit lg-orbit-b" aria-hidden="true" />
+      <header className="lg-top">
+        <span className="lg-logo" role="img" aria-label={`${agency.name}, Overseas Pvt.Ltd`}>
+          <img className="lg-logo-img lg-logo-light" src="/brand/care-india-logo-tight.png" alt="" width={768} height={400} decoding="async" draggable={false} />
+          <img className="lg-logo-img lg-logo-dark" src="/brand/care-india-logo-tight-dark.png" alt="" width={768} height={400} decoding="async" draggable={false} />
+        </span>
+        <button type="button" className="lg-theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
+          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+      </header>
 
-        <p className="lg-kicker"><span className="lg-kicker-dot" aria-hidden="true" />Gulf placement desk</p>
+      <section className="lg-story" aria-label={`${agency.name} placement desk`}>
+        <p className="lg-kicker"><span className="lg-kicker-dot" aria-hidden="true" />Overseas placement desk</p>
 
         <div className="lg-story-copy">
-          <h1>From first call to <em>first day abroad.</em></h1>
-          <p>Prescreening, client interviews, medical, visa and the air ticket: every candidate and every Gulf client on one tracked route.</p>
+          <h1>Get every candidate <em>placed abroad,</em> one clear step at a time.</h1>
+          <p>Follow each person from the first call to the first day at work, with your clients, orders and documents in one place.</p>
         </div>
 
         <PlacementJourney />
         <ol className="lg-sr">{STAGES.map((stage) => <li key={stage.key}>{stage.title}</li>)}</ol>
 
         <ul className="lg-values">
-          <li><Workflow size={16} aria-hidden="true" />Eleven tracked stages</li>
-          <li><Timer size={16} aria-hidden="true" />48-hour task deadline</li>
-          <li><Globe2 size={16} aria-hidden="true" />Six Gulf destinations</li>
+          <li><Workflow size={16} aria-hidden="true" />{STAGES.length} tracked stages</li>
+          <li><Briefcase size={16} aria-hidden="true" />Clients and orders together</li>
+          <li><Globe2 size={16} aria-hidden="true" />Placements across the Gulf</li>
         </ul>
       </section>
 
       <section className="lg-access" aria-label="Sign in to your workspace">
-        <div className="lg-brand-row">
-          <span className="lg-brand"><span className="lg-brand-mark"><Layers2 size={22} strokeWidth={2.4} /></span><span><strong>{agency.name}</strong><small>Recruitment workspace</small></span></span>
-          <button type="button" className="lg-theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-
         <form className="lg-card" onSubmit={submit} noValidate>
           <header className="lg-heading">
             <h2>Sign in</h2>
@@ -269,9 +276,9 @@ export default function LoginPage() {
             {busy ? <><LoaderCircle size={18} className="lg-spin" aria-hidden="true" />Signing in…</> : 'Sign in'}
           </button>
         </form>
-
-        <p className="lg-foot">Need an account? <strong>Contact your administrator</strong></p>
       </section>
+
+      <p className="lg-foot">Need an account? <strong>Contact your administrator</strong></p>
     </main>
   )
 }

@@ -61,7 +61,7 @@ def receive_account(account_id, *, sessions, settings):
         auto = account.auto_ingest
         config = account_config(db, settings, account)
         if config is None:
-            raise ValueError("Mailbox credentials are missing from the server environment.")
+            raise ValueError("The sign-in details for this mailbox are missing. Ask an administrator to reconnect it.")
     require_cursor_source(cursor, config)
     with IMAPMailbox(config) as mailbox:
         uids = mailbox.list_uids(after_uid=cursor["last_uid"],
@@ -307,8 +307,7 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
     text = "\n".join(page.get("text", "") for result in results
                      for kind, part in result.get("extractions", {}).items() if kind == "resume"
                      for page in sorted(part["raw"].get("pages", []), key=lambda page: page.get("page_number") if type(page.get("page_number")) is int else 0))
-    if text and not candidate.resume_text:
-        candidate.resume_text = text
+    new_resume = False
     attachments = list(db.scalars(select(MailAttachment).where(MailAttachment.message_id == message.id)))
     for attachment in attachments:
         document = job.state.get(attachment.id, {})
@@ -329,13 +328,18 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
                 Attachment.slot == link["slot"])) or 0) + 1
             db.add(Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link))
             db.flush()
+            new_resume = new_resume or link["slot"] == "resume"
+    # A different resume file is the latest resume, so Data Bank search must find its
+    # text (the database trigger refreshes the search index when resume_text changes).
+    if text and (new_resume or not candidate.resume_text):
+        candidate.resume_text = text
     message.candidate_id = candidate.id
     job.candidate_id, job.status = candidate.id, "completed"
     job.last_error = ("Saved from the readable documents. " + " ".join(notes))[:500] if notes else None
     db.flush()
     from app.services.intake_acknowledgements import queue_intake_acknowledgement
     queue_intake_acknowledgement(db, "email", message.id)
-    db.add(AuditEntry(action="Ingested email candidate" if created else "Attached email candidate evidence",
+    db.add(AuditEntry(action="Created candidate from email" if created else "Added email documents to a candidate",
                       target=candidate.name, entity_type="candidate", entity_id=candidate.id))
 
 
@@ -484,7 +488,7 @@ def process_job(job_id, *, sessions, settings):
             result = document_state.get("output")
             data = read_bytes(settings, attachment.object_key)
             if hashlib.sha256(data).hexdigest() != attachment.content_hash:
-                raise IntakeReviewError("Stored attachment checksum mismatch. Restore the original file before retrying.")
+                raise IntakeReviewError("The saved file looks damaged. Restore the original file, then try again.")
             if result is None:
                 reason = _set_aside_reason(data)
                 if reason:
@@ -550,7 +554,7 @@ def process_job(job_id, *, sessions, settings):
                     for document in documents.values():
                         content = read_bytes(settings, document["object_key"])
                         if hashlib.sha256(content).hexdigest() != document["content_hash"]:
-                            raise IntakeReviewError("A selected document checksum does not match. Restore it before retrying.")
+                            raise IntakeReviewError("A selected document looks different from the saved copy. Restore the original, then try again.")
             results.append({**result, "source": {
                 "channel": "email", "message_id": attachment.message_id,
                 "attachment_id": attachment.id, "file_name": attachment.file_name,
@@ -583,7 +587,7 @@ def process_job(job_id, *, sessions, settings):
             if not job or job.status not in {"pending", "processing", "retry"}:
                 return
             job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=30)
-            job.last_error = "Waiting for the existing Veris job."
+            job.last_error = "Waiting for the document reader to finish."
             db.commit()
     except ValueError as exc:
         with sessions() as db:
@@ -593,7 +597,7 @@ def process_job(job_id, *, sessions, settings):
             job.status = "needs_review"
             job.last_error = (
                 str(exc)[:500] if isinstance(exc, IntakeReviewError)
-                else "Document values could not be applied. Review the saved extraction before retrying."
+                else "We could not fill in the details from the documents. Check what was read from them, then try again."
             )
             db.commit()
     except Exception as exc:
@@ -612,5 +616,5 @@ def process_job(job_id, *, sessions, settings):
                         request_extraction_retry(document, automatic=True)
                 job.state = saved
             job.next_attempt_at = now() + timedelta(seconds=90 * 2 ** (job.attempts - 1))
-            job.last_error = "Document processing failed. Check worker logs and OCR configuration; retry after correcting the cause."
+            job.last_error = "We could not read the documents in this email. Try again, and contact your administrator if it keeps happening."
             db.commit()

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpRight, BriefcaseBusiness, CalendarClock, Check, CheckCheck, ChevronRight, Clock3, GitBranch, Layers, ListChecks, Plus, RefreshCw, Search, ShieldCheck, UserPlus, Users } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpRight, BriefcaseBusiness, CalendarClock, Check, CheckCheck, ChevronRight, Clock3, FileSearch, ListChecks, Mail, Plus, RefreshCw, Search, UserPlus, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Select } from '@/shared/ui/primitives'
 import { DataTable, type Column } from '@/shared/ui/table'
@@ -10,21 +10,18 @@ import { dateLabel, dateTimeLabel } from '@/shared/lib/format'
 import { useReportData, type DashboardResult, type DashboardTask, type OrderMetrics } from '@/features/reports/report-api'
 import { SourceHealth } from '@/features/dashboard/components/source-health'
 import { NeedsAttention } from '@/features/dashboard/components/needs-attention'
-import { Distribution, Metric, MiniChart, Trend, number } from '@/features/dashboard/components/overview-charts'
+import { IntakeBlock, IntakeSkeleton, SOURCE_KEYS, number, type IntakeOverview } from '@/features/dashboard/components/intake-panel'
 import { CandidateCards, roleLine, OrderCards, TaskCards, useNarrow } from '@/features/dashboard/components/stacked'
 import { Avatar, Flag, Pill, SlaMeter, SourceTag, StageMini } from '@/features/dashboard/components/identity'
-import { PERIODS, inWindow, isVerified, periodStart, previousCount, ratio, seriesFor, trendPercent, verificationSeries, type Period } from '@/features/dashboard/metrics'
+import { AttentionList, type AttentionItem } from '@/features/dashboard/components/recent-arrivals'
+import { PERIODS, arrivalGrid, inWindow, intakeBuckets, isVerified, periodStart, recentDays, type Period } from '@/features/dashboard/metrics'
 import '@/styles/dashboard-ref.css'
 
 type TaskFilter = 'open' | 'dueToday' | 'overdue' | 'escalated' | 'notUpdated'
 const FILTERS: { key: TaskFilter; label: string; hint?: string }[] = [
-  { key: 'open', label: 'All open' }, { key: 'dueToday', label: 'Due today' },
-  { key: 'overdue', label: 'Overdue' }, { key: 'escalated', label: 'Escalated', hint: 'Overdue by more than 2 days and sent to the admin' }, { key: 'notUpdated', label: 'Not updated today', hint: 'Open tasks with no remark added today' },
+  { key: 'open', label: 'All open' }, { key: 'dueToday', label: 'Due today', hint: 'Tasks that must be finished today, before their 48-hour limit ends' },
+  { key: 'overdue', label: 'Overdue', hint: 'Tasks past their 48-hour limit' }, { key: 'escalated', label: 'Escalated', hint: 'Past the 48-hour limit and reported to the admin and managers' }, { key: 'notUpdated', label: 'Not updated today', hint: 'Open tasks with no remark added today' },
 ]
-const SOURCES = [
-  { key: 'email', label: 'Email' }, { key: 'whatsapp', label: 'WhatsApp' }, { key: 'walk_in', label: 'Walk-in' },
-  { key: 'referral', label: 'Referral' }, { key: 'other', label: 'Other' },
-] as const
 const STATUS: Record<string, { label: string; tone: 'info' | 'warn' | 'good' | 'bad' | 'muted' | 'accent' }> = {
   new: { label: 'New', tone: 'info' }, in_process: { label: 'In process', tone: 'accent' }, needs_review: { label: 'Needs review', tone: 'warn' },
   deployed: { label: 'Deployed', tone: 'good' }, not_interested: { label: 'Not interested', tone: 'muted' },
@@ -37,10 +34,7 @@ function EmptyContent({ title, detail, icon: Icon = BriefcaseBusiness }: { title
   return <div className="dr-empty"><span><Icon size={20} strokeWidth={1.5} /></span><strong>{title}</strong><p>{detail}</p></div>
 }
 function DashboardSkeleton() {
-  return <div className="dr-skeleton" role="status" aria-label="Loading your dashboard">
-    <div className="dr-grid-4">{[0, 1, 2, 3].map(index => <div key={index} className="dr-metric dr-skel-card"><i /><i /><i className="is-chart" /><i /></div>)}</div>
-    <div className="dr-grid-4">{[0, 1, 2, 3].map(index => <div key={index} className="dr-stat dr-skel-card"><i /><i /></div>)}</div>
-  </div>
+  return <div className="dr-skeleton"><IntakeSkeleton /></div>
 }
 
 /** Charts and tables share the same live, permission-scoped dashboard result. */
@@ -74,20 +68,34 @@ export default function DashboardPage() {
   // Overview cards: candidates in the same scope as the rest of the page, over the chosen period.
   const scoped = useMemo(() => store.candidates.filter(candidate => isTeam ? !staff || candidate.ownerId === staff : candidate.ownerId === store.me.id), [store.candidates, isTeam, staff, store.me.id])
   const anchorKey = data?.generatedAt
-  const overview = useMemo(() => {
+  const overview = useMemo<IntakeOverview>(() => {
     const end = new Date().getTime()
     const start = periodStart(period, new Date(end), scoped)
     const pool = inWindow(scoped, start, end)
-    const verified = pool.filter(isVerified).length
-    return {
-      total: pool.length, verified,
-      growth: seriesFor(pool, start, end, undefined, true),
-      quality: verificationSeries(pool, start, end),
-      trend: trendPercent(period, pool.length, previousCount(scoped, start, end)),
-      sources: SOURCES.map(source => ({ key: source.key, label: source.label, value: pool.filter(candidate => candidate.source === source.key).length })),
-    }
+    const before = inWindow(scoped, start - (end - start), start - 1)
+    // A source this screen does not know is counted as "Other", so the parts always add up to the total.
+    const count = (rows: typeof pool) => Object.fromEntries(SOURCE_KEYS.map(key => [key, rows.filter(candidate => (SOURCE_KEYS.includes(candidate.source) ? candidate.source : 'other') === key).length])) as Record<string, number>
+    // Placed = reached Deployed, either on the candidate's own status or on any of their applications.
+    const deployedIds = new Set(store.applications.filter(application => application.status === 'deployed').map(application => application.candidateId))
+    const placed = count(pool.filter(candidate => candidate.status === 'deployed' || deployedIds.has(candidate.id)))
+    const recentRows = [...pool].sort((a, b) => b.addedAt.localeCompare(a.addedAt)).slice(0, 12)
+      .map(candidate => ({ id: candidate.id, name: candidate.name, source: candidate.source, addedAt: candidate.addedAt, status: candidate.status, role: candidate.designations[0] || candidate.skills[0] || 'No job title yet' }))
+    const daily = Object.fromEntries([7, 14, 30].map(days => [days, recentDays(pool, days, end, SOURCE_KEYS)]))
+    return { total: pool.length, verified: pool.filter(isVerified).length, ...intakeBuckets(pool, period, start, end, SOURCE_KEYS), sources: count(pool), previous: count(before), placed, recent: recentRows, daily, span: period === 'week' ? 7 : period === 'month' ? 30 : null }
     // anchorKey refreshes the window end whenever the dashboard reloads.
-  }, [scoped, period, anchorKey])
+  }, [scoped, period, anchorKey, store.applications])
+  // Days a candidate has waited at their current stage: since the last stage was completed, or since the application began.
+  const waitingDays = useMemo(() => {
+    const now = Date.now()
+    const days: Record<string, number> = {}
+    for (const application of store.applications) {
+      if (application.status !== 'active') continue
+      const since = Math.max(Date.parse(application.createdAt) || 0, ...application.stages.map(record => Date.parse(record.completedAt ?? '') || 0))
+      if (since) days[application.id] = Math.max(0, Math.floor((now - since) / 86_400_000))
+    }
+    return days
+  }, [store.applications, anchorKey])
+  const arrivals = useMemo(() => arrivalGrid(scoped, new Date().getTime()), [scoped, anchorKey])
   const recent = useMemo(() => {
     const term = query.trim().toLowerCase()
     return [...scoped].sort((a, b) => b.addedAt.localeCompare(a.addedAt))
@@ -104,9 +112,9 @@ export default function DashboardPage() {
   const orderColumns: Column<OrderMetrics>[] = [
     { key: 'ref', header: 'Order', value: row => row.ref, width: '19%', render: row => <div className="dr-copy"><strong>{row.ref}</strong><small>{row.company}</small></div> },
     { key: 'designation', header: 'Position', value: row => row.designation, width: '19%', render: row => <div className="dr-copy"><strong>{row.designation}</strong><small>{row.client}</small></div> },
-    { key: 'country', header: 'Country', value: row => store.order(row.id)?.country ?? '', width: '20%', render: row => { const order = store.order(row.id); return <span className="dr-place"><Flag country={order?.country} />{[order?.city, order?.country].filter(Boolean).join(', ') || 'Not added'}</span> } },
-    { key: 'progress', header: 'Deployed', value: row => row.openings ? row.deployed / row.openings : 0, width: '22%', render: row => <div className="dr-progress" title={`${row.deployed} deployed of ${row.openings} openings`}><span><i style={{ width: `${row.openings ? Math.min(100, row.deployed / row.openings * 100) : 0}%` }} /></span><b>{number(row.deployed)}/{number(row.openings)}</b></div> },
-    ...(['matched', 'selected'] as const).map(key => ({ key, header: key[0].toUpperCase() + key.slice(1), value: (row: OrderMetrics) => row[key], align: 'right' as const, width: '10%' })),
+    { key: 'country', header: 'Country', value: row => store.order(row.id)?.country ?? '', width: '18%', render: row => { const order = store.order(row.id); return <span className="dr-place"><Flag country={order?.country} />{[order?.city, order?.country].filter(Boolean).join(', ') || 'Not added'}</span> } },
+    { key: 'progress', header: 'Deployed', value: row => row.openings ? row.deployed / row.openings : 0, width: '20%', render: row => <div className="dr-progress" title={`${row.deployed} deployed of ${row.openings} openings`}><span><i style={{ width: `${row.openings ? Math.min(100, row.deployed / row.openings * 100) : 0}%` }} /></span><b>{number(row.deployed)}/{number(row.openings)}</b></div> },
+    ...(['matched', 'selected'] as const).map(key => ({ key, header: key[0].toUpperCase() + key.slice(1), value: (row: OrderMetrics) => row[key], align: 'right' as const, width: '12%' })),
   ]
   function openTask(task: DashboardTask) { if (task.applicationId) { setOpenStage(task.stage || undefined); setOpenApp(task.applicationId) } else navigate(`/candidates/${task.candidateId}`) }
   async function finishTodo(id: string) {
@@ -136,8 +144,17 @@ export default function DashboardPage() {
     document.body.appendChild(link); link.click(); link.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
-  const maxStage = Math.max(1, ...(data?.pipeline.map(row => row.count) ?? [1]))
   const tasksView = data?.tasks.filter(task => taskFilter === 'open' || task[taskFilter]) ?? []
+  const needsReview = scoped.filter(candidate => candidate.needsReview || candidate.status === 'needs_review').length
+  const unassigned = scoped.filter(candidate => !candidate.ownerId).length
+  // What needs a person now. Only items that have something waiting are listed; each opens the exact list.
+  const attention: AttentionItem[] = !data ? [] : [
+    ...(isTeam && unassigned > 0 ? [{ key: 'waiting', label: unassigned === 1 ? 'candidate waiting for a recruiter' : 'candidates waiting for a recruiter', hint: 'Open the Data Bank, waiting list', count: unassigned, icon: Users, tone: 'warn' as const, onClick: () => navigate('/data-bank?pool=unassigned') }] : []),
+    ...(needsReview > 0 ? [{ key: 'review', label: needsReview === 1 ? 'profile that needs a review' : 'profiles that need a review', hint: 'Open the Data Bank, profiles to review', count: needsReview, icon: FileSearch, tone: 'warn' as const, onClick: () => navigate(`/data-bank?pool=needs_review${isTeam && staff ? `&staff=${encodeURIComponent(staff)}` : ''}`) }] : []),
+    ...(data.taskCounts.overdue > 0 ? [{ key: 'overdue', label: data.taskCounts.overdue === 1 ? 'overdue task' : 'overdue tasks', hint: 'Show them in the task list below', count: data.taskCounts.overdue, icon: AlertTriangle, tone: 'bad' as const, onClick: () => showTasks('overdue') }] : []),
+    ...(data.taskCounts.dueToday > 0 ? [{ key: 'today', label: data.taskCounts.dueToday === 1 ? 'task due today' : 'tasks due today', hint: 'Show them in the task list below', count: data.taskCounts.dueToday, icon: CalendarClock, tone: 'info' as const, onClick: () => showTasks('dueToday') }] : []),
+    ...(store.inboxUnread > 0 ? [{ key: 'mail', label: store.inboxUnread === 1 ? 'unread message' : 'unread messages', hint: 'Open the inbox', count: store.inboxUnread, icon: Mail, tone: 'info' as const, onClick: () => navigate('/inbox') }] : []),
+  ]
   const overdueRow = (row: DashboardTask) => row.overdue ? 'dr-row-overdue' : undefined
   const fulfilled = openings ? Math.min(100, Math.round(deployed / openings * 100)) : 0
   const fulfilDetail = openings ? data?.staffId ? `${number(deployed)} deployed out of ${number(openings)} openings in this view` : `${number(deployed)} of ${number(openings)} openings filled` : 'No open positions yet'
@@ -145,7 +162,7 @@ export default function DashboardPage() {
     { label: 'New candidates today', value: data.today.total, detail: `${number(data.today.email)} email · ${number(data.today.whatsapp)} WhatsApp`, icon: UserPlus, tone: 'primary', go: () => navigate('/data-bank') },
     { label: scopeLabel('open tasks'), value: data.taskCounts.open, detail: 'Waiting for the next step', icon: ListChecks, tone: 'violet', filter: 'open' as TaskFilter },
     { label: 'Tasks due today', value: data.taskCounts.dueToday, detail: 'Finish these before the 48-hour limit ends', icon: CalendarClock, tone: 'amber', filter: 'dueToday' as TaskFilter },
-    { label: 'Overdue tasks', value: data.taskCounts.overdue, detail: isStaff ? 'Past the 48-hour limit' : `${number(data.taskCounts.escalated)} sent to the admin`, icon: AlertTriangle, tone: 'red', filter: 'overdue' as TaskFilter, danger: data.taskCounts.overdue > 0 },
+    { label: 'Overdue tasks', value: data.taskCounts.overdue, detail: isStaff ? 'Past the 48-hour limit' : `${number(data.taskCounts.escalated)} reported to the admin and managers`, icon: AlertTriangle, tone: 'red', filter: 'overdue' as TaskFilter, danger: data.taskCounts.overdue > 0 },
   ] : []
 
   const orderEmpty = <EmptyContent title="No open orders yet" detail="Open orders and how far each one has come will show here." />
@@ -165,25 +182,19 @@ export default function DashboardPage() {
     {error && <div role="alert" className="dr-error">{error}{data && ' Showing the last loaded result.'}<button onClick={refresh}>Try again</button></div>}
     {!data && !error && <DashboardSkeleton />}
     {data && <>
+      {attention.length > 0
+        ? <section aria-label="Needs your attention now" className="dc-attn-section">
+          <header className="dr-section-head"><div><h2>Needs your attention now</h2></div></header>
+          <AttentionList items={attention} />
+        </section>
+        : <p className="dc-calm" role="status"><CheckCheck size={16} aria-hidden="true" />You are all caught up. Nothing is waiting for you right now.</p>}
       <section aria-label="New candidates and pipeline">
         <header className="dr-section-head">
           <div><h2>New candidates</h2><p>How many candidates came in, where they came from, and how complete their details are.</p></div>
           <div className="dr-seg" role="group" aria-label="Reporting period">{PERIODS.map(option => <button key={option.value} aria-pressed={period === option.value} className={period === option.value ? 'is-active' : ''} onClick={() => setPeriod(option.value)}>{option.short}</button>)}</div>
         </header>
-        <div className="dr-grid-4">
-          <Metric label="New candidates" value={number(overview.total)} hint={<Trend percent={overview.trend} />} icon={UserPlus} title="Candidates added over time" description="Total candidates added so far in this period" linkLabel="Data Bank" onClick={() => navigate('/data-bank')}>
-            <MiniChart points={overview.growth} label="Cumulative candidate intake" kind="area" />
-          </Metric>
-          <Metric label="Where they came from" value={number(overview.total)} hint={<span className="dr-hint">from email, WhatsApp, walk-ins and more</span>} icon={Layers} title="Sources" description="How candidates reach us" linkLabel="Inbox" onClick={() => navigate('/inbox')}>
-            <Distribution items={overview.sources} />
-          </Metric>
-          <Metric label="Clean profiles" value={`${ratio(overview.verified, overview.total)}%`} hint={<span className="dr-hint">{number(overview.verified)} profiles need no check</span>} icon={ShieldCheck} title="Profiles with no check needed" description="Share of new profiles that need no manual check" linkLabel="Data Bank" onClick={() => navigate('/data-bank')}>
-            <MiniChart points={overview.quality} label="Share of profiles that need no check, by period" kind="step" max={100} unit="%" />
-          </Metric>
-          <Metric label="Active placements" value={number(active)} hint={<span className="dr-hint">in the 11 stages right now · {number(data.orders.length)} open orders</span>} icon={GitBranch} title="Candidates by stage" description="Where active candidates are on the way to deployment" linkLabel="Pipeline" onClick={() => navigate('/mapped')}>
-            <MiniChart points={data.pipeline.map(row => ({ label: `${row.stage}`, value: row.count }))} label="Active applications by stage" kind="bars" empty="No active applications" />
-          </Metric>
-        </div>
+        <IntakeBlock overview={overview} arrivals={arrivals} period={period} periodLabel={PERIODS.find(option => option.value === period)?.label ?? ''} scope={!isTeam ? 'Your numbers' : staff ? store.user(staff)?.name.split(' ')[0] ?? 'Selected recruiter' : 'Whole team'} staffId={isTeam ? staff : ''} stages={data.pipeline.map(row => ({ stage: row.stage, label: row.label, count: row.count, people: row.applications.map(application => ({ id: application.id, name: application.candidate, days: waitingDays[application.id] ?? null })) }))}
+          todayCount={data.today.total} openOrders={data.orders.length} statusOf={status => STATUS[status] ?? STATUS.new} onStage={setStage} onCandidate={id => navigate(`/candidates/${id}`)} go={path => navigate(path)} />
       </section>
 
       <section aria-label="Today's work">
@@ -196,14 +207,6 @@ export default function DashboardPage() {
             <span className={`dr-stat-detail${item.danger ? ' is-danger' : ''}`}>{item.detail}</span>
           </button>
         })}</div>
-      </section>
-
-      <section className="dr-card dr-pipeline">
-        <CardHeading title="Placement pipeline" subtitle="How many active candidates are in each of the 11 stages, from prescreening to the air ticket. Select a stage to see who is in it." action={<button className="dr-link" onClick={() => navigate('/mapped')}>Open pipeline<ArrowRight size={13} /></button>} />
-        <div className="dr-stages" aria-label="Explore placement stages">{data.pipeline.map(row => <button key={row.stage} aria-label={`Stage ${row.stage}: ${row.label}, ${row.count} active applications`} title={row.label} onClick={() => setStage(row.stage)}>
-          <i aria-hidden="true"><b style={{ width: `${row.count / maxStage * 100}%` }} /></i>
-          <span className="dr-stage-no">Stage {row.stage}</span><strong>{number(row.count)}</strong><em>{row.label}</em>
-        </button>)}</div>
       </section>
 
       <section className="dr-card dr-recent">
@@ -219,17 +222,23 @@ export default function DashboardPage() {
             <td className="dr-cell-end"><button type="button" className="dr-open" aria-label={`Open ${candidate.name}`} onClick={event => { event.stopPropagation(); navigate(`/candidates/${candidate.id}`) }}>Open<ArrowRight size={14} /></button></td>
           </tr>
         })}</tbody></table></div> : <EmptyContent icon={Users} title={query ? 'No matching candidates' : 'No candidates yet'} detail={query ? 'Try a different name, job title, phone or email.' : 'Add a candidate, or let emails and WhatsApp messages add them to the Data Bank.'} />}
-        <footer className="dr-card-foot"><button className="dr-link" onClick={() => navigate('/data-bank')}>View all in Data Bank<ArrowRight size={13} /></button></footer>
+        <footer className="dr-card-foot">
+          <span className="dr-foot-chips">
+            {needsReview > 0 && <button type="button" className="dr-chip" onClick={() => navigate('/data-bank')}>{number(needsReview)} need review</button>}
+            {isTeam && unassigned > 0 && <button type="button" className="dr-chip" onClick={() => navigate('/data-bank')}>{number(unassigned)} not assigned</button>}
+          </span>
+          <button className="dr-link" onClick={() => navigate('/data-bank')}>View all in Data Bank<ArrowRight size={13} /></button>
+        </footer>
       </section>
 
       <div className={`dr-split${isStaff ? ' is-single' : ''}`}>
         <section className="dr-card dr-orders">
           <CardHeading title="Active orders" subtitle="Open orders, and how many candidates are matched, selected and deployed for each." action={<button className="dr-link" onClick={() => navigate('/jobs')}>All orders<ChevronRight size={13} /></button>} />
-          <div className="dr-fulfil" role="img" aria-label={fulfilDetail}>
+          {data.orders.length > 0 && <div className="dr-fulfil" role="img" aria-label={fulfilDetail}>
             <span className="dr-fulfil-label">{data.staffId ? 'Deployed in this view' : 'Openings filled'}</span>
             <span className="dr-fulfil-bar"><i style={{ width: `${fulfilled}%` }} /></span>
             <span className="dr-fulfil-text">{fulfilDetail}</span>
-          </div>
+          </div>}
           {narrow ? <OrderCards rows={data.orders} country={row => store.order(row.id) ?? {}} onOpen={row => navigate(`/orders/${row.id}`)} empty={orderEmpty} /> : <DataTable rows={data.orders} columns={orderColumns} rowKey={row => row.id} pageSize={5} onRowClick={row => navigate(`/orders/${row.id}`)} empty={orderEmpty} />}
         </section>
         {!isStaff && <section className="dr-card dr-todos">

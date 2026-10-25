@@ -9,8 +9,10 @@ from app.core.config import get_settings
 from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, IntakeAcknowledgement, IntakeAcknowledgementSettings, Role, WhatsAppSendAttempt
 from app.db.session import get_db
-from app.services.intake_acknowledgements import (DEFAULT_BODY, attempt_out, channel, completed_source,
-    configuration, connected, email_suppression, utcnow)
+from app.services.agency_settings import default_acknowledgement
+from app.services.intake_acknowledgements import (TEMPLATE_VALUES, attempt_out, channel, completed_source,
+    configuration, connected, email_suppression, read_template_choice, utcnow, validate_template_choice,
+    write_template_choice)
 
 router = APIRouter(prefix="/api/intake-acknowledgements", tags=["Intake acknowledgements"])
 admin = require_role(Role.admin)
@@ -23,8 +25,12 @@ def snapshot(db, source_kind, channel_id):
     rows = list(db.scalars(select(IntakeAcknowledgement).where(IntakeAcknowledgement.source_kind == source_kind,
         IntakeAcknowledgement.channel_id == channel_id).order_by(IntakeAcknowledgement.created_at.desc(), IntakeAcknowledgement.id.desc()).limit(20)))
     settings = get_settings()
+    template, template_ready = read_template_choice(db, config) if source_kind == "whatsapp" else (None, False)
     return {"sourceKind": source_kind, "channelId": channel_id, "enabled": bool(config and config.enabled),
-        "body": config.body if config else DEFAULT_BODY, "enabledAt": config.enabled_at if config else None,
+        # WhatsApp only: the approved template sent instead of the plain text, or null for the plain text.
+        "template": template, "templateAvailable": source_kind == "whatsapp" and template_ready,
+        "templateValues": TEMPLATE_VALUES if source_kind == "whatsapp" else {},
+        "body": config.body if config else default_acknowledgement(db), "enabledAt": config.enabled_at if config else None,
         "connected": connected(source_kind, account),
         "workerEnabled": settings.email_ingestion_enabled if source_kind == "email" else settings.whatsapp_enabled,
         "attempts": [attempt_out(db, row) for row in rows]}
@@ -35,17 +41,27 @@ def read_settings(source_kind: SourceKind, channel_id: str, db=Depends(get_db), 
     return snapshot(db, source_kind, channel_id)
 
 
+class TemplateChoiceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=512, pattern=r"^[a-z0-9_]+$")
+    language: str = Field(min_length=2, max_length=30, pattern=r"^[A-Za-z_]+$")
+    # What goes into {{1}}, {{2}}, ... in order.
+    parameters: list[Literal["first_name", "full_name", "agency_name"]] = Field(default_factory=list, max_length=10)
+
+
 class SettingsIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     enabled: StrictBool
     body: str = Field(min_length=10, max_length=2000)
     previewedBody: str | None = None
+    # WhatsApp only. Left out = keep the current choice; null = send the plain text; an object = send that approved template.
+    template: TemplateChoiceIn | None = None
 
     @field_validator("body")
     @classmethod
     def plain_text(cls, value):
         if "\x00" in value:
-            raise ValueError("The acknowledgement cannot contain null characters.")
+            raise ValueError("The reply text cannot contain hidden special characters.")
         return value
 
 
@@ -61,15 +77,28 @@ def change_settings(source_kind: SourceKind, channel_id: str, body: SettingsIn,
             raise HTTPException(422, "Preview this reply and confirm the exact text before you turn it on.")
     changed_text = bool(config and config.body != body.body)
     was_enabled = bool(config and config.enabled)
+    template_requested = "template" in body.model_fields_set
+    if template_requested and source_kind != "whatsapp":
+        raise HTTPException(422, "Templates only apply to WhatsApp replies.")
+    new_choice = body.template.model_dump() if body.template else None
+    if new_choice:
+        validate_template_choice(db, channel_id, new_choice)
+    old_choice = read_template_choice(db, config)[0] if config is not None and source_kind == "whatsapp" else None
     if config is None:
         config = IntakeAcknowledgementSettings(source_kind=source_kind, channel_id=channel_id, body=body.body)
         db.add(config)
     config.enabled, config.body, config.updated_by = body.enabled, body.body, user.id
+    changed_template = False
+    if template_requested and new_choice != old_choice:
+        db.flush()
+        if not write_template_choice(db, config, new_choice):
+            raise HTTPException(409, "Template replies need a database update that has not been applied yet. Ask your system administrator to run the latest update, then try again.")
+        changed_template = True
     if body.enabled and not was_enabled:
         config.enabled_at = utcnow()
     # Stop unsent old copies when an administrator disables/changes the text.
     # In-flight sends retain their result/unknown state and are never reset.
-    if not body.enabled or changed_text:
+    if not body.enabled or changed_text or changed_template:
         queued = list(db.scalars(select(IntakeAcknowledgement).where(IntakeAcknowledgement.source_kind == source_kind,
             IntakeAcknowledgement.channel_id == channel_id, IntakeAcknowledgement.status.in_(["pending", "paused"]))
             .with_for_update()))
@@ -79,11 +108,12 @@ def change_settings(source_kind: SourceKind, channel_id: str, body: SettingsIn,
                 if outgoing and outgoing.state != "queued":
                     continue
                 if outgoing:
-                    outgoing.state, outgoing.last_error = "cancelled", "Automatic acknowledgement settings changed before dispatch."
-            row.status, row.last_error = "suppressed", "Automatic acknowledgement settings changed before dispatch."
+                    outgoing.state, outgoing.last_error = "cancelled", "The automatic reply settings changed before this reply was sent."
+            row.status, row.last_error = "suppressed", "The automatic reply settings changed before this reply was sent."
     db.flush()
-    db.add(AuditEntry(actor_id=user.id, action="Updated intake acknowledgement settings", entity_type="intake_ack_settings",
-        entity_id=config.id, meta={"sourceKind": source_kind, "channelId": channel_id, "enabled": body.enabled, "textChanged": changed_text}))
+    db.add(AuditEntry(actor_id=user.id, action="Changed the settings for automatic replies to candidates", entity_type="intake_ack_settings",
+        entity_id=config.id, meta={"sourceKind": source_kind, "channelId": channel_id, "enabled": body.enabled, "textChanged": changed_text,
+              "template": new_choice if template_requested else old_choice, "templateChanged": changed_template}))
     db.commit()
     return snapshot(db, source_kind, channel_id)
 
@@ -112,7 +142,7 @@ def retry(attempt_id: str, db=Depends(get_db), user=Depends(admin)):
     if reason:
         raise HTTPException(409, reason)
     row.status, row.last_error = "pending", None
-    db.add(AuditEntry(actor_id=user.id, action="Retried intake acknowledgement", entity_type="intake_acknowledgement", entity_id=row.id))
+    db.add(AuditEntry(actor_id=user.id, action="Tried an automatic reply again", entity_type="intake_acknowledgement", entity_id=row.id))
     db.commit()
     return attempt_out(db, row)
 
@@ -132,10 +162,10 @@ def resolve(attempt_id: str, body: ResolveIn, db=Depends(get_db), user=Depends(a
     if row.source_kind != "email" or attempt_out(db, row)["status"] != "unknown" or not body.providerChecked:
         raise HTTPException(409, "Check with the email provider first. You can only settle a reply here when it is not clear whether it was sent.")
     row.status = "sent" if body.outcome == "sent" else "suppressed"
-    row.last_error = None if body.outcome == "sent" else "Stopped after administrator reviewed the provider; no resend was queued."
+    row.last_error = None if body.outcome == "sent" else "An administrator checked this reply by hand. It will not be sent again."
     if body.outcome == "sent":
         row.sent_at = utcnow()
-    db.add(AuditEntry(actor_id=user.id, action="Resolved uncertain intake acknowledgement", entity_type="intake_acknowledgement",
+    db.add(AuditEntry(actor_id=user.id, action="Marked an automatic reply as handled", entity_type="intake_acknowledgement",
         entity_id=row.id, meta={"outcome": body.outcome, "providerChecked": True, "reason": body.reason}))
     db.commit()
     return attempt_out(db, row)

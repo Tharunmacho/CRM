@@ -1,31 +1,14 @@
-import { Check, Globe2, PhoneCall } from 'lucide-react'
+import { Check, PhoneCall } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
+import { CountryFlag } from '@/shared/ui/country-flag'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 
 /** Care India's own touches on the task list: country flags, the stage tracker, the owner tag and the 48-hour ring. */
 
-const FLAGS: [string, string[]][] = [
-  ['ae', ['united arab emirates', 'uae', 'emirates', 'dubai', 'abu dhabi', 'sharjah']],
-  ['sa', ['saudi']],
-  ['qa', ['qatar']],
-  ['kw', ['kuwait']],
-  ['om', ['oman']],
-  ['bh', ['bahrain']],
-  ['de', ['germany']],
-  ['gb', ['united kingdom', 'uk', 'britain', 'england']],
-  ['in', ['india']],
-  ['sg', ['singapore']],
-  ['us', ['united states', 'usa', 'america']],
-]
-
-/** The country's flag from /flags (matched by name), or a globe when we do not ship it or none is recorded. */
+/** The country's flag from /flags (matched by name), or a globe when it has no flag file or none is recorded. */
 export function Flag({ country }: { country?: string | null }) {
-  const key = (country ?? '').trim().toLowerCase()
-  const code = key ? FLAGS.find(([, names]) => names.some((name) => key === name || key.includes(name)))?.[0] : undefined
-  return code
-    ? <img src={`/flags/${code}.svg`} alt="" width={20} height={14} className="tk-flag" loading="lazy" />
-    : <Globe2 size={15} aria-hidden="true" className="tk-flag-globe" />
+  return <CountryFlag country={country} className="tk-flag" globeClassName="tk-flag-globe" />
 }
 
 /** Owner as a circular hue avatar plus first name; the full name is the tooltip. */

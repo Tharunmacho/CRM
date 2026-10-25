@@ -187,6 +187,12 @@ tr:hover .ui-row-open { border-color: var(--border-hover); color: var(--text-mai
   .workspace-dialog > footer > .ui-button { flex: 1 1 auto; }
 }
 
+/* ---------- Touch: 44px fields ---------- */
+@media (max-width: 639px), (pointer: coarse) {
+  input.ui-input:not([type='checkbox']):not([type='radio']):not([type='file']), .custom-select-trigger, .date-picker-trigger, .ui-radio-chip { min-height: 44px; }
+  .ui-search input { height: 44px; }
+}
+
 /* ---------- Phones (under 640px) ---------- */
 @media (max-width: 639px) {
   /* Dialogs are bottom sheets: header and footer stay put, only the body scrolls, buttons stack full width.

@@ -1,0 +1,68 @@
+/*
+ * Users > Agency settings. Same visual language as the Team tab: flat white cards with a hairline, a 17px title with a muted
+ * description in each card head (.uv-head), the form fields in a padded body, the currency list as a compact DataTable.
+ * Tokens only. The .uv-* classes (heads, notes, buttons) come from users-v2.css.
+ */
+.as { display: grid; gap: 20px; min-width: 0; }
+.as .uv-panel { margin-bottom: 0; }
+.as-notice { display: flex; align-items: flex-start; gap: 8px; }
+.as-notice > svg { flex: none; margin-top: 2px; }
+.as-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; min-width: 0; }
+.as-form { display: grid; gap: 16px; min-width: 0; }
+.as-fields { display: grid; gap: 20px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.as-fields:disabled { opacity: .75; }
+.as-body { padding: 18px 20px 20px; min-width: 0; }
+.as-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; align-items: start; }
+.as-grid > * { min-width: 0; }
+.as-fields :is(textarea, .ui-input) { width: 100%; }
+.as-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 12px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.as-stamp { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--text-muted); }
+.as-unsaved { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border: 1px solid var(--warning-edge); border-radius: 999px; background: var(--warning-fill); font-size: 12.5px; font-weight: 500; color: var(--warning-ink); }
+.as-savebar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+
+/* ---------- Fixed rules ---------- */
+.as-facts { display: grid; gap: 0; margin: 0; }
+.as-facts > div { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.as-facts > div + div { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-faint); }
+.as-facts dt { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; line-height: 20px; color: var(--text-muted); }
+.as-facts dd { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; letter-spacing: -.02em; color: var(--text-main); overflow-wrap: anywhere; }
+.as-facts dd.as-note { font-size: 13px; font-weight: 400; line-height: 1.55; letter-spacing: 0; color: var(--text-muted); }
+
+/* ---------- Currencies ---------- */
+.as-inline { margin: 0 20px 14px; }
+.as-code { font-size: 14px; font-weight: 600; letter-spacing: .02em; color: var(--text-main); }
+.as-name { font-size: 13.5px; color: var(--text-main); overflow-wrap: anywhere; }
+.as-symbol { font-weight: 600; color: var(--text-main); }
+.as-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.as-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.as-switch > span { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.as-delete:hover:not(:disabled) { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.uv-edit:disabled { opacity: .5; cursor: not-allowed; }
+.uv-edit:disabled:hover { border-color: var(--border-control); color: var(--text-main); }
+
+
+@media (max-width: 1099px) {
+  .as-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .as-body { padding: 16px; }
+  .as-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .as :is(input, select, textarea, .ui-input, .custom-select-trigger) { font-size: 16px; }
+  .as :is(.custom-select-trigger, .ui-input:not(textarea)) { min-height: 44px; }
+  .as-savebar { flex-direction: column-reverse; align-items: stretch; padding: 16px; }
+  .as-savebar-actions { flex-direction: column-reverse; align-items: stretch; margin-left: 0; }
+  .as-savebar-actions > * { width: 100%; min-height: 44px; justify-content: center; }
+  .as-stamp { justify-content: center; }
+  .as-inline { margin: 0 16px 12px; }
+  .as-currencies .uv-head-actions > .ui-button { width: 100%; min-height: 44px; justify-content: center; }
+  .as-fields textarea { min-height: 168px; }
+  .as-switch { min-height: 40px; }
+  .as .ui-switch { position: relative; }
+  .as .ui-switch::after { content: ''; position: absolute; inset: -9px -6px; }
+  .as-currencies .uv-actions { width: 100%; }
+  .as-currencies .uv-actions .uv-edit { flex: 1; justify-content: center; }
+}
+@media (max-width: 640px) {
+  .workspace-dialog:has(#currency-form) > footer { flex-direction: column-reverse; align-items: stretch; }
+  .workspace-dialog:has(#currency-form) > footer > .ui-button { width: 100%; min-height: 44px; }
+}

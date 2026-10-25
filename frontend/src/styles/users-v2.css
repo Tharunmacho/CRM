@@ -237,3 +237,6 @@ a.uv-phone:focus-visible { outline: 2px solid var(--primary); outline-offset: 2p
   .uv :is(input, select) { font-size: 16px; }
 }
 @media (pointer: coarse) and (min-width: 768px) and (max-width: 1279px) { .uv a.uv-phone { display: inline-flex; align-items: center; min-height: 40px; margin: -10px 0; } }
+
+/* Page-level tabs (Team / Agency settings) sit under the page header. */
+.uv-page-tabs { margin-top: 14px; }

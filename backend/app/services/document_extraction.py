@@ -68,7 +68,7 @@ def _persist(state: dict, save: Callable[[dict], None]) -> None:
     try:
         save(deepcopy(state))
     except Exception:
-        raise ExtractionFailure("OCR progress could not be saved. Retry after storage is available.") from None
+        raise ExtractionFailure("We could not save the progress of reading this document. Try again in a few minutes.") from None
 
 
 def _request_key(source_hash: str, kind: str, selected: list[int], generation: int = 0) -> str:
@@ -111,17 +111,17 @@ def _provider_result(
     record = jobs.get(kind)
     if record is not None:
         if record.get("idempotency_key") != key or record.get("selected_pages") != selected:
-            raise ExtractionFailure("Document page selection changed. Review the saved extraction before retrying.")
+            raise ExtractionFailure("The pages chosen for this document have changed. Check the saved results before trying again.")
         if record.get("status") == "failed":
             raise ExtractionFailure(
-                f"The accepted {kind} job failed. Retry when another extraction attempt is available."
+                f"We could not read the {kind} pages. Try again later, or enter the details by hand."
             )
         if "result" in record:
             return deepcopy(record["result"])
         if record.get("status") == "succeeded":
-            raise ExtractionFailure("A completed OCR result is missing from storage. Review it before retrying.")
+            raise ExtractionFailure("The saved result for this document has gone missing. Check the document, then try again.")
     if not (settings.veris_ocr_base_url and settings.veris_ocr_api_key):
-        raise ExtractionFailure("OCR extraction is not configured. Configure the provider before retrying.")
+        raise ExtractionFailure("Document reading is not set up on this server yet. Ask your system administrator to finish the setup.")
     if record is None:
         record = {
             "idempotency_key": key, "selected_pages": list(selected), "status": "submitting",
@@ -149,7 +149,7 @@ def _provider_result(
             job = provider.jobs.get(record["job_id"])
     except (VerisOCRError, ValidationError):
         raise ExtractionFailure(
-            "The OCR provider could not return a valid response. Retry to check the same saved job."
+            "The document reader sent back an answer we could not use. Try again."
         ) from None
 
     record["status"] = job.status
@@ -157,16 +157,16 @@ def _provider_result(
         _persist(state, save)
         raise ExtractionPending(record["job_id"], kind)
     if job.status == "failed":
-        record["error"] = "The OCR provider reported that this job failed."
+        record["error"] = "The document reader could not read this file."
         _persist(state, save)
         raise ExtractionFailure(
-            f"The accepted {kind} job failed. Retry when another extraction attempt is available."
+            f"We could not read the {kind} pages. Try again later, or enter the details by hand."
         )
     if job.status != "succeeded" or not isinstance(job.result, dict):
         if job.status == "succeeded":
             record["validation_status"] = "failed"
         _persist(state, save)
-        raise ExtractionFailure("The OCR job returned no usable result. Review the saved job before retrying.")
+        raise ExtractionFailure("The document reader did not find anything we could use. Check the document, then try again.")
     record["result"] = deepcopy(job.result)
     # Save the paid response before validation, mapping, or any candidate write.
     _persist(state, save)
@@ -208,7 +208,7 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
             state["provider_jobs"][kind]["validation_status"] = "failed"
             _persist(state, save)
             raise ExtractionFailure(
-                f"The saved {kind} result has an invalid structure. Review it before requesting another extraction."
+                f"The saved {kind} result could not be used. Check it before trying to read the document again."
             ) from None
         pages = response.pages
         if (

@@ -107,3 +107,16 @@
   .wa-list-paging .ui-button { min-width: 40px; }
   .wa-workspace.wa-has-selection { height: clamp(520px, calc(100dvh - 96px), 900px); }
 }
+
+/* ---------- 24-hour reply window: time left in the contact list and in the chat banner ---------- */
+.wa-win-text::before { content: ' · '; color: var(--text-light); }
+.wa-win-text[data-tone='warn'], .wa-win-left[data-tone='warn'] { color: var(--warning-ink); }
+.wa-win-text[data-tone='danger'], .wa-win-left[data-tone='danger'] { color: var(--error-ink); }
+.wa-win-left { margin-left: 4px; font-weight: 600; color: var(--text-main); }
+.wa-win-left[data-tone='warn'] { color: var(--warning-ink); }
+.wa-win-left[data-tone='danger'] { color: var(--error-ink); }
+@media (max-width: 760px) {
+  .wa-window { flex-wrap: wrap; }
+  .wa-window > span:not(.ui-badge) { min-width: 0; flex: 1 1 0; }
+  .wa-win-left { display: block; margin-left: 0; }
+}

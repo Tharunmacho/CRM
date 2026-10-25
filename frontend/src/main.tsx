@@ -12,6 +12,7 @@ import './styles/dashboard-refresh.css'
 import './styles/crm-theme.css'
 import './styles/compact.css'
 import './styles/depth.css'
+import './styles/skin.css'
 
 initTheme()
 

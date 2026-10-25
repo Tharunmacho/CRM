@@ -88,6 +88,6 @@ def receive_history(account_id, *, sessions, settings):
             current = db.scalar(select(MailAccount).where(MailAccount.id == account_id).with_for_update())
             progress = dict(current.sync_state.get("history") or {})
             if progress.get("id") == history["id"] and progress.get("status") in ACTIVE:
-                progress.update(status="error", last_error=str(exc) if isinstance(exc, MailAdapterError) else "Historical mail could not be imported. Check storage and mailbox access, then resume.")
+                progress.update(status="error", last_error=str(exc) if isinstance(exc, MailAdapterError) else "We could not import your older emails. Check the mailbox connection, then continue the import.")
                 current.sync_state = {**current.sync_state, "history": progress}
                 db.commit()

@@ -11,7 +11,7 @@ import { Tabs } from '@/shared/ui/overlay'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import { ClientDialog } from '@/features/clients/components/client-dialog'
 import {
-  AgreementPill, Avatar, CopyButton, DemandCell, Place, ViewToggle, demandByClient, downloadCsv, useMediaQuery, useSavedView,
+  AgreementPill, Avatar, CopyButton, DemandCell, Place, ViewToggle, demandByClient, downloadCsv, useElementWidth, useSavedView,
   type Demand,
 } from '@/features/clients/components/parts'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
@@ -40,8 +40,9 @@ export default function ClientsPage() {
   const [sort, setSort] = useState<Sort>('recent')
   const [savedView, setView] = useSavedView('crm-clients-view')
   const [shown, setShown] = useState(CARD_PAGE)
-  // The table needs about 1150px of content; below that the same records read as cards.
-  const narrow = useMediaQuery('(max-width: 1279px)')
+  // The table needs about 1020px for its columns; with less room the same records read as cards.
+  const [panelRef, panelWidth] = useElementWidth()
+  const narrow = panelWidth > 0 && panelWidth < 1020
   const view = narrow ? 'cards' : savedView
 
   const companiesByClient = useMemo(() => {
@@ -112,7 +113,7 @@ export default function ClientsPage() {
     {
       key: 'name',
       header: 'Company',
-      width: '24%',
+      width: '22.5%',
       render: (c) => {
         const sectors = sectorsOf(c)
         const detail = sectors.length ? sectors.slice(0, 2).join(' · ') : companiesOf(c).length ? 'No industry added' : 'No company added yet'
@@ -140,7 +141,7 @@ export default function ClientsPage() {
     {
       key: 'agreement',
       header: 'Agreement',
-      width: '12%',
+      width: '13.5%',
       render: (c) => { const { total, filed } = agreementOf(c); return <AgreementPill filed={filed} total={total} /> },
     },
     {
@@ -203,12 +204,13 @@ export default function ClientsPage() {
       <KpiStrip
         items={[
           { label: 'Clients', value: store.clients.length, detail: `${activeCount} active · ${store.companies.length} ${store.companies.length === 1 ? 'company' : 'companies'}`, icon: Users },
-          { label: 'Hiring now', value: demand.size, detail: `${totals.orders} open ${totals.orders === 1 ? 'order' : 'orders'}`, icon: Zap, tone: 'amber', active: hiring, onSelect: () => setHiring((value) => !value) },
+          { label: 'Hiring now', value: demand.size, detail: `${totals.orders} open ${totals.orders === 1 ? 'order' : 'orders'}`, icon: Zap, tone: 'amber', active: hiring, onSelect: () => { setHiring((value) => !value); setShown(CARD_PAGE) } },
           { label: 'Openings left', value: totals.toFill, detail: totals.deployed ? `${totals.deployed} of ${totals.openings} already deployed` : 'Jobs still to fill', icon: Target, tone: 'green' },
-          { label: 'Agreement missing', value: missing, detail: missing ? 'Get a signed agreement' : 'Every client has an agreement', icon: FileWarning, tone: missing ? 'red' : 'green', active: noAgreement, onSelect: () => setNoAgreement((value) => !value) },
+          { label: 'Agreement missing', value: missing, detail: missing ? 'Get a signed agreement' : 'Every client has an agreement', icon: FileWarning, tone: missing ? 'red' : 'green', active: noAgreement, onSelect: () => { setNoAgreement((value) => !value); setShown(CARD_PAGE) } },
         ]}
       />
 
+      <div ref={panelRef} className="cl-measure">
       <Panel flush>
         <Tabs tabs={[
           { key: 'all', label: 'All clients' },
@@ -296,6 +298,7 @@ export default function ClientsPage() {
           </>
         )}
       </Panel>
+      </div>
 
       {adding && <ClientDialog onClose={() => setAdding(false)} />}
     </div>

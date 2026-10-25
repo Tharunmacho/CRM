@@ -16,6 +16,15 @@
  *  - Storage that is full, blocked or corrupt just means no cache.
  */
 
+/**
+ * THE SWITCH. Off (false) by decision: nothing of the workspace, candidates or report results is kept in the
+ * browser. Every load reads the database, and live updates (live-events.ts) keep the screen current afterwards.
+ * While off, entries an earlier version stored (`crm-swr:v1:*`) are deleted when the app starts (see the end of this
+ * file), and reads/writes of this cache do nothing. Set to true to bring the stale-while-revalidate cache back;
+ * live updates then also erase it whenever the server announces a change.
+ */
+export const SNAPSHOT_CACHE_ENABLED = false
+
 const PREFIX = 'crm-swr:v1:'
 const MAX_CHARS = 3_500_000
 const USER_HINT_COOKIE = 'crm_uid'
@@ -46,7 +55,7 @@ export function signedInUserHint(): string | null {
 
 export function readPersisted<T>(name: string, userId: string | null): { value: T; savedAt: number } | null {
   const storage = store()
-  if (!storage || !userId || signedInUserHint() !== userId) return null
+  if (!SNAPSHOT_CACHE_ENABLED || !storage || !userId || signedInUserHint() !== userId) return null
   try {
     const raw = storage.getItem(PREFIX + name)
     if (!raw) return null
@@ -60,7 +69,7 @@ export function readPersisted<T>(name: string, userId: string | null): { value: 
 
 export function writePersisted<T>(name: string, userId: string, value: T): void {
   const storage = store()
-  if (!storage) return
+  if (!SNAPSHOT_CACHE_ENABLED || !storage) return
   try {
     const raw = JSON.stringify({ userId, savedAt: Date.now(), value } satisfies Entry<T>)
     if (raw.length > MAX_CHARS) {
@@ -108,6 +117,7 @@ const MAX_REPORTS = 24
 const PERSISTED_REPORT = /^\/dashboard(\?|$)/
 
 export function peekReport<T>(sessionId: string, path: string, revision: string): T | null {
+  if (!SNAPSHOT_CACHE_ENABLED) return null
   const key = `${sessionId}:${path}:${revision}`
   const hit = reports.get(key)
   if (hit) return hit.data as T
@@ -119,9 +129,24 @@ export function peekReport<T>(sessionId: string, path: string, revision: string)
 }
 
 export function rememberReport(sessionId: string, path: string, revision: string, data: unknown): void {
+  if (!SNAPSHOT_CACHE_ENABLED) return
   const key = `${sessionId}:${path}:${revision}`
   reports.delete(key)
   reports.set(key, { data, at: Date.now() })
   while (reports.size > MAX_REPORTS) reports.delete(reports.keys().next().value as string)
   if (PERSISTED_REPORT.test(path)) writePersisted(`report:${path}`, sessionId, data)
 }
+
+/** Delete every snapshot an earlier version left in this browser (session and local storage). */
+export function purgeStoredSnapshots(): void {
+  for (const make of [() => window.sessionStorage, () => window.localStorage]) {
+    try {
+      const storage = make()
+      for (const key of Object.keys(storage)) if (key.startsWith(PREFIX)) storage.removeItem(key)
+    } catch {
+      // Storage may be blocked; then nothing was stored either.
+    }
+  }
+}
+
+if (!SNAPSHOT_CACHE_ENABLED && typeof window !== 'undefined') purgeStoredSnapshots()

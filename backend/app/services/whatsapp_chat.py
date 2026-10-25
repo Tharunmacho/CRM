@@ -99,7 +99,7 @@ def open_conversation(db, phone_id, number, *, candidate_id=None, actor=None):
     row = db.scalar(select(WhatsAppConversation).where(WhatsAppConversation.phone_number_id == phone_id,
         WhatsAppConversation.peer_number == number))
     if actor:
-        db.add(AuditEntry(actor_id=actor.id, action="Opened WhatsApp conversation", entity_type="whatsapp_conversation",
+        db.add(AuditEntry(actor_id=actor.id, action="Opened a WhatsApp chat", entity_type="whatsapp_conversation",
             entity_id=row.id, meta={"candidateId": row.candidate_id}))
     return row
 
@@ -124,7 +124,7 @@ def candidate_for_number(db, number):
 
 
 def _link_audit(db, conversation, candidate_id, reason):
-    db.add(AuditEntry(action="Linked WhatsApp conversation candidate", entity_type="whatsapp_conversation",
+    db.add(AuditEntry(action="Linked a WhatsApp chat to a candidate", entity_type="whatsapp_conversation",
         entity_id=conversation.id, meta={"fromCandidateId": None, "candidateId": candidate_id, "reason": reason}))
 
 
@@ -272,7 +272,7 @@ def enqueue(db, channel_id, recipient, body, request_key, source_message_id=None
         body=body, template=template, state="queued", created_at=at, updated_at=at, **media)
     db.add(row); db.flush()
     conversation.last_message_at, conversation.last_preview = at, (body or (template or {}).get("name") or media.get("file_name") or kind)[:500]
-    db.add(AuditEntry(actor_id=actor_id, action="Queued WhatsApp message", entity_type="whatsapp_send_attempt", entity_id=row.id,
+    db.add(AuditEntry(actor_id=actor_id, action="Started sending a WhatsApp message", entity_type="whatsapp_send_attempt", entity_id=row.id,
         meta={"conversationId": conversation.id, "type": kind, "sourceMessageId": source_message_id}))
     return row
 
@@ -464,7 +464,7 @@ def dispatch_attempt(attempt_id, *, sessions, settings, client=None):
         if object_key:
             content = read_bytes(settings, object_key)
             if not content_hash or hashlib.sha256(content).hexdigest() != content_hash:
-                raise provider.WhatsAppError("Stored attachment checksum does not match the queued send.")
+                raise provider.WhatsAppError("The saved file looks different from the one queued to send. Nothing was sent.")
             media_id = provider.upload_media(settings, content, filename, mime, client=client)
         if kind == "template":
             with sessions() as db:
@@ -473,7 +473,7 @@ def dispatch_attempt(attempt_id, *, sessions, settings, client=None):
         with sessions() as db:
             row = db.scalar(select(WhatsAppSendAttempt).where(WhatsAppSendAttempt.id == attempt_id).with_for_update())
             if row and row.state == "preparing" and row.updated_at == claimed:
-                row.state, row.last_error = "failed", "The attachment or approved template could not be prepared. No message was sent."
+                row.state, row.last_error = "failed", "We could not prepare the file or template. No message was sent."
                 db.commit()
         return
     with sessions() as db:
@@ -541,7 +541,7 @@ def dispatch_queued(*, sessions, settings, limit=5, client=None):
         db.execute(update(WhatsAppSendAttempt).where(WhatsAppSendAttempt.state == "preparing", WhatsAppSendAttempt.updated_at < cutoff)
             .values(state="queued", updated_at=utcnow()))
         db.execute(update(WhatsAppSendAttempt).where(WhatsAppSendAttempt.state == "sending", WhatsAppSendAttempt.updated_at < cutoff)
-            .values(state="unknown", last_error="Sending was interrupted. Await delivery status; automatic resend is disabled.", updated_at=utcnow()))
+            .values(state="unknown", last_error="Sending was interrupted. Wait for WhatsApp's delivery status before sending this message again.", updated_at=utcnow()))
         ids = list(db.scalars(select(WhatsAppSendAttempt.id).join(WhatsAppConversation).join(WhatsAppChannel)
             .where(WhatsAppSendAttempt.state == "queued", WhatsAppChannel.enabled.is_(True),
                 WhatsAppChannel.phone_number_id == settings.whatsapp_phone_number_id)

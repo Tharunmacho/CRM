@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.db.models import Attachment, EmailIngestionJob, MailAttachment, MailMessage, WhatsAppMessage
 
-DUPLICATE_REASON = "Duplicate file: these exact bytes were already processed."
+DUPLICATE_REASON = "Duplicate file: this is an exact copy of a file we already processed."
 
 
 def processed_hashes(db, hashes, *, exclude_mail_message_id=None, exclude_whatsapp_id=None) -> dict[str, dict]:

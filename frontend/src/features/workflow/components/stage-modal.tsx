@@ -21,6 +21,7 @@ import {
   User,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { currencyChoices, currencyLabel } from '@/shared/lib/agency'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { applicationFileSlot, applicationFileVersions, newestFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
@@ -49,10 +50,10 @@ import {
   Select,
   Textarea,
 } from '@/shared/ui/primitives'
-import { DocumentSlotRow, FileDrop, type StoredFile } from '@/shared/ui/file-drop'
+import { FileDrop, type StoredFile } from '@/shared/ui/file-drop'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { PersonAvatar } from './person-avatar'
-import { CertificateSlotRow, MULTI_DOCUMENT_KEYS } from '@/features/candidates/components/certificate-slot-row'
+import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { SlaMeter, StageRail } from './stage-rail'
 import '@/styles/candidate-v2.css'
 
@@ -84,7 +85,28 @@ export function StageModal({
     }, 80)
     return () => window.clearTimeout(timer)
   }, [open, focusStage, snapshot.ready, applicationId])
+  // Open on the stage that needs work: finished stages stay collapsed above, so the current one is the first thing you edit.
+  useEffect(() => {
+    if (!open || !snapshot.ready || focusStage) return
+    const timer = window.setTimeout(() => {
+      const steps = document.querySelectorAll<HTMLElement>('.sm-timeline > .sm-step')
+      const target = document.querySelector<HTMLElement>('.sm-timeline > .sm-step.is-current') ?? steps[steps.length - 1]
+      target?.scrollIntoView({ block: 'start' })
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [open, snapshot.ready, applicationId])
   const app = store.applications.find((a) => a.id === applicationId)
+  // Who reopened an earlier try, and when. A failed read is not an error: the reason is still shown.
+  const [reopenings, setReopenings] = useState<Reopening[]>([])
+  const reopenCount = app ? app.stages.filter((record) => record.reopenedReason).length : 0
+  useEffect(() => {
+    if (!open || !applicationId || reopenCount === 0) { setReopenings([]); return }
+    let current = true
+    api.get<Reopening[]>(`/applications/${encodeURIComponent(applicationId)}/reopenings`)
+      .then((rows) => { if (current && Array.isArray(rows)) setReopenings(rows) })
+      .catch(() => { if (current) setReopenings([]) })
+    return () => { current = false }
+  }, [open, applicationId, reopenCount])
   const [files, setFiles] = useState<ApplicationFile[]>([])
   const [fileError, setFileError] = useState(false)
   const [fileRetry, setFileRetry] = useState(0)
@@ -107,7 +129,7 @@ export function StageModal({
   const order = app ? store.order(app.orderId) : undefined
   const client = order ? store.company(order.companyId) : undefined
   const designation = order ? store.designation(order.designationId) : undefined
-  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" onClick={snapshot.retry}>Refresh</Button>}</Dialog>
+  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the stages…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" variant="primary" onClick={snapshot.retry}>Refresh</Button>}</Dialog>
   const owner = store.user(cand.ownerId)
 
   const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
@@ -192,7 +214,8 @@ export function StageModal({
             <summary>Earlier tries kept after reopening ({superseded.length})</summary>
             <p className="sm-hint">These earlier tries stay on record. They do not count towards the progress now.</p>
             <div className="mt-4 space-y-6">{superseded.map((record) => <div key={`${record.stage}-${record.attempt}`}>
-              <p className="mb-2 text-xs text-amber-700">Reopened: {record.reopenedReason}</p>
+              <ReopenedNote record={record} reopenings={reopenings} />
+
               <CompletedStage record={record} files={files} app={app} />
             </div>)}</div>
           </details>}
@@ -203,6 +226,19 @@ export function StageModal({
 }
 
 const NEGATIVE_OUTCOMES = ['Failed', 'Rejected', 'Unfit', 'Not forwarded']
+
+/** One row of GET /applications/{id}/reopenings: who set aside which attempt of a stage, and when. */
+interface Reopening { stage: number; attempt: number; reopenedBy?: string | null; reopenedByName?: string | null; reopenedAt?: string | null; reason?: string | null }
+
+/** "Reopened by Priya on 12 Mar 2026, 10:30: reason". Who and when only show when the server returned them. */
+function ReopenedNote({ record, reopenings }: { record: StageRecord; reopenings: Reopening[] }) {
+  const store = useStore()
+  const found = reopenings.find((item) => item.stage === record.stage && item.attempt === record.attempt)
+  const who = found ? found.reopenedByName || (found.reopenedBy ? store.user(found.reopenedBy)?.name : '') || '' : ''
+  const when = found?.reopenedAt ? dateTimeLabel(found.reopenedAt) : ''
+  const lead = who || when ? `Reopened${who ? ` by ${who}` : ''}${when ? ` on ${when}` : ''}` : 'Reopened'
+  return <p className="sm-reopened-note">{lead}: {record.reopenedReason || found?.reason}</p>
+}
 
 /**
  * Header: candidate name, photo, phone, passport number, client, order, designation, owner,
@@ -301,7 +337,7 @@ function CandidateRecord({ app }: { app: Application }) {
         <Fact label="Preferred job title" value={cand.designations.join(', ') || 'Not provided'} half />
         <Fact label="Total experience" value={cand.totalExperience == null ? 'Not recorded' : `${cand.totalExperience} years`} />
         <Fact label="Gulf or overseas experience" value={cand.gulfExperience == null ? 'Not recorded' : `${cand.gulfExperience} years`} />
-        <Fact label="Expected salary" value={money(cand.expectedSalary, 'AED')} />
+        <Fact label="Expected salary" value={money(cand.expectedSalary)} />
         <div className="sm-fact is-wide">
           <dt>Skills</dt>
           <dd className="mt-1.5 flex flex-wrap gap-1.5">
@@ -332,9 +368,7 @@ function CandidateRecord({ app }: { app: Application }) {
 
       <Segment icon={<FileText className="h-4 w-4" />} title="Documents" subtitle="Nothing is overwritten. A new file is saved as a new version.">
         <div className="sm-fact is-wide">
-          {cand.documents.map((d) => MULTI_DOCUMENT_KEYS.includes(d.key)
-            ? <CertificateSlotRow key={d.key} label={d.label} files={d.versions} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
-            : <DocumentSlotRow key={d.key} label={d.label} versions={d.versions} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />)}
+          <DocumentList documents={cand.documents} uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
         </div>
       </Segment>
     </div>
@@ -445,7 +479,7 @@ function readValue(f: StageField, raw: unknown, row: Record<string, unknown> = {
   // The advance is shown in the currency it was collected in, not the order's.
   if (f.type === 'number')
     return f.name === 'amount'
-      ? money(raw as number, (row.amountCurrency as string) || 'INR')
+      ? money(raw as number, (row.amountCurrency as string) || null)
       : String(raw)
   if (f.optionsSource === 'users') return userRefName(raw) || '—'
   const option = f.options?.find((o) => o.value === raw)
@@ -633,8 +667,8 @@ function CurrentStage({
 
         {def.closer && (
           <p className="sm-form-note">
-            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            A “no” result here closes this order for the candidate. They go back to the Data Bank and can be matched to another order.
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            <span>If this stage ends with a closing result, the order closes for the candidate. They go back to the Data Bank and can be matched to another order.</span>
           </p>
         )}
 
@@ -646,7 +680,7 @@ function CurrentStage({
 
         <footer className="sm-foot">
           <span className="sm-foot-meta">
-            Save draft keeps what you typed. Complete stage saves the result and moves to the next stage.
+            Save draft keeps what you typed. {result.closes ? 'The last button saves the result and closes the order.' : 'Complete stage saves the result and moves on.'}
             {def.repeatable && ' This stage can be done again.'}
           </span>
           <div className="sm-foot-actions">
@@ -751,7 +785,10 @@ function StageFieldInput({
       ? store.users
           .filter((u) => u.active && u.role === 'staff')
           .map((u) => ({ value: u.id, label: u.name }))
-      : (field.options ?? [])
+      : field.optionsSource === 'currencies'
+        // The agency's active currencies from the database, plus the one already saved here even if it was retired since.
+        ? currencyChoices(store.settings.currencies, value as string).map((c) => ({ value: c.code, label: currencyLabel(c) }))
+        : (field.options ?? [])
 
   // Rows written before this field became a picker hold a bare name — match on it so
   // the existing selection still shows.
@@ -759,7 +796,9 @@ function StageFieldInput({
     field.optionsSource === 'users'
       ? userRefId(value) ||
         (store.users.find((u) => u.name === userRefName(value))?.id ?? '')
-      : ((value as string) ?? '')
+      : field.optionsSource === 'currencies'
+        ? ((value as string) || store.settings.defaultAdvanceCurrency)
+        : ((value as string) ?? '')
 
   switch (field.type) {
     case 'radio':

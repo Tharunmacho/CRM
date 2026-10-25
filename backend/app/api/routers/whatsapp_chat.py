@@ -100,7 +100,7 @@ def link_candidate(conversation_id: str, body: CandidateIn, db: Session = Depend
     row = chat.get_conversation(db, conversation_id, lock=True)
     if body.candidateId and db.scalar(select(Candidate.id).where(Candidate.id == body.candidateId)) is None: raise HTTPException(404, "Candidate not found")
     previous, row.candidate_id = row.candidate_id, body.candidateId
-    db.add(AuditEntry(actor_id=user.id, action="Linked WhatsApp conversation candidate", entity_type="whatsapp_conversation",
+    db.add(AuditEntry(actor_id=user.id, action="Linked a WhatsApp chat to a candidate", entity_type="whatsapp_conversation",
         entity_id=row.id, meta={"fromCandidateId": previous, "candidateId": body.candidateId, "reason": body.reason}))
     db.commit()
     return {"conversation": chat.conversation_json(db, row, user, get_settings())}
@@ -279,6 +279,6 @@ def sync_templates(body: SyncIn, db: Session = Depends(get_db), user: User = Dep
     if body.phoneNumberId != settings.whatsapp_phone_number_id: raise HTTPException(409, "Choose the WhatsApp number that is set up for this CRM.")
     try: result = chat.sync_templates(db, settings)
     except provider.WhatsAppError as exc: raise HTTPException(503, str(exc)) from None
-    db.add(AuditEntry(actor_id=user.id, action="Synchronized WhatsApp templates", entity_type="whatsapp_channel", entity_id=body.phoneNumberId))
+    db.add(AuditEntry(actor_id=user.id, action="Refreshed WhatsApp message templates", entity_type="whatsapp_channel", entity_id=body.phoneNumberId))
     db.commit()
     return {"templates": result, "canSync": True}

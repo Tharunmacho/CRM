@@ -160,7 +160,7 @@ def test_period_validation_defaults_and_one_snapshot_query(workspace):
         event.remove(workspace.engine, "before_cursor_execute", observed)
     assert response.status_code == 200, response.text
     assert response.json()["period"] == {"from": "2026-10-01", "to": "2026-10-22"}
-    assert sum(statement.lstrip().upper().startswith("SELECT") for statement in statements) == 2  # Authentication + directory.
+    assert 1 <= sum(statement.lstrip().upper().startswith("SELECT") for statement in statements) <= 2  # The directory snapshot, plus authentication when the sign-in memo is cold.
     assert all(statement.lstrip().upper().startswith(("SELECT", "SET TRANSACTION READ ONLY")) for statement in statements)
 
 

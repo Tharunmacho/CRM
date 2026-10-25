@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AlertTriangle, Archive, ArrowLeft, ChevronLeft, ChevronRight, Download, Eye, FileText, FolderPlus, Info, Mail, MailOpen, MessageCircle, MoreVertical, Paperclip, Pencil, Plus, RefreshCw, Reply, ReplyAll, Send, Settings2, SlidersHorizontal, Star, Trash2, Undo2, UserCheck } from 'lucide-react'
 import { api, fileHref, type InboxAccount, type InboxSnapshot, type InboxJob, type MailProvider } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { smartTime } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { Badge, EmptyState, PageHeader, Panel } from '@/shared/ui/display'
 import { Button, Field, Input, SearchInput, Select, Switch } from '@/shared/ui/primitives'
 import { Dialog, Tabs } from '@/shared/ui/overlay'
@@ -12,7 +13,7 @@ import { useInbox } from '@/features/inbox/use-inbox'
 import { IntakeAcknowledgements } from '@/features/intake/intake-acknowledgements'
 import { DocumentBundleReview } from '@/features/candidates/components/document-bundle-review'
 import { JobReport } from '@/features/inbox/intake-status'
-import { PROVIDER_LABEL, intakeUnavailable, isLiveAccount } from '@/features/inbox/inbox-status'
+import { PROVIDER_LABEL, folderLabel, intakeHeadline, intakeUnavailable, isLiveAccount } from '@/features/inbox/inbox-status'
 import { HistoryImport } from '@/features/inbox/history-import'
 import { ConnectMailbox } from '@/features/inbox/connect-mailbox'
 import { AttachmentPreview, type PreviewFile } from '@/features/inbox/attachment-preview'
@@ -26,15 +27,26 @@ import '@/features/inbox/mailbox.css'
 const PAGE_SIZE = 25
 type InboxTab = 'all' | 'unread' | 'starred' | 'archived'
 const TABS: [InboxTab, string][] = [['all', 'All'], ['unread', 'Unread'], ['starred', 'Starred'], ['archived', 'Archived']]
+const DRAFT_STATUS: Record<string, string> = { draft: 'Draft', sending: 'Sending', sent: 'Sent', unknown: 'Not confirmed as sent', failed: 'Not sent', discarded: 'Discarded' }
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'We could not load the mailbox. Check your internet and try again.'
+/** The plain-English state of a mailbox for the manager dialog. */
+const accountState = (account: InboxAccount): { tone: 'neutral' | 'green' | 'amber' | 'stamp'; text: string } => {
+  if (account.connectionStatus === 'disconnected') return { tone: 'neutral', text: 'Disconnected' }
+  if (!account.configured) return { tone: 'amber', text: 'Setup needed' }
+  if (account.connectionStatus === 'error' || account.lastError) return { tone: 'stamp', text: 'Needs attention' }
+  if (!isLiveAccount({ ...account, connectionStatus: 'connected' })) return { tone: 'neutral', text: 'Read only' }
+  return { tone: 'green', text: 'Connected' }
+}
 
 export default function InboxScreen() {
   const store = useStore()
   const navigate = useNavigate()
+  const location = useLocation()
   const admin = store.can('connect_sources')
   const [bundleSource, setBundleSource] = useState<string | null>(null)
-  const [accountId, setAccountId] = useState('')
-  const [folder, setFolder] = useState('INBOX')
+  // The chosen mailbox and folder live in the address (?account=<id>&folder=<name>) so reload, deep links and Back all work.
+  const [accountId, setAccountId] = useState(() => new URLSearchParams(window.location.search).get('account') ?? '')
+  const [folder, setFolder] = useState(() => new URLSearchParams(window.location.search).get('folder') ?? 'INBOX')
   const [view, setView] = useState<'mail' | 'drafts'>('mail')
   const [historyMode, setHistoryMode] = useState(false)
   const [unread, setUnread] = useState('')
@@ -75,19 +87,20 @@ export default function InboxScreen() {
   if (attachments) summaryParams.set('has_attachments', attachments)
   if (focusMessage) summaryParams.set('message_id', focusMessage)
   const inbox = useInbox(store.me.id, store.isCurrentSession, summaryParams.toString())
-  const accounts = inbox.data?.accounts ?? []
+  // The mailbox cards stay on screen while a new mailbox loads: only the list pane shows its skeleton.
+  const accountsKept = useRef<InboxAccount[]>([])
+  if (inbox.data) accountsKept.current = inbox.data.accounts
+  const accounts = inbox.data?.accounts ?? accountsKept.current
   const account = accounts.find((item) => item.id === accountId)
   const liveMailbox = isLiveAccount(account)
   const remoteView = liveMailbox && !historyMode && !focusMessage
   const composeAccount = isLiveAccount(account) ? account : accounts.find(isLiveAccount)
-  const accountLabel = (id: string) => accounts.find((item) => item.id === id)?.address ?? ''
   const providerName = account ? PROVIDER_LABEL[account.provider] : 'mailbox'
   const busy = inbox.busy !== null
   const currentFolder = folders.find((item) => item.name === folder)
   const currentRole = currentFolder?.role ?? 'inbox'
   const summaryMessages = inbox.data?.messages ?? []
   const messages: MailboxMessage[] = remoteView ? mailbox?.messages ?? [] : summaryMessages
-  const total = remoteView ? mailbox?.total ?? 0 : inbox.data?.total ?? messages.length
   const hasMore = remoteView ? !!mailbox?.hasMore : !!inbox.data?.hasMore
   const open = messages.find((item) => item.id === openId)
   const openAccount = accounts.find((item) => item.id === open?.accountId)
@@ -97,6 +110,12 @@ export default function InboxScreen() {
   const openJobs = selectedJobs.filter((item) => item.messageId === open?.id)
   const openCandidateIds = open ? (open.candidateId ? [open.candidateId] : open.documentBundle?.candidateIds ?? []) : []
   const bump = () => setRevision((value) => value + 1)
+  // The intake state of every message on the page (from the same snapshot), so a stuck or unread email stands out in the list.
+  const jobsByMessage = useMemo(() => {
+    const map = new Map<string, InboxJob[]>()
+    for (const job of inbox.data?.jobs ?? []) map.set(job.messageId, [...(map.get(job.messageId) ?? []), job])
+    return map
+  }, [inbox.data?.jobs])
   // Opening an unread message reads it, as in any mail client. "Mark unread" still brings the dot back
   // because each message is auto-read at most once per visit.
   const autoRead = useRef('')
@@ -120,6 +139,7 @@ export default function InboxScreen() {
     if (!openId) { setJobLoading(false); return }
     const controller = new AbortController()
     let pending = false
+    let again = false // a change arrived while a read was running: that read may predate it
     const read = async () => {
       if (pending || document.visibilityState !== 'visible') return
       pending = true; setJobLoading(true)
@@ -127,11 +147,14 @@ export default function InboxScreen() {
         const result = await api.get<InboxSnapshot>(`/inbox?${new URLSearchParams({ message_id: openId, limit: '1' })}`, { signal: controller.signal })
         if (!controller.signal.aborted && store.isCurrentSession()) { setSelectedJobs(result.jobs); setJobError('') }
       } catch (cause) { if (!controller.signal.aborted) setJobError(errorText(cause)) }
-      finally { pending = false; if (!controller.signal.aborted) setJobLoading(false) }
+      finally {
+        pending = false; if (!controller.signal.aborted) setJobLoading(false)
+        if (again && !controller.signal.aborted) { again = false; void read() }
+      }
     }
     void read()
-    const timer = window.setInterval(() => void read(), 5000)
-    return () => { controller.abort(); window.clearInterval(timer) }
+    const stopLive = liveInterval(() => void read(), 5000, ['mail', 'whatsapp', 'documents'], { onChange: () => { if (pending) again = true; else void read() } })
+    return () => { controller.abort(); stopLive() }
   }, [openId, revision, store.me.id])
   useEffect(() => {
     if (!liveMailbox || !accountId) { setFolders([]); setFolderError(''); return }
@@ -141,8 +164,9 @@ export default function InboxScreen() {
     }).catch((cause) => { if (!controller.signal.aborted) setFolderError(errorText(cause)) })
     return () => controller.abort()
   }, [accountId, liveMailbox, revision, store.me.id])
+  useEffect(() => { setMailbox(null) }, [accountId, folder, remoteView])
   useEffect(() => {
-    setMailbox(null); setMailError('')
+    setMailError('')
     if (!remoteView || !accountId || view !== 'mail') { setLoading(false); return }
     const controller = new AbortController()
     let pending = false
@@ -174,8 +198,35 @@ export default function InboxScreen() {
       .finally(() => { if (!controller.signal.aborted) setDraftLoading(false) })
     return () => controller.abort()
   }, [accountId, draftOffset, search, revision, store.me.id])
-  const selectAccount = (id: string) => { setAccountId(id); setFolder('INBOX'); setView('mail'); setHistoryMode(false); setAttachments(''); setUnread(''); setTab('all'); setFiltersOpen(false); setOpenId(null); setOffset(0); setDraftOffset(0); setDrafts([]); setFocusMessage(null); setQuery(''); setFolders([]) }
+  // Choosing a mailbox re-scopes everything: list, folders, search, filters, pager, the open email and the live reads.
+  const resetContext = (id: string, nextFolder = 'INBOX') => { setAccountId(id); setFolder(nextFolder); setView('mail'); setHistoryMode(false); setAttachments(''); setUnread(''); setTab('all'); setFiltersOpen(false); setOpenId(null); setOffset(0); setDraftOffset(0); setDrafts([]); setFocusMessage(null); setQuery(''); setSearch(''); setFolders([]); setFolderError(''); setMailbox(null); setMailError(''); setSelectedJobs([]) }
+  const selectAccount = (id: string) => { if (id === accountId && !focusMessage) return; resetContext(id) }
   const selectFolder = (name: string) => { const role = folders.find((item) => item.name === name)?.role; setFolder(name); setView('mail'); setHistoryMode(false); setAttachments(''); setOpenId(null); setOffset(0); setFocusMessage(null); setTab((current) => role === 'archive' ? 'archived' : current === 'archived' ? (unread === 'true' ? 'unread' : 'all') : current) }
+  const urlFor = (id: string, name: string) => { const q = new URLSearchParams(); if (id) q.set('account', id); if (id && name && name !== 'INBOX') q.set('folder', name); const text = q.toString(); return text ? `?${text}` : '' }
+  // State to address: a new mailbox is a new history entry (Back returns to the last one), a folder change replaces the entry.
+  const lastAccount = useRef(accountId)
+  useEffect(() => {
+    if (focusMessage && !new URLSearchParams(location.search).has('account')) return
+    const want = urlFor(accountId, folder)
+    if (location.search !== want) navigate({ pathname: '/inbox', search: want }, { replace: lastAccount.current === accountId })
+    lastAccount.current = accountId
+  }, [accountId, folder, focusMessage])
+  // Address to state: Back, Forward, reload and shared links.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search)
+    if (q.has('message') || q.has('mail_connected') || q.has('mail_error')) return
+    const id = q.get('account') ?? ''
+    const name = q.get('folder') ?? 'INBOX'
+    if (id !== accountId) resetContext(id, name)
+    else if (name !== folder) { setFolder(name); setView('mail'); setOpenId(null); setOffset(0) }
+  }, [location.search])
+  // A link to a mailbox that no longer exists falls back to all mail.
+  useEffect(() => { if (accountId && accounts.length && !accounts.some((item) => item.id === accountId)) resetContext('') }, [accounts, accountId])
+  // If the chosen folder does not exist in this mailbox, show its inbox.
+  useEffect(() => {
+    if (!liveMailbox || !folders.length || folders.some((item) => item.name === folder)) return
+    setFolder(folders.find((item) => item.role === 'inbox')?.name ?? folders[0]!.name)
+  }, [folders])
   const createDraft = (mode: DraftMode, message?: MailboxMessage) => {
     const sourceAccount = message ? accounts.find((item) => item.id === message.accountId) : composeAccount
     if (!sourceAccount || !isLiveAccount(sourceAccount)) return
@@ -202,7 +253,8 @@ export default function InboxScreen() {
     }
   }, '')
   const openCandidate = async (id: string) => { setOpeningCandidate(true); try { if (!store.candidate(id)) await store.refresh({ keepCurrent: true }); if (store.isCurrentSession()) navigate(`/candidates/${id}`) } catch (cause) { store.notify(errorText(cause), 'warn') } finally { setOpeningCandidate(false) } }
-  const folderChoices = useMemo(() => folders.length ? folders : [{ name: 'INBOX', role: 'inbox' as const, total, unread: 0 }], [folders, total])
+  // "All accounts" and mailboxes that are not connected have no folders on a server, so the folder list shows the saved mail only.
+  const folderChoices = useMemo<{ name: string; label: string }[]>(() => liveMailbox && folders.length ? folders.map((item) => ({ name: item.name, label: folderLabel(item.name, item.role) })) : [{ name: 'INBOX', label: liveMailbox ? 'Inbox' : 'Saved mail' }], [folders, liveMailbox])
   const refresh = () => { bump(); void inbox.refresh().catch(() => {}) }
   // Gmail and Microsoft sign-in return here with the outcome in the address.
   useEffect(() => {
@@ -210,7 +262,7 @@ export default function InboxScreen() {
     const added = params.get('mail_connected')
     const failed = params.get('mail_error')
     if (!added && !failed) return
-    window.history.replaceState(null, '', '/inbox')
+    navigate('/inbox', { replace: true })
     if (failed) store.notify(failed, 'warn')
     else if (added) { selectAccount(added); store.notify('Mailbox connected. New mail will show up shortly.') }
   }, [])
@@ -226,32 +278,38 @@ export default function InboxScreen() {
     if (next === 'archived' && remoteView && archiveFolder) setFolder(archiveFolder.name)
     else if (next !== 'archived' && remoteView && currentRole === 'archive') setFolder(inboxFolder)
   }
-  const folderSelect = <Select aria-label="Folder" className="mb-folder-select" value={view === 'drafts' ? '__saved_drafts' : folder} onChange={(event) => event.target.value === '__saved_drafts' ? setView('drafts') : selectFolder(event.target.value)}>{folderChoices.map((item) => <option key={item.name} value={item.name}>{item.role === 'drafts' ? 'Mailbox drafts' : item.name}</option>)}<option value="__saved_drafts">My saved drafts</option></Select>
+  const folderSelect = <Select aria-label="Folder" className="mb-folder-select" value={view === 'drafts' ? '__saved_drafts' : folder} onChange={(event) => event.target.value === '__saved_drafts' ? (setView('drafts'), setOpenId(null)) : selectFolder(event.target.value)}>{folderChoices.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}<option value="__saved_drafts">My saved drafts</option></Select>
 
   const toggleAuto = (target: InboxAccount, enabled: boolean) => void perform(`auto:${target.id}`, () => api.inbox.setAutoIngest(target.id, enabled), `Auto-import turned ${enabled ? 'on' : 'off'} for ${target.address}.`)
   const checkingJobs = openJobs.some((job) => ['pending', 'processing', 'retry'].includes(job.status))
   const noCandidateYet = !open?.candidateId && !openJobs.length && !open?.documentBundle?.candidateIds.length
   // PRD: a manual "Create candidate from attachment" on any email the automatic import skipped or could not read, for every role.
   const canCreateFromAttachment = !open?.candidateId && !open?.documentBundle?.candidateIds.length && (openJobs.length === 0 || openJobs.every((job) => ['ignored', 'failed'].includes(job.status)))
+  const reading = !!open && view === 'mail'
+  const ready = !!inbox.data || accounts.length > 0
+  const activeId = focusMessage && open ? open.accountId : accountId
+  // The list pane shows its own skeleton while a mailbox (or a new page of it) loads for the first time.
+  const listLoading = remoteView ? !mailbox && !mailError : !inbox.data && !inbox.error
 
-  return <div className={cn('inbox-v2 mb-page', open && view === 'mail' && 'is-reading')}>
+  return <div className={cn('inbox-v2 mb-page', reading && 'is-reading')}>
     <PageHeader title="Inbox" eyebrow="Mail" description="All your mailboxes in one list. Read mail, reply, and turn resumes into candidates."
       actions={<>
         <Button icon={<RefreshCw size={15} />} disabled={loading || busy} onClick={refresh}>Refresh</Button>
         {admin && <Button icon={<Settings2 size={15} />} disabled={busy} onClick={() => setManaging(true)}>Mailboxes</Button>}
-        {store.me.role === 'admin' && <Button icon={<MessageCircle size={15} />} onClick={() => navigate('/whatsapp')}>WhatsApp</Button>}
-        {liveMailbox && <Button icon={<FolderPlus size={15} />} disabled={busy} onClick={() => { setFolderName(''); setNewFolder(true) }}>New folder</Button>}
+        <Button icon={<MessageCircle size={15} />} onClick={() => navigate('/whatsapp')}>WhatsApp</Button>
+        {liveMailbox && admin && <Button icon={<FolderPlus size={15} />} disabled={busy} onClick={() => { setFolderName(''); setNewFolder(true) }}>New folder</Button>}
         <Button variant="primary" icon={<Pencil size={15} />} disabled={busy || !composeAccount || composeAccount.connectionStatus === 'disconnected'} title={composeAccount ? undefined : 'Connect a mailbox to compose'} onClick={() => createDraft('compose')}>Compose</Button>
       </>} />
     {(inbox.error || inbox.actionError || mailError) && <div role="alert" className="mb-alert is-error"><AlertTriangle size={18} /><div><p className="break-words">{inbox.actionError || mailError || inbox.error}</p>{mailError && mailbox && <p className="mb-alert-sub">Showing the last mail we loaded. Press Refresh to try again.</p>}</div><Button size="sm" onClick={refresh}>Try again</Button></div>}
     {inbox.notice && <p role="status" className="mb-alert is-info"><Info size={18} /><span>{inbox.notice}</span></p>}
-    {!inbox.data && !inbox.error && <div role="status" aria-label="Loading mailbox" className="mb-skeleton">
+    {!ready && !inbox.error && <div role="status" aria-label="Loading mailbox" className="mb-skeleton">
       <div className="mb-card mb-skel-rail">{[0, 1, 2].map((row) => <i key={row} />)}</div>
       <div className="mb-card mb-skel-list"><div className="mb-skel-bar" />{[0, 1, 2, 3, 4, 5].map((row) => <div key={row} className="mb-skel-row"><span /><div><i /><i /></div></div>)}</div>
       <div className="mb-card mb-skel-reader" />
     </div>}
-    {focusMessage && <p className="mb-focus-note">Showing a candidate source message. <button type="button" onClick={() => { setFocusMessage(null); setOpenId(null); window.history.replaceState(null, '', '/inbox') }}>Return to mailbox</button></p>}
-    {inbox.data && accounts.length === 0 ? <Panel className="mb-empty-panel"><EmptyState icon={<Mail size={24} />} title="No mailbox connected yet" description={admin ? 'Connect Gmail, Microsoft 365, Zoho or any other mailbox. Add as many as you need and read them all here.' : 'An admin can connect the recruitment mailboxes.'} action={admin ? <Button variant="primary" icon={<Plus size={15} />} onClick={() => setConnect({ address: '' })}>Connect mailbox</Button> : undefined} /></Panel> : inbox.data && <>
+    {!ready && inbox.error && <Panel className="mb-empty-panel"><EmptyState icon={<AlertTriangle size={24} />} title="We could not load your mail" description="Check your internet connection, then try again. Nothing was lost." action={<Button variant="primary" icon={<RefreshCw size={15} />} onClick={refresh}>Try again</Button>} /></Panel>}
+    {focusMessage && <p className="mb-focus-note">Showing a candidate source message. <button type="button" onClick={() => { setFocusMessage(null); setOpenId(null); navigate('/inbox', { replace: true }) }}>Return to mailbox</button></p>}
+    {inbox.data && accounts.length === 0 ? <Panel className="mb-empty-panel"><EmptyState icon={<Mail size={24} />} title="No mailbox connected yet" description={admin ? 'Connect Gmail, Microsoft 365, Zoho or any other mailbox. Add as many as you need and read them all here.' : 'An admin can connect the recruitment mailboxes.'} action={admin ? <Button variant="primary" icon={<Plus size={15} />} onClick={() => setConnect({ address: '' })}>Connect mailbox</Button> : undefined} /></Panel> : ready && <>
       {account && (account.lastError || !liveMailbox) && <div className="mb-alert is-warn">
         <AlertTriangle size={18} />
         <div className="min-w-0 flex-1">
@@ -260,18 +318,19 @@ export default function InboxScreen() {
         </div>
         {admin && account.connectionStatus === 'disconnected' && <Button size="sm" disabled={busy} onClick={() => setConnect({ address: account.address, provider: account.provider })}>Reconnect mailbox</Button>}
       </div>}
-      <div className="mb"><div className={cn('mb-shell', open && view === 'mail' && 'is-reading', view === 'drafts' && 'is-drafts')}>
-        <AccountRail accounts={accounts} selectedId={accountId} admin={admin} busy={busy} onSelect={selectAccount} onToggleAuto={toggleAuto} onConnect={() => setConnect({ address: '' })} />
+      <div className="mb"><div className={cn('mb-shell', reading && 'is-reading', view === 'drafts' && 'is-drafts')}>
+        <AccountRail accounts={accounts} selectedId={activeId} admin={admin} busy={busy} onSelect={selectAccount} onToggleAuto={toggleAuto} onConnect={() => setConnect({ address: '' })} />
         <div className="mb-panes">
           {view === 'drafts' ? <section className="mb-card mb-draft-list" aria-label="My drafts">
-            <header className="mb-card-head"><div><h2>My saved drafts</h2><p>Drafts saved in the CRM, from all your mailboxes.</p></div><div className="mb-draft-controls">{folderSelect}</div></header>
+            <header className="mb-card-head"><div><h2>My saved drafts</h2><p>Drafts saved in the CRM{account ? ` for ${account.address}` : ', from all your mailboxes'}.</p></div><div className="mb-draft-controls">{folderSelect}</div></header>
+            {folderError && <p role="alert" className="mb-note is-error">{folderError}</p>}
             {draftError && <p role="alert" className="mb-note is-error">{draftError}</p>}
             {draftLoading && <p role="status" className="mb-note">Loading saved drafts…</p>}
-            <div className="mb-pager"><Button size="sm" aria-label="Previous saved drafts" disabled={draftOffset === 0 || draftLoading} onClick={() => setDraftOffset(Math.max(0, draftOffset - PAGE_SIZE))}><ChevronLeft size={15} /></Button><span>Page {Math.floor(draftOffset / PAGE_SIZE) + 1} · {draftTotal} results</span><Button size="sm" aria-label="Next saved drafts" disabled={!draftHasMore || draftLoading} onClick={() => setDraftOffset(draftOffset + PAGE_SIZE)}><ChevronRight size={15} /></Button></div>
+            <div className="mb-pager"><Button size="sm" aria-label="Previous saved drafts" disabled={draftOffset === 0 || draftLoading} onClick={() => setDraftOffset(Math.max(0, draftOffset - PAGE_SIZE))}><ChevronLeft size={15} /></Button><span>Page {Math.floor(draftOffset / PAGE_SIZE) + 1} · {draftTotal} {draftTotal === 1 ? 'result' : 'results'}</span><Button size="sm" aria-label="Next saved drafts" disabled={!draftHasMore || draftLoading} onClick={() => setDraftOffset(draftOffset + PAGE_SIZE)}><ChevronRight size={15} /></Button></div>
             <ul className="mb-scroll">{drafts.map((item) => <li key={item.id}><button type="button" className="mb-draft-row" disabled={busy || draftLoading} onClick={() => openDraft(item)}>
               <span className="mb-draft-icon"><FileText size={17} /></span>
               <span className="mb-draft-text"><strong title={item.subject || '(No subject)'}>{item.subject || '(No subject)'}</strong><span className="mb-draft-to">To {item.to.join(', ') || 'no one added yet'} · {smartTime(item.updatedAt)}</span><span className="mb-draft-body">{item.body || 'Empty draft'}</span></span>
-              <Badge tone={item.status === 'unknown' || item.status === 'failed' ? 'amber' : 'neutral'} variant="dot">{item.status === 'unknown' ? 'Not confirmed as sent' : item.status}</Badge>
+              <Badge tone={item.status === 'unknown' || item.status === 'failed' ? 'amber' : 'neutral'} variant="dot">{DRAFT_STATUS[item.status] ?? item.status}</Badge>
             </button></li>)}</ul>
             {!drafts.length && !draftError && !draftLoading && <EmptyState icon={<FileText size={22} />} title={search ? 'No matching drafts' : 'No saved drafts'} description={search ? 'Try another subject, message or recipient.' : 'Write a message and save it to keep your text and files here. Drafts saved to the mailbox can also be seen by others who use that mailbox.'} />}
           </section> : <>
@@ -292,12 +351,14 @@ export default function InboxScreen() {
                   <div className="mb-pager"><Button size="sm" aria-label="Previous messages" disabled={offset === 0 || loading} onClick={() => { setOpenId(null); setOffset(Math.max(0, offset - PAGE_SIZE)) }}><ChevronLeft size={15} /></Button><span>Page {Math.floor(offset / PAGE_SIZE) + 1}</span><Button size="sm" aria-label="Next messages" disabled={!hasMore || loading} onClick={() => { setOpenId(null); setOffset(offset + PAGE_SIZE) }}><ChevronRight size={15} /></Button></div>
                 </div>
               </div>
-              {loading && <p role="status" className="mb-note">Refreshing from {providerName}…</p>}
-              <ul className="mb-scroll mb-rows">{shown.map((message) => {
+              {folderError && <p role="alert" className="mb-note is-error">{folderError}</p>}
+              {loading && !listLoading && <p role="status" className="mb-note">Refreshing from {providerName}…</p>}
+              {listLoading ? <div role="status" aria-label="Loading mail" className="mb-scroll mb-list-skeleton">{[0, 1, 2, 3, 4, 5].map((row) => <div key={row} className="mb-skel-row"><span /><div><i /><i /></div></div>)}</div> : <ul className="mb-scroll mb-rows">{shown.map((message) => {
                 const candidateIds = message.candidateId ? [message.candidateId] : message.documentBundle?.candidateIds ?? []
                 const owner = accounts.find((item) => item.id === message.accountId)
                 const sender = message.fromName || message.fromAddress
-                return <li key={message.id} className={cn('mb-row', open?.id === message.id && 'is-selected', message.unread && 'is-unread', candidateIds.length > 0 && 'has-chip')}>
+                const headline = intakeHeadline(message.attachments.length, candidateIds.length, jobsByMessage.get(message.id) ?? [])
+                return <li key={message.id} className={cn('mb-row', open?.id === message.id && 'is-selected', message.unread && 'is-unread', (candidateIds.length > 0 || !!headline) && 'has-chip')}>
                   <button type="button" className="mb-row-open" aria-pressed={open?.id === message.id} onClick={() => setOpenId(message.id)}>
                     <SenderAvatar name={sender} />
                     <span className="mb-row-body">
@@ -319,21 +380,22 @@ export default function InboxScreen() {
                       {isLiveAccount(owner) && <button type="button" className={cn('mb-star', message.starred && 'is-on')} aria-label={`${message.starred ? 'Unstar' : 'Star'} ${message.subject || 'message'}`} title={message.starred ? 'Remove star' : 'Star'} disabled={busy || ['moving', 'unknown'].includes(message.remoteState ?? '') || owner?.connectionStatus === 'disconnected'} onClick={() => flags(message, { starred: !message.starred })}><Star size={16} /></button>}
                     </span>
                   </div>
-                  {candidateIds.length > 0 && <div className="mb-row-chip"><CandidateChip label={candidateIds.length > 1 ? `${candidateIds.length} candidates created` : 'Candidate created'} disabled={openingCandidate} title={candidateIds.length > 1 ? 'This email produced several candidates. Open it to see each one.' : 'Open the candidate created from this email'} ariaLabel={candidateIds.length > 1 ? `${candidateIds.length} candidates from ${message.subject || 'this message'}` : `Open candidate from ${message.subject || 'this message'}`} onClick={() => candidateIds.length > 1 ? setOpenId(message.id) : void openCandidate(candidateIds[0])} /></div>}
+                  {candidateIds.length > 0 && <div className="mb-row-chip"><CandidateChip label={candidateIds.length > 1 ? `${candidateIds.length} candidates created` : 'Candidate created'} disabled={openingCandidate} title={candidateIds.length > 1 ? 'This email produced several candidates. Open it to see each one.' : 'Open the candidate created from this email'} ariaLabel={candidateIds.length > 1 ? `${candidateIds.length} candidates from ${message.subject || 'this message'}` : `Open candidate from ${message.subject || 'this message'}`} onClick={() => candidateIds.length > 1 ? setOpenId(message.id) : void openCandidate(candidateIds[0]!)} /></div>}
+                  {candidateIds.length === 0 && headline && <div className="mb-row-chip is-status"><Badge tone={headline.tone} variant="dot">{headline.text}</Badge></div>}
                 </li>
-              })}</ul>
-              {!shown.length && !loading && !mailError && <EmptyState icon={<Mail size={22} />} title={tab === 'starred' ? 'No starred messages' : tab === 'archived' ? 'No archived messages' : tab === 'unread' ? 'No unread messages' : 'No messages in this view'} description={search ? 'Try another search.' : tab === 'starred' ? 'Star a message to keep it here. Only the messages on this page are checked.' : 'Mail will show here once this folder loads.'} />}
+              })}</ul>}
+              {!listLoading && !shown.length && !loading && !mailError && <EmptyState icon={<Mail size={22} />} title={tab === 'starred' ? 'No starred messages' : tab === 'archived' ? 'No archived messages' : tab === 'unread' ? 'No unread messages' : 'No messages in this view'} description={search ? 'Try another search.' : tab === 'starred' ? 'Star a message to keep it here. Only the messages on this page are checked.' : remoteView ? 'Mail will show here once this folder loads.' : 'No saved mail matches this view.'} />}
             </section>
             <section className="mb-card mb-reader" aria-label="Message reader">{open ? <>
               <div className="mb-reader-bar">
                 <button type="button" className="mb-icon-btn is-boxed mb-back" aria-label="Back to messages" title="Back to messages" onClick={() => setOpenId(null)}><ArrowLeft size={16} /></button>
-                <span className="mb-reader-where" title={openAccount?.address}>{openAccount && <ProviderMark provider={openAccount.provider} size="sm" />}<span>{currentFolder?.name ?? open.folder ?? 'INBOX'}</span></span>
+                <span className="mb-reader-where" title={openAccount?.address}>{openAccount && <ProviderMark provider={openAccount.provider} size="sm" />}<span>{folderLabel(currentFolder?.name ?? open.folder ?? 'INBOX', currentFolder?.role ?? 'inbox')}</span></span>
                 <span className="mb-spacer" />
                 {isLiveAccount(openAccount) && <button type="button" className={cn('mb-icon-btn', open.starred && 'is-star-on')} aria-label={open.starred ? 'Unstar message' : 'Star message'} title={open.starred ? 'Remove star' : 'Star'} disabled={busy || moveUnconfirmed} onClick={() => flags(open, { starred: !open.starred })}><Star size={17} /></button>}
                 <button type="button" className="mb-icon-btn" aria-label="Archive" title="Archive" disabled={busy || !canOperate} onClick={() => move(open, 'archive')}><Archive size={17} /></button>
                 {currentRole === 'trash' || currentRole === 'archive' ? <button type="button" className="mb-icon-btn" aria-label="Restore" title="Restore" disabled={busy || !canOperate} onClick={() => move(open, 'restore')}><Undo2 size={17} /></button> : <button type="button" className="mb-icon-btn" aria-label="Trash" title="Move to Trash" disabled={busy || !canOperate} onClick={() => move(open, 'trash')}><Trash2 size={17} /></button>}
                 <button type="button" className="mb-icon-btn" aria-label={open.unread ? 'Mark read' : 'Mark unread'} title={open.unread ? 'Mark read' : 'Mark unread'} disabled={busy || !canOperate} onClick={() => flags(open, { unread: !open.unread })}>{open.unread ? <MailOpen size={17} /> : <Mail size={17} />}</button>
-                {liveMailbox && <details className="mb-more"><summary className="mb-icon-btn" aria-label="More actions" title="More"><MoreVertical size={17} /></summary><div className="mb-more-pop"><Select aria-label="Move message to folder" value="" disabled={busy || !canOperate} onChange={(event) => { if (event.target.value) move(open, event.target.value, true) }}><option value="">Move to folder…</option>{folders.filter((item) => item.name !== folder).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</Select></div></details>}
+                {liveMailbox && <details className="mb-more"><summary className="mb-icon-btn" aria-label="More actions" title="More"><MoreVertical size={17} /></summary><div className="mb-more-pop"><Select aria-label="Move message to folder" value="" disabled={busy || !canOperate} onChange={(event) => { if (event.target.value) move(open, event.target.value, true) }}><option value="">Move to folder…</option>{folders.filter((item) => item.name !== folder).map((item) => <option key={item.name} value={item.name}>{folderLabel(item.name, item.role)}</option>)}</Select></div></details>}
               </div>
               <div className="mb-reader-scroll">
                 <h2 className="mb-subject">{open.subject || '(No subject)'}</h2>
@@ -374,7 +436,7 @@ export default function InboxScreen() {
                 </section>
               </div>
               <footer className="mb-reply-bar">{currentRole === 'drafts' ? <Button disabled={busy || !canOperate} icon={<Pencil size={14} />} onClick={() => createDraft('edit_draft', open)}>Edit draft</Button> : <><Button disabled={busy || !canOperate} icon={<Reply size={14} />} onClick={() => createDraft('reply', open)}>Reply</Button><Button disabled={busy || !canOperate} icon={<ReplyAll size={14} />} onClick={() => createDraft('reply_all', open)}>Reply all</Button><Button disabled={busy || !canOperate} icon={<Send size={14} />} onClick={() => createDraft('forward', open)}>Forward</Button></>}</footer>
-            </> : <EmptyState icon={<MailOpen size={22} />} title="Choose a conversation" description="Open a message to read, reply or review its candidate documents." />}</section>
+            </> : <EmptyState icon={<MailOpen size={22} />} title="Choose an email" description="Open a message to read it, reply, or turn its attachment into a candidate." />}</section>
           </>}
         </div>
       </div></div>
@@ -389,16 +451,16 @@ export default function InboxScreen() {
     <Dialog open={managing && admin} onClose={() => { if (!busy) setManaging(false) }} title="Your mailboxes" description="Connect as many mailboxes as you need, and choose how each one handles candidate documents." width="lg" footer={<><Button icon={<Plus size={15} />} disabled={busy} onClick={() => setConnect({ address: '' })}>Connect mailbox</Button><Button variant="primary" disabled={busy} onClick={() => setManaging(false)}>Done</Button></>}>
       <div className="mb-acct-dialog">{accounts.map((item) => {
         const live = isLiveAccount({ ...item, connectionStatus: 'connected' })
-        const state = item.connectionStatus.replaceAll('_', ' ')
+        const state = accountState(item)
         return <section key={item.id} className="mb-acct-card">
           <header>
             <ProviderMark provider={item.provider} off={item.connectionStatus === 'disconnected'} />
             <div className="min-w-0 flex-1"><h3 title={item.address}>{item.address}</h3><p>{PROVIDER_LABEL[item.provider]}</p></div>
-            <Badge tone={item.configured && item.connectionStatus !== 'disconnected' ? 'green' : 'neutral'} variant="dot">{item.configured ? 'Ready' : 'Setup needed'}</Badge>
+            <Badge tone={state.tone} variant="dot">{state.text}</Badge>
           </header>
           <dl className="mb-kv">
-            <div><dt>Status</dt><dd className="capitalize">{state}</dd></div>
-            <div><dt>Messages</dt><dd>{item.messageCount ?? 0}</dd></div>
+            <div><dt>Status</dt><dd className="capitalize">{item.connectionStatus.replaceAll('_', ' ')}</dd></div>
+            <div><dt>Messages saved</dt><dd>{item.messageCount ?? 0}</dd></div>
             <div><dt>Unread</dt><dd>{item.unreadCount ?? 0}</dd></div>
             <div><dt>Last checked</dt><dd>{item.lastSyncAt ? smartTime(item.lastSyncAt) : 'Not yet'}</dd></div>
           </dl>

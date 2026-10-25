@@ -58,21 +58,21 @@ def _http_error(exc: VerisOCRError) -> HTTPException:
     if isinstance(exc, (VerisOCRBadRequestError, VerisOCRValidationError)):
         return HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "The OCR could not read this file. Check the selected pages or enter the details manually.",
+            "We could not read this file. Check the selected pages, or enter the details by hand.",
         )
     if isinstance(exc, VerisOCRRateLimitError):
         return HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "The document reader is busy. Try this file again in a minute.")
     if isinstance(exc, VerisOCRTimeoutError):
         return HTTPException(
             status.HTTP_504_GATEWAY_TIMEOUT,
-            "The OCR took too long on this file. Try again, or fill the form by hand.",
+            "Reading this file took too long. Try again, or fill in the form by hand.",
         )
     # Not passed on as a 401: the page would read that as our own session expiring.
     if isinstance(exc, VerisOCRAuthenticationError):
-        return HTTPException(status.HTTP_502_BAD_GATEWAY, "The OCR refused our API key. Check VERIS_OCR_API_KEY.")
+        return HTTPException(status.HTTP_502_BAD_GATEWAY, "The document reader is not set up correctly on this server. Ask your system administrator to check it.")
     return HTTPException(
         status.HTTP_502_BAD_GATEWAY,
-        "The OCR is not responding. Fill the form by hand, or try again shortly.",
+        "The document reader is not responding. Fill in the form by hand, or try again shortly.",
     )
 
 
@@ -121,20 +121,20 @@ def scan(
     )
     if not inspected.complete:
         warnings.append(
-            "Some pages could not be read or classified confidently. Nothing was sent to Veris. "
-            "Review the listed pages and upload a clearer document, or enter the details manually."
+            "Some pages could not be read clearly. Check the listed pages and upload a clearer document, "
+            "or enter the details by hand."
         )
         return _response(report, warnings, "needs_review")
     if not selected:
         warnings.append(
-            f"No {kind} pages were identified from the document content. Nothing was sent to Veris."
+            f"We could not find any {kind} pages in this document."
         )
         return _response(report, warnings, "no_resume" if kind == "resume" else "needs_review")
     if not (settings.veris_ocr_base_url and settings.veris_ocr_api_key):
         raise _inspection_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Local inspection is ready. Configure VERIS_OCR_BASE_URL and VERIS_OCR_API_KEY "
-            "to extract the selected pages, or enter the details manually.",
+            "Document reading is not set up on this server yet. Ask your system administrator to finish the setup, "
+            "or enter the details by hand.",
             report,
         )
 
@@ -156,7 +156,7 @@ def scan(
         log.warning("Veris %s extraction failed (ScanFailed)", kind)
         raise _inspection_error(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "The OCR could not read this file. Check the selected pages or enter the details manually.",
+            "We could not read this file. Check the selected pages, or enter the details by hand.",
             report,
         ) from None
     except ScanTimedOut:

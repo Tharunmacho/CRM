@@ -19,6 +19,7 @@ from app.integrations.mail.mailbox import WritableMailbox, MailAdapterError, rol
 from app.integrations.mail.smtp import address, deliver, MailSendError
 from app.services.document_storage import file_response, put_bytes, read_bytes
 from app.services import mail_drafts as service, mail_providers
+from app.services.audit_log import audit_once
 from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(tags=["inbox"])
@@ -179,6 +180,8 @@ def create(body: CreateIn, db: Session = Depends(get_db), user: User = Depends(c
             db.add(MailDraftAttachment(draft_id=row.id, file_name=item.file_name,
                 content_type=mimetypes.guess_type(item.file_name)[0] or "application/octet-stream", size_bytes=len(data),
                 object_key=item.object_key, content_hash=item.content_hash or hashlib.sha256(data).hexdigest()))
+    db.add(AuditEntry(actor_id=user.id, action="Started an email draft", target=(subject or "(no subject)")[:300],
+        entity_type="mail_draft", entity_id=row.id, meta={"mode": body.mode, "account_id": account.id}))
     db.commit()
     return service.draft_out(db, row)
 
@@ -199,6 +202,9 @@ def save(draft_id: str, body: SaveIn, db: Session = Depends(get_db), user: User 
     row.to_addresses, row.cc_addresses, row.bcc_addresses = body.to, body.cc, body.bcc
     row.subject, row.body, row.status, row.lock_version = body.subject, body.body, "draft", row.lock_version + 1
     row.remote_state, row.last_error = "pending", None
+    # Autosave runs while typing, so one line per draft and working session.
+    audit_once(db, user.id, "Edited an email draft", target=(body.subject or "(no subject)")[:300],
+        entity_type="mail_draft", entity_id=row.id, window_minutes=30)
     db.commit()
     row = service.sync_draft(db, get_settings(), row)
     return service.draft_out(db, row)
@@ -232,6 +238,8 @@ async def upload(draft_id: str, file: UploadFile = File(...), lock_version: int 
         raise HTTPException(503, "Attachment storage is unavailable. Try the upload again.") from None
     db.add(MailDraftAttachment(id=attachment_id, draft_id=row.id, file_name=name, content_type=mime,
         size_bytes=len(data), object_key=key, content_hash=digest))
+    db.add(AuditEntry(actor_id=user.id, action="Attached a file to an email draft", target=name,
+        entity_type="mail_draft", entity_id=row.id, meta={"size_bytes": len(data)}))
     row.lock_version, row.remote_state = row.lock_version + 1, "pending"
     db.commit()
     return service.draft_out(db, service.sync_draft(db, get_settings(), row))
@@ -245,6 +253,8 @@ def remove_attachment(draft_id: str, attachment_id: str, lock_version: int,
     item = db.scalar(select(MailDraftAttachment).where(MailDraftAttachment.id == attachment_id, MailDraftAttachment.draft_id == row.id))
     if not item:
         raise HTTPException(404, "Attachment not found")
+    db.add(AuditEntry(actor_id=user.id, action="Removed a file from an email draft", target=item.file_name[:300],
+        entity_type="mail_draft", entity_id=row.id))
     db.delete(item)  # Original immutable bytes can also belong to retained inbound evidence.
     row.lock_version, row.remote_state = row.lock_version + 1, "pending"
     db.commit()
@@ -281,6 +291,8 @@ def discard(draft_id: str, lock_version: int, db: Session = Depends(get_db), use
             db.commit()
             raise HTTPException(502, "We could not remove the draft from the mailbox. Your draft here is safe. Try again.") from None
     row.status, row.lock_version = "discarded", row.lock_version + 1
+    db.add(AuditEntry(actor_id=user.id, action="Discarded an email draft", target=(row.subject or "(no subject)")[:300],
+        entity_type="mail_draft", entity_id=row.id))
     db.commit()
     return service.draft_out(db, row)
 
@@ -328,13 +340,13 @@ def send(draft_id: str, body: SendIn, db: Session = Depends(get_db), user: User 
         refused = deliver(config, outgoing, recipients)
         attempt.status, attempt.sent_at = ("partial" if refused else "sent"), service.now()
         attempt.refused_recipients = refused
-        attempt.last_error = "Some recipients were refused. Accepted recipients must not be sent another copy automatically." if refused else None
+        attempt.last_error = "Some recipients did not get this email. The others already have it and will not be sent another copy." if refused else None
         row.status = "unknown" if refused else "sent"
     except MailSendError as exc:
         attempt.status = "unknown" if exc.unknown else "failed"
         attempt.last_error, row.status = str(exc), attempt.status
     row.last_error = attempt.last_error
-    db.add(AuditEntry(actor_id=user.id, action="Mail send " + attempt.status, entity_type="mail_send", entity_id=attempt.id,
+    db.add(AuditEntry(actor_id=user.id, action={"sent": "Email sent", "partial": "Email sent to some recipients", "failed": "Email could not be sent"}.get(attempt.status, "Email sending not confirmed"), entity_type="mail_send", entity_id=attempt.id,
         meta={"draft_id": row.id, "account_id": row.account_id, "status": attempt.status, "recipient_count": len(recipients)}))
     db.commit()
     if attempt.status == "sent":
@@ -360,14 +372,14 @@ def reconcile(draft_id: str, db: Session = Depends(get_db), user: User = Depends
         with WritableMailbox(config) as mailbox:
             sent_folder = next((folder["name"] for folder in mailbox.folders() if folder["role"] == "sent"), None)
             if not sent_folder:
-                raise MailAdapterError("sent_folder", "Make the Sent folder visible to IMAP in the mailbox settings to check this send.")
+                raise MailAdapterError("sent_folder", "Make the Sent folder visible in the mailbox settings so we can check whether this was sent.")
             _, uids = mailbox.find_message_id(sent_folder, attempt.provider_message_id)
             if uids:
                 attempt.status, row.status, attempt.sent_at = "sent", "sent", service.now()
-                attempt.last_error = "The message is present in the Sent folder. Individual recipient delivery cannot be reconstructed from Sent alone."
+                attempt.last_error = "The email is in the Sent folder, but we cannot tell which recipients received it."
                 row.last_error = attempt.last_error
             else:
-                row.last_error = "No matching Sent message was found yet. The send remains unconfirmed; no message was resent."
+                row.last_error = "We could not find this email in the Sent folder yet, so we cannot confirm it was sent. It has not been sent again."
         db.commit()
         if row.status == "sent":
             service.remove_remote_draft(db, row, config)

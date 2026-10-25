@@ -68,9 +68,11 @@ export function ago(value: string | Date) {
   return formatDistanceToNowStrict(new Date(value), { addSuffix: true })
 }
 
-export function money(amount?: number | null, currency = 'AED') {
+/** An amount with its currency when one was recorded; never an assumed currency. */
+export function money(amount?: number | null, currency?: string | null) {
   if (amount == null) return '—'
-  return `${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 0 })}`
+  const figure = amount.toLocaleString('en-US', { minimumFractionDigits: 0 })
+  return currency ? `${currency} ${figure}` : figure
 }
 
 export function initials(name: string) {

@@ -618,6 +618,41 @@ def test_duplicate_fills_empty_fields_and_keeps_human_edits_owner_status(intake,
     assert len(calls) == 2
 
 
+def _resume_output(text):
+    output = extraction()
+    output["extractions"]["resume"]["raw"] = {"pages": [{"page_number": 2, "text": text}]}
+    return output
+
+
+def test_new_resume_file_replaces_search_text_of_existing_candidate_and_is_searchable(intake, monkeypatch):
+    first, _ = receipt(intake)
+    fake_extraction(monkeypatch, _resume_output("oldtoken welding resume"))
+    run(intake, first)
+    revised = pdf("Page one: certificate", "Page two: resume revised", "Page three: passport")
+    second, _ = receipt(intake, uid=12, data=revised)
+    fake_extraction(monkeypatch, _resume_output("newtoken pipefitting resume"))
+    run(intake, second)
+    with intake.sessions() as db:
+        candidate = db.get(Candidate, db.get(EmailIngestionJob, first).candidate_id)
+        assert row_count(db, Candidate) == 1
+        assert candidate.resume_text == "newtoken pipefitting resume"
+        assert list(db.scalars(select(Attachment.version).where(Attachment.slot == "resume").order_by(Attachment.version))) == [1, 2]
+        found = lambda word: db.scalar(select(func.count()).select_from(Candidate).where(Candidate.resume_tsv.op("@@")(func.to_tsquery("simple", word))))
+        assert found("newtoken") == 1 and found("oldtoken") == 0
+
+
+def test_same_resume_file_again_keeps_existing_search_text(intake, monkeypatch):
+    first, _ = receipt(intake)
+    fake_extraction(monkeypatch, _resume_output("original resume words"))
+    run(intake, first)
+    second, _ = receipt(intake, uid=12, data=ORIGINAL + b" changed")
+    fake_extraction(monkeypatch, _resume_output("different words from the same pages"))
+    run(intake, second)
+    with intake.sessions() as db:
+        candidate = db.get(Candidate, db.get(EmailIngestionJob, first).candidate_id)
+        assert candidate.resume_text == "original resume words"
+
+
 @pytest.mark.parametrize("failure", ["partial", "conflicting_documents", "ambiguous_database"])
 def test_incomplete_or_conflicting_results_require_review_without_candidate_writes(intake, monkeypatch, failure):
     job_id, _ = receipt(intake)
@@ -668,7 +703,7 @@ def test_original_checksum_is_verified_before_using_a_cached_result(intake, monk
     run(intake, second)
     with intake.sessions() as db:
         job = db.get(EmailIngestionJob, second)
-        assert job.status == "needs_review" and "checksum mismatch" in job.last_error
+        assert job.status == "needs_review" and "looks damaged" in job.last_error
         assert job.candidate_id is None
         assert row_count(db, Candidate) == 1
     assert len(calls) == 1
@@ -975,7 +1010,7 @@ def test_an_unreadable_real_document_is_reported_while_the_rest_saves(intake, mo
 
     def extract(data, *, state, save, **kwargs):
         if data == broken:
-            raise subject.UnreadableDocument("Password-protected PDFs must be unlocked before inspection.")
+            raise subject.UnreadableDocument("Password-protected PDFs must be unlocked before you upload them.")
         state.update(source_sha256=hashlib.sha256(data).hexdigest(), inspection=extraction()["inspection"])
         save(state)
         return extraction()

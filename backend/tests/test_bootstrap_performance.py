@@ -41,6 +41,8 @@ SNAPSHOT_COLLECTIONS = {
     "todos", "notifications",
 }
 WIRE_COLLECTIONS = SNAPSHOT_COLLECTIONS - {"files", "agreements", "stages"}
+# The agency profile and the currency list ride in the same statement (migration 0017 seeds them).
+SETTINGS_COLUMNS = {"agency", "currencies"}
 # Email completions, WhatsApp completions and candidate changes: count:epoch each.
 EMPTY_REVISION = "0:0:0:0:0:0"
 FORBIDDEN_FIELDS = {
@@ -78,7 +80,8 @@ def test_snapshot_compilation_uses_an_explicit_public_projection():
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)
 
-    assert set(statement.selected_columns.keys()) == SNAPSHOT_COLLECTIONS | {"ingestionRevision"}
+    assert set(statement.selected_columns.keys()) == SNAPSHOT_COLLECTIONS | SETTINGS_COLUMNS | {"ingestionRevision"}
+    assert set(snapshot_statement("projection-only-user", settings=False).selected_columns.keys()) == SNAPSHOT_COLLECTIONS | {"ingestionRevision"}
     assert "projection-only-user" not in sql
     assert "projection-only-user" in compiled.params.values()
     assert "SELECT *" not in sql.upper()
@@ -302,7 +305,9 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
     assert response.status_code == 200
     assert_select_budget(statements, 2)
     body = response.json()
-    assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision", "agencyTimezone"}
+    assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision", "agencyTimezone", "settings"}
+    assert body["settings"]["name"] and body["settings"]["editable"] is True
+    assert body["settings"]["timezone"] == "Asia/Kolkata" and body["settings"]["slaHours"] == 48
     with Session(desk_engine) as db:
         # The fixture holds a candidate, so the token is the committed aggregate, never empty.
         assert body["ingestionRevision"] == read_revision(db) != EMPTY_REVISION
@@ -434,7 +439,9 @@ def test_empty_snapshot_returns_arrays_with_one_query(schema_database):
         with recorded_statements(schema_database) as statements:
             snapshot = read_snapshot(db, "no-account")
     assert_select_budget(statements, 1)
+    agency, currencies = snapshot.pop("agency"), snapshot.pop("currencies")
     assert snapshot == {**{key: [] for key in SNAPSHOT_COLLECTIONS}, "ingestionRevision": EMPTY_REVISION}
+    assert agency["name"] and len(currencies) == 11
 
 
 def test_snapshot_query_count_stays_constant_and_committed_changes_are_visible(desk_engine):

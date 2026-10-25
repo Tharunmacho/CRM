@@ -4,6 +4,7 @@ import { ArrowUpRight } from 'lucide-react'
 import { api, type InboxHealth } from '@/shared/api/client'
 import { ago } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 
 type WhatsAppHealth = {
   enabled: boolean; configured: boolean
@@ -47,13 +48,15 @@ export function SourceHealth() {
       } finally { if (pending === controller) pending = null }
     }
     void read()
-    const timer = window.setInterval(() => void read(), 60_000)
+    const stopLive = liveInterval(() => void read(), 60_000, ['mail', 'whatsapp', 'documents'], {
+      onChange: () => { pending?.abort(); pending = null; void read() },
+    })
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     return () => {
       live = false
       pending?.abort()
-      window.clearInterval(timer)
+      stopLive()
       document.removeEventListener('visibilitychange', visible)
     }
   }, [store.me.id])

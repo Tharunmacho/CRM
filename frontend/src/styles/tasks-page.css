@@ -191,7 +191,7 @@
   .tk-row > td.tk-cell-candidate { grid-column: span 4; }
   .tk-row > td[data-label='Assigned to'] { grid-column: span 3; }
   .tk-row > td[data-label='Created'], .tk-row > td[data-label='Due'] { grid-column: span 2; }
-  .tk-row > td[data-label='Time remaining'] { grid-column: span 5; }
+  .tk-row > td[data-label='Time left'] { grid-column: span 5; }
   .tk-row > td[data-label='Daily update'], .tk-row > td.tk-cell-actions { grid-column: span 6; }
   .tk-row > td.tk-cell-actions { align-self: end; }
   .tk-cell-actions .tk-acts { justify-content: flex-end; }
@@ -211,7 +211,7 @@
 }
 @container tk (max-width: 640px) {
   .tk-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tk-row > td, .tk-row > td[data-label='Assigned to'], .tk-row > td[data-label='Created'], .tk-row > td[data-label='Due'], .tk-row > td[data-label='Time remaining'] { grid-column: span 1; }
+  .tk-row > td, .tk-row > td[data-label='Assigned to'], .tk-row > td[data-label='Created'], .tk-row > td[data-label='Due'], .tk-row > td[data-label='Time left'] { grid-column: span 1; }
   .tk-row > td.tk-cell-candidate, .tk-row > td[data-label='Daily update'], .tk-row > td.tk-cell-actions { grid-column: 1 / -1; }
   .tk-cell-actions .tk-acts { justify-content: flex-start; }
   .tk-panel-head, .tk-toolbar, .tk-foot { padding-left: 16px; padding-right: 16px; }

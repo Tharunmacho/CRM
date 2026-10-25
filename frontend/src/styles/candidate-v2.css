@@ -14,11 +14,14 @@
 .sr-seg.is-done { background: color-mix(in srgb, var(--primary) 42%, var(--bg-card)); }
 .sr-seg.is-now { background: var(--primary); }
 .sr-seg.is-closed { background: var(--error-ink); }
+/* A step not reached yet is an anonymous hollow node: it carries no stage name. */
+.sr-seg.is-todo { background: transparent; box-shadow: inset 0 0 0 1px var(--border-main); }
 .sr-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; clip-path: inset(50%); white-space: nowrap; }
 /* Screen-reader-only text clips with clip-path, so it never reads as clipped layout text. */
 :is(.cp, .sm) .sr-only { overflow: visible; clip: auto; clip-path: inset(50%); }
 .sr.is-numbered { gap: 4px; }
 .sr.is-numbered .sr-seg { display: grid; place-items: center; height: 30px; border: 1px solid var(--border-faint); border-radius: 6px; background: var(--tint-1); font-size: 12px; font-weight: 600; line-height: 1; color: var(--text-light); }
+.sr.is-numbered .sr-seg.is-todo { box-shadow: none; }
 .sr.is-numbered .sr-seg.is-done { border-color: color-mix(in srgb, var(--primary) 26%, var(--bg-card)); background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: color-mix(in srgb, var(--primary) 82%, var(--text-main)); }
 .sr.is-numbered .sr-seg.is-now { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
 .sr.is-numbered .sr-seg.is-closed { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
@@ -42,12 +45,12 @@
 .sla-copy span { font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
 
 /* ================================================================== Profile page */
-.cp { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.cp { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .cp-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 28px; font-size: 13.5px; color: var(--text-muted); cursor: pointer; transition: color .14s; }
 .cp-back:hover { color: var(--primary); }
 
 /* Header card */
-.cp-head { display: flex; flex-direction: column; gap: 20px; padding: 24px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.cp-head { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
 .cp-head-main { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px 24px; }
 .cp-id { display: flex; align-items: center; gap: 18px; min-width: 0; flex: 1 1 380px; }
 .cp-id-copy { min-width: 0; }
@@ -63,7 +66,7 @@
 .cp-contact svg { color: var(--text-muted); }
 a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2); }
 .cp-contact span { min-width: 0; overflow-wrap: anywhere; }
-.cp-track { display: flex; flex-direction: column; gap: 10px; padding-top: 18px; border-top: 1px solid var(--border-faint); }
+.cp-track { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border-faint); }
 .cp-track-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; }
 .cp-track-order { display: inline-flex; align-items: baseline; gap: 10px; min-width: 0; max-width: 100%; }
 .cp-track-order b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
@@ -77,39 +80,44 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 .cp-tabs { position: sticky; top: 64px; z-index: 20; background: var(--bg-main); }
 .cp-tabs .ui-tabs-line { padding: 0; }
 
-/* Layout */
-.cp-grid { display: grid; align-items: start; gap: 20px; grid-template-columns: minmax(0, 1fr); }
-@media (min-width: 1024px) { .cp-grid { grid-template-columns: minmax(0, 1fr) 360px; } }
-@media (min-width: 1280px) { .cp-grid { grid-template-columns: minmax(0, 1fr) 400px; } }
-.cp-main, .cp-group { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.cp-group { scroll-margin-top: 128px; }
-.cp-aside { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.cp-aside > * { flex: none; }
-/* Taller than the window? It scrolls inside itself, so nothing is ever trapped below the fold. */
-@media (min-width: 1024px) {
-  .cp-aside { position: sticky; top: 128px; max-height: calc(100dvh - 144px); overflow: hidden auto; padding: 2px; margin: -2px; scrollbar-width: thin; }
+/* Layout: a masonry of cards. One column on a phone or tablet; two from 1100px; three on very wide screens.
+   Each card sits under the one above it in its column (the page script sets its row span), so the columns end
+   together and no empty area is left. Nothing is sticky or scrolls inside itself. */
+.cp-masonry { --cp-gap: 16px; display: flex; flex-direction: column; gap: var(--cp-gap); min-width: 0; }
+.cp-masonry > *, .cp-masonry .cp-group { min-width: 0; }
+@media (min-width: 1100px) {
+  .cp-masonry { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1px; column-gap: var(--cp-gap); row-gap: 0; align-items: start; }
+  .cp-masonry > * { align-self: start; }
 }
+@media (min-width: 1700px) { .cp-masonry { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1100px) {
+  .cp-masonry > .is-wide { grid-column: 1 / -1; }
+  .cp-masonry .cp-activity { column-count: 2; column-gap: 32px; }
+  .cp-masonry .cp-activity > li { break-inside: avoid; }
+}
+.cp-group { display: flex; flex-direction: column; gap: 16px; min-width: 0; scroll-margin-top: 128px; }
 .cp-note { font-size: 14px; color: var(--text-muted); }
 
 /* Cards */
 .cp-card { position: relative; min-width: 0; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); overflow: hidden; }
-.cp-card > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-faint); }
-.cp-card-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cp-card > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--border-faint); }
+.cp-card-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .cp-card-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
-.cp-card h2 { font-size: 17px; line-height: 1.35; font-weight: 600; letter-spacing: -.02em; color: var(--text-main); }
-.cp-card-meta { margin-top: 1px; font-size: 13px; line-height: 1.45; color: var(--text-muted); }
+.cp-card-icon svg { width: 16px; height: 16px; }
+.cp-card h2 { font-size: 16px; line-height: 1.3; font-weight: 600; letter-spacing: -.02em; color: var(--text-main); }
+.cp-card-meta { margin-top: 0; font-size: 12.5px; line-height: 1.4; color: var(--text-muted); }
 .cp-card-action { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.cp-card-body { padding: 20px; }
+.cp-card-body { padding: 16px; }
 .cp-card.is-accent::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--primary); }
 
 /* Fact tiles */
-.cp-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.cp-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .cp-fact { min-width: 0; padding: 10px 14px; border: 1px solid var(--border-faint); border-radius: 8px; background: var(--tint-1); }
 .cp-fact dt { font-size: 12.5px; line-height: 1.4; color: var(--text-muted); }
 .cp-fact dd { margin: 2px 0 0; font-size: 14px; line-height: 1.5; font-weight: 500; color: var(--text-main); overflow-wrap: anywhere; }
 .cp-fact.is-wide { grid-column: 1 / -1; }
 .cp-facts.is-single { grid-template-columns: minmax(0, 1fr); }
-.cp-block { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-faint); }
+.cp-block { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-faint); }
 .cp-block-title { margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
 
 /* Prose, lists, links */
@@ -122,7 +130,7 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 .cp-link { color: var(--primary); }
 .cp-link:hover { text-decoration: underline; }
 .cp-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.cp-tags > li { max-width: 100%; padding: 3px 12px; border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--bg-card)); border-radius: 999px; background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); font-size: 13px; font-weight: 500; color: color-mix(in srgb, var(--primary) 80%, var(--text-main)); overflow-wrap: anywhere; }
+.cp-tags > li { max-width: 100%; padding: 2px 10px; line-height: 1.5; border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--bg-card)); border-radius: 999px; background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); font-size: 13px; font-weight: 500; color: color-mix(in srgb, var(--primary) 80%, var(--text-main)); overflow-wrap: anywhere; }
 .cp-stack { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .cp-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 20px; padding: 12px 14px; border: 1px solid var(--border-faint); border-radius: 8px; background: var(--tint-1); }
 .cp-item > * { min-width: 0; }
@@ -133,7 +141,7 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 @media (min-width: 640px) { .cp-item-when { text-align: right; } }
 .cp-note-row { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--text-muted); white-space: pre-line; overflow-wrap: anywhere; }
 .cp-timeline { position: relative; margin: 0; padding: 0; list-style: none; }
-.cp-timeline > li { position: relative; padding: 0 0 20px 24px; border-left: 2px solid var(--border-main); }
+.cp-timeline > li { position: relative; padding: 0 0 14px 24px; border-left: 2px solid var(--border-main); }
 .cp-timeline > li:last-child { padding-bottom: 0; border-left-color: transparent; }
 .cp-timeline > li::before { content: ''; position: absolute; left: -6px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: var(--primary); outline: 3px solid var(--bg-card); }
 
@@ -174,7 +182,7 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 
 /* Activity */
 .cp-activity { margin: 0; padding: 0; list-style: none; }
-.cp-activity > li { --dot: var(--text-light); position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 14px; padding-bottom: 18px; }
+.cp-activity > li { --dot: var(--text-light); position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 14px; padding-bottom: 14px; }
 .cp-activity > li:last-child { padding-bottom: 0; }
 .cp-activity > li::before { content: ''; position: absolute; left: 6px; top: 20px; bottom: 2px; width: 2px; background: var(--border-main); }
 .cp-activity > li:last-child::before { display: none; }
@@ -198,7 +206,6 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
   .cp-actions > span { display: flex; }
   .cp-actions > span > .ui-button { width: 100%; }
   .cp-facts { grid-template-columns: minmax(0, 1fr); }
-  .cp-card > header, .cp-card-body { padding-left: 16px; padding-right: 16px; }
   .cp .summary-value { font-size: 20px; }
 }
 
@@ -418,3 +425,17 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
   .cp-docs .flex-wrap { column-gap: 12px; row-gap: 14px; }
   .cp-cert-acts { gap: 8px; }
 }
+
+/* ---------- Added after the first release, drawn in the same flat card language ---------- */
+/* Admin-only danger area: its own card at the foot of the profile, apart from the everyday actions. */
+.cp-danger { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 12px 16px; border: 1px solid var(--error-edge); border-radius: 12px; background: var(--bg-card); }
+.cp-danger h2 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--error-ink); }
+.cp-danger p { margin-top: 2px; font-size: 13.5px; line-height: 1.5; color: var(--text-muted); }
+/* Remove-from-order dialog: where the application stood, then what happens. */
+.cp-unmap { display: grid; gap: 14px; }
+.cp-unmap-route { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border-faint); border-radius: 10px; background: var(--tint-1); }
+/* A reopened earlier try: who set it aside, when and why. */
+.sm-reopened-note { margin: 0 0 8px; font-size: 12.5px; line-height: 1.5; color: var(--warning-ink); overflow-wrap: anywhere; }
+
+/* On a phone the action bar flows with the form instead of covering its last fields. */
+@media (max-width: 640px) { .sm-foot { position: static; } }

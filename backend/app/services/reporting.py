@@ -16,14 +16,15 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import JSON, func, or_, select
 
+from app.core.config import get_settings
 from app.db import models as m
 from app.domain.stages import STAGES as WORKFLOW_STAGES
 
 
 STAGES = [stage.title for stage in WORKFLOW_STAGES]
-REASONS = {"prescreen_failed": "Prescreen failed", "not_interested": "Not interested",
+REASONS = {"prescreen_failed": "Failed the first screening", "not_interested": "Not interested",
            "resume_not_received": "Resume not received", "interview_rejected": "Interview rejected",
-           "medical_unfit": "Medical unfit", "unmapped": "Unmapped"}
+           "medical_unfit": "Not medically fit", "unmapped": "Removed from the order"}
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in",
                  "referral": "Referral", "other": "Other"}
 
@@ -60,7 +61,7 @@ class Filters:
                        self.designation_id, user.id if value(user.role) == "staff" else self.staff_id)
 
 
-def read_reporting_data(db, filters: Filters | None = None, zone="Asia/Kolkata"):
+def read_reporting_data(db, filters: Filters | None = None, zone=None):
     """Read report inputs without changing historical attribution.
 
     An authorized period bounds events and execution tasks. Latest effective
@@ -86,7 +87,7 @@ def read_reporting_data(db, filters: Filters | None = None, zone="Asia/Kolkata")
     # One statement sees a consistent committed snapshot across all tables and
     # avoids twelve round trips to a remotely hosted PostgreSQL instance.
     if filters is not None:
-        tz = ZoneInfo(zone)
+        tz = ZoneInfo(zone or get_settings().agency_timezone)
         start = datetime.combine(filters.from_date, time.min, tzinfo=tz)
         end = datetime.combine(filters.to_date + timedelta(days=1), time.min, tzinfo=tz)
         events_in_period = (m.TaskEvent.occurred_at >= start, m.TaskEvent.occurred_at < end)
@@ -131,11 +132,12 @@ def sees_team(user):
     return value(user.role) in ("admin", "manager")
 
 
-def read_dashboard_data(db, user, staff_id=None, zone="Asia/Kolkata", now=None):
+def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
     """One fresh projection of operational data, excluding historical report input."""
     if not sees_team(user) and staff_id not in (None, user.id):
         raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
     scope = staff_id if sees_team(user) else user.id
+    zone = zone or get_settings().agency_timezone
     today = aware(now or datetime.now(timezone.utc)).astimezone(ZoneInfo(zone)).date()
     start = datetime.combine(today, time.min, ZoneInfo(zone))
     end = datetime.combine(today + timedelta(days=1), time.min, ZoneInfo(zone))
@@ -225,8 +227,9 @@ def _order_rows(orders, cohort, companies, clients, designations, effective, sta
     return output
 
 
-def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
+def report_data(data, user, filters: Filters, zone=None, now=None):
     filters = filters.authorize(user)
+    zone = zone or get_settings().agency_timezone
     tz = ZoneInfo(zone)
     now = aware(now or datetime.now(timezone.utc))
     start = datetime.combine(filters.from_date, time.min, tzinfo=tz)
@@ -394,10 +397,10 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
     company_ids = {o["company_id"] for o in option_orders}
     client_ids = {companies[cid]["client_id"] for cid in company_ids if cid in companies}
     designation_ids = {o["designation_id"] for o in option_orders}
-    notes = ["Pipeline and order counts use applications mapped in the date range; openings are the order's total capacity.",
-             "Sources and assigned candidates use intake date and the initial assignment owner. Task completions, stage durations, rejections, advances and persisted events use their event date.",
-             "Client, order and designation filters restrict candidates/tasks to linked matching orders. Waiting applications are shown separately from closures.",
-             "Legacy ownership may be inferred from current ownership; historical events before tracking began are not reconstructed. Missing duration samples are not treated as zero."]
+    notes = ["Pipeline and order counts include candidates who were added to an order during the chosen dates. Openings are the total number of places on each order.",
+             "Sources and assigned candidates are counted by the day the candidate arrived and the recruiter they were first given to. Completed tasks, time spent in each stage, rejections and moves to the next stage are counted by the day they happened.",
+             "The client, order and job title filters show only the candidates and tasks linked to matching orders. Candidates who are waiting are shown separately from those whose application was closed.",
+             "If an older record does not show who owned it, we use the current owner. We cannot rebuild history from before tracking began. A stage with no timing records is left blank, not counted as zero."]
     return {
         "generatedAt": now.isoformat(), "timezone": zone,
         "filters": {"fromDate": filters.from_date.isoformat(), "toDate": filters.to_date.isoformat(),
@@ -420,12 +423,13 @@ def report_data(data, user, filters: Filters, zone="Asia/Kolkata", now=None):
     }
 
 
-def dashboard_data(data, user, staff_id=None, zone="Asia/Kolkata", now=None):
+def dashboard_data(data, user, staff_id=None, zone=None, now=None):
     """Admin and manager see the team (optionally one person); staff land on their own workload."""
     if not sees_team(user) and staff_id not in (None, user.id):
         raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
     scope = staff_id if sees_team(user) else user.id
     now = aware(now or datetime.now(timezone.utc))
+    zone = zone or get_settings().agency_timezone
     tz = ZoneInfo(zone)
     today = now.astimezone(tz).date()
     candidates = {c["id"]: c for c in data["candidates"]}

@@ -40,7 +40,7 @@ def storage_key(settings, key):
     if key.startswith("s3://") or getattr(settings, "storage_backend", "local") == "local":
         return key
     if settings.storage_backend != "s3" or not settings.s3_bucket:
-        raise ValueError("Configure a local storage directory or S3 bucket")
+        raise ValueError("File storage is not set up on this server. Ask your system administrator to finish the setup.")
     path = PurePosixPath(key)
     if path.is_absolute() or ".." in path.parts or "\\" in key:
         raise ValueError("Invalid storage key")
@@ -68,13 +68,13 @@ def put_bytes(settings, key, data, content_type="application/octet-stream"):
             if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
                 raise
             if hashlib.sha256(read_bytes(settings, key)).hexdigest() != digest:
-                raise ValueError("A different document already occupies this immutable storage key") from exc
+                raise ValueError("A different document is already saved in this place. Try uploading it again.") from exc
     else:
         target = _local(settings, key)
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-                raise ValueError("A different document already occupies this immutable storage key")
+                raise ValueError("A different document is already saved in this place. Try uploading it again.")
         else:
             temporary = target.with_suffix(f".{uuid4().hex}.tmp")
             try:
@@ -83,7 +83,7 @@ def put_bytes(settings, key, data, content_type="application/octet-stream"):
                 try: os.link(temporary, target)
                 except FileExistsError:
                     if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-                        raise ValueError("A different document already occupies this immutable storage key")
+                        raise ValueError("A different document is already saved in this place. Try uploading it again.")
             finally:
                 temporary.unlink(missing_ok=True)
     return key

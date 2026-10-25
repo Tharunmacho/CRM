@@ -8,16 +8,16 @@ import { Dialog } from '@/shared/ui/overlay'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
-import { COUNTRY_SUGGESTIONS, Flag, FormSection, countryCode } from '@/features/clients/components/parts'
+import { Flag, FormSection } from '@/features/clients/components/parts'
+import { frequentValues } from '@/shared/lib/suggestions'
 
-/** Country names already on record, then the destinations we ship flags for that no record already covers. */
+/** Country names already saved on clients, companies and orders, most used first. Any other name can still be typed. */
 export function useCountryOptions() {
   const store = useStore()
-  return useMemo(() => {
-    const known = [...new Set([...store.clients.map((c) => c.country?.trim()), ...store.companies.map((c) => c.country?.trim())].filter(Boolean) as string[])]
-    const covered = new Set(known.map(countryCode))
-    return [...known, ...COUNTRY_SUGGESTIONS.filter((name) => !covered.has(countryCode(name)))]
-  }, [store.clients, store.companies])
+  return useMemo(
+    () => frequentValues([...store.clients.map((c) => c.country), ...store.companies.map((c) => c.country), ...store.orders.map((o) => o.country)]),
+    [store.clients, store.companies, store.orders],
+  )
 }
 
 /** A country field that suggests names as you type and shows the flag it recognises. */
@@ -40,6 +40,8 @@ export function CountryInput({ value, onChange, listId, options }: { value: stri
 export function ClientDialog({ client, onClose }: { client?: Client; onClose: () => void }) {
   const store = useStore()
   const countries = useCountryOptions()
+  // Industries already saved on companies, most used first. Any other name can still be typed.
+  const industries = useMemo(() => frequentValues(store.companies.map((c) => c.industry)), [store.companies])
   const [form, setForm] = useState({
     name: client?.name ?? '', email: client?.email ?? '', phone: client?.phone ?? '',
     whatsapp: client?.whatsapp ?? '', country: client?.country ?? '', city: client?.city ?? '',
@@ -98,7 +100,7 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
       <fieldset disabled={saving || !!saved} className="client-form-fields">
         {creating && <FormSection icon={<Building2 size={18} />} title="Company" hint="The company that will give you orders">
           <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={employer.name} onChange={(e) => setCompany('name', e.target.value)} placeholder="Gulf Build Contracting LLC" /></Field>
-          <Field label="Industry"><Input maxLength={120} value={employer.industry} onChange={(e) => setCompany('industry', e.target.value)} placeholder="Construction" /></Field>
+          <Field label="Industry"><Input maxLength={120} list="client-industries" autoComplete="off" value={employer.industry} onChange={(e) => setCompany('industry', e.target.value)} placeholder="Construction" /><datalist id="client-industries">{industries.map((name) => <option key={name} value={name} />)}</datalist></Field>
           <Field label="Status" hint="Inactive clients cannot get new orders."><Select value={form.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></Select></Field>
           <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} listId="client-countries" options={countries} /></Field>
           <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>

@@ -54,7 +54,7 @@ def reset_sla(task_id: str, body: ResetIn, db: Session = Depends(get_db), user: 
         raise HTTPException(409, "A closed task cannot get a new deadline")
     now = datetime.now(timezone.utc)
     restart_sla(db, task, now, user.id, body.reason)
-    db.add(AuditEntry(actor_id=user.id, action="Reset task SLA", entity_type="task", entity_id=task.id, target=task.title, meta={"reason": body.reason}))
+    db.add(AuditEntry(actor_id=user.id, action="Restarted the 48-hour clock", entity_type="task", entity_id=task.id, target=task.title, meta={"reason": body.reason}))
     db.commit()
     return TaskOut.model_validate(task)
 

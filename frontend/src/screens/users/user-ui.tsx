@@ -115,3 +115,11 @@ export function PasswordOnce({ name, email, password, created }: { name: string;
     </div>
   )
 }
+
+/** Section header: a 17px title with a muted description on the left, the controls on the right, a hairline under it. */
+export function PanelHead({ id, title, description, actions }: { id?: string; title: string; description?: ReactNode; actions?: ReactNode }) {
+  return <header className="uv-head">
+    <div><h2 id={id}>{title}</h2>{description && <p>{description}</p>}</div>
+    {actions && <div className="uv-head-actions">{actions}</div>}
+  </header>
+}

@@ -16,7 +16,7 @@ export function validDateFilter(value: string | null) {
 }
 
 /** Completion period is inclusive in the agency timezone, not the browser zone. */
-export function completedInPeriod(completedAt: string | undefined, from: string, to: string, timezone = 'Asia/Kolkata') {
+export function completedInPeriod(completedAt: string | undefined, from: string, to: string, timezone?: string) {
   if (!completedAt) return false
   const date = new Date(completedAt)
   if (!Number.isFinite(date.getTime())) return false

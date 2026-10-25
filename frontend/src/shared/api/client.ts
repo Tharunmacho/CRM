@@ -35,6 +35,14 @@ export function fileHref(url: string) {
   return `${BASE}${url}`
 }
 
+/** The live-update stream (Server-Sent Events); same origin as the API so the session cookie goes with it. */
+export function eventsHref() {
+  return `${BASE}/api/events`
+}
+
+/** Whether the API lives on another origin (npm run dev); EventSource then needs credentials sent explicitly. */
+export const apiIsCrossOrigin = BASE !== ''
+
 /** Resolve public API links against the same base used by API requests. */
 export function absoluteApiHref(path: string) {
   return new URL(fileHref(path), window.location.origin).href
@@ -57,6 +65,14 @@ interface SharedRead { startedAt: number; refs: number; controller: AbortControl
  */
 const JOIN_WINDOW_MS = 300
 const reads = new Map<string, SharedRead>()
+
+/**
+ * Forget GETs that are in flight. A live change event means any read that started before it may lack the change,
+ * so a refetch triggered by the event must start its own request instead of joining one begun a moment earlier.
+ */
+export function dropSharedReads() {
+  reads.clear()
+}
 
 async function fetchRaw(method: string, path: string, body: unknown, controller: AbortController, timeout: { fired: boolean }): Promise<RawResponse> {
   try {

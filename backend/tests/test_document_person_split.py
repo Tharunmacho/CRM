@@ -200,6 +200,26 @@ def test_duplicate_requires_explicit_merge_and_retains_owner_work(env):
         assert db.scalar(select(func.count()).select_from(Task)) == 1
 
 
+def test_any_recruiter_can_combine_a_duplicate_owned_by_someone_else(env):
+    env.actor = SimpleNamespace(id=env.other, role=Role.staff)
+    bundle = prepare(env)
+    identifier = str(uuid4())
+    with env.sessions() as db:
+        db.add(Candidate(id=identifier, ref="EXISTING", name="Human verified Alice", phone="9876543210", source=Source.walk_in,
+            owner_id=env.staff, skills=["Human verified skill"], total_experience=8))
+        db.commit()
+    first = commit(env, bundle)
+    assert first.status_code == 409, first.text
+    duplicates = first.json()["detail"]["duplicates"]
+    assert len(duplicates) == 1 and duplicates[0]["canMerge"] is True
+    choice = {"groupId": duplicates[0]["groupId"], "candidateId": identifier}
+    response = commit(env, bundle, duplicateDecisions=[choice]); assert response.status_code == 200, response.text
+    with env.sessions() as db:
+        existing = db.get(Candidate, identifier)
+        assert existing.owner_id == env.staff and existing.name == "Human verified Alice" and existing.skills == ["Human verified skill"]
+        assert db.scalar(select(func.count()).select_from(Task)) == 1
+
+
 def test_storage_failure_rolls_back_every_person_and_retry_is_safe(env, monkeypatch):
     bundle = prepare(env)
     original = subject._attach_group
@@ -431,7 +451,7 @@ def test_people_are_still_saved_with_a_visible_warning_when_reading_is_not_confi
     with env.sessions() as db:
         for person in db.scalars(select(Candidate).where(Candidate.id.in_(response.json()["candidateIds"]))):
             assert person.needs_review
-            assert any("not configured" in note for note in person.ocr_data["person_split"]["extractionWarnings"])
+            assert any("not set up" in note for note in person.ocr_data["person_split"]["extractionWarnings"])
 
 
 def test_pending_provider_job_asks_for_the_same_confirmation_again(env, monkeypatch):

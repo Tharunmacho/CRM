@@ -11,7 +11,7 @@ from app.api.routers.candidates import lock_assignment_cursor, next_owner
 from app.db.models import Attachment, AuditEntry, Candidate, CandidateStatus, Designation, Notification, Role, Source, Task, TaskKind, User, WhatsAppChannel, WhatsAppMessage
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import parse_loose_date, resume_text_from
-from app.integrations.whatsapp import download_media, WhatsAppError
+from app.integrations.whatsapp import download_media, WhatsAppError, WhatsAppReviewError
 from app.services.candidate_identity import enrich_empty, identity_matches, normalize_candidate_values
 from app.services.document_extraction import extract_attachment, ExtractionPending, request_extraction_retry
 from app.services.document_storage import put_bytes, read_bytes
@@ -80,8 +80,10 @@ def receive_payload(db, payload, settings):
 
 
 def attach_original(db, message, candidate):
+    """Attach the files; return the slots that received a file this candidate did not have yet."""
+    added = set()
     if not message.object_key:
-        return
+        return added
     links = [{"slot": "source_bundle", "object_key": message.object_key, "file_name": message.file_name or "WhatsApp document",
               "content_hash": message.content_hash, "content_type": message.content_type, "size_kb": message.processing_state.get("sizeKb")}]
     links.extend({"slot": kind, **document} for kind, document in message.processing_state.get("documents", {}).items())
@@ -91,6 +93,8 @@ def attach_original(db, message, candidate):
         version = (db.scalar(select(func.max(Attachment.version)).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == link["slot"])) or 0) + 1
         db.add(Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link))
         db.flush()
+        added.add(link["slot"])
+    return added
 
 
 def commit_candidate(db, message, output):
@@ -137,9 +141,12 @@ def commit_candidate(db, message, output):
         if candidate.gender and values.get("gender") and candidate.gender.casefold() != values["gender"].casefold():
             raise IntakeReviewError("The gender does not match the candidate already in the system. Check the documents.")
         enrich_empty(candidate, values, raw)
-    if not candidate.resume_text:
-        candidate.resume_text = resume_text_from(raw)
-    attach_original(db, message, candidate)
+    new_slots = attach_original(db, message, candidate)
+    text = resume_text_from(raw)
+    # A different resume file is the latest resume, so Data Bank search must find
+    # its text (the database trigger refreshes the search index on this update).
+    if text and ("resume" in new_slots or not candidate.resume_text):
+        candidate.resume_text = text
     message.candidate_id, message.status, message.last_error = candidate.id, "completed", None
     db.flush()
     # The sender's conversation belongs to this candidate, so the owner can message them.
@@ -151,7 +158,7 @@ def commit_candidate(db, message, output):
         log.warning("WhatsApp conversation could not be linked to the candidate; intake continues.")
     from app.services.intake_acknowledgements import queue_intake_acknowledgement
     queue_intake_acknowledgement(db, "whatsapp", message.id)
-    db.add(AuditEntry(action="Created WhatsApp candidate" if created else "Added WhatsApp candidate evidence", entity_type="candidate", entity_id=candidate.id, target=candidate.name, meta={"messageId": message.id, "senderNumber": message.sender_number}))
+    db.add(AuditEntry(action="Created candidate from WhatsApp" if created else "Added WhatsApp documents to a candidate", entity_type="candidate", entity_id=candidate.id, target=candidate.name, meta={"messageId": message.id, "senderNumber": message.sender_number}))
 
 
 def process_message(message_id, *, sessions, settings, fetch_media=download_media, extract=extract_attachment):
@@ -176,12 +183,12 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         with sessions() as db:
             row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
             if not row:
-                raise WhatsAppError("This message is being checked or is already saved.")
+                raise WhatsAppReviewError("This message is being checked or is already saved.")
             paused = row.status not in {"pending", "processing", "retry"}
             row.processing_state = deepcopy(value)
             db.commit()
             if paused:
-                raise WhatsAppError("This message is being checked or is already saved.")
+                raise WhatsAppReviewError("This message is being checked or is already saved.")
             connected_channel(db, phone_id, settings)
     try:
         with sessions() as db:
@@ -189,7 +196,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         if key:
             data = read_bytes(settings, key)
             if hashlib.sha256(data).hexdigest() != state.get("originalHash"):
-                raise WhatsAppError("Stored original checksum mismatch. Restore the original before retrying.")
+                raise WhatsAppReviewError("The saved file looks damaged. Restore the original file, then try again.")
         else:
             data, mime = fetch_media(settings, media_id)
             digest = hashlib.sha256(data).hexdigest()
@@ -253,7 +260,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         state["output"] = output
         checkpoint(state)
         if output.get("status") == "needs_review":
-            raise WhatsAppError("Some pages need a check. Open the original file before you finish this message.")
+            raise WhatsAppReviewError("Some pages need a check. Open the original file before you finish this message.")
         if not output.get("extractions"):
             with sessions() as db:
                 connected_channel(db, phone_id, settings, lock=True)
@@ -268,7 +275,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             documents = {}
             for kind, part in output["extractions"].items():
                 if kind not in {"resume", "passport", "aadhaar"} or part["selected_pages"] != getattr(inspected, f"{kind}_pages"):
-                    raise WhatsAppError("The pages chosen need a check")
+                    raise WhatsAppReviewError("The pages chosen need a check")
                 content = inspected.pdf_for_pages(part["selected_pages"])
                 digest = hashlib.sha256(content).hexdigest()
                 documents[kind] = {"object_key": put_bytes(settings, f"whatsapp/{message_id}/{kind}-{digest}.pdf", content, "application/pdf"),
@@ -280,7 +287,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
         for document in state.get("documents", {}).values():
             content = read_bytes(settings, document["object_key"])
             if hashlib.sha256(content).hexdigest() != document["content_hash"]:
-                raise WhatsAppError("Stored document checksum mismatch. Restore the original before retrying.")
+                raise WhatsAppReviewError("The saved file looks damaged. Restore the original file, then try again.")
         with sessions() as db:
             connected_channel(db, phone_id, settings, lock=True)
             lock_assignment_cursor(db)
@@ -295,14 +302,14 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             if not row or row.status not in {"pending", "processing", "retry"}:
                 return
             row.status, row.next_attempt_at = "retry", utcnow()
-            row.last_error = "Channel disconnected. Saved work will resume after reconnecting."
+            row.last_error = "This WhatsApp number is disconnected. Work will carry on once it is connected again."
             db.commit()
     except ExtractionPending:
         with sessions() as db:
             row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
             if not row or row.status not in {"pending", "processing", "retry"}:
                 return
-            row.status, row.next_attempt_at, row.last_error = "retry", utcnow() + timedelta(seconds=30), "Waiting for the existing document extraction job"
+            row.status, row.next_attempt_at, row.last_error = "retry", utcnow() + timedelta(seconds=30), "Waiting for the document reader to finish."
             db.commit()
     except Exception as exc:
         from app.services.email_intake import IntakeReviewError
@@ -311,7 +318,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             if not row or row.status not in {"pending", "processing", "retry"}:
                 return
             row.attempts += 1
-            review = isinstance(exc, IntakeReviewError) or isinstance(exc, WhatsAppError) and any(word in str(exc).lower() for word in ("review", "checksum", "format", "limit"))
+            review = isinstance(exc, (IntakeReviewError, WhatsAppReviewError))
             row.status = "needs_review" if review else "failed" if row.attempts >= 4 else "retry"
             if row.status == "retry":
                 saved = deepcopy(row.processing_state or {})
@@ -320,6 +327,6 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                 request_extraction_retry(saved.setdefault("extraction", {}), automatic=True)
                 row.processing_state = saved
             row.next_attempt_at = utcnow() + timedelta(seconds=90 * 2 ** min(row.attempts - 1, 4))
-            row.last_error = str(exc)[:500] if isinstance(exc, (WhatsAppError, IntakeReviewError)) else "Document processing failed. Check worker configuration and retry."
+            row.last_error = str(exc)[:500] if isinstance(exc, (WhatsAppError, IntakeReviewError)) else "We could not read this document. Try again, and contact your administrator if it keeps happening."
             db.commit()
         log.warning("WhatsApp processing stopped (%s); receipt retained.", type(exc).__name__)

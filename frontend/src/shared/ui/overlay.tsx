@@ -111,7 +111,7 @@ export function Dialog({
             <h2 className="text-[19px] font-semibold leading-snug tracking-[-0.02em] text-ink">{title}</h2>
             {description && <p className="mt-1 text-[14px] leading-6 text-ink-500">{description}</p>}
           </div>
-          <IconButton label="Close" onClick={onClose}>
+          <IconButton label="Close" className="ui-dialog-close" onClick={onClose}>
             <X className="h-4 w-4" />
           </IconButton>
         </header>
@@ -169,7 +169,7 @@ export function Sheet({
             <h2 className="text-[18px] font-semibold leading-snug tracking-[-0.02em] text-ink">{title}</h2>
             {description && <p className="mt-1 text-[14px] leading-6 text-ink-500">{description}</p>}
           </div>
-          <IconButton label="Close" onClick={onClose}>
+          <IconButton label="Close" className="ui-dialog-close" onClick={onClose}>
             <X className="h-4 w-4" />
           </IconButton>
         </header>
@@ -193,6 +193,7 @@ export function Dropdown({
   align = 'right',
   width = 'w-64',
   label,
+  side = 'bottom',
 }: {
   trigger: (props: { open: boolean; toggle: () => void }) => ReactNode
   children: (close: () => void) => ReactNode
@@ -200,6 +201,8 @@ export function Dropdown({
   width?: string
   /** Names the open panel for screen readers. */
   label?: string
+  /** Opens below the trigger (default) or above it, for triggers at the bottom of the window. */
+  side?: 'bottom' | 'top'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -225,7 +228,8 @@ export function Dropdown({
         <div
           aria-label={label}
           className={cn(
-            'ui-menu absolute top-[calc(100%+6px)] z-40 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-[10px] border border-rule bg-white p-1 shadow-pop animate-sheet-in',
+            'ui-menu absolute z-40 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-[10px] border border-rule bg-white p-1 shadow-pop animate-sheet-in',
+            side === 'top' ? 'bottom-[calc(100%+6px)]' : 'top-[calc(100%+6px)]',
             align === 'right' ? 'right-0' : 'left-0',
             width,
           )}

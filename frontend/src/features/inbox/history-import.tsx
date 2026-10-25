@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { Button, Field, Input, Select, Switch } from '@/shared/ui/primitives'
 
 const STATUS_WORDS: Record<string, string> = { queued: 'Waiting to start', running: 'Importing', limited: 'Batch finished', paused: 'Paused', error: 'Stopped by a problem', done: 'Finished', completed: 'Finished' }
@@ -25,8 +26,8 @@ export function HistoryImport({ accountId, disabled }: { accountId: string; disa
       } catch (cause) { if (live) setError(cause instanceof Error ? cause.message : 'We could not load the import status.') }
     }
     void read()
-    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void read() }, 5000)
-    return () => { live = false; window.clearInterval(timer) }
+    const stopLive = liveInterval(() => { if (document.visibilityState === 'visible') void read() }, 5000, ['mail'])
+    return () => { live = false; stopLive() }
   }, [accountId, store.isCurrentSession])
   const act = async (action: string, body?: unknown) => {
     setBusy(true); setError('')

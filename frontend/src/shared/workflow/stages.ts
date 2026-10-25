@@ -39,7 +39,7 @@ export interface StageField {
   type: FieldType
   options?: { value: string; label: string }[]
   /** Options resolved from the store at render time rather than listed here. */
-  optionsSource?: 'users'
+  optionsSource?: 'users' | 'currencies'
   placeholder?: string
   help?: string
   /** Render the value in mono — identifiers read character by character. */
@@ -428,18 +428,7 @@ export const STAGES: StageDef[] = [
         type: 'select',
         width: 'half',
         showWhen: { field: 'collected', in: ['yes'] },
-        options: [
-          { value: 'INR', label: 'INR — Indian Rupee' },
-          { value: 'USD', label: 'USD — US Dollar' },
-          { value: 'EUR', label: 'EUR — Euro' },
-          { value: 'SGD', label: 'SGD — Singapore Dollar' },
-          { value: 'AED', label: 'AED — UAE Dirham' },
-          { value: 'SAR', label: 'SAR — Saudi Riyal' },
-          { value: 'QAR', label: 'QAR — Qatari Riyal' },
-          { value: 'OMR', label: 'OMR — Omani Rial' },
-          { value: 'KWD', label: 'KWD — Kuwaiti Dinar' },
-          { value: 'BHD', label: 'BHD — Bahraini Dinar' },
-        ],
+        optionsSource: 'currencies',
       },
       {
         name: 'date',
@@ -624,7 +613,7 @@ export const closureLabels: Record<ClosureReason, string> = {
   resume_not_received: 'Resume not received',
   interview_rejected: 'Rejected at interview',
   medical_unfit: 'Medically unfit',
-  unmapped: 'Unmapped',
+  unmapped: 'Removed from the order',
 }
 
 /** Whether a field should render given the values recorded so far. */

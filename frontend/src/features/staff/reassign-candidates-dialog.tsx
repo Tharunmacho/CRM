@@ -57,7 +57,7 @@ export function ReassignCandidatesDialog({ candidateIds, onClose, onSaved, descr
         <Textarea value={reason} disabled={busy} maxLength={1000} rows={3} onChange={event => setReason(event.target.value)} placeholder="Explain why responsibility is changing" />
       </Field>
       {isAdmin && <div className="space-y-2">
-        <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0" disabled={busy} checked={restart} onChange={event => setRestart(event.target.checked)} />Also restart the 48-hour clock</label>
+        <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0" disabled={busy} checked={restart} onChange={event => setRestart(event.target.checked)} /><span><b className="font-semibold text-ink-900">Also restart the 48-hour clock</b><small className="block text-xs text-ink-500">Admin only. Gives every open task of these candidates a fresh 48 hours.</small></span></label>
         {restart && <Field label="Reason for restarting the clock" required hint="Saved in the task history.">
           <Textarea value={restartReason} disabled={busy} maxLength={2000} rows={2} onChange={event => setRestartReason(event.target.value)} placeholder="Explain why the deadline is being restarted" />
         </Field>}

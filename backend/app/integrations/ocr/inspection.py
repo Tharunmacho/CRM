@@ -126,14 +126,14 @@ class Inspection:
     def pdf_for_pages(self, page_numbers: list[int]) -> bytes:
         """Only verified pages; positions in the report always name the original."""
         if not (self.complete or self.allow_partial):
-            raise InspectionError("Some pages are unread or unclassified. Review the inspection before sending this document.")
+            raise InspectionError("Some pages could not be read or identified. Check the page results before sending this document.")
         if not page_numbers:
             raise InspectionError("No matching pages were identified in this document.")
         if any(type(n) is not int or n < 1 or n > self.page_count for n in page_numbers):
             raise InspectionError("You chose page numbers that this document does not have.")
         wanted = sorted(set(page_numbers))
         if any(self.pages[n - 1].status != "read" or self.pages[n - 1].document_type == "unknown" for n in wanted):
-            raise InspectionError("Only successfully read and classified pages can be selected.")
+            raise InspectionError("Only pages that were read and identified can be selected.")
         with fitz.open(stream=self._pdf, filetype="pdf") as source, fitz.open() as subset:
             for number in wanted:
                 subset.insert_pdf(source, from_page=number - 1, to_page=number - 1)
@@ -202,7 +202,7 @@ def _tesseract(image: Image.Image, command: str, languages: str, timeout: float)
         except OSError:
             return OCRRead("", 0, "Tesseract could not start. Install it or configure TESSERACT_CMD.")
     if result.returncode:
-        return OCRRead("", 0, "Tesseract could not read this page. Check the configured OCR language installation.")
+        return OCRRead("", 0, "We could not read this page. Ask your system administrator to check the document reader's language settings.")
     lines: dict[tuple[str, ...], list[str]] = {}
     scores: list[float] = []
     try:
@@ -242,7 +242,7 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
 def _word_pdf(data: bytes, suffix: str, deadline: float) -> bytes:
     command = _find_libreoffice()
     if not command:
-        raise InspectionError("Word inspection requires LibreOffice. Install LibreOffice on the server or upload an exported PDF.", retryable=True)
+        raise InspectionError("We cannot open Word documents on this server right now. Save the document as a PDF and upload that instead.", retryable=True)
     with tempfile.TemporaryDirectory(prefix="crm-word-inspection-") as directory:
         root = Path(directory)
         source = root / f"document.{suffix}"
@@ -255,10 +255,10 @@ def _word_pdf(data: bytes, suffix: str, deadline: float) -> bytes:
                 check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.TimeoutExpired):
-            raise InspectionError("Word-to-PDF conversion failed or timed out. Export the document as PDF and retry.", retryable=True) from None
+            raise InspectionError("We could not convert this Word document. Save it as a PDF and upload that instead.", retryable=True) from None
         output = root / "document.pdf"
         if result.returncode or not output.is_file():
-            raise InspectionError("LibreOffice could not convert this Word document. Export it as PDF and retry.")
+            raise InspectionError("We could not convert this Word document. Save it as a PDF and upload that instead.")
         return output.read_bytes()
 
 
@@ -279,9 +279,9 @@ def _normalize(data: bytes, deadline: float) -> tuple[bytes, str]:
     try:
         with Image.open(io.BytesIO(data)) as image:
             if getattr(image, "n_frames", 1) != 1:
-                raise InspectionError("Multiple-frame images are not supported. Convert every frame to a multipage PDF and retry.")
+                raise InspectionError("This image has several frames, which we cannot read. Save every frame in one multi-page PDF and upload that.")
             if image.width * image.height > 40_000_000:
-                raise InspectionError("The image exceeds the 40-million-pixel inspection limit. Resize it and retry.")
+                raise InspectionError("This image is too large to read. Make it smaller and upload it again.")
             source_format = (image.format or "image").lower()
             image.load()
             normalized = io.BytesIO()
@@ -319,16 +319,16 @@ def inspect_document(
         raise InspectionError("We cannot open this PDF. Save it again as a PDF without a password and try again.") from None
     with source:
         if source.needs_pass:
-            raise InspectionError("Password-protected PDFs must be unlocked before inspection.")
+            raise InspectionError("Password-protected PDFs must be unlocked before you upload them.")
         if not source.page_count:
             raise InspectionError("This document has no pages.")
         for index in range(source.page_count):
             number = index + 1
             reason = ""
             if number > max_pages:
-                reason = f"The document exceeds the {max_pages}-page inspection limit."
+                reason = f"This document has more than {max_pages} pages, which is too many to read."
             elif time.monotonic() >= deadline:
-                reason = "The document inspection time limit was reached."
+                reason = "Reading this document went over the time limit."
             if reason:
                 pages.append(InspectedPage(number, "unread", "unknown", "not_processed", "", reason=reason))
                 continue
@@ -346,7 +346,7 @@ def inspect_document(
                     continue
                 # Bound memory for pathological page dimensions at the intended DPI.
                 if page.rect.width * page.rect.height * (300 / 72) ** 2 > 40_000_000:
-                    raise InspectionError("This page is too large to render safely at 300 DPI. Export it at a standard page size.")
+                    raise InspectionError("This page is too large to read. Save it at a standard page size and upload it again.")
                 pixmap = page.get_pixmap(dpi=300, colorspace=fitz.csRGB, alpha=False)
                 with Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples) as image:
                     if _blank(image):
@@ -366,9 +366,9 @@ def inspect_document(
                     read.reason if not usable else "",
                 ))
                 if not usable and not pages[-1].reason:
-                    pages[-1].reason = "OCR did not produce enough reliable text. Review or replace this page."
+                    pages[-1].reason = "We could not read enough text on this page. Check it, or upload a clearer copy."
             except Exception as exc:
-                reason = str(exc) if isinstance(exc, InspectionError) else "This page could not be inspected. Export a new PDF and retry."
+                reason = str(exc) if isinstance(exc, InspectionError) else "We could not read this page. Save the document as a new PDF and upload it again."
                 pages.append(InspectedPage(number, "unread", "unknown", "failed", "", reason=reason))
     classified = classify_pages([p.text if p.status == "read" else "" for p in pages])
     for page, verdict in zip(pages, classified):
@@ -384,7 +384,7 @@ def inspect_document(
     if unread:
         warnings.append(f"Pages {_numbers(unread)} could not be read. Review them in the stored original.")
     if unknown:
-        warnings.append(f"Pages {_numbers(unknown)} could not be classified. Review them in the stored original.")
+        warnings.append(f"We could not tell what kind of pages {_numbers(unknown)} are. Check them in the saved original.")
     if inherited:
         warnings.append(
             f"Pages {_numbers(inherited)} have no identifying content and were assigned to the adjoining "

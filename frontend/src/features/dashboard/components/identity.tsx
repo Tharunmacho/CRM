@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
-import { Footprints, Globe2, Link2, Mail, MessageCircle, UserPlus } from 'lucide-react'
+import { Footprints, Link2, Mail, MessageCircle, UserPlus } from 'lucide-react'
 import { initials, slaState } from '@/shared/lib/format'
+import { CountryFlag } from '@/shared/ui/country-flag'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 
 /** Care India's own touches on the dashboard: per-name avatars, flags, source icons, the stage tracker and the 48-hour meter. */
@@ -12,15 +13,8 @@ export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md'
   return <span className={`dr-avatar${size === 'sm' ? ' is-sm' : ''}`} style={{ '--h': hueOf(name || '?') } as CSSProperties} aria-hidden="true">{initials(name || '?')}</span>
 }
 
-const FLAGS: [string, string[]][] = [
-  ['ae', ['united arab emirates', 'uae', 'emirates', 'dubai', 'abu dhabi', 'sharjah']], ['sa', ['saudi']], ['qa', ['qatar']], ['kw', ['kuwait']],
-  ['om', ['oman']], ['bh', ['bahrain']], ['de', ['germany']], ['gb', ['united kingdom', 'uk', 'britain', 'england']],
-  ['in', ['india']], ['sg', ['singapore']], ['us', ['united states', 'usa', 'america']],
-]
 export function Flag({ country }: { country?: string | null }) {
-  const key = (country ?? '').trim().toLowerCase()
-  const code = key ? FLAGS.find(([, names]) => names.some(name => key === name || key.includes(name)))?.[0] : undefined
-  return code ? <img src={`/flags/${code}.svg`} alt="" width={20} height={14} className="dr-flag" loading="lazy" /> : <Globe2 size={15} aria-hidden="true" className="dr-flag-globe" />
+  return <CountryFlag country={country} className="dr-flag" globeClassName="dr-flag-globe" />
 }
 
 export const SOURCE_META: Record<string, { label: string; icon: typeof Mail }> = {

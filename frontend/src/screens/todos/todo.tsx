@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { addDays, format, nextMonday, setHours, setMinutes } from 'date-fns'
+import { format } from 'date-fns'
 import {
   AlertCircle, CalendarCheck2, CalendarClock, CheckCheck, Check, Clock3, ListChecks, LockKeyhole, Pencil, Plus,
   RefreshCw, Sparkles, TimerOff, Trash2,
@@ -9,7 +9,7 @@ import { api } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { isSameDay } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
-import type { TodoItem } from '@/shared/model/types'
+import type { Priority, TodoItem } from '@/shared/model/types'
 import { Badge, EmptyState, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { Button, Checkbox, Input, Select } from '@/shared/ui/primitives'
@@ -17,14 +17,14 @@ import { Dialog, Tabs } from '@/shared/ui/overlay'
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { TodoDialog } from './todo-dialog'
 import {
-  Flag, LINK_KINDS, LinkIcon, PRIORITIES, dayDate, dayLabel, dueText, groupByDay, lateText, linkIdOf, linkKindOf, untilText,
-  type TabKey,
+  Flag, LINK_KINDS, LinkIcon, PRIORITIES, dayDate, dayLabel, dueText, groupByDay, lateText, linkIdOf, linkKindOf, presetDue, presetLabel,
+  untilText, type Preset, type TabKey,
 } from './todo-meta'
 import '@/styles/todo-v2.css'
 
 const EMPTY: Record<TabKey, { title: string; description: string }> = {
-  today: { title: 'Nothing due today', description: 'Type a to-do in the quick add box above, or use Add item to add notes, a priority and a link to a candidate, client or order.' },
-  upcoming: { title: 'Nothing scheduled ahead', description: 'Add a follow-up for a candidate, client or order. It will wait here until its day.' },
+  today: { title: 'Nothing due today', description: 'Type a to-do in the quick add box above, or use More options to add notes, a priority and a link to a candidate, client or order.' },
+  upcoming: { title: 'Nothing scheduled ahead', description: 'Add a follow-up for a candidate, client or order. It waits here until its day.' },
   overdue: { title: 'Nothing is overdue', description: 'A to-do shows here in red when its time has passed, until you tick it off.' },
   done: { title: 'Nothing ticked off yet', description: 'Finished to-dos stay here. Tick the box on a to-do to finish it.' },
 }
@@ -100,7 +100,7 @@ export default function TodoPage() {
         actions={
           <>
             <Button icon={<RefreshCw />} onClick={todoRead.refresh}>Refresh list</Button>
-            <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add item</Button>
+            <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add to-do</Button>
           </>
         }
       />
@@ -140,7 +140,7 @@ export default function TodoPage() {
                 icon={<CalendarCheck2 size={22} strokeWidth={1.6} />}
                 title={EMPTY[tab].title}
                 description={EMPTY[tab].description}
-                action={tab !== 'done' && <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add item</Button>}
+                action={tab !== 'done' && <Button variant="primary" icon={<Plus />} onClick={() => openDialog()}>Add to-do</Button>}
               />
             </div>
           ) : (
@@ -205,7 +205,7 @@ export default function TodoPage() {
 
             <p className="td-privacy-note">
               <LockKeyhole size={15} aria-hidden="true" />
-              <span>Only you can see this list. Team tasks are on the Tasks page.</span>
+              <span>Only you can see this list. Team work is on the Tasks page.</span>
             </p>
           </div>
         </Panel>
@@ -218,44 +218,36 @@ export default function TodoPage() {
 
 /* ------------------------------------------------------------- quick add */
 
-type Preset = 'soon' | 'tomorrow' | 'week'
-
-function presetDue(preset: Preset, now: number) {
-  const base = new Date(now)
-  if (preset === 'tomorrow') return setMinutes(setHours(addDays(base, 1), 9), 0)
-  if (preset === 'week') return setMinutes(setHours(nextMonday(base), 9), 0)
-  const soon = new Date(now)
-  soon.setHours(soon.getHours() + 2, 0, 0, 0)
-  // Keep "today" on today: late in the evening it lands at the last minutes of the day.
-  if (!isSameDay(soon, base)) return new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59)
-  return soon
-}
-
 function QuickAdd({ tab, now, onMore }: { tab: TabKey; now: number; onMore: (title: string) => void }) {
   const store = useStore()
   const [title, setTitle] = useState('')
   const [preset, setPreset] = useState<Preset>(tab === 'upcoming' ? 'tomorrow' : 'soon')
+  const [priority, setPriority] = useState<Priority>('normal')
   const [error, setError] = useState('')
+  const [added, setAdded] = useState('')
   const [busy, setBusy] = useState(false)
-  const label = (p: Preset) => {
-    const due = presetDue(p, now)
-    return `${p === 'soon' ? 'Today' : p === 'tomorrow' ? 'Tomorrow' : `Mon ${format(due, 'd MMM')}`}, ${format(due, 'HH:mm')}`
-  }
+
+  useEffect(() => {
+    if (!added) return undefined
+    const timer = window.setTimeout(() => setAdded(''), 4000)
+    return () => window.clearTimeout(timer)
+  }, [added])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (busy) return
     if (!title.trim()) { setError('Type what needs doing, then press Enter.'); return }
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setAdded('')
     try {
-      await store.addTodo({ title: title.trim(), dueAt: presetDue(preset, now).toISOString(), priority: 'normal', linkTo: null, linkLabel: null })
+      await store.addTodo({ title: title.trim(), dueAt: presetDue(preset, now).toISOString(), priority, linkTo: null, linkLabel: null })
+      setAdded(`Added for ${presetLabel(preset, now)}.`)
       setTitle('')
     } catch (e) { setError(e instanceof Error ? e.message : 'We could not add the to-do. Please try again.') }
     finally { setBusy(false) }
   }
 
   return (
-    <form className="td-quick" onSubmit={(e) => void submit(e)} noValidate>
+    <form className="td-quick" onSubmit={(e) => void submit(e)} noValidate aria-label="Quick add form">
       <div className="td-quick-row">
         <div className="td-quick-input">
           <ListChecks size={16} aria-hidden="true" />
@@ -265,22 +257,28 @@ function QuickAdd({ tab, now, onMore }: { tab: TabKey; now: number; onMore: (tit
             aria-label="Quick add a to-do"
             aria-invalid={!!error}
             aria-describedby={error ? 'td-quick-error' : undefined}
-            placeholder="Quick add: what needs doing?"
+            placeholder="Add a to-do"
             disabled={busy}
             onChange={(e) => { setTitle(e.target.value); if (error) setError('') }}
           />
         </div>
         <div className="td-quick-when">
           <Select value={preset} aria-label="Due" onChange={(e) => setPreset(e.target.value as Preset)} disabled={busy}>
-            <option value="soon">{label('soon')}</option>
-            <option value="tomorrow">{label('tomorrow')}</option>
-            <option value="week">{label('week')}</option>
+            <option value="soon">{presetLabel('soon', now)}</option>
+            <option value="tomorrow">{presetLabel('tomorrow', now)}</option>
+            <option value="week">{presetLabel('week', now)}</option>
+          </Select>
+        </div>
+        <div className="td-quick-prio">
+          <Select value={priority} aria-label="Priority" onChange={(e) => setPriority(e.target.value as Priority)} disabled={busy}>
+            {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
           </Select>
         </div>
         <Button type="submit" variant="primary" icon={<Plus />} disabled={busy}>{busy ? 'Adding…' : 'Add'}</Button>
         <Button type="button" disabled={busy} onClick={() => onMore(title.trim())}>More options</Button>
       </div>
       {error && <p id="td-quick-error" role="alert" className="td-quick-error">{error}</p>}
+      {added && !error && <p role="status" className="td-quick-added">{added}</p>}
     </form>
   )
 }

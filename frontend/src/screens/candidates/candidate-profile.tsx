@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, Flag, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Unlink, UserCog, UserPlus, ListChecks } from 'lucide-react'
+import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, Flag, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Trash2, Unlink, UserCog, UserPlus, ListChecks } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { DOCUMENT_HELP, newestFileVersions } from '@/shared/lib/document-files'
 import { useStore } from '@/shared/state/crm-store'
+import { live } from '@/shared/state/live'
 import { api } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
 import { closureLabels, STAGES, stageByNo } from '@/shared/workflow/stages'
 import { Badge, EmptyState, Panel, StatusPill, type Tone } from '@/shared/ui/display'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
 import { Tabs } from '@/shared/ui/overlay'
-import { Button, Field, RadioRow, Textarea } from '@/shared/ui/primitives'
-import { DocumentSlotRow, FileLink } from '@/shared/ui/file-drop'
+import { Button } from '@/shared/ui/primitives'
+import { FileLink } from '@/shared/ui/file-drop'
 import { Dialog } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { PersonAvatar } from '@/features/workflow/components/person-avatar'
 import { StageCaption, StageRail } from '@/features/workflow/components/stage-rail'
+import { CallDialog } from '@/features/candidates/components/call-dialog'
 import { MapToOrderDialog } from '@/features/candidates/components/map-dialog'
 import { CandidateSections, type CandidateOcr } from '@/features/candidates/components/profile-sections'
 import { ProfileCard } from '@/features/candidates/components/fact-section'
@@ -27,9 +29,10 @@ import { buildActivity, type ActivityTone } from '@/features/candidates/activity
 import { passportExpiryNotice } from '@/features/candidates/passport-expiry'
 import { EmailEvidenceHistory } from '@/features/inbox/email-evidence-history'
 import { CandidateIntakeEvidence } from '@/features/candidates/components/candidate-intake-evidence'
-import { CertificateSlotRow, MULTI_DOCUMENT_KEYS } from '@/features/candidates/components/certificate-slot-row'
+import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
-import { linkedConversationId, mapToOrderBlocker } from '@/features/candidates/profile-actions'
+import { canDeleteCandidate, linkedConversationId, mapToOrderBlocker } from '@/features/candidates/profile-actions'
+import { DeleteCandidateDialog } from '@/features/candidates/components/delete-candidate-dialog'
 import { conversationHref } from '@/features/whatsapp/chat-types'
 import '@/styles/candidate-v2.css'
 
@@ -70,11 +73,12 @@ function useProfileTabs(root: RefObject<HTMLElement>, scroller: RefObject<HTMLEl
       frame = 0
       if (Date.now() < lockUntil.current) return
       let current = ids[0]
+      let best = -Infinity
       for (const id of ids) {
         const el = document.getElementById(id)
         if (!el) continue
-        if (el.getBoundingClientRect().top <= 150) current = id
-        else break
+        const top = el.getBoundingClientRect().top
+        if (top <= 150 && top > best) { best = top; current = id }
       }
       if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) current = ids[ids.length - 1]
       setActive(current)
@@ -109,6 +113,115 @@ function useProfileTabs(root: RefObject<HTMLElement>, scroller: RefObject<HTMLEl
   }, [])
 
   return { tabs, active, go }
+}
+
+/* ---------------------------------------------------------------- Masonry */
+
+/** Gap between cards, in px. Must match `--cp-gap` in candidate-v2.css. */
+const MASONRY_GAP = 16
+
+/** The cards of a masonry: its children, looking through wrappers that have `display: contents`. */
+function masonryItems(container: HTMLElement): HTMLElement[] {
+  const found: HTMLElement[] = []
+  for (const child of Array.from(container.children) as HTMLElement[]) {
+    const display = window.getComputedStyle(child).display
+    if (display === 'contents') found.push(...masonryItems(child))
+    else if (display !== 'none') found.push(child)
+  }
+  return found
+}
+
+/** Spread: how far apart the tallest and shortest column end when the cards are dropped in this order. */
+function columnSpread(columns: number, fixed: number[], order: number[], moving: number[]): number {
+  const ends = new Array<number>(columns).fill(0)
+  const drop = (height: number) => { let at = 0; for (let i = 1; i < columns; i++) if (ends[i] < ends[at]) at = i; ends[at] += height }
+  fixed.forEach(drop)
+  order.forEach((index) => drop(moving[index]))
+  return Math.max(...ends) - Math.min(...ends)
+}
+
+/** A cheap, repeatable search for an order of the movable cards that leaves the columns ending close together. */
+function balancedOrder(columns: number, fixed: number[], moving: number[]): number[] {
+  const natural = moving.map((_, index) => index)
+  let best = natural
+  let bestSpread = columnSpread(columns, fixed, natural, moving)
+  if (bestSpread <= 40) return best
+  const tallFirst = [...natural].sort((a, b) => moving[b] - moving[a])
+  const tallSpread = columnSpread(columns, fixed, tallFirst, moving)
+  if (tallSpread < bestSpread) { best = tallFirst; bestSpread = tallSpread }
+  let seed = 7
+  const random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+  let current = best
+  let currentSpread = bestSpread
+  for (let step = 0; step < 1500 && bestSpread > 24; step++) {
+    const next = [...current]
+    const a = Math.floor(random() * next.length)
+    const b = Math.floor(random() * next.length)
+    if (a === b) continue
+    ;[next[a], next[b]] = [next[b], next[a]]
+    const spread = columnSpread(columns, fixed, next, moving)
+    if (spread <= currentSpread) { current = next; currentSpread = spread }
+    if (spread < bestSpread) { best = next; bestSpread = spread }
+  }
+  // Keep the page order unless reordering clearly helps.
+  return columnSpread(columns, fixed, natural, moving) - bestSpread > 48 ? best : natural
+}
+
+/**
+ * Two (or three) columns of cards that end together. Each card spans as many 1px grid rows as it is tall, so the
+ * grid drops the next card into the shorter column. Below the two-column breakpoint the container is a plain
+ * column and the spans do nothing. No sticky or inner scrolling: the page just flows.
+ */
+function useMasonry(root: RefObject<HTMLElement>) {
+  const observer = useRef<ResizeObserver | null>(null)
+  const watched = useRef(new Set<Element>())
+  const place = useCallback((item: Element) => {
+    const height = Math.ceil((item as HTMLElement).getBoundingClientRect().height)
+    const span = height > 0 ? `span ${height + MASONRY_GAP}` : ''
+    if ((item as HTMLElement).style.gridRowEnd !== span) (item as HTMLElement).style.gridRowEnd = span
+  }, [])
+  const lastKey = useRef('')
+  const balance = useCallback(() => {
+    const container = root.current
+    if (!container) return
+    const items = masonryItems(container)
+    const style = window.getComputedStyle(container)
+    const columns = style.display === 'grid' ? style.gridTemplateColumns.split(' ').length : 1
+    if (columns < 2) {
+      if (lastKey.current) { lastKey.current = ''; for (const item of items) item.style.order = '' }
+      return
+    }
+    const rail = items.filter((item) => item.classList.contains('cp-rail'))
+    const wide = items.filter((item) => item.classList.contains('is-wide'))
+    const moving = items.filter((item) => !rail.includes(item) && !wide.includes(item))
+    const height = (item: HTMLElement) => Math.ceil(item.getBoundingClientRect().height) + MASONRY_GAP
+    const railHeights = rail.map(height)
+    const movingHeights = moving.map(height)
+    const key = `${columns}:${railHeights.join(',')}|${movingHeights.join(',')}`
+    if (key === lastKey.current) return
+    lastKey.current = key
+    const order = balancedOrder(columns, railHeights, movingHeights)
+    rail.forEach((item, index) => { item.style.order = String(index) })
+    order.forEach((movingIndex, position) => { moving[movingIndex].style.order = String(100 + position) })
+    wide.forEach((item) => { item.style.order = '1000' })
+  }, [root])
+  useLayoutEffect(() => {
+    const container = root.current
+    if (!container) return
+    if (!observer.current && typeof ResizeObserver !== 'undefined') {
+      observer.current = new ResizeObserver((entries) => { for (const entry of entries) place(entry.target); balance() })
+    }
+    const items = masonryItems(container)
+    for (const item of items) {
+      place(item)
+      if (!watched.current.has(item)) { watched.current.add(item); observer.current?.observe(item) }
+    }
+    for (const item of [...watched.current]) {
+      if (!items.includes(item as HTMLElement)) { watched.current.delete(item); observer.current?.unobserve(item) }
+    }
+    balance()
+  })
+  useEffect(() => () => { observer.current?.disconnect(); observer.current = null; watched.current.clear() }, [])
 }
 
 /* ------------------------------------------------------------------ Identity */
@@ -154,6 +267,7 @@ export default function CandidateProfilePage() {
   const [mapping, setMapping] = useState(false)
   const [editing, setEditing] = useState(false)
   const [reassigning, setReassigning] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [unmapping, setUnmapping] = useState<string | null>(null)
   const [unmapSaving, setUnmapSaving] = useState(false)
   const [unmapError, setUnmapError] = useState('')
@@ -166,7 +280,7 @@ export default function CandidateProfilePage() {
   useEffect(() => {
     let live = true
     setLoadedId(null); setLoadError('')
-    setOpenApp(null); setCalling(false); setMapping(false); setEditing(false); setReassigning(false); setUnmapping(null)
+    setOpenApp(null); setCalling(false); setMapping(false); setEditing(false); setReassigning(false); setDeleting(false); setUnmapping(null)
     const request = retry ? refresh.current.refresh({ keepCurrent: true }) : refresh.current.ensureFresh()
     request.then(() => {
       if (live) setLoadedId(id ?? null)
@@ -197,6 +311,23 @@ export default function CandidateProfilePage() {
     return () => controller.abort()
   }, [id, cand, evidenceRetry])
   useEffect(() => { setOcr({}); setFullText(null) }, [id])
+  // Live updates already refresh `cand` underneath an open form without touching what was typed (each dialog keeps
+  // its own state). If a change from the server altered this candidate while a dialog is open, say so once.
+  const dialogOpen = editing || calling || mapping || reassigning || deleting || openApp !== null || unmapping !== null
+  const dialogOpenRef = useRef(dialogOpen)
+  dialogOpenRef.current = dialogOpen
+  const liveChangeAt = useRef(0)
+  const candidateApps = cand ? store.applicationsFor(cand.id) : null
+  const fingerprint = useMemo(() => (cand ? JSON.stringify([cand, candidateApps]) : ''), [cand, candidateApps])
+  const lastFingerprint = useRef(fingerprint)
+  useEffect(() => live.subscribe(['candidates', 'applications', 'tasks'], () => { liveChangeAt.current = Date.now() }, { debounceMs: 0 }), [])
+  useEffect(() => {
+    const before = lastFingerprint.current
+    lastFingerprint.current = fingerprint
+    if (before && fingerprint && before !== fingerprint && dialogOpenRef.current && Date.now() - liveChangeAt.current < 8_000) {
+      store.notify('Updated just now: the latest version of this candidate is loaded. Anything you have typed is untouched.')
+    }
+  }, [fingerprint])
   // The WhatsApp button exists only when a conversation is linked; one cheap read, never part of bootstrap.
   useEffect(() => {
     if (!id) return
@@ -212,6 +343,7 @@ export default function CandidateProfilePage() {
   const bodyRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const { tabs, active: activeTab, go } = useProfileTabs(bodyRef, barRef)
+  useMasonry(bodyRef)
 
   if (loadedId !== id) {
     return <Panel><p role={loadError ? 'alert' : 'status'} className="text-sm text-ink-500">{loadError || 'Loading the candidate…'}</p>
@@ -287,8 +419,8 @@ export default function CandidateProfilePage() {
               <h1>{cand.name}</h1>
               {(model.designation || model.meta.length > 0) && <p className="cp-sub">{[model.designation, ...model.meta].filter(Boolean).join(' · ')}</p>}
               <div className="cp-pills">
-                <StatusPill status={cand.status} />
-                {cand.needsReview && <span title="Check these details on your next call"><Badge tone="amber" variant="dot">Needs review</Badge></span>}
+                <span title={cand.status === 'needs_review' ? 'Check these details on your next call' : undefined}><StatusPill status={cand.status} /></span>
+                {cand.needsReview && cand.status !== 'needs_review' && <span title="Check these details on your next call"><Badge tone="amber" variant="dot">Needs review</Badge></span>}
                 {expiry && <Badge tone={expiry.tone === 'expired' ? 'stamp' : 'amber'} variant="dot">{expiry.text}</Badge>}
               </div>
             </div>
@@ -327,23 +459,9 @@ export default function CandidateProfilePage() {
         </nav>
       </div>
 
-      <div className="cp-grid">
-        <div ref={bodyRef} className="cp-main">
-          {evidenceLoading && <p role="status" className="cp-note">Loading documents…</p>}
-          {evidenceError && (
-            <Panel>
-              <p role="alert" className="text-[14px] text-stamp-700">We could not refresh the documents. {fullText?.id === id ? 'Showing what we loaded before.' : 'The profile is shown, but the details read from the documents are missing.'} {evidenceError}</p>
-              <Button className="mt-3" onClick={() => setEvidenceRetry(value => value + 1)}>Try again</Button>
-            </Panel>
-          )}
-          <CandidateSections cand={{ ...cand, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
-          <div id="profile-activity" data-profile-tab="Activity" className="cp-group empty:hidden">
-            <ActivityCard events={activity} />
-          </div>
-        </div>
-
-        <aside aria-label="Recruitment workflow" className="cp-aside">
-          <ProfileCard title="Next step" icon={<Flag size={17} />} accent>
+      {/* One masonry of cards: every card sits under the one above it in its column, so both columns end together and nothing is pinned. */}
+      <div ref={bodyRef} className="cp-masonry">
+          <ProfileCard title="Next step" icon={<Flag size={17} />} accent className="cp-rail">
             <h3 className="cp-next-title">{!cand.ownerId ? 'Assign a recruiter' : active ? `Continue stage ${active.currentStage}: ${stageByNo(active.currentStage).title}` : deployed ? 'Recruitment finished' : initialTask ? 'Make the initial call' : 'Match to a suitable order'}</h3>
             <p className="cp-next-text">{!cand.ownerId ? 'Once a recruiter is assigned, the initial call task starts.' : active ? 'Your progress and deadlines are saved.' : deployed ? 'Documents and history stay on this page.' : initialTask ? `${owner?.name || 'The assigned recruiter'} will make the call${initialTask.dueAt ? ` · due ${dateTimeLabel(initialTask.dueAt)}` : ''}.` : 'Pick an open order to start the 11 stages.'}</p>
             {((!cand.ownerId && canAssign) || (initialTask && canWork) || (active && canWork)) && (
@@ -355,7 +473,7 @@ export default function CandidateProfilePage() {
             )}
           </ProfileCard>
 
-          <ProfileCard title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}. Open one to work on its 11 stages.` : undefined}>
+          <ProfileCard className="cp-rail" title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}. Open one to work on its 11 stages.` : undefined}>
             {apps.length === 0 ? (
               <div>
                 <p className="cp-empty-title">Not matched to any order</p>
@@ -396,11 +514,12 @@ export default function CandidateProfilePage() {
           </ProfileCard>
 
           <ProfileCard
+            className="cp-rail"
             title="Initial call"
             icon={<PhoneCall size={17} />}
             meta="Did you call, are they interested, and your notes"
             action={
-              canWork && !active && !deployed && (
+              canWork && (
                 <Button size="sm" variant="secondary" icon={<PhoneCall />} onClick={() => setCalling(true)}>
                   {cand.callOutcome ? 'Update' : 'Record'}
                 </Button>
@@ -426,6 +545,7 @@ export default function CandidateProfilePage() {
           </ProfileCard>
 
           <ProfileCard
+            className="cp-rail"
             title="Recruiter"
             icon={<UserCog size={17} />}
             action={canAssign && <Button size="sm" onClick={() => setReassigning(true)}>{cand.ownerId ? 'Reassign' : 'Assign'}</Button>}
@@ -436,55 +556,57 @@ export default function CandidateProfilePage() {
             </div>
           </ProfileCard>
 
-          <ProfileCard title="Documents" icon={<FileText size={17} />} meta={canWork ? DOCUMENT_HELP : undefined}>
+          <ProfileCard className="cp-rail" title="Documents" icon={<FileText size={17} />} meta={canWork ? DOCUMENT_HELP : undefined}>
             <div className="cp-docs">
-              {cand.documents.map((d) => MULTI_DOCUMENT_KEYS.includes(d.key) ? (
-                <CertificateSlotRow
-                  key={d.key}
-                  label={d.label}
-                  files={d.versions}
-                  uploaderName={(userId) => store.user(userId)?.name || 'Former team member'}
-                  onUpload={canWork ? async (file) => {
-                    await api.upload('candidate', cand.id, d.key, file)
+              <DocumentList
+                documents={cand.documents}
+                uploaderName={(userId) => store.user(userId)?.name || 'Former team member'}
+                emptyFor={(slot) => hasOriginals && ['resume', 'passport', 'aadhaar'].includes(slot.key) ? 'In the original upload' : undefined}
+                onUpload={canWork ? (slot) => {
+                  if (slot.key === 'source_bundle') return undefined
+                  const multi = slot.key === 'education' || slot.key === 'experience'
+                  return async (file) => {
+                    await api.upload('candidate', cand.id, slot.key, file)
                     try {
                       await store.refresh()
-                      store.notify(`${file.name} added to ${d.label.toLowerCase()}`)
-                    } catch (err) {
-                      store.notify(`${file.name} was uploaded. Reload the page to see it.`, 'warn')
+                      store.notify(multi ? `${file.name} added to ${slot.label.toLowerCase()}` : `${slot.label} uploaded`)
+                    } catch {
+                      store.notify(multi ? `${file.name} was uploaded. Reload the page to see it.` : `${slot.label} was uploaded. Reload the page to see the saved version.`, 'warn')
                     }
-                  } : undefined}
-                />
-              ) : (
-                <DocumentSlotRow
-                  key={d.key}
-                  label={d.label}
-                  versions={d.versions}
-                  emptyLabel={hasOriginals && ['resume', 'passport', 'aadhaar'].includes(d.key) ? 'In the original upload' : undefined}
-                  uploaderName={(userId) => store.user(userId)?.name || 'Former team member'}
-                  onUpload={
-                    canWork && d.key !== 'source_bundle'
-                      ? async (file) => {
-                          await api.upload('candidate', cand.id, d.key, file)
-                          try {
-                            await store.refresh()
-                            store.notify(`${d.label} uploaded`)
-                          } catch (err) {
-                            store.notify(`${d.label} was uploaded. Reload the page to see the saved version.`, 'warn')
-                          }
-                        }
-                      : undefined
                   }
-                />
-              ))}
+                } : undefined}
+              />
               <EmailEvidenceHistory candidateId={cand.id} />
               <CandidateIntakeEvidence candidateId={cand.id} />
             </div>
           </ProfileCard>
-        </aside>
+          {evidenceLoading && <p role="status" className="cp-note">Loading documents…</p>}
+          {evidenceError && (
+            <Panel>
+              <p role="alert" className="text-[14px] text-stamp-700">We could not refresh the documents. {fullText?.id === id ? 'Showing what we loaded before.' : 'The profile is shown, but the details read from the documents are missing.'} {evidenceError}</p>
+              <Button className="mt-3" onClick={() => setEvidenceRetry(value => value + 1)}>Try again</Button>
+            </Panel>
+          )}
+          <CandidateSections cand={{ ...cand, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
+          <div id="profile-activity" data-profile-tab="Activity" className="cp-group is-wide empty:hidden">
+            <ActivityCard events={activity} />
+          </div>
       </div>
+
+      {canDeleteCandidate(store.me.role) && (
+        <section className="cp-danger" aria-label="Danger area">
+          <div>
+            <h2>Danger area</h2>
+            <p>Deleting removes this candidate, their documents and their history for good.</p>
+          </div>
+          <Button variant="dangerGhost" icon={<Trash2 />} onClick={() => setDeleting(true)}>Delete candidate</Button>
+        </section>
+      )}
 
       <CallDialog open={calling} onClose={() => setCalling(false)} candidateId={cand.id} />
       {editing && <CandidateEditDialog candidate={cand} onClose={() => setEditing(false)} />}
+      {deleting && <DeleteCandidateDialog open candidateId={cand.id} name={cand.name} onClose={() => setDeleting(false)}
+        onDeleted={() => { navigate('/data-bank', { replace: true }) }} />}
       {mapping && <MapToOrderDialog open onClose={() => setMapping(false)} candidateId={cand.id} />}
       {reassigning && <ReassignCandidatesDialog candidateIds={[cand.id]} onClose={() => setReassigning(false)} description={cand.ownerId ? 'Change the recruiter responsible for this candidate and their open tasks.' : 'Pick a free recruiter. Once assigned, the initial call task starts.'} />}
       <Dialog
@@ -503,7 +625,10 @@ export default function CandidateProfilePage() {
           }}>{unmapSaving ? 'Removing…' : 'Remove from order'}</Button>
         </>}
       >
-        <p className="text-sm leading-6 text-ink-600">This match is closed with the reason Unmapped. Its open tasks are cancelled and the candidate goes back to the Data Bank. You can match them to another order later. That starts again at stage 1.</p>
+        {unmapApp && <div className="cp-unmap">
+          <div className="cp-unmap-route"><StageRail status={unmapApp.status} currentStage={unmapApp.currentStage} reached={[...new Set(unmapApp.stages.filter(record => !record.reopenedReason).map(record => record.stage))]} /><StageCaption no={unmapApp.currentStage} status={unmapApp.status} /></div>
+          <p className="text-sm leading-6 text-ink-600">This match is closed because the candidate was removed from the order. Its open tasks are cancelled and the candidate goes back to the Data Bank. You can match them to another order later. That starts again at stage 1.</p>
+        </div>}
         {unmapError && <p role="alert" className="mt-3 text-sm text-stamp-700">{unmapError}</p>}
       </Dialog>
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
@@ -534,77 +659,5 @@ function ActivityCard({ events }: { events: ReturnType<typeof buildActivity> }) 
         </Button>
       )}
     </ProfileCard>
-  )
-}
-
-function CallDialog({
-  open,
-  onClose,
-  candidateId,
-}: {
-  open: boolean
-  onClose: () => void
-  candidateId: string
-}) {
-  const { recordCall } = useStore()
-  const [interested, setInterested] = useState('')
-  const [remarks, setRemarks] = useState('')
-  const [called, setCalled] = useState('yes')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  return (
-    <Dialog
-      open={open}
-      onClose={() => { if (!saving) onClose() }}
-      title="Record the call result"
-      description="If the candidate is interested or not interested, the initial call task is done. If they did not answer, or you have not called yet, the task stays open."
-      footer={
-        <>
-          <Button variant="ghost" disabled={saving} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={saving || !interested}
-            onClick={async () => {
-              if (saving) return
-              setSaving(true); setError('')
-              try {
-                await recordCall(candidateId, interested, remarks, called === 'yes')
-                setInterested(''); setRemarks(''); setCalled('yes'); onClose()
-              } catch (error) { setError(error instanceof Error ? error.message : 'We could not save the call result. Please try again.') } finally { setSaving(false) }
-            }}
-          >
-            {saving ? 'Saving…' : 'Save result'}
-          </Button>
-        </>
-      }
-    >
-      <fieldset disabled={saving} className="min-w-0 space-y-4">
-        <Field label="Called" required><RadioRow name="called" value={called} onChange={value => { setCalled(value); if (value === 'no') setInterested('unreachable') }} options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} /></Field>
-        <Field label="Interested" required>
-          <RadioRow
-            name="interested"
-            value={interested}
-            onChange={setInterested}
-            options={called === 'no' ? [{ value: 'unreachable', label: 'Not contacted yet' }] : [
-              { value: 'yes', label: 'Yes' },
-              { value: 'no', label: 'No' },
-              { value: 'unreachable', label: 'Not reachable' },
-            ]}
-          />
-        </Field>
-        {error && <p role="alert" className="text-sm text-stamp-600">{error}</p>}
-        <Field label="Remarks">
-          <Textarea
-            maxLength={10000}
-            value={remarks}
-            onChange={(e) => setRemarks(e.target.value)}
-            placeholder="What the candidate said"
-          />
-        </Field>
-      </fieldset>
-    </Dialog>
   )
 }

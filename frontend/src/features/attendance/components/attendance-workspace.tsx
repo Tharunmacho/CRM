@@ -3,12 +3,14 @@ import { useSearchParams } from 'react-router-dom'
 import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Plus, RefreshCw, ShieldCheck, Timer, Users, WalletCards } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
-import { agencyDay } from '@/shared/lib/task-time'
+import { liveInterval } from '@/shared/state/live'
+import { agencyDay, browserTimeZone } from '@/shared/lib/task-time'
 import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
 import { Button, Field, IconButton, Input, Select } from '@/shared/ui/primitives'
 import { Tabs } from '@/shared/ui/overlay'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { AttendanceClock } from './attendance-clock'
+import { Callout } from './attendance-status'
 import { AttendanceOverview, AttendancePolicyStrip, MonthCalendar, MonthMatrix } from './attendance-overview'
 import { CorrectionHistory, EmployeeRecord, ScheduleRecords, WeeklyOff } from './attendance-records'
 import { RequestsView, type DecisionAction } from './attendance-requests'
@@ -45,6 +47,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
   const [removing, setRemoving] = useState<DutyPlan | null>(null)
   const [weeklyBusy, setWeeklyBusy] = useState(false)
   const [requestStaff, setRequestStaff] = useState('')
+  const [focusDate, setFocusDate] = useState('')
   const [activityDate, setActivityDate] = useState(today)
   const [loadedAt, setLoadedAt] = useState<string | null>(null)
   const own = scope === 'mine' || !canManage
@@ -69,6 +72,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
   useEffect(() => {
     const controller = new AbortController()
     let running = false
+    let again = false // a change arrived while a read was running: that read may predate it
     setRequesting(false); setDecision(null); setSchedule(null); setRemoving(null)
     const load = async (initial = false) => {
       if (running || !/^\d{4}-\d{2}$/.test(month)) return
@@ -86,14 +90,20 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
         if (!controller.signal.aborted) { setBundle({ month: monthly, requests: requests.requests, settings, adjustments: adjustments.adjustments }); setLoadedAt(new Date().toISOString()); setError('') }
       } catch (cause) {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'We could not load attendance. Check your internet and press Refresh.')
-      } finally { running = false; if (!controller.signal.aborted) setLoading(false) }
+      } finally {
+        running = false; if (!controller.signal.aborted) setLoading(false)
+        if (again && !controller.signal.aborted) { again = false; void load() }
+      }
     }
     void load(true)
-    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000)
-    return () => { controller.abort(); window.clearInterval(timer) }
+    const stopLive = liveInterval(() => { if (document.visibilityState === 'visible') void load() }, 30_000, ['attendance', 'users'], {
+      onChange: () => { if (running) again = true; else void load() },
+    })
+    return () => { controller.abort(); stopLive() }
   }, [month, employeeId, retry, revision, recordRevision, store.me.id])
 
   useEffect(() => { setRequestStaff('') }, [month, employeeId])
+  useEffect(() => { if (!notice) return undefined; const timer = window.setTimeout(() => setNotice(''), 6000); return () => window.clearTimeout(timer) }, [notice])
 
   const saved = () => {
     if (!store.isCurrentSession()) return
@@ -102,7 +112,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
   }
   const rows = bundle?.month.staff ?? []
   const detail = rows.find((row) => row.userId === selected) ?? rows[0]
-  const timezone = bundle?.month.timezone ?? store.agencyTimezone ?? 'Asia/Kolkata'
+  const timezone = bundle?.month.timezone ?? store.agencyTimezone ?? browserTimeZone()
   const incomingCover = (bundle?.requests ?? []).filter((request) => request.canRespondCover)
   const visibleRequests = (bundle?.requests ?? []).filter((request) => !own || request.userId === store.me.id)
   const filteredRequests = visibleRequests.filter((request) => !requestStaff || request.userId === requestStaff)
@@ -135,8 +145,8 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
     </>} />
     <AttendanceClock targetMinutes={bundle?.month.policy.workMinutes} />
 
-    {activeTab !== 'presence' && error && <p role="alert" className="att-callout att-callout-error">{error}{bundle ? ' What you see may be out of date.' : ''} Press Refresh to try again.</p>}
-    {notice && <p role="status" className="att-callout att-callout-ok">{notice}</p>}
+    {activeTab !== 'presence' && error && <Callout tone="error" role="alert">{error.replace(/[.!?]*$/, '.')}{bundle ? ' What you see may be out of date.' : ''} Press Refresh to try again.</Callout>}
+    {notice && <Callout tone="ok" role="status">{notice}</Callout>}
     {activeTab !== 'presence' && !loading && bundle && <SummaryCards items={own ? [
       { label: 'Present days', value: totals.present, detail: 'In the month shown', icon: CheckCircle2 },
       { label: 'Worked time', value: minutesLabel(totals.worked), detail: 'Counted by company rules', icon: Clock3, tone: 'green' },
@@ -149,7 +159,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
       { label: 'Unpaid time', value: minutesLabel(totals.unpaid), detail: 'After free minutes and approved overtime', icon: WalletCards, tone: 'red' },
     ]} />}
 
-    <div className="att-tabbar"><Tabs tabs={tabs} active={activeTab} onChange={(key) => { setTab(key as Tab); if (key === 'requests') setRequestStaff('') }} /></div>
+    <div className="att-tabbar"><Tabs tabs={tabs} active={activeTab} onChange={(key) => { setTab(key as Tab); if (key === 'requests') setRequestStaff(''); if (key !== 'employee') setFocusDate('') }} /></div>
 
     {activeTab !== 'presence' && <div className="att-toolbar" role="group" aria-label="Attendance filters">
       <div className="att-tool att-tool-month">
@@ -172,8 +182,8 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
       {own && detail && detail.summary.graceUsedMinutes >= bundle.month.policy.warningMinutes && <p role="status" className="att-callout att-callout-warn">Free late minutes this month: {detail.summary.graceUsedMinutes} of {bundle.month.policy.monthlyGraceMinutes} used, {detail.summary.graceRemainingMinutes} left. Paid permissions used: {detail.summary.permissionOccasionsUsed} of {bundle.month.policy.monthlyPermissionOccasions}.</p>}
       {activeTab === 'overview' && <div className="att-stack">
         <AttendancePolicyStrip policy={bundle.month.policy} />
-        <AttendanceOverview rows={rows} requests={visibleRequests} own={own} month={month} onRecord={(id) => { setSelected(id); setTab('employee') }} onRequests={(id) => { setRequestStaff(id); setTab('requests') }} />
-        {own ? (detail && <MonthCalendar employee={detail} month={month} today={today} onDay={() => setTab('employee')} />) : <MonthMatrix rows={rows} month={month} today={today} onRecord={(id) => { setSelected(id); setTab('employee') }} />}
+        <AttendanceOverview rows={rows} requests={visibleRequests} own={own} month={month} onRecord={(id) => { setSelected(id); setFocusDate(''); setTab('employee') }} onRequests={(id) => { setRequestStaff(id); setTab('requests') }} />
+        {own ? (detail && <MonthCalendar employee={detail} month={month} today={today} onDay={(date) => { setFocusDate(date); setTab('employee') }} />) : <MonthMatrix rows={rows} month={month} today={today} onRecord={(id) => { setSelected(id); setFocusDate(''); setTab('employee') }} />}
         <details className="att-ot">
           <summary>How overtime and unpaid time add up</summary>
           <dl className="att-ot-grid">
@@ -185,7 +195,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
           <p className="att-help">Approved overtime covers late or short minutes. Full days absent and unpaid leave are counted separately.</p>
         </details>
       </div>}
-      {activeTab === 'employee' && (detail ? <EmployeeRecord employee={detail} timezone={timezone} canAdjust={management && !error && detail.userId !== store.me.id} onAdjust={() => setSchedule('adjustment')} onSessions={(date) => { setSelected(detail.userId); setActivityDate(date); setTab('presence') }} /> : <Panel flush><EmptyState title="No employee selected" description="Choose an employee from the month view." /></Panel>)}
+      {activeTab === 'employee' && (detail ? <EmployeeRecord employee={detail} timezone={timezone} focusDate={focusDate} canAdjust={management && !error && detail.userId !== store.me.id} onAdjust={() => setSchedule('adjustment')} onSessions={(date) => { setSelected(detail.userId); setActivityDate(date); setTab('presence') }} /> : <Panel flush><EmptyState title="No employee selected" description="Choose an employee from the month view." /></Panel>)}
       {activeTab === 'requests' && <RequestsView requests={filteredRequests} own={own} timezone={timezone} disabled={!!error} incomingCover={incomingCover}
         heading={own ? 'Your request history' : 'Requests and approvals'}
         headingMeta={`${filteredRequests.length} ${filteredRequests.length === 1 ? 'request' : 'requests'} in ${month}${requestStaff ? ` · ${rows.find((row) => row.userId === requestStaff)?.name ?? 'Selected employee'}` : ''}`}

@@ -1,8 +1,9 @@
-import { ChevronLeft, ChevronRight, Globe2, LayoutGrid, MoreHorizontal, Rows3, type LucideIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, LayoutGrid, MoreHorizontal, Rows3, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
+import { CountryFlag as SharedCountryFlag } from '@/shared/ui/country-flag'
 import { Select } from '@/shared/ui/primitives'
 import { trendCaption, type ArrivalTrend } from '@/features/candidates/data-bank-trends'
 
@@ -201,18 +202,10 @@ export function Pager({ page, pageSize, total, noun, onPage, onPageSize }: {
 
 /* ------------------------------------------------------------------- flags */
 
-const FLAG_CODES: Record<string, string> = {
-  india: 'in', 'united arab emirates': 'ae', uae: 'ae', bahrain: 'bh', germany: 'de', 'united kingdom': 'gb', uk: 'gb',
-  kuwait: 'kw', oman: 'om', qatar: 'qa', 'saudi arabia': 'sa', ksa: 'sa', singapore: 'sg', 'united states': 'us', usa: 'us',
-}
-
-/** Flag of a country by name (files in /flags), a globe when we have no flag for it. */
+/** Flag of a country by name (files in /flags, any country the shared helper knows), a globe when there is no flag file for it. */
 export function CountryFlag({ country }: { country?: string | null }) {
-  const code = country ? FLAG_CODES[country.trim().toLowerCase()] : undefined
   if (!country) return null
-  return code
-    ? <img className="db-flag" src={`/flags/${code}.svg`} alt="" width={18} height={13} title={country} loading="lazy" />
-    : <Globe2 className="db-flag-globe" size={15} aria-hidden="true"><title>{country}</title></Globe2>
+  return <SharedCountryFlag country={country} width={18} height={13} className="db-flag" globeClassName="db-flag-globe" title={country} />
 }
 
 /* ---------------------------------------------------------------- row menu */

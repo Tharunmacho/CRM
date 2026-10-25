@@ -22,7 +22,7 @@ const SHELL = 'src/app/layout/app-shell.tsx'
  * session answered and the shell rendered: a chain of downloads before the first screen. The list below is
  * built from the real bundle (chunk names are hashed), so it can never point at a stale file.
  */
-function earlyChunks(): Plugin {
+function earlyChunks(apiBase = ''): Plugin {
   let base = '/'
   return {
     name: 'crm-early-chunks',
@@ -33,7 +33,8 @@ function earlyChunks(): Plugin {
       order: 'post',
       handler(html, ctx) {
         const bundle = ctx.bundle
-        if (!bundle) return html.replace('__CRM_CHUNK_TABLE__', '{}')
+        const withBase = (text: string) => text.replace('__CRM_API_BASE__', JSON.stringify(apiBase).slice(1, -1))
+        if (!bundle) return withBase(html.replace('__CRM_CHUNK_TABLE__', '{}'))
         const chunks = Object.values(bundle).filter((item) => item.type === 'chunk')
         const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]))
         const closure = (start: string, seen = new Set<string>()) => {
@@ -65,7 +66,7 @@ function earlyChunks(): Plugin {
         }
         const table: Record<string, string[]> = {}
         for (const [route, source] of Object.entries(SCREENS)) table[route] = files(SHELL, source)
-        return html.replace('__CRM_CHUNK_TABLE__', JSON.stringify(table))
+        return withBase(html.replace('__CRM_CHUNK_TABLE__', JSON.stringify(table)))
       },
     },
   }
@@ -73,9 +74,10 @@ function earlyChunks(): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, 'API_')
+  const apiBase = loadEnv(mode, __dirname, 'VITE_').VITE_API_URL ?? ''
 
   return {
-    plugins: [react(), earlyChunks()],
+    plugins: [react(), earlyChunks(apiBase)],
     resolve: { alias: { '@': path.resolve(__dirname, './src') } },
     build: {
       rollupOptions: {

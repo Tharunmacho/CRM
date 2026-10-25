@@ -137,10 +137,10 @@
   --c-accent-300: 4 120 87;
 }
 [data-palette="white"] {
-  --primary-rgb: 47, 85, 212;
+  --primary-rgb: 1, 94, 155;
   --primary: rgb(var(--primary-rgb));
-  --primary-hover: #2543b0;
-  --primary-deep: #1e3a8a;
+  --primary-hover: #014b7c;
+  --primary-deep: #013d66;
   --on-primary: #ffffff;
   --primary-glow: rgba(var(--primary-rgb), .07);
   --bg-main: #f2f4f9;
@@ -205,10 +205,10 @@
   --c-accent-300: 108 233 166;
 }
 [data-theme="dark"][data-palette="white"] {
-  --primary-rgb: 143, 168, 255;
+  --primary-rgb: 86, 170, 230;
   --primary: rgb(var(--primary-rgb));
-  --primary-hover: #b4c4ff;
-  --primary-deep: #6f8cf5;
+  --primary-hover: #86c3ee;
+  --primary-deep: #4d9ad6;
   --on-primary: #0a0a0b;
   --primary-glow: rgba(var(--primary-rgb), .16);
   --bg-main: #0a0a0b;
@@ -683,3 +683,36 @@
 
 :root { color-scheme: light; --radius-sm: 6px; --radius-md: 8px; --radius-lg: 9px; --radius-xl: 10px; --radius-control: 6px; --radius-dialog: 12px; }
 [data-theme="dark"] { color-scheme: dark; }
+
+/* ---- Navigation panel + brand tokens (shell.css, login.css) ----
+   Two themes only: the sidebar is white in light and near-black in dark. Accent = the Care India logo blue (--primary of
+   the white palette), supporting accent = the logo green (active-page bar, unread dot). Keep this block last. */
+:root {
+  --brand-blue: #015e9b;
+  --brand-green: #5ac419;
+  --nav-bg: #ffffff;
+  --nav-head-bg: #ffffff;
+  --nav-text: #0f172a;
+  --nav-muted: #54627a;
+  --nav-active-bg: #eaf3fa;
+  --nav-active-ring: transparent;
+  --nav-hover-bg: #f3f5f9;
+  --nav-border: #e3e8f0;
+  --nav-field: #f5f7fb;
+  --nav-stem: #5ac419;
+  --nav-alert: #d92d20;
+  --nav-shadow: 8px 0 24px -20px rgba(16, 24, 40, .25);
+}
+[data-theme="dark"] {
+  --nav-bg: #0b0c0e;
+  --nav-head-bg: #0b0c0e;
+  --nav-text: #f1f3f6;
+  --nav-muted: rgba(241, 243, 246, .64);
+  --nav-active-bg: rgba(86, 170, 230, .14);
+  --nav-hover-bg: rgba(255, 255, 255, .06);
+  --nav-border: rgba(255, 255, 255, .09);
+  --nav-field: rgba(255, 255, 255, .05);
+  --nav-stem: #6fd02f;
+  --nav-alert: #ff7b7b;
+  --nav-shadow: none;
+}

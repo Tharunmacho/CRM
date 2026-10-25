@@ -17,7 +17,7 @@ const CHOICES: { provider: MailProvider; hint: string }[] = [
 const ZOHO_REGIONS = [['in', 'India'], ['com', 'United States'], ['eu', 'Europe'], ['com.au', 'Australia'], ['jp', 'Japan'], ['ca', 'Canada'], ['com.cn', 'China'], ['sa', 'Saudi Arabia']]
 
 /** What usually fixes a rejected sign-in, per provider; the server message stays as the headline. */
-const signInHint = (message: string, provider: MailProvider) => !/sign-in failed|credentials/i.test(message) ? '' : provider === 'zoho'
+const signInHint = (message: string, provider: MailProvider) => !/sign-in failed|credentials|could not sign in|sign-in details/i.test(message) ? '' : provider === 'zoho'
   ? 'Use a Zoho app password (Zoho Account → Security → App Passwords), not your normal password. Make sure IMAP access is turned on in Zoho Mail settings and the region matches your account.'
   : provider === 'imap' ? 'Check the username and password. Make sure IMAP access is turned on for the mailbox, and use an app password if your provider asks for one.' : ''
 
@@ -71,7 +71,7 @@ export function ConnectMailbox({ address = '', provider: initial, providers = []
     description="Connect as many mailboxes as you need. Mail from every account appears together in one inbox."
     footer={<><Button className="flex-1 sm:flex-none" disabled={busy} onClick={finish}>Cancel</Button><Button className="flex-1 sm:flex-none" icon={<Mail size={17} />} variant="primary" type="submit" form="connect-mailbox" disabled={busy || !ready}>{busy ? (oauth ? 'Opening sign-in…' : 'Connecting…') : oauth ? `Continue with ${PROVIDER_LABEL[provider]}` : 'Connect mailbox'}</Button></>}>
     <form id="connect-mailbox" onSubmit={(event) => { event.preventDefault(); void submit() }} className="space-y-6">
-      {error && <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-control border border-stamp-100 bg-white p-4 text-sm text-stamp-700"><p className="mb-1 font-semibold">{error.includes('MAIL_TOKEN_ENCRYPTION_KEY') ? 'Setup needed on the server' : 'We could not connect the mailbox'}</p><p className="break-words">{error}</p>{signInHint(error, provider) && <p className="mt-2 text-xs text-ink-500">{signInHint(error, provider)}</p>}</div>}
+      {error && <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-control border border-stamp-100 bg-white p-4 text-sm text-stamp-700"><p className="mb-1 font-semibold">{(error.includes('MAIL_TOKEN_ENCRYPTION_KEY') || /not set up on this server/i.test(error)) ? 'Setup needed on the server' : 'We could not connect the mailbox'}</p><p className="break-words">{error}</p>{signInHint(error, provider) && <p className="mt-2 text-xs text-ink-500">{signInHint(error, provider)}</p>}</div>}
       <fieldset className="min-w-0" disabled={busy || reconnecting}>
         <legend className="mb-2 text-sm font-semibold text-ink">Mail provider</legend>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" role="radiogroup" aria-label="Mail provider">

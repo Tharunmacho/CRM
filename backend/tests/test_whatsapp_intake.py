@@ -251,7 +251,7 @@ def test_media_fetch_keeps_bearer_token_on_meta_hosts_and_checks_hash():
         assert download_media(settings, "777", client=client) == (data, "application/pdf")
     for address in ("https://untrusted.example/media", "https://lookaside.fbsbx.com:8443/media", "https://user:password@lookaside.fbsbx.com/media"):
         with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"url": address}))) as client:
-            with pytest.raises(WhatsAppError, match="unsupported media address"):
+            with pytest.raises(WhatsAppError, match="file link we cannot use"):
                 download_media(settings, "777", client=client)
 
 
@@ -292,7 +292,7 @@ def test_cached_selected_document_corruption_blocks_candidate_commit(setup, monk
     with sessions() as db:
         row = db.get(WhatsAppMessage, message_id)
         assert row.status == "needs_review" and row.candidate_id is None
-        assert "checksum" in row.last_error
+        assert "looks damaged" in row.last_error
         assert db.scalar(select(func.count()).select_from(Candidate)) == 1
         assert db.scalar(select(func.count()).select_from(Attachment)) == 0
 
@@ -366,6 +366,31 @@ def test_duplicate_file_is_skipped_without_candidate_ack_or_ocr_but_new_version_
         assert versions == list(range(1, resume_versions + 2))
         # The ignored duplicate queued nothing of its own.
         assert db.scalar(select(func.count()).select_from(IntakeAcknowledgement).where(IntakeAcknowledgement.source_id == same)) == 0
+
+
+def test_new_resume_file_replaces_search_text_and_same_file_keeps_it(setup):
+    sessions, settings = setup
+    def output(text):
+        value = extraction(fields={"phone": "9000000002"})
+        value["extractions"]["resume"]["raw"] = {"pages": [{"page_number": 2, "text": text}]}
+        return value
+    first = receipt(sessions, settings)
+    process_message(first, sessions=sessions, settings=settings, fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
+                    extract=lambda *_, **__: output("oldtoken welding resume"))
+    with sessions() as db:
+        candidate_id = db.get(WhatsAppMessage, first).candidate_id
+        assert db.get(Candidate, candidate_id).resume_text == "oldtoken welding resume"
+        receive_payload(db, payload("wamid.revised"), settings)
+        newer = db.scalar(select(WhatsAppMessage.id).where(WhatsAppMessage.provider_message_id == "wamid.revised"))
+    process_message(newer, sessions=sessions, settings=settings,
+                    fetch_media=lambda *_: (make_pdf("Page one: certificate", "Page two: resume revised", "Page three: passport"), "application/pdf"),
+                    extract=lambda *_, **__: output("newtoken pipefitting resume"))
+    with sessions() as db:
+        assert db.get(WhatsAppMessage, newer).candidate_id == candidate_id
+        candidate = db.get(Candidate, candidate_id)
+        assert candidate.resume_text == "newtoken pipefitting resume"
+        found = lambda word: db.scalar(select(func.count()).select_from(Candidate).where(Candidate.resume_tsv.op("@@")(func.to_tsquery("simple", word))))
+        assert found("newtoken") == 1 and found("oldtoken") == 0
 
 
 def test_changed_cached_original_does_not_reuse_extraction(setup):

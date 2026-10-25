@@ -10,21 +10,29 @@ import re
 import unicodedata
 from sqlalchemy import case, func, or_, select
 from app.db.models import Candidate
+from app.services import agency_settings
 
 
 def text(value):
     return unicodedata.normalize("NFKC", str(value or "")).strip()
 
 
-def normalize_phone(value):
+NATIONAL_DIGITS = 10  # a home number is the calling code plus ten digits, or a trunk "0" plus ten digits
+
+
+def normalize_phone(value, home=None):
+    """Digits only, with the agency's home calling code (or a leading trunk 0) dropped.
+
+    `home` is the calling code as digits; left out, the code last read from agency_settings is used.
+    Other country codes are retained, so unrelated international numbers are not collapsed to the same last ten.
+    """
+    home = agency_settings.home_digits() if home is None else home
     digits = re.sub(r"\D", "", text(value))
     if digits.startswith("00"):
         digits = digits[2:]
-    # Domestic Indian prefixes are equivalent. Other country codes are retained,
-    # so unrelated international numbers are not collapsed to the same last ten.
-    if len(digits) == 12 and digits.startswith("91"):
-        digits = digits[2:]
-    elif len(digits) == 11 and digits.startswith("0"):
+    if home and len(digits) == len(home) + NATIONAL_DIGITS and digits.startswith(home):
+        digits = digits[len(home):]
+    elif len(digits) == 1 + NATIONAL_DIGITS and digits.startswith("0"):
         digits = digits[1:]
     return digits if len(digits) >= 7 else ""
 
@@ -61,12 +69,14 @@ def normalize_candidate_values(values):
 
 def identity_matches(db, fields, exclude_id=None, lock=True):
     clauses = []
-    phone, email, passport = normalize_phone(fields.get("phone")), normalize_email(fields.get("email")), normalize_passport(fields.get("passport_no"))
+    home = agency_settings.home_digits(db)
+    phone, email, passport = normalize_phone(fields.get("phone"), home), normalize_email(fields.get("email")), normalize_passport(fields.get("passport_no"))
     if phone:
         digits = func.regexp_replace(Candidate.phone, r"\D", "", "g")
         international = case((func.left(digits, 2) == "00", func.substr(digits, 3)), else_=digits)
-        normalized = case(((func.length(international) == 12) & (func.left(international, 2) == "91"), func.substr(international, 3)),
-                          ((func.length(international) == 11) & (func.left(international, 1) == "0"), func.substr(international, 2)), else_=international)
+        cut = len(home)
+        normalized = case(((func.length(international) == cut + NATIONAL_DIGITS) & (func.left(international, cut) == home), func.substr(international, cut + 1)),
+                          ((func.length(international) == 1 + NATIONAL_DIGITS) & (func.left(international, 1) == "0"), func.substr(international, 2)), else_=international)
         clauses.append(normalized == phone)
     if email:
         clauses.append(func.lower(func.trim(Candidate.email)) == email)
@@ -82,7 +92,7 @@ def identity_matches(db, fields, exclude_id=None, lock=True):
     result = []
     for candidate in db.scalars(query):
         labels = []
-        if phone and normalize_phone(candidate.phone) == phone:
+        if phone and normalize_phone(candidate.phone, home) == phone:
             labels.append("phone number")
         if email and normalize_email(candidate.email) == email:
             labels.append("email")

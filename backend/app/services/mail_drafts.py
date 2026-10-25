@@ -109,10 +109,10 @@ def sync_draft(db, settings, row):
             folders = mailbox.folders()
             destination = next((item["name"] for item in folders if item["role"] == "drafts"), None)
             if not destination:
-                raise MailAdapterError("draft_folder", "Make the Drafts folder visible to IMAP in the mailbox settings. The CRM draft is saved.")
+                raise MailAdapterError("draft_folder", "Make the Drafts folder visible in the mailbox settings. Your draft is saved here.")
             cursor, uids = mailbox.find_message_id(destination, message_id)
             if len(uids) > 1:
-                raise MailAdapterError("draft_duplicates", "The mailbox has multiple copies of this draft version. Review them there before syncing again.")
+                raise MailAdapterError("draft_duplicates", "The mailbox has more than one copy of this draft. Delete the extra copies there, then try again.")
             if uids:
                 validity, uid = cursor.uid_validity, uids[0]
             else:
@@ -120,7 +120,7 @@ def sync_draft(db, settings, row):
                 if result is None:
                     cursor, uids = mailbox.find_message_id(destination, message_id)
                     if len(uids) != 1:
-                        raise MailAdapterError("draft_unknown", "The mailbox accepted the draft but its location is unconfirmed. Check draft sync before sending.")
+                        raise MailAdapterError("draft_unknown", "The mailbox took the draft, but we could not confirm where it was saved. Check the draft before sending.")
                     result = cursor.uid_validity, uids[0]
                 validity, uid = result
             old = row.remote_folder, row.remote_uid, row.remote_uid_validity
@@ -131,7 +131,7 @@ def sync_draft(db, settings, row):
                 try:
                     mailbox.remove_draft(*old)
                 except MailAdapterError:
-                    row.last_error = "The latest draft is saved. The mailbox may still show an older draft copy; remove it there after checking."
+                    row.last_error = "Your latest draft is saved. The mailbox may still show an older copy of it. Delete the old copy there once you have checked it."
     except (MailAdapterError, HTTPException) as exc:
         row.remote_state = "unknown" if getattr(exc, "unknown", False) or getattr(exc, "code", "") == "draft_unknown" else "error"
         row.last_error = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
@@ -145,7 +145,7 @@ def expire_sending(db, row, attempts=None):
     changed = False
     for attempt in attempts:
         if attempt.status in {"pending", "sending"} and attempt.created_at < now() - timedelta(minutes=3):
-            attempt.status, attempt.last_error = "unknown", "The send request was interrupted. Check the Sent folder before sending another copy."
+            attempt.status, attempt.last_error = "unknown", "Sending was interrupted. Check the Sent folder before sending this again."
             if row.status == "sending":
                 row.status, row.last_error = "unknown", attempt.last_error
             changed = True
@@ -162,5 +162,5 @@ def remove_remote_draft(db, row, config):
             mailbox.remove_draft(row.remote_folder, row.remote_uid, row.remote_uid_validity)
         row.remote_state, row.remote_uid = "synced", None
     except MailAdapterError:
-        row.remote_state, row.last_error = "error", "The mailbox may still show the saved draft. Remove that copy after checking Sent; do not send it again."
+        row.remote_state, row.last_error = "error", "The mailbox may still show the saved draft. Check the Sent folder first, then delete that copy. Do not send it again."
     db.commit()

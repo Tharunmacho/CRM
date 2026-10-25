@@ -24,7 +24,7 @@ test('restoring an intake uses only its saved form and preserves its own deliber
   assert.equal(restored.form.name, 'Candidate B')
   assert.equal(restored.form.phone, '')
   assert.equal(restored.form.skills, 'TIG welding')
-  assert.equal(restored.form.nationality, 'Indian')
+  assert.equal(restored.form.nationality, '')
   assert.equal(restored.form.unexpected, undefined)
   assert.deepEqual([...restored.edited], ['name', 'phone'])
   assert.equal(EMPTY_CANDIDATE_FORM.name, '')

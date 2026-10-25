@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { AlertTriangle, CalendarDays, Download, KeyRound, LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCw, ScrollText, UserCheck, UserCog, UserX, Users } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
@@ -14,10 +15,11 @@ import { useStaffAvailability } from '@/features/staff/use-staff-availability'
 import type { StaffAvailability } from '@/features/staff/availability-model'
 import { useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { availabilityWords } from '@/features/staff-directory/model'
+import { AgencySettingsTab } from './agency-settings'
 import { AuditHistory } from './audit-sheet'
 import { SecurityDialog } from './security-dialog'
 import { UserDialog } from './user-dialog'
-import { RolePill, UserAvatar, downloadRows, failureText, roleLabels } from './user-ui'
+import { PanelHead, RolePill, UserAvatar, downloadRows, failureText, roleLabels } from './user-ui'
 import '@/styles/users-v2.css'
 
 const PAGE_SIZE = 10
@@ -30,7 +32,22 @@ const STATUS_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'in_rotation', label: 'Getting candidates' }, { key: 'on_leave', label: 'On leave' },
 ]
 
+const PAGE_TABS = [{ key: 'team', label: 'Team' }, { key: 'agency', label: 'Agency settings' }]
+
+/** User Management has two tabs under the page header: the team (default) and the agency settings (`?tab=agency`). */
 export default function UsersPage() {
+  const [params, setParams] = useSearchParams()
+  const view = params.get('tab') === 'agency' ? 'agency' : 'team'
+  const tabs = <Tabs tabs={PAGE_TABS} active={view} className="uv-page-tabs"
+    onChange={(key) => setParams(key === 'agency' ? { tab: 'agency' } : {}, { replace: true })} />
+  if (view === 'agency') return <div className="uv">
+    <PageHeader title="User Management" eyebrow="People & permissions" description="Set your agency's name, defaults and currencies.">{tabs}</PageHeader>
+    <AgencySettingsTab />
+  </div>
+  return <TeamPage tabs={tabs} />
+}
+
+function TeamPage({ tabs }: { tabs: ReactNode }) {
   const store = useStore()
   const accountRead = useWorkspaceRead()
   const [editing, setEditing] = useState<{ user: User | null; deactivate?: boolean } | null>(null)
@@ -105,7 +122,7 @@ export default function UsersPage() {
   const header = (actions?: boolean) => <PageHeader title="User Management" eyebrow="People & permissions"
     description="Add your team, choose what each person can do, and choose who gets new candidates."
     actions={actions ? <><Button icon={<RefreshCw className="h-4 w-4" />} onClick={() => { accountRead.refresh(); availability.refresh() }}>Refresh</Button>
-      <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button></> : undefined} />
+      <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ user: null })}>Add user</Button></> : undefined}>{tabs}</PageHeader>
 
   if (accountRead.loading) return <div className="uv"><PageSkeleton label="Loading team directory" /></div>
   if (accountRead.error) return <div className="uv">
@@ -229,12 +246,4 @@ export default function UsersPage() {
     {security && <SecurityDialog key={security.user.id + security.kind} {...security} onClose={() => setSecurity(null)} />}
     {auditFor && <AuditHistory key={auditFor.id} user={auditFor} onClose={() => setAuditFor(null)} />}
   </div>
-}
-
-/** Section header: a 17px title with a muted description on the left, the controls on the right, a hairline under it. */
-function PanelHead({ id, title, description, actions }: { id: string; title: string; description: ReactNode; actions?: ReactNode }) {
-  return <header className="uv-head">
-    <div><h2 id={id}>{title}</h2><p>{description}</p></div>
-    {actions && <div className="uv-head-actions">{actions}</div>}
-  </header>
 }

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 
+from app.core.config import get_settings
 from app.db.models import Candidate, Notification, Remark, Role, Task, TaskEvent, TodoItem, User, WorkflowSettings
 
 
@@ -57,7 +58,7 @@ def deliver_due_todos(db, *, now=None):
     return count
 
 
-def scan_workflow(db, *, now=None, agency_timezone="Asia/Kolkata"):
+def scan_workflow(db, *, now=None, agency_timezone=None):
     """Caller commits once; failures leave both notifications and checkpoint unapplied."""
     now = now or datetime.now(timezone.utc)
     if not db.scalar(text("SELECT pg_try_advisory_xact_lock(724681930119)")):
@@ -93,7 +94,7 @@ def scan_workflow(db, *, now=None, agency_timezone="Asia/Kolkata"):
                overdue_detail(names.get(task.candidate_id, "Candidate"), task, owner_names.get(task.owner_id, "Unassigned"), overdue),
                f"/tasks?task={task.id}")
 
-    zone = ZoneInfo(agency_timezone)
+    zone = ZoneInfo(agency_timezone or get_settings().agency_timezone)
     yesterday = now.astimezone(zone).date() - timedelta(days=1)
     day = config.last_daily_check_date + timedelta(days=1) if config.last_daily_check_date else yesterday
     # Check every unprocessed day after downtime. A first deployment starts with yesterday.

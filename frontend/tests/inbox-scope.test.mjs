@@ -20,6 +20,7 @@ const useRef = (...args) => globalThis.__inboxHooks.useRef(...args);
 const useState = (...args) => globalThis.__inboxHooks.useState(...args);`)
   .replace('const { api, createLatestRequest } = globalThis.__inboxDependencies;', `
 const api = { get: (...args) => globalThis.__inboxDependencies.api.get(...args) };
+const liveInterval = (...args) => globalThis.__inboxDependencies.liveInterval(...args);
 const createLatestRequest = () => globalThis.__inboxDependencies.createLatestRequest();`))
 
 function deferred() {
@@ -77,7 +78,9 @@ function mountInbox() {
       }
     },
   }
-  globalThis.__inboxDependencies = { createLatestRequest, api: { async get(path) {
+  // The live-update helper is stubbed as the poll it replaces: the harness has no event stream.
+  const liveInterval = (run, ms) => { const timer = globalThis.window.setInterval(run, ms); return () => globalThis.window.clearInterval(timer) }
+  globalThis.__inboxDependencies = { createLatestRequest, liveInterval, api: { async get(path) {
     requests.push(path)
     return { accounts: [], messages: [{ id: path }], jobs: [] }
   } } }

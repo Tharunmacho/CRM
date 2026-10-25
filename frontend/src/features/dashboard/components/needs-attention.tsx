@@ -4,6 +4,7 @@ import { CheckCheck, FileUp, Mail, MessageCircle, RefreshCw, RotateCw } from 'lu
 import { api, type AttentionItem, type AttentionSource, type InboxAttention } from '@/shared/api/client'
 import { ago } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { attentionDetail, attentionReason, hiddenCount, openPath, retryPath, SOURCE_LABEL } from '@/features/dashboard/attention'
 
 const ICON: Record<AttentionSource, typeof Mail> = { email: Mail, whatsapp: MessageCircle, manual: FileUp }
@@ -41,12 +42,14 @@ export function NeedsAttention() {
 
   useEffect(() => {
     void load()
-    const timer = window.setInterval(() => void load(), 60_000)
+    const stopLive = liveInterval(() => void load(), 60_000, ['mail', 'whatsapp', 'documents', 'candidates'], {
+      onChange: () => { pending.current?.abort(); pending.current = null; void load() },
+    })
     const visible = () => void load()
     document.addEventListener('visibilitychange', visible)
     return () => {
       pending.current?.abort(); pending.current = null
-      window.clearInterval(timer)
+      stopLive()
       document.removeEventListener('visibilitychange', visible)
     }
   }, [load, store.me.id])

@@ -9,20 +9,21 @@ from email.utils import getaddresses
 import re
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
 
-from app.db.models import (DocumentPersonGroup, EmailIngestionJob, IntakeAcknowledgement,
+from app.db.models import (Candidate, DocumentPersonGroup, EmailIngestionJob, IntakeAcknowledgement,
     IntakeAcknowledgementSettings, MailAccount, MailMessage, MultiPersonIntake,
-    WhatsAppChannel, WhatsAppMessage, WhatsAppSendAttempt)
+    WhatsAppChannel, WhatsAppMessage, WhatsAppSendAttempt, WhatsAppTemplate)
 from app.integrations.mail.smtp import MailSendError, address, compose, deliver
 from app.integrations.mail.base import MailAdapterError
+from app.services.agency_settings import FALLBACK_ACKNOWLEDGEMENT
 from app.services.mail_providers import account_config
 
 
-DEFAULT_BODY = ("Thank you for contacting Care India Overseas. We have received and saved "
-                "your candidate documents. Our recruitment team will review them and contact "
-                "you when there is a suitable next step.")
+# Last resort only: the default text lives in agency_settings.acknowledgement_text (Users > Agency settings).
+DEFAULT_BODY = FALLBACK_ACKNOWLEDGEMENT
 
 
 def utcnow():
@@ -133,7 +134,7 @@ def queue_intake_acknowledgement(db, source_kind, source_id):
         subject = "Re: " + subject
     row_id = db.scalar(insert(IntakeAcknowledgement).values(source_kind=source_kind, source_id=source_id,
         channel_id=channel_id, recipient=recipient[:255], body=config.body, subject=subject, status=status,
-        request_key=key, last_error=reason or ("Channel disconnected; acknowledgement paused." if status == "paused" else None))
+        request_key=key, last_error=reason or ("The mailbox or WhatsApp number is disconnected, so this automatic reply is on hold." if status == "paused" else None))
         .on_conflict_do_nothing(index_elements=["source_kind", "source_id"]).returning(IntakeAcknowledgement.id))
     if row_id is None:
         return db.scalar(select(IntakeAcknowledgement).where(IntakeAcknowledgement.request_key == key))
@@ -143,16 +144,99 @@ def queue_intake_acknowledgement(db, source_kind, source_id):
     return row
 
 
-def enqueue_whatsapp(db, row):
-    from app.services.whatsapp_chat import enqueue
+# ----------------------------------------------------- optional approved WhatsApp template
+#
+# The template choice lives in intake_acknowledgement_settings.whatsapp_template (migration 0018). It is read
+# and written only here, inside a savepoint, so a database without the column behaves exactly as before:
+# nothing is chosen, plain text is sent.
+
+TEMPLATE_VALUES = {
+    "first_name": "The candidate's first name",
+    "full_name": "The candidate's full name",
+    "agency_name": "The agency name",
+}
+
+
+def read_template_choice(db, config):
+    """(choice or None, column_available). Never raises for a database without migration 0018."""
+    if config is None:
+        return None, True
     try:
         with db.begin_nested():
-            attempt = enqueue(db, channel_id=row.channel_id, recipient=row.recipient, body=row.body,
-                request_key=row.request_key, source_message_id=row.source_id, actor_id=None)
-            db.flush()
-            row.outbound_id = attempt.id
-    except HTTPException as exc:
-        row.status, row.last_error = "failed", str(exc.detail)[:500]
+            value = db.scalar(select(IntakeAcknowledgementSettings.whatsapp_template)
+                .where(IntakeAcknowledgementSettings.id == config.id).execution_options(populate_existing=True))
+        return (value if isinstance(value, dict) and value.get("name") else None), True
+    except DBAPIError:
+        return None, False
+
+
+def write_template_choice(db, config, choice):
+    """Store (or with None clear) the template. Returns False when the database has no column for it yet."""
+    try:
+        with db.begin_nested():
+            db.execute(update(IntakeAcknowledgementSettings).where(IntakeAcknowledgementSettings.id == config.id)
+                .values(whatsapp_template=choice))
+        return True
+    except DBAPIError:
+        return False
+
+
+def validate_template_choice(db, channel_id, choice):
+    """Check the choice against the synced template list when there is one. Raises HTTPException(422/409)."""
+    from app.services.whatsapp_chat import template_description
+    cached = list(db.scalars(select(WhatsAppTemplate).where(WhatsAppTemplate.phone_number_id == channel_id)))
+    if not cached:
+        return  # Nothing synced yet: it is checked again when the reply is sent.
+    row = next((item for item in cached if item.name == choice["name"] and item.language == choice["language"]), None)
+    if row is None:
+        raise HTTPException(422, "That template is not in the synced WhatsApp template list. Refresh the templates in the WhatsApp chat and choose again.")
+    if row.status != "APPROVED":
+        raise HTTPException(409, "That template is not approved by WhatsApp yet, so it cannot be used.")
+    description = template_description(row)
+    if not description["supported"]:
+        raise HTTPException(422, description["unsupportedReason"])
+    if len(choice["parameters"]) != description["parameterCount"]:
+        raise HTTPException(422, f"This template has {description['parameterCount']} value(s). Choose what goes into each one.")
+
+
+def _template_values(db, row):
+    source = db.get(WhatsAppMessage, row.source_id)
+    candidate = db.get(Candidate, source.candidate_id) if source is not None and source.candidate_id else None
+    full = " ".join((candidate.name if candidate and candidate.name else "").split())
+    # A name that still needs review is not worth greeting by.
+    if not full or full.lower() == "name needs review":
+        full = ""
+    from app.services.agency_settings import agency_row
+    agency = agency_row(db)
+    return {"first_name": (full.split(" ")[0] if full else "there"), "full_name": full or "there",
+            "agency_name": ((agency.short_name or agency.name) if agency else "our agency")}
+
+
+def enqueue_whatsapp(db, row):
+    from app.services.whatsapp_chat import enqueue
+    config = configuration(db, "whatsapp", row.channel_id)
+    choice, _ = read_template_choice(db, config)
+    attempts = []
+    if choice:
+        values = _template_values(db, row)
+        attempts.append({"kind": "template", "body": "", "template": {"name": choice["name"], "language": choice["language"],
+            "parameters": [values.get(item, "")[:1024] or "there" for item in choice.get("parameters", [])]}})
+    # Plain text is the fallback: it works inside the 24-hour window and was the behaviour before templates.
+    attempts.append({"kind": "text", "body": row.body, "template": None})
+    error = None
+    for attempt_args in attempts:
+        try:
+            with db.begin_nested():
+                attempt = enqueue(db, channel_id=row.channel_id, recipient=row.recipient, request_key=row.request_key,
+                    source_message_id=row.source_id, actor_id=None, **attempt_args)
+                db.flush()
+                row.outbound_id = attempt.id
+                if attempt_args["kind"] == "template" and attempt.body:
+                    row.body = attempt.body  # history shows the words that were actually sent
+                return
+        except HTTPException as exc:
+            error = exc
+    row.status, row.last_error = "failed", str(error.detail)[:500]
 
 
 def attempt_out(db, row):
@@ -165,7 +249,7 @@ def attempt_out(db, row):
                 "delivered": "sent", "read": "sent", "cancelled": "suppressed"}.get(outgoing.state, outgoing.state)
             error, provider_id, sent_at = outgoing.last_error, outgoing.provider_message_id, outgoing.sent_at or outgoing.accepted_at
     elif state == "sending" and row.started_at and row.started_at < utcnow() - timedelta(minutes=3):
-        state, error = "unknown", "Sending was interrupted. Check the provider's Sent folder; this acknowledgement will not resend automatically."
+        state, error = "unknown", "Sending was interrupted. Check the Sent folder. This automatic reply will not be sent again by itself."
     return {"id": row.id, "sourceId": row.source_id, "recipient": row.recipient, "body": row.body,
         "subject": row.subject, "status": state, "providerMessageId": provider_id, "createdAt": row.created_at,
         "sentAt": sent_at, "lastError": error, "canRetry": row.source_kind == "email" and state in {"failed", "paused"}}
@@ -186,7 +270,7 @@ def dispatch_email_acknowledgement(attempt_id, *, sessions, settings, sender=Non
             return
         config = configuration(db, "email", row.channel_id)
         if not connected("email", account) or config is None or not config.enabled or not settings.email_ingestion_enabled:
-            row.status, row.last_error = "paused", "Automatic acknowledgements or this mailbox are disconnected."
+            row.status, row.last_error = "paused", "Automatic replies are turned off, or this mailbox is disconnected."
             db.commit()
             return
         source = completed_source(db, "email", row.source_id)
@@ -213,11 +297,11 @@ def dispatch_email_acknowledgement(attempt_id, *, sessions, settings, sender=Non
         db.commit()
     try:
         refused = sender(mail_config, outgoing, recipients, envelope_from="")
-        state, error = ("failed", "The provider refused this recipient.") if refused else ("sent", None)
+        state, error = ("failed", "The mail provider would not send to this address.") if refused else ("sent", None)
     except MailSendError as exc:
         state, error = ("unknown" if exc.unknown else "failed"), str(exc)
     except Exception:
-        state, error = "unknown", "Delivery could not be confirmed. Check the provider's Sent folder before resolving this acknowledgement."
+        state, error = "unknown", "We could not confirm this automatic reply was sent. Check the Sent folder before marking it as done."
     with sessions() as db:
         row = db.scalar(select(IntakeAcknowledgement).where(IntakeAcknowledgement.id == attempt_id).with_for_update())
         # Never erase a provider-confirmed/admin-resolved result with delayed work.
@@ -234,7 +318,7 @@ def dispatch_pending_email_acknowledgements(*, sessions, settings, limit=5):
             IntakeAcknowledgement.status == "sending", IntakeAcknowledgement.started_at < utcnow() - timedelta(minutes=3))
             .with_for_update(skip_locked=True)))
         for row in stale:
-            row.status, row.last_error = "unknown", "Sending was interrupted; check the provider's Sent folder before resolving."
+            row.status, row.last_error = "unknown", "Sending was interrupted. Check the Sent folder before marking this as done."
         ids = list(db.scalars(select(IntakeAcknowledgement.id).where(IntakeAcknowledgement.source_kind == "email",
             IntakeAcknowledgement.status == "pending").order_by(IntakeAcknowledgement.created_at, IntakeAcknowledgement.id).limit(limit)))
         db.commit()

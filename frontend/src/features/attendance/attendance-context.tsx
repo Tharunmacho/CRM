@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, fileHref } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { activeAttendanceSession, type AttendanceResponse, type PresenceSummary, type StaffAttendance } from './model'
 import { createPresenceReporter } from './presence-reporter'
 import { readClockIntent, writeClockIntent, type ClockIntent } from './clock-intent'
@@ -74,10 +75,10 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
     intentRecovered.current = false; clockContext.current = null
     setOwn(null); setLoading(true); setError(''); setPresenceError('')
     void refresh()
-    const interval = window.setInterval(() => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }, 30_000)
+    const interval = liveInterval(() => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }, 30_000, ['attendance'])
     const resume = () => { if (document.visibilityState === 'visible' && !busyRef.current) void refresh() }
     window.addEventListener('focus', resume); window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
-    return () => { active.current = false; lifecycleVersion.current += 1; request.current?.abort(); clearInterval(interval); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
+    return () => { active.current = false; lifecycleVersion.current += 1; request.current?.abort(); interval(); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [refresh])
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type InboxSnapshot } from '@/shared/api/client'
 import { createLatestRequest } from '@/shared/api/latest-request'
+import { liveInterval } from '@/shared/state/live'
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'The inbox request failed. Please try again.'
 
@@ -73,16 +74,20 @@ export function useInbox(identityId: string, isCurrentSession: () => boolean, se
       if (document.visibilityState === 'visible') void refresh().catch(() => {})
     }
     read()
-    const timer = window.setInterval(() => {
+    // A mail/intake change re-reads at once (replacing a read that began earlier); otherwise the old rhythm applies,
+    // but only while the live stream is down.
+    const stopLive = liveInterval(() => {
       const processing = snapshotRef.current?.jobs.some(job => ['pending', 'processing', 'retry'].includes(job.status))
       if (Date.now() - lastReadAt.current >= (processing ? 5000 : 15_000)) read()
-    }, 5000)
+    }, 5000, ['mail', 'whatsapp', 'documents'], {
+      onChange: () => { if (document.visibilityState === 'visible') void refresh(true).catch(() => {}) },
+    })
     document.addEventListener('visibilitychange', read)
     return () => {
       generation.current += 1
       mounted.current = false
       requests.invalidate()
-      window.clearInterval(timer)
+      stopLive()
       document.removeEventListener('visibilitychange', read)
     }
   }, [identityId, refresh, requests])

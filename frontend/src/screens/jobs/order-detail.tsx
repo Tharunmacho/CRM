@@ -9,20 +9,18 @@ import type { ClosureReason } from '@/shared/model/types'
 import type { Application } from '@/shared/model/types'
 import { EmptyState, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
 import { Button, SearchInput } from '@/shared/ui/primitives'
-import { Dialog } from '@/shared/ui/overlay'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
 import { CandidateMatchDrawer } from '@/features/jobs/components/candidate-match-drawer'
-import { OrderDialog } from '@/features/jobs/components/job-dialogs'
+import { OrderDialog, UnmapCandidateDialog } from '@/features/jobs/components/job-dialogs'
 import { Avatar, Flag, StageMini } from '@/features/jobs/components/identity'
 import { ActionMenu, DueChip, MenuButton, OrderStatusText, useMinWidth } from '@/features/jobs/components/order-parts'
 import { deadlineNote, daysToDeadline, isOverdue } from '@/features/jobs/order-meta'
 import { useOrderActions } from '@/features/jobs/use-order-actions'
 import { isMatched, isSelected, orderCounts } from '@/features/jobs/order-counts'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
-import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import '@/styles/jobs.css'
@@ -89,8 +87,9 @@ export default function OrderDetailPage() {
   if (!client || !designation) return <EmptyState title="This order's company or job title is missing" description="Refresh the page to load the latest records." action={<Button onClick={snapshot.retry}>Refresh</Button>} />
   const canMatch = order.status === 'open'
   const counts = orderCounts(apps)
+  const deployedCount = counts.deployed
+  const unmapApp = apps.find((a) => a.id === unmapping)
   const activeApps = apps.filter(isMatched)
-  const deployed = apps.filter((a) => a.status === 'deployed')
   const place = [order.city, order.country].filter(Boolean).join(', ')
   const note = deadlineNote(order)
   const overdue = isOverdue(order)
@@ -105,7 +104,7 @@ export default function OrderDetailPage() {
     })
     const text = [
       `Shortlist for ${designation.title}, ${client.name} (${order.ref})`,
-      `Openings: ${order.openings} · Deployed: ${deployed.length} · Matched: ${counts.matched} · Selected: ${counts.selected}`,
+      `Openings: ${order.openings} · Deployed: ${deployedCount} · Matched: ${counts.matched} · Selected: ${counts.selected}`,
       '',
       ...(lines.length ? lines : ['No candidates are matched to this order yet.']),
     ].join('\n')
@@ -216,7 +215,7 @@ export default function OrderDetailPage() {
         description={[client.name, place].filter(Boolean).join(' · ')}
         actions={
           <>
-            <Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={!canMatch} onClick={() => setMatching(true)}>Match candidates</Button>
+            <Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={!canMatch} title={canMatch ? undefined : 'Matching is off while the order is not open'} onClick={() => setMatching(true)}>Match candidates</Button>
             <Button icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit order</Button>
             <Button icon={<History className="h-4 w-4" />} onClick={() => setHistory(true)}>History</Button>
             <ActionMenu label="More actions for this order" text="More">
@@ -236,9 +235,9 @@ export default function OrderDetailPage() {
           <span className="ident">{order.ref}</span>
           <OrderStatusText order={order} />
           <DueChip order={order} />
-          <span className="jv-meta-progress" title={`${deployed.length} of ${order.openings} openings deployed`}>
-            <span className="jv-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, order.openings ? (deployed.length / order.openings) * 100 : 0)}%` }} /></span>
-            {deployed.length} of {order.openings} deployed
+          <span className="jv-meta-progress" title={`${deployedCount} of ${order.openings} openings deployed`}>
+            <span className="jv-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, order.openings ? (deployedCount / order.openings) * 100 : 0)}%` }} /></span>
+            {deployedCount} of {order.openings} deployed
           </span>
         </div>
       </PageHeader>
@@ -265,7 +264,7 @@ export default function OrderDetailPage() {
           { label: 'Openings', value: order.openings, detail: 'People needed', icon: Users },
           { label: 'Matched', value: counts.matched, detail: 'Candidates on this order', icon: Link2, onSelect: () => setFilter(filter === 'active' ? 'all' : 'active'), active: filter === 'active' },
           { label: 'Selected', value: counts.selected, detail: 'Past the interview stage', icon: Target, onSelect: () => setFilter(filter === 'selected' ? 'all' : 'selected'), active: filter === 'selected' },
-          { label: 'Deployed', value: deployed.length, detail: `${apps.filter((a) => a.status === 'closed').length} closed`, icon: UserCheck, onSelect: () => setFilter(filter === 'deployed' ? 'all' : 'deployed'), active: filter === 'deployed' },
+          { label: 'Deployed', value: deployedCount, detail: `${apps.filter((a) => a.status === 'closed').length} closed`, icon: UserCheck, onSelect: () => setFilter(filter === 'deployed' ? 'all' : 'deployed'), active: filter === 'deployed' },
         ]}
       />
 
@@ -297,7 +296,7 @@ export default function OrderDetailPage() {
             <p className="jv-require-copy">{designation.description || 'Check each candidate\'s skills and experience before you start. If something is missing from a profile, ask the candidate.'}</p>
             <p className="jv-subtle">Required skills</p>
             <div className="jv-chips">{designation.requiredSkills.length ? designation.requiredSkills.map((skill) => <span key={skill}>{skill}</span>) : <i>No skills added</i>}</div>
-            {!canMatch && <p role="status" className="jv-pause">You cannot match new candidates because this order is not open. Candidates already matched stay on the order.</p>}
+            {!canMatch && <p role="status" className="jv-pause">You cannot match new candidates because this order is {order.status === 'on_hold' ? 'on hold' : order.status}. Candidates already matched stay on the order.</p>}
           </div>
         </Panel>
       </div>
@@ -350,7 +349,7 @@ export default function OrderDetailPage() {
                       <div><dt>Updated</dt><dd>{dateTimeLabel(a.updatedAt)}</dd></div>
                     </dl>
                     <div className="jv-mcard-foot">
-                      {a.status === 'active' && store.can('map_candidates') && <Button size="sm" icon={<Unlink className="h-3.5 w-3.5" />} onClick={() => { setUnmapping(a.id); setUnmapError('') }}>Remove</Button>}
+                      {a.status === 'active' && store.can('map_candidates') && <Button size="sm" icon={<Unlink className="h-3.5 w-3.5" />} onClick={() => { setUnmapping(a.id); setUnmapError('') }}>Remove from order</Button>}
                       <Button size="sm" variant="primary" onClick={() => setOpenApp(a.id)}>Open stages</Button>
                     </div>
                   </li>
@@ -373,39 +372,21 @@ export default function OrderDetailPage() {
 
       {matching && <CandidateMatchDrawer key={order.id} onClose={() => setMatching(false)} orderId={order.id} />}
 
-      <Dialog
-        open={!!unmapping}
-        onClose={() => { if (!unmapSaving) setUnmapping(null) }}
-        title="Remove this candidate from the order?"
-        description="This closes their application on this order and cancels its open tasks. The candidate goes back to the Data Bank and can be matched to another order."
-        footer={
-          <>
-            <Button variant="ghost" disabled={unmapSaving} onClick={() => setUnmapping(null)}>
-              Keep on order
-            </Button>
-            <Button
-              variant="danger"
-              disabled={unmapSaving}
-              onClick={async () => {
-                if (!unmapping || unmapSaving) return
-                setUnmapSaving(true); setUnmapError('')
-                try { await store.unmap(unmapping); setUnmapping(null) }
-                catch (error) { setUnmapError(error instanceof Error ? error.message : 'We could not remove the candidate. Please try again.') }
-                finally { setUnmapSaving(false) }
-              }}
-            >
-              {unmapSaving ? 'Removing…' : 'Remove'}
-            </Button>
-          </>
-        }
-      >
-        <DialogMark />
-        <p className="text-sm text-ink-600">
-          Stages already done stay on record. If you match them again later, they start again at
-          Stage 1.
-        </p>
-        {unmapError && <p role="alert" className="mt-3 text-sm text-stamp-700">{unmapError}</p>}
-      </Dialog>
+      {unmapping && (
+        <UnmapCandidateDialog
+          name={store.candidate(unmapApp?.candidateId ?? '')?.name ?? 'This candidate'}
+          saving={unmapSaving}
+          error={unmapError}
+          onClose={() => setUnmapping(null)}
+          onConfirm={async () => {
+            if (!unmapping || unmapSaving) return
+            setUnmapSaving(true); setUnmapError('')
+            try { await store.unmap(unmapping); setUnmapping(null) }
+            catch (error) { setUnmapError(error instanceof Error ? error.message : 'We could not remove the candidate. Please try again.') }
+            finally { setUnmapSaving(false) }
+          }}
+        />
+      )}
 
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
       {editing && <OrderDialog order={order} onClose={() => setEditing(false)} />}

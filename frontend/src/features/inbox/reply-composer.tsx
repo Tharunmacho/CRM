@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CornerUpLeft } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { smartTime } from '@/shared/lib/format'
 import { Button, Textarea } from '@/shared/ui/primitives'
 import { Badge } from '@/shared/ui/display'
@@ -52,8 +53,8 @@ export function ReplyComposer({ messageId, address, disconnected }: { messageId:
       } catch (cause) { if (live && store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'Reply history could not load.') }
     }
     void refresh()
-    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 10000)
-    return () => { live = false; window.clearInterval(timer) }
+    const stopLive = liveInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 10000, ['mail'])
+    return () => { live = false; stopLive() }
   }, [messageId, key, store.isCurrentSession])
   const send = async () => {
     if (!body.trim() || busy || disconnected) return

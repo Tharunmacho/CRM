@@ -7,11 +7,27 @@ from decimal import Decimal
 import re
 from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 TOTAL_STAGES = 11
 YesNo = Literal["yes", "no"]
-Currency = Literal["INR", "USD", "EUR", "SGD", "AED", "SAR", "QAR", "OMR", "KWD", "BHD"]
+# Last-resort values, used only when the database has no currency list or agency settings (for example a
+# database that has not had migration 0017 yet). The real list and defaults are the `currencies` and
+# `agency_settings` tables, administered under Users > Agency settings; see services/agency_settings.py.
+CURRENCY_CODES = ("INR", "USD", "EUR", "SGD", "AED", "SAR", "QAR", "OMR", "KWD", "BHD", "GBP")
+FALLBACK_ADVANCE_CURRENCY = "INR"
+
+
+@dataclass(frozen=True)
+class StageOptions:
+    """Reference data a stage's values are checked against, read from the database by the caller."""
+    currencies: frozenset[str] | None = None   # active currency codes; None means CURRENCY_CODES
+    default_currency: str | None = None        # advance currency when none is chosen
+
+
+def _context(options: "StageOptions | None") -> dict | None:
+    return None if options is None else {"currencies": options.currencies, "default_currency": options.default_currency}
 
 
 class FileRef(BaseModel):
@@ -96,7 +112,7 @@ class Passport(StageInput):
 class Advance(StageInput):
     collected: YesNo | None = None
     amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
-    amountCurrency: Currency | None = "INR"
+    amountCurrency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     date: Date | None = None
     mode: Literal["cash", "bank", "upi", "cheque"] | None = None
     receiptNo: str | None = Field(default=None, max_length=100)
@@ -108,6 +124,20 @@ class Advance(StageInput):
         if isinstance(value, bool):
             raise ValueError("Enter a monetary amount.")
         return value
+
+    @field_validator("amountCurrency")
+    @classmethod
+    def currency_is_offered(cls, value, info):
+        allowed = (info.context or {}).get("currencies") or CURRENCY_CODES
+        if value is not None and value not in allowed:
+            raise PydanticCustomError("currency_not_offered", "Choose one of the available currencies.")
+        return value
+
+    @model_validator(mode="after")
+    def default_currency(self, info):
+        if self.amountCurrency is None:
+            self.amountCurrency = (info.context or {}).get("default_currency") or FALLBACK_ADVANCE_CURRENCY
+        return self
 
 
 class VisaArrival(StageInput):
@@ -136,9 +166,9 @@ SCHEMAS = [Prescreen, Forward, InterviewSchedule, InterviewResult, Offer, Medica
 FILE_FIELDS = {5: ("file",), 7: ("copy",), 8: ("receipt",), 9: ("file",), 10: ("file",), 11: ("file",)}
 
 
-def validate_payload(stage: int, data: dict[str, Any]) -> dict[str, Any]:
+def validate_payload(stage: int, data: dict[str, Any], options: StageOptions | None = None) -> dict[str, Any]:
     """Normalize supplied values; completion alone requires PRD mandatory fields."""
-    normalized = SCHEMAS[stage - 1].model_validate(data).model_dump(mode="json", by_alias=True, exclude_none=True)
+    normalized = SCHEMAS[stage - 1].model_validate(data, context=_context(options)).model_dump(mode="json", by_alias=True, exclude_none=True)
     if "amount" in normalized:
         normalized["amount"] = float(normalized["amount"])
     return normalized
@@ -250,9 +280,9 @@ def _stage11(d: dict) -> Evaluation:
 
 
 def _validated(stage: int, evaluate: Callable[[dict], Evaluation]):
-    def check(data: dict) -> Evaluation:
+    def check(data: dict, options: StageOptions | None = None) -> Evaluation:
         try:
-            clean = validate_payload(stage, data)
+            clean = validate_payload(stage, data, options)
         except ValidationError as exc:
             return _need(*(f"{' / '.join(map(str, item['loc']))}: {item['msg']}" for item in exc.errors()))
         return evaluate(clean)
@@ -267,7 +297,7 @@ class StageDef:
     task_title: str
     closer: bool
     repeatable: bool
-    evaluate: Callable[[dict], Evaluation]
+    evaluate: Callable[..., Evaluation]  # evaluate(data, options=None)
 
 
 _DEFINITIONS = [

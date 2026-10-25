@@ -12,7 +12,7 @@ def configured_mailboxes(settings) -> dict[str, MailConfig]:
             if not isinstance(entries, list):
                 raise ValueError()
         except (ValueError, TypeError):
-            raise ValueError("EMAIL_ACCOUNTS_JSON must be an array of IMAP account objects.") from None
+            raise ValueError("The list of mailboxes in the server settings is not valid. Ask your system administrator to fix it.") from None
     elif settings.imap_server and settings.imap_username and settings.imap_password:
         entries = [{
             "host": settings.imap_server, "port": settings.imap_port,
@@ -34,5 +34,5 @@ def configured_mailboxes(settings) -> dict[str, MailConfig]:
                 smtp_use_ssl=item.get("smtp_use_ssl", getattr(settings, "smtp_use_ssl", False)),
             )
     except (KeyError, ValueError, TypeError):
-        raise ValueError("Each mailbox needs a unique username, host, port and app password.") from None
+        raise ValueError("Each mailbox needs its own email address, mail server name, port and password. Ask your system administrator to fix the server settings.") from None
     return accounts

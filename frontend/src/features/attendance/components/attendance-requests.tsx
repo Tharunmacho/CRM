@@ -13,7 +13,7 @@ export type DecisionAction = 'approve' | 'reject' | 'accept_cover' | 'decline_co
 type Filter = 'all' | 'mine' | 'pending' | 'approved' | 'rejected'
 
 function matches(request: AttendanceRequest, filter: Filter) {
-  if (filter === 'mine') return request.canDecide || request.canRespondCover
+  if (filter === 'mine') return request.canDecide || request.canRespondCover || request.canNominateCover
   if (filter === 'pending') return request.status === 'pending' || request.status === 'awaiting_cover'
   if (filter === 'approved' || filter === 'rejected') return request.status === filter
   return true

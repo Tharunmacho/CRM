@@ -120,3 +120,18 @@ def test_failed_merge_does_not_bind_and_bound_group_cannot_move_to_another_candi
     assert not db.get(m.DocumentExtractionJob, job.id).draft.get('savedCandidateId')
     assert api.post(f"/api/candidates/{first['id']}/merge", json=body).status_code == 200
     assert api.post(f"/api/candidates/{second['id']}/merge", json={**body, 'phone': '9000000021'}).status_code == 409
+
+
+def test_non_owner_who_combined_an_upload_can_attach_its_files_but_not_before(db):
+    original = client(db).post('/api/candidates', json={'name': 'Original', 'phone': '9000000020'}).json()
+    job = intake(db, owner='b')
+    other = client(db, 'b')
+    assert db.get(m.Candidate, original['id']).owner_id == 'a'
+    attach = f"/api/ocr/jobs/{job.id}/attach"
+    assert other.post(attach, json={'candidateId': original['id']}).status_code == 403
+    merged = other.post(f"/api/candidates/{original['id']}/merge", json={'name': 'Incoming', 'phone': '9000000020', 'intake_group_id': job.group_id})
+    assert merged.status_code == 200, merged.text
+    # A repeat of the merge after the response was lost must not need ownership either.
+    assert other.post(f"/api/candidates/{original['id']}/merge", json={'name': 'Incoming', 'phone': '9000000020', 'intake_group_id': job.group_id}).status_code == 200
+    # The synthetic job has no stored bytes, so the attach now fails on storage (503), not on permission (403).
+    assert other.post(attach, json={'candidateId': original['id']}).status_code == 503

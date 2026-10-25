@@ -8,7 +8,7 @@ import type { Priority, TodoItem } from '@/shared/model/types'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { LINK_KINDS, PRIORITIES, linkKindOf, toInputValue, type LinkKind } from './todo-meta'
+import { LINK_KINDS, PRIORITIES, linkKindOf, presetDue, presetLabel, toInputValue, type LinkKind, type Preset } from './todo-meta'
 
 function Section({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children: ReactNode }) {
   return (
@@ -43,6 +43,7 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [titleError, setTitleError] = useState('')
+  const now = Date.now()
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }))
 
   const recordOptions = useMemo(() => {
@@ -94,12 +95,12 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
       open
       onClose={() => { if (!busy) onClose() }}
       title={item ? 'Edit to-do' : 'Add a to-do'}
-      description="Only you see this item. You will get a reminder in the notification bell when it is due."
+      description="Only you see this item. You get a reminder in the notification bell when it is due."
       footer={
         <>
           <Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={busy} onClick={() => void save()}>
-            {busy ? 'Saving…' : item ? 'Save changes' : 'Add item'}
+            {busy ? 'Saving…' : item ? 'Save changes' : 'Add to-do'}
           </Button>
         </>
       }
@@ -140,6 +141,12 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
                 >{p.label}</button>
               ))}
             </div>
+          </div>
+          <div className="td-span-2 td-presets" role="group" aria-label="Quick due times">
+            <span>Quick times</span>
+            {(['soon', 'tomorrow', 'week'] as Preset[]).map((p) => (
+              <button key={p} type="button" onClick={() => set('dueAt', format(presetDue(p, now), "yyyy-MM-dd'T'HH:mm"))}>{presetLabel(p, now)}</button>
+            ))}
           </div>
         </Section>
 

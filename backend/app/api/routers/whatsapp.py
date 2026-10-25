@@ -133,7 +133,7 @@ def connect_channel(db: Session = Depends(get_db), user: User = Depends(admin)):
     phone_id = settings.whatsapp_phone_number_id
     db.execute(insert(WhatsAppChannel).values(phone_number_id=phone_id, enabled=True)
                .on_conflict_do_update(index_elements=["phone_number_id"], set_={"enabled": True, "last_error": None}))
-    db.add(AuditEntry(actor_id=user.id, action="Connected WhatsApp channel", entity_type="whatsapp_channel", entity_id=phone_id))
+    db.add(AuditEntry(actor_id=user.id, action="Connected a WhatsApp number", entity_type="whatsapp_channel", entity_id=phone_id))
     db.commit()
     return {"id": phone_id, "enabled": True}
 
@@ -144,7 +144,7 @@ def disconnect_channel(phone_number_id: str, db: Session = Depends(get_db), user
     if channel is None:
         raise HTTPException(404, "Channel not found")
     channel.enabled = False
-    db.add(AuditEntry(actor_id=user.id, action="Disconnected WhatsApp channel", entity_type="whatsapp_channel", entity_id=phone_number_id,
+    db.add(AuditEntry(actor_id=user.id, action="Disconnected a WhatsApp number", entity_type="whatsapp_channel", entity_id=phone_number_id,
                       meta={"retainedMessages": True, "queuedWorkPaused": True}))
     db.commit()
     return {"id": phone_number_id, "enabled": False}
@@ -156,7 +156,7 @@ def update_channel(phone_number_id: str, body: ChannelIn, db: Session = Depends(
     if channel is None: raise HTTPException(404, "Channel not found")
     if not channel.enabled: raise HTTPException(409, "Reconnect this WhatsApp number before you change automatic import.")
     channel.auto_ingest = body.autoIngest
-    db.add(AuditEntry(actor_id=user.id, action="Changed WhatsApp auto-ingest", entity_type="whatsapp_channel", target=channel.display_number, meta=body.model_dump()))
+    db.add(AuditEntry(actor_id=user.id, action="Changed automatic candidate import for WhatsApp", entity_type="whatsapp_channel", target=channel.display_number, meta=body.model_dump()))
     db.commit()
     return {"ok": True}
 
@@ -188,7 +188,7 @@ def retry(message_id: str, db: Session = Depends(get_db), user: User = Depends(a
     state.pop("output", None); state.pop("documents", None)
     row.processing_state, row.status, row.attempts, row.last_error = state, "pending", 0, None
     row.next_attempt_at = datetime.now(timezone.utc)
-    db.add(AuditEntry(actor_id=user.id, action="Retried WhatsApp intake", entity_type="whatsapp_message", entity_id=row.id))
+    db.add(AuditEntry(actor_id=user.id, action="Tried a WhatsApp message again", entity_type="whatsapp_message", entity_id=row.id))
     db.commit()
     return {"ok": True}
 
@@ -216,7 +216,7 @@ def resolve(message_id: str, body: ResolveIn, db: Session = Depends(get_db), use
     attach_original(db, row, candidate)
     row.candidate_id, row.status, row.last_error = candidate.id, "completed", None
     queue_intake_acknowledgement(db, "whatsapp", row.id)
-    db.add(AuditEntry(actor_id=user.id, action="Resolved WhatsApp intake", entity_type="candidate", entity_id=candidate.id,
+    db.add(AuditEntry(actor_id=user.id, action="Marked a WhatsApp message as handled", entity_type="candidate", entity_id=candidate.id,
                       target=candidate.name, meta={"messageId": row.id, "reason": body.reason}))
     db.commit()
     return {"candidateId": candidate.id}

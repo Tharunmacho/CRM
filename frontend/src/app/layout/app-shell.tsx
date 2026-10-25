@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
@@ -6,7 +6,6 @@ import {
   Building2,
   Check,
   ChevronDown,
-  ChevronsUpDown,
   Clock3,
   ContactRound,
   Database,
@@ -15,13 +14,14 @@ import {
   GitBranch,
   Inbox,
   LayoutDashboard,
-  Layers2,
   ListChecks,
   LogOut,
   Mail,
   Menu,
   MessageCircle,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Search,
   SquareCheckBig,
   Sun,
@@ -31,10 +31,10 @@ import {
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { ago, initials, slaState } from '@/shared/lib/format'
-import { PALETTES, useTheme } from '@/shared/lib/theme'
+import { useTheme } from '@/shared/lib/theme'
 import { useStore } from '@/shared/state/crm-store'
 import { taskClockStart } from '@/shared/lib/task-time'
-import { agency } from '@/app/config/agency'
+import { useAgency } from '@/shared/state/use-agency'
 import { Dropdown, MenuItem, Toast } from '@/shared/ui/overlay'
 import { PageLoading } from '@/shared/ui/page-loading'
 import type { Capability } from '@/shared/state/crm-store'
@@ -48,8 +48,6 @@ interface NavItem {
   to: string
   label: string
   icon: typeof LayoutDashboard
-  /** Colour of the icon tile; the sidebar gives every destination its own soft hue. */
-  tone: string
   capability?: Capability
   supervisorsOnly?: boolean
   signal?: 'tasks' | 'inbox'
@@ -59,21 +57,21 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, tone: '#4f46e5', group: 'main' },
-  { to: '/inbox', label: 'Inbox', icon: Inbox, tone: '#0891b2', signal: 'inbox', group: 'main' },
-  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, tone: '#16a34a', group: 'main', extension: true },
-  { to: '/clients', label: 'Clients', icon: Building2, tone: '#2563eb', group: 'Recruitment' },
-  { to: '/companies', label: 'Companies', icon: Factory, tone: '#0d9488', group: 'Recruitment', extension: true },
-  { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, tone: '#d97706', group: 'Recruitment' },
-  { to: '/add-candidate', label: 'Add Candidate', icon: UserPlus, tone: '#9333ea', group: 'Recruitment' },
-  { to: '/data-bank', label: 'Data Bank', icon: Database, tone: '#0d9488', group: 'Recruitment' },
-  { to: '/mapped', label: 'Mapped Candidates', icon: GitBranch, tone: '#0891b2', group: 'Recruitment', extension: true },
-  { to: '/tasks', label: 'Tasks', icon: ListChecks, tone: '#db2777', signal: 'tasks', group: 'Workspace' },
-  { to: '/todo', label: 'To-do List', icon: SquareCheckBig, tone: '#16a34a', capability: 'todo_list', group: 'Workspace' },
-  { to: '/reports', label: 'Reports', icon: FileBarChart, tone: '#7c3aed', group: 'Workspace' },
-  { to: '/users', label: 'User Management', icon: Users, tone: '#ca8a04', capability: 'user_management', group: 'Workspace' },
-  { to: '/staff-directory', label: 'Staff Directory', icon: ContactRound, tone: '#059669', supervisorsOnly: true, group: 'Workspace', extension: true },
-  { to: '/attendance', label: 'Attendance', icon: Clock3, tone: '#7c3aed', group: 'Workspace', extension: true },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, group: 'main' },
+  { to: '/inbox', label: 'Inbox', icon: Inbox, signal: 'inbox', group: 'main' },
+  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, group: 'main', extension: true },
+  { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
+  { to: '/companies', label: 'Companies', icon: Factory, group: 'Recruitment', extension: true },
+  { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, group: 'Recruitment' },
+  { to: '/add-candidate', label: 'Add Candidate', icon: UserPlus, group: 'Recruitment' },
+  { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
+  { to: '/mapped', label: 'Matched Candidates', icon: GitBranch, group: 'Recruitment', extension: true },
+  { to: '/tasks', label: 'Tasks', icon: ListChecks, signal: 'tasks', group: 'Workspace' },
+  { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list', group: 'Workspace' },
+  { to: '/reports', label: 'Reports', icon: FileBarChart, group: 'Workspace' },
+  { to: '/users', label: 'User Management', icon: Users, capability: 'user_management', group: 'Workspace' },
+  { to: '/staff-directory', label: 'Staff Directory', icon: ContactRound, supervisorsOnly: true, group: 'Workspace', extension: true },
+  { to: '/attendance', label: 'Attendance', icon: Clock3, group: 'Workspace', extension: true },
 ]
 
 const GROUPS: { id: NavItem['group']; label?: string }[] = [
@@ -84,8 +82,42 @@ const GROUPS: { id: NavItem['group']; label?: string }[] = [
 
 const COLLAPSE_KEY = 'crm-rail-collapsed'
 
+/**
+ * The Care India Overseas logo for the attached header box: the full logo (figure, name, "Overseas Pvt.Ltd") and, for
+ * the 72px icon rail, the figure alone. Light and dark variants are both in the markup; CSS shows the one for the theme.
+ */
+export function BrandLogo() {
+  return (
+    <>
+      <img className="rail-logo-full is-light-only" src="/brand/care-india-logo-tight.png" alt="" width={768} height={400} decoding="async" draggable={false} />
+      <img className="rail-logo-full is-dark-only" src="/brand/care-india-logo-tight-dark.png" alt="" width={768} height={400} decoding="async" draggable={false} />
+      <img className="rail-logo-mark is-light-only" src="/brand/care-india-mark-fit.png" alt="" width={116} height={233} decoding="async" draggable={false} />
+      <img className="rail-logo-mark is-dark-only" src="/brand/care-india-mark-dark-fit.png" alt="" width={116} height={233} decoding="async" draggable={false} />
+    </>
+  )
+}
+
+const GROUPS_KEY = 'crm-nav-groups'
+/** Which menu groups a person folded away; remembered per user. Everything is open by default. */
+function readClosedGroups(userId: string): string[] {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? '{}') as Record<string, unknown>
+    const mine = all[userId]
+    return Array.isArray(mine) ? mine.filter((id): id is string => typeof id === 'string') : []
+  } catch { return [] }
+}
+function writeClosedGroups(userId: string, closed: string[]) {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(GROUPS_KEY) ?? '{}') as Record<string, unknown>
+    window.localStorage.setItem(GROUPS_KEY, JSON.stringify({ ...(all && typeof all === 'object' ? all : {}), [userId]: closed }))
+  } catch { /* optional */ }
+}
+
+const badgeText = (count: number) => (count > 99 ? '99+' : String(count))
+
 export function AppShell() {
   const store = useStore()
+  const agency = useAgency()
   const { can, toast, dismissToast } = store
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searching, setSearching] = useState(false)
@@ -97,6 +129,14 @@ export function AppShell() {
     } catch { /* optional */ }
     return window.innerWidth < 1366 && window.innerWidth >= 1024
   })
+  const [closedGroups, setClosedGroups] = useState<string[]>(() => readClosedGroups(store.me.id))
+  const [peek, setPeek] = useState(false)
+  const hoverRef = useRef(false)
+  const peekTimer = useRef(0)
+  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null)
+  const [bar, setBar] = useState<{ top: number; height: number } | null>(null)
+  const [barReady, setBarReady] = useState(false)
+  const navRef = useRef<HTMLDivElement>(null)
   const location = useLocation()
   const railRef = useRef<HTMLElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
@@ -158,63 +198,172 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const toggleGroup = (id: string) => setClosedGroups((current) => {
+    const next = current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+    writeClosedGroups(store.me.id, next)
+    return next
+  })
+  const showTip = useCallback((label: string, element: HTMLElement) => {
+    const box = element.getBoundingClientRect()
+    setTip({ label, top: box.top + box.height / 2, left: box.right + 10 })
+  }, [])
+  const hideTip = useCallback(() => setTip(null), [])
+
+
+  // One bar in the logo green slides (150ms) to the active page; it hides when that page sits in a folded group.
+  const measureBar = useCallback(() => {
+    const nav = navRef.current
+    const active = nav?.querySelector<HTMLElement>('.rail-item.is-active')
+    if (!nav || !active || active.offsetParent === null || active.offsetHeight === 0) { setBar(null); return }
+    const height = Math.round(active.offsetHeight * 0.64)
+    const top = Math.round(active.offsetTop + (active.offsetHeight - height) / 2)
+    setBar((current) => (current && current.top === top && current.height === height ? current : { top, height }))
+  }, [])
+  useLayoutEffect(() => { measureBar() }, [measureBar, location.pathname, closedGroups, collapsed, mobileOpen, store.me.role])
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setBarReady(true))
+    const nav = navRef.current
+    if (!nav || typeof ResizeObserver === 'undefined') return () => cancelAnimationFrame(frame)
+    const observer = new ResizeObserver(() => measureBar())
+    observer.observe(nav)
+    window.addEventListener('resize', measureBar)
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener('resize', measureBar) }
+  }, [measureBar])
+
   const allowed = (item: NavItem) => (!item.capability || can(item.capability)) && (!item.supervisorsOnly || store.me.role === 'admin' || store.me.role === 'manager')
   const items = NAV.filter((item) => !item.extension && allowed(item))
   const searchable = NAV.filter(allowed).map((item) => ({ label: item.label, to: item.to, icon: item.icon }))
-  const toggleCollapse = () => setCollapsed((value) => { try { window.localStorage.setItem(COLLAPSE_KEY, value ? '0' : '1') } catch { /* optional */ } return !value })
+  // The icon rail "peeks": hovering it (after a short intent delay) or tabbing into it opens the full panel over the page
+  // without pushing it; leaving or Escape closes it again. The pin button keeps it open for good (and remembers that).
+  const peeking = collapsed && peek
+  const dock = collapsed && !peek
+  const pinLabel = collapsed ? 'Pin sidebar' : 'Unpin sidebar'
+  const closePeek = useCallback(() => { window.clearTimeout(peekTimer.current); setPeek(false) }, [])
+  const canHover = () => window.innerWidth >= 1024 && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches
+  const onRailEnter = (event: React.PointerEvent) => {
+    if (event.pointerType !== 'mouse' || !collapsed || !canHover()) return
+    hoverRef.current = true
+    window.clearTimeout(peekTimer.current)
+    peekTimer.current = window.setTimeout(() => setPeek(true), 180)
+  }
+  const onRailLeave = () => {
+    hoverRef.current = false
+    window.clearTimeout(peekTimer.current)
+    if (!railRef.current?.contains(document.activeElement) || !(document.activeElement as HTMLElement | null)?.matches?.(':focus-visible')) setPeek(false)
+  }
+  const onRailFocus = (event: React.FocusEvent) => {
+    if (!collapsed || !canHover()) return
+    if ((event.target as HTMLElement).matches?.(':focus-visible')) { window.clearTimeout(peekTimer.current); setPeek(true) }
+  }
+  const onRailBlur = (event: React.FocusEvent) => {
+    if (railRef.current?.contains(event.relatedTarget as Node | null)) return
+    if (!hoverRef.current) setPeek(false)
+  }
+  const onRailKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape' && peek) { event.stopPropagation(); closePeek() }
+  }
+  useEffect(() => () => window.clearTimeout(peekTimer.current), [])
+  useEffect(() => { if (!collapsed) closePeek() }, [collapsed, closePeek])
+  useEffect(() => { if (!dock) setTip(null) }, [dock])
+  const order = useMemo(() => Object.fromEntries(items.map((item, index) => [item.to, index])) as Record<string, number>, [items])
+
+  const toggleCollapse = () => { hideTip(); setPeek(false); hoverRef.current = false; setCollapsed((value) => { try { window.localStorage.setItem(COLLAPSE_KEY, value ? '0' : '1') } catch { /* optional */ } return !value }) }
 
   return (
     <AttendanceProvider key={store.me.id}>
       <div className={cn('app-shell', collapsed && 'is-collapsed')}>
         <div className={cn('rail-backdrop', mobileOpen && 'is-open')} onClick={() => setMobileOpen(false)} aria-hidden="true" />
-        <nav ref={railRef} className={cn('rail', collapsed && 'is-collapsed', mobileOpen && 'is-open')} aria-label="Main navigation">
-          <div className="rail-brand">
-            <NavLink to="/" className="rail-logo" aria-label={`${agency.name} dashboard`} onClick={() => setMobileOpen(false)}>
-              <span className="rail-logo-mark"><Layers2 size={22} strokeWidth={2.4} /></span>
-              <span className="rail-logo-text"><strong>Care India</strong><small>Recruitment workspace</small></span>
-            </NavLink>
-            <button type="button" className="rail-toggle rail-desktop-toggle" onClick={toggleCollapse} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!collapsed}><ChevronsUpDown size={14} /></button>
-            <button type="button" className="rail-toggle rail-mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={17} /></button>
+        <nav
+          ref={railRef}
+          className={cn('rail', collapsed && 'is-collapsed', dock && 'is-dock', peeking && 'is-peek', mobileOpen && 'is-open')}
+          aria-label="Main navigation"
+          onPointerEnter={onRailEnter}
+          onPointerLeave={onRailLeave}
+          onFocusCapture={onRailFocus}
+          onBlurCapture={onRailBlur}
+          onKeyDown={onRailKey}
+        >
+          <div className="rail-panel">
+            <div className="rail-brand">
+              <NavLink to="/" className="rail-logo" aria-label={`${agency.name} dashboard`} title={agency.name} onClick={() => { setMobileOpen(false); closePeek() }}>
+                <BrandLogo />
+              </NavLink>
+              <button type="button" className="rail-toggle rail-desktop-toggle" onClick={toggleCollapse} aria-label={pinLabel} aria-pressed={!collapsed} title={pinLabel} tabIndex={dock ? -1 : undefined}>
+                {collapsed ? <PanelLeftOpen size={16} strokeWidth={1.75} /> : <PanelLeftClose size={16} strokeWidth={1.75} />}
+              </button>
+              <button type="button" className="rail-toggle rail-mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={17} /></button>
+            </div>
+
+            <button
+              type="button"
+              className="rail-search"
+              aria-label="Search workspace"
+              aria-keyshortcuts="Control+K"
+              onClick={() => { searchingRef.current = true; setMobileOpen(false); closePeek(); hideTip(); setSearching(true) }}
+              onMouseEnter={(event) => dock && showTip('Search, Ctrl K', event.currentTarget)}
+              onMouseLeave={hideTip}
+              onFocus={(event) => dock && showTip('Search, Ctrl K', event.currentTarget)}
+              onBlur={hideTip}
+            >
+              <Search size={16} strokeWidth={1.75} /><span>Search</span><kbd>Ctrl K</kbd>
+            </button>
+
+            <div className="rail-scroll scrollbar-thin">
+              <div className="rail-nav" ref={navRef}>
+                <span className={cn('rail-indicator', barReady && 'is-ready')} aria-hidden="true" style={bar ? { transform: `translateY(${bar.top}px)`, height: bar.height, opacity: 1 } : { opacity: 0 }} />
+                {GROUPS.map((group, index) => {
+                  const list = items.filter((item) => item.group === group.id)
+                  if (!list.length) return null
+                  const closed = Boolean(group.label) && closedGroups.includes(group.id) && !collapsed
+                  const signals = list.some((item) => (item.signal === 'tasks' && overdue > 0) || (item.signal === 'inbox' && store.inboxUnread > 0))
+                  return (
+                    <div key={group.id} className={cn('rail-group', index === 0 && 'is-main', closed && 'is-closed')} role="group" aria-label={group.label ?? 'Overview'}>
+                      {group.label && (
+                        <button type="button" className="rail-section-label" aria-expanded={!closed} aria-controls={`rail-list-${group.id}`} onClick={() => toggleGroup(group.id)} title={closed ? `Show ${group.label}` : `Hide ${group.label}`} tabIndex={dock ? -1 : undefined}>
+                          <span>{group.label}</span>
+                          {closed && signals && <i className="rail-section-dot" aria-label="Something needs your attention" />}
+                          <ChevronDown size={14} strokeWidth={2} aria-hidden="true" className="rail-section-chevron" />
+                        </button>
+                      )}
+                      <div className="rail-list-wrap" id={`rail-list-${group.id}`}>
+                        <div className="rail-list">
+                          {list.map((item) => {
+                            const count = item.signal === 'tasks' ? overdue : item.signal === 'inbox' ? store.inboxUnread : 0
+                            return (
+                              <NavLink
+                                key={item.to}
+                                to={item.to}
+                                end={item.to === '/'}
+                                tabIndex={closed ? -1 : undefined}
+                                style={{ '--i': order[item.to] } as React.CSSProperties}
+                                onClick={() => { setMobileOpen(false); hideTip(); closePeek() }}
+                                onMouseEnter={(event) => dock && showTip(item.label, event.currentTarget)}
+                                onMouseLeave={hideTip}
+                                onFocus={(event) => dock && showTip(item.label, event.currentTarget)}
+                                onBlur={hideTip}
+                                className={({ isActive }) => cn('rail-item', isActive && 'is-active')}
+                              >
+                                <span className="rail-nav-icon" aria-hidden="true"><item.icon size={20} strokeWidth={1.75} /></span>
+                                <span className="rail-item-label">{item.label}</span>
+                                {count > 0 && <span className={cn('rail-badge', item.signal === 'tasks' && 'is-alert')} role="img" aria-label={item.signal === 'tasks' ? `${count} overdue` : `${count} unread`}>{badgeText(count)}</span>}
+                              </NavLink>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <RailFoot dock={dock} pinLabel={pinLabel} onToggle={toggleCollapse} showTip={showTip} hideTip={hideTip} />
           </div>
-
-          <button type="button" className="rail-search" aria-label="Search workspace" onClick={() => { searchingRef.current = true; setMobileOpen(false); setSearching(true) }}>
-            <Search size={14} strokeWidth={1.6} /><span>Search</span><kbd>Ctrl K</kbd>
-          </button>
-
-          <div className="rail-scroll scrollbar-thin">
-            {GROUPS.map((group, index) => {
-              const list = items.filter((item) => item.group === group.id)
-              if (!list.length) return null
-              return (
-                <div key={group.id} className={cn('rail-group', index === 0 && 'is-main')} role="group" aria-label={group.label ?? 'Overview'}>
-                  {group.label && <p className="rail-section-label">{group.label}</p>}
-                  {list.map((item) => {
-                    const dot = (item.signal === 'tasks' && overdue > 0) || (item.signal === 'inbox' && store.inboxUnread > 0)
-                    return (
-                      <NavLink
-                        key={item.to}
-                        to={item.to}
-                        end={item.to === '/'}
-                        title={collapsed ? item.label : undefined}
-                        onClick={() => setMobileOpen(false)}
-                        className={({ isActive }) => cn('rail-item', isActive && 'is-active')}
-                      >
-                        <span className="rail-nav-icon" style={{ '--nav-icon-color': item.tone } as React.CSSProperties}><item.icon size={16} strokeWidth={1.7} /></span>
-                        <span className="rail-item-label">{item.label}</span>
-                        {dot && <i className={cn('rail-dot', item.signal === 'tasks' && 'is-alert')} aria-label={item.signal === 'tasks' ? `${overdue} overdue` : 'Unread messages'} />}
-                      </NavLink>
-                    )
-                  })}
-                </div>
-              )
-            })}
-          </div>
-
-          <RailFoot collapsed={collapsed} />
+          {tip && dock && <span className="rail-tip" role="tooltip" style={{ top: tip.top, left: tip.left }}>{tip.label}</span>}
         </nav>
 
         <div className="shell-body">
-          <Topbar menuRef={menuButtonRef} menuAlert={overdue > 0 || store.inboxUnread > 0} onMenu={() => setMobileOpen(true)} onSearch={() => setSearching(true)} />
+          <Topbar menuRef={menuButtonRef} menuAlert={overdue > 0 || store.inboxUnread > 0} onMenu={() => setMobileOpen(true)} />
           <main className="workspace">
             <div className={cn('workspace-inner', location.pathname !== '/' && 'workspace-page')}>
               <Suspense fallback={<PageLoading />}>
@@ -231,33 +380,29 @@ export function AppShell() {
   )
 }
 
-function RailFoot({ collapsed }: { collapsed: boolean }) {
-  const { theme, palette, setTheme, setPalette } = useTheme()
-  const current = PALETTES.find((option) => option.id === palette)
+function RailFoot({ dock, pinLabel, onToggle, showTip, hideTip }: { dock: boolean; pinLabel: string; onToggle: () => void; showTip: (label: string, element: HTMLElement) => void; hideTip: () => void }) {
+  const { theme, setTheme } = useTheme()
   return (
     <div className="rail-foot">
-      <div className="rail-workspace-note"><span className="rail-workspace-dot" /><span className="rail-workspace-name">Care India CRM</span><small>Workspace</small></div>
-      <div className="palette-picker" role="group" aria-label="Colour palette">
-        <div className="palette-picker-label"><span>Colour</span><strong>{current?.label}</strong></div>
-        <div className="palette-swatches">
-          {PALETTES.map(({ id, label, swatch }) => (
-            <button key={id} type="button" className={cn('palette-swatch', palette === id && 'is-on')} data-palette-id={id} onClick={() => setPalette(id)} aria-label={`${label} palette`} aria-pressed={palette === id} title={label}>
-              <span className="palette-dot" style={{ background: swatch }}>{palette === id && <Check size={12} strokeWidth={2.8} />}</span>
-            </button>
-          ))}
-        </div>
-      </div>
       <div className="theme-switch" role="group" aria-label="Colour theme">
         {([{ id: 'light', label: 'Light', icon: Sun }, { id: 'dark', label: 'Dark', icon: Moon }] as const).map(({ id, label, icon: Icon }) => (
-          <button key={id} type="button" className={cn('theme-switch-btn', theme === id && 'is-on')} onClick={() => setTheme(id)} aria-pressed={theme === id} title={`${label} theme`}>
-            <Icon size={13} /><span className="rail-item-label">{label}</span>
+          <button key={id} type="button" className={cn('theme-switch-btn', theme === id && 'is-on')} onClick={() => setTheme(id)} aria-pressed={theme === id} title={`${label} theme`} tabIndex={dock ? -1 : undefined}>
+            <Icon size={15} aria-hidden="true" /><span>{label}</span>
           </button>
         ))}
       </div>
-      {collapsed && <button type="button" className="rail-theme-mini" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Switch colour theme">{theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}</button>}
+      {/* Only the icon rail shows this: the pin button that opens the sidebar for good. */}
+      <div className="rail-dock-tools">
+        <button type="button" className="rail-dock-btn" onClick={onToggle} aria-label={pinLabel} tabIndex={dock ? undefined : -1}
+          onMouseEnter={(event) => dock && showTip(pinLabel, event.currentTarget)} onMouseLeave={hideTip} onFocus={(event) => dock && showTip(pinLabel, event.currentTarget)} onBlur={hideTip}>
+          <PanelLeftOpen size={17} strokeWidth={1.75} />
+        </button>
+      </div>
     </div>
   )
 }
+
+const ROLE_LABEL: Record<string, string> = { admin: 'Administrator', manager: 'Manager', staff: 'Staff' }
 
 function ProfileMenu() {
   const { me, signOut } = useStore()
@@ -267,9 +412,9 @@ function ProfileMenu() {
       width="w-[min(19rem,calc(100vw-2rem))]"
       trigger={({ open, toggle }) => (
         <button type="button" className="topbar-profile-trigger" onClick={toggle} aria-label={`Account menu for ${me.name}`} aria-expanded={open}>
-          <span className="topbar-profile-avatar">{initials(me.name)}</span>
-          <span className="topbar-profile-copy"><strong>{me.name}</strong><small>{me.email}</small></span>
-          <ChevronDown size={12} aria-hidden="true" />
+          <span className="topbar-profile-avatar" aria-hidden="true">{initials(me.name)}</span>
+          <span className="topbar-profile-copy"><strong>{me.name}</strong><small>{ROLE_LABEL[me.role] ?? me.role}</small></span>
+          <ChevronDown size={14} aria-hidden="true" />
         </button>
       )}
     >
@@ -277,7 +422,7 @@ function ProfileMenu() {
         <>
           <div className="border-b border-rule-soft px-3 py-2.5">
             <p className="text-sm font-medium text-ink">{me.name}</p>
-            <p className="truncate text-micro text-ink-400">{me.email} · <span className="capitalize">{me.role}</span></p>
+            <p className="truncate text-micro text-ink-400">{me.email} · {ROLE_LABEL[me.role] ?? me.role}</p>
           </div>
           <MenuItem onClick={() => { close(); void signOut() }} tone="danger"><span className="inline-flex items-center gap-2"><LogOut size={14} />Sign out</span></MenuItem>
         </>
@@ -286,23 +431,30 @@ function ProfileMenu() {
   )
 }
 
-function Topbar({ onMenu, onSearch, menuRef, menuAlert }: { onMenu: () => void; onSearch: () => void; menuRef: React.RefObject<HTMLButtonElement>; menuAlert: boolean }) {
+function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: React.RefObject<HTMLButtonElement>; menuAlert: boolean }) {
   const { me, notifications, inboxUnread, notify, markNotificationRead } = useStore()
   const navigate = useNavigate()
   const unread = notifications.filter((n) => !n.read).length
-  const firstName = me.name.split(' ')[0]
+  const firstName = me.name.trim().split(/\s+/)[0] || me.name
+  const roleLabel = ROLE_LABEL[me.role] ?? me.role
 
   return (
     <header className="topbar">
-      <button ref={menuRef} type="button" className="topbar-menu" onClick={onMenu} aria-label={menuAlert ? 'Open menu. Something needs your attention.' : 'Open menu'}>
-        <Menu size={19} />{menuAlert && <i className="topbar-menu-dot" aria-hidden="true" />}
-      </button>
-      <h2 className="topbar-welcome" title={`Welcome back, ${me.name}`}><span className="topbar-welcome-lead">Welcome back</span><span className="topbar-welcome-comma">, </span><span className="topbar-welcome-name">{firstName}</span></h2>
+      <div className="topbar-left">
+        <button ref={menuRef} type="button" className="topbar-menu" onClick={onMenu} aria-label={menuAlert ? 'Open menu. Something needs your attention.' : 'Open menu'}>
+          <Menu size={20} />{menuAlert && <i className="topbar-menu-dot" aria-hidden="true" />}
+        </button>
+        <div className="topbar-hello">
+          <h2 className="topbar-welcome" title={`Welcome back, ${me.name}`}>
+            <span className="welcome-long">Welcome back</span><span className="welcome-short">Hi</span>, {firstName}
+          </h2>
+          {roleLabel.toLowerCase() !== firstName.toLowerCase() && <p className="topbar-role">{roleLabel}</p>}
+        </div>
+      </div>
       <div className="topbar-actions">
-        <button type="button" className="topbar-icon-btn topbar-search-btn" onClick={onSearch} aria-label="Search workspace"><Search size={16} strokeWidth={1.7} /></button>
         <AttendanceClock compact />
         <button type="button" className="topbar-icon-btn topbar-mail-btn" aria-label={inboxUnread > 0 ? `Open messages, ${inboxUnread} unread` : 'Open messages'} onClick={() => navigate('/inbox')}>
-          <Mail size={16} strokeWidth={1.7} />
+          <Mail size={18} strokeWidth={1.75} />
           {inboxUnread > 0 && <span className="topbar-badge">{inboxUnread > 9 ? '9+' : inboxUnread}</span>}
         </button>
         <Dropdown
@@ -310,7 +462,7 @@ function Topbar({ onMenu, onSearch, menuRef, menuAlert }: { onMenu: () => void; 
           label="Notifications"
           trigger={({ toggle }) => (
             <button type="button" className="topbar-icon-btn" onClick={toggle} aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`}>
-              <Bell size={16} strokeWidth={1.7} />
+              <Bell size={18} strokeWidth={1.75} />
               {unread > 0 && <span className="topbar-badge">{unread > 9 ? '9+' : unread}</span>}
             </button>
           )}

@@ -99,7 +99,7 @@ class AdjustmentInput(EmployeeChange):
     @classmethod
     def aware(cls, value):
         if value is not None and value.tzinfo is None:
-            raise ValueError("Include the attendance timezone")
+            raise ValueError("Add a time zone to the attendance time.")
         return value
 
 

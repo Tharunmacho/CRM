@@ -76,7 +76,7 @@ export function AccountRail({ accounts, selectedId, admin, busy, onSelect, onTog
             {!connected
               ? <>
                 <span className="mb-acct-sub is-warn" title={item.connectionStatus === 'disconnected' ? 'Needs reconnecting' : 'Old mailbox, read only'}><AlertTriangle size={13} /><span>{item.connectionStatus === 'disconnected' ? 'Needs reconnecting' : 'Old mailbox, read only'}</span></span>
-                <span className="mb-acct-auto-label">Saved mail only</span>
+                <span className="mb-acct-auto-label" title="Saved mail only">Saved mail only</span>
               </>
               : <>
                 <span className={cn('mb-acct-sub', attention && 'is-warn')} title={item.lastError ?? (item.lastSyncAt ? `Last checked ${smartTime(item.lastSyncAt)}` : undefined)}>{attention && <AlertTriangle size={13} />}<span>{PROVIDER_LABEL[item.provider]} · {attention ? 'needs attention' : item.lastSyncAt ? smartTime(item.lastSyncAt) : 'not checked yet'}</span></span>

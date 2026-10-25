@@ -103,6 +103,9 @@ export function CandidateMatchDrawer({ onClose, orderId }: { onClose: () => void
     else onClose()
   }
 
+  const requirementSkills = requirements?.skills ?? designation.requiredSkills
+  const requirementYears = requirements?.minExperience ?? designation.minExperience
+
   return <Sheet open onClose={() => { if (!saving) onClose() }} width="xl" title="Match candidates to this order"
     description={`${designation.title} · ${store.company(order.companyId)?.name} · ${order.ref}`}
     footer={<div className="flex w-full flex-wrap items-center justify-end gap-2">
@@ -112,11 +115,11 @@ export function CandidateMatchDrawer({ onClose, orderId }: { onClose: () => void
     </div>}>
     <div className="jv-match jv-form"><DialogMark /><section className="jv-match-needs" aria-label="Order requirements">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><h3>What this order needs</h3><p className="mt-1 text-sm">{requirements?.title ?? designation.title} · at least {requirements?.minExperience ?? designation.minExperience} years of experience</p></div>
+        <div><h3>What this order needs</h3><p className="mt-1 text-sm">{requirements?.title ?? designation.title} · {requirementYears > 0 ? `at least ${requirementYears} years of experience` : 'any experience'}</p></div>
         <Button size="sm" icon={<RefreshCw className="h-4 w-4" />} disabled={saving} onClick={() => void refresh()}>Refresh results</Button>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">{(requirements?.skills ?? designation.requiredSkills).map(skill => <span key={skillKey(skill)} className="jv-match-skill">{skill}</span>)}</div>
-      <p className="mt-3 text-sm">Compare the skills saved on each candidate below. "Not recorded" means the skill is not on their profile. Check with the candidate before you decide.</p>
+      <div className="mt-3 flex flex-wrap gap-2">{requirementSkills.map(skill => <span key={skillKey(skill)} className="jv-match-skill">{skill}</span>)}</div>
+      <p className="mt-3 text-sm">Compare the skills saved on each candidate below. "Skills not on profile" means the skill is not recorded. Check with the candidate before you decide.</p>
     </section>
     <fieldset disabled={saving} className="min-w-0 border-b border-rule-soft p-5">
       <SearchInput value={query} onChange={value => { setQuery(value); resetSelection() }} placeholder="Search by name, phone, email, skill or resume text" />

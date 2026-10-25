@@ -160,7 +160,7 @@ def test_zoho_reconnect_after_uid_reset_keeps_cursor_and_history_for_explicit_re
         "address": "inbox@example.test", "password": "new-synthetic-password", "region": "in",
     })
     assert response.status_code == 409
-    assert "Reconnecting alone cannot restore sync" in response.json()["detail"]
+    assert "Contact your administrator" in response.json()["detail"]
     with env.sessions() as db:
         account = db.get(MailAccount, "account")
         assert account.disconnected_at and account.sync_state == retained_cursor
@@ -428,7 +428,7 @@ def test_create_folder_is_idempotent_validated_and_available_to_staff(zoho):
     assert again.status_code == 200 and not again.json()["created"]
     assert zoho.client.post("/api/inbox/accounts/account/folders", json={"name": "Bad\nfolder"}).status_code == 422
     with zoho.sessions() as db:
-        assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.action == "create_mail_folder")) == 1
+        assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.action == "Created a mailbox folder")) == 1
 
 
 def test_private_draft_search_and_pagination_do_not_hide_older_drafts(zoho):
@@ -480,3 +480,23 @@ def test_folder_list_is_reused_briefly_and_refresh_forces_a_live_read(zoho):
     assert len(reads) == 1
     assert env.client.get("/api/inbox/accounts/account/folders?refresh=true").status_code == 200
     assert len(reads) == 2
+
+
+def test_draft_lifecycle_is_audited_once_per_action_without_autosave_noise(zoho):
+    env = zoho
+    draft = new_draft(env)
+    for text in ("one", "two", "three"):
+        draft = save(env, draft, body=text)
+    draft = env.client.post(f"/api/inbox/drafts/{draft['id']}/attachments", data={"lock_version": draft["lockVersion"]},
+        files={"file": ("cv.pdf", b"%PDF-1.7 synthetic", "application/pdf")}).json()
+    removed = env.client.delete(f"/api/inbox/drafts/{draft['id']}/attachments/{draft['attachments'][0]['id']}?lock_version={draft['lockVersion']}")
+    assert removed.status_code == 200, removed.text
+    draft = removed.json()
+    assert env.client.delete(f"/api/inbox/drafts/{draft['id']}?lock_version={draft['lockVersion']}").status_code == 200
+    with env.sessions() as db:
+        rows = list(db.scalars(select(AuditEntry).where(AuditEntry.entity_type == "mail_draft", AuditEntry.entity_id == draft["id"]).order_by(AuditEntry.at, AuditEntry.id)))
+    actions = [row.action for row in rows]
+    assert sorted(actions) == sorted(["Started an email draft", "Edited an email draft", "Attached a file to an email draft",
+        "Removed a file from an email draft", "Discarded an email draft"])
+    assert all(row.actor_id == "admin" and row.at is not None for row in rows)
+    assert {row.target for row in rows if "file" in row.action} == {"cv.pdf"}

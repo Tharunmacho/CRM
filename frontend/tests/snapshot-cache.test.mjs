@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises'
 import { beforeEach, test } from 'node:test'
 import ts from 'typescript'
 
-async function load() {
-  const source = await readFile(new URL('../src/shared/state/snapshot-cache.ts', import.meta.url), 'utf8')
+// The shipped default is OFF; the behavioural tests below switch the cache on to prove its safety rules still hold.
+async function load(enabled = true) {
+  let source = await readFile(new URL('../src/shared/state/snapshot-cache.ts', import.meta.url), 'utf8')
+  assert.match(source, /export const SNAPSHOT_CACHE_ENABLED = false/, 'the cache must ship disabled')
+  if (enabled) source = source.replace('SNAPSHOT_CACHE_ENABLED = false', 'SNAPSHOT_CACHE_ENABLED = true')
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
   })
@@ -79,4 +82,29 @@ test('reports are remembered per user and query; only the dashboard survives a r
   assert.equal(cache.peekReport('u1', '/dashboard?staff_id=u3', ''), null)
   const survivors = [...window.sessionStorage.items.keys()]
   assert.deepEqual(survivors, ['crm-swr:v1:report:/dashboard'])
+})
+
+test('disabled by default: nothing is stored, restored or remembered', async () => {
+  const off = await load(false)
+  assert.equal(off.SNAPSHOT_CACHE_ENABLED, false)
+  document.cookie = 'crm_uid=u1'
+  off.writePersisted('bootstrap', 'u1', { a: 1 })
+  off.rememberReport('u1', '/dashboard', '', { n: 1 })
+  off.persistSoon('bootstrap', 'u1', () => ({ a: 1 }))
+  assert.equal(window.sessionStorage.items.size, 0)
+  assert.equal(off.readPersisted('bootstrap', 'u1'), null)
+  assert.equal(off.peekReport('u1', '/dashboard', ''), null)
+})
+
+test('starting the app purges snapshots an earlier version stored, and only those', async () => {
+  window.sessionStorage.setItem('crm-swr:v1:bootstrap', '{"old":true}')
+  window.sessionStorage.setItem('crm-swr:v1:report:/dashboard', '{"old":true}')
+  window.sessionStorage.setItem('crm-mail-draft:u1', 'unsent text')
+  window.sessionStorage.setItem('crm:whatsapp:send:u1:c', '{"intent":1}')
+  window.localStorage = storage()
+  window.localStorage.setItem('crm-swr:v1:bootstrap', '{"old":true}')
+  window.localStorage.setItem('theme', 'dark')
+  await load(false)
+  assert.deepEqual([...window.sessionStorage.items.keys()].sort(), ['crm-mail-draft:u1', 'crm:whatsapp:send:u1:c'])
+  assert.deepEqual([...window.localStorage.items.keys()], ['theme'])
 })

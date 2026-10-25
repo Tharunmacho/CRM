@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -11,7 +13,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.api.routers import applications, auth, candidates, data, files, ocr, inbox, users, reports, workflow, whatsapp, document_jobs, attendance, staff_directory
-from app.api.routers import document_bundles, intake_acknowledgements, whatsapp_chat
+from app.api.routers import document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
 from app.db.models import User
@@ -20,12 +22,13 @@ from app.db.schema_readiness import UPDATE_REQUIRED, schema_status
 from app.integrations.redis import close_redis, redis_health
 from app.integrations.ocr.inspection import find_tesseract
 from app.services.bootstrap import bootstrap_state, ensure_bootstrap
+from app.services.live_hub import hub as live_hub
 
 settings = get_settings()
 log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(
-    title="Care India Overseas CRM",
+    title="Recruitment CRM",
     version="0.1.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
@@ -115,10 +118,22 @@ app.include_router(whatsapp_chat.router)
 app.include_router(document_bundles.router)
 app.include_router(intake_acknowledgements.router)
 app.include_router(attendance.router)
+app.include_router(events.router)
+app.include_router(agency_settings_router.router)
+
+
+@app.on_event("startup")
+async def start_live_updates() -> None:
+    """Listen for database change notifications so open browsers are told about commits at once (see events.py)."""
+    if engine.dialect.name != "postgresql" or (os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("CRM_LIVE_EVENTS") != "force"):
+        return
+    conninfo = engine.url.set(drivername="postgresql").render_as_string(hide_password=False)
+    live_hub.start(asyncio.get_running_loop(), conninfo)
 
 
 @app.on_event("shutdown")
 def on_shutdown() -> None:
+    live_hub.stop()  # ends open event streams so the server can exit
     close_redis()
 
 

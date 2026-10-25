@@ -174,7 +174,33 @@ def test_explicit_merge_fills_empty_fields_and_preserves_workflow(db):
     assert candidate.name == 'Synthetic candidate' and candidate.skills == ['Human skill'] and candidate.total_experience == 0
     assert candidate.email == 'new@example.test' and candidate.owner_id == 'a'
     assert db.scalar(select(func.count()).select_from(m.Task)) == 1
-    assert make_client(db, 'b').post(f'/api/candidates/{original.id}/merge', json={'name': 'No', 'phone': '9000000001'}).status_code == 403
+    # A staff member who is not the owner may still combine a duplicate entry (PRD: merge or cancel),
+    # but still may not edit the existing candidate directly.
+    assert make_client(db, 'b').patch(f'/api/candidates/{original.id}', json={'name': 'No', 'phone': '9000000001'}).status_code == 403
+
+
+def test_any_staff_member_can_combine_a_duplicate_without_taking_the_candidate(db):
+    original = create(db)
+    candidate = db.get(m.Candidate, original.id)
+    candidate.name, candidate.status, candidate.needs_review = 'Human name', m.CandidateStatus.needs_review, True
+    candidate.skills = ['Human skill']
+    db.commit()
+    owner, status, tasks = candidate.owner_id, candidate.status, db.scalar(select(func.count()).select_from(m.Task))
+    assert owner == 'a'
+    response = make_client(db, 'b').post(f'/api/candidates/{original.id}/merge', json={
+        'name': 'Typed by B', 'phone': '9000000001', 'email': 'filled@example.test', 'skills': ['Other skill']})
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    candidate = db.get(m.Candidate, original.id)
+    assert candidate.owner_id == owner == response.json()['ownerId'] and candidate.status == status and candidate.needs_review
+    assert candidate.name == 'Human name' and candidate.skills == ['Human skill'] and candidate.email == 'filled@example.test'
+    assert db.scalar(select(func.count()).select_from(m.Task)) == tasks
+    audit = db.scalar(select(m.AuditEntry).where(m.AuditEntry.action == 'Merged candidate entry'))
+    assert audit.actor_id == 'b' and audit.at is not None and audit.entity_id == original.id
+    assert audit.meta['filled_fields'] == ['email'] and audit.meta['merged_by'] == 'B' and audit.meta['owner_id'] == 'a'
+    # Admin and the owner keep working exactly as before.
+    for who in ('a', 'admin'):
+        assert make_client(db, who).post(f'/api/candidates/{original.id}/merge', json={'name': 'x', 'phone': '9000000001'}).status_code == 200
 
 
 def test_merge_validates_new_dates_together_with_retained_profile(db):

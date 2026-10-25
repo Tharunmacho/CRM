@@ -46,7 +46,7 @@ def wait_for_job(
         if job.status == "succeeded":
             return job
         if job.status == "failed":
-            raise ScanFailed(job.error.message if job.error else "The OCR job failed.")
+            raise ScanFailed(job.error.message if job.error else "The document reader could not read this file.")
         remaining = give_up_at - clock()
         if remaining <= 0:
             raise ScanTimedOut(job_id)

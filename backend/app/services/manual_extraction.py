@@ -99,7 +99,7 @@ def process_job(identifier, *, sessions, settings):
     try:
         data = read_bytes(settings, key)
         if hashlib.sha256(data).hexdigest() != digest:
-            raise ExtractionFailure("The saved original failed its integrity check. Restore the document before retrying.")
+            raise ExtractionFailure("The saved copy of this document looks damaged. Upload the original again, then try again.")
         output = state.get("output")
         if output is None:
             output = extract_attachment(data, state=state, save=checkpoint, settings=settings, designations=titles)
@@ -119,7 +119,7 @@ def process_job(identifier, *, sessions, settings):
                     continue
                 selected = extraction["selected_pages"]
                 if selected != getattr(inspected, kind + "_pages"):
-                    raise ExtractionFailure("The selected pages no longer match the saved inspection.")
+                    raise ExtractionFailure("The selected pages no longer match what was checked earlier. Check the pages and try again.")
                 content = inspected.pdf_for_pages(selected)
                 document_key = put_bytes(settings, "manual/" + owner + "/" + identifier + "/" + kind + ".pdf", content, "application/pdf")
                 documents[kind] = {"object_key": document_key, "file_name": kind + ".pdf", "content_type": "application/pdf",
@@ -156,7 +156,7 @@ def process_job(identifier, *, sessions, settings):
                     request_extraction_retry(saved, automatic=True)
                 job.state = saved
                 job.status = "failed" if job.attempts >= 4 else "retry"
-                job.last_error = str(exc)[:500] if isinstance(exc, ExtractionFailure) else "Document reading could not finish. The original is saved; retry after checking the worker."
+                job.last_error = str(exc)[:500] if isinstance(exc, ExtractionFailure) else "We could not finish reading this document. The original file is safe. Try again, and contact your administrator if it keeps happening."
                 job.next_attempt_at = now() + timedelta(seconds=30 * 2 ** (job.attempts - 1))
                 job.updated_at = now()
                 db.commit()
@@ -173,9 +173,12 @@ def attach_original(db, user, identifier, candidate_id, settings):
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if candidate is None:
         raise HTTPException(404, "Candidate not found")
-    if user.role == Role.staff and candidate.owner_id != user.id and candidate.created_by != user.id:
-        raise HTTPException(403, "Only the assigned recruiter, candidate creator or a supervisor can attach these documents")
     job = owned_job(db, identifier, user.id, lock=True)
+    # Someone who combined this saved upload into the candidate (merge) or saved the
+    # candidate from it already passed the access check, so they can add its files.
+    bound_here = candidate.id in {job.candidate_id, (job.draft or {}).get("savedCandidateId")}
+    if user.role == Role.staff and candidate.owner_id != user.id and candidate.created_by != user.id and not bound_here:
+        raise HTTPException(403, "Only the assigned recruiter, candidate creator or a supervisor can attach these documents")
     if job.candidate_id:
         if job.candidate_id != candidate.id:
             raise HTTPException(409, "These documents are already attached to another candidate")
@@ -203,7 +206,7 @@ def attach_original(db, user, identifier, candidate_id, settings):
             uploaded_by=user.id, uploaded_at=now())
         db.add(row)
         attached[slot] = row.id
-        db.add(AuditEntry(actor_id=user.id, action="Attached saved intake document", target=row.file_name,
+        db.add(AuditEntry(actor_id=user.id, action="Added a saved document to a candidate", target=row.file_name,
             entity_type="candidate", entity_id=candidate.id, meta={"attachment_id": row.id, "slot": slot,
             "version": row.version, "document_job_id": job.id}))
     db.flush()

@@ -6,14 +6,18 @@ are never changed; corrections are supplied separately as adjustments.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, Mapping
 from zoneinfo import ZoneInfo
 
+from app.core.config import get_settings
 from app.services.attendance_policy_types import AttendanceStatus, Shift
 
-IST = ZoneInfo("Asia/Kolkata")
+
+def agency_timezone_name() -> str:
+    """The agency zone from configuration; the single source for every attendance calculation."""
+    return get_settings().agency_timezone
 
 
 @dataclass(frozen=True)
@@ -23,7 +27,7 @@ class AttendancePolicy:
     monthly_paid_occasions: int = 2
     warning_minutes: int = 45
     missing_punch_deadline_days: int = 2
-    timezone_name: str = "Asia/Kolkata"
+    timezone_name: str = field(default_factory=agency_timezone_name)
     # Flexible hours: presence counts from this long before the shift start
     # until this long after its end — 09:00 to 20:00 on the default shift.
     flex_minutes: int = 60
@@ -32,16 +36,16 @@ class AttendancePolicy:
 def as_utc(value: datetime) -> datetime:
     """Return an aware UTC timestamp; reject ambiguous naive input."""
     if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError("attendance timestamps must include a timezone")
+        raise ValueError("Attendance times must include a timezone.")
     return value.astimezone(timezone.utc)
 
 
-def local_day(value: datetime, timezone_name: str = "Asia/Kolkata") -> date:
-    return as_utc(value).astimezone(ZoneInfo(timezone_name)).date()
+def local_day(value: datetime, timezone_name: str | None = None) -> date:
+    return as_utc(value).astimezone(ZoneInfo(timezone_name or agency_timezone_name())).date()
 
 
-def shift_bounds(day: date, shift: Shift, timezone_name: str = "Asia/Kolkata") -> tuple[datetime, datetime]:
-    zone = ZoneInfo(timezone_name)
+def shift_bounds(day: date, shift: Shift, timezone_name: str | None = None) -> tuple[datetime, datetime]:
+    zone = ZoneInfo(timezone_name or agency_timezone_name())
     start = datetime.combine(day, shift.start, zone)
     end = datetime.combine(day, shift.end, zone)
     if end <= start:  # overnight shift
@@ -332,7 +336,7 @@ def attendance_overview(days: Iterable[Mapping]) -> dict:
 
 def lop_amount(unpaid_minutes: int, wage_basis: float, scheduled_payable_minutes: int) -> float:
     if wage_basis < 0 or scheduled_payable_minutes <= 0:
-        raise ValueError("wage basis must be non-negative and scheduled minutes positive")
+        raise ValueError("The pay rate cannot be negative, and the scheduled minutes must be more than zero.")
     return round(wage_basis * max(0, unpaid_minutes) / scheduled_payable_minutes, 2)
 
 

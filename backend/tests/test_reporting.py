@@ -338,3 +338,19 @@ def test_funnel_export_carries_stage_to_stage_drop_off(dataset):
     assert "Lost before next stage" in text and "Lost before next stage (%)" in text and "Closure rate (%)" in text
     with pymupdf.open(stream=pdf("funnel", result), filetype='pdf') as doc:
         assert "Lost before next stage" in ''.join(page.get_text() for page in doc)
+
+
+def test_rejections_export_names_the_stage_and_labels_the_reason(dataset):
+    from app.services.report_exports import sheets
+    result = report_data(dataset, STAFF, FILTERS, now=NOW)
+    name, rows = sheets("rejections", result)[1]
+    assert rows[0] == ["Stage", "Reason", "Count"]
+    assert rows[1] == ["Stage 2 · Forwarded to client", "Resume not received", 1]
+    with ZipFile(BytesIO(xlsx("rejections", result))) as archive:
+        text = ''.join(archive.read(entry).decode() for entry in archive.namelist())
+    assert "Stage 2 · Forwarded to client" in text and ">Reason<" in text and "Description" not in text
+    with pymupdf.open(stream=pdf("rejections", result), filetype='pdf') as doc:
+        page_text = ''.join(page.get_text() for page in doc)
+    assert "Forwarded to client" in page_text and "Reason" in page_text
+    # Other reports keep their wording.
+    assert sheets("funnel", result)[1][1][0][:2] == ["Stage", "Description"]

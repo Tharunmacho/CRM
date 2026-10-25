@@ -56,19 +56,19 @@ def assert_public_host(host: str) -> None:
         addresses = [literal]
     else:
         if not _HOSTNAME.fullmatch(host):
-            raise MailAdapterError("invalid_host", "Enter a mail server hostname such as imap.example.com.")
+            raise MailAdapterError("invalid_host", "Enter a mail server name such as imap.example.com.")
         try:
             addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)]
         except (socket.gaierror, ValueError):
-            raise MailAdapterError("invalid_host", f"The server name {host} could not be found. Check the spelling.") from None
+            raise MailAdapterError("invalid_host", f"We could not find the mail server {host}. Check the spelling and try again.") from None
     if not addresses or any(not address.is_global for address in addresses):
-        raise MailAdapterError("invalid_host", "Mail servers on private or local networks cannot be connected.")
+        raise MailAdapterError("invalid_host", "We cannot connect to mail servers on private or local networks. Use your mail provider's public server name.")
 
 
 def make_custom_config(address: str, password: str, server: CustomServer, *, verify_host: bool = True) -> MailConfig:
     imap_host, smtp_host = server.imap_host.strip().casefold(), server.smtp_host.strip().casefold()
     if server.imap_port not in IMAP_PORTS or server.smtp_port not in SMTP_PORTS:
-        raise MailAdapterError("invalid_port", "Use IMAP port 993 (SSL) or 143 (STARTTLS), and SMTP port 465 (SSL) or 587 (STARTTLS).")
+        raise MailAdapterError("invalid_port", "Use port 993 or 143 for receiving email, and port 465 or 587 for sending. Your mail provider can tell you which to use.")
     if not password or len(password) > 1000 or any(char in password for char in "\r\n\x00"):
         raise MailAdapterError("invalid_password", "Enter a valid mailbox password or app password.")
     if verify_host:
@@ -82,9 +82,9 @@ def make_custom_config(address: str, password: str, server: CustomServer, *, ver
 def validate_config(config: MailConfig) -> MailConfig:
     """Policy for server-configured (legacy) IMAP accounts."""
     if config.port not in IMAP_PORTS or IMAP_PORTS[config.port] != config.use_ssl:
-        raise MailAdapterError("invalid_port", "IMAP must use port 993 with SSL or port 143 with STARTTLS.")
+        raise MailAdapterError("invalid_port", "Receiving email must use port 993 or 143. Ask an administrator to fix the mailbox settings.")
     if config.smtp_host and (config.smtp_port, config.smtp_use_ssl) not in set(SMTP_PORTS.items()):
-        raise MailAdapterError("invalid_port", "SMTP must use port 465 with SSL or port 587 with STARTTLS.")
+        raise MailAdapterError("invalid_port", "Sending email must use port 465 or 587. Ask an administrator to fix the mailbox settings.")
     return config
 
 
@@ -103,7 +103,7 @@ def account_config(db, settings, account) -> MailConfig:
                 saved["imap_host"], int(saved["imap_port"]), saved["smtp_host"], int(saved["smtp_port"])))
         config = configured_mailboxes(settings).get(account.address)
         if config is None:
-            raise MailAdapterError("mail_configuration", "Mailbox credentials are missing. An administrator can reconnect this account.")
+            raise MailAdapterError("mail_configuration", "The sign-in details for this mailbox are missing. An administrator can reconnect it.")
         return validate_config(config)
     raise MailAdapterError("provider_archived", "This mail provider is no longer supported. Stored history remains readable.")
 
@@ -116,7 +116,7 @@ def readiness(settings) -> list[dict]:
         mail_oauth.cipher(settings)
         ready, message = True, "Connect with an app password and the mail server details."
     except MailAdapterError:
-        ready, message = False, "Configure MAIL_TOKEN_ENCRYPTION_KEY on the CRM server before connecting mailboxes."
+        ready, message = False, "Mailbox connections are not set up on this server yet. Ask your system administrator to finish the setup, then try again."
     result += [{"provider": "zoho", "label": LABELS["zoho"], "ready": ready, "message": message},
         {"provider": "imap", "label": LABELS["imap"], "ready": ready, "message": message}]
     return result

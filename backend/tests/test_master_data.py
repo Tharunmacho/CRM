@@ -244,7 +244,7 @@ def test_deletion_retains_closed_application_history_and_documents(desk, kind):
     identifier = {'clients': contact['id'], 'companies': company['id'], 'orders': order['id']}[kind]
     response = desk.client.delete(f'/api/{kind}/{identifier}')
     assert response.status_code == 409, response.text
-    assert 'history' in response.text and 'inactive' in response.text
+    assert 'history' in response.text.lower() and 'inactive' in response.text.lower()
     with desk.sessions() as db:
         assert db.get(Client, contact['id']) and db.get(Company, company['id']) and db.get(Order, order['id'])
         assert db.get(Application, 'retained-application')
@@ -339,3 +339,42 @@ def test_unreachable_call_retains_open_task_until_interest_is_confirmed(desk):
     assert response.status_code == 200, response.text
     with desk.sessions() as db:
         assert db.get(Task, 'initial-call').completed_at is not None
+
+
+def _matched_candidate(env, *, status=None):
+    order = setup_order(env)[3]
+    with env.sessions() as db:
+        candidate = Candidate(id='matched', ref='MATCHED', name='Matched', phone='9000000003', source=Source.walk_in, owner_id='staff')
+        db.add(candidate); db.flush()
+        db.add(Application(id='matched-app', candidate_id='matched', order_id=order['id'], owner_id='staff', current_stage=1, status=ApplicationStatus.active))
+        candidate.status = status or candidate.status
+        db.commit()
+    return order
+
+
+def test_call_can_be_recorded_after_matching_without_changing_order_work(desk):
+    from app.db.models import CandidateStatus
+    _matched_candidate(desk, status=CandidateStatus.in_process)
+    with desk.sessions() as db:
+        tasks_before = db.scalar(select(func.count()).select_from(Task))
+    response = desk.client.post('/api/candidates/matched/call', json={'called': True, 'interested': 'no', 'remarks': 'Changed his mind'})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['onOrder'] is True and body['statusChanged'] is False and 'still on an order' in body['notice']
+    with desk.sessions() as db:
+        candidate = db.get(Candidate, 'matched')
+        assert candidate.call_called and candidate.call_interested == 'no' and candidate.call_remarks == 'Changed his mind' and candidate.call_recorded_at
+        assert candidate.status == CandidateStatus.in_process
+        assert db.get(Application, 'matched-app').status == ApplicationStatus.active
+        assert db.scalar(select(func.count()).select_from(Task)) == tasks_before
+        audit = db.scalar(select(AuditEntry).where(AuditEntry.entity_id == 'matched', AuditEntry.action == 'Recorded initial call after matching'))
+        assert audit.actor_id == 'staff' and audit.meta == {'called': True, 'interested': 'no', 'on_order': True}
+    # Unmatched candidates keep the existing rule: "no" closes the candidate.
+    with desk.sessions() as db:
+        db.add(Candidate(id='free', ref='FREE', name='Free', phone='9000000004', source=Source.walk_in, owner_id='staff')); db.commit()
+    free = desk.client.post('/api/candidates/free/call', json={'called': True, 'interested': 'no'})
+    assert free.json()['onOrder'] is False and free.json()['statusChanged'] is True
+    with desk.sessions() as db:
+        assert db.get(Candidate, 'free').status == CandidateStatus.not_interested
+    desk.actor = SimpleNamespace(id='other', role=Role.staff)
+    assert desk.client.post('/api/candidates/matched/call', json={'called': True, 'interested': 'yes'}).status_code == 403

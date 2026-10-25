@@ -152,7 +152,7 @@ def test_unavailable_sources_reject_intake_and_retry_but_keep_evidence_and_revie
 
     response = env.client.post("/api/inbox/messages/message-0/ingest")
     assert response.status_code == 409, response.text
-    assert ("Reconnect" if disconnected else "archived") in response.json()["detail"]
+    assert ("Reconnect" if disconnected else "no longer supported") in response.json()["detail"]
     checkpoint = {"attachment": {"provider_jobs": {"resume": {
         "job_id": "accepted-unknown", "status": "unknown", "idempotency_key": "retained-key",
     }}}}

@@ -20,7 +20,7 @@ function TabGroup({ id, label, children }: { id: string; label: string; children
     <div
       id={`profile-${id}`}
       data-profile-tab={label}
-      className="flex scroll-mt-32 flex-col gap-5 empty:hidden"
+      className="flex min-w-0 scroll-mt-32 flex-col gap-4 empty:hidden"
     >
       {children}
     </div>
@@ -62,17 +62,18 @@ export function CandidateSections({
   const aadhaar = primaryDocument(ocr, 'aadhaar')?.payload as AadhaarOcr | undefined
 
   return (
-    <div className="flex min-w-0 flex-col gap-5">
+    <div className="contents">
       <TabGroup id="details" label="Details">
         {model.details.length > 0 && (
           <ProfileCard title="Candidate details" icon={<UserRound size={18} />} meta="Who they are and how to reach them">
             <ProfileRows rows={model.details} />
           </ProfileCard>
         )}
-        <ProfileCard title="Work profile and source" icon={<Wallet size={18} />} meta="Work abroad, the salary they want, and how they found us">
-          <FactGrid facts={workProfileFacts(cand)} />
-        </ProfileCard>
       </TabGroup>
+      {/* A card of its own (not inside the Details group), so the page can place it beside the other cards. */}
+      <ProfileCard title="Work profile and source" icon={<Wallet size={18} />} meta="Work abroad, the salary they want, and how they found us">
+        <FactGrid facts={workProfileFacts(cand)} />
+      </ProfileCard>
 
       <TabGroup id="summary" label="Summary">
         {model.summary && (

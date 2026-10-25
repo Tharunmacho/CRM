@@ -197,7 +197,7 @@
 .jv-alert-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .jv-alert-actions > span { font-size: 12.5px; font-weight: 500; }
 .workspace-page .jv .jv-alert .ui-button { background: var(--bg-card); color: var(--text-main); border-color: var(--border-main); }
-.jv-detail-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 20px; margin-bottom: 20px; align-items: stretch; }
+.jv-detail-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 20px; margin-bottom: 20px; align-items: start; }
 .jv-detail-grid > .ui-panel { display: flex; flex-direction: column; }
 .jv-card-body { flex: 1 1 auto; padding: 20px 22px 22px; }
 .jv-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 24px; }

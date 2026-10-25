@@ -265,3 +265,21 @@ def test_known_precommit_failure_cleans_only_uncommitted_original(intake, monkey
     assert list(Path(intake.settings.storage_dir).rglob("original")) == []
     with intake.sessions() as db:
         assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 0
+
+
+def test_dismiss_retry_and_draft_save_are_audited_with_user_and_time(intake):
+    from app.db.models import AuditEntry
+    job = upload(intake)
+    path = "/api/ocr/jobs/groups/" + job["groupId"]
+    for name in ("A", "B"):
+        draft = {"form": {"name": name}, "editedFields": ["name"], "jobIds": [job["id"]]}
+        assert intake.client.put(path + "/draft", json=draft).status_code == 200
+    start(intake, job["id"])
+    assert intake.client.post("/api/ocr/jobs/" + job["id"] + "/dismiss").status_code == 200
+    assert intake.client.post("/api/ocr/jobs/" + job["id"] + "/dismiss").status_code == 200
+    with intake.sessions() as db:
+        rows = list(db.scalars(select(AuditEntry).where(AuditEntry.action != "Saved document intake")))
+    actions = sorted(row.action for row in rows)
+    assert actions == ["Asked for an uploaded document to be read again", "Removed an uploaded intake file",
+        "Saved candidate details from an uploaded intake"]
+    assert all(row.actor_id == "owner" and row.at is not None and row.target == "synthetic.pdf" for row in rows)

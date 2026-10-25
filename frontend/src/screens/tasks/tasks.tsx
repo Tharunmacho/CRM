@@ -32,7 +32,7 @@ const COLUMNS = [
   { key: 'owner', header: 'Assigned to', width: 9 },
   { key: 'created', header: 'Created', width: 7 },
   { key: 'due', header: 'Due', width: 7 },
-  { key: 'remaining', header: 'Time remaining', width: 12 },
+  { key: 'remaining', header: 'Time left', width: 12 },
   { key: 'update', header: 'Daily update', width: 14 },
   { key: 'actions', header: 'Actions', width: 9 },
 ] as const
@@ -181,7 +181,7 @@ export default function TasksPage() {
     { key: 'open', label: 'Open tasks', value: buckets.open.length, detail: 'Waiting for the next step', icon: ClipboardList, tone: 'blue' as const },
     { key: 'due', label: 'Due today', value: buckets.due.length, detail: 'Time runs out today', icon: CalendarClock, tone: 'amber' as const },
     { key: 'overdue', label: 'Overdue', value: buckets.overdue.length, detail: 'Past 48 hours', icon: TimerOff, tone: 'red' as const },
-    ...(isSupervisor ? [{ key: 'escalated', label: 'Escalated', value: buckets.escalated.length, detail: 'Sent to admin', icon: ShieldAlert, tone: 'red' as const }] : []),
+    ...(isSupervisor ? [{ key: 'escalated', label: 'Escalated', value: buckets.escalated.length, detail: 'Reported to admin and managers', icon: ShieldAlert, tone: 'red' as const }] : []),
     { key: 'missing', label: 'Not updated today', value: notUpdated, detail: 'No remark added yet', icon: MessageSquareOff, tone: 'amber' as const },
     { key: 'completed', label: 'Completed', value: buckets.completed.length, detail: completedFrom || completedTo ? 'In the selected period' : 'Stage finished', icon: CheckCheck, tone: 'green' as const },
   ]
@@ -238,7 +238,7 @@ export default function TasksPage() {
         {notificationTask?.completedAt && <p>Completed {dateTimeLabel(notificationTask.completedAt)}. {tab !== 'completed' && <button onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.set('view', 'completed'); next.delete('from'); next.delete('to'); next.delete('date'); return next })}>View completed task</button>}</p>}
         {notificationTask?.cancelledAt && <p>Cancelled {dateTimeLabel(notificationTask.cancelledAt)}. <button onClick={() => navigate(`/candidates/${notificationTask.candidateId}`)}>View candidate history</button></p>}
         {params.get('task') && !notificationTask && <p role="status">You can no longer see this task.</p>}
-        {stageFilter !== null && <p>Stage {stageFilter} — {stageByNo(stageFilter).title}. <button onClick={() => navigate('/tasks')}>Clear</button></p>}
+        {stageFilter !== null && <p>Stage {stageFilter}: {stageByNo(stageFilter).title}. <button onClick={() => navigate('/tasks')}>Clear</button></p>}
         {notUpdated > 0 && tab !== 'completed' && tab !== 'history' && tab !== 'missing' && <p className="is-warn"><TriangleAlert size={15} aria-hidden="true" />{notUpdated} open {notUpdated === 1 ? 'task has' : 'tasks have'} no remark today. Each open task needs a daily update. <button onClick={() => changeTab('missing')}>Show them</button></p>}
       </div>
 
@@ -329,7 +329,7 @@ export default function TasksPage() {
                         </td>
                         <td data-label="Created"><Stamp value={t.createdAt} /></td>
                         <td data-label="Due"><Stamp value={dueAt} empty={!!t.cancelledAt} /></td>
-                        <td data-label="Time remaining"><ClockCell clock={clockState} /></td>
+                        <td data-label="Time left"><ClockCell clock={clockState} /></td>
                         <td data-label="Daily update">
                           {open ? (
                             <span className={cn('tk-pill', updated ? 'is-ok' : 'is-warn')}>{updated ? 'Updated today' : 'Not updated today'}</span>
@@ -401,7 +401,7 @@ function viewInfo(tab: TabKey, historyDay: string | null) {
     open: { title: 'Open tasks', description: 'All tasks waiting for the next step. Closest deadline first.' },
     due: { title: 'Due today', description: 'Tasks whose 48 hours run out today.' },
     overdue: { title: 'Overdue', description: 'Tasks past their 48-hour limit. Give them to someone else or finish the stage.' },
-    escalated: { title: 'Escalated', description: 'Overdue tasks that were sent on to the admin.' },
+    escalated: { title: 'Escalated', description: 'Overdue tasks that were reported to the admin and managers.' },
     initial: { title: 'Initial calls', description: 'First calls waiting for a result before a stage starts.' },
     missing: { title: 'Not updated today', description: 'Open tasks that still need today\'s remark.' },
     completed: { title: 'Completed', description: 'Tasks closed by finishing their stage. Newest first.' },
@@ -427,7 +427,7 @@ function emptyBody(tab: TabKey) {
     open: 'Tasks show here as candidates are assigned and move to new stages.',
     due: 'Every open task still has time left.',
     overdue: 'Everything is on time. Keep adding daily remarks.',
-    escalated: 'No task has been sent to the admin.',
+    escalated: 'No task has been reported to the admin and managers.',
     initial: 'Initial call tasks show here when a candidate is assigned. They close when the call result is saved.',
     missing: 'All open tasks here have a remark today.',
     completed: 'A task closes when its stage is completed.',
@@ -447,7 +447,7 @@ function AutomationSettings() {
   return <div className="tk-automation">
     <span className="tk-meter-icon"><ShieldAlert size={18} aria-hidden="true" /></span>
     <div className="tk-automation-text"><p>Task monitoring</p><small>48-hour limit · checked every 15 minutes · {settings?.lastRunAt ? `Last checked ${smartTime(settings.lastRunAt)}` : 'Waiting for the first check'}</small>
-    <Select className="tk-auto-select" aria-label="Alerts to the admin for overdue tasks" disabled={!settings || busy} value={settings?.escalationRepeatHours ?? 0} onChange={async (e) => {
+    <Select className="tk-auto-select" aria-label="Alerts for overdue tasks" disabled={!settings || busy} value={settings?.escalationRepeatHours ?? 0} onChange={async (e) => {
       const hours = Number(e.target.value) as 0 | 24
       setBusy(true); setError('')
       try { await api.patch('/workflow/settings', { escalationRepeatHours: hours }); setSettings((old) => old ? { ...old, escalationRepeatHours: hours } : old); store.notify('Saved') }
@@ -474,6 +474,6 @@ function ResetDeadline({ task, onClose }: { task: Task; onClose: () => void }) {
     finally { setBusy(false) }
   }}>{busy ? 'Saving…' : 'Restart clock'}</Button></>}>
     {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
-    <Field label="Reason" required><Textarea className="tk-reset-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000} /></Field>
+    <Field label="Reason" required hint="Saved in the task history. At least 3 characters."><Textarea className="tk-reset-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000} /></Field>
   </Dialog>
 }

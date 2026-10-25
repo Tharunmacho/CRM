@@ -278,7 +278,7 @@ def attention(db: Session = Depends(get_db), user: User = Depends(supervisor)):
 def connect(body: ConnectIn, db: Session = Depends(get_db), user: User = Depends(admin)):
     available = configs()
     if not available:
-        raise HTTPException(503, "Set IMAP_SERVER, IMAP_PORT, IMAP_USERNAME, IMAP_PASSWORD, IMAP_USE_SSL and IMAP_FOLDER in backend environment settings.")
+        raise HTTPException(503, "No mailbox is set up on this server yet. Ask your system administrator to add one, or connect a mailbox from the Mailboxes page.")
     address = body.address.strip().lower() if body.address else next(iter(available))
     if address not in available:
         raise HTTPException(422, "This email address is not set up on the server.")

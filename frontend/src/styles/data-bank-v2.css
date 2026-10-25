@@ -221,7 +221,7 @@
 .db-pager { display: flex; align-items: center; gap: 8px; }
 .db-pager-text { padding: 0 4px; white-space: nowrap; }
 .db-pagesize { width: 118px; }
-.db-mini.is-overdue { border-color: var(--error-edge); }
+.db-mini.is-late { border-color: var(--error-edge); }
 .db-pager .custom-select-trigger { height: 34px; min-height: 34px; }
 
 /* ---------- Mapped candidates ---------- */
@@ -289,16 +289,15 @@
 .db-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; color: var(--text-main); text-align: left; cursor: pointer; }
 .db-menu-item:hover, .db-menu-item:focus-visible { background: var(--tint-2); outline: none; }
 .db-menu-item svg { color: var(--text-muted); }
-.db-tbl tbody tr.is-overdue > td { background: var(--error-fill); }
-.db-tbl tbody tr.is-overdue:hover > td { background: color-mix(in srgb, var(--error-ink) 8%, var(--error-fill)); }
+.db-tbl tbody tr.is-late > td { background: var(--error-fill); }
+.db-tbl tbody tr.is-late:hover > td { background: color-mix(in srgb, var(--error-ink) 8%, var(--error-fill)); }
 .db-pill > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .db-with-flag { min-width: 0; }
 .db-with-flag > span, .db-tbl .db-with-flag { overflow-wrap: break-word; }
 .db-tbl .db-with-flag { display: flex; width: 100%; }
 .db-tbl .db-with-flag > .db-wrap { flex: 1 1 auto; }
 .db-tbl .db-with-flag > .db-flag, .db-tbl .db-with-flag > .db-flag-globe { margin-top: 3px; }
-/* The shared .is-overdue rule (dashboard.css) would turn the whole row blue; keep row text neutral. */
-.db-tbl tbody tr.is-overdue, .db-mini.is-overdue { color: var(--text-main) !important; }
+/* Overdue rows use is-late, not is-overdue: the shared .is-overdue rule (dashboard.css) would turn the whole row blue. */
 
 .db-ellip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .db-mini-meta dd.db-with-flag { display: flex; }
@@ -348,3 +347,21 @@
 @media (pointer: coarse), (max-width: 640px) {
   .db .ui-button { min-height: 44px; }
 }
+
+/* ---------- Added with the plain-wording / live-list pass ---------- */
+/* A list that is reloading keeps its rows (dimmed) instead of blinking empty. */
+.db-box.is-busy { opacity: .55; transition: opacity .15s ease; pointer-events: none; }
+/* Matched candidates: how far past the 48-hour deadline the open task is. */
+.db-late { display: block; margin-top: 2px; font-size: 11.5px; font-weight: 600; line-height: 1.3; color: var(--error-ink); white-space: nowrap; }
+/* Phone numbers stay on one line, in the table and on the cards. */
+.db-tbl .db-num, .db-mini-meta .ident { white-space: nowrap; }
+/* Six pools (when people wait for a recruiter): three across so each card keeps room to breathe. */
+.db-kpis[data-count='6'] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 767px) {
+  .db-kpis[data-count='6'] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 359px) {
+  .db-kpis[data-count='6'] { grid-template-columns: minmax(0, 1fr); }
+}
+.db-tbl .db-owner.is-empty { align-items: flex-start; font-size: 12px; }
+.db-tbl .db-owner.is-empty > span { overflow: visible; overflow-wrap: anywhere; }

@@ -1,20 +1,11 @@
-import { Footprints, Globe2, Link2, Mail, MessageCircle, UserPlus, type LucideIcon } from 'lucide-react'
+import { Footprints, Link2, Mail, MessageCircle, UserPlus, type LucideIcon } from 'lucide-react'
+import { CountryFlag } from '@/shared/ui/country-flag'
 import { SOURCE_COLOURS } from './report-config'
 
 /** Care India's own touches in the reports: country flags, source icons and stage chips. */
 
-const FLAGS: [string, string[]][] = [
-  ['ae', ['united arab emirates', 'uae', 'emirates', 'dubai', 'abu dhabi', 'sharjah']], ['sa', ['saudi']], ['qa', ['qatar']], ['kw', ['kuwait']],
-  ['om', ['oman']], ['bh', ['bahrain']], ['de', ['germany']], ['gb', ['united kingdom', 'uk', 'britain', 'england']],
-  ['in', ['india']], ['sg', ['singapore']], ['us', ['united states', 'usa', 'america']],
-]
-
 export function Flag({ country }: { country?: string | null }) {
-  const key = (country ?? '').trim().toLowerCase()
-  const code = key ? FLAGS.find(([, names]) => names.some(name => key === name || key.includes(name)))?.[0] : undefined
-  return code
-    ? <img src={`/flags/${code}.svg`} alt="" width={20} height={14} className="rv-flag" loading="lazy" title={country ?? undefined} />
-    : <Globe2 size={15} aria-hidden="true" className="rv-flag-globe" />
+  return <CountryFlag country={country} className="rv-flag" globeClassName="rv-flag-globe" title={country ?? undefined} />
 }
 
 export const SOURCE_META: Record<string, { label: string; icon: LucideIcon }> = {

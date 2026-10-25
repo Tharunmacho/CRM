@@ -106,14 +106,14 @@ def test_mixed_aadhaar_and_resume_page_is_not_sent_to_either_provider():
     assert not report.complete
     assert report.unknown_pages == [1]
     assert report.aadhaar_pages == report.resume_pages == []
-    with pytest.raises(subject.InspectionError, match="unread or unclassified"):
+    with pytest.raises(subject.InspectionError, match="read or identified"):
         report.pdf_for_pages([1])
 
 
 @pytest.mark.parametrize("numbers", [[0], [4], [True], ["2"]])
 def test_subset_rejects_invalid_page_numbers(numbers):
     report = subject.inspect_document(pdf([CV, CERTIFICATE, PASSPORT]))
-    with pytest.raises(subject.InspectionError, match="outside"):
+    with pytest.raises(subject.InspectionError, match="does not have"):
         report.pdf_for_pages(numbers)
 
 
@@ -137,7 +137,7 @@ def test_rendered_blank_is_distinct_from_failed_scan(monkeypatch):
     assert failed.pages[0].document_type == "unknown"
     assert failed.unread_pages == [1]
     assert not failed.complete
-    with pytest.raises(subject.InspectionError, match="unread or unclassified"):
+    with pytest.raises(subject.InspectionError, match="read or identified"):
         failed.pdf_for_pages([1])
 
 
@@ -147,7 +147,7 @@ def test_unknown_nonblank_page_blocks_even_known_resume_subset():
     assert report.resume_pages == [1]
     assert report.unknown_pages == [2]
     assert report.unread_pages == []
-    with pytest.raises(subject.InspectionError, match="unread or unclassified"):
+    with pytest.raises(subject.InspectionError, match="read or identified"):
         report.resume_pdf()
 
 
@@ -156,7 +156,7 @@ def test_page_cap_reports_every_unprocessed_original_page():
     assert report.page_count == 3
     assert report.unread_pages == [3]
     assert report.pages[2].method == "not_processed"
-    assert "2-page" in report.pages[2].reason
+    assert "more than 2 pages" in report.pages[2].reason
     assert not report.complete
 
 
@@ -237,7 +237,7 @@ def test_word_bytes_require_converter_and_do_not_fall_back_to_partial_paragraphs
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as archive:
         archive.writestr("word/document.xml", "<document/>")
-    with pytest.raises(subject.InspectionError, match="LibreOffice"):
+    with pytest.raises(subject.InspectionError, match="Word documents"):
         subject.inspect_document(out.getvalue())
 
 
@@ -302,13 +302,13 @@ def test_unclassified_page_is_left_out_of_the_selection_only_for_a_partial_calle
     text = "This is correspondence about travel arrangements and several unrelated meeting dates. " * 3
     report = subject.inspect_document(pdf([CV, text]))
     assert report.unknown_pages == [2] and report.resume_pages == [1] and report.has_classified_pages
-    assert any("Pages 2" in warning for warning in report.warnings)
+    assert any("kind of pages 2" in warning for warning in report.warnings)
     report.allow_partial = True
     with fitz.open(stream=report.resume_pdf(), filetype="pdf") as selected:
         assert selected.page_count == 1
-    with pytest.raises(subject.InspectionError, match="outside"):
+    with pytest.raises(subject.InspectionError, match="does not have"):
         report.pdf_for_pages([3])
-    with pytest.raises(subject.InspectionError, match="classified pages"):
+    with pytest.raises(subject.InspectionError, match="read and identified"):
         report.pdf_for_pages([2])
 
 

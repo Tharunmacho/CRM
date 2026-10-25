@@ -1,30 +1,32 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, Briefcase, BriefcaseBusiness, Camera, Check, CheckCircle2, FileText, Image as ImageIcon, PhoneCall, ChevronRight, Fingerprint, FolderOpen, GraduationCap, IdCard, LoaderCircle, Share2, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
+import { AlertTriangle, Briefcase, BriefcaseBusiness, Camera, Check, CheckCircle2, FileText, Image as ImageIcon, PhoneCall, Fingerprint, FolderOpen, GraduationCap, IdCard, LoaderCircle, Share2, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { api, ApiError, type OcrScan } from '@/shared/api/client'
-import { Badge, PageHeader } from '@/shared/ui/display'
+import { PageHeader } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { DOCUMENT_HELP } from '@/shared/lib/document-files'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { Dialog } from '@/shared/ui/overlay'
-import { hasOcrExtraction, inspectedPageCount, mergeOcrForm, ocrSavePayload, scanWarnings, type DocumentScans, type ScanKind } from '@/features/candidates/ocr-form'
+import { hasOcrExtraction, mergeOcrForm, ocrSavePayload, type DocumentScans, type ScanKind } from '@/features/candidates/ocr-form'
 import { normalizedSkills } from '@/features/candidates/candidate-skills'
-import { scansFromJobs, useDocumentIntake } from '@/features/candidates/use-document-intake'
+import { passportExpiryNotice } from '@/features/candidates/passport-expiry'
+import { scansFromJobs, useDocumentIntake, MAX_FILES_PER_KIND } from '@/features/candidates/use-document-intake'
 import { DocumentBundleReview } from '@/features/candidates/components/document-bundle-review'
+import { DocumentReadReport } from '@/features/candidates/components/document-read-report'
 import { IntakeRecovery } from '@/features/candidates/components/intake-recovery'
 import { EntrySection, TagField } from '@/features/candidates/components/entry-section'
 import { MultiFileSlot } from '@/features/candidates/components/multi-file-slot'
-import { MAX_FILES_PER_KIND } from '@/features/candidates/use-document-intake'
 import { EntryAvatar } from '@/features/candidates/components/entry-avatar'
-import '@/styles/add-candidate-v2.css'
+import { DuplicateDialog, RecoveryDialog } from '@/features/candidates/components/entry-dialogs'
+import { appliedFieldLabels, fieldSources, liveDuplicateQuery, SCAN_KIND_LABEL, type DuplicateMatch } from '@/features/candidates/entry-signals'
 import { candidateEntryErrors, EMPTY_CANDIDATE_FORM as EMPTY, restoredCandidateDraft } from '@/features/candidates/entry-model'
+import '@/styles/add-candidate-v2.css'
 
 type FormKey = keyof typeof EMPTY
-type Duplicate = { id: string; ref: string; name: string; phone: string; ownerId: string | null; ownerName: string | null; matchedOn: string[] }
 type SavedResult = { ref?: string; name?: string; ownerName: string | null; merged: boolean; at: number }
+type LiveCheck = { status: 'idle' | 'checking' | 'none' | 'found' | 'conflict' | 'unavailable'; match?: DuplicateMatch; message?: string }
 const SCAN_KINDS: ScanKind[] = ['resume', 'passport', 'aadhaar']
 const SLA_MS = 48 * 3600 * 1000
 const IMAGE_FILE = /.(jpe?g|png|webp|heic|heif|tiff?)$/i
@@ -43,101 +45,14 @@ function documentPill(job: { status: string; kind: string } | undefined, reading
   return { tone: 'muted', label: 'Saved' }
 }
 const VALIDATION_MESSAGE = 'Please fix the fields marked in red, then save again. Nothing you typed was lost.'
-/** Names shown for the fields a document filled in, so the reviewer sees what to double-check. */
-const FIELD_LABELS: Partial<Record<FormKey, string>> = {
-  name: 'Full name', phone: 'Phone', whatsapp: 'WhatsApp', email: 'Email', dob: 'Date of birth', gender: 'Gender', nationality: 'Nationality',
-  currentCity: 'Current city', languages: 'Languages', passportNo: 'Passport number', passportIssue: 'Issue date', passportExpiry: 'Expiry date',
-  passportPlace: 'Place of issue', designation: 'Job titles', totalExperience: 'Total experience', gulfExperience: 'Gulf experience', skills: 'Skills',
-}
-function appliedFieldLabels(scan: OcrScan, edited: ReadonlySet<FormKey>): string[] {
-  if (!hasOcrExtraction(scan)) return []
-  return Object.entries(scan.fields).flatMap(([key, value]) => {
-    const label = FIELD_LABELS[key as FormKey]
-    const text = Array.isArray(value) ? value.join('') : value == null ? '' : String(value)
-    return label && text.trim() && !edited.has(key as FormKey) ? [label] : []
-  })
-}
-
-function DocumentReadReport({ kind, scan, applied }: { kind: ScanKind; scan: OcrScan; applied: string[] }) {
-  const [showPages, setShowPages] = useState(false)
-  const label = kind === 'resume' ? 'Resume' : kind === 'passport' ? 'Passport' : 'Aadhaar'
-  const inspection = scan.inspection
-  const extracted = hasOcrExtraction(scan)
-  const warnings = scanWarnings(scan)
-  const selected = inspection?.selected_pages
-    ?? (kind === 'resume' ? inspection?.resume_pages : kind === 'passport' ? inspection?.passport_pages : inspection?.aadhaar_pages)
-  const list = (pages: number[] | undefined) => pages?.length ? pages.join(', ') : 'None'
-  const title = scan.extraction_status === 'no_resume'
-    ? 'No resume found'
-    : !extracted ? 'Please check' : 'Details read'
-
-  return (
-    <section
-      aria-label={`What we read from the ${label.toLowerCase()}`}
-      className={`ac-report ${extracted ? 'is-ok' : 'is-warn'}`}
-    >
-      <p className="ac-report-head">
-        <strong>{label}</strong>
-        <span className={`ac-pill ${extracted ? 'is-good' : 'is-warn'}`}><i aria-hidden />{title}</span>
-      </p>
-      <p className="ac-report-copy">
-        {extracted
-          ? 'Check the details we filled in below before you save. Anything you typed yourself is kept.'
-          : 'We could not fill in any details. Try a clearer file, or type the details yourself.'}
-      </p>
-      {applied.length > 0 && (
-        <div className="ac-applied">
-          <span className="ac-applied-label">Filled from this document</span>
-          <ul>{applied.map((name) => <li key={name}>{name}</li>)}</ul>
-        </div>
-      )}
-      {warnings.length > 0 && (
-        <ul className="ac-report-warnings">
-          {warnings.map((warning, index) => (
-            <li key={index}>
-              <AlertTriangle aria-hidden size={14} />
-              <span>{warning}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {inspection && (
-        <div className="ac-report-details">
-          <button type="button" className="ac-report-toggle" aria-expanded={showPages} onClick={() => setShowPages((open) => !open)}>
-            <ChevronRight size={14} aria-hidden />Page details
-          </button>
-          {showPages && <div className="ac-report-more">
-            <dl>
-              <div><dt>Pages checked</dt><dd>{inspectedPageCount(inspection)} of {inspection.page_count}</dd></div>
-              <div><dt>Pages used for the {kind}</dt><dd>{list(selected)}</dd></div>
-              <div><dt>Pages that look like a resume</dt><dd>{list(inspection.resume_pages)}</dd></div>
-              <div><dt>Pages we could not read</dt><dd>{list(inspection.unread_pages)}</dd></div>
-              <div><dt>Pages we are not sure about</dt><dd>{list(inspection.unknown_pages)}</dd></div>
-            </dl>
-            <p>Page numbers match the original file. A page we checked may still be hard to read or unclear.</p>
-            {inspection.pages.length > 0 && (
-              <ol className="ac-report-pages">
-                {inspection.pages.map((page) => (
-                  <li key={page.page_number}>
-                    <strong>Page {page.page_number}</strong>
-                    {' · '}{page.status}; {page.document_type === 'unknown' ? 'type not clear' : page.document_type}
-                    {page.reason && <p>{page.reason}</p>}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>}
-        </div>
-      )}
-    </section>
-  )
-}
 
 export default function AddCandidatePage() {
   const store = useStore()
   const navigate = useNavigate()
   const intake = useDocumentIntake(store.me!.id)
-  const [form, setForm] = useState(EMPTY)
+  // The blank form: empty, except for the nationality the agency chose to pre-fill (none unless an admin sets one).
+  const blank = useMemo(() => ({ ...EMPTY, nationality: store.settings.defaultNationality ?? '' }), [store.settings.defaultNationality])
+  const [form, setForm] = useState(blank)
   const [saving, setSaving] = useState(false)
   const [bundleSource, setBundleSource] = useState<string | null>(null)
   const [savedCandidateId, setSavedCandidateId] = useState<string | null>(null)
@@ -147,7 +62,9 @@ export default function AddCandidatePage() {
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({})
   const [saveError, setSaveError] = useState('')
 
-  const [duplicate, setDuplicate] = useState<{ candidate: Duplicate; matchedOn: string[] } | null>(null)
+  const [duplicate, setDuplicate] = useState<{ candidate: DuplicateMatch; matchedOn: string[] } | null>(null)
+  const [live, setLive] = useState<LiveCheck>({ status: 'idle' })
+  const liveTicket = useRef(0)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   // Inspection can succeed without extraction, so it has its own visible result.
@@ -181,6 +98,26 @@ export default function AddCandidatePage() {
     return () => clearTimeout(timer)
   }, [form, intake.jobs.length, savedCandidateId])
 
+  // Live duplicate check: the same rule the save uses (phone, email, passport number), run once the typing settles.
+  const liveKey = JSON.stringify(liveDuplicateQuery(form))
+  useEffect(() => {
+    const query = liveDuplicateQuery(form)
+    const ticket = ++liveTicket.current
+    if (!query || savedCandidateId) { setLive({ status: 'idle' }); return }
+    setLive((previous) => previous.status === 'found' ? previous : { status: 'checking' })
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api.post<{ duplicate: boolean; candidate?: DuplicateMatch }>('/candidates/check-duplicate', query)
+        if (ticket !== liveTicket.current || !store.isCurrentSession()) return
+        setLive(result.duplicate && result.candidate ? { status: 'found', match: result.candidate } : { status: 'none' })
+      } catch (error) {
+        if (ticket !== liveTicket.current || !store.isCurrentSession()) return
+        setLive(error instanceof ApiError && error.status === 409 ? { status: 'conflict', message: error.message } : { status: 'unavailable' })
+      }
+    }, 700)
+    return () => clearTimeout(timer)
+  }, [liveKey, savedCandidateId])
+
   /** Originals are durable before reading; choosing a replacement keeps human edits. */
   const choose = (kind: ScanKind) => async (file: File) => {
     if (readController.current || saving || savedCandidateId) return
@@ -190,7 +127,7 @@ export default function AddCandidatePage() {
     const { [kind]: _, ...remaining } = scansRef.current
     scansRef.current = remaining
     setScans(remaining)
-    setForm((previous) => mergeOcrForm(previous, EMPTY, remaining, edited.current))
+    setForm((previous) => mergeOcrForm(previous, blank, remaining, edited.current))
     setReadErrors(({ [kind]: _, ...rest }) => rest)
     setReadMessage('Your file is saved. You can leave this page and carry on later.')
     await intake.saveDraft(draftRef.current).catch(() => {})
@@ -212,17 +149,17 @@ export default function AddCandidatePage() {
       if (recovered.jobs.some(job => job.draft?.splitCandidateIds?.length)) {
         setBundleSource(groupId)
         intake.reset()
-        setForm(EMPTY); edited.current = new Set(); scansRef.current = {}; setScans({})
+        setForm(blank); edited.current = new Set(); scansRef.current = {}; setScans({})
         setSavedCandidateId(null); setPendingRecovery(null)
         return
       }
       const read = scansFromJobs(recovered.jobs)
       const draft = recovered.draft
-      const restored = restoredCandidateDraft(draft)
+      const restored = restoredCandidateDraft(draft, blank)
       edited.current = restored.edited
       scansRef.current = read
       setScans(read)
-      setForm(mergeOcrForm(restored.form, EMPTY, read, edited.current))
+      setForm(mergeOcrForm(restored.form, blank, read, edited.current))
       setSavedCandidateId(draft?.savedCandidateId ?? recovered.jobs.find((job) => job.candidateId)?.candidateId ?? null)
       setReadErrors({}); setSaveError(''); setUploadErrors({}); setErrors({}); setDuplicate(null); setPendingRecovery(null)
       setReadMessage('Your saved files, what we had already read, and your form have been brought back.')
@@ -249,7 +186,7 @@ export default function AddCandidatePage() {
       const failures: Partial<Record<ScanKind, string>> = {}
       for (const job of jobs) if (job.status === 'failed' && SCAN_KINDS.some((kind) => job.kind === kind)) failures[job.kind as ScanKind] = job.lastError ?? 'We could not read this file. Try again, or type the details yourself.'
       scansRef.current = read; setScans(read); setReadErrors(failures)
-      setForm((previous) => mergeOcrForm(previous, EMPTY, read, edited.current))
+      setForm((previous) => mergeOcrForm(previous, blank, read, edited.current))
       setErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => edited.current.has(key as FormKey))))
       // The reminder about highlighted fields is stale once documents have filled them in.
       setSaveError((message) => message === VALIDATION_MESSAGE ? '' : message)
@@ -264,7 +201,7 @@ export default function AddCandidatePage() {
     readController.current?.abort()
     readController.current = null
     setReading(false)
-    setForm((prev) => mergeOcrForm(prev, EMPTY, scansRef.current, edited.current))
+    setForm((prev) => mergeOcrForm(prev, blank, scansRef.current, edited.current))
     setReadMessage('You stopped waiting. We keep reading in the background. Come back later, or type the details yourself.')
   }
 
@@ -287,7 +224,7 @@ export default function AddCandidatePage() {
       else await doSave()
     } catch (error) {
       if (error instanceof ApiError && error.status === 409 && typeof error.detail === 'object' && error.detail && 'candidate' in error.detail) {
-        const candidate = (error.detail as { candidate: Duplicate }).candidate
+        const candidate = (error.detail as { candidate: DuplicateMatch }).candidate
         setDuplicate({ candidate, matchedOn: candidate.matchedOn })
       }
       if (store.isCurrentSession()) setSaveError(error instanceof Error ? error.message : 'We could not save this candidate. Please try again.')
@@ -297,12 +234,21 @@ export default function AddCandidatePage() {
   }
 
   const doSave = async () => {
-    const result = await api.post<{ duplicate: boolean; candidate?: Duplicate }>('/candidates/check-duplicate', payload())
+    const result = await api.post<{ duplicate: boolean; candidate?: DuplicateMatch }>('/candidates/check-duplicate', payload())
     if (result.duplicate && result.candidate) {
       setDuplicate({ candidate: result.candidate, matchedOn: result.candidate.matchedOn })
       return
     }
     await commit()
+  }
+
+  /** From the live match card: the same decision dialog, but only once the required details are valid (a combine sends the whole form). */
+  const reviewMatch = () => {
+    if (live.status !== 'found' || !live.match) return
+    const next = candidateEntryErrors(form)
+    setErrors(next)
+    if (Object.keys(next).length) { setSaveError(VALIDATION_MESSAGE); return }
+    setDuplicate({ candidate: live.match, matchedOn: live.match.matchedOn })
   }
 
   const payload = () => ({
@@ -363,6 +309,11 @@ export default function AddCandidatePage() {
     if (store.isCurrentSession()) navigate(`/candidates/${candidateId}`)
   }
 
+  const combine = async (id: string) => {
+    setSaving(true); setSaveError('')
+    try { await commit(id) } catch (error) { setSaveError(error instanceof Error ? error.message : 'We could not combine them. Nothing you typed was lost.') } finally { setSaving(false) }
+  }
+
   // The saved result (owner, retry buttons) sits above the form; make sure it is what the user sees.
   useEffect(() => {
     if (savedCandidateId) document.querySelector('.ac-saved')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -387,7 +338,19 @@ export default function AddCandidatePage() {
     const job = intake.jobs.find((item) => item.kind === kind)
     return job ? { id: job.id, name: job.filename, sizeKb: job.sizeKb, url: job.originalUrl } : null
   }
-  const mergeBlocked = !!duplicate && !store.can('work_any_candidate') && duplicate.candidate.ownerId !== store.me!.id
+  const sources = fieldSources(scans, edited.current)
+  const filledCount = Object.keys(sources).length
+  const expiryNotice = passportExpiryNotice(form.passportExpiry)
+  /** A field with the "From resume" marker when a document filled it and nobody has typed over it. */
+  const from = (key: FormKey, node: ReactNode, className = '') => {
+    const kind = sources[key]
+    return (
+      <div className={`ac-f ${className}`} data-from={kind ? '' : undefined}>
+        {node}
+        {kind && <span className="ac-from" title={`Filled from the ${SCAN_KIND_LABEL[kind]}. Check it before you save.`}><Sparkles size={12} aria-hidden />From {SCAN_KIND_LABEL[kind]}</span>}
+      </div>
+    )
+  }
 
   return (
     <>
@@ -412,7 +375,7 @@ export default function AddCandidatePage() {
         </ol>
 
         <div className="ac-stack">
-          {bundleSource && <DocumentBundleReview sourceType="manual" sourceId={bundleSource} onClose={() => setBundleSource(null)} onCommitted={async result => { intake.reset(); setForm(EMPTY); edited.current = new Set(); scansRef.current = {}; setScans({}); setSavedCandidateId(null); setSavedResult(null); setErrors({}); setReadErrors({}); setUploadErrors({}); setSaveError(''); setReadMessage(`${result.candidateIds.length} candidate profiles saved from the reviewed document pages. This form is ready for a new candidate.`); await Promise.allSettled([store.refresh({ keepCurrent: true }), intake.reload()]) }} />}
+          {bundleSource && <DocumentBundleReview sourceType="manual" sourceId={bundleSource} onClose={() => setBundleSource(null)} onCommitted={async result => { intake.reset(); setForm(blank); edited.current = new Set(); scansRef.current = {}; setScans({}); setSavedCandidateId(null); setSavedResult(null); setErrors({}); setReadErrors({}); setUploadErrors({}); setSaveError(''); setReadMessage(`${result.candidateIds.length} candidate profiles saved from the reviewed document pages. This form is ready for a new candidate.`); await Promise.allSettled([store.refresh({ keepCurrent: true }), intake.reload()]) }} />}
           {saveError && <p role="alert" className="ac-alert"><AlertTriangle size={16} aria-hidden /><span>{saveError}</span></p>}
           {savedCandidateId && <EntrySection icon={CheckCircle2} className="ac-saved"
             title={savedResult?.merged ? 'Combined with the existing candidate' : failedUploads ? 'Candidate saved. Some documents are not attached yet.' : 'Candidate saved'}
@@ -448,78 +411,99 @@ export default function AddCandidatePage() {
           </EntrySection>}
 
           <fieldset disabled={saving || recovering || Boolean(savedCandidateId)} className="ac-grid">
-            <div className="ac-hint-bar">
-              <Sparkles size={16} aria-hidden />
-              <p>Have a resume? Add it under Documents and we will fill in these fields. You can still change anything.</p>
-              <button type="button" onClick={() => document.getElementById('candidate-documents')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Go to Documents</button>
+            <div className={`ac-hint-bar ${filledCount ? 'is-filled' : ''}`} role="status">
+              {reading ? <LoaderCircle size={16} className="ac-spin" aria-hidden /> : <Sparkles size={16} aria-hidden />}
+              <p>
+                {reading ? 'Reading your documents. The fields will fill in when we are done.'
+                  : filledCount ? <>We filled in <strong>{filledCount} {filledCount === 1 ? 'field' : 'fields'}</strong> from your documents. Check the ones marked with where they came from.</>
+                  : 'Have a resume? Add it under Documents and we will fill in these fields. You can still change anything.'}
+              </p>
+              {!filledCount && !reading && <button type="button" onClick={() => document.getElementById('candidate-documents')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Go to Documents</button>}
             </div>
             <EntrySection id="candidate-basic" className="ac-s-12" icon={UserRound} title="Candidate details" meta="Name and phone are required.">
               <div className="ac-fields ac-fields-basic">
-                <Field label="Full name" required error={errors.name}>
-                  <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="As written in the passport" />
-                </Field>
-                <Field label="Email" error={errors.email}>
+                {from('name', <Field label="Full name" required error={errors.name}>
+                  <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="As written in the passport" autoComplete="off" />
+                </Field>)}
+                {from('email', <Field label="Email" error={errors.email}>
                   <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="candidate@example.com" />
-                </Field>
-                <Field label="Phone" required error={errors.phone}>
-                  <Input ident value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+91 98400 00000" />
-                </Field>
-                <Field label="WhatsApp number">
-                  <Input ident value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} placeholder="If different from phone" />
-                </Field>
-                <Field label="Current city">
+                </Field>)}
+                {from('phone', <Field label="Phone" required error={errors.phone}>
+                  <Input ident value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+91 98400 00000" inputMode="tel" />
+                </Field>)}
+                {from('whatsapp', <Field label="WhatsApp number">
+                  <Input ident value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} placeholder="If different from phone" inputMode="tel" />
+                </Field>)}
+                {from('currentCity', <Field label="Current city">
                   <Input value={form.currentCity} onChange={(e) => set('currentCity', e.target.value)} />
-                </Field>
-                <Field label="Date of birth" error={errors.dob}>
+                </Field>)}
+                {from('dob', <Field label="Date of birth" error={errors.dob}>
                   <DatePicker value={form.dob} onChange={(value) => set('dob', value)} />
-                </Field>
-                <Field label="Gender">
+                </Field>)}
+                {from('gender', <Field label="Gender">
                   <Select value={form.gender} onChange={(e) => set('gender', e.target.value)}>
                     <option value="">Not recorded</option>
                     <option value="male">Male</option>
                     <option value="female">Female</option>
                   </Select>
-                </Field>
-                <Field label="Nationality">
+                </Field>)}
+                {from('nationality', <Field label="Nationality">
                   <Input value={form.nationality} onChange={(e) => set('nationality', e.target.value)} />
-                </Field>
-                <TagField label="Languages" className="ac-lang" value={form.languages} onChange={(value) => set('languages', value)} placeholder="Add a language" />
+                </Field>)}
+                {from('languages', <TagField label="Languages" value={form.languages} onChange={(value) => set('languages', value)} placeholder="Add a language" />, 'ac-lang')}
               </div>
+              {live.status === 'found' && live.match && !savedCandidateId && (
+                <div className="ac-match" role="status">
+                  <EntryAvatar name={live.match.name} size="lg" />
+                  <div className="ac-match-copy">
+                    <p className="ac-match-title">Looks like {live.match.name} is already in the Data Bank</p>
+                    <p className="ac-match-sub"><span className="tnum">{live.match.ref}</span> · Same {live.match.matchedOn.join(' and ')} · Recruiter: {live.match.ownerName ?? 'not assigned yet'}</p>
+                  </div>
+                  <div className="ac-match-actions">
+                    <Button size="sm" onClick={() => navigate(`/candidates/${live.match!.id}`)}>Open candidate</Button>
+                    <Button size="sm" variant="primary" onClick={reviewMatch} disabled={busyAny}>Review match</Button>
+                  </div>
+                </div>
+              )}
+              {live.status === 'conflict' && !savedCandidateId && (
+                <p className="ac-match-note is-warn" role="status"><AlertTriangle size={14} aria-hidden /><span>{live.message || 'The phone, email or passport belong to different candidates. Sort this out before you save.'}</span></p>
+              )}
+              {live.status === 'checking' && !savedCandidateId && <p className="ac-match-note" role="status"><LoaderCircle size={14} className="ac-spin" aria-hidden /><span>Checking the Data Bank for this person…</span></p>}
             </EntrySection>
 
             <EntrySection id="candidate-passport" className="ac-s-12" icon={IdCard} title="Passport details" meta="Add a copy under Documents. The original passport is collected at stage 7.">
               <div className="ac-fields ac-fields-passport">
-                <Field label="Passport number" className="ac-pp-no">
+                {from('passportNo', <Field label="Passport number">
                   <Input ident value={form.passportNo} onChange={(e) => set('passportNo', e.target.value)} placeholder="M1234567" />
-                </Field>
-                <Field label="Place of issue" className="ac-pp-pl">
+                </Field>, 'ac-pp-no')}
+                {from('passportPlace', <Field label="Place of issue">
                   <Input value={form.passportPlace} onChange={(e) => set('passportPlace', e.target.value)} />
-                </Field>
-                <Field label="Issue date" className="ac-pp-is">
+                </Field>, 'ac-pp-pl')}
+                {from('passportIssue', <Field label="Issue date">
                   <DatePicker value={form.passportIssue} onChange={(value) => set('passportIssue', value)} />
-                </Field>
-                <Field label="Expiry date" error={errors.passportExpiry} className="ac-pp-ex">
+                </Field>, 'ac-pp-is')}
+                {from('passportExpiry', <Field label="Expiry date" error={errors.passportExpiry} hint={expiryNotice ? `${expiryNotice.text}. Most Gulf countries want six months left.` : undefined}>
                   <DatePicker value={form.passportExpiry} onChange={(value) => set('passportExpiry', value)} />
-                </Field>
+                </Field>, 'ac-pp-ex')}
               </div>
             </EntrySection>
 
             <EntrySection id="candidate-work" className="ac-s-12" icon={BriefcaseBusiness} title="Work profile" meta="Skills help us search the Data Bank and match candidates to orders.">
               <div className="ac-fields ac-fields-work">
-                <TagField label="Preferred job titles" className="ac-w-des" value={form.designation} onChange={(value) => set('designation', value)}
-                  suggestions={store.designations.map((designation) => designation.title)} placeholder="Pick from the list, or type and press Enter" />
-                <Field label="Total experience" error={errors.totalExperience} className="ac-w-tot">
+                {from('designation', <TagField label="Preferred job titles" value={form.designation} onChange={(value) => set('designation', value)}
+                  suggestions={store.designations.map((designation) => designation.title)} placeholder="Pick from the list, or type and press Enter" />, 'ac-w-des')}
+                {from('totalExperience', <Field label="Total experience" error={errors.totalExperience}>
                   <Input type="number" min="0" step="1" value={form.totalExperience} onChange={(e) => set('totalExperience', e.target.value)} placeholder="Years" />
-                </Field>
-                <Field label="Gulf or overseas experience" error={errors.gulfExperience} className="ac-w-gulf">
+                </Field>, 'ac-w-tot')}
+                {from('gulfExperience', <Field label="Gulf or overseas experience" error={errors.gulfExperience}>
                   <Input type="number" min="0" step="1" value={form.gulfExperience} onChange={(e) => set('gulfExperience', e.target.value)} placeholder="Years" />
-                </Field>
-                <Field label="Expected salary" error={errors.expectedSalary} className="ac-w-sal">
+                </Field>, 'ac-w-gulf')}
+                {from('expectedSalary', <Field label="Expected salary" error={errors.expectedSalary}>
                   <Input type="number" min="0" step="0.01" value={form.expectedSalary} onChange={(e) => set('expectedSalary', e.target.value)} placeholder="Per month" />
-                </Field>
-                <Field label="Skills" hint="Separate with commas or new lines." className="ac-w-skills">
+                </Field>, 'ac-w-sal')}
+                {from('skills', <Field label="Skills" hint="Separate with commas or new lines.">
                   <Textarea value={form.skills} onChange={(e) => set('skills', e.target.value)} placeholder="TIG welding, Pipe fitting, Blueprint reading" />
-                </Field>
+                </Field>, 'ac-w-skills')}
               </div>
             </EntrySection>
 
@@ -648,81 +632,10 @@ export default function AddCandidatePage() {
         </div>
       </div>
 
-      <Dialog open={Boolean(pendingRecovery)} onClose={() => { if (!recovering) setPendingRecovery(null) }} title="Open a different saved upload?"
-        description={intake.jobs.length ? 'Your current form and files will be kept as their own saved upload. The one you pick will open with its own details.' : 'Your current form has no files and is not backed up. Opening the saved upload will replace what you typed.'}
-        footer={<div className="ac-dialog-actions"><Button disabled={recovering} onClick={() => setPendingRecovery(null)}>Stay on this form</Button><Button variant="primary" disabled={recovering} onClick={() => { if (pendingRecovery) void recoverIntake(pendingRecovery) }}>{recovering ? 'Opening…' : 'Open saved upload'}</Button></div>}>
-        <p className="text-sm text-ink-500">Details of different candidates are kept apart. Check the name and contact details before you save.</p>
-        {intake.draftError && <p role="alert" className="mt-3 text-sm text-stamp-600">{intake.draftError}</p>}
-      </Dialog>
-
-      <Dialog
-        open={!!duplicate}
-        onClose={() => { if (!saving) setDuplicate(null) }}
-        title="This candidate is already in the Data Bank"
-        description={
-          duplicate
-            ? `The ${duplicate.matchedOn.join(' and ')} already belong to a candidate in the Data Bank. You can combine this entry with that candidate, or cancel.`
-            : undefined
-        }
-        footer={
-          <div className="ac-dialog-actions">
-            <Button variant="ghost" disabled={saving} onClick={() => setDuplicate(null)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={saving}
-              onClick={() => {
-                const id = duplicate!.candidate.id
-                setDuplicate(null)
-                navigate(`/candidates/${id}`)
-              }}
-            >
-              Open existing candidate
-            </Button>
-            <Button variant="primary" disabled={saving || mergeBlocked} onClick={async () => {
-              if (!duplicate) return
-              setSaving(true); setSaveError('')
-              try { await commit(duplicate.candidate.id) } catch (error) { setSaveError(error instanceof Error ? error.message : 'We could not combine them. Nothing you typed was lost.') } finally { setSaving(false) }
-            }}>{saving ? 'Combining…' : 'Combine with existing'}</Button>
-          </div>
-        }
-      >
-        {duplicate && (
-          <div className="ac-dup">
-            <div className="ac-dup-card is-existing">
-              <EntryAvatar name={duplicate.candidate.name} size="lg" />
-              <div className="ac-dup-body">
-                <p className="ac-dup-label">Already in the Data Bank</p>
-                <p className="ac-dup-name">{duplicate.candidate.name}</p>
-                <p className="ac-dup-meta ident" title={duplicate.candidate.phone}>{duplicate.candidate.phone}</p>
-                <div className="ac-dup-badges">
-                  <Badge>{duplicate.candidate.ref}</Badge>
-                  <Badge>Recruiter: {duplicate.candidate.ownerName ?? 'Not assigned yet'}</Badge>
-                  {duplicate.matchedOn.map((field) => <Badge key={field} tone="amber">Same {field}</Badge>)}
-                </div>
-              </div>
-            </div>
-            <div className="ac-dup-card">
-              <EntryAvatar name={form.name.trim() || 'New candidate'} size="lg" />
-              <div className="ac-dup-body">
-                <p className="ac-dup-label">What you typed</p>
-                <p className="ac-dup-name">{form.name.trim() || 'Unnamed'}</p>
-                <p className="ac-dup-meta ident">{form.phone.trim() || 'No phone'}</p>
-                {form.email.trim() && <p className="ac-dup-meta" title={form.email.trim()}>{form.email.trim()}</p>}
-                {form.passportNo.trim() && <p className="ac-dup-meta ident">Passport {form.passportNo.trim()}</p>}
-              </div>
-            </div>
-          </div>
-        )}
-        <p className="ac-dup-note">
-          <AlertTriangle size={14} aria-hidden />
-          <span>Combining fills in empty fields and adds your documents as new copies. Details already saved, the recruiter and the stages stay as they are. No new task is created.</span>
-        </p>
-        {mergeBlocked && duplicate && (
-          <p className="ac-dup-note is-warn">Only the recruiter who has this candidate ({duplicate.candidate.ownerName ?? 'nobody yet'}) or a supervisor can combine into this candidate. You can open the candidate instead.</p>
-        )}
-        {saveError && <p role="alert" className="mt-3 text-sm text-stamp-600">{saveError}</p>}
-      </Dialog>
+      <RecoveryDialog open={Boolean(pendingRecovery)} recovering={recovering} hasFiles={intake.jobs.length > 0} intake={intake}
+        onStay={() => setPendingRecovery(null)} onOpen={() => { if (pendingRecovery) void recoverIntake(pendingRecovery) }} />
+      <DuplicateDialog duplicate={duplicate} form={form} saving={saving} error={duplicate ? saveError : ''}
+        onCancel={() => setDuplicate(null)} onOpen={(id) => { setDuplicate(null); navigate(`/candidates/${id}`) }} onMerge={(id) => void combine(id)} />
     </>
   )
 }

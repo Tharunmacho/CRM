@@ -57,8 +57,9 @@ _DATE_FORMATS = (
 
 _ORDINAL = re.compile(r"\b(\d{1,2})(st|nd|rd|th)\b", re.IGNORECASE)
 
-# The countries the agency recruits from. Anything else keeps its ISO code, which is
-# still readable and easier to correct than a wrong guess.
+# ISO 3166-1 alpha-3 code -> demonym for the countries the agency recruits from. Any other
+# code is stored exactly as printed on the passport, which is easier to correct than a
+# wrong guess.
 _DEMONYMS = {
     "IND": "Indian",
     "NPL": "Nepalese",
@@ -66,6 +67,13 @@ _DEMONYMS = {
     "BGD": "Bangladeshi",
     "PAK": "Pakistani",
     "PHL": "Filipino",
+    "IDN": "Indonesian",
+    "KEN": "Kenyan",
+    "UGA": "Ugandan",
+    "ETH": "Ethiopian",
+    "EGY": "Egyptian",
+    "NGA": "Nigerian",
+    "GHA": "Ghanaian",
 }
 
 
@@ -205,7 +213,7 @@ def _low_confidence(kind: str, pages) -> list[str]:
     if not low:
         return []
     listed = ", ".join(str(n) for n in low[:10])
-    return [f"The OCR returned low confidence for {kind} page(s) {listed}. Compare the details against the original."]
+    return [f"We read the {kind} page(s) {listed} with low confidence. Compare the details with the original."]
 
 
 def resume_fields(r: ResumeResponse, designations: list[str]) -> tuple[OcrFields, list[str]]:
@@ -287,8 +295,8 @@ def passport_fields(p: PassportResponse) -> tuple[OcrFields, list[str]]:
     warnings = [*p.warnings, *_low_confidence("passport", p.pages)]
     if p.mrz_source != "mrz":
         warnings.append(
-            "The passport details were read from the printed page, not its machine-readable "
-            "zone. Compare every value against the scan."
+            "The passport details were read from the printed page, not the coded lines at the bottom of it, "
+            "so they may be less accurate. Compare every value against the scan."
         )
     if not mrz.all_check_digits_valid:
         warnings.append(
@@ -317,7 +325,7 @@ def aadhaar_fields(response: AadhaarResponse) -> tuple[OcrFields, list[str]]:
     if identity.year_of_birth and not identity.date_of_birth:
         warnings.append("Only a birth year was read from Aadhaar. Enter the full date of birth manually.")
     if identity.aadhaar_number_valid is False:
-        warnings.append("The Aadhaar number did not pass validation. Compare it against the original document.")
+        warnings.append("The Aadhaar number does not look right. Compare it with the original document.")
     # A full address does not establish a separate city, and the issuer does
     # not establish citizenship. Neither field is inferred from the card.
     return fields, warnings

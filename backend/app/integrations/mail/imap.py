@@ -16,9 +16,8 @@ from .mime import parse_message
 
 
 UIDVALIDITY_RECOVERY_REQUIRED = (
-    "Mailbox identifiers changed. Incoming sync is paused to protect retained history. "
-    "Reconnecting alone cannot restore sync; contact your administrator for mailbox recovery. "
-    "Existing messages and original files remain available."
+    "This mailbox was reset by the mail provider, so we stopped collecting new emails to protect your saved ones. "
+    "Your existing emails and files are safe. Contact your administrator to get it working again."
 )
 
 
@@ -39,17 +38,17 @@ class MailConfig:
 
     def __post_init__(self):
         if not self.host or re.search(r"[\s/@\\]", self.host):
-            raise MailAdapterError("invalid_config", "Configure a valid IMAP hostname without a URL prefix.")
+            raise MailAdapterError("invalid_config", "Enter the mail server name without http:// or https://, for example imap.example.com.")
         if type(self.port) is not int or not 1 <= self.port <= 65535:
-            raise MailAdapterError("invalid_config", "Configure a valid IMAP port.")
+            raise MailAdapterError("invalid_config", "Enter a valid mail server port, such as 993.")
         if not self.username or not (self.password or self.access_token):
-            raise MailAdapterError("invalid_config", "Configure an IMAP username and password or app password.")
+            raise MailAdapterError("invalid_config", "Enter the mailbox email address and its password (or app password).")
         if not self.folder or any(c in self.folder + self.username for c in "\r\n\x00"):
-            raise MailAdapterError("invalid_config", "The IMAP mailbox name or username is invalid.")
+            raise MailAdapterError("invalid_config", "The mailbox folder name or email address is not valid.")
         if not math.isfinite(self.timeout) or self.timeout <= 0:
-            raise MailAdapterError("invalid_config", "The IMAP timeout must be a finite positive number.")
+            raise MailAdapterError("invalid_config", "The mail server wait time must be a number greater than zero.")
         if type(self.max_message_bytes) is not int or self.max_message_bytes <= 0:
-            raise MailAdapterError("invalid_config", "The email size limit must be a positive byte count.")
+            raise MailAdapterError("invalid_config", "The email size limit must be a number greater than zero.")
 
 
 @dataclass(frozen=True)
@@ -72,12 +71,12 @@ def require_cursor_source(cursor: dict, config: MailConfig) -> None:
     if not cursor.get("source_id"):
         raise MailAdapterError(
             "source_unbound",
-            "This mailbox cursor has no verified source. Re-register the mailbox before syncing.",
+            "We cannot tell which mailbox this is. Disconnect it and connect it again before checking for new emails.",
         )
     if cursor["source_id"] != mailbox_source_id(config):
         raise MailAdapterError(
             "source_changed",
-            "Mailbox connection settings changed. Restore the original server, username and folder before syncing.",
+            "The mailbox connection settings changed. Switch back to the original server, email address and folder, then try again.",
         )
 
 
@@ -136,13 +135,13 @@ class IMAPMailbox:
                 # Credentials must never be sent over cleartext IMAP.
                 status, _ = connection.starttls(ssl_context=context)
                 if status != "OK":
-                    raise MailAdapterError("tls_required", "The IMAP server must support TLS.")
+                    raise MailAdapterError("tls_required", "This mail server does not offer a secure connection, so we cannot use it.")
         except MailAdapterError:
             self.close()
             raise
         except Exception:
             self.close()
-            raise MailAdapterError("connection_failed", "Could not establish a secure IMAP connection.", retryable=True) from None
+            raise MailAdapterError("connection_failed", "We could not connect to the mailbox. Check the server name, port and your internet connection, then try again.", retryable=True) from None
         try:
             if self.config.access_token:
                 auth = f"user={self.config.username}\x01auth=Bearer {self.config.access_token}\x01\x01".encode()
@@ -153,7 +152,7 @@ class IMAPMailbox:
                 raise imaplib.IMAP4.error("login refused")
         except Exception:
             self.close()
-            raise MailAdapterError("authentication_failed", "IMAP sign-in failed. Check the account credentials or app password.") from None
+            raise MailAdapterError("authentication_failed", "We could not sign in to the mailbox. Check the email address and password (or app password), then try again.") from None
 
     def close(self) -> None:
         connection, self._connection = self._connection, None
@@ -172,7 +171,7 @@ class IMAPMailbox:
         try:
             status, _ = self._connection.select(_mailbox_wire_name(self.config.folder), readonly=True)
             if status != "OK":
-                raise MailAdapterError("mailbox_unavailable", "The configured IMAP folder cannot be opened read-only.")
+                raise MailAdapterError("mailbox_unavailable", "We could not open the mailbox folder. Check the folder name, then try again.")
             _, values = self._connection.response("UIDVALIDITY")
             validity = str(int(values[0]))
             if int(validity) <= 0:
@@ -193,7 +192,7 @@ class IMAPMailbox:
         except MailAdapterError:
             raise
         except Exception:
-            raise MailAdapterError("mailbox_metadata_failed", "Could not read the mailbox's stable identifiers.", retryable=True) from None
+            raise MailAdapterError("mailbox_metadata_failed", "We could not read the mailbox details. Try again in a few minutes.", retryable=True) from None
 
     def probe(self) -> MailboxCursor:
         """Current high-water mark; first connection can start with future mail."""
@@ -201,7 +200,7 @@ class IMAPMailbox:
 
     def list_uids(self, *, after_uid: int, uid_validity: str, limit: int = 25) -> list[int]:
         if type(after_uid) is not int or after_uid < 0 or type(limit) is not int or not 1 <= limit <= 100:
-            raise MailAdapterError("invalid_cursor", "Use a nonnegative UID cursor and a batch size between 1 and 100.")
+            raise MailAdapterError("invalid_cursor", "The email position or batch size is not valid. Try again, and contact your administrator if it keeps happening.")
         self._selected(uid_validity)
         try:
             status, data = self._connection.uid("SEARCH", None, "UID", f"{after_uid + 1}:*")
@@ -211,7 +210,7 @@ class IMAPMailbox:
             values = [int(uid) for uid in ((data or [b""])[0] or b"").split()]
             return sorted({uid for uid in values if uid > after_uid})[:limit]
         except Exception:
-            raise MailAdapterError("search_failed", "Could not list new email messages.", retryable=True) from None
+            raise MailAdapterError("search_failed", "We could not check for new emails. We will try again soon.", retryable=True) from None
 
     def _download(self, uid: int, failure) -> tuple[int, bytes, bytes]:
         """Size, FETCH metadata and raw bytes of one message; a batch prefetch may already hold them."""
@@ -220,24 +219,24 @@ class IMAPMailbox:
             return held
         status, size_rows = self._connection.uid("FETCH", str(uid), "(UID RFC822.SIZE)")
         if status != "OK":
-            raise failure("message_unavailable", "The source email could not be fetched.", True)
+            raise failure("message_unavailable", "We could not download this email. We will try again.", True)
         metadata = next((row for row in size_rows or [] if isinstance(row, bytes)
                          and re.search(rb"\bUID\s+" + str(uid).encode() + rb"\b", row)), b"")
         size_match = re.search(rb"\bRFC822\.SIZE\s+(\d+)", metadata)
         if not size_match:
-            raise failure("message_unavailable", "The source email is missing or has no valid size.")
+            raise failure("message_unavailable", "This email is missing from the mailbox or looks empty.")
         size = int(size_match.group(1))
         if size > self.config.max_message_bytes:
-            raise failure("message_too_large", "The email exceeds the configured message size limit.")
+            raise failure("message_too_large", "This email is too large to download.")
         request = f"(UID BODY.PEEK[]<0.{self.config.max_message_bytes + 1}> INTERNALDATE FLAGS)"
         status, body_rows = self._connection.uid("FETCH", str(uid), request)
         if status != "OK":
-            raise failure("fetch_failed", "The source email body could not be read.", True)
+            raise failure("fetch_failed", "We could not read this email. We will try again.", True)
         matches = [row for row in body_rows or [] if isinstance(row, tuple) and len(row) == 2
                    and isinstance(row[0], bytes) and isinstance(row[1], bytes)
                    and re.search(rb"\bUID\s+" + str(uid).encode() + rb"\b", row[0])]
         if len(matches) != 1:
-            raise failure("fetch_failed", "The server did not return the requested email.", True)
+            raise failure("fetch_failed", "The mail server did not send this email. We will try again.", True)
         details, raw = matches[0]
         return size, details, raw
 
@@ -287,7 +286,7 @@ class IMAPMailbox:
 
     def fetch(self, uid: int, *, uid_validity: str) -> InboundMessage:
         if type(uid) is not int or uid <= 0:
-            raise MailAdapterError("invalid_cursor", "The message UID must be a positive integer.")
+            raise MailAdapterError("invalid_cursor", "We cannot tell which email this is. Refresh and try again.")
         self._selected(uid_validity)
         provider_id = provider_message_id(self.config.folder, str(uid_validity), uid)
         def failure(code: str, message: str, retryable=False):
@@ -295,13 +294,13 @@ class IMAPMailbox:
         try:
             size, details, raw = self._download(uid, failure)
             if len(raw) > self.config.max_message_bytes:
-                raise failure("message_too_large", "The fetched email exceeds the configured message size limit.")
+                raise failure("message_too_large", "This email is too large to download.")
             # RFC822.SIZE and the delivered bytes legitimately differ by a little on many
             # servers (line-ending normalisation, generated headers), so equality would
             # reject good mail and block whole folders. A transfer cut short is the real
             # failure: the body is meaningfully smaller than announced.
             if (size - len(raw)) * 100 > size * 3:
-                raise failure("incomplete_message", "The email download was incomplete. Retry the source message.", True)
+                raise failure("incomplete_message", "The email did not finish downloading. We will try again.", True)
             received = None
             date_match = re.search(rb'INTERNALDATE "([^"]+)"', details)
             if date_match:
@@ -316,7 +315,7 @@ class IMAPMailbox:
         except MailMessageError:
             raise
         except Exception:
-            raise failure("fetch_failed", "The email could not be downloaded safely. Retry the source message.", True) from None
+            raise failure("fetch_failed", "We could not download this email safely. We will try again.", True) from None
 
     def history_uids(self, *, after_uid: int, before_uid: int, since: str, uid_validity: str, limit=25):
         """Bound history to a saved upper UID and an explicit administrator date."""
@@ -332,4 +331,4 @@ class IMAPMailbox:
             values = [int(value) for value in ((data or [b""])[0] or b"").split()]
             return sorted({value for value in values if after_uid < value <= before_uid})[:limit]
         except Exception:
-            raise MailAdapterError("history_search", "Historical messages could not be listed. Resume the import after checking the connection.", retryable=True) from None
+            raise MailAdapterError("history_search", "We could not list your older emails. Check the mailbox connection, then continue the import.", retryable=True) from None

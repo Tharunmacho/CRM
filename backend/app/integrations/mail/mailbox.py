@@ -37,7 +37,7 @@ class WritableMailbox(IMAPMailbox):
     @staticmethod
     def _uid(uid):
         if type(uid) is not int or uid <= 0:
-            raise MailMutationError("The message identifier is invalid. Refresh the mailbox.")
+            raise MailMutationError("We could not find this email. Refresh the mailbox and try again.")
 
     def select_folder(self, folder, expected=None, *, writable=False):
         self.config = replace(self.config, folder=folder)
@@ -46,10 +46,10 @@ class WritableMailbox(IMAPMailbox):
             try:
                 status, _ = self._connection.select(_mailbox_wire_name(folder), readonly=False)
                 if status != "OK":
-                    raise MailMutationError("The mailbox did not allow changes to this folder.")
+                    raise MailMutationError("The mail provider does not allow changes to this folder.")
                 _, values = self._connection.response("UIDVALIDITY")
                 if str(int(values[0])) != cursor.uid_validity:
-                    raise MailMutationError("The folder identifiers changed. Refresh the mailbox before changing this message.")
+                    raise MailMutationError("This folder changed since you last opened it. Refresh the mailbox, then try again.")
             except MailAdapterError:
                 raise
             except Exception:
@@ -92,12 +92,12 @@ class WritableMailbox(IMAPMailbox):
         except MailAdapterError:
             raise
         except Exception:
-            raise MailAdapterError("folders_failed", "The mailbox folders could not be listed. Check the connection and IMAP folder visibility settings.", retryable=True) from None
+            raise MailAdapterError("folders_failed", "We could not load the mailbox folders. Check the connection, then try again.", retryable=True) from None
 
     def page(self, folder, *, search="", offset=0, limit=25, unread=None):
         cursor = self.select_folder(folder)
         if any(c in search for c in "\r\n\x00"):
-            raise MailAdapterError("search_invalid", "Search cannot contain control characters.")
+            raise MailAdapterError("search_invalid", "Search words cannot include hidden special characters. Remove them and try again.")
         try:
             flags = [] if unread is None else ["UNSEEN" if unread else "SEEN"]
             if search:
@@ -120,14 +120,14 @@ class WritableMailbox(IMAPMailbox):
     def find_message_id(self, folder, message_id):
         cursor = self.select_folder(folder)
         if not re.fullmatch(r"<[^<>\s]+>", message_id):
-            raise MailAdapterError("message_id", "This message has no stable remote identifier.")
+            raise MailAdapterError("message_id", "We cannot tell which email this is. Refresh the mailbox and try again.")
         try:
             status, data = self._connection.uid("SEARCH", None, "UNDELETED", "HEADER", "Message-ID", '"' + message_id.replace('"', '') + '"')
             if status != "OK":
                 raise ValueError()
             return cursor, [int(value) for value in ((data or [b""])[0] or b"").split()]
         except Exception:
-            raise MailAdapterError("search_failed", "The provider could not confirm the message state.", retryable=True) from None
+            raise MailAdapterError("search_failed", "The mail provider did not confirm this email's status. Try again.", retryable=True) from None
 
     def set_flags(self, folder, uid, validity, *, unread=None, starred=None):
         self._uid(uid)
@@ -139,19 +139,19 @@ class WritableMailbox(IMAPMailbox):
                     issued = True
                     status, _ = self._connection.uid("STORE", str(uid), "+FLAGS.SILENT" if enabled else "-FLAGS.SILENT", f"({flag})")
                     if status != "OK":
-                        raise MailMutationError("The mailbox refused this flag change. Refresh to check the current flags.", unknown=True)
+                        raise MailMutationError("The mailbox did not accept this change. Refresh to see the email's current status.", unknown=True)
             return self.fetch(uid, uid_validity=validity)
         except MailAdapterError:
             raise
         except Exception:
-            raise MailMutationError("The flag change could not be confirmed. Refresh the message before trying again.", unknown=issued) from None
+            raise MailMutationError("We could not confirm the change. Refresh the email, then try again.", unknown=issued) from None
 
     def move(self, folder, uid, validity, destination):
         self._uid(uid)
         self.select_folder(folder, validity, writable=True)
         caps = {c.decode().upper() if isinstance(c, bytes) else str(c).upper() for c in self._connection.capabilities}
         if "MOVE" not in caps and "UIDPLUS" not in caps:
-            raise MailMutationError("This IMAP server does not support moving one message safely. Enable MOVE or UIDPLUS support with the mailbox administrator.")
+            raise MailMutationError("This mail server cannot move a single email safely. Ask your mail administrator to turn on the move feature.")
         copied = False
         try:
             status, _ = self._connection.uid("MOVE" if "MOVE" in caps else "COPY", str(uid), _mailbox_wire_name(destination))
@@ -165,15 +165,15 @@ class WritableMailbox(IMAPMailbox):
                 # for explicit reconciliation; the service never repeats COPY.
                 status, _ = self._connection.uid("STORE", str(uid), "+FLAGS.SILENT", "(\\Deleted)")
                 if status != "OK":
-                    raise MailMutationError("The destination copy exists but removing the source was not confirmed. Reconcile both folders.", unknown=True)
+                    raise MailMutationError("The email was copied to the new folder, but we could not confirm it was removed from the old one. Check both folders.", unknown=True)
                 status, _ = self._connection.uid("EXPUNGE", str(uid))
                 if status != "OK":
-                    raise MailMutationError("The destination copy exists but source removal is unconfirmed. Reconcile both folders.", unknown=True)
+                    raise MailMutationError("The email was copied to the new folder, but we could not confirm it was removed from the old one. Check both folders.", unknown=True)
             return (match.group(1).decode(), int(match.group(2))) if match else None
         except MailMutationError:
             raise
         except Exception:
-            raise MailMutationError("The move outcome is unknown. Refresh the source and destination folders before retrying.", unknown=True) from None
+            raise MailMutationError("We could not confirm the move. Check both folders before trying again.", unknown=True) from None
 
     def create_folder(self, name):
         if not name.strip() or len(name) > 255 or any(char in name for char in "\r\n\x00"):
@@ -182,7 +182,7 @@ class WritableMailbox(IMAPMailbox):
         try:
             status, _ = self._connection.create(_mailbox_wire_name(name))
             if status != "OK":
-                raise MailMutationError("The mailbox refused to create this folder. Refresh the folders before retrying.")
+                raise MailMutationError("The mailbox would not create this folder. Refresh the folder list and try again.")
         except MailAdapterError:
             raise
         except Exception:
@@ -193,25 +193,25 @@ class WritableMailbox(IMAPMailbox):
         try:
             status, _ = self._connection.append(_mailbox_wire_name(folder), "(\\Draft \\Seen)", imaplib.Time2Internaldate(datetime.now(timezone.utc)), raw)
             if status != "OK":
-                raise MailMutationError("The mailbox refused to save the draft.")
+                raise MailMutationError("The mailbox would not save the draft.")
             _, values = self._connection.response("APPENDUID")
             match = re.search(rb"(\d+)\s+(\d+)", b" ".join(v for v in values or [] if isinstance(v, bytes)))
             return (match.group(1).decode(), int(match.group(2))) if match else None
         except MailMutationError:
             raise
         except Exception:
-            raise MailMutationError("The draft save could not be confirmed. The CRM draft is safe; check its sync state before retrying.", unknown=True) from None
+            raise MailMutationError("We could not confirm the draft was saved to the mailbox. Your draft is safe here. Check it before trying again.", unknown=True) from None
 
     def remove_draft(self, folder, uid, validity):
         self._uid(uid)
         self.select_folder(folder, validity, writable=True)
         caps = {c.decode().upper() if isinstance(c, bytes) else str(c).upper() for c in self._connection.capabilities}
         if "UIDPLUS" not in caps:
-            raise MailMutationError("The provider cannot remove one draft safely. Remove the old draft in the mailbox.")
+            raise MailMutationError("We cannot remove the old draft for you. Delete it in the mailbox yourself.")
         try:
             status, _ = self._connection.uid("STORE", str(uid), "+FLAGS.SILENT", "(\\Deleted)")
             if status != "OK":
-                raise MailMutationError("The mailbox refused to remove this draft.")
+                raise MailMutationError("The mailbox would not remove this draft.")
             status, _ = self._connection.uid("EXPUNGE", str(uid))
             if status != "OK":
                 raise MailMutationError("Draft removal could not be confirmed.", unknown=True)

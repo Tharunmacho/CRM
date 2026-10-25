@@ -161,7 +161,7 @@ def test_uidvalidity_reset_stops_before_search_or_body_fetch(connection, config)
         with pytest.raises(MailAdapterError) as error:
             mailbox.list_uids(after_uid=7, uid_validity="122")
     assert error.value.code == "uidvalidity_changed"
-    assert "Reconnecting alone cannot restore sync" in str(error.value)
+    assert "Contact your administrator" in str(error.value)
     assert not any(call[0] in {"SEARCH", "FETCH"} for call in connection.calls)
 
 

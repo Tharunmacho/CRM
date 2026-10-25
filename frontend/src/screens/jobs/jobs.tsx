@@ -16,7 +16,7 @@ import { Avatar, Place } from '@/features/jobs/components/identity'
 import { DueChip, LayoutToggle, OrderRowActions, OrderStatusText, useElementWidth, useMinWidth, useStoredLayout, type OrderActionHandlers } from '@/features/jobs/components/order-parts'
 import { isOverdue, orderStatusKey, toCsv } from '@/features/jobs/order-meta'
 import { useOrderActions } from '@/features/jobs/use-order-actions'
-import { isDeployed, isMatched } from '@/features/jobs/order-counts'
+import { seatSplit, useOrderStats } from '@/features/jobs/use-order-stats'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { SnapshotState } from '@/shared/ui/page-loading'
@@ -48,6 +48,7 @@ export default function JobsPage() {
   const snapshot = useWorkspaceReady('jobs')
   const navigate = useNavigate()
   const actions = useOrderActions()
+  const stats = useOrderStats()
   const [params, setParams] = useSearchParams()
   const companyId = params.get('company') || ''
   const requestedView = params.get('view')
@@ -84,8 +85,8 @@ export default function JobsPage() {
 
   const active = store.designations.find((d) => d.id === activeId)
   const scopedOrders = useMemo(() => store.orders.filter((o) => !companyId || o.companyId === companyId), [store.orders, companyId])
-  const activeCount = (order: Order) => store.applications.filter((a) => a.orderId === order.id && isMatched(a)).length
-  const deployedCount = (order: Order) => store.applications.filter((a) => a.orderId === order.id && isDeployed(a)).length
+  const activeCount = (order: Order) => stats.of(order.id).matched
+  const deployedCount = (order: Order) => stats.of(order.id).deployed
   const matchesStatus = (order: Order, key: StatusKey) => {
     switch (key) {
       case 'all': return true
@@ -108,7 +109,7 @@ export default function JobsPage() {
       return [designation?.title, designation?.category, order.ref, store.company(order.companyId)?.name, order.country, order.city, ...(designation?.requiredSkills ?? [])]
         .some((value) => (value ?? '').toLowerCase().includes(q))
     })
-  }, [scopedOrders, status, country, designationFilter, query, store.applications, store.designations, store.companies])
+  }, [scopedOrders, status, country, designationFilter, query, stats, store.designations, store.companies]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const designations = useMemo(() => {
     const q = railQuery.trim().toLowerCase()
@@ -116,17 +117,14 @@ export default function JobsPage() {
   }, [store.designations, railQuery])
   const designationOrders = scopedOrders.filter((o) => o.designationId === activeId)
   const visibleDesignationOrders = designationOrders.filter((o) => matchesStatus(o, designationStatus))
-  const designationApps = useMemo(() => {
-    const ids = new Set(designationOrders.map((o) => o.id))
-    return store.applications.filter((a) => ids.has(a.orderId))
-  }, [designationOrders, store.applications])
+  const sumOf = (list: Order[], pick: (id: string) => number) => list.reduce((total, o) => total + pick(o.id), 0)
 
   if (!snapshot.ready) return <SnapshotState error={snapshot.error} onRetry={snapshot.retry} retryLabel="Try again" label="Loading orders" />
 
-  const openSeats = (list: Order[]) => list.filter((o) => o.status === 'open').reduce((total, o) => total + o.openings, 0)
-  const inScope = (appOrderId: string) => scopedOrders.some((o) => o.id === appOrderId)
-  const inProcessTotal = store.applications.filter((a) => isMatched(a) && inScope(a.orderId)).length
-  const deployedTotal = store.applications.filter((a) => isDeployed(a) && inScope(a.orderId)).length
+  /** Seats on open orders that are neither deployed nor held by a candidate: what is still to fill. */
+  const openSeats = (list: Order[]) => list.filter((o) => o.status === 'open').reduce((total, o) => total + seatSplit(o.openings, stats.of(o.id).deployed, 0).free, 0)
+  const inProcessTotal = sumOf(scopedOrders, (id) => stats.of(id).matched)
+  const deployedTotal = sumOf(scopedOrders, (id) => stats.of(id).deployed)
   const filtersActive = status !== 'all' || !!country || !!designationFilter || !!query.trim()
   const resetFilters = () => { setStatus('all'); setCountry(''); setDesignationFilter(''); setQuery('') }
   const showOrders = (key: StatusKey) => { setStatus(key); setParam('view', 'orders') }
@@ -345,7 +343,7 @@ export default function JobsPage() {
                         <span className="jv-option-icon"><BriefcaseBusiness size={17} strokeWidth={1.6} /></span>
                         <span className="jv-option-copy">
                           <span className="jv-option-title" title={d.title}>{d.title}</span>
-                          <span className="jv-option-sub" title={d.category || "General"}>{d.category || 'General'}</span>
+                          <span className="jv-option-sub" title={d.category || 'No category'}>{d.category || 'No category'}</span>
                         </span>
                         {count > 0 && <span className="jv-option-open"><i aria-hidden="true" />{count} open</span>}
                       </button>
@@ -366,7 +364,7 @@ export default function JobsPage() {
                   <div className="jv-detail-head">
                     <span className="jv-icon-tile" aria-hidden="true"><BriefcaseBusiness size={22} strokeWidth={1.6} /></span>
                     <div className="jv-detail-title">
-                      <p className="jv-eyebrow">{active.category || 'General'}</p>
+                      <p className="jv-eyebrow">{active.category || 'No category'}</p>
                       <h2>{active.title}</h2>
                       <p>{active.minExperience > 0 ? `Minimum ${active.minExperience} ${active.minExperience === 1 ? 'year' : 'years'} of experience` : 'Any experience'}</p>
                     </div>
@@ -379,8 +377,8 @@ export default function JobsPage() {
                   <dl className="jv-stat-row">
                     <div><dt>Open orders</dt><dd className="tnum">{designationOrders.filter((o) => o.status === 'open').length}</dd></div>
                     <div><dt>Openings left</dt><dd className="tnum">{openSeats(designationOrders)}</dd></div>
-                    <div><dt>In progress</dt><dd className="tnum">{designationApps.filter(isMatched).length}</dd></div>
-                    <div><dt>Deployed</dt><dd className="tnum">{designationApps.filter(isDeployed).length}</dd></div>
+                    <div><dt>In progress</dt><dd className="tnum">{sumOf(designationOrders, (id) => stats.of(id).matched)}</dd></div>
+                    <div><dt>Deployed</dt><dd className="tnum">{sumOf(designationOrders, (id) => stats.of(id).deployed)}</dd></div>
                   </dl>
                   <dl className="jv-facts">
                     <div><dt>Description</dt><dd>{active.description || <span className="text-ink-400">No description added</span>}</dd></div>

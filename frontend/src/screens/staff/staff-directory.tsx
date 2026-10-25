@@ -25,7 +25,7 @@ export default function StaffDirectoryPage() {
   }
 
   return <div className="staff-directory-workspace">
-    <PageHeader title="Staff directory" description="Find your team, see how much work each person has, and follow up on what needs attention." actions={<Button disabled={loading || refreshing} icon={<RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />} onClick={refresh}>{loading || refreshing ? 'Refreshing…' : 'Refresh'}</Button>} />
+    <PageHeader title="Staff directory" description="See how much work each person has, who is behind, and who gets the next new candidate." actions={<Button disabled={loading || refreshing} icon={<RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />} onClick={refresh}>{loading || refreshing ? 'Refreshing…' : 'Refresh'}</Button>} />
     <DirectoryFeedback loading={loading && !view} error={error} retry={refresh} stale={!!view} />
     {view && <>
       <SummaryCards items={[
@@ -40,7 +40,7 @@ export default function StaffDirectoryPage() {
         {!rows.length
           ? <EmptyState title={all.length ? 'No employees match these filters' : 'No employees yet'} description={all.length ? 'Try another name, employee or setting.' : 'Employees will show here once they have been added.'} action={all.length ? <Button onClick={() => filter('clear', '')}>Clear filters</Button> : undefined} />
           : directoryView === 'cards' ? <DirectoryCards employees={rows} query={params.toString()} /> : <DirectoryTable employees={rows} query={params.toString()} />}
-        <footer className="staff-note"><p><strong>New candidates</strong> shows who can be given new candidates, one after another. It does not show whether someone is online or checked in.</p><p>The counts show the work each person has right now. Open an employee to see finished work for a chosen period.</p></footer>
+        <footer className="staff-note"><p><strong>New candidates</strong> shows who is in line for the next new candidate. It does not show whether someone is online or checked in.</p><p>The counts show the work each person has right now. Open an employee to see finished work for a chosen period.</p></footer>
       </Panel>
     </>}
   </div>

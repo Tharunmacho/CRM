@@ -61,8 +61,9 @@ def test_domain_names_cover_renamed_models_and_documented_intake_extension():
                  "staff_attendance_duty_plans", "staff_attendance_calendar", "staff_attendance_adjustments",
                  "staff_attendance_cover_items"}
     expected |= {'whatsapp_send_attempts', 'whatsapp_templates', 'whatsapp_delivery_events', 'intake_acknowledgements', 'document_person_intakes', 'whatsapp_conversations', 'document_person_groups', 'intake_acknowledgement_settings'}
+    expected |= {"agency_settings", "currencies"}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 50
+    assert len(Base.metadata.tables) == 52
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
@@ -603,7 +604,7 @@ def test_attendance_policy_upgrade_preserves_existing_clocks_and_presence(schema
     before = snapshot()
     _migrate(engine, "head")
     assert snapshot() == before
-    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 50
+    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 52
     _migrate(engine, "0014_attendance_ordering", downgrade=True)
     assert snapshot() == before
     assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 35

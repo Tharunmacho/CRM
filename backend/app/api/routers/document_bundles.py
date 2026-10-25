@@ -47,7 +47,7 @@ class GroupIn(StrictModel):
     def bounded_fields(cls, value):
         import json
         if set(value) - service.FIELD_KEYS or len(json.dumps(value)) > 30000:
-            raise ValueError("Unsupported or oversized candidate details")
+            raise ValueError("Some candidate details are not supported or are too long.")
         return value
 
 

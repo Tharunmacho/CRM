@@ -48,6 +48,22 @@ With Docker Desktop and the preview database container running, restart the prev
 
 The preview passed 26 real-browser screen checks (13 screens at desktop 1440px and mobile 360px), including candidate and order details, with no API errors, JavaScript errors or page-width overflow. Screenshots and the browser report are local artifacts under `artifacts/local-preview/browser/`. These checks establish local screen loading, not live provider integration or production acceptance.
 
+## Live updates (Server-Sent Events)
+
+Every screen is pushed changes the moment they commit, so one user's save appears on other desks without a reload.
+
+How it works: each write transaction ends with `pg_notify('crm_changes', ...)` on its own connection (topic names and opaque ids only, never personal data; a rolled-back transaction announces nothing). Each server process keeps one extra PostgreSQL connection that `LISTEN`s and fans events out to browsers through `GET /api/events`. Browsers refetch through the normal permission-checked API. Polling stays as a slow safety net (2 minutes) while the stream is up and returns to the old fast intervals if it drops.
+
+Deployment checklist:
+
+- **Proxy buffering must be off for `/api/events`.** The response already sends `X-Accel-Buffering: no` and `Cache-Control: no-cache, no-transform`, which nginx and Traefik honour. Behind another proxy or CDN, disable response buffering and compression for that path and allow a read timeout above 60 seconds (heartbeats arrive every 20 seconds). Dokploy/Traefik needs no extra setting; for a custom nginx use `proxy_buffering off; proxy_read_timeout 3600s;` on `/api/events`.
+- **The database must allow `LISTEN`/`NOTIFY` on a direct connection.** A pooler in *transaction* mode (PgBouncer `pool_mode=transaction`) delivers no notifications; point `DATABASE_URL` at the server directly or at a session-mode pooler. If it cannot, the stream answers 503 and the app polls as before.
+- **One extra database connection per server process** (the listener). With N workers, N connections; each worker serves its own browsers.
+- **Switch off** with `CRM_LIVE_EVENTS=0` (no notifications sent, no listener, `/api/events` answers 503 and browsers poll). Run workers with the same setting as the web process.
+- Per account at most 8 concurrent streams (a further tab gets 429 and polls). A session that is signed out, expired or whose account is deactivated receives `bye` and is closed within the 20-second heartbeat, usually at once.
+- The browser workspace cache is **off**: no workspace, candidate or report data is stored in the browser, and entries left by older versions (`crm-swr:v1:*`) are deleted at startup. To bring the fast-reload cache back set `SNAPSHOT_CACHE_ENABLED = true` in `frontend/src/shared/state/snapshot-cache.ts` (live events then erase it whenever data changes). Unsent mail/WhatsApp draft text kept in the browser is user input, not business data, and is untouched.
+- Verify after deploy: open the CRM in two browsers, create a client in one, and watch it appear in the other's list within a second. In the browser network tab `/api/events` should stay open (type `eventsource`) and receive a `ping` every 20 seconds.
+
 ## Zoho Mail inside the CRM
 
 Follow [email connections](email-connections.md) for the Zoho account-specific IMAP/SMTP details. Set `MAIL_TOKEN_ENCRYPTION_KEY` once and back it up securely; replacing it invalidates existing encrypted credentials. Admin can connect Zoho later from the CRM. The app does not require a connected mailbox to use recruitment or attendance. New Gmail/Microsoft connections and live operations are disabled; existing historical records remain readable.

@@ -89,9 +89,9 @@ def test_mutations_reject_multi_message_or_invalid_uid_before_command(uid):
 
 def test_uidvalidity_guard_stops_remote_mutations():
     adapter=box()
-    with pytest.raises(MailAdapterError,match='Mailbox identifiers changed') as failure:
+    with pytest.raises(MailAdapterError,match='reset by the mail provider') as failure:
         adapter.move('INBOX',8,'old-validity','Trash')
-    assert 'Reconnecting alone cannot restore sync' in str(failure.value)
+    assert 'Contact your administrator' in str(failure.value)
     assert not any(call[0] in {'MOVE','COPY','STORE','EXPUNGE'} for call in adapter._connection.calls)
 
 

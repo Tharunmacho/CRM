@@ -4,7 +4,7 @@ import { dateLabel, money } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
 import type { Order } from '@/shared/model/types'
 import { orderStatusKey } from '@/features/jobs/order-meta'
-import { orderCounts } from '@/features/jobs/order-counts'
+import { useOrderStats } from '@/features/jobs/use-order-stats'
 import { Avatar, Place } from '@/features/jobs/components/identity'
 import { DueChip, OrderRowActions, OrderStatusText, type OrderActionHandlers } from '@/features/jobs/components/order-parts'
 
@@ -15,8 +15,7 @@ export function OrderCard({ order, handlers, showDesignation }: { order: Order; 
   const store = useStore()
   const company = store.company(order.companyId)
   const designation = store.designation(order.designationId)
-  const apps = store.applications.filter((application) => application.orderId === order.id)
-  const { matched, selected, deployed } = orderCounts(apps)
+  const { matched, selected, deployed } = useOrderStats().of(order.id)
   const share = Math.min(100, order.openings ? (deployed / order.openings) * 100 : 0)
   const status = orderStatusKey(order)
   const name = company?.name ?? 'Unknown company'

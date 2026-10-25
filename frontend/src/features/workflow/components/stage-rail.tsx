@@ -30,16 +30,19 @@ export function StageRail({
     if (no === currentStage) return 'now'
     return (reached ? reached.includes(no) : no < currentStage) ? 'done' : 'todo'
   }
+  const remaining = STAGES.filter((stage) => stateOf(stage.no) === 'todo').length
   return (
-    <ol className={cn('sr', numbered && 'is-numbered', className)} aria-label="The 11 stages">
+    <ol className={cn('sr', numbered && 'is-numbered', className)} aria-label={remaining > 0 ? `The 11 stages, ${remaining} more ${remaining === 1 ? 'step' : 'steps'} to go` : 'The 11 stages'}>
       {STAGES.map((stage) => {
         const state = stateOf(stage.no)
-        const label = `${stage.no}. ${stage.title}`
+        // Only stages that were reached carry their title. A future stage stays an anonymous hollow
+        // segment, so the rail never names a step the candidate has not got to.
+        const label = state === 'todo' ? `Step ${stage.no}` : `${stage.no}. ${stage.title}`
         return (
           <li
             key={stage.no}
             className={cn('sr-seg', `is-${state}`)}
-            title={state === 'todo' ? `${label} (not started)` : state === 'now' ? `${label} (current)` : state === 'closed' ? `${label} (closed here)` : `${label} (done)`}
+            title={state === 'todo' ? 'Not reached yet' : state === 'now' ? `${label} (current)` : state === 'closed' ? `${label} (closed here)` : `${label} (done)`}
             aria-current={state === 'now' ? 'step' : undefined}
           >
             {numbered ? <span className="tnum">{stage.no}</span> : <span className="sr-sr">{label}</span>}
@@ -54,7 +57,7 @@ export function StageRail({
 export function StageCaption({ no, status }: { no: number; status: ApplicationStatus }) {
   if (status === 'deployed') return <span className="sr-caption">Deployed · all 11 stages</span>
   const title = stageByNo(no).title
-  return <span className="sr-caption"><b className="tnum">{no}</b>{title}{status === 'closed' ? ' · closed' : ''}</span>
+  return <span className="sr-caption"><b className="tnum">{no}</b>{title}{status === 'closed' ? ' · closed here' : ''}</span>
 }
 
 /**

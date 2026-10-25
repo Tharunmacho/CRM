@@ -213,10 +213,18 @@ def test_passport_with_only_a_surname_still_gives_a_name():
 
 
 def test_passport_nationality_code_without_a_demonym_is_kept_as_the_code():
-    fields, _ = passport_fields(passport({"nationality": "KEN", "sex": "F"}))
+    fields, _ = passport_fields(passport({"nationality": "BTN", "sex": "F"}))
 
-    assert fields.nationality == "KEN"
+    assert fields.nationality == "BTN"
     assert fields.gender == "female"
+
+
+@pytest.mark.parametrize("code,demonym", [("IDN", "Indonesian"), ("KEN", "Kenyan"), ("UGA", "Ugandan"), ("ETH", "Ethiopian"),
+                                          ("EGY", "Egyptian"), ("NGA", "Nigerian"), ("GHA", "Ghanaian")])
+def test_passport_nationality_covers_the_countries_the_agency_works_with(code, demonym):
+    fields, _ = passport_fields(passport({"nationality": code}))
+
+    assert fields.nationality == demonym
 
 
 def test_passport_failed_check_digits_warn_the_recruiter():

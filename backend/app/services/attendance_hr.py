@@ -564,7 +564,7 @@ def nominate_cover(db, actor, request_id, body, *, at=None):
     _check_cover(db, actor, body["coverUserId"], row.attendance_date)
     row.cover_user_id, row.cover_status, row.cover_note = body["coverUserId"], "requested", None
     db.flush()
-    _audit(db, actor, "Nominated replacement leave cover", row, {"coverUserId": row.cover_user_id})
+    _audit(db, actor, "Chose someone to cover leave", row, {"coverUserId": row.cover_user_id})
     _notify(db, row.cover_user_id, "Leave cover requested", f"{actor.name} needs cover on {row.attendance_date}")
     return _request_json(db, actor, row)
 
@@ -732,7 +732,7 @@ def _move_task(db, task, target_id, request_id, at, phase):
 
 
 def _cover_audit(db, candidate_id, request, from_id, to_id, at, *, returning=False):
-    db.add(AuditEntry(actor_id=None, action="Returned leave-cover candidate" if returning else "Started leave-cover candidate",
+    db.add(AuditEntry(actor_id=None, action="Returned candidate after leave cover" if returning else "Moved candidate to leave cover",
         entity_type="candidate", entity_id=candidate_id, at=at,
         meta={"fromUserId": from_id, "toUserId": to_id, "requestId": request.id,
               "reason": f"{'Return after' if returning else 'Accepted'} leave cover for {request.attendance_date}"}))
@@ -759,8 +759,8 @@ def run_cover_sweep(db, *, at=None):
         # the UI claiming an expired handover is still scheduled.
         request.cover_settled_at = at
         counts["settled"] += 1
-        _audit(db, None, "Leave-cover window elapsed without handover", request, {"date": request.attendance_date.isoformat()})
-        _notify(db, request.user_id, "Leave cover did not run", f"The cover window for {request.attendance_date} elapsed before handover; no candidates were moved.")
+        _audit(db, None, "Leave cover ended without handing over candidates", request, {"date": request.attendance_date.isoformat()})
+        _notify(db, request.user_id, "Leave cover did not run", f"The cover period for {request.attendance_date} ended before any candidates were handed over, so none were moved.")
     finished = list(db.scalars(select(AttendanceHRRequest).where(AttendanceHRRequest.cover_started_at.is_not(None),
         AttendanceHRRequest.cover_settled_at.is_(None), AttendanceHRRequest.attendance_date < today).order_by(AttendanceHRRequest.id).with_for_update()))
     for request in finished:
@@ -796,7 +796,7 @@ def run_cover_sweep(db, *, at=None):
             counts[outcome] += 1
         request.cover_settled_at = at
         counts["settled"] += 1
-        _notify(db, request.user_id, "Leave cover ended", f"Cover for {request.attendance_date} has settled; unfinished unchanged work was returned.")
+        _notify(db, request.user_id, "Leave cover ended", f"Cover for {request.attendance_date} has ended. Work that was not finished was given back to its original owner.")
         notify_assignment_changes(db, ownership_changes, reason=f"Unfinished work returned after leave cover on {request.attendance_date}.", users=users.values())
     # Sessions use autoflush=False. Today's handover must see yesterday's
     # returned ownership and closed ledger entries in the same transaction.

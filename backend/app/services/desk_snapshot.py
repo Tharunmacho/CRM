@@ -8,6 +8,7 @@ This is a fresh database snapshot, not a cross-user cache.
 
 from sqlalchemy import JSON, Select, case, cast, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
@@ -15,9 +16,10 @@ from app.api.schemas import (
     NotificationOut, OrderOut, RemarkOut, StageRecordOut, TaskOut, TodoOut, UserOut,
 )
 from app.db.models import (
-    Application, ApplicationStage, Attachment, Candidate, Client, Company,
-    Designation, Notification, Order, Remark, Role, Task, TodoItem, User,
+    AgencySettings, Application, ApplicationStage, Attachment, Candidate, Client, Company,
+    Currency, Designation, Notification, Order, Remark, Role, Task, TodoItem, User,
 )
+from app.services import agency_settings
 from app.services.ingestion_revision import revision_expression
 
 
@@ -40,7 +42,7 @@ def _rows(name: str, statement: Select, *ordering):
     return select(func.json_agg(record, type_=JSON)).scalar_subquery().label(name)
 
 
-def snapshot_statement(user_id: str, *, compact: bool = False) -> Select:
+def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = True) -> Select:
     supervisor = select(User.role.in_([Role.admin, Role.manager])).where(User.id == user_id).scalar_subquery()
     owned_candidates = select(Candidate.id).where(Candidate.owner_id == user_id)
     visible_tasks = or_(supervisor, Task.owner_id == user_id)
@@ -72,6 +74,19 @@ def snapshot_statement(user_id: str, *, compact: bool = False) -> Select:
         .distinct(Attachment.entity_id)
         .order_by(Attachment.entity_id, Attachment.version.desc())
     )
+    # The agency profile and currency list ride in the same statement: no extra request or round trip.
+    # `settings=False` leaves them out for a database that has not had migration 0017 yet.
+    agency_row = select(
+        AgencySettings.name, AgencySettings.short_name, AgencySettings.default_order_currency,
+        AgencySettings.default_advance_currency, AgencySettings.home_calling_code,
+        AgencySettings.default_nationality, AgencySettings.acknowledgement_text,
+        AgencySettings.updated_by, AgencySettings.updated_at,
+    ).where(AgencySettings.id == 1).subquery("agency_row")
+    settings_columns = [
+        select(func.row_to_json(agency_row.table_valued())).scalar_subquery().label("agency"),
+        _rows("currencies", select(Currency.code, Currency.name, Currency.symbol, Currency.active, Currency.sort_order),
+              ("sort_order", False), ("code", False)),
+    ] if settings else []
     return select(
         # Use the candidates' SQL snapshot, so a completion between bootstrap
         # and the first browser poll cannot be mistaken for an initial baseline.
@@ -101,8 +116,25 @@ def snapshot_statement(user_id: str, *, compact: bool = False) -> Select:
             _fields(Notification, NotificationOut).where(Notification.user_id == user_id),
             ("created_at", True), ("id", False),
         ),
+        *settings_columns,
     )
 
 
-def read_snapshot(db: Session, user_id: str, *, compact: bool = False) -> dict[str, list[dict] | str]:
-    return {name: rows or [] for name, rows in db.execute(snapshot_statement(user_id, compact=compact)).mappings().one().items()}
+def read_snapshot(db: Session, user_id: str, *, compact: bool = False) -> dict[str, list[dict] | dict | str | None]:
+    use_settings = agency_settings.assume_present()
+    try:
+        row = db.execute(snapshot_statement(user_id, compact=compact, settings=use_settings)).mappings().one()
+    except ProgrammingError as error:
+        if not (use_settings and agency_settings.is_missing_table(error)):
+            raise
+        # An un-migrated database: read the desk without the settings and remember that for a little while.
+        db.rollback()
+        agency_settings.mark_present(False)
+        row = db.execute(snapshot_statement(user_id, compact=compact, settings=False)).mappings().one()
+    else:
+        if use_settings:
+            agency_settings.mark_present(True)
+    snapshot = {name: rows or [] for name, rows in row.items() if name != "agency"}
+    snapshot["agency"] = row["agency"] if "agency" in row else None
+    agency_settings.note_snapshot(snapshot["agency"])
+    return snapshot

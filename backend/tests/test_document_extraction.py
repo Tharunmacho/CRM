@@ -232,7 +232,7 @@ def test_a_page_beyond_the_limit_is_reported_and_blocks_extraction_instead_of_va
 
     assert output["status"] == "needs_review" and output["extractions"] == {}
     assert output["inspection"]["unread_pages"] == [2]
-    assert "inspection limit" in output["inspection"]["pages"][1]["reason"]
+    assert "too many to read" in output["inspection"]["pages"][1]["reason"]
     assert environment.submissions == []
 
 
@@ -332,10 +332,10 @@ def test_cached_paid_result_does_not_require_available_provider_configuration(en
 def test_accepted_failed_job_is_not_resubmitted_without_retry_budget_authorization(environment):
     data = pdf(CV)
     environment.statuses["resume"] = "failed"
-    with pytest.raises(subject.ExtractionFailure, match="accepted resume job failed"):
+    with pytest.raises(subject.ExtractionFailure, match="could not read the resume pages"):
         environment.extract(data)
     restarted = deepcopy(environment.saved[-1])
-    with pytest.raises(subject.ExtractionFailure, match="accepted resume job failed"):
+    with pytest.raises(subject.ExtractionFailure, match="could not read the resume pages"):
         environment.extract(data, state=restarted)
     assert len(environment.submissions) == len(environment.polls) == len(environment.opened) == 1
 
@@ -344,7 +344,7 @@ def test_budgeted_retry_allows_initial_attempt_and_three_distinct_confirmed_fail
     data = pdf(CV)
     environment.statuses["resume"] = "failed"
     for attempt in range(1, 5):
-        with pytest.raises(subject.ExtractionFailure, match="accepted resume job failed"):
+        with pytest.raises(subject.ExtractionFailure, match="could not read the resume pages"):
             environment.extract(data)
         assert len(environment.submissions) == attempt
         if attempt < 4:
@@ -467,7 +467,7 @@ def test_nonmatching_content_is_ignored_without_provider_configuration(environme
 
 def test_missing_provider_configuration_retains_inspection(environment):
     environment.settings.veris_ocr_api_key = ""
-    with pytest.raises(subject.ExtractionFailure, match="not configured"):
+    with pytest.raises(subject.ExtractionFailure, match="not set up"):
         environment.extract(pdf(CV))
     assert environment.saved[-1]["inspection"]["resume_pages"] == [1]
     assert environment.submissions == environment.opened == []
@@ -477,7 +477,7 @@ def test_checkpoint_failure_stops_before_paid_work(environment):
     def unavailable(snapshot):
         raise RuntimeError("Synthetic storage outage")
 
-    with pytest.raises(subject.ExtractionFailure, match="progress could not be saved"):
+    with pytest.raises(subject.ExtractionFailure, match="could not save the progress"):
         environment.extract(pdf(CV), save=unavailable)
     assert environment.submissions == environment.opened == []
 
@@ -526,7 +526,7 @@ def test_aadhaar_birth_year_and_number_never_become_invented_candidate_fields(en
     assert "nationality" not in fields
     assert "current_city" not in fields
     assert any("birth year" in warning for warning in output["warnings"])
-    assert any("number did not pass" in warning for warning in output["warnings"])
+    assert any("number does not look right" in warning for warning in output["warnings"])
 
 
 # ---- partial extraction, dual-kind pages, unreadable and decorative files -----------------

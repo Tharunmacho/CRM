@@ -16,10 +16,13 @@
 
 .workspace-loading { display: grid; place-items: center; min-height: 280px; padding: 28px; background: var(--bg-main); font-family: var(--crm-font); }
 .workspace-loading.is-fullscreen { min-height: 100vh; background: var(--bg-main); }
-.splash { width: min(100%, 260px); display: flex; flex-direction: column; align-items: center; animation: splash-in 240ms ease-out both; }
-.splash-mark { display: grid; place-items: center; width: 52px; height: 52px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); animation: splash-pulse 1.8s ease-in-out infinite; }
-.splash-mark > span { display: block; width: 22px; height: 22px; border: 3px solid var(--primary); border-radius: 6px; transform: rotate(45deg); }
-.splash-brand { margin-top: 16px; color: var(--text-main); font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
+.splash { width: min(100%, 300px); display: flex; flex-direction: column; align-items: center; animation: splash-in 240ms ease-out both; }
+/* The full Care India Overseas logo (the dark theme gets the dark variant), gently pulsing while the workspace opens. */
+.splash-logo { display: block; width: min(100%, 240px); animation: splash-pulse 1.8s ease-in-out infinite; }
+.splash-logo > img { display: block; width: 100%; height: auto; }
+.splash-logo-dark { display: none !important; }
+[data-theme="dark"] .splash-logo-light { display: none !important; }
+[data-theme="dark"] .splash-logo-dark { display: block !important; }
 .splash-track { width: 120px; height: 3px; margin-top: 20px; background: var(--tint-2); overflow: hidden; border-radius: 3px; }
 .splash-track > span { display: block; height: 100%; width: 40%; background: var(--primary); border-radius: inherit; animation: splash-slide 1.2s cubic-bezier(.4,0,.2,1) infinite; }
 .splash-note { margin-top: 16px; min-height: 22px; color: var(--text-muted); font-size: 13px; text-align: center; opacity: 0; transition: opacity 300ms; }
@@ -27,7 +30,7 @@
 .workspace-loading-retry { margin-top: 14px; padding: 9px 18px; border-radius: 6px; border: 1px solid var(--border-control); background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; }
 .workspace-loading-retry:hover { border-color: var(--border-hover); background: var(--tint-1); }
 @keyframes splash-in { from { opacity: 0; transform: translateY(4px); } }
-@keyframes splash-pulse { 50% { transform: scale(1.05); } }
+@keyframes splash-pulse { 50% { transform: scale(1.03); } }
 @keyframes splash-slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 
 /* Skeleton screens: shaped like the page they stand in for. The shimmer runs between two tints. */
@@ -67,4 +70,4 @@
 @keyframes sk-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (max-width: 900px) { .sk-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .sk-cards { grid-template-columns: 1fr; } .sk-hide-sm { display: none; } .sk-actions { display: none; } }
-@media (prefers-reduced-motion: reduce) { .sk, .splash, .splash-mark, .splash-track > span, .sk-page { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .sk, .splash, .splash-logo, .splash-track > span, .sk-page { animation: none; } }

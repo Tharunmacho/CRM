@@ -4,7 +4,7 @@ import { Button, Checkbox, Field, Input, Select, Textarea } from '@/shared/ui/pr
 import { useStore } from '@/shared/state/crm-store'
 import { Dialog } from '@/shared/ui/overlay'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { attendanceLabels, requestLabels, approvalLabel, type AttendanceRequest, type AttendanceSettings, type RequestKind } from '../policy-model'
+import { attendanceLabels, requestLabels, approvalLabel, minutesLabel, type AttendanceRequest, type AttendanceSettings, type RequestKind } from '../policy-model'
 
 interface FormProps { onClose: () => void; onSaved: () => void }
 function SaveDialog({ title, description, onClose, onSaved, children, save, label = 'Save' }: FormProps & { title: string; description?: string; children: ReactNode; save: () => Promise<unknown>; label?: string }) {
@@ -76,6 +76,9 @@ export function AttendanceScheduleDialog({ kind, today, userId, settings, canCor
   const [minutes, setMinutes] = useState('0')
   const [action, setAction] = useState('check_in')
   const [occurredAt, setOccurredAt] = useState(`${today}T10:00`)
+  const toMinutes = (value: string) => { const [h, m] = value.split(':').map(Number); return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : NaN }
+  const net = toMinutes(end) - toMinutes(start) - (Number(breakMinutes) || 0)
+  const shiftNet = Number.isFinite(net) && net > 0 ? net : null
   const title = { duty: 'Plan a shift', timing: 'Set work timings', calendar: 'Set a special day', adjustment: 'Fix an attendance record' }[kind]
   const save = async () => {
     const common = { userId: employee, date, reason: reason.trim() }
@@ -89,6 +92,7 @@ export function AttendanceScheduleDialog({ kind, today, userId, settings, canCor
     <Field label="Employee" required><Select required value={employee} onChange={(event) => setEmployee(event.target.value)}><option value="">Choose an employee</option>{eligibleEmployees.map((person) => <option key={person.id} value={person.id}>{person.name}{!person.active ? ' (inactive)' : ''}</option>)}</Select></Field>
     <Field label={kind === 'timing' ? 'Effective from' : 'Date'} required><DatePicker value={date} onChange={setDate} required /></Field>
     {(kind === 'duty' || kind === 'timing') && <><Field label="Shift start" required><Input type="time" value={start} onChange={(event) => setStart(event.target.value)} required /></Field><Field label="Shift end" required><Input type="time" value={end} onChange={(event) => setEnd(event.target.value)} required /></Field><Field label="Break (minutes)" required><Input type="number" min={0} max={480} value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} required /></Field></>}
+    {(kind === 'duty' || kind === 'timing') && shiftNet !== null && <p className="attendance-form-wide att-shift-note">Counts as <strong>{minutesLabel(shiftNet)}</strong> of work ({start} to {end} with a {breakMinutes} minute break).</p>}
     {kind === 'adjustment' && <Field label="What do you want to fix?" required><Select value={adjustment} onChange={(event) => setAdjustment(event.target.value)}>{canCorrect && <option value="status_override">Change the day's status</option>}<option value="time_recovery">Give back unpaid minutes</option><option value="add_punch">Add a missing check-in or check-out</option></Select></Field>}
     {(kind === 'calendar' || (kind === 'adjustment' && adjustment === 'status_override')) && <Field label="Attendance status" required><Select value={status} onChange={(event) => setStatus(event.target.value)}>{Object.entries(attendanceLabels).filter(([code]) => kind !== 'calendar' || (canCorrect ? ['H', 'WO', 'PL', 'UL'] : ['H', 'WO']).includes(code)).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</Select></Field>}
     {kind === 'adjustment' && adjustment === 'time_recovery' && <Field label="Minutes to give back" required><Input type="number" min={1} max={1440} value={minutes} onChange={(event) => setMinutes(event.target.value)} required /></Field>}

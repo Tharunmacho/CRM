@@ -129,7 +129,7 @@ function Require({ capability, children }: { capability: Capability; children: J
   if (can(capability)) return children
   return (
     <EmptyState
-      title="This page is not available to your role"
+      title="You do not have access to this page"
       description={`You are signed in as ${me.name} (${me.role}). Ask an admin if you need access.`}
     />
   )
@@ -138,7 +138,7 @@ function Require({ capability, children }: { capability: Capability; children: J
 function RequireStaffSupervisor({ children }: { children: JSX.Element }) {
   const { me } = useStore()
   if (me.role === 'admin' || me.role === 'manager') return children
-  return <EmptyState title="Staff directory is available to supervisors" description="Administrators and managers can review employee availability and team workload." />
+  return <EmptyState title="Only admins and managers can see the staff directory" description="They can check who is available and how busy each person is." />
 }
 
 export default function AppRoutes() {

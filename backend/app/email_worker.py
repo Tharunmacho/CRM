@@ -62,7 +62,7 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
             receive_history(account_id, sessions=sessions, settings=settings)
         except Exception as exc:
             from app.integrations.mail.imap import MailAdapterError
-            message = str(exc) if isinstance(exc, MailAdapterError) else "Mailbox sync failed. Check connection settings and worker logs."
+            message = str(exc) if isinstance(exc, MailAdapterError) else "We could not check this mailbox for new emails. We will try again soon. If this keeps happening, contact your administrator."
             log.warning("Mailbox %s sync failed (%s)", account_id, type(exc).__name__)
             with sessions() as db:
                 account = db.get(MailAccount, account_id)
@@ -105,7 +105,7 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
                     job.attempts += 1
                     job.status = "failed" if job.attempts >= 4 else "retry"
                     job.next_attempt_at = now() + timedelta(seconds=90 * 2 ** (job.attempts - 1))
-                    job.last_error = "Document processing failed. Retry after checking worker configuration."
+                    job.last_error = "We could not read the documents in this email. Try again, and contact your administrator if it keeps happening."
                     db.commit()
     if mode != "extract":
         dispatch_pending_email_acknowledgements(sessions=sessions, settings=settings)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
@@ -12,32 +13,49 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.schemas import CandidateOut as CandidateDetailOut, Wire
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.session import get_db
+from app.services import document_storage
 from app.core.deps import current_user, require_role
 from app.integrations.ocr.mapping import resume_text_from
 from app.services.candidate_identity import identity_matches, enrich_empty, normalize_candidate_values, normalize_phone
-from app.services.candidate_intake_binding import bind_intake, lock_intake_group, saved_candidate
+from app.services.candidate_intake_binding import bind_intake, lock_intake_group, saved_candidate, saved_candidate_id
 from app.services.candidate_search import Pool, Search, search_candidates, export_candidates, candidate_skill_facets, pool_counts
 from app.services.candidate_matching import match_candidates
 from app.services.parallel_reads import parallel_reads
 from app.db.models import (
+    Application,
+    ApplicationStatus,
     AssignmentPointer,
+    Attachment,
     AuditEntry,
     Candidate,
     CandidateStatus,
+    DocumentExtractionJob,
+    DocumentPersonGroup,
+    EmailIngestionJob,
+    MailAttachment,
+    MailDraftAttachment,
+    MailMessage,
     Notification,
+    Order,
     Role,
     Source,
     Task,
     TaskKind,
+    TodoItem,
     User,
+    WhatsAppConversation,
+    WhatsAppMessage,
+    WhatsAppSendAttempt,
 )
 
 router = APIRouter(prefix="/api/candidates", tags=["candidates"])
+logger = logging.getLogger(__name__)
 
 
 def candidate_filters(q: str = Query(default="", max_length=500), pool: Pool = "all",
@@ -220,7 +238,7 @@ class CandidateIn(BaseModel):
     whatsapp: str | None = None
     email: str | None = None
     gender: str | None = None
-    nationality: str | None = "Indian"
+    nationality: str | None = None
     current_city: str | None = None
     languages: list[str] = Field(default_factory=list)
 
@@ -600,12 +618,14 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if not candidate:
         raise HTTPException(404, "Candidate not found.")
-    ensure_candidate_edit(candidate, user)
+    # Combining a new entry into an existing duplicate is open to every signed-in
+    # user (PRD: merge or cancel). It can only fill empty fields and add documents,
+    # so the owner, status and populated details of the existing candidate stay.
     intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
-    recovered = saved_candidate(db, intake_jobs, user)
-    if recovered is not None and recovered.id != candidate_id:
+    recovered_id = saved_candidate_id(intake_jobs)
+    if recovered_id is not None and recovered_id != candidate_id:
         raise HTTPException(409, "These documents already belong to another saved candidate.")
-    if recovered is not None:
+    if recovered_id is not None:
         owner = db.get(User, candidate.owner_id) if candidate.owner_id else None
         return CandidateOut(id=candidate.id, ref=candidate.ref, name=candidate.name, owner_id=candidate.owner_id,
                             owner_name=owner.name if owner else None, task_id=None)
@@ -625,7 +645,8 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
         raise HTTPException(409, f"These details conflict with the retained candidate profile: {exc}") from exc
     changed = enrich_empty(candidate, values, body.ocr_data.stored() if body.ocr_data else None)
     bind_intake(intake_jobs, candidate.id)
-    db.add(AuditEntry(actor_id=user.id, action="Merged candidate entry", target=candidate.name, entity_type="candidate", entity_id=candidate.id, meta={"filled_fields": changed}))
+    db.add(AuditEntry(actor_id=user.id, action="Merged candidate entry", target=candidate.name, entity_type="candidate", entity_id=candidate.id,
+                      meta={"filled_fields": changed, "merged_by": user.name, "owner_id": candidate.owner_id}))
     db.commit()
     owner_user = db.get(User, candidate.owner_id) if candidate.owner_id else None
     return CandidateOut(id=candidate.id, ref=candidate.ref, name=candidate.name, owner_id=candidate.owner_id,
@@ -672,3 +693,117 @@ def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session 
                       meta={"changed_fields": [key for key in changes if before[key] != changes[key]], "review_completed": body.mark_reviewed}))
     db.commit()
     return {"id": candidate.id, "needsReview": candidate.needs_review}
+
+
+# ----------------------------------------------------------------- deletion
+#
+# Admin only. A candidate on an order (active) or with a deployed placement is never
+# deleted: the order's filled count and the placement record must stay. Everything else
+# goes in one transaction. Tables that declare ON DELETE CASCADE from the candidate or
+# its applications/tasks (applications, application stages, tasks, task remarks, task
+# SLA events, leave-cover items) are removed by the database. The tables below have a
+# plain foreign key, so they are handled here or the delete would fail:
+#   - kept, link cleared: mail messages, WhatsApp messages and conversations, email
+#     intake jobs, multi-person document groups (the mail and chats stay in the inbox)
+#   - removed: stored documents (all versions), manual upload jobs, notifications and
+#     to-do links that pointed at the candidate or its tasks
+# The audit trail is kept, and records that the candidate was deleted. The round-robin
+# pointer holds a user, not a candidate, so it is untouched.
+
+def _files_still_used(db: Session, keys: set[str]) -> set[str]:
+    """Stored objects that another record (mail, WhatsApp, drafts, other documents) still points at."""
+    used: set[str] = set()
+    for column in (Attachment.object_key, MailAttachment.object_key, WhatsAppMessage.object_key,
+                   WhatsAppSendAttempt.object_key, DocumentExtractionJob.object_key, MailDraftAttachment.object_key):
+        used.update(db.scalars(select(column).where(column.in_(keys))))
+    return used
+
+
+def _remove_stored_files(db: Session, audit_id: str, keys: set[str]) -> None:
+    """Best effort, after the commit. A storage problem must never undo or fail the delete."""
+    leftover: list[str] = []
+    try:
+        shared = _files_still_used(db, keys)
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not check which stored files of a deleted candidate are still in use")
+        db.rollback()
+        shared, leftover, keys = set(), sorted(keys), set()
+    settings = get_settings()
+    for key in sorted(keys - shared):
+        try:
+            document_storage.delete_bytes(settings, key)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not remove stored file %s of a deleted candidate", key)
+            leftover.append(key)
+    if leftover:
+        try:
+            entry = db.get(AuditEntry, audit_id)
+            entry.meta = {**(entry.meta or {}), "storageLeftover": leftover}
+            db.commit()
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not record the leftover stored files of a deleted candidate")
+            db.rollback()
+
+
+@router.delete("/{candidate_id}")
+def delete_candidate(candidate_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+    # Same lock order as a profile correction: assignment cursor, then the candidate.
+    lock_assignment_cursor(db)
+    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
+    if candidate is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
+
+    placements = db.execute(
+        select(Application.id, Application.status, Order.ref)
+        .join(Order, Order.id == Application.order_id)
+        .where(Application.candidate_id == candidate_id)
+    ).all()
+    if any(state is ApplicationStatus.active for _, state, _ in placements):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This candidate is still on an order. Remove them from the order first.")
+    deployed = next((order_ref for _, state, order_ref in placements if state is ApplicationStatus.deployed), None)
+    if deployed:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"This candidate was deployed through {deployed}, and a deployed placement is kept on record. They cannot be deleted.")
+
+    name, ref = candidate.name, candidate.ref
+    application_ids = [row[0] for row in placements]
+    attached = db.execute(select(Attachment.id, Attachment.object_key).where(
+        or_(
+            (Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id),
+            (Attachment.entity_type == "application") & Attachment.entity_id.in_(application_ids or [""]),
+        ))).all()
+    attachment_ids = [row[0] for row in attached]
+    jobs = db.execute(select(DocumentExtractionJob.object_key).where(DocumentExtractionJob.candidate_id == candidate_id)).all()
+    task_ids = list(db.scalars(select(Task.id).where(Task.candidate_id == candidate_id)))
+    stored_keys = {key for _, key in attached if key} | {key for (key,) in jobs if key}
+
+    # Records that keep existing but must stop pointing at this candidate.
+    for model in (MailMessage, WhatsAppMessage, WhatsAppConversation, EmailIngestionJob):
+        db.execute(update(model).where(model.candidate_id == candidate_id).values(candidate_id=None))
+    db.execute(update(DocumentPersonGroup).where(DocumentPersonGroup.candidate_id == candidate_id)
+               .values(candidate_id=None, fields={}))
+    link = f"/candidates/{candidate_id}"
+    db.execute(update(TodoItem).where(TodoItem.link_to == link).values(link_to=None, link_label=None))
+    db.execute(delete(Notification).where(Notification.link_to.in_([link, *[f"/tasks?task={task_id}" for task_id in task_ids]])))
+
+    # Documents: first anything that points at them, then the documents themselves.
+    if attachment_ids:
+        db.execute(update(DocumentExtractionJob).where(DocumentExtractionJob.attachment_id.in_(attachment_ids))
+                   .values(attachment_id=None))
+    db.execute(delete(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == candidate_id))
+    if attachment_ids:
+        db.execute(delete(Attachment).where(Attachment.id.in_(attachment_ids)))
+
+    # Applications, stages, tasks, remarks and SLA events follow by ON DELETE CASCADE.
+    db.execute(delete(Candidate).where(Candidate.id == candidate_id))
+    audit = AuditEntry(actor_id=user.id, action="Deleted candidate", target=f"{name} ({ref})", entity_type="candidate",
+                       entity_id=candidate_id, meta={"ref": ref, "documents": len(attachment_ids),
+                                                     "applications": len(application_ids), "tasks": len(task_ids)})
+    db.add(audit)
+    db.flush()
+    audit_id = audit.id
+    db.commit()
+
+    if stored_keys:
+        _remove_stored_files(db, audit_id, stored_keys)
+    return {"deleted": {"candidates": 1, "documents": len(attachment_ids), "applications": len(application_ids)}}

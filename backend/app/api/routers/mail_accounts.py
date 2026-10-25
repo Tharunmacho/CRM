@@ -70,7 +70,7 @@ def save_password_account(db: Session, settings, user: User, *, provider: str, a
     row.auto_ingest, row.connected_by, row.disconnected_at = auto_ingest, user.id, None
     row.last_error, row.sync_requested = None, True
     row.sync_state = {**row.sync_state, "folders": folders}
-    audit(db, user, f"connect_{provider}", row, f"Connected {LABELS[provider]}; credentials encrypted and excluded from audit data.")
+    audit(db, user, f"Connected a {LABELS[provider]} mailbox", row, f"Connected {LABELS[provider]}; credentials encrypted and excluded from audit data.")
     try:
         db.commit()
     except IntegrityError:
@@ -146,7 +146,7 @@ def oauth_callback(provider: Literal["gmail", "microsoft"], state: str = Query(d
         session_id: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
     try:
         row = mail_oauth.finish(db, get_settings(), provider, state, code, user.id, session_id, denied=bool(error))
-        audit(db, user, f"connect_{provider}", row, f"Connected {LABELS[provider]} through OAuth; tokens encrypted and excluded from audit data.")
+        audit(db, user, f"Connected a {LABELS[provider]} mailbox", row, f"Connected {LABELS[provider]} through OAuth; tokens encrypted and excluded from audit data.")
         db.commit()
     except MailAdapterError as exc:
         db.rollback()

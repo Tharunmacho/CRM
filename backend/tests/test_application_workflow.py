@@ -411,3 +411,41 @@ def test_concurrent_unmap_and_atomic_complete_have_one_winner(workflow):
         assert app.lock_version == 1
         open_tasks = db.scalar(select(func.count()).select_from(Task).where(Task.application_id == app_id, Task.completed_at.is_(None), Task.cancelled_at.is_(None)))
         assert open_tasks == (1 if app.status == ApplicationStatus.active else 0)
+
+
+def test_mapping_reports_closed_initial_call_under_both_key_styles(workflow):
+    env = workflow
+    with env.sessions() as db:
+        db.add(Task(id="first-call", kind=TaskKind.initial_call, title="Initial call", candidate_id="candidate", owner_id="staff"))
+        db.get(Candidate, "second-candidate").call_recorded_at = datetime.now(timezone.utc)
+        db.commit()
+    first = env.client.post("/api/applications", json={"candidate_id": "candidate", "order_id": "order"})
+    assert first.status_code == 201, first.text
+    body = first.json()
+    assert body["closedInitialCall"] is True and body["closed_initial_call"] is True and body["initialCallRecorded"] is False
+    with env.sessions() as db:
+        assert db.get(Task, "first-call").cancelled_at is not None
+    second = env.client.post("/api/applications", json={"candidate_id": "second-candidate", "order_id": "order"}).json()
+    assert second["closedInitialCall"] is False and second["closed_initial_call"] is False and second["initialCallRecorded"] is True
+
+
+def test_reopenings_endpoint_shows_who_reopened_and_when(workflow):
+    env = workflow
+    app_id = mapped(env)
+    reach(env, app_id, 4)
+    assert env.client.get(f"/api/applications/{app_id}/reopenings").json() == []
+    env.actor = SimpleNamespace(id="admin", role=Role.admin)
+    reopened = env.client.post(f"/api/applications/{app_id}/reopen", json={"stage": 2, "reason": "Correct the date", "lock_version": version(env, app_id)})
+    assert reopened.status_code == 200, reopened.text
+    with env.sessions() as db:
+        audit = db.scalar(select(AuditEntry).where(AuditEntry.action == "Reopened stage 2"))
+    for who in (SimpleNamespace(id="admin", role=Role.admin), SimpleNamespace(id="staff", role=Role.staff)):
+        env.actor = who
+        response = env.client.get(f"/api/applications/{app_id}/reopenings")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert sorted((row["stage"], row["attempt"]) for row in body) == [(2, 1), (3, 1)]
+        assert all(row["reopenedBy"] == "admin" and row["reopenedByName"] == "admin" and row["reason"] == "Correct the date" for row in body)
+        assert all(row["reopenedAt"].startswith(audit.at.isoformat()[:19]) for row in body)
+    env.actor = SimpleNamespace(id="other", role=Role.staff)
+    assert env.client.get(f"/api/applications/{app_id}/reopenings").status_code == 403

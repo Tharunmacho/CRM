@@ -66,7 +66,7 @@
 
 /* ------------------------------------------------- list screens: toolbar */
 .cl-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(0, 172px)) auto; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border-faint); }
-.cl-toolbar.is-companies { grid-template-columns: minmax(220px, 1fr) minmax(0, 220px) auto; }
+.cl-toolbar.is-companies { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(0, 200px)) auto; }
 .workspace-page .cl-toolbar > .ui-search { width: 100%; max-width: none; min-width: 0; }
 .cl-toolbar > .custom-select { min-width: 0; }
 .cl-resultbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 48px; padding: 8px 20px; border-bottom: 1px solid var(--border-faint); font-size: 13px; color: var(--text-muted); }
@@ -74,6 +74,9 @@
 .cl-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px 0 11px; border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--bg-card)); border-radius: 999px; background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); color: var(--primary); font-size: 12.5px; font-weight: 500; transition: background-color .12s; }
 .cl-chip:hover { background: color-mix(in srgb, var(--primary) 16%, var(--bg-card)); }
 .cl-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* The list's own width decides table or cards (see useElementWidth), so the wrapper must be allowed to shrink. */
+.cl-measure { min-width: 0; }
 
 /* ----------------------------------------------------------- list: table */
 .cl-cell { display: grid; min-width: 0; line-height: 1.4; }
@@ -155,9 +158,9 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 .cd-sub > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .cd-head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-.cd-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); align-items: stretch; gap: 20px; margin-bottom: 32px; }
+.cd-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); align-items: start; gap: 20px; margin-bottom: 32px; }
 .cd-layout > :is(aside, section) { display: flex; flex-direction: column; min-width: 0; }
-.cd-layout > :is(aside, section) > .ui-panel { flex: 1; }
+.cd-layout > :is(aside, section) > .ui-panel { flex: none; }
 .cd-person { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
 .cd-person-name { font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--text-main); overflow-wrap: anywhere; }
 .cd-person-role { font-size: 13px; color: var(--text-muted); }
@@ -240,6 +243,23 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 .cd-profile:hover { border-color: var(--primary); color: var(--primary); }
 .cd-profile:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
+/* Company details sheet (opened from the Companies list) */
+.cd-sheet { padding: 20px 20px 20px; border-bottom: 1px solid var(--border-faint); }
+.cd-sheet:last-child { border-bottom: 0; }
+.cd-sheet .cd-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cd-sheet-orders { padding: 20px; }
+.cd-sheet-orders > h3 { margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.cd-sheet-orders .cd-employer-stats { max-width: none; margin-bottom: 12px; }
+.cd-sheet-list { display: grid; gap: 8px; }
+.cd-sheet-list a { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 10px 14px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); transition: border-color .12s; }
+.cd-sheet-list a:hover { border-color: var(--primary); }
+.cd-sheet-list a > .ui-badge, .cd-sheet .cd-employer-badges > * { flex: none; white-space: nowrap; }
+.cd-sheet > header { flex-wrap: wrap; }
+.cd-sheet-list a { text-decoration: none; }
+.cd-sheet-list .cd-sheet-main { display: grid; min-width: 0; line-height: 1.35; }
+.cd-sheet-list b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; color: var(--text-main); }
+.cd-sheet-list small { font-size: 12.5px; color: var(--text-muted); }
+
 /* ----------------------------------------------------------- dialogs */
 .client-form { display: grid; gap: 22px; }
 .client-form-fields { display: grid; gap: 22px; min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -307,7 +327,7 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
   .cd-head h1 { font-size: 23px; }
   .cd-head-actions, .cd-head-actions > .ui-button { width: 100%; }
   .cd-head-actions > .ui-button { flex: 1 1 auto; }
-  .cd-details { grid-template-columns: minmax(0, 1fr); }
+  .cd-details, .cd-sheet .cd-details { grid-template-columns: minmax(0, 1fr); }
   .cd-employer { padding: 16px; }
   .cd-employer > header { flex-wrap: wrap; }
   .cd-employer-badges { justify-content: flex-start; }

@@ -14,6 +14,7 @@
 .att-icon-only.ui-button { width: 32px; padding: 0; }
 .att-row-off { background: var(--tint-1); }
 .att-row-off td { color: var(--text-muted); }
+.att-row-focus { background: color-mix(in srgb, var(--primary) 7%, var(--bg-card)); box-shadow: inset 2px 0 0 var(--primary); }
 
 /* ---------- Status colours: one hue per attendance code, mixed into the card surface ---------- */
 [data-st] { --c: var(--text-muted); }
@@ -139,6 +140,8 @@
 /* ---------- Dialog forms (attendance-forms.tsx) ---------- */
 .attendance-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; min-width: 0; border: 0; padding: 0; margin: 0; }
 .attendance-form-wide { grid-column: 1 / -1; }
+.att-shift-note { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.att-shift-note strong { font-weight: 600; color: var(--text-main); }
 .attendance-help { font-size: 13px; line-height: 1.55; color: var(--text-muted); }
 .attendance-alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); color: var(--error-ink); font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
 .workspace-dialog:has(#attendance-policy-form) { display: flex; flex-direction: column; max-height: calc(100dvh - 64px); }

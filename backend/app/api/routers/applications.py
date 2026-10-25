@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.domain.orders import reopen_blocker
 from app.domain.stages import FILE_FIELDS, TOTAL_STAGES, stage_by_no, validate_payload
+from app.services import agency_settings
 from app.services import document_storage
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
@@ -40,6 +41,10 @@ class MapOut(Wire):
     current_stage: int
     task_id: str
     closed_initial_call: bool
+    # Same flag under the snake_case key older screens read (the Wire default is camelCase).
+    closed_initial_call_snake: bool = Field(serialization_alias="closed_initial_call")
+    # False when nobody has recorded the first call yet, so the screen can warn before matching.
+    initial_call_recorded: bool
 
 
 class DraftIn(BaseModel):
@@ -197,6 +202,11 @@ def _sync_order(db: Session, order: Order):
         order.status = OrderStatus.open
 
 
+def _stage_options(db: Session, stage: int):
+    """Reference data a stage checks its values against; only the advance (stage 8) has any: the active currencies."""
+    return agency_settings.stage_options(db) if stage == 8 else None
+
+
 def _normalized_data(db: Session, app: Application, payload: dict, *, require_bytes=False):
     data = dict(payload)
     for field in FILE_FIELDS.get(app.current_stage, ()):
@@ -255,7 +265,7 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
             raise HTTPException(422, "Choose an active staff member who is holding the passport.")
         data["heldBy"] = {"id": keeper.id, "name": keeper.name}
     try:
-        return validate_payload(app.current_stage, data)
+        return validate_payload(app.current_stage, data, _stage_options(db, app.current_stage))
     except ValidationError as exc:
         errors = [{"field": ".".join(map(str, item["loc"])), "message": item["msg"]}
                   for item in exc.errors()]
@@ -283,6 +293,7 @@ def map_candidate(body: MapIn, db: Session = Depends(get_db), user: User = Depen
         db.add(app)
         db.flush()
         closed_initial_call = False
+        initial_call_recorded = candidate.call_recorded_at is not None
         for task in db.scalars(select(Task).where(
             Task.candidate_id == candidate.id, Task.kind == TaskKind.initial_call,
             Task.completed_at.is_(None), Task.cancelled_at.is_(None),
@@ -293,7 +304,8 @@ def map_candidate(body: MapIn, db: Session = Depends(get_db), user: User = Depen
         candidate.status = CandidateStatus.in_process
         _audit(db, user, "Mapped candidate to order", app, candidate, at, {"order_id": order.id, "owner_id": owner.id})
     return MapOut(id=app.id, candidate_id=candidate.id, order_id=order.id, current_stage=1,
-                  task_id=task.id, closed_initial_call=closed_initial_call)
+                  task_id=task.id, closed_initial_call=closed_initial_call,
+                  closed_initial_call_snake=closed_initial_call, initial_call_recorded=initial_call_recorded)
 
 
 @router.post("/{application_id}/unmap")
@@ -312,6 +324,39 @@ def unmap(application_id: str, body: UnmapIn | None = None,
         candidate.status = CandidateStatus.needs_review if candidate.needs_review else CandidateStatus.new
         _audit(db, user, "Unmapped candidate", app, candidate, at)
     return {"id": app.id, "status": app.status.value, "lockVersion": app.lock_version}
+
+
+class ReopeningOut(Wire):
+    stage: int
+    attempt: int
+    reopened_by: str | None = None
+    reopened_by_name: str | None = None
+    reopened_at: datetime
+    reason: str | None = None
+
+
+@router.get("/{application_id}/reopenings", response_model=list[ReopeningOut])
+def stage_reopenings(application_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Who reopened which completed stage attempt, and when, newest reopening last.
+
+    Read from the audit trail written by the reopen, so it covers earlier reopenings too and needs
+    no extra column. The desk snapshot deliberately never reads the audit log, hence a separate call.
+    """
+    app = _load(db, application_id)
+    ensure_can_work(db, app, user)
+    rows = db.execute(select(AuditEntry.actor_id, AuditEntry.at, AuditEntry.meta, User.name)
+        .outerjoin(User, User.id == AuditEntry.actor_id)
+        .where(AuditEntry.entity_type == "application", AuditEntry.entity_id == app.id,
+               AuditEntry.action.like("Reopened stage%"))
+        .order_by(AuditEntry.at, AuditEntry.id)).all()
+    result: dict[tuple[int, int], ReopeningOut] = {}
+    for actor_id, at, meta, name in rows:
+        for item in (meta or {}).get("superseded_attempts", []):
+            if isinstance(item, dict) and type(item.get("stage")) is int and type(item.get("attempt")) is int:
+                result[(item["stage"], item["attempt"])] = ReopeningOut(
+                    stage=item["stage"], attempt=item["attempt"], reopened_by=actor_id, reopened_by_name=name,
+                    reopened_at=at, reason=(meta or {}).get("reason"))
+    return list(result.values())
 
 
 @router.get("/{application_id}/draft", response_model=DraftOut)
@@ -347,7 +392,7 @@ def complete_stage(application_id: str, body: CompleteIn,
         _owner(db, candidate)
         data = _normalized_data(db, app, body.data if body.data is not None else app.draft or {}, require_bytes=True)
         definition = stage_by_no(app.current_stage)
-        result = definition.evaluate(data)
+        result = definition.evaluate(data, _stage_options(db, app.current_stage))
         if not result.can_complete:
             raise HTTPException(422, {"message": "This stage is not complete.", "missing": result.missing})
         if app.current_stage == TOTAL_STAGES:
@@ -365,7 +410,7 @@ def complete_stage(application_id: str, body: CompleteIn,
             data=data, outcome=result.outcome, completed_by=user.id, completed_at=at,
             owner_id=candidate.owner_id or app.owner_id,
             amount=data.get("amount") if app.current_stage == 8 else None,
-            amount_currency=data.get("amountCurrency", "INR") if app.current_stage == 8 else None,
+            amount_currency=data.get("amountCurrency") if app.current_stage == 8 else None,
         ))
         for task in _open_tasks(db, app):
             if task.stage == app.current_stage:

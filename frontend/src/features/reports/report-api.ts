@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, fileHref, takeEarlyRead } from '@/shared/api/client'
 import { peekReport, rememberReport } from '@/shared/state/snapshot-cache'
+import { liveInterval } from '@/shared/state/live'
 
 export interface Option { id: string; label: string }
 export interface OrderMetrics { id: string; ref: string; company: string; client: string; designation: string; status: string; openings: number; matched: number; selected: number; deployed: number }
@@ -36,6 +37,8 @@ export interface DashboardResult {
 /** How often a visible report re-reads, and the least time between two reads triggered by focus. */
 const REFRESH_MS = 60_000
 const FOCUS_REFRESH_MIN_MS = 15_000
+/** Reports are heavy: when the desk is busy a change burst re-reads them at most this often. */
+const LIVE_REPORT_WINDOW_MS = 1_500
 
 /**
  * Clear prior scope immediately, abort on navigation, and refresh visible desks.
@@ -70,11 +73,16 @@ export function useReportData<T>(path: string, sessionId: string, revision = '')
       } finally { finishedAt = Date.now(); if (request === controller) request = null; if (active) setReading(null) }
     }
     void read(true)
-    const interval = window.setInterval(() => void read(true), REFRESH_MS)
+    // Any business change makes the numbers stale ('reports' follows every change). A read that was already running
+    // began before the change, so it is abandoned and a new one starts.
+    const stopLive = liveInterval(() => void read(true), REFRESH_MS, ['reports'], {
+      debounceMs: LIVE_REPORT_WINDOW_MS,
+      onChange: () => { request?.abort(); request = null; void read(true) },
+    })
     const visible = () => void read()
     document.addEventListener('visibilitychange', visible)
     window.addEventListener('focus', visible)
-    return () => { active = false; request?.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
+    return () => { active = false; request?.abort(); stopLive(); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [key, path, reload])
   const remembered = snapshot?.key === key ? snapshot.data : peekReport<T>(sessionId, path, revision)
   return { data: remembered, error: failure?.key === key ? failure.message : '', refreshing: reading === key, refresh: () => setReload(n => n + 1) }

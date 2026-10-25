@@ -38,11 +38,14 @@ export const fileKind = (name: string): FileKind => {
 }
 
 /** A file-type tile: red PDF, blue document, green sheet, violet image. */
-export function FileIcon({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+export function FileIcon({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
   const kind = fileKind(name)
   const Icon = kind === 'image' ? FileImage : kind === 'sheet' ? FileSpreadsheet : kind === 'other' ? File : FileText
-  return <span className={cn('mb-file', `is-${kind}`, size === 'sm' && 'is-sm')} aria-hidden="true"><Icon size={size === 'sm' ? 14 : 17} strokeWidth={1.9} /></span>
+  return <span className={cn('mb-file', `is-${kind}`, size === 'sm' && 'is-sm', size === 'lg' && 'is-lg')} aria-hidden="true"><Icon size={size === 'sm' ? 14 : size === 'lg' ? 24 : 17} strokeWidth={1.9} /></span>
 }
+
+/** Same tile under the name the attachment preview uses. */
+export const FileTile = FileIcon
 
 export const fileSize = (kb: number) => kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`
 

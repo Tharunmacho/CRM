@@ -406,7 +406,7 @@ def test_eligible_document_requires_provider_configuration_after_inspection(ocr_
     assert detail["inspection"]["page_count"] == 1
     assert detail["inspection"]["selected_pages"] == [1]
     assert all("text" not in page for page in detail["inspection"]["pages"])
-    assert "Configure" in detail["message"]
+    assert "not set up" in detail["message"]
     assert environment.calls == []
     assert environment.database.events == ["rollback", "inspection"]
 

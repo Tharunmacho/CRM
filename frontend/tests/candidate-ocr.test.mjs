@@ -13,7 +13,7 @@ async function loadSource(path) {
 
 const { mergeOcrForm, hasOcrExtraction, inspectedPageCount, scanWarnings, ocrSavePayload } = await loadSource('../src/features/candidates/ocr-form.ts')
 const { api, ApiError } = await loadSource('../src/shared/api/client.ts')
-const defaults = { name: '', phone: '', dob: '', nationality: 'Indian', skills: '', totalExperience: '' }
+const defaults = { name: '', phone: '', dob: '', nationality: '', skills: '', totalExperience: '' }
 const scan = (fields, extra = {}) => ({
   fields, warnings: [], raw: { text: 'Synthetic document' }, extraction_status: 'complete', ...extra,
 })

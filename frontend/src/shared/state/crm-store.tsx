@@ -12,9 +12,13 @@ import { ApiError, api, takeEarlyRead, type InboxUnreadCount } from '@/shared/ap
 import { createLatestRequest } from '@/shared/api/latest-request'
 import { createIngestionRefresh } from '@/shared/api/ingestion-refresh'
 import { agencyDay } from '@/shared/lib/task-time'
+import { EMPTY_SETTINGS } from '@/shared/lib/agency'
 import { indexWorkspace } from './workspace-index'
 import { forgetSnapshots, persistSoon, readPersisted, signedInUserHint } from './snapshot-cache'
+import { live, liveInterval } from './live'
+import { matchDoneMessage } from '@/features/candidates/initial-call'
 import type {
+  AgencySettings,
   Application,
   Candidate,
   Client,
@@ -40,6 +44,8 @@ import type {
 
 interface Data {
   agencyTimezone?: string
+  /** The agency's name, default currencies, calling code and currency list, from the database. */
+  settings: AgencySettings
   ingestionRevision?: string
   users: User[]
   clients: Client[]
@@ -57,6 +63,7 @@ interface Data {
 type Bootstrap = Data & { me: User }
 
 const EMPTY: Data = {
+  settings: EMPTY_SETTINGS,
   users: [],
   clients: [],
   companies: [],
@@ -109,6 +116,8 @@ interface StoreValue extends Data {
   me: User
   ready: boolean
   authenticated: boolean
+  /** The agency name the sign-in page shows before anyone is signed in (null until the server answers). */
+  publicAgency: { name: string; shortName: string | null } | null
   loadError: string | null
   retryStartup: () => Promise<void>
   /** Whether a pending UI operation still belongs to this signed-in account. */
@@ -149,7 +158,7 @@ interface StoreValue extends Data {
   // Writes. Each posts and then reloads, so nothing is left only in the browser.
   saveDraft: (applicationId: string, data: Record<string, unknown>, lockVersion: number) => Promise<void>
   completeStage: (applicationId: string, lockVersion: number) => Promise<void>
-  mapCandidate: (candidateId: string, orderId: string) => Promise<{ refreshed: boolean } | null>
+  mapCandidate: (candidateId: string, orderId: string) => Promise<{ refreshed: boolean; closedInitialCall: boolean } | null>
   unmap: (applicationId: string) => Promise<void>
   addRemark: (taskId: string, body: string) => Promise<void>
   recordCall: (candidateId: string, interested: string, remarks: string, called?: boolean) => Promise<void>
@@ -161,6 +170,8 @@ interface StoreValue extends Data {
   deleteClient: (id: string) => Promise<void>
   deleteCompany: (id: string) => Promise<void>
   deleteOrder: (id: string) => Promise<void>
+  /** Admin only. Throws the server's plain message (e.g. still on an order). */
+  deleteCandidate: (id: string) => Promise<void>
   addDesignation: (payload: Record<string, unknown>) => Promise<void>
   addOrder: (payload: Record<string, unknown>) => Promise<void>
   addTodo: (payload: Record<string, unknown>) => Promise<void>
@@ -171,8 +182,20 @@ interface StoreValue extends Data {
 
 const Ctx = createContext<StoreValue | null>(null)
 
-/** How often the desk asks whether new mail/intake arrived (and re-reads the unread badge). */
+/**
+ * How often the desk asks whether new mail/intake arrived (and re-reads the unread badge) while the live stream
+ * is down. With the stream up it asks when mail/WhatsApp/document topics change, plus a slow safety poll.
+ */
 const PULSE_MS = 20_000
+const NOTIFICATIONS_POLL_MS = 30_000
+
+/** Everything the workspace snapshot (/bootstrap) is built from, except notifications, which have their own cheap read. */
+const WORKSPACE_TOPICS = ['candidates', 'applications', 'tasks', 'clients', 'companies', 'orders', 'designations', 'users', 'todos', 'settings'] as const
+/** Route-entry revalidation window: short when polling is all we have, longer when the stream keeps the snapshot current. */
+/** Changes arriving within this window are fetched together; kept short because this is the visible latency. */
+const WORKSPACE_LIVE_WINDOW_MS = 120
+const FRESH_MS = 5_000
+const FRESH_WHILE_LIVE_MS = 30_000
 
 /**
  * The last workspace this tab saw for the person the browser says is signed in, if any. It is painted
@@ -197,6 +220,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(Boolean(hydrated))
   const [loadError, setLoadError] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast>(null)
+  const [publicAgency, setPublicAgency] = useState<StoreValue['publicAgency']>(null)
   const [inboxUnread, setInboxUnread] = useState(0)
   const readInboxUnread = useRef<() => Promise<void>>(() => Promise.resolve())
   const requests = useRef(createLatestRequest<Bootstrap | null>()).current
@@ -277,7 +301,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [loadWorkspace])
 
   const ensureFresh = useCallback(() => {
-    if (lastLoadedAt.current > 0 && Date.now() - lastLoadedAt.current < 5_000) return Promise.resolve()
+    if (lastLoadedAt.current > 0 && Date.now() - lastLoadedAt.current < (live.isUp() ? FRESH_WHILE_LIVE_MS : FRESH_MS)) return Promise.resolve()
     return loadWorkspace(false, false, true)
   }, [loadWorkspace])
 
@@ -292,6 +316,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // loadWorkspace renders the failure and leaves retry available.
     }
   }, [loadWorkspace, requests])
+
+  // Signed out: the sign-in page still names the agency. The session probe stays free of database work, so the
+  // name comes from its own tiny public read, and only here, never for a signed-in visit.
+  useEffect(() => {
+    if (!ready || me || publicAgency) return
+    const controller = new AbortController()
+    api.get<{ name?: string; shortName?: string | null }>('/settings/public', { signal: controller.signal })
+      .then((found) => { if (found?.name) setPublicAgency({ name: found.name, shortName: found.shortName ?? null }) })
+      .catch(() => { /* the page falls back to a neutral label */ })
+    return () => controller.abort()
+  }, [ready, me, publicAgency])
 
   // StrictMode replays this effect in development. Both setups share one request.
   useEffect(() => {
@@ -362,12 +397,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try { await observer.check() } catch { /* Keep the last known count; the next poll retries. */ }
     }
     const first = window.setTimeout(read, 1_200)
-    const timer = window.setInterval(read, PULSE_MS)
+    const stopLive = liveInterval(read, PULSE_MS, ['mail', 'whatsapp', 'documents'])
     document.addEventListener('visibilitychange', read)
     return () => {
       observer.dispose()
       window.clearTimeout(first)
-      window.clearInterval(timer)
+      stopLive()
       document.removeEventListener('visibilitychange', read)
       readInboxUnread.current = () => Promise.resolve()
     }
@@ -396,8 +431,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!controller.signal.aborted && error instanceof ApiError && error.isUnauthorised) void loadWorkspace(false, false, true).catch(() => {})
       } finally { running = false }
     }
-    const timer = window.setInterval(() => void check(), 30_000)
-    return () => { controller.abort(); window.clearInterval(timer) }
+    const stopLive = liveInterval(() => void check(), NOTIFICATIONS_POLL_MS, ['notifications'])
+    return () => { controller.abort(); stopLive() }
+  }, [me?.id, ready, loadWorkspace])
+
+  // One live stream for the whole signed-in session (see live-events.ts): open once we know who is signed in.
+  useEffect(() => {
+    if (!me?.id) return
+    live.start()
+    return () => live.stop()
+  }, [me?.id])
+
+  // The server announced a committed change to something the workspace shows: re-read it now instead of waiting for
+  // the next poll. `replace` abandons a read that began before the change, whose snapshot may not contain it.
+  useEffect(() => {
+    if (!me?.id || !ready) return
+    const version = authVersion.current
+    return live.subscribe(WORKSPACE_TOPICS, () => {
+      if (version !== authVersion.current || pendingAuthWrites.current > 0) return
+      lastLoadedAt.current = 0
+      void loadWorkspace(false, true, true).catch(() => {})
+    }, { debounceMs: WORKSPACE_LIVE_WINDOW_MS })
   }, [me?.id, ready, loadWorkspace])
 
   const queueAuthWrite = useCallback((write: () => Promise<unknown>) => {
@@ -488,6 +542,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       me: me as User,
       ready,
       authenticated: me !== null,
+      publicAgency,
       loadError,
       retryStartup,
       isCurrentSession,
@@ -544,7 +599,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         )
       },
       mapCandidate: async (candidateId, orderId) => {
-        try { await api.post('/applications', { candidate_id: candidateId, order_id: orderId }) }
+        let closedInitialCall = false
+        try {
+          const created = await api.post<{ closed_initial_call?: boolean } | null>('/applications', { candidate_id: candidateId, order_id: orderId })
+          closedInitialCall = created?.closed_initial_call === true
+        }
         catch (error) {
           if (isCurrentSession()) notify(error instanceof Error ? error.message : 'Mapping failed', 'warn')
           throw error
@@ -553,18 +612,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         try {
           await refresh({ keepCurrent: true })
           if (!isCurrentSession()) return null
-          notify('Mapped. Stage 1 task raised.')
-          return { refreshed: true }
+          notify(matchDoneMessage(closedInitialCall))
+          return { refreshed: true, closedInitialCall }
         } catch {
           if (!isCurrentSession()) return null
           notify('Candidate mapped. The directory could not refresh; refresh the results to see the change.', 'warn')
-          return { refreshed: false }
+          return { refreshed: false, closedInitialCall }
         }
       },
       unmap: async (applicationId) => {
         await run(
           () => api.post(`/applications/${applicationId}/unmap`),
-          'Unmapped. Open tasks cancelled; the candidate is back in the Data Bank.',
+          'Removed from the order. Open tasks were cancelled and the candidate is back in the Data Bank.',
         )
       },
       addRemark: async (taskId, body) => {
@@ -601,6 +660,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteOrder: async (id) => {
         await run(() => api.del(`/orders/${id}`), 'Order deleted')
       },
+      deleteCandidate: async (id) => {
+        await run(() => api.del(`/candidates/${id}`), 'Candidate deleted')
+      },
       addDesignation: async (payload) => {
         await run(() => api.post('/designations', payload), 'Designation saved')
       },
@@ -621,7 +683,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await run(() => api.post('/candidates/reassign', { candidateIds, toUserId, reason, ...(restartClockReason ? { restartClock: true, restartReason: restartClockReason } : {}) }), 'Reassigned')
       },
     }
-  }, [data, index, me, ready, loadError, retryStartup, inboxUnread, toast, signIn, signOut, refresh, ensureFresh, notify, run])
+  }, [data, index, me, ready, loadError, publicAgency, retryStartup, inboxUnread, toast, signIn, signOut, refresh, ensureFresh, notify, run])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

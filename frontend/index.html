@@ -2,10 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Care India | Recruitment CRM</title>
-    <script>(function(){try{var d=document.documentElement,t=localStorage.getItem('crm-theme'),p=localStorage.getItem('crm-palette');if(t!=='light'&&t!=='dark')t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';d.dataset.theme=t;if(p&&p!=='royal'&&/^(white|graphite|violet|emerald)$/.test(p))d.dataset.palette=p}catch(e){}})()</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <link rel="icon" href="/brand/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/care-india-favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/brand/care-india-favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/brand/care-india-favicon-180.png" />
+    <title>CRM</title>
+    <script>(function(){try{var d=document.documentElement,t=localStorage.getItem('crm-theme');if(t!=='light'&&t!=='dark')t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';d.dataset.theme=t;d.dataset.palette='white'}catch(e){}})()</script>
     <script>
       /* Start the first requests now, before the JavaScript bundle has even downloaded: the server begins working on
          the session + workspace (and the dashboard) while the browser fetches the app. The app takes these over
@@ -13,7 +16,7 @@
       (function () {
         try {
           if (!window.fetch) return
-          var base = '%VITE_API_URL%'
+          var base = '__CRM_API_BASE__'
           if (base.indexOf('%') > -1) base = ''
           var early = (window.__crmEarly = {})
           var start = function (key, path) {
@@ -38,14 +41,16 @@
         } catch (e) {}
       })()
     </script>
+    <style>[data-theme="dark"] .pre-splash{background:#0a0a0b!important}[data-theme="dark"] .pre-logo-light{display:none!important}[data-theme="dark"] .pre-logo-dark{display:block!important}[data-theme="dark"] .pre-splash p{color:#a1a1aa!important}</style>
     <link rel="preload" href="/fonts/poppins-medium.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
     <div id="root">
-      <div role="status" aria-label="Loading Care India" style="display:grid;min-height:100vh;place-items:center;margin:0;font-family:system-ui,sans-serif;background:#fff">
+      <div class="pre-splash" role="status" aria-label="Loading" style="display:grid;min-height:100vh;place-items:center;margin:0;font-family:system-ui,sans-serif;background:#fff">
         <div style="display:flex;flex-direction:column;align-items:center">
-          <span style="display:grid;place-items:center;width:56px;height:56px;border-radius:17px;background:#edf2ff"><span style="display:block;width:24px;height:24px;border:3px solid #4169e1;border-radius:6px;transform:rotate(45deg)"></span></span>
-          <p style="margin:16px 0 0;font-size:17px;font-weight:600;color:#202d43">Care India</p>
+          <img class="pre-logo-light" src="/brand/care-india-logo-tight.png" alt="Care India Overseas" width="240" height="125" style="display:block;width:240px;height:auto" />
+          <img class="pre-logo-dark" src="/brand/care-india-logo-tight-dark.png" alt="Care India Overseas" width="240" height="125" style="display:none;width:240px;height:auto" />
+          <p style="margin:18px 0 0;font-size:14px;font-weight:500;color:#64748b">Loading…</p>
         </div>
       </div>
     </div>

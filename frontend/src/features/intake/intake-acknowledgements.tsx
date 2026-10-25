@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCheck, RefreshCw } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
+import { liveInterval } from '@/shared/state/live'
 import { smartTime } from '@/shared/lib/format'
-import { Button, Field, Textarea } from '@/shared/ui/primitives'
+import { Button, Field, Select, Textarea } from '@/shared/ui/primitives'
 
 type SourceKind = 'email' | 'whatsapp'
 interface Attempt {
@@ -11,9 +12,12 @@ interface Attempt {
   status: 'pending' | 'sending' | 'sent' | 'unknown' | 'failed' | 'suppressed' | 'paused'
   createdAt: string; sentAt?: string; lastError?: string; providerMessageId?: string; canRetry: boolean
 }
+interface TemplateChoice { name: string; language: string; parameters: string[] }
+interface ApprovedTemplate { id: string; name: string; language: string; status: string; supported: boolean; parameterCount: number; body: string }
 interface Snapshot {
   sourceKind: SourceKind; channelId: string; enabled: boolean; body: string; enabledAt?: string
   connected: boolean; workerEnabled: boolean; attempts: Attempt[]
+  template?: TemplateChoice | null; templateAvailable?: boolean; templateValues?: Record<string, string>
 }
 const LABELS: Record<Attempt['status'], string> = {
   pending: 'Queued', sending: 'Sending', sent: 'Submitted to provider', unknown: 'Delivery unconfirmed',
@@ -39,6 +43,9 @@ function AcknowledgementPanel({ sourceKind, channelId, channelLabel, canManage }
   const [resolving, setResolving] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [providerChecked, setProviderChecked] = useState(false)
+  const [templates, setTemplates] = useState<ApprovedTemplate[]>([])
+  const [templateKey, setTemplateKey] = useState('')
+  const [templateValues, setTemplateValues] = useState<string[]>([])
   const scope = `${sourceKind}/${channelId}`
   const active = useRef(scope)
   active.current = scope
@@ -52,7 +59,11 @@ function AcknowledgementPanel({ sourceKind, channelId, channelLabel, canManage }
       const result = await api.get<Snapshot>(`/intake-acknowledgements/${scope}`)
       if (!valid(scope) || request !== sequence.current) return
       setData(result)
-      if (initialize) setBody(result.body)
+      if (initialize) {
+        setBody(result.body)
+        setTemplateKey(result.template ? `${result.template.name}|${result.template.language}` : '')
+        setTemplateValues(result.template?.parameters ?? [])
+      }
       setError('')
     } catch (cause) {
       if (valid(scope) && request === sequence.current) setError(cause instanceof Error ? cause.message : 'Acknowledgement settings could not load.')
@@ -67,11 +78,17 @@ function AcknowledgementPanel({ sourceKind, channelId, channelLabel, canManage }
     return () => { mounted.current = false; sequence.current += 1 }
   }, [read])
   useEffect(() => {
+    if (!open || sourceKind !== 'whatsapp' || !data?.templateAvailable) return
+    let stale = false
+    void api.get<{ templates: ApprovedTemplate[] }>(`/whatsapp/templates?phone_number_id=${encodeURIComponent(channelId)}`)
+      .then(result => { if (!stale) setTemplates(result.templates) }).catch(() => { /* the plain text still works */ })
+    return () => { stale = true }
+  }, [open, sourceKind, channelId, data?.templateAvailable])
+  useEffect(() => {
     if (!open) return
-    const timer = window.setInterval(() => {
+    return liveInterval(() => {
       if (document.visibilityState === 'visible' && !writing.current) void read()
-    }, 10000)
-    return () => window.clearInterval(timer)
+    }, 10000, ['mail', 'whatsapp'])
   }, [open, read])
   const mutate = async (work: () => Promise<unknown>, success: string) => {
     if (writing.current) return
@@ -89,8 +106,12 @@ function AcknowledgementPanel({ sourceKind, channelId, channelLabel, canManage }
       if (valid(scope)) setBusy(false)
     }
   }
+  const chosen = templates.find(item => `${item.name}|${item.language}` === templateKey)
+  const valueChoices = Object.entries(data?.templateValues ?? {})
+  const templateReady = !templateKey || (!!chosen && templateValues.length === chosen.parameterCount && templateValues.every(Boolean))
   const save = (enabled: boolean) => mutate(() => api.patch(`/intake-acknowledgements/${scope}`, {
     enabled, body: enabled ? body.trim() : data!.body, previewedBody: previewed ? body.trim() : undefined,
+    ...(enabled && sourceKind === 'whatsapp' && data?.templateAvailable ? { template: templateKey && chosen ? { name: chosen.name, language: chosen.language, parameters: templateValues } : null } : {}),
   }), enabled ? 'Acknowledgements enabled for newly received, successfully saved intake.' : 'Acknowledgements turned off. Already sending messages retain their delivery status.')
   return <details className="rounded-control border border-rule bg-white p-4" onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary className="cursor-pointer text-sm font-semibold text-ink">
@@ -113,6 +134,26 @@ function AcknowledgementPanel({ sourceKind, channelId, channelLabel, canManage }
           <Field label="Acknowledgement message" hint="Plain text, up to 2,000 characters. This confirms receipt; it does not promise a job or selection.">
             <Textarea rows={4} maxLength={2000} value={body} disabled={busy} onChange={(event) => { setBody(event.target.value); setPreviewed(false) }} />
           </Field>
+          {sourceKind === 'whatsapp' && data.templateAvailable && <div className="space-y-3">
+            <Field label="Approved WhatsApp template (optional)" hint="Use this when the 24-hour reply time may have ended. Leave it empty to send the message above as plain text.">
+              <Select value={templateKey} disabled={busy} onChange={event => {
+                const next = templates.find(item => `${item.name}|${item.language}` === event.target.value)
+                setTemplateKey(event.target.value); setTemplateValues(next ? Array(next.parameterCount).fill('first_name') : [])
+              }}>
+                <option value="">No template: send the message above</option>
+                {templates.map(item => <option key={item.id} value={`${item.name}|${item.language}`} disabled={!item.supported || item.status !== 'APPROVED'}>{item.name} · {item.language}{!item.supported ? ' · not supported' : item.status !== 'APPROVED' ? ` · ${item.status}` : ''}</option>)}
+              </Select>
+            </Field>
+            {chosen && <>
+              {templateValues.map((value, index) => <Field key={index} label={`What goes into value ${index + 1}`}>
+                <Select value={value} disabled={busy} onChange={event => setTemplateValues(current => current.map((item, i) => i === index ? event.target.value : item))}>
+                  {valueChoices.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                </Select>
+              </Field>)}
+              <p className="text-xs text-ink-500">Template text: {chosen.body}</p>
+            </>}
+            {!templates.length && <p className="text-xs text-ink-500">No templates yet. An admin can update the approved templates from the WhatsApp chat.</p>}
+          </div>}
           <div className="rounded-control border border-rule bg-field/40 p-3">
             <p className="mb-2 text-xs font-semibold text-ink-600">Sender preview</p>
             <p className="whitespace-pre-wrap break-words text-sm text-ink-700">{body.trim() || 'Enter the confirmation message above.'}</p>
@@ -122,7 +163,7 @@ function AcknowledgementPanel({ sourceKind, channelId, channelLabel, canManage }
             I reviewed this exact message and approve automatic confirmations for new saved intake.
           </label>
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" disabled={busy || !data.connected || !previewed || body.trim().length < 10} onClick={() => void save(true)}>{busy ? 'Saving…' : data.enabled ? 'Save approved message' : 'Enable acknowledgements'}</Button>
+            <Button variant="primary" disabled={busy || !data.connected || !previewed || body.trim().length < 10 || !templateReady} onClick={() => void save(true)}>{busy ? 'Saving…' : data.enabled ? 'Save approved message' : 'Enable acknowledgements'}</Button>
             {data.enabled && <Button disabled={busy} onClick={() => void save(false)}>Turn off acknowledgements</Button>}
           </div>
         </div> : <p className="text-sm text-ink-500">An administrator can preview and change this acknowledgement.</p>}

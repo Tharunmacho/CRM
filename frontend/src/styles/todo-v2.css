@@ -16,13 +16,15 @@
 
 /* ---------- Quick add ---------- */
 .td-quick { padding: var(--td-inset) var(--td-pad); border-bottom: 1px solid var(--border-faint); background: var(--tint-1); }
-.td-quick-row { display: grid; grid-template-columns: minmax(0, 1fr) 200px auto auto; align-items: center; gap: 8px; }
+.td-quick-row { display: grid; grid-template-columns: minmax(0, 1fr) 190px 120px auto auto; align-items: center; gap: 8px; }
 .td-quick-input { position: relative; min-width: 0; }
 .td-quick-input > svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--text-light); pointer-events: none; }
 .td-quick-input .ui-input { height: 40px; padding-left: 38px; }
-.td-quick-when { min-width: 0; }
-.td-quick-when :is(.custom-select-trigger, .ui-input) { width: 100%; height: 40px; min-height: 40px; }
+
+.td-quick-when, .td-quick-prio { min-width: 0; }
+.td-quick-when :is(.custom-select-trigger, .ui-input), .td-quick-prio :is(.custom-select-trigger, .ui-input) { width: 100%; height: 40px; min-height: 40px; }
 .td-quick-error { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--error-ink); }
+.td-quick-added { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--success-ink); }
 
 /* ---------- Timeline ---------- */
 .td-scroll { flex: 1 1 auto; min-height: 0; max-height: 640px; overflow-y: auto; padding: var(--td-pad); scrollbar-width: thin; }
@@ -146,6 +148,13 @@ a.td-link > b::after { content: '·'; margin-left: 6px; font-weight: 400; }
 .td-seg button.is-low.is-on { border-color: var(--success-ink); color: var(--success-ink); }
 .td-seg button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
+/* ---- Quick due times in the dialog ---- */
+.td-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.td-presets > span { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.td-presets button { min-height: 32px; padding: 4px 12px; border: 1px solid var(--border-control); border-radius: 999px; background: var(--bg-card); font-size: 12.5px; font-weight: 500; color: var(--text-main); transition: background-color .14s, border-color .14s; }
+.td-presets button:hover { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+.td-presets button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
   .td .td-layout { grid-template-columns: minmax(0, 1fr); }
@@ -159,9 +168,8 @@ a.td-link > b::after { content: '·'; margin-left: 6px; font-weight: 400; }
   .td-skel-body { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-  .td-quick-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .td-quick-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .td-quick-input { grid-column: 1 / -1; }
-  .td-quick-when { grid-column: 1 / 2; }
   .td-skel-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .td-skel-tiles > span { height: 110px; }
   .td-item { grid-template-columns: 14px minmax(0, 1fr); column-gap: 10px; }
@@ -172,7 +180,6 @@ a.td-link > b::after { content: '·'; margin-left: 6px; font-weight: 400; }
   .td-item { grid-template-columns: minmax(0, 1fr); }
   .td-rail { display: none; }
   .td-quick-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .td-quick-when { grid-column: 1 / -1; }
 }
 @media (max-width: 640px) {
   .td { --td-pad: 16px; }
@@ -203,7 +210,8 @@ a.td-link > b::after { content: '·'; margin-left: 6px; font-weight: 400; }
 }
 @media (max-width: 900px) {
   .td :is(input, textarea, select) { font-size: 16px; }
-  .td-quick-input .ui-input, .td-quick-when :is(.custom-select-trigger, .ui-input) { height: 44px; min-height: 44px; }
+  .td-quick-input .ui-input, .td-quick-when :is(.custom-select-trigger, .ui-input), .td-quick-prio :is(.custom-select-trigger, .ui-input) { height: 44px; min-height: 44px; }
+  .td-presets button { min-height: 40px; }
   .td-quick-row .ui-button, .td-empty .ui-button, .td-state-body .ui-button { min-height: 44px; }
   .td-check label { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin: -9px 0 0 -9px; }
   a.td-link { min-height: 40px; }
