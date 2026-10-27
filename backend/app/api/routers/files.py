@@ -236,6 +236,14 @@ def upload(
     }
 
 
+def _own_stage_files_only(db: Session, entity_type: str, entity_id: str, user: User) -> None:
+    """PRD: staff work the stage modal on their own candidates only, so its files follow the same rule."""
+    if entity_type == "application":
+        application = db.get(Application, entity_id)
+        if application is not None:
+            ensure_can_work(db, application, user)
+
+
 @router.get("/{attachment_id}")
 def download(
     attachment_id: str,
@@ -246,6 +254,7 @@ def download(
     row = db.get(Attachment, attachment_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+    _own_stage_files_only(db, row.entity_type, row.entity_id, user)
 
     if row.object_key.startswith("s3://"):
         try:
@@ -282,6 +291,7 @@ def list_for(
     user: User = Depends(current_user),
 ) -> list[dict]:
     _entity(db, entity_type, entity_id)
+    _own_stage_files_only(db, entity_type, entity_id, user)
     rows = db.scalars(
         select(Attachment)
         .where(Attachment.entity_type == entity_type, Attachment.entity_id == entity_id)

@@ -172,11 +172,12 @@ def test_cover_sweep_returns_pending_keeps_completed_and_preserves_clocks(worksp
         assert pending.owner_id == completed.owner_id == "other"
         assert pending.due_at == NOW + timedelta(hours=36)
         notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert len(notices) == 8
-        assert {notice.user_id for notice in notices} == {'other', 'admin', 'manager', 'manager2'}
+        # PRD: the owner and the admin are told about an assignment (two candidates, two people each).
+        assert len(notices) == 4
+        assert {notice.user_id for notice in notices} == {'other', 'admin'}
         assert hr.run_cover_sweep(db, at=NOW + timedelta(minutes=1))["started"] == 0
         db.commit()
-        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 8
+        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 4
         completed.completed_at = NOW + timedelta(hours=1)
         db.get(Candidate, "completed").call_recorded_at = NOW + timedelta(hours=1)
         db.commit()
@@ -190,8 +191,8 @@ def test_cover_sweep_returns_pending_keeps_completed_and_preserves_clocks(worksp
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_type == "candidate", AuditEntry.entity_id == "candidate")) == 2
         notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
         returned = [notice for notice in notices if 'returned after leave cover' in notice.detail]
-        assert len(notices) == 12 and len(returned) == 4
-        assert {notice.user_id for notice in returned} == {'owner', 'admin', 'manager', 'manager2'}
+        assert len(notices) == 6 and len(returned) == 2
+        assert {notice.user_id for notice in returned} == {'owner', 'admin'}
         assert all(notice.link_to == '/candidates/candidate' for notice in returned)
 
 
@@ -345,7 +346,7 @@ def test_cover_sweep_rollback_retries_without_half_transferred_work(workspace):
         db.commit()
         assert db.scalar(select(func.count()).select_from(AttendanceCoverItem)) == 1
         assert db.scalar(select(func.count()).select_from(TaskEvent).where(TaskEvent.kind == "assignment")) == 1
-        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 4
+        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 2
 
 
 def test_status_override_survives_monthly_permission_classification(workspace):

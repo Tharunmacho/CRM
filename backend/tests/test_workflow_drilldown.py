@@ -71,13 +71,13 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
         assert db.get(Task, 'task').owner_id == 'owner'
         assert db.scalar(select(TaskEvent).where(TaskEvent.kind == 'assignment')) is None
         notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert {notice.user_id for notice in notices} == {'other', 'admin', 'manager'}
-        assert len(notices) == 3
+        assert {notice.user_id for notice in notices} == {'other', 'admin'}
+        assert len(notices) == 2
         assert all(notice.link_to == '/candidates/candidate' for notice in notices)
     repeated = history_client.post('/api/candidates/reassign', json={**payload, 'reason': 'Already assigned'})
     assert repeated.status_code == 200
     with workspace() as db:
-        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 3
+        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 2
     history_client.cookies.set(SESSION_COOKIE, 'history-owner')
     history = history_client.get('/api/candidates/candidate/assignment-history')
     assert history.status_code == 200
@@ -100,8 +100,8 @@ def test_same_candidate_owner_repairs_open_task_and_notifies_only_once(workspace
     with workspace() as db:
         assert db.get(Task, 'task').owner_id == 'other'
         notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert len(notices) == 3
-        assert {notice.user_id for notice in notices} == {'other', 'admin', 'manager'}
+        assert len(notices) == 2
+        assert {notice.user_id for notice in notices} == {'other', 'admin'}
         assert all(notice.title == 'Task assigned' and notice.link_to == '/tasks?task=task' for notice in notices)
 
 

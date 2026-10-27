@@ -25,10 +25,11 @@ def _notify_changes(db, changes, *, reason, users, task):
         return 0
     people = users if users is not None else db.execute(select(User.id, User.name, User.role, User.active)).all()
     active = {person.id: person for person in people if person.active}
-    supervisors = {person.id for person in active.values() if person.role in (Role.admin, Role.manager)}
+    # PRD: the owner and the admin are notified of an assignment. Managers make reassignments themselves.
+    admins = {person.id for person in active.values() if person.role == Role.admin}
     count = 0
     for identifier, (name, _previous, target) in changed.items():
-        recipients = supervisors | ({target} if target in active else set())
+        recipients = admins | ({target} if target in active else set())
         target_name = active[target].name if target in active else 'the assigned recruiter'
         for recipient in sorted(recipients):
             db.add(Notification(user_id=recipient, kind='assignment', title='Task assigned' if task else 'Candidate assigned',

@@ -143,11 +143,11 @@ def test_deactivation_requires_valid_target_and_is_atomic(env):
         assert db.get(LoginSession, 'session-staff') is None
         assert db.scalar(select(AuditEntry).where(AuditEntry.entity_type == 'candidate')).meta['toUserId'] == 'receiver'
         notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert {notice.user_id for notice in notices} == {'receiver', 'admin', 'manager'}
-        assert len(notices) == 3 and all(notice.link_to == '/candidates/candidate' for notice in notices)
+        assert {notice.user_id for notice in notices} == {'receiver', 'admin'}
+        assert len(notices) == 2 and all(notice.link_to == '/candidates/candidate' for notice in notices)
     assert env.client.patch('/api/users/staff', json={'active': False, 'reassignToUserId': 'receiver'}).status_code == 200
     with env.factory() as db:
-        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 3
+        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 2
 
 
 def test_failed_commit_rolls_back_reassignment_and_revocation(env, monkeypatch):
@@ -176,8 +176,8 @@ def test_deactivation_notifies_about_task_only_transfer_without_claiming_candida
         assert db.get(Task, 'open').owner_id == 'receiver'
         assert db.get(Task, 'completed').owner_id == 'staff'
         notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert len(notices) == 3
-        assert {notice.user_id for notice in notices} == {'receiver', 'admin', 'manager'}
+        assert len(notices) == 2
+        assert {notice.user_id for notice in notices} == {'receiver', 'admin'}
         assert all(notice.title == 'Task assigned' and notice.link_to == '/tasks?task=open' for notice in notices)
 
 

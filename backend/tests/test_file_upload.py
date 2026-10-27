@@ -432,3 +432,27 @@ def test_files_require_a_session_for_upload_history_and_download(upload_environm
         "entity_type": "candidate", "entity_id": "candidate-1",
     }).status_code == 401
     assert environment.client.get("/api/files/unknown").status_code == 401
+
+
+def test_stage_files_follow_the_stage_modal_rule_staff_see_only_their_own_candidates(upload_environment):
+    """PRD: staff work the stage modal on their own candidates only; admin and manager on any candidate."""
+    environment = upload_environment
+    environment.user.role = Role.staff
+    environment.database.entities[Candidate].owner_id = environment.user.id
+    saved = post_file(environment, b"%PDF-1.7 document", entity_type="application", entity_id="application-1", slot="offerLetter")
+    assert saved.status_code == 201
+    url = saved.json()["url"]
+    listing = "/api/files?entity_type=application&entity_id=application-1"
+    assert environment.client.get(listing).status_code == 200
+    assert environment.client.get(url).status_code == 200
+
+    environment.database.entities[Candidate].owner_id = "another-recruiter"
+    assert environment.client.get(listing).status_code == 403
+    assert environment.client.get(url).status_code == 403
+    for role in (Role.manager, Role.admin):
+        environment.user.role = role
+        assert environment.client.get(listing).status_code == 200
+        assert environment.client.get(url).status_code == 200
+    # A candidate's own documents are not stage files: every role keeps reading those.
+    environment.user.role = Role.staff
+    assert environment.client.get("/api/files?entity_type=candidate&entity_id=candidate-1").status_code == 200

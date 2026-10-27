@@ -73,8 +73,10 @@ def test_assigned_intake_keeps_the_ordinary_receipt_notice(setup):
     sessions, settings = setup
     candidate = ingest(sessions, settings)
     with sessions() as db:
-        titles = {n.title for n in db.scalars(select(Notification).where(Notification.link_to == f"/candidates/{candidate.id}"))}
-        assert titles == {"Candidate received by WhatsApp"}
+        notices = list(db.scalars(select(Notification).where(Notification.link_to == f"/candidates/{candidate.id}")))
+        assert {n.title for n in notices} == {"Candidate received by WhatsApp"}
+        # PRD: "The owner and the admin are notified" of an assignment; managers are not.
+        assert {n.user_id for n in notices} == {candidate.owner_id, "admin"}
 
 
 def test_reassign_clears_review_when_the_missing_owner_was_the_only_reason(setup):
@@ -139,6 +141,7 @@ def test_sweep_assigns_round_robin_in_one_transaction_with_tasks_notices_and_aud
         assert db.scalar(select(func.count()).select_from(Task).where(Task.candidate_id.like("wait-%"))) == 3
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.action == "Candidate assigned from waiting list")) == 3
         assert db.scalar(select(func.count()).select_from(Notification).where(Notification.title == "Candidate assigned")) >= 3
+        assert "manager" not in set(db.scalars(select(Notification.user_id).where(Notification.title == "Candidate assigned")))
         assert assign_waiting_candidates(db, "admin", "Admin")["assigned"] == 0
 
 

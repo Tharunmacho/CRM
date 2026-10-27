@@ -458,7 +458,9 @@ def create_candidate(
         db.flush()
         task_id = task.id
 
-    recipients = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
+    # PRD: the owner and the admin are told about an assignment. Admins and managers both hear about a candidate nobody could take.
+    told = [Role.admin] if owner else [Role.admin, Role.manager]
+    recipients = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_(told))))
     if owner:
         recipients.add(owner.id)
     for recipient in recipients:

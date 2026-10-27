@@ -726,7 +726,7 @@ def toggle_todo(todo_id: str, body: TodoIn | TodoCompletionIn | None = None, db:
 
 
 @router.delete("/todos/{todo_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-def delete_todo(todo_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def delete_todo(todo_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
     row = db.get(TodoItem, todo_id)
     if row is not None and row.owner_id == user.id:
         db.add(AuditEntry(actor_id=user.id, action="Deleted personal to-do", entity_type="todo", entity_id=row.id, target=row.title))

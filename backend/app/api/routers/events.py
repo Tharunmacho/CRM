@@ -47,6 +47,11 @@ def _identify(session_id: str | None) -> tuple[str, str] | None:
         return None
 
 
+def _still_same_person(identity: tuple[str, str] | None, subscriber: Subscriber) -> bool:
+    """False when the session ended or the account now has another role, so old rights are never kept open."""
+    return identity is not None and identity[1] == subscriber.role
+
+
 def _frame(name: str, data: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
@@ -63,7 +68,7 @@ async def _stream(subscriber: Subscriber, session_id: str, request: Request):
             except asyncio.TimeoutError:
                 if await request.is_disconnected():
                     return
-                if await run_in_threadpool(_identify, session_id) is None:
+                if not _still_same_person(await run_in_threadpool(_identify, session_id), subscriber):
                     yield _frame("bye", {"reason": "signed-out"})
                     return
                 yield _frame("ping", {"at": int(time.time() * 1000)})
@@ -88,7 +93,7 @@ async def _stream(subscriber: Subscriber, session_id: str, request: Request):
                     else:
                         pending = more if pending is None else change_feed.merge_events(pending, more)
 
-            if recheck and await run_in_threadpool(_identify, session_id) is None:
+            if recheck and not _still_same_person(await run_in_threadpool(_identify, session_id), subscriber):
                 yield _frame("bye", {"reason": "signed-out"})
                 return
             if subscriber.behind:  # the queue overflowed: one resync replaces whatever was dropped

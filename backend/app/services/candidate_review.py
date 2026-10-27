@@ -78,7 +78,9 @@ def notify_candidate_received(db, candidate, owner, *, channel: str, kind: str, 
     """Receipt notices for a candidate created by intake, plus the review marker and the
     best-effort WhatsApp conversation link. Ownerless candidates get a distinct notice."""
     record_review_flag(db, candidate, ocr_warning=has_extraction_warnings(results))
-    recipients = set(db.scalars(select(User.id).where(User.role.in_([Role.admin, Role.manager]), User.active.is_(True))))
+    # PRD: the owner and the admin are told about an assignment. Admins and managers both hear about a candidate nobody could take.
+    told = [Role.admin] if owner else [Role.admin, Role.manager]
+    recipients = set(db.scalars(select(User.id).where(User.role.in_(told), User.active.is_(True))))
     if owner:
         recipients.add(owner.id)
     for recipient in recipients:

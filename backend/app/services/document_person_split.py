@@ -541,6 +541,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
         prepared.append((group, values, target))
     if duplicates:
         raise HTTPException(409, {"message": "Some of these people are already in the system. Check each duplicate and choose whether to merge it.", "code": "duplicate_candidates", "duplicates": duplicates})
+    admins = set(db.scalars(select(User.id).where(User.active.is_(True), User.role == Role.admin)))
     supervisors = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
     for group, values, candidate in prepared:
         ocr_raw, notes = extraction.get(group.id, (None, []))
@@ -567,7 +568,8 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 started = now()
                 db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=candidate.id,
                     owner_id=owner.id, created_at=started, sla_started_at=started, due_at=started + timedelta(hours=48)))
-            for recipient in supervisors | ({owner.id} if owner else set()):
+            # PRD: the owner and the admin are told about an assignment; a waiting candidate alerts admins and managers.
+            for recipient in (admins | {owner.id}) if owner else supervisors:
                 db.add(Notification(user_id=recipient, kind="candidate_assignment", title="Candidate assigned" if owner else "Candidate needs assignment", detail=candidate.name, link_to=f"/candidates/{candidate.id}"))
         _attach_group(db, bundle, group, candidate, user, settings)
         group.candidate_id, group.status = candidate.id, "committed"
