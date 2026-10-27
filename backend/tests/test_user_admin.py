@@ -106,7 +106,7 @@ def test_create_is_persistent_normalized_and_never_returns_or_audits_password(en
 
 @pytest.mark.parametrize('payload', [{'name': '  ', 'email': 'x@example.test', 'password': 'valid-test-password'},
     {'name': 'Name', 'email': 'invalid', 'password': 'valid-test-password'},
-    {'name': 'Name', 'email': 'x@example.test', 'password': 'short'}])
+    {'name': 'Name', 'email': 'x@example.test', 'password': ''}])
 def test_invalid_create_does_not_add_account(env, payload):
     assert env.client.post('/api/users', json=payload).status_code == 422
     assert len(env.client.get('/api/users').json()) == 4

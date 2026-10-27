@@ -23,6 +23,13 @@ export function ReassignCandidatesDialog({ candidateIds, onClose, onSaved, descr
   const eligible = (availability.data?.staff ?? []).filter(canReceiveManualAssignment)
     .filter(staff => ids.some(id => store.candidate(id)?.ownerId !== staff.id))
   const validOwner = eligible.some(staff => staff.id === owner)
+  // Why each staff member is not in the list, so an empty list is never a dead end.
+  const staffAccounts = (availability.data?.staff ?? []).filter(staff => staff.role === 'staff')
+  const notListed = staffAccounts.filter(staff => !eligible.some(option => option.id === staff.id)).map(staff => ({
+    id: staff.id,
+    name: staff.name,
+    reason: canReceiveManualAssignment(staff) ? 'Already responsible for this candidate' : staff.availability.label,
+  }))
   const isAdmin = store.me?.role === 'admin'
   const restartMissing = isAdmin && restart && restartReason.trim().length < 3
   const save = async () => {
@@ -47,11 +54,19 @@ export function ReassignCandidatesDialog({ candidateIds, onClose, onSaved, descr
       {availability.data && <>
         <Field label="New owner" required hint={`Availability for ${availability.data.today} · ${availability.data.timezone}. Staff on approved or manual leave cannot receive assignments.`}>
           <Select value={validOwner ? owner : ''} disabled={busy || !eligible.length} onChange={event => setOwner(event.target.value)} aria-label="New owner">
-            <option value="">Choose an available staff member</option>
+            <option value="">{eligible.length ? 'Choose an available staff member' : 'No one is available'}</option>
             {eligible.map(staff => <option key={staff.id} value={staff.id}>{manualAssignmentLabel(staff)}</option>)}
           </Select>
         </Field>
-        {!eligible.length && <div className="space-y-2"><p role="status" className="text-sm text-amber-700">No other staff member can receive these candidates right now. Review staff availability and try again.</p><Button size="sm" disabled={busy} onClick={availability.refresh}>Refresh availability</Button></div>}
+        {!eligible.length && <div className="space-y-2">
+          <p role="status" className="text-sm text-amber-700">{staffAccounts.length === 0
+            ? 'There are no staff accounts yet. Add a staff member in User Management, then come back.'
+            : 'No one else can take these candidates right now.'}</p>
+          {notListed.length > 0 && <ul className="space-y-1 text-sm text-ink-600" aria-label="Staff who cannot take candidates right now">
+            {notListed.map(item => <li key={item.id}><b className="font-semibold text-ink-900">{item.name}</b> · {item.reason}</li>)}
+          </ul>}
+          <Button size="sm" disabled={busy} onClick={availability.refresh}>Check again</Button>
+        </div>}
       </>}
       <Field label="Reason for reassignment" required hint="Saved in each candidate’s assignment history.">
         <Textarea value={reason} disabled={busy} maxLength={1000} rows={3} onChange={event => setReason(event.target.value)} placeholder="Explain why responsibility is changing" />

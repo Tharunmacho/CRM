@@ -8,7 +8,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { useStaffAvailability } from '@/features/staff/use-staff-availability'
 import { canReceiveManualAssignment, manualAssignmentLabel } from '@/features/staff/availability-model'
 import { availabilityWords } from '@/features/staff-directory/model'
-import { FormSection, PasswordOnce, PasswordReveal, RolePill, UserAvatar, failureText, generatePassword, roleBlurbs } from './user-ui'
+import { FormSection, PasswordOnce, PasswordPair, RolePill, UserAvatar, failureText, generatePassword, roleBlurbs } from './user-ui'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -38,7 +38,6 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
   const blocked = transfers && (availability.loading || !!availability.error || !replacementValid)
   const isStaff = form.role === 'staff'
   const close = () => { if (!busy) onClose() }
-  const passwordShown = !user && generated !== '' && generated === form.password && form.password === form.confirmation
 
   const useGenerated = () => {
     const next = generatePassword()
@@ -49,8 +48,8 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
     if (!form.name.trim() || !EMAIL.test(form.email.trim())) {
       setError('Enter a name and a valid email address.'); return
     }
-    if (!user && (form.password.length < 12 || form.password !== form.confirmation)) {
-      setError('Use a password of at least 12 characters and enter the same password twice.'); return
+    if (!user && (!form.password || form.password !== form.confirmation)) {
+      setError(form.password ? 'The two passwords are not the same.' : 'Enter a password for this person.'); return
     }
     if (blocked) { setError('Choose a staff member who is free to take over the candidates and open tasks.'); return }
     setBusy(true); setError('')
@@ -95,14 +94,8 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
               <Select value={form.role} disabled={busy || own} onChange={(e) => set('role', e.target.value as Role)}><option value="staff">Staff</option><option value="manager">Manager</option><option value="admin">Admin</option></Select>
             </Field>
             {!user && <>
-              <Field label="Initial password" required hint="At least 12 characters.">
-                <Input type={passwordShown ? 'text' : 'password'} autoComplete="new-password" maxLength={128} value={form.password} onChange={(e) => set('password', e.target.value)} /></Field>
-              <Field label="Confirm password" required>
-                <Input type={passwordShown ? 'text' : 'password'} autoComplete="new-password" maxLength={128} value={form.confirmation} onChange={(e) => set('confirmation', e.target.value)} /></Field>
-              <div className="uv-generate sm:col-span-2">
-                <Button size="sm" icon={<Sparkles className="h-4 w-4" />} onClick={useGenerated}>Create a strong password</Button>
-                {passwordShown ? <PasswordReveal value={form.password} defaultVisible /> : <span>Or type your own. Give it to the new user in a safe way.</span>}
-              </div>
+              <PasswordPair className="sm:col-span-2" label="Initial password" disabled={busy} password={form.password} confirmation={form.confirmation} generated={generated}
+                onPassword={(value) => set('password', value)} onConfirmation={(value) => set('confirmation', value)} onGenerate={useGenerated} />
             </>}
             <div className="uv-toggle sm:col-span-2">
               <Switch label="Account active" description="Inactive accounts cannot sign in." checked={form.active} disabled={busy || own} onChange={(value) => set('active', value)} />

@@ -41,8 +41,8 @@ SNAPSHOT_COLLECTIONS = {
     "todos", "notifications",
 }
 WIRE_COLLECTIONS = SNAPSHOT_COLLECTIONS - {"files", "agreements", "stages"}
-# The agency profile and the currency list ride in the same statement (migration 0017 seeds them).
-SETTINGS_COLUMNS = {"agency", "currencies"}
+# The agency profile, currency list and job category list ride in the same statement (migrations 0017 and 0019 seed them).
+SETTINGS_COLUMNS = {"agency", "currencies", "categories"}
 # Email completions, WhatsApp completions and candidate changes: count:epoch each.
 EMPTY_REVISION = "0:0:0:0:0:0"
 FORBIDDEN_FIELDS = {
@@ -439,9 +439,9 @@ def test_empty_snapshot_returns_arrays_with_one_query(schema_database):
         with recorded_statements(schema_database) as statements:
             snapshot = read_snapshot(db, "no-account")
     assert_select_budget(statements, 1)
-    agency, currencies = snapshot.pop("agency"), snapshot.pop("currencies")
+    agency, currencies, categories = snapshot.pop("agency"), snapshot.pop("currencies"), snapshot.pop("categories")
     assert snapshot == {**{key: [] for key in SNAPSHOT_COLLECTIONS}, "ingestionRevision": EMPTY_REVISION}
-    assert agency["name"] and len(currencies) == 11
+    assert agency["name"] and len(currencies) == 11 and len(categories) > 10
 
 
 def test_snapshot_query_count_stays_constant_and_committed_changes_are_visible(desk_engine):

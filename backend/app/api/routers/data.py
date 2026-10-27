@@ -139,7 +139,7 @@ def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user),
         "me": UserOut.model_validate(user).model_dump(by_alias=True, mode="json"),
         "ingestionRevision": snapshot["ingestionRevision"],
         "agencyTimezone": get_settings().agency_timezone,
-        "settings": agency_settings.build_payload(snapshot.get("agency"), snapshot.get("currencies")),
+        "settings": agency_settings.build_payload(snapshot.get("agency"), snapshot.get("currencies"), snapshot.get("categories")),
         "users": [UserOut.model_validate(u).model_dump(by_alias=True, mode="json") for u in snapshot["users"]],
         "clients": [ClientOut.model_validate(c).model_dump(by_alias=True, mode="json") for c in snapshot["clients"]],
         "companies": [company_out(c) for c in snapshot["companies"]],
@@ -356,11 +356,13 @@ def update_company(company_id: str, body: CompanyIn, db: Session = Depends(get_d
 
 @router.post("/designations", status_code=status.HTTP_201_CREATED)
 def create_designation(body: DesignationIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    body.category = agency_settings.canonical_category(db, body.category)
     return _master_save(db, user, Designation(), body, "designation", DesignationOut, new=True)
 
 
 @router.put("/designations/{designation_id}")
 def update_designation(designation_id: str, body: DesignationIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    body.category = agency_settings.canonical_category(db, body.category)
     return _master_save(db, user, _master_row(db, Designation, designation_id), body, "designation", DesignationOut)
 
 

@@ -98,6 +98,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "ingestion_failures": ("documents",),
     "agency_settings": ("settings",),
     "currencies": ("settings",),
+    "job_categories": ("settings",),
 }
 
 # Internal bookkeeping that no screen shows: writing to it announces nothing.

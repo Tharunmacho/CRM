@@ -58,7 +58,6 @@ export default function DashboardPage() {
   const isTeam = store.me.role === 'admin' || store.me.role === 'manager'
   const stageData = data?.pipeline.find(row => row.stage === stage)
   // Staff see their own numbers; admin and managers see the team, or the person chosen in the filter.
-  // The server scopes everyone except the admin to their own work, so only an admin without a filter sees the team.
   const scopeLabel = (noun: string) => !isTeam ? `My ${noun}` : staff ? `${noun[0].toUpperCase()}${noun.slice(1)} · ${store.user(staff)?.name.split(' ')[0] ?? 'selected'}` : `Team ${noun}`
   const active = data?.pipeline.reduce((sum, item) => sum + item.count, 0) ?? 0
   const openings = data?.orders.reduce((sum, item) => sum + item.openings, 0) ?? 0

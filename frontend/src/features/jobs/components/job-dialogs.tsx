@@ -3,12 +3,14 @@ import { BriefcaseBusiness, CalendarDays, Gift, MapPin, Users } from 'lucide-rea
 import { api } from '@/shared/api/client'
 import type { Designation, Order } from '@/shared/model/types'
 import { useStore } from '@/shared/state/crm-store'
+import { categorySuggestions } from '@/shared/lib/job-categories'
 import { frequentValues } from '@/shared/lib/suggestions'
 import { currencyChoices, currencyLabel } from '@/shared/lib/agency'
 import { Badge } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { Dialog } from '@/shared/ui/overlay'
+import { SuggestInput } from '@/shared/ui/suggest-input'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import '@/styles/jobs.css'
@@ -31,7 +33,7 @@ export function DesignationDialog({ designation, onClose, onSaved }: { designati
     description: designation?.description ?? '', skills: designation?.requiredSkills.join(', ') ?? '', minExperience: String(designation?.minExperience ?? 0) })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const categories = useMemo(() => frequentValues(store.designations.map((item) => item.category)), [store.designations])
+  const categories = useMemo(() => categorySuggestions(store.settings.categories, store.designations.map((item) => item.category)), [store.settings.categories, store.designations])
   const set = (key: string, value: string) => setForm((previous) => ({ ...previous, [key]: value }))
   const close = () => { if (!saving) onClose() }
   const skillList = form.skills.split(',').map((skill) => skill.trim()).filter(Boolean)
@@ -55,7 +57,7 @@ export function DesignationDialog({ designation, onClose, onSaved }: { designati
     <form id="designation-form" className="form-stack jv-form" onSubmit={(event) => { event.preventDefault(); void save() }}><fieldset disabled={saving} className="form-stack">
       <FormSection icon={<BriefcaseBusiness size={18} />} title="Basic details">
         <Field label="Job title" required className="sm:col-span-2"><Input required maxLength={160} value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="Welder (6G)" /></Field>
-        <Field label="Category"><Input maxLength={120} list="designation-categories" value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="Skilled trades" /><datalist id="designation-categories">{categories.map((name) => <option key={name} value={name} />)}</datalist></Field>
+        <Field label="Category"><SuggestInput maxLength={120} value={form.category} onChange={(value) => set('category', value)} options={categories} placeholder="Choose or type a category" /></Field>
         <Field label="Minimum experience (years)"><Input required type="number" min={0} max={60} step={1} value={form.minExperience} onChange={(e) => set('minExperience', e.target.value)} /></Field>
         <Field label="Description" className="sm:col-span-2"><Textarea maxLength={20000} value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="What the role involves and who suits it" /></Field>
       </FormSection>

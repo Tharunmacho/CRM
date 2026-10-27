@@ -1,4 +1,4 @@
-"""Agency settings and the managed currency list.
+"""Agency settings, the managed currency list and the managed job category list.
 
 Everyone signed in reads them (they are also part of /api/bootstrap, so the desk needs no extra request);
 only an administrator changes them. Every change is written to the audit log with the user and time, and the
@@ -10,12 +10,12 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.deps import current_user, require_role
-from app.db.models import AgencySettings, AuditEntry, Currency, Role, User
+from app.db.models import AgencySettings, AuditEntry, Currency, Designation, JobCategory, Role, User
 from app.db.session import get_db
 from app.services import agency_settings as agency
 
@@ -24,6 +24,8 @@ admin = require_role(Role.admin)
 
 NOT_INSTALLED = "Agency settings are not available yet. Ask your administrator to apply the latest database update."
 IN_USE = "This currency is used by existing orders. Mark it inactive instead."
+CATEGORY_IN_USE = "This category is used by job titles. Mark it inactive instead."
+CATEGORY_NOT_INSTALLED = "Job categories are not available yet. Ask your administrator to apply the latest database update."
 
 
 class Loose(BaseModel):
@@ -49,6 +51,12 @@ class CurrencyIn(Loose):
     sortOrder: int | None = None
 
 
+class CategoryIn(Loose):
+    name: str | None = None
+    active: bool | None = None
+    sortOrder: int | None = None
+
+
 def _refuse(errors: dict[str, str]) -> None:
     if errors:
         raise HTTPException(422, {"message": "Check the highlighted fields.",
@@ -62,6 +70,11 @@ def _clean(value: str | None) -> str:
 def _require_tables(db: Session) -> None:
     if not agency.tables_present(db):
         raise HTTPException(503, NOT_INSTALLED)
+
+
+def _require_categories(db: Session) -> None:
+    if not agency.categories_present(db):
+        raise HTTPException(503, CATEGORY_NOT_INSTALLED)
 
 
 def _audit(db: Session, user: User, action: str, target: str, kind: str, entity_id: str, meta: dict | None = None) -> None:
@@ -237,5 +250,104 @@ def delete_currency(code: str, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(409, "Keep at least one active currency.")
     db.execute(delete(Currency).where(Currency.code == row.code))
     _audit(db, user, "Deleted currency", row.code, "currency", row.code, {"name": row.name})
+    _commit(db)
+    return agency.read_payload(db)
+
+
+# ---------------------------------------------------------------- job categories
+
+def _category_list(db: Session) -> list[dict]:
+    return agency.read_payload(db)["categories"]
+
+
+def _category_name(body: CategoryIn) -> str:
+    name = agency.clean_category_name(body.name)
+    errors: dict[str, str] = {}
+    if not name:
+        errors["name"] = "Enter the category name."
+    elif len(name) < agency.CATEGORY_MIN:
+        errors["name"] = f"Use at least {agency.CATEGORY_MIN} characters."
+    elif len(name) > agency.CATEGORY_MAX:
+        errors["name"] = f"Use {agency.CATEGORY_MAX} characters or fewer."
+    elif "\x00" in name:
+        errors["name"] = "The name cannot contain hidden special characters."
+    if body.sortOrder is not None and not 0 <= body.sortOrder <= 100000:
+        errors["sortOrder"] = "Enter a number from 0 to 100,000."
+    _refuse(errors)
+    return name
+
+
+def _category_taken(db: Session, name: str, ignore_id: str | None = None) -> bool:
+    query = select(JobCategory.id).where(func.lower(JobCategory.name) == name.lower())
+    if ignore_id:
+        query = query.where(JobCategory.id != ignore_id)
+    return db.scalar(query.limit(1)) is not None
+
+
+def _locked_category(db: Session, category_id: str) -> JobCategory:
+    row = db.scalar(select(JobCategory).where(JobCategory.id == category_id).with_for_update())
+    if row is None:
+        raise HTTPException(404, "Category not found.")
+    return row
+
+
+@router.get("/categories")
+def read_categories(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    payload = agency.read_payload(db)
+    return {"categories": payload["categories"], "editable": payload["categoriesEditable"]}
+
+
+@router.post("/categories", status_code=201)
+def add_category(body: CategoryIn, db: Session = Depends(get_db), user: User = Depends(admin)) -> dict:
+    _require_categories(db)
+    name = _category_name(body)
+    if _category_taken(db, name):
+        raise HTTPException(409, "That category is already in the list.")
+    order = body.sortOrder if body.sortOrder is not None else (db.scalar(select(func.max(JobCategory.sort_order))) or 0) + 10
+    row = JobCategory(name=name, is_active=True if body.active is None else body.active, sort_order=order)
+    db.add(row)
+    db.flush()
+    _audit(db, user, "Added job category", name, "job_category", row.id, {"name": name})
+    _commit(db)
+    return agency.read_payload(db)
+
+
+@router.put("/categories/{category_id}")
+def change_category(category_id: str, body: CategoryIn, db: Session = Depends(get_db), user: User = Depends(admin)) -> dict:
+    """Rename and switch on or off. A rename also renames the category on every job title that used the old name."""
+    _require_categories(db)
+    name = _category_name(body)
+    row = _locked_category(db, category_id)
+    if _category_taken(db, name, row.id):
+        raise HTTPException(409, "That category is already in the list.")
+    active = row.is_active if body.active is None else body.active
+    old_name = row.name
+    changes = {}
+    for key, value in (("name", name), ("is_active", active), ("sort_order", row.sort_order if body.sortOrder is None else body.sortOrder)):
+        if getattr(row, key) != value:
+            changes[key] = {"from": getattr(row, key), "to": value}
+            setattr(row, key, value)
+    if changes:
+        titles = 0
+        if old_name != name:
+            # Same transaction as the rename, so a job title never keeps a name the list no longer has.
+            titles = db.execute(update(Designation).where(func.lower(Designation.category) == old_name.lower())
+                                .values(category=name)).rowcount or 0
+        meta = {"changes": changes}
+        if titles:
+            meta["jobTitlesRenamed"] = titles
+        _audit(db, user, "Updated job category", name, "job_category", row.id, meta)
+        _commit(db)
+    return agency.read_payload(db)
+
+
+@router.delete("/categories/{category_id}")
+def delete_category(category_id: str, db: Session = Depends(get_db), user: User = Depends(admin)) -> dict:
+    _require_categories(db)
+    row = _locked_category(db, category_id)
+    if agency.category_in_use(db, row.name):
+        raise HTTPException(409, CATEGORY_IN_USE)
+    db.execute(delete(JobCategory).where(JobCategory.id == row.id))
+    _audit(db, user, "Deleted job category", row.name, "job_category", row.id, {"name": row.name})
     _commit(db)
     return agency.read_payload(db)

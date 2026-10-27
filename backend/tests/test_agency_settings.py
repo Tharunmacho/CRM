@@ -138,7 +138,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     with engine.begin() as connection:
         connection.execute(text("INSERT INTO auth_users (id,name,email,role,active,receives_auto_assign,on_leave) VALUES ('u','U','u@example.test','admin',true,false,false)"))
     _migrate(engine, "head")
-    assert set(inspect(engine).get_table_names()) - before == {"agency_settings", "currencies"}
+    assert set(inspect(engine).get_table_names()) - before == {"agency_settings", "currencies", "job_categories"}  # 0017 and the later 0019
     with engine.begin() as connection:
         connection.execute(text("UPDATE agency_settings SET name = 'Edited', default_nationality = 'Kenyan'"))
         connection.execute(text("UPDATE currencies SET active = false WHERE code = 'GBP'"))

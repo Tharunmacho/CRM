@@ -10,7 +10,7 @@ export const NEUTRAL_NAME = 'CRM'
 
 export const EMPTY_SETTINGS: AgencySettings = {
   name: '', shortName: null, defaultOrderCurrency: '', defaultAdvanceCurrency: '', homeCallingCode: '',
-  defaultNationality: null, acknowledgementText: '', currencies: [], timezone: '', slaHours: 0, editable: false,
+  defaultNationality: null, acknowledgementText: '', currencies: [], categories: [], categoriesEditable: false, timezone: '', slaHours: 0, editable: false,
 }
 
 export const agencyName = (settings?: Pick<AgencySettings, 'name'> | null, signedOut?: { name?: string } | null) =>

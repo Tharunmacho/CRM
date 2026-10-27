@@ -209,10 +209,10 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                 row.object_key, row.content_hash, row.content_type, row.processing_state = key, digest, mime, deepcopy(state)
                 # PRD: skip a file whose hash was already processed. The receipt and original stay for the
                 # audit trail, but nothing is read, no candidate or acknowledgement is created.
-                from app.services.duplicate_files import DUPLICATE_REASON, processed_hashes
+                from app.services.duplicate_files import duplicate_reason, processed_hashes
                 known = processed_hashes(db, [digest], exclude_whatsapp_id=message_id).get(digest)
                 if known:
-                    row.status, row.last_error = "ignored", DUPLICATE_REASON
+                    row.status, row.last_error = "ignored", duplicate_reason(known)
                     db.add(AuditEntry(action="Ignored duplicate WhatsApp file", target=row.file_name, entity_type="whatsapp_message",
                                       entity_id=row.id, meta={"channel": "whatsapp", "senderNumber": row.sender_number,
                                                               "providerMessageId": row.provider_message_id,

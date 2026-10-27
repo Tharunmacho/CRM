@@ -38,6 +38,16 @@
 .as-switch > span { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
 .as-delete:hover:not(:disabled) { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
 .uv-edit:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---------- Job categories: a plain list that scrolls inside the card ---------- */
+.as-cats { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--border-faint); }
+.as-cat { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px 24px; min-height: 52px; padding: 8px 20px; transition: background-color .12s; }
+.as-cat + .as-cat { border-top: 1px solid var(--border-faint); }
+.as-cat:hover { background: var(--tint-1); }
+.as-cat-name { font-size: 14px; font-weight: 500; color: var(--text-main); overflow-wrap: anywhere; }
+.as-cat.is-off .as-cat-name { color: var(--text-muted); }
+.as-cat .as-switch { min-width: 112px; }
+.as-categories .as-notice { margin: 0 20px 14px; }
 .uv-edit:disabled:hover { border-color: var(--border-control); color: var(--text-main); }
 
 
@@ -62,7 +72,15 @@
   .as-currencies .uv-actions { width: 100%; }
   .as-currencies .uv-actions .uv-edit { flex: 1; justify-content: center; }
 }
+@media (max-width: 767px) {
+  .as-cats { max-height: 480px; }
+  .as-cat { grid-template-columns: minmax(0, 1fr) auto; padding: 12px 16px; }
+  .as-cat .uv-actions { grid-column: 1 / -1; width: 100%; }
+  .as-cat .uv-actions .uv-edit { flex: 1; justify-content: center; }
+  .as-categories .as-notice { margin: 0 16px 12px; }
+  .as-categories .uv-head-actions > .ui-button { width: 100%; min-height: 44px; justify-content: center; }
+}
 @media (max-width: 640px) {
-  .workspace-dialog:has(#currency-form) > footer { flex-direction: column-reverse; align-items: stretch; }
-  .workspace-dialog:has(#currency-form) > footer > .ui-button { width: 100%; min-height: 44px; }
+  .workspace-dialog:is(:has(#currency-form), :has(#category-form)) > footer { flex-direction: column-reverse; align-items: stretch; }
+  .workspace-dialog:is(:has(#currency-form), :has(#category-form)) > footer > .ui-button { width: 100%; min-height: 44px; }
 }

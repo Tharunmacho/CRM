@@ -7,6 +7,14 @@ export interface CurrencyOption {
   sortOrder: number
 }
 
+/** One entry of the agency's job category list (Users > Agency settings). A job title stores the category as plain text. */
+export interface JobCategory {
+  id: string
+  name: string
+  active: boolean
+  sortOrder: number
+}
+
 /** The agency's identity and defaults, served inside /bootstrap and by GET /api/settings. */
 export interface AgencySettings {
   name: string
@@ -20,6 +28,10 @@ export interface AgencySettings {
   updatedAt?: string | null
   updatedBy?: string | null
   currencies: CurrencyOption[]
+  /** The managed job categories. Missing on an older server: the screens then use the categories already on job titles. */
+  categories?: JobCategory[]
+  /** False when the server has no category table yet, so the list cannot be edited. */
+  categoriesEditable?: boolean
   /** Read only: set by the server, not editable here. */
   timezone: string
   slaHours: number

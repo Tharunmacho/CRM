@@ -14,7 +14,7 @@ Task escalation and daily-update checks run every 15 minutes. Personal to-do rem
 
 1. Back up the existing PostgreSQL database and all documents; retain the current release and environment configuration, especially the token-encryption key.
 2. Stop older API instances and workers that write to this database. Confirm the deployment points to the intended database and persistent storage.
-3. From the repository root, run `python -m alembic -c backend/alembic.ini upgrade head` in the configured deployment environment. The expected head is `0016_intake_communications`.
+3. From the repository root, run `python -m alembic -c backend/alembic.ini upgrade head` in the configured deployment environment. The expected head is `0019_job_categories` (0017 adds the agency settings and currency tables, 0018 the WhatsApp acknowledgement template, 0019 the job category list with its starting categories; all only add tables or columns).
 4. Start the matching release. Verify `/api/health`, existing account login, an old uploaded document, a new upload, task-monitoring heartbeat and ingestion source health.
 5. Configure the selected services below, then run live acceptance with dedicated test records. Keep synthetic tests separate from production candidate data.
 

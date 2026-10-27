@@ -7,13 +7,14 @@ import { activeCurrencies, agencyFormChanged, agencyFormErrors, currencyLabel, f
 import { dateTimeLabel } from '@/shared/lib/format'
 import { Panel } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
+import { CategoryCard } from './category-card'
 import { CurrencyCard } from './currency-card'
 import { PanelHead } from './user-ui'
 import '@/styles/agency-settings.css'
 
 type Errors = Partial<Record<keyof AgencyForm, string>>
 
-/** Users > Agency settings: identity, defaults for new records, the reply text, the fixed rules and the currency list. */
+/** Users > Agency settings: identity, defaults for new records, the reply text, the fixed rules, the currency list and the job categories. */
 export function AgencySettingsTab() {
   const store = useStore()
   const settings = store.settings
@@ -144,5 +145,7 @@ export function AgencySettingsTab() {
     </div>
 
     <CurrencyCard editable={editable} defaultOrder={settings.defaultOrderCurrency} defaultAdvance={settings.defaultAdvanceCurrency} />
+
+    <CategoryCard editable={editable} />
   </div>
 }

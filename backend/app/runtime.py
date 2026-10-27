@@ -139,8 +139,10 @@ def require_current_schema():
     try:
         with connect_with_retry() as connection:
             state = schema_status(connection)
-    except Exception:
-        raise SystemExit("Cannot check the CRM database. Check the server database configuration.") from None
+    except Exception as error:
+        # Only the error type is shown: its message can contain the host or user name.
+        reason = type(error.__cause__ or error).__name__
+        raise SystemExit(f"Cannot check the CRM database ({reason}). Check the server database configuration.") from None
     if state["status"] == "ok":
         return
     current, required = ", ".join(state["current"]) or "unversioned", ", ".join(state["expected"])

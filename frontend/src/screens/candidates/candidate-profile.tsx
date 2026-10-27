@@ -115,115 +115,6 @@ function useProfileTabs(root: RefObject<HTMLElement>, scroller: RefObject<HTMLEl
   return { tabs, active, go }
 }
 
-/* ---------------------------------------------------------------- Masonry */
-
-/** Gap between cards, in px. Must match `--cp-gap` in candidate-v2.css. */
-const MASONRY_GAP = 16
-
-/** The cards of a masonry: its children, looking through wrappers that have `display: contents`. */
-function masonryItems(container: HTMLElement): HTMLElement[] {
-  const found: HTMLElement[] = []
-  for (const child of Array.from(container.children) as HTMLElement[]) {
-    const display = window.getComputedStyle(child).display
-    if (display === 'contents') found.push(...masonryItems(child))
-    else if (display !== 'none') found.push(child)
-  }
-  return found
-}
-
-/** Spread: how far apart the tallest and shortest column end when the cards are dropped in this order. */
-function columnSpread(columns: number, fixed: number[], order: number[], moving: number[]): number {
-  const ends = new Array<number>(columns).fill(0)
-  const drop = (height: number) => { let at = 0; for (let i = 1; i < columns; i++) if (ends[i] < ends[at]) at = i; ends[at] += height }
-  fixed.forEach(drop)
-  order.forEach((index) => drop(moving[index]))
-  return Math.max(...ends) - Math.min(...ends)
-}
-
-/** A cheap, repeatable search for an order of the movable cards that leaves the columns ending close together. */
-function balancedOrder(columns: number, fixed: number[], moving: number[]): number[] {
-  const natural = moving.map((_, index) => index)
-  let best = natural
-  let bestSpread = columnSpread(columns, fixed, natural, moving)
-  if (bestSpread <= 40) return best
-  const tallFirst = [...natural].sort((a, b) => moving[b] - moving[a])
-  const tallSpread = columnSpread(columns, fixed, tallFirst, moving)
-  if (tallSpread < bestSpread) { best = tallFirst; bestSpread = tallSpread }
-  let seed = 7
-  const random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
-  let current = best
-  let currentSpread = bestSpread
-  for (let step = 0; step < 1500 && bestSpread > 24; step++) {
-    const next = [...current]
-    const a = Math.floor(random() * next.length)
-    const b = Math.floor(random() * next.length)
-    if (a === b) continue
-    ;[next[a], next[b]] = [next[b], next[a]]
-    const spread = columnSpread(columns, fixed, next, moving)
-    if (spread <= currentSpread) { current = next; currentSpread = spread }
-    if (spread < bestSpread) { best = next; bestSpread = spread }
-  }
-  // Keep the page order unless reordering clearly helps.
-  return columnSpread(columns, fixed, natural, moving) - bestSpread > 48 ? best : natural
-}
-
-/**
- * Two (or three) columns of cards that end together. Each card spans as many 1px grid rows as it is tall, so the
- * grid drops the next card into the shorter column. Below the two-column breakpoint the container is a plain
- * column and the spans do nothing. No sticky or inner scrolling: the page just flows.
- */
-function useMasonry(root: RefObject<HTMLElement>) {
-  const observer = useRef<ResizeObserver | null>(null)
-  const watched = useRef(new Set<Element>())
-  const place = useCallback((item: Element) => {
-    const height = Math.ceil((item as HTMLElement).getBoundingClientRect().height)
-    const span = height > 0 ? `span ${height + MASONRY_GAP}` : ''
-    if ((item as HTMLElement).style.gridRowEnd !== span) (item as HTMLElement).style.gridRowEnd = span
-  }, [])
-  const lastKey = useRef('')
-  const balance = useCallback(() => {
-    const container = root.current
-    if (!container) return
-    const items = masonryItems(container)
-    const style = window.getComputedStyle(container)
-    const columns = style.display === 'grid' ? style.gridTemplateColumns.split(' ').length : 1
-    if (columns < 2) {
-      if (lastKey.current) { lastKey.current = ''; for (const item of items) item.style.order = '' }
-      return
-    }
-    const rail = items.filter((item) => item.classList.contains('cp-rail'))
-    const wide = items.filter((item) => item.classList.contains('is-wide'))
-    const moving = items.filter((item) => !rail.includes(item) && !wide.includes(item))
-    const height = (item: HTMLElement) => Math.ceil(item.getBoundingClientRect().height) + MASONRY_GAP
-    const railHeights = rail.map(height)
-    const movingHeights = moving.map(height)
-    const key = `${columns}:${railHeights.join(',')}|${movingHeights.join(',')}`
-    if (key === lastKey.current) return
-    lastKey.current = key
-    const order = balancedOrder(columns, railHeights, movingHeights)
-    rail.forEach((item, index) => { item.style.order = String(index) })
-    order.forEach((movingIndex, position) => { moving[movingIndex].style.order = String(100 + position) })
-    wide.forEach((item) => { item.style.order = '1000' })
-  }, [root])
-  useLayoutEffect(() => {
-    const container = root.current
-    if (!container) return
-    if (!observer.current && typeof ResizeObserver !== 'undefined') {
-      observer.current = new ResizeObserver((entries) => { for (const entry of entries) place(entry.target); balance() })
-    }
-    const items = masonryItems(container)
-    for (const item of items) {
-      place(item)
-      if (!watched.current.has(item)) { watched.current.add(item); observer.current?.observe(item) }
-    }
-    for (const item of [...watched.current]) {
-      if (!items.includes(item as HTMLElement)) { watched.current.delete(item); observer.current?.unobserve(item) }
-    }
-    balance()
-  })
-  useEffect(() => () => { observer.current?.disconnect(); observer.current = null; watched.current.clear() }, [])
-}
-
 /* ------------------------------------------------------------------ Identity */
 
 const phoneDigits = (value: string) => value.replace(/[^\d+]/g, '')
@@ -343,7 +234,6 @@ export default function CandidateProfilePage() {
   const bodyRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const { tabs, active: activeTab, go } = useProfileTabs(bodyRef, barRef)
-  useMasonry(bodyRef)
 
   if (loadedId !== id) {
     return <Panel><p role={loadError ? 'alert' : 'status'} className="text-sm text-ink-500">{loadError || 'Loading the candidate…'}</p>
@@ -364,7 +254,7 @@ export default function CandidateProfilePage() {
   const active = apps.find((a) => a.status === 'active')
   const deployed = apps.some((a) => a.status === 'deployed') || cand.status === 'deployed'
   const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
-  const canAssign = store.can('work_any_candidate')
+  const canAssign = store.can('reassign')
   const ownerActive = !!cand.ownerId && !!store.user(cand.ownerId)?.active
   const initialTask = store.tasks.find(task => task.candidateId === cand.id && task.kind === 'initial_call' && !task.completedAt && !task.cancelledAt)
   const hasOriginals = cand.documents.some(document => document.key === 'source_bundle' && document.versions.length > 0)
@@ -459,9 +349,20 @@ export default function CandidateProfilePage() {
         </nav>
       </div>
 
-      {/* One masonry of cards: every card sits under the one above it in its column, so both columns end together and nothing is pinned. */}
-      <div ref={bodyRef} className="cp-masonry">
-          <ProfileCard title="Next step" icon={<Flag size={17} />} accent className="cp-rail">
+      {/* The details read from the CV come first; the workflow cards sit beside them. Nothing is pinned. */}
+      <div ref={bodyRef} className="cp-grid">
+        <div className="cp-main">
+          {evidenceLoading && <p role="status" className="cp-note">Loading documents…</p>}
+          {evidenceError && (
+            <Panel>
+              <p role="alert" className="text-[14px] text-stamp-700">We could not refresh the documents. {fullText?.id === id ? 'Showing what we loaded before.' : 'The profile is shown, but the details read from the documents are missing.'} {evidenceError}</p>
+              <Button className="mt-3" onClick={() => setEvidenceRetry(value => value + 1)}>Try again</Button>
+            </Panel>
+          )}
+          <CandidateSections cand={{ ...cand, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
+        </div>
+        <aside aria-label="Recruitment workflow" className="cp-aside">
+          <ProfileCard title="Next step" icon={<Flag size={17} />} accent>
             <h3 className="cp-next-title">{!cand.ownerId ? 'Assign a recruiter' : active ? `Continue stage ${active.currentStage}: ${stageByNo(active.currentStage).title}` : deployed ? 'Recruitment finished' : initialTask ? 'Make the initial call' : 'Match to a suitable order'}</h3>
             <p className="cp-next-text">{!cand.ownerId ? 'Once a recruiter is assigned, the initial call task starts.' : active ? 'Your progress and deadlines are saved.' : deployed ? 'Documents and history stay on this page.' : initialTask ? `${owner?.name || 'The assigned recruiter'} will make the call${initialTask.dueAt ? ` · due ${dateTimeLabel(initialTask.dueAt)}` : ''}.` : 'Pick an open order to start the 11 stages.'}</p>
             {((!cand.ownerId && canAssign) || (initialTask && canWork) || (active && canWork)) && (
@@ -473,7 +374,7 @@ export default function CandidateProfilePage() {
             )}
           </ProfileCard>
 
-          <ProfileCard className="cp-rail" title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}. Open one to work on its 11 stages.` : undefined}>
+          <ProfileCard title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}. Open one to work on its 11 stages.` : undefined}>
             {apps.length === 0 ? (
               <div>
                 <p className="cp-empty-title">Not matched to any order</p>
@@ -514,7 +415,7 @@ export default function CandidateProfilePage() {
           </ProfileCard>
 
           <ProfileCard
-            className="cp-rail"
+           
             title="Initial call"
             icon={<PhoneCall size={17} />}
             meta="Did you call, are they interested, and your notes"
@@ -545,7 +446,7 @@ export default function CandidateProfilePage() {
           </ProfileCard>
 
           <ProfileCard
-            className="cp-rail"
+           
             title="Recruiter"
             icon={<UserCog size={17} />}
             action={canAssign && <Button size="sm" onClick={() => setReassigning(true)}>{cand.ownerId ? 'Reassign' : 'Assign'}</Button>}
@@ -556,7 +457,7 @@ export default function CandidateProfilePage() {
             </div>
           </ProfileCard>
 
-          <ProfileCard className="cp-rail" title="Documents" icon={<FileText size={17} />} meta={canWork ? DOCUMENT_HELP : undefined}>
+          <ProfileCard title="Documents" icon={<FileText size={17} />} meta={canWork ? DOCUMENT_HELP : undefined}>
             <div className="cp-docs">
               <DocumentList
                 documents={cand.documents}
@@ -580,17 +481,10 @@ export default function CandidateProfilePage() {
               <CandidateIntakeEvidence candidateId={cand.id} />
             </div>
           </ProfileCard>
-          {evidenceLoading && <p role="status" className="cp-note">Loading documents…</p>}
-          {evidenceError && (
-            <Panel>
-              <p role="alert" className="text-[14px] text-stamp-700">We could not refresh the documents. {fullText?.id === id ? 'Showing what we loaded before.' : 'The profile is shown, but the details read from the documents are missing.'} {evidenceError}</p>
-              <Button className="mt-3" onClick={() => setEvidenceRetry(value => value + 1)}>Try again</Button>
-            </Panel>
-          )}
-          <CandidateSections cand={{ ...cand, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
-          <div id="profile-activity" data-profile-tab="Activity" className="cp-group is-wide empty:hidden">
+          <div id="profile-activity" data-profile-tab="Activity" className="cp-group empty:hidden">
             <ActivityCard events={activity} />
           </div>
+        </aside>
       </div>
 
       {canDeleteCandidate(store.me.role) && (

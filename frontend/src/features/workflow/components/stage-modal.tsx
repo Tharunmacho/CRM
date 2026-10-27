@@ -55,7 +55,9 @@ import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { PersonAvatar } from './person-avatar'
 import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { SlaMeter, StageRail } from './stage-rail'
+import { shortRef } from '@/features/candidates/components/data-bank-columns'
 import '@/styles/candidate-v2.css'
+import '@/styles/stage-modal.css'
 
 /**
  * One scrolling application: completed sections are collapsed, the current stage
@@ -129,7 +131,7 @@ export function StageModal({
   const order = app ? store.order(app.orderId) : undefined
   const client = order ? store.company(order.companyId) : undefined
   const designation = order ? store.designation(order.designationId) : undefined
-  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the stages…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" variant="primary" onClick={snapshot.retry}>Refresh</Button>}</Dialog>
+  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}><div className="sm sm-state"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the stages…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" variant="primary" onClick={snapshot.retry}>Refresh</Button>}</div></Dialog>
   const owner = store.user(cand.ownerId)
 
   const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
@@ -144,8 +146,8 @@ export function StageModal({
       open={open}
       onClose={() => { if (!pending && !reopening && (!dirty || window.confirm('Throw away changes you have not saved?'))) onClose() }}
       width="full"
-      title={cand.name}
-      description={`${designation.title} · ${client.name} · ${order.ref}`}
+      title="Stages for this order"
+      description={`${cand.name} · ${order.ref}`}
     >
       <div className="sm">
         <div className="sm-wrap">
@@ -227,6 +229,27 @@ export function StageModal({
 
 const NEGATIVE_OUTCOMES = ['Failed', 'Rejected', 'Unfit', 'Not forwarded']
 
+/**
+ * How many of the form's 12 columns each field takes. Short controls take 4 (three to a row), a longer
+ * choice takes 8, a plain text field fills what is left of its row (all of it when the row is empty),
+ * and files, notes and checkboxes always take the full row.
+ */
+function fieldSpans(fields: StageField[]): number[] {
+  let used = 0
+  return fields.map((field) => {
+    const choiceLength = (field.options ?? []).reduce((total, option) => total + option.label.length, 0)
+    let span: number
+    if (field.type === 'file' || field.type === 'textarea' || field.type === 'checkbox') span = 12
+    else if (field.type === 'radio') span = choiceLength <= 20 ? 4 : choiceLength <= 36 ? 8 : 12
+    else if (field.type === 'text' && field.width !== 'half') span = used > 0 && 12 - used >= 8 ? 12 - used : 12
+    else span = 4
+    if (used + span > 12) used = 0
+    used += span
+    if (used >= 12) used = 0
+    return span
+  })
+}
+
 /** One row of GET /applications/{id}/reopenings: who set aside which attempt of a stage, and when. */
 interface Reopening { stage: number; attempt: number; reopenedBy?: string | null; reopenedByName?: string | null; reopenedAt?: string | null; reason?: string | null }
 
@@ -254,42 +277,50 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const designation = store.designation(order.designationId)!
   const owner = store.user(cand.ownerId)
   const photo = newestFileVersions(cand.documents.find(document => document.key === 'photo')?.versions ?? [])[0]
-  const stageText = app.status === 'deployed' ? 'Deployed' : app.status === 'closed' ? `Closed at stage ${app.currentStage}` : `${app.currentStage}. ${stageByNo(app.currentStage).title}`
+  // The order and the stage are already in the title line and the progress strip, so they are not repeated here.
   const facts: [string, React.ReactNode, React.ReactNode, boolean?][] = [
     ['Phone', <Phone key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.phone, true],
     ['Passport', <BookUser key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.passportNo ?? 'Not saved', !!cand.passportNo],
-    ['Client', <Building2 key="i" className="h-3.5 w-3.5" aria-hidden="true" />, client.name],
-    ['Order', <FileText key="i" className="h-3.5 w-3.5" aria-hidden="true" />, order.ref, true],
-    ['Job title', <Briefcase key="i" className="h-3.5 w-3.5" aria-hidden="true" />, designation.title],
+    ['Passport expires', <BookUser key="i" className="h-3.5 w-3.5" aria-hidden="true" />, cand.passportExpiry ? dateLabel(cand.passportExpiry) : 'Not saved'],
     ['Recruiter', <User key="i" className="h-3.5 w-3.5" aria-hidden="true" />, owner?.name ?? 'Not assigned'],
-    ['Current stage', <ListChecks key="i" className="h-3.5 w-3.5" aria-hidden="true" />, stageText],
-    ['Status', <ShieldCheck key="i" className="h-3.5 w-3.5" aria-hidden="true" />, app.status === 'closed' && app.closureReason ? `Closed: ${closureLabels[app.closureReason]}` : app.status === 'deployed' ? 'Deployed' : 'Active'],
+    ['Client', <Building2 key="i" className="h-3.5 w-3.5" aria-hidden="true" />, client.name],
+    ['Job title', <Briefcase key="i" className="h-3.5 w-3.5" aria-hidden="true" />, designation.title],
+    ['Matched on', <FileText key="i" className="h-3.5 w-3.5" aria-hidden="true" />, dateLabel(app.createdAt)],
+    ['Last update', <ListChecks key="i" className="h-3.5 w-3.5" aria-hidden="true" />, smartTime(app.updatedAt)],
   ]
+  const statusTone = app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'
+  const statusLabel = app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'
+  const progressLead = app.status === 'active' ? `Stage ${app.currentStage} of ${STAGES.length} · ${stageByNo(app.currentStage).title}` : app.status === 'deployed' ? 'Deployed' : `Closed at stage ${app.currentStage}${app.closureReason ? ` · ${closureLabels[app.closureReason]}` : ''}`
+  const progressText = app.status === 'active' ? 'Finish it below to open the next stage.' : app.status === 'deployed' ? 'All 11 stages are done.' : 'This order is closed for this candidate. Saved results and documents are below.'
   return (
     <>
       <header className="sm-head">
-        <div className="sm-head-top">
-          <div className="sm-person">
-            <PersonAvatar name={cand.name} photoUrl={photo?.url} size={56} />
-            <div className="min-w-0">
-              <p className="sm-eyebrow">Candidate · <span className="tnum">{cand.ref}</span></p>
-              <p className="sm-person-role" title={`${designation.title} · ${client.name}`}>{designation.title} · {client.name}</p>
-            </div>
+        <div className="sm-head-main">
+          <PersonAvatar name={cand.name} photoUrl={photo?.url} size={56} />
+          <div className="sm-id">
+            <h3 className="sm-name" title={cand.name}>{cand.name}</h3>
+            <p className="sm-sub"><span>Order</span><b className="tnum" title={order.ref}>{order.ref}</b><i aria-hidden="true">·</i><span>Candidate</span><b className="tnum" title={cand.ref}>{shortRef(cand.ref)}</b></p>
           </div>
           <div className="sm-head-side">
-            <Badge tone={app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'} variant="dot">{app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'}</Badge>
-            <Badge className="tnum">{recorded} of {STAGES.length} stages done</Badge>
+            <Badge tone={statusTone} variant="dot">{statusLabel}</Badge>
           </div>
         </div>
         <dl className="sm-facts">
           {facts.map(([label, icon, value, ident]) => <div key={label}><dt>{icon}{label}</dt><dd className={cn(ident && 'ident')} title={typeof value === 'string' ? value : undefined}>{value}</dd></div>)}
         </dl>
-        <StageRail status={app.status} currentStage={app.currentStage} reached={[...new Set(effective.map(item => item.stage))]} numbered />
-        <p className="sm-progress-label">{app.status === 'active' ? `Stage ${app.currentStage} of ${STAGES.length}: ${stageByNo(app.currentStage).title}. Finish it below to open the next stage.` : app.status === 'deployed' ? 'All 11 stages are done.' : 'This order is closed for this candidate. Saved results and documents are below.'}</p>
+        <div className="sm-progress">
+          <div className="sm-progress-line">
+            <p className="sm-progress-label"><b>{progressLead}</b><span>{progressText}</span></p>
+            <Badge className="tnum">{recorded} of {STAGES.length} stages done</Badge>
+          </div>
+          <StageRail status={app.status} currentStage={app.currentStage} reached={[...new Set(effective.map(item => item.stage))]} numbered />
+        </div>
+        <div className="sm-head-foot">
+          <button type="button" className="sm-record-toggle" aria-expanded={record} onClick={() => setRecord((value) => !value)}>
+            <User className="h-4 w-4" aria-hidden="true" />{record ? 'Hide full candidate details' : 'See full candidate details'}<ChevronDown className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
       </header>
-      <button type="button" className="sm-record-toggle" aria-expanded={record} onClick={() => setRecord((value) => !value)}>
-        <User className="h-4 w-4" aria-hidden="true" />{record ? 'Hide full candidate details' : 'See full candidate details'}<ChevronDown className="h-4 w-4" aria-hidden="true" />
-      </button>
       {record && <CandidateRecord app={app} />}
     </>
   )
@@ -599,15 +630,9 @@ function CurrentStage({
     }
   }
 
-  // Half-width fields sit in pairs; one left without a partner takes the full row so no cell is orphaned.
+  // Short fields (Yes/No, date, time, choices) sit side by side on a 12-column grid; long ones take the whole row.
   const visibleFields = def.fields.filter((f) => fieldVisible(f, data))
-  const fieldSpan: string[] = []
-  let halfRun = 0
-  visibleFields.forEach((f, index) => {
-    if (f.width !== 'half') { fieldSpan.push('is-full'); halfRun = 0; return }
-    if (halfRun % 2 === 1) { fieldSpan.push('is-half'); halfRun += 1; return }
-    if (visibleFields[index + 1]?.width === 'half') { fieldSpan.push('is-half'); halfRun += 1 } else { fieldSpan.push('is-full'); halfRun = 0 }
-  })
+  const fieldSpan = fieldSpans(visibleFields)
   const ready = result.canComplete && !result.closes && !result.repeats
   const checkState = result.canComplete ? (result.closes ? 'is-closes' : 'is-ready') : ''
 
@@ -649,7 +674,7 @@ function CurrentStage({
 
         <div className="sm-form">
           {visibleFields.map((f, index) => (
-            <div key={f.name} className={fieldSpan[index]}>
+            <div key={f.name} className={`sm-c${fieldSpan[index]}`}>
               <StageFieldInput
                 field={f}
                 value={data[f.name]}

@@ -221,3 +221,36 @@ def test_every_table_pointing_at_a_candidate_is_handled():
         for key in table.foreign_keys:
             if key.column.table.name == "crm_candidates":
                 assert key.ondelete in {"CASCADE", "SET NULL"} or table.name in cleared, table.name
+
+
+def test_a_deleted_candidates_files_can_be_read_again_and_the_reason_names_the_owner(env):
+    """A file is a duplicate only while the candidate it made still exists (email, WhatsApp and stored files)."""
+    from app.services.duplicate_files import duplicate_reason, processed_hashes
+    db = env.db
+    cid = candidate(db, "dup")
+    db.add(m.Attachment(entity_type="candidate", entity_id=cid, slot="resume", file_name="cv.pdf", object_key="cv.pdf",
+                        content_hash="h-file", uploaded_by="staff"))
+    db.add(m.MailAccount(id="acct", address="hr@example.test", provider="imap"))
+    db.flush()
+    db.add(m.MailMessage(id="msg", account_id="acct", provider_message_id="p1", received_at=NOW, candidate_id=cid))
+    db.flush()
+    db.add(m.MailAttachment(message_id="msg", file_name="cv.pdf", object_key="cv2.pdf", content_hash="h-mail"))
+    db.add(m.EmailIngestionJob(message_id="msg", status="completed", state={}))
+    db.add(m.WhatsAppChannel(phone_number_id="pn"))
+    db.flush()
+    db.add(m.WhatsAppMessage(provider_message_id="wa1", phone_number_id="pn", sender_number="919000000000", message_type="document",
+                             received_at=NOW, status="completed", candidate_id=cid, content_hash="h-wa"))
+    db.commit()
+
+    found = processed_hashes(db, ["h-file", "h-mail", "h-wa"])
+    assert {key: value["source"] for key, value in found.items()} == {"h-file": "candidate_file", "h-mail": "email", "h-wa": "whatsapp"}
+    assert all(value["candidateId"] == cid and value["candidateName"] == "Person dup" and value["candidateRef"] == "C-dup" for value in found.values())
+    reason = duplicate_reason(found["h-mail"])
+    assert reason.startswith("Duplicate file") and "Person dup (C-dup)" in reason and "01 May 2026" in reason and "email" in reason
+
+    assert env.http().delete(f"/api/candidates/{cid}").status_code == 200
+    db.expire_all()
+    # The receipts stay for the audit trail, but none of them blocks the same file any more.
+    assert db.get(m.MailMessage, "msg") is not None and db.scalar(select(m.EmailIngestionJob.status)) == "completed"
+    assert processed_hashes(db, ["h-file", "h-mail", "h-wa"]) == {}
+    assert duplicate_reason([]).startswith("Duplicate file")

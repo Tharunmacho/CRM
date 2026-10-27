@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { X, type LucideIcon } from 'lucide-react'
+import { useSuggestions } from '@/shared/ui/suggest-input'
 
 /** A flat section card (hairline border, neutral icon tile) used by every block of the Add Candidate form. */
 export function EntrySection({ id, icon: Icon, title, meta, action, className = '', children }: {
@@ -31,8 +32,8 @@ export function TagField({ label, hint, required, value, onChange, suggestions =
   suggestions?: string[]; placeholder?: string; className?: string
 }) {
   const id = useId()
-  const list = `${id}-options`
   const input = useRef<HTMLInputElement>(null)
+  const box = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState('')
   const tags = split(value)
 
@@ -41,8 +42,11 @@ export function TagField({ label, hint, required, value, onChange, suggestions =
     setDraft('')
     if (incoming.length) onChange([...tags, ...incoming].join(', '))
   }
+  const picker = useSuggestions({ anchor: box, options: suggestions.filter((item) => !tags.some((tag) => tag.toLowerCase() === item.toLowerCase())), query: draft, onPick: commit })
   const remove = (index: number) => onChange(tags.filter((_, position) => position !== index).join(', '))
   const onKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    picker.inputProps.onKeyDown(event)
+    if (event.isPropagationStopped()) return // the suggestion list used this key
     if (event.key === 'Enter' || event.key === ',') {
       if (event.key === 'Enter' && !draft.trim()) return // an empty Enter must not be swallowed
       event.preventDefault(); commit(draft)
@@ -54,7 +58,7 @@ export function TagField({ label, hint, required, value, onChange, suggestions =
   return (
     <div className={`ui-field block ac-tagfield ${className}`}>
       <label htmlFor={id} className="ac-tag-label">{label}{required && <span className="text-stamp-600"> *</span>}</label>
-      <div className="ac-tags" onClick={() => input.current?.focus()}>
+      <div ref={box} className="ac-tags" onClick={() => input.current?.focus()}>
         {tags.map((tag, index) => (
           <span key={tag} className="ac-tag">
             {tag}
@@ -62,15 +66,14 @@ export function TagField({ label, hint, required, value, onChange, suggestions =
           </span>
         ))}
         <input
-          ref={input} id={id} list={suggestions.length ? list : undefined} value={draft} autoComplete="off"
-          placeholder={tags.length ? '' : placeholder} onKeyDown={onKey} onBlur={() => commit(draft)}
+          {...picker.inputProps} ref={input} id={id} name={`crm-${id}`} value={draft}
+          placeholder={tags.length ? '' : placeholder} onKeyDown={onKey} onFocus={() => picker.setOpen(true)} onBlur={() => { picker.setOpen(false); commit(draft) }}
           onChange={(event) => {
             const text = event.target.value
-            const picked = (event.nativeEvent as InputEvent).inputType === 'insertReplacementText' // chosen from the suggestion list
-            if (text.includes(',') || picked) commit(text); else setDraft(text)
+            if (text.includes(',')) commit(text); else { setDraft(text); picker.setOpen(true) }
           }}
         />
-        {suggestions.length > 0 && <datalist id={list}>{suggestions.map((item) => <option key={item} value={item} />)}</datalist>}
+        {picker.popup}
       </div>
       {hint && <span className="ac-hint">{hint}</span>}
     </div>

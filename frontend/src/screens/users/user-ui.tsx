@@ -1,9 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Check, Copy, Eye, EyeOff, ShieldCheck } from 'lucide-react'
+import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
+import { Check, Copy, Eye, EyeOff, ShieldCheck, Sparkles, X } from 'lucide-react'
 import type { Role } from '@/shared/model/types'
 import { cn } from '@/shared/lib/cn'
 import { Badge } from '@/shared/ui/display'
-import { Button } from '@/shared/ui/primitives'
+import { Button, Field, Input } from '@/shared/ui/primitives'
 
 export const roleLabels: Record<Role, string> = { admin: 'Admin', manager: 'Manager', staff: 'Staff' }
 export const roleBlurbs: Record<Role, string> = {
@@ -83,6 +83,55 @@ export function generatePassword(length = 16) {
   while (chars.length < length) chars.push(all[random(all.length)])
   for (let i = chars.length - 1; i > 0; i--) { const j = random(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]] }
   return chars.join('')
+}
+
+/** A password box with an eye button inside it to show or hide what is typed. */
+export function PasswordInput({ forceVisible = false, className, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { forceVisible?: boolean }) {
+  const [visible, setVisible] = useState(false)
+  const shown = visible || forceVisible
+  return (
+    <span className="uv-pass">
+      <Input {...props} type={shown ? 'text' : 'password'} autoComplete="new-password" className={cn('pr-12', className)} />
+      <button type="button" className="uv-pass-eye" aria-label={shown ? 'Hide password' : 'Show password'} aria-pressed={shown} title={shown ? 'Hide password' : 'Show password'} disabled={forceVisible} onClick={() => setVisible((current) => !current)}>
+        {shown ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+      </button>
+    </span>
+  )
+}
+
+/**
+ * Two password boxes and a helper line. There is no length rule: the person choosing the password decides.
+ * It only has to be filled in and typed twice the same way.
+ */
+export function PasswordPair({ label = 'Password', confirmLabel = 'Confirm password', password, confirmation, onPassword, onConfirmation, onGenerate, generated, disabled, autoFocus, className }: {
+  label?: string; confirmLabel?: string; password: string; confirmation: string
+  onPassword: (value: string) => void; onConfirmation: (value: string) => void; onGenerate: () => void
+  /** The password we created, so it can be shown while it is still the one in the boxes. */
+  generated: string; disabled?: boolean; autoFocus?: boolean; className?: string
+}) {
+  const showingGenerated = generated !== '' && generated === password && password === confirmation
+  const state = !confirmation ? 'idle' : password === confirmation ? 'match' : 'differ'
+  return (
+    <div className={cn('uv-pair', className)}>
+      <div className="uv-pair-grid">
+        <Field label={label} required>
+          <PasswordInput autoFocus={autoFocus} disabled={disabled} maxLength={128} forceVisible={showingGenerated} value={password} onChange={(event) => onPassword(event.target.value)} />
+        </Field>
+        <Field label={confirmLabel} required>
+          <PasswordInput disabled={disabled} maxLength={128} forceVisible={showingGenerated} value={confirmation} onChange={(event) => onConfirmation(event.target.value)} />
+        </Field>
+      </div>
+      <div className="uv-pair-foot">
+        <p className={cn('uv-pair-status', state === 'match' && 'is-ok', state === 'differ' && 'is-bad')} role="status" aria-live="polite">
+          {state === 'match' ? <><Check size={14} aria-hidden="true" />Both passwords match</>
+            : state === 'differ' ? <><X size={14} aria-hidden="true" />The two passwords are not the same</>
+            : 'Choose any password you like. Type it twice.'}
+        </p>
+        <Button size="sm" disabled={disabled} icon={<Sparkles className="h-4 w-4" />} onClick={onGenerate}>Create one for me</Button>
+      </div>
+      {showingGenerated && <PasswordReveal value={password} defaultVisible />}
+    </div>
+  )
 }
 
 /** Password box with reveal and copy. The value only ever lives in component state. */

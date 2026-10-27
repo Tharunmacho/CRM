@@ -145,11 +145,11 @@ def _receive_job(db: Session, message: MailMessage, stored) -> None:
     id, time) as ``ignored`` with the reason, and nothing is read, created or acknowledged.
     A message that also carries any new file is processed as usual.
     """
-    from app.services.duplicate_files import DUPLICATE_REASON, processed_hashes
+    from app.services.duplicate_files import duplicate_reason, processed_hashes
     hashes = {part.content_hash for part, _ in stored}
     known = processed_hashes(db, hashes, exclude_mail_message_id=message.id)
     if hashes and set(known) == hashes:
-        db.add(EmailIngestionJob(message_id=message.id, status="ignored", state={}, last_error=DUPLICATE_REASON))
+        db.add(EmailIngestionJob(message_id=message.id, status="ignored", state={}, last_error=duplicate_reason([known[h] for h in sorted(known)])))
         db.add(AuditEntry(action="Ignored duplicate email file", target=(message.subject or "")[:300],
                           entity_type="email_message", entity_id=message.id,
                           meta={"channel": "email", "fromAddress": message.from_address, "receivedAt": message.received_at.isoformat(),

@@ -5,6 +5,7 @@ import type { Client, Company } from '@/shared/model/types'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
+import { SuggestInput } from '@/shared/ui/suggest-input'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
@@ -21,12 +22,11 @@ export function useCountryOptions() {
 }
 
 /** A country field that suggests names as you type and shows the flag it recognises. */
-export function CountryInput({ value, onChange, listId, options }: { value: string; onChange: (value: string) => void; listId: string; options: string[] }) {
+export function CountryInput({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[] }) {
   return (
     <div className="client-form-flag">
       <Flag country={value} />
-      <Input className="min-w-0 flex-1" maxLength={100} list={listId} value={value} onChange={(event) => onChange(event.target.value)} autoComplete="off" />
-      <datalist id={listId}>{options.map((name) => <option key={name} value={name} />)}</datalist>
+      <SuggestInput wrapperClassName="min-w-0 flex-1" maxLength={100} value={value} onChange={onChange} options={options} aria-label="Country" />
     </div>
   )
 }
@@ -100,9 +100,9 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
       <fieldset disabled={saving || !!saved} className="client-form-fields">
         {creating && <FormSection icon={<Building2 size={18} />} title="Company" hint="The company that will give you orders">
           <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={employer.name} onChange={(e) => setCompany('name', e.target.value)} placeholder="Gulf Build Contracting LLC" /></Field>
-          <Field label="Industry"><Input maxLength={120} list="client-industries" autoComplete="off" value={employer.industry} onChange={(e) => setCompany('industry', e.target.value)} placeholder="Construction" /><datalist id="client-industries">{industries.map((name) => <option key={name} value={name} />)}</datalist></Field>
+          <Field label="Industry"><SuggestInput maxLength={120} value={employer.industry} onChange={(value) => setCompany('industry', value)} options={industries} placeholder="Construction" /></Field>
           <Field label="Status" hint="Inactive clients cannot get new orders."><Select value={form.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></Select></Field>
-          <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} listId="client-countries" options={countries} /></Field>
+          <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>
           <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>
           <Field label="Address" className="sm:col-span-2"><Textarea rows={2} maxLength={2000} value={employer.address} onChange={(e) => setCompany('address', e.target.value)} placeholder="Building, street, area" /></Field>
         </FormSection>}
@@ -112,7 +112,7 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
           <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
           <Field label="WhatsApp"><Input type="tel" maxLength={40} value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} /></Field>
           {!creating && <Field label="Status" hint="Inactive clients cannot get new companies or orders."><Select value={form.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></Select></Field>}
-          {!creating && <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} listId="client-countries" options={countries} /></Field>}
+          {!creating && <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>}
           {!creating && <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>}
         </FormSection>
       </fieldset>

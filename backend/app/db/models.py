@@ -914,6 +914,21 @@ class AgencySettings(Base):
     )
 
 
+class JobCategory(Base, PkMixin):
+    """A job category offered on job titles. Admin-managed; `crm_job_designations.category` stays free text that matches by name."""
+
+    __tablename__ = "job_categories"
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    __table_args__ = (
+        Index("ux_job_categories_name_lower", func.lower(name), unique=True),
+        CheckConstraint("char_length(btrim(name)) BETWEEN 2 AND 120", name="ck_job_categories_name"),
+        {"comment": "Admin-managed job category list for job titles; names are unique ignoring case and inactive ones stay valid on saved job titles."},
+    )
+
+
 class MailDraft(Base, PkMixin, TimestampMixin):
     __tablename__ = "email_drafts"
     account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), nullable=False, index=True)

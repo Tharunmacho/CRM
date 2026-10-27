@@ -47,7 +47,7 @@ class UserFields(Wire):
 
 
 class CreateUserIn(UserFields):
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class UpdateUserIn(Wire):
@@ -74,7 +74,7 @@ class UpdateUserIn(Wire):
 
 class PasswordIn(Wire):
     model_config = ConfigDict(extra='forbid')
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
 
 
 @router.get('', response_model=list[UserOut])

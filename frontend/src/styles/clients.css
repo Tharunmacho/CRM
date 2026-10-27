@@ -271,8 +271,8 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 .client-form-note { padding: 10px 12px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--tint-1); font-size: 13px; line-height: 1.5; color: var(--text-muted); }
 .client-form-error { margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--error-edge); border-radius: 8px; background: var(--error-fill); font-size: 14px; color: var(--error-ink); }
 .client-form-flag { position: relative; }
-.client-form-flag > .cl-flag, .client-form-flag > .cl-flag-globe { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
-.client-form-flag > .ui-input { padding-left: 42px; }
+.client-form-flag > .cl-flag, .client-form-flag > .cl-flag-globe { position: absolute; left: 12px; top: 50%; z-index: 1; transform: translateY(-50%); pointer-events: none; }
+.client-form-flag .ui-input { padding-left: 42px; }
 
 /* Record activity sheet */
 .cl-audit { position: relative; display: grid; gap: 0; padding: 20px; }

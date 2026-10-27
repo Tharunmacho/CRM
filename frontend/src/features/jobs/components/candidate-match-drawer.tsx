@@ -9,6 +9,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { EmptyState } from '@/shared/ui/display'
 import { Button, CheckboxInput, Field, Input, SearchInput, Select } from '@/shared/ui/primitives'
 import { Sheet } from '@/shared/ui/overlay'
+import { SuggestInput } from '@/shared/ui/suggest-input'
 import { normalizedSkills, skillKey } from '@/features/candidates/candidate-skills'
 import { useSkillFacets } from '@/features/candidates/use-skill-facets'
 import type { CandidateMatchFilters } from '@/features/jobs/candidate-matching'
@@ -124,7 +125,7 @@ export function CandidateMatchDrawer({ onClose, orderId }: { onClose: () => void
     <fieldset disabled={saving} className="min-w-0 border-b border-rule-soft p-5">
       <SearchInput value={query} onChange={value => { setQuery(value); resetSelection() }} placeholder="Search by name, phone, email, skill or resume text" />
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Field label="Job title" hint="The job title saved on the candidate, or leave empty."><Input list="matching-designations" value={filters.designation} onChange={event => set('designation', event.target.value)} placeholder="Any job title" /><datalist id="matching-designations">{normalizedSkills(store.designations.map(item => item.title)).map(title => <option key={title} value={title} />)}</datalist></Field>
+        <Field label="Job title" hint="The job title saved on the candidate, or leave empty."><SuggestInput value={filters.designation} onChange={value => set('designation', value)} options={normalizedSkills(store.designations.map(item => item.title))} placeholder="Any job title" /></Field>
         <Field label="Minimum experience (years)"><Input type="number" min="0" max="100" step="0.5" value={filters.minExperience} onChange={event => set('minExperience', event.target.value)} placeholder="Any experience" /></Field>
         <Field label="Current location"><Input value={filters.location} onChange={event => set('location', event.target.value)} placeholder="City or place" /></Field>
         <Field label="Recruiter"><Select value={filters.owner} onChange={event => set('owner', event.target.value)}><option value="all">Anyone</option>{store.users.filter(user => user.active).map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</Select></Field>

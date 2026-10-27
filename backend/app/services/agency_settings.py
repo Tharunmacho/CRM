@@ -5,6 +5,9 @@ code, default acknowledgement text) and the `currencies` list. They are optional
 are missing (a database that has not had the migration yet) or empty, the compiled-in last-resort values below keep
 orders, the stage-8 advance and phone matching working exactly as before. They are never the first choice.
 
+The managed job category list (migration 0019, table `job_categories`) rides along but has its own presence flag: a
+database that has 0017 and not yet 0019 keeps its agency settings and simply reports no category list.
+
 The timezone and the 48-hour task rule are not settings: moving the timezone shifts every worker's "agency day"
 bookkeeping and the SLA is fixed by the product requirements. They are reported read-only for display.
 """
@@ -19,7 +22,7 @@ from sqlalchemy import exists, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core import config
-from app.db.models import AgencySettings, Application, ApplicationStage, Currency, Order
+from app.db.models import AgencySettings, Application, ApplicationStage, Currency, Designation, JobCategory, Order
 from app.domain.stages import CURRENCY_CODES, FALLBACK_ADVANCE_CURRENCY, StageOptions
 
 SLA_HOURS = 48  # fixed by the PRD; shown read-only
@@ -37,6 +40,8 @@ CURRENCY_CODE = re.compile(r"^[A-Z]{3}$")
 _PRESENT_FOR, _ABSENT_FOR = 600.0, 20.0
 _lock = threading.Lock()
 _state: dict[str, Any] = {"present": None, "until": 0.0}
+_cat_state: dict[str, Any] = {"present": None, "until": 0.0}
+CATEGORY_MIN, CATEGORY_MAX = 2, 120
 # The home calling code as plain digits, for phone matching code that has no database handle.
 _HOME_REFRESH = 60.0
 _home: dict[str, Any] = {"digits": FALLBACK_HOME_CALLING_CODE.lstrip("+"), "at": 0.0}
@@ -46,6 +51,7 @@ def reset_cache() -> None:
     """Forget what was learned about the tables and the calling code (tests, and after a restore)."""
     with _lock:
         _state.update(present=None, until=0.0)
+        _cat_state.update(present=None, until=0.0)
         _home.update(digits=FALLBACK_HOME_CALLING_CODE.lstrip("+"), at=0.0)
         _public.update(value=None, until=0.0)
 
@@ -54,6 +60,31 @@ def is_missing_table(error: BaseException) -> bool:
     """True for PostgreSQL's 'relation does not exist' raised for one of the two settings tables."""
     original = getattr(error, "orig", error)
     return getattr(original, "sqlstate", None) == "42P01" and any(name in str(original) for name in ("agency_settings", "currencies"))
+
+
+def is_missing_categories(error: BaseException) -> bool:
+    """True for PostgreSQL's 'relation does not exist' raised for the job category table."""
+    original = getattr(error, "orig", error)
+    return getattr(original, "sqlstate", None) == "42P01" and "job_categories" in str(original)
+
+
+def mark_categories_present(present: bool) -> None:
+    with _lock:
+        _cat_state.update(present=present, until=time.monotonic() + (_PRESENT_FOR if present else _ABSENT_FOR))
+
+
+def assume_categories_present() -> bool:
+    return not (_cat_state["present"] is False and time.monotonic() < _cat_state["until"])
+
+
+def categories_present(db: Session) -> bool:
+    if _cat_state["present"] is not None and time.monotonic() < _cat_state["until"]:
+        return bool(_cat_state["present"])
+    if db.get_bind().dialect.name != "postgresql":
+        return True
+    found = bool(db.scalar(text("SELECT to_regclass('job_categories') IS NOT NULL")))
+    mark_categories_present(found)
+    return found
 
 
 def mark_present(present: bool) -> None:
@@ -83,8 +114,16 @@ def currency_out(row: dict) -> dict:
             "active": bool(row["active"]), "sortOrder": row.get("sort_order", 0)}
 
 
-def build_payload(agency: dict | None, currencies: list[dict] | None) -> dict:
-    """The settings object the desk receives, from raw rows (snake_case) or from nothing at all."""
+def category_out(row: dict) -> dict:
+    return {"id": row["id"], "name": row["name"], "active": bool(row["is_active"]), "sortOrder": row.get("sort_order", 0)}
+
+
+def build_payload(agency: dict | None, currencies: list[dict] | None, categories: list[dict] | None = None) -> dict:
+    """The settings object the desk receives, from raw rows (snake_case) or from nothing at all.
+
+    `categories` is None when the server has no category table yet (the desk then falls back to the categories already
+    used on job titles and shows no editor); a list, even an empty one, means the table exists.
+    """
     available = agency is not None
     if available:
         values = {
@@ -107,7 +146,9 @@ def build_payload(agency: dict | None, currencies: list[dict] | None) -> dict:
         rows = [{"code": code, "name": code, "symbol": None, "active": True, "sortOrder": (index + 1) * 10}
                 for index, code in enumerate(CURRENCY_CODES)]
         available = False
-    return {**values, "currencies": rows, "timezone": config.get_settings().agency_timezone, "slaHours": SLA_HOURS,
+    category_rows = sorted((category_out(item) for item in categories or []), key=lambda item: (item["sortOrder"], item["name"].lower()))
+    return {**values, "currencies": rows, "categories": category_rows, "categoriesEditable": categories is not None,
+            "timezone": config.get_settings().agency_timezone, "slaHours": SLA_HOURS,
             "editable": available}
 
 
@@ -129,6 +170,7 @@ def read_payload(db: Session) -> dict:
         return build_payload(None, None)
     agency = db.get(AgencySettings, 1)
     currencies = db.scalars(select(Currency)).all()
+    categories = db.scalars(select(JobCategory)).all() if categories_present(db) else None
     raw = None if agency is None else {
         "name": agency.name, "short_name": agency.short_name, "default_order_currency": agency.default_order_currency,
         "default_advance_currency": agency.default_advance_currency, "home_calling_code": agency.home_calling_code,
@@ -137,7 +179,8 @@ def read_payload(db: Session) -> dict:
     }
     note_snapshot(raw)
     return build_payload(raw, [{"code": c.code, "name": c.name, "symbol": c.symbol, "active": c.active,
-                                "sort_order": c.sort_order} for c in currencies])
+                                "sort_order": c.sort_order} for c in currencies],
+                         None if categories is None else [{"id": c.id, "name": c.name, "is_active": c.is_active, "sort_order": c.sort_order} for c in categories])
 
 
 def active_currency_codes(db: Session) -> frozenset[str]:
@@ -220,3 +263,30 @@ def currency_in_use(db: Session, code: str) -> bool:
 
 def active_count(db: Session) -> int:
     return db.scalar(select(func.count()).select_from(Currency).where(Currency.active.is_(True))) or 0
+
+
+# ---------------------------------------------------------------- job categories
+
+def clean_category_name(value: str | None) -> str:
+    """Trimmed, with runs of spaces collapsed, so 'Oil  and gas ' and 'Oil and gas' are the same name."""
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def category_in_use(db: Session, name: str) -> int:
+    """How many job titles carry this category (compared ignoring case)."""
+    return db.scalar(select(func.count()).select_from(Designation).where(func.lower(Designation.category) == name.lower())) or 0
+
+
+def canonical_category(db: Session, value: str | None) -> str | None:
+    """What to store on a job title: the managed spelling when the text matches one ignoring case, else the text as typed.
+
+    Unknown names are kept on purpose (old titles and free typing stay valid). Empty text becomes None.
+    """
+    name = clean_category_name(value)
+    if not name:
+        return None
+    if categories_present(db):
+        managed = db.scalar(select(JobCategory.name).where(func.lower(JobCategory.name) == name.lower()))
+        if managed:
+            return managed
+    return name
