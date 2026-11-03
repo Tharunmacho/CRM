@@ -106,4 +106,4 @@ export function useElementWidth<E extends HTMLElement>() {
 }
 
 /** Below this card width the eleven columns would no longer fit without scrolling, so cards take over. */
-export const TABLE_MIN_WIDTH = 1040
+export const TABLE_MIN_WIDTH = 1130

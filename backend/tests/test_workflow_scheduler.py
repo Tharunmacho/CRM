@@ -153,8 +153,10 @@ def test_worker_keeps_sla_cadence_while_delivering_timely_reminders(monkeypatch)
     monkeypatch.setattr(worker, "get_settings", lambda: SimpleNamespace(agency_timezone="Asia/Kolkata"))
     monkeypatch.setattr(worker, "scan_workflow", lambda *_, **kw: calls.append(("tasks", clock["value"])) or {"todos": 0})
     monkeypatch.setattr(worker, "deliver_due_todos", lambda *_: calls.append(("todos", clock["value"])) or 0)
+    monkeypatch.setattr(worker, "scan_daily_work_only", lambda *_, **kw: calls.append(("daily", clock["value"])) or {})
     worker.main()
-    assert calls == [("tasks", 0), ("todos", 30), ("todos", 60), ("tasks", 900)]
+    # Reminders every 30 s, the daily-work pass (allocation, hourly alerts) every minute, the full scan every 15 minutes.
+    assert calls == [("tasks", 0), ("todos", 30), ("daily", 60), ("todos", 60), ("tasks", 900)]
     assert commits == [0, 30, 60, 900] and waits == [30] * 4
 
 

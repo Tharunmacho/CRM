@@ -24,7 +24,8 @@ from app.core.deps import current_user, require_role
 from app.integrations.ocr.mapping import resume_text_from
 from app.services.candidate_identity import identity_matches, enrich_empty, normalize_candidate_values, normalize_phone
 from app.services.candidate_intake_binding import bind_intake, lock_intake_group, saved_candidate, saved_candidate_id
-from app.services.candidate_search import Pool, Search, search_candidates, export_candidates, candidate_skill_facets, pool_counts
+from app.services.candidate_review import UNNAMED
+from app.services.candidate_search import Pool, Search, search_candidates, export_candidates, candidate_skill_facets, pool_counts, position_groups
 from app.services.candidate_matching import match_candidates
 from app.services.parallel_reads import parallel_reads
 from app.db.models import (
@@ -61,16 +62,24 @@ logger = logging.getLogger(__name__)
 def candidate_filters(q: str = Query(default="", max_length=500), pool: Pool = "all",
                       skills: list[str] = Query(default=[]), skill_mode: Literal["all", "any"] = "all", missing_skills: bool = False,
                       column_filters: str = Query(default="{}", max_length=5000), sort: str = "added", direction: Literal["asc", "desc"] = "desc",
-                      staff: str | None = Query(default=None, max_length=36)):
+                      staff: str | None = Query(default=None, max_length=36), position_id: str = Query(default="", max_length=36)):
     if len(skills) > 50 or any(len(skill) > 200 for skill in skills):
         raise HTTPException(422, "Select at most 50 skills of at most 200 characters each.")
-    return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, staff or None)
+    return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, staff or None, order_id=position_id)
 
 
 @router.get("")
 def candidate_list(filters: Search = Depends(candidate_filters), page: int = Query(default=0, ge=0), page_size: int = Query(default=20, ge=1, le=100),
                    db: Session = Depends(get_db), user: User = Depends(current_user)):
     return search_candidates(db, filters, page, page_size)
+
+
+@router.get("/position-groups")
+def candidate_position_groups(response: Response, filters: Search = Depends(candidate_filters),
+                              db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """The positions (orders) that hold the candidates this search finds, with a resume count each."""
+    response.headers["Cache-Control"] = "private, no-store"
+    return position_groups(db, filters)
 
 
 @router.get("/export")
@@ -226,14 +235,17 @@ def _validate_profile_relationships(values, supplied=None):
     if supplied is None or {"total_experience", "gulf_experience"} <= supplied:
         if values["gulf_experience"] > values["total_experience"]:
             raise ValueError("Gulf experience cannot exceed total experience.")
-    if not normalize_phone(values["phone"]):
+    # A phone may be blank (a candidate saved from an uploaded document before the number is known);
+    # a number that is given must still be a real one.
+    if values["phone"] and not normalize_phone(values["phone"]):
         raise ValueError("Enter a valid phone number with at least seven digits.")
 
 
 class CandidateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=200)
-    phone: str = Field(min_length=1, max_length=40)
+    # Both are required unless the candidate comes from an uploaded document (see `dates`).
+    name: str = Field(default="", max_length=200)
+    phone: str = Field(default="", max_length=40)
     dob: date | None = None
     whatsapp: str | None = None
     email: str | None = None
@@ -261,9 +273,7 @@ class CandidateIn(BaseModel):
 
     @field_validator("name", "phone")
     @classmethod
-    def nonblank(cls, raw):
-        if not raw.strip():
-            raise ValueError("This field cannot be blank.")
+    def trimmed(cls, raw):
         return raw.strip()
 
     @field_validator("whatsapp", "email", "gender", "nationality", "current_city", "passport_no", "passport_place", "source_detail")
@@ -283,6 +293,18 @@ class CandidateIn(BaseModel):
         if len(values) > 200 or any(len(item) > 200 for item in values):
             raise ValueError("Use at most 200 entries, each no longer than 200 characters.")
         return values
+
+    @model_validator(mode="after")
+    def dates(self):
+        # A document is the evidence for a candidate saved without them; they are then flagged for review.
+        if self.intake_group_id is None and not (self.name and self.phone):
+            raise ValueError("Enter the candidate's name and phone number.")
+        _validate_profile_relationships({key: getattr(self, key) for key in PROFILE_CHECK_FIELDS})
+        return self
+
+
+class DuplicateLookup(CandidateIn):
+    """The live duplicate check only matches on phone, email and passport, so nothing else is required."""
 
     @model_validator(mode="after")
     def dates(self):
@@ -401,11 +423,13 @@ def create_candidate(
     owner = next_owner(db, pointer=pointer)
 
     ocr_data = body.ocr_data.stored() if body.ocr_data else {}
+    # Saved from a document that did not give a name or number: kept, and flagged for a person to complete.
+    incomplete = not (body.name and body.phone)
 
     candidate = Candidate(
         ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}",
-        name=body.name.strip(),
-        phone=body.phone.strip(),
+        name=body.name or UNNAMED,
+        phone=body.phone,
         dob=body.dob,
         whatsapp=body.whatsapp,
         email=body.email.strip().lower() if body.email else None,
@@ -424,8 +448,8 @@ def create_candidate(
         expected_salary=body.expected_salary,
         source=body.source,
         source_detail=body.source_detail,
-        status=CandidateStatus.new if owner else CandidateStatus.needs_review,
-        needs_review=owner is None,
+        status=CandidateStatus.new if owner and not incomplete else CandidateStatus.needs_review,
+        needs_review=owner is None or incomplete,
         owner_id=owner.id if owner else None,
         intake_owner_id=owner.id if owner else None,
         created_by=user.id,
@@ -581,7 +605,7 @@ def mask_aadhaar_identifiers(stored: dict) -> dict:
 
 @router.post("/check-duplicate")
 def check_duplicate(
-    body: CandidateIn,
+    body: DuplicateLookup,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -685,6 +709,9 @@ def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session 
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     before = {key: getattr(candidate, key) for key in changes}
+    for key in ("name", "phone"):
+        if key in changes and not changes[key] and before[key] not in ("", UNNAMED):
+            raise HTTPException(422, f"The candidate's {'name' if key == 'name' else 'phone number'} cannot be removed. Replace it instead.")
     for key, val in changes.items():
         setattr(candidate, key, val)
     if body.mark_reviewed:

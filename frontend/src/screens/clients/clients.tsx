@@ -188,16 +188,11 @@ export default function ClientsPage() {
       <PageHeader
         title="Clients"
         eyebrow="Your clients"
-        description="Clients you hire for, with their contact people, companies and open orders."
+        description="Everything about the clients you hire for in one place: contact people, their companies, agreements and open orders."
         actions={
-          <>
-            <Button variant="secondary" icon={<Building2 className="h-4 w-4" />} onClick={() => navigate('/companies')}>
-              Companies
-            </Button>
-            <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>
-              New client
-            </Button>
-          </>
+          <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>
+            New client
+          </Button>
         }
       />
 

@@ -41,6 +41,16 @@ The screen has loading and error states, zero-result tables and **No collections
 
 Excel is an actual XLSX workbook and PDF is generated as a paginated report, both from the same authorized calculation path. A Staff user cannot bypass their own-number restriction by changing a URL or export request. Exports are newly calculated at request time; if another user changes data between the screen load and export, refresh the screen before comparing that difference.
 
+## Weekly staff report (admin only)
+
+**Staff Report** in the menu (or the button on Reports) shows, for a Monday-to-Sunday week or any custom range of up to 62 days, how each staff member worked: attendance, hours, daily tasks and candidates from prescreening to deployment. It is computed on request from stored rows and follows the live feed, so it changes the moment attendance, tasks or a stage changes. Excel and CSV exports use the same calculation. API: `GET /api/reports/staff-weekly`, `/staff-weekly/{staff_id}` (adds each candidate end to end) and `/staff-weekly/export?format=xlsx|csv`; the server returns 403 to anyone but an admin.
+
+* Hours: check-in to check-out split by agency day. An unclosed session from an earlier day counts no hours and is flagged. Absent: a scheduled working day with no check-in (weekly offs, holidays and approved leave are not absences, same rules as Attendance). Today before a first check-in is "not in yet".
+* Daily tasks: from `workflow_daily_work_items` (see `tasks-data-contract.md`): assigned, completed, postponed, overdue and the carried-over backlog as of now (or of the end of a past period). If those tables are missing the section says "No data yet".
+* Stage moves: stage completions in the period (reopened ones excluded), credited to the responsible recruiter; the stage-by-stage matrix and team funnel also show where candidates are waiting now and how many reached each stage.
+* Score (0 to 100, always shown with its parts): tasks 40% (completed / assigned), hours 30% (worked / expected, capped), stage moves 30% (moves / daily stage-move goal x days worked, capped). A part with nothing to measure is dropped and the rest are rescaled.
+* Questions to ask: no attendance, absent days, left open sessions, fewer than 75% of expected hours, under 60% task completion (3+ tasks), backlog of 3+, and candidates stuck 7+ days in a stage (idle staff are marked high).
+
 ## Recovery and handoffs
 
 Correct an invalid date range and refresh. If the network fails, retain the chosen filters, retry the report and verify its update time. If an export fails, retry that format after the report is available; there is no candidate or workflow mutation to undo. To change a reported result, correct the authorized source workflow rather than editing report totals.

@@ -111,6 +111,18 @@ def test_new_client_form_saves_contact_and_employer_together(desk):
     assert rejected.status_code == 422
 
 
+def test_new_client_form_company_contact_overrides_client_contact(desk):
+    payload = {"name": "Khalid Rahman", "email": "khalid@example.test", "phone": "+97140000001", "whatsapp": "+97150000001",
+               "company": {"name": "Gulf Build LLC", "contactPerson": "Site Office", "contactEmail": "HR@GULFBUILD.TEST", "phone": "+97140000009", "whatsapp": ""}}
+    company = post(desk, "clients", payload)["company"]
+    assert company["contactPerson"] == "Site Office" and company["contactEmail"] == "hr@gulfbuild.test"
+    assert company["phone"] == "+97140000009"
+    # A blank company field falls back to the client contact's value.
+    assert company["whatsapp"] == "+97150000001"
+    bad = desk.client.post("/api/clients", json={"name": "X", "company": {"name": "Y", "contactEmail": "nope"}})
+    assert bad.status_code == 422
+
+
 def test_failed_employer_save_leaves_no_client_behind(desk, monkeypatch):
     original = subject._master_save
     def fail_on_company(db, user, row, body, kind, *args, **kwargs):

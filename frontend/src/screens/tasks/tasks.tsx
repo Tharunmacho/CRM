@@ -18,6 +18,7 @@ import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-d
 import { completedInPeriod, taskViewFromParams, validDateFilter, type TaskView } from '@/features/staff/task-filters'
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { ClockCell, RemarkPanel, clockOf } from './task-parts'
+import { DailyWork } from './daily-work'
 import { Flag, OwnerTag, StageTrack } from './task-identity'
 import '@/styles/tasks-page.css'
 
@@ -44,7 +45,22 @@ function Stamp({ value, empty }: { value?: string | Date; empty?: boolean }) {
   return <span className="tk-stamp" title={dateTimeLabel(date)}><b>{format(date, 'd MMM')}</b><small>{format(date, 'HH:mm')}</small></span>
 }
 
+/** The 48-hour list keeps every deep link (?view=, ?task=, ?stage=, ?date=); a plain /tasks opens the daily quota. */
+const LIST_PARAMS = ['task', 'stage', 'date', 'from', 'to']
+function wantsDailyWork(params: URLSearchParams) {
+  const view = params.get('view')
+  return (!view || view === 'daily') && !LIST_PARAMS.some((name) => params.get(name))
+}
+
 export default function TasksPage() {
+  const [params, setParams] = useSearchParams()
+  if (wantsDailyWork(params)) {
+    return <DailyWork onOpenAll={() => setParams((previous) => { const next = new URLSearchParams(previous); next.set('view', 'open'); return next })} />
+  }
+  return <TaskList />
+}
+
+function TaskList() {
   const store = useStore()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
@@ -81,6 +97,7 @@ export default function TasksPage() {
   })
   const changeTab = (view: string) => setParams(previous => {
     const next = new URLSearchParams(previous)
+    if (view === 'daily') { for (const name of ['view', 'task', 'stage', 'date', 'from', 'to']) next.delete(name); return next }
     next.set('view', view)
     if (view !== 'history') next.delete('date')
     return next
@@ -146,6 +163,7 @@ export default function TasksPage() {
   useEffect(() => { setShown(PAGE_SIZE) }, [tab, term, staffFilter, sort, stageFilter])
 
   const tabs = [
+    { key: 'daily', label: 'Daily work' },
     ...(historyDay ? [{ key: 'history', label: 'No update on this date' }] : []),
     { key: 'open', label: 'Open' },
     { key: 'due', label: 'Due today' },

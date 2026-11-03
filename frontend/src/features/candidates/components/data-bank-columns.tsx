@@ -7,6 +7,7 @@ import { ownerLabel } from '@/features/candidates/data-bank-pools'
 import { Avatar, RowMenu, StageTracker, StatusDot, type DotTone, type RowMenuItem } from '@/features/candidates/components/db-parts'
 import type { DbColumn } from '@/features/candidates/components/db-table'
 import type { useStore } from '@/shared/state/crm-store'
+import { agentName } from '@/features/candidates/data-bank-search'
 
 export const SOURCE_LABEL: Record<string, string> = {
   email: 'Email',
@@ -183,6 +184,10 @@ export function dataBankColumns({ store, onOpen, onReassign, onEdit, onOpenStage
     { key: 'experience', header: 'Exp.', sortKey: 'experience', width: 54, render: (c) => <span className="tnum db-nowrap" title={`${c.totalExperience} years of experience`}>{experienceLabel(c.totalExperience)}</span> },
     { key: 'passport', header: 'Passport', sortKey: 'passport', width: 64, render: (c) => <PassportIcon candidate={c} /> },
     { key: 'source', header: 'Source', sortKey: 'source', width: 50, render: (c) => <SourceIcon source={c.source} /> },
+    {
+      key: 'agent', header: 'Agent', width: 96,
+      render: (c) => { const agent = agentName(c); return agent ? <span className="db-wrap" title={`Agent / referred by: ${agent}`}>{agent}</span> : <Dash /> },
+    },
     { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 106, render: (c) => <OwnerText candidate={c} store={store} /> },
     { key: 'order', header: 'Order', sortKey: 'order', width: 90, render: (c) => <MappedOrder candidate={c} store={store} onOpenStage={onOpenStage} withCompany={false} /> },
     { key: 'stage', header: 'Stage', sortKey: 'stage', width: 118, render: (c) => <CurrentStage candidate={c} store={store} /> },

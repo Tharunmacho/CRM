@@ -9,9 +9,9 @@ Admin, Manager and Staff can create and edit client/company records. Destructive
 ## User journey
 
 1. Open **Clients**, create the contact and save their name, communication details, location, notes and active status.
-2. Open the saved client and choose **Add employer**; the client contact is preselected. Alternatively open **Companies**, link the contact and enter the employer's company name, country, city, industry, contact person/email, phone, WhatsApp, address, notes and status.
+2. Open the saved client and choose **Add employer**; the client contact is preselected. Companies are managed only inside Clients (there is no separate Companies page; `/companies` redirects to Clients). The **New client** form also takes the first employer's company name, country, city, industry, contact person/email, phone, WhatsApp, address, notes and status.
 3. Save the employer before attaching its agreement. Upload the agreement and confirm that it appears on the saved record.
-4. In the client detail's **Employers & hiring** section, choose **View hiring orders** for an employer. The Jobs workspace retains that employer filter, and a new order preselects it. In Companies, opening a row or choosing **Hiring orders** does the same; the **Client contact** link opens the parent relationship separately.
+4. In the client detail's **Employers & hiring** section, choose **View hiring orders** for an employer. The Jobs workspace retains that employer filter, and a new order preselects it.
 5. Edit a contact or employer when details change. Phone, employer WhatsApp and agency/contact WhatsApp are separate fields and must not overwrite one another.
 6. Replace an agreement when needed. Open the latest original and older versions to verify that the old document remains available.
 7. Set an obsolete record inactive when it has history. Use deletion only when permitted and the server confirms that linked records/documents do not prevent it.
@@ -39,6 +39,8 @@ Keep entered fields after a validation error. If another user removes/deactivate
 
 Forms, connected employer/order navigation, independent company WhatsApp, agreement versions and audit are implemented. Client/employer screens check current records before exposing actions; failed reads have an explicit retry. Search-empty states distinguish no matching rows from an empty database. New employers need an active client contact. Literal employer-as-Client alignment remains a deliberate product decision; this guide does not silently authorize a data-model migration.
 
-Implementation: [Clients](../../frontend/src/screens/clients/clients.tsx), [client detail](../../frontend/src/screens/clients/client-detail.tsx), [Companies](../../frontend/src/screens/companies/companies.tsx), [master-data API](../../backend/app/api/routers/data.py). File rules: [Documents](06-documents-ocr.md).
+Implementation: [Clients](../../frontend/src/screens/clients/clients.tsx), [client detail](../../frontend/src/screens/clients/client-detail.tsx), [master-data API](../../backend/app/api/routers/data.py). File rules: [Documents](06-documents-ocr.md).
 
 **Update (client form).** *New client* now follows the PRD client fields in one form: company name, industry, country, city, address, status, agreement, contact person, email, phone, WhatsApp and notes. `POST /api/clients` accepts an optional `company` block and saves the contact and its first employer in one transaction (no migration; the contact → company model is unchanged). The agreement uploads to the new employer afterwards, and a failed upload is retried without creating a duplicate. The client detail page shows the contact, each employer (address, agreement, contacts), and every order with matched / selected / deployed progress and its candidates.
+
+**Update (single client form).** Companies no longer have their own page or menu entry. *New client* is the one complete form: contact person (name, email, phone, WhatsApp, status), company (name, industry, country, city, address), an optional company contact (person, email, phone, WhatsApp; blank fields use the contact person's details), the agreement and notes. `POST /api/clients` `company` accepts those optional contact fields. More companies are added, edited, given an agreement, viewed in history or deleted (where permitted) from the client's own page.

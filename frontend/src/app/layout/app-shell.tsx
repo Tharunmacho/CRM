@@ -6,10 +6,10 @@ import {
   Building2,
   Check,
   ChevronDown,
+  ClipboardCheck,
   Clock3,
   ContactRound,
   Database,
-  Factory,
   FileBarChart,
   GitBranch,
   Inbox,
@@ -36,6 +36,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { taskClockStart } from '@/shared/lib/task-time'
 import { useAgency } from '@/shared/state/use-agency'
 import { Dropdown, MenuItem, Toast } from '@/shared/ui/overlay'
+import { DailyWorkPrompt } from '@/features/daily-work/daily-work-prompt'
 import { PageLoading } from '@/shared/ui/page-loading'
 import type { Capability } from '@/shared/state/crm-store'
 import { AttendanceProvider } from '@/features/attendance/attendance-context'
@@ -61,7 +62,6 @@ const NAV: NavItem[] = [
   { to: '/inbox', label: 'Inbox', icon: Inbox, signal: 'inbox', group: 'main' },
   { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, group: 'main', extension: true },
   { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
-  { to: '/companies', label: 'Companies', icon: Factory, group: 'Recruitment', extension: true },
   { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, group: 'Recruitment' },
   { to: '/add-candidate', label: 'Add Candidate', icon: UserPlus, group: 'Recruitment' },
   { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
@@ -69,6 +69,7 @@ const NAV: NavItem[] = [
   { to: '/tasks', label: 'Tasks', icon: ListChecks, signal: 'tasks', group: 'Workspace' },
   { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list', group: 'Workspace' },
   { to: '/reports', label: 'Reports', icon: FileBarChart, group: 'Workspace' },
+  { to: '/staff-report', label: 'Staff Report', icon: ClipboardCheck, capability: 'staff_report', group: 'Workspace' },
   { to: '/users', label: 'User Management', icon: Users, capability: 'user_management', group: 'Workspace' },
   { to: '/staff-directory', label: 'Staff Directory', icon: ContactRound, supervisorsOnly: true, group: 'Workspace', extension: true },
   { to: '/attendance', label: 'Attendance', icon: Clock3, group: 'Workspace', extension: true },
@@ -366,6 +367,7 @@ export function AppShell() {
           <Topbar menuRef={menuButtonRef} menuAlert={overdue > 0 || store.inboxUnread > 0} onMenu={() => setMobileOpen(true)} />
           <main className="workspace">
             <div className={cn('workspace-inner', location.pathname !== '/' && 'workspace-page')}>
+              <DailyWorkPrompt />
               <Suspense fallback={<PageLoading />}>
                 <Outlet />
               </Suspense>
@@ -489,7 +491,7 @@ function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: R
                     }}
                     className={cn('notif-row flex w-full gap-2.5 border-b border-rule-soft px-3 py-2.5 text-left last:border-0 hover:bg-field', !n.read && 'bg-field/60')}
                   >
-                    <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', n.kind === 'escalation' ? 'bg-stamp-600' : n.kind === 'reminder' ? 'bg-amber-600' : n.read ? 'bg-ink-300' : 'bg-navy-600')} />
+                    <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', (n.kind === 'escalation' || n.kind === 'daily_work') ? 'bg-stamp-600' : n.kind === 'reminder' ? 'bg-amber-600' : n.read ? 'bg-ink-300' : 'bg-navy-600')} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
                         <span className="notif-title text-xs font-medium text-ink">{n.title}</span>

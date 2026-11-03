@@ -282,7 +282,7 @@ export interface MailMessage {
 export interface Notification {
   id: string
   /** Every kind the backend writes: workflow scheduler, assignments, intake and attendance. */
-  kind: 'assignment' | 'candidate_assignment' | 'attendance' | 'escalation' | 'reminder' | 'todo'
+  kind: 'assignment' | 'candidate_assignment' | 'attendance' | 'escalation' | 'reminder' | 'todo' | 'daily_work'
   title: string
   detail: string
   createdAt: string

@@ -77,3 +77,16 @@ Assignments link to [Staff Directory](11-staff-assignment-directory.md), complet
 Task generation, stage-linked closure, daily remarks, recorded history, supervisor transfers, Admin resets and scheduler rules are implemented with isolated workflow tests. Production acceptance still requires the workflow worker to remain running and actual supervisor/owner accounts to receive the expected bell events. The fifteen-minute scan and browser polling mean notifications are not instant push delivery.
 
 Implementation: [Tasks screen](../../frontend/src/screens/tasks/tasks.tsx), [workflow API](../../backend/app/api/routers/workflow.py), [task scheduler](../../backend/app/services/workflow_scheduler.py), [data and reassignment API](../../backend/app/api/routers/data.py).
+
+## Daily work quota and goals
+
+The Tasks page opens on **Daily work**: each active Staff recruiter is handed a fixed number of candidates every working day (agency default 5: 3 morning slots and 2 evening slots, one candidate per hour). The data contract for reports is in [tasks-data-contract.md](tasks-data-contract.md).
+
+* **Allocation is automatic.** The oldest open application-stage tasks the recruiter owns become the day's items (initial calls are excluded: they have no client or order). Opening Tasks, the supervisor view and the workflow worker (every minute) top the day up; a day off (leave, holiday or weekly off, Sunday by default) gets none. Slot deadlines follow the recruiter's shift: with the default 10:00-19:00 shift and a one-hour break they are 11:00, 12:00, 13:00, 15:00 and 16:00.
+* **Completion is the real stage workflow.** An item is finished when its stage task is completed (the same transaction records it); there is no checkbox. Unmapping, closing, reopening or reassigning releases the item and a replacement is drawn.
+* **Carry-over.** Unfinished items stay on the list, marked Postponed with the number of days late and shown first, next to the new day's full quota: finishing 4 of 5 gives 1 postponed + 5 new = 6 the next working day. Nothing is capped or dropped, and the backlog count is shown.
+* **Alerts.** A countdown per item turns amber in the last 15 minutes and red when late; a banner asks Staff to "Complete your tasks first" on every page while today's list is unfinished (it can be hidden for 30 minutes and returns when another deadline is missed). The worker sends the owner a bell notice per missed hourly slot, and the owner and Admin/Manager one grouped notice when work is carried into a new day.
+* **Goals.** "Today's goals" shows candidates (morning/evening bars and hourly checkpoints), forwarded to client and stage moves against targets stored in `workflow_daily_goals`. Admin sets the agency default and per-person goals under **Set goals**; Manager can see them. Progress is computed from the real records and a per-day snapshot is kept in `workflow_daily_goal_progress`.
+* **Supervisors** see every recruiter's progress (candidates, morning/evening, forwarded, stage moves, postponed, overdue, next deadline) with a staff filter; Staff see only their own list.
+
+Implementation: [daily_work service](../../backend/app/services/daily_work.py), [daily work API](../../backend/app/api/routers/daily_work.py), [Daily work screen](../../frontend/src/screens/tasks/daily-work.tsx), migration `0020_daily_work_quota`.

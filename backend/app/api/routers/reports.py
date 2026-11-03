@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.deps import current_user
-from app.db.models import User
+from app.core.deps import current_user, require_role
+from app.db.models import Role, User
 from app.db.session import get_db
 from app.services.reporting import Filters, dashboard_data, read_dashboard_data, read_reporting_data, report_data
 from app.services.report_exports import REPORTS, pdf, xlsx
+from app.services import staff_weekly, staff_weekly_export
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 dashboard_router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -29,6 +30,35 @@ def authorized_report(db, user, filters):
     authorized = filters.authorize(user)  # Reject scope tampering before any data reads.
     zone = get_settings().agency_timezone
     return report_data(read_reporting_data(db, authorized, zone), user, authorized, zone)
+
+
+# The weekly staff report is for the admin only. These routes come before `/{report}/export` so that path never
+# captures "staff-weekly".
+@router.get("/staff-weekly")
+def staff_weekly_report(from_date: date | None = None, to_date: date | None = None,
+                        user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)):
+    return staff_weekly.build_report(db, from_date, to_date, get_settings().agency_timezone)
+
+
+@router.get("/staff-weekly/export")
+def staff_weekly_export_file(format: Literal["xlsx", "csv"], from_date: date | None = None, to_date: date | None = None,
+                             user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)):
+    data = staff_weekly.build_report(db, from_date, to_date, get_settings().agency_timezone)
+    payload = staff_weekly_export.xlsx(data) if format == "xlsx" else staff_weekly_export.csv_bytes(data)
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if format == "xlsx" else "text/csv; charset=utf-8"
+    return Response(payload, media_type=mime, headers={
+        "Content-Disposition": f'attachment; filename="staff-weekly-{data["range"]["from"]}-{data["range"]["to"]}.{format}"',
+        "Cache-Control": "private, no-store",
+    })
+
+
+@router.get("/staff-weekly/{staff_id}")
+def staff_weekly_detail(staff_id: str, from_date: date | None = None, to_date: date | None = None,
+                        user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)):
+    data = staff_weekly.build_report(db, from_date, to_date, get_settings().agency_timezone, staff_id=staff_id, with_candidates=True)
+    if not data["staff"]:
+        raise HTTPException(404, "Staff member not found.")
+    return data
 
 
 @router.get("")

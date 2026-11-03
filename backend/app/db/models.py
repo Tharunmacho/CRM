@@ -554,6 +554,93 @@ class TaskEvent(Base, PkMixin):
     )
 
 
+class DailyWorkItem(Base, PkMixin):
+    """
+    One candidate in a recruiter's daily quota. Allocated automatically (never by hand) from the recruiter's open
+    application-stage tasks; it is finished when that stage task is completed through the stage workflow. An item
+    still open after its day is *postponed*: it stays in the list (oldest first) next to the new day's quota.
+
+    `status` values: open (to do), completed (the stage task was completed by the owner) and released (the task was
+    cancelled, or reassigned to someone else, before it was done: it no longer counts for anyone).
+    Every moment is stored for reports: allocated_at, started_at (first draft save or owner remark), overdue_at (the
+    hourly deadline it missed), postponed_at (start of the day after work_date, while still unfinished), completed_at
+    and released_at.
+    """
+
+    __tablename__ = "workflow_daily_work_items"
+    owner_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
+    work_date: Mapped[date] = mapped_column(Date, nullable=False, comment="Agency-timezone day the item was allocated.")
+    task_id: Mapped[str] = mapped_column(ForeignKey("workflow_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    application_id: Mapped[str | None] = mapped_column(ForeignKey("crm_applications.id", ondelete="CASCADE"))
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("crm_candidates.id", ondelete="CASCADE"), nullable=False)
+    stage: Mapped[int | None] = mapped_column(Integer, comment="Stage the candidate was at when allocated.")
+    slot_no: Mapped[int] = mapped_column(Integer, nullable=False, comment="1-based place in the day's quota.")
+    session: Mapped[str] = mapped_column(String(10), nullable=False, comment="morning or evening.")
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Hourly slot deadline.")
+    status: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'open'"), comment="open, completed or released.")
+    allocated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="First draft save or owner remark; set to completed_at if the work was done in one step.")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    overdue_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="The deadline it missed (equals due_at); null when finished on time.")
+    postponed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="Start of the day after work_date, set when it was still unfinished then.")
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[str | None] = mapped_column(String(20), comment="task_cancelled or reassigned.")
+    overdue_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    postponed_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        Index("uq_daily_work_task_owner_live", "task_id", "owner_id", unique=True, postgresql_where=text("status <> 'released'")),
+        Index("ix_daily_work_owner_date", "owner_id", "work_date"),
+        Index("ix_daily_work_open", "owner_id", postgresql_where=text("status = 'open'")),
+        CheckConstraint("session IN ('morning','evening')", name="ck_daily_work_session"),
+        CheckConstraint("status IN ('open','completed','released')", name="ck_daily_work_status"),
+        CheckConstraint("slot_no >= 1", name="ck_daily_work_slot"),
+        {"comment": "Auto-allocated daily candidate quota per recruiter with hourly slot deadlines and every lifecycle timestamp; completion comes from the linked stage task."},
+    )
+
+
+class DailyGoal(Base, PkMixin):
+    """
+    A daily target. `user_id` null is the agency default; a row with a user overrides it for that person. Metrics:
+    candidates (daily quota, with morning_target the morning share and the rest evening), forwarded_to_client
+    (stage 2 completed with Forwarded) and stage_moves (any stage completed). Admin-managed data, never code.
+    """
+
+    __tablename__ = "workflow_daily_goals"
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), index=True, comment="Null for the agency default.")
+    metric: Mapped[str] = mapped_column(String(30), nullable=False)
+    target: Mapped[int] = mapped_column(Integer, nullable=False)
+    morning_target: Mapped[int | None] = mapped_column(Integer, comment="Candidates metric only: how many of the target are morning slots.")
+    updated_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        Index("uq_daily_goal_scope_metric", func.coalesce(user_id, ""), "metric", unique=True),
+        CheckConstraint("metric IN ('candidates','forwarded_to_client','stage_moves')", name="ck_daily_goal_metric"),
+        CheckConstraint("target BETWEEN 0 AND 200", name="ck_daily_goal_target"),
+        CheckConstraint("morning_target IS NULL OR (metric = 'candidates' AND morning_target BETWEEN 0 AND target)", name="ck_daily_goal_morning"),
+        {"comment": "Daily staff goals: agency defaults (user_id null) and per-person overrides, edited by the admin."},
+    )
+
+
+class DailyGoalProgress(Base, PkMixin):
+    """Per person, agency day and metric: the target that applied and what was achieved, kept up to date for reports."""
+
+    __tablename__ = "workflow_daily_goal_progress"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False)
+    goal_date: Mapped[date] = mapped_column(Date, nullable=False)
+    metric: Mapped[str] = mapped_column(String(30), nullable=False)
+    target: Mapped[int] = mapped_column(Integer, nullable=False)
+    morning_target: Mapped[int | None] = mapped_column(Integer)
+    actual: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    morning_actual: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        UniqueConstraint("user_id", "goal_date", "metric", name="uq_daily_goal_progress"),
+        CheckConstraint("metric IN ('candidates','forwarded_to_client','stage_moves')", name="ck_daily_goal_progress_metric"),
+        {"comment": "Daily goal snapshot per recruiter, agency day and metric: the target in force and the actual count, for weekly reports."},
+    )
+
+
 class TodoItem(Base, PkMixin):
     __tablename__ = "personal_todos"
     __table_args__ = {

@@ -12,7 +12,6 @@ const loaders = {
   'inbox/inbox': () => import('@/screens/inbox/inbox'),
   'clients/clients': () => import('@/screens/clients/clients'),
   'clients/client-detail': () => import('@/screens/clients/client-detail'),
-  'companies/companies': () => import('@/screens/companies/companies'),
   'jobs/jobs': () => import('@/screens/jobs/jobs'),
   'jobs/order-detail': () => import('@/screens/jobs/order-detail'),
   'candidates/add-candidate': () => import('@/screens/candidates/add-candidate'),
@@ -30,7 +29,6 @@ const FIRST_SCREEN: [RegExp, keyof typeof loaders][] = [
   [/^\/inbox\/?$/, 'inbox/inbox'],
   [/^\/clients\/?$/, 'clients/clients'],
   [/^\/clients\/[^/]+\/?$/, 'clients/client-detail'],
-  [/^\/companies\/?$/, 'companies/companies'],
   [/^\/jobs\/?$/, 'jobs/jobs'],
   [/^\/orders\/[^/]+\/?$/, 'jobs/order-detail'],
   [/^\/add-candidate\/?$/, 'candidates/add-candidate'],
@@ -78,7 +76,6 @@ const InboxPage = lazy(loaders['inbox/inbox'])
 const WhatsAppPage = lazy(() => import('@/screens/inbox/whatsapp'))
 const ClientsPage = lazy(loaders['clients/clients'])
 const ClientDetailPage = lazy(loaders['clients/client-detail'])
-const CompaniesPage = lazy(loaders['companies/companies'])
 const JobsPage = lazy(loaders['jobs/jobs'])
 const OrderDetailPage = lazy(loaders['jobs/order-detail'])
 const AddCandidatePage = lazy(loaders['candidates/add-candidate'])
@@ -89,6 +86,7 @@ const TasksPage = lazy(loaders['tasks/tasks'])
 const AttendancePage = lazy(() => import('@/screens/attendance/attendance'))
 const TodoPage = lazy(() => import('@/screens/todos/todo'))
 const ReportsPage = lazy(() => import('@/screens/reports/reports'))
+const StaffWeeklyReportPage = lazy(() => import('@/screens/reports/staff-weekly'))
 const UsersPage = lazy(() => import('@/screens/users/users'))
 const StaffDirectoryPage = lazy(() => import('@/screens/staff/staff-directory'))
 const StaffDetailPage = lazy(() => import('@/screens/staff/staff-detail'))
@@ -153,7 +151,8 @@ export default function AppRoutes() {
             <Route path="whatsapp" element={<WhatsAppPage />} />
             <Route path="clients" element={<ClientsPage />} />
             <Route path="clients/:id" element={<ClientDetailPage />} />
-            <Route path="companies" element={<CompaniesPage />} />
+            {/* Companies live inside Clients now; old links and bookmarks land on the client list. */}
+            <Route path="companies" element={<Navigate to="/clients" replace />} />
             <Route path="jobs" element={<JobsPage />} />
             <Route path="orders/:id" element={<OrderDetailPage />} />
             <Route path="add-candidate" element={<AddCandidatePage />} />
@@ -173,6 +172,7 @@ export default function AppRoutes() {
               }
             />
             <Route path="reports" element={<ReportsPage />} />
+            <Route path="staff-report" element={<StaffWeeklyReportPage />} />
             <Route
               path="users"
               element={

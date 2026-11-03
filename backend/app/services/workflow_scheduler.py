@@ -58,6 +58,13 @@ def deliver_due_todos(db, *, now=None):
     return count
 
 
+def scan_daily_work_only(db, *, now=None, agency_timezone=None):
+    """Allocation and daily-work alerts between the 15-minute task scans; the caller commits."""
+    from app.services.daily_work import scan_daily_work
+    supervisors = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
+    return scan_daily_work(db, supervisors, now=now or datetime.now(timezone.utc), tz=agency_timezone)
+
+
 def scan_workflow(db, *, now=None, agency_timezone=None):
     """Caller commits once; failures leave both notifications and checkpoint unapplied."""
     now = now or datetime.now(timezone.utc)
@@ -135,6 +142,8 @@ def scan_workflow(db, *, now=None, agency_timezone=None):
         config.last_daily_check_date = day
         day += timedelta(days=1)
 
+    from app.services.daily_work import scan_daily_work
+    counts.update(scan_daily_work(db, supervisors, now=now, tz=agency_timezone))
     counts["todos"] = deliver_due_todos(db, now=now)
     config.last_run_at = now
     return counts

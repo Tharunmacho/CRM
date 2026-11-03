@@ -43,6 +43,8 @@ export default function ClientDetailPage() {
   const [history, setHistory] = useState(false)
   const [addingCompany, setAddingCompany] = useState(false)
   const [editingCompany, setEditingCompany] = useState<Company | null>(null)
+  const [companyHistory, setCompanyHistory] = useState<string | null>(null)
+  const [deletingCompany, setDeletingCompany] = useState<string | null>(null)
   const [orderFor, setOrderFor] = useState<string | null>(null)
   const [employer, setEmployer] = useState('')
 
@@ -203,7 +205,9 @@ export default function ClientDetailPage() {
                       </div>
                       <div className="cd-employer-actions">
                         <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEditingCompany(company)}>Edit</Button>
+                        <Button size="sm" icon={<History className="h-3.5 w-3.5" />} onClick={() => setCompanyHistory(company.id)}>History</Button>
                         <Button size="sm" onClick={() => navigate(`/jobs?view=orders&company=${encodeURIComponent(company.id)}`)}>View orders</Button>
+                        {store.can('delete_records') && <Button size="sm" variant="dangerGhost" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setDeletingCompany(company.id)}>Delete</Button>}
                         <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} disabled={!canWork || company.status !== 'active'} onClick={() => setOrderFor(company.id)}>New order</Button>
                       </div>
                     </footer>
@@ -314,6 +318,14 @@ export default function ClientDetailPage() {
       {editingCompany && <CompanyDialog company={editingCompany} onClose={() => setEditingCompany(null)} />}
       {orderFor && <OrderDialog companyId={orderFor} onClose={() => setOrderFor(null)} onSaved={(orderId) => navigate(`/orders/${orderId}`)} />}
       {history && <RecordAudit kind="client" id={client.id} onClose={() => setHistory(false)} />}
+      {companyHistory && <RecordAudit kind="company" id={companyHistory} onClose={() => setCompanyHistory(null)} />}
+      <DeleteRecordDialog
+        kind="company"
+        id={deletingCompany ?? ''}
+        open={!!deletingCompany}
+        onClose={() => setDeletingCompany(null)}
+        onEdit={() => setEditingCompany(store.company(deletingCompany ?? '') ?? null)}
+      />
       <DeleteRecordDialog
         kind="client"
         id={client.id}

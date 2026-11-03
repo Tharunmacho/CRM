@@ -89,6 +89,7 @@ export type Capability =
   | 'user_management'
   | 'export'
   | 'all_reports'
+  | 'staff_report'
 
 /** Straight from the client specification's capability table. */
 const MATRIX: Record<Capability, Role[]> = {
@@ -104,6 +105,8 @@ const MATRIX: Record<Capability, Role[]> = {
   user_management: ['admin'],
   export: ['admin'],
   all_reports: ['admin', 'manager'],
+  // The weekly per-person performance report (hours, tasks, candidate progress) is the admin's.
+  staff_report: ['admin'],
 }
 
 type Toast = { id: number; message: string; tone: 'ok' | 'warn' } | null

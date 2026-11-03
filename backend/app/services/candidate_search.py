@@ -7,11 +7,12 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import String, and_, case, cast, exists, func, literal_column, or_, select, true
-from sqlalchemy.orm import defer
+from sqlalchemy.orm import aliased, defer
 from sqlalchemy.orm.attributes import set_committed_value
 from app.api.schemas import CandidateOut
 from app.core.config import get_settings
-from app.db.models import Application, Candidate, Order, User
+from app.db.models import Application, Candidate, CandidateStatus, Client, Company, Designation, Order, Source, User
+from app.domain.stages import STAGES
 from app.services.candidate_identity import normalized_labels
 from app.services.parallel_reads import parallel_reads
 from app.services.report_exports import xlsx_rows
@@ -22,6 +23,10 @@ UNASSIGNED_LABEL = "Needs assignment"
 # Extra column_filters keys: a range on Experience (whole years) and on Date added (YYYY-MM-DD, agency timezone).
 # "experience" (exact years) and "added" (one day, or text) keep working as before.
 RANGE_KEYS = {"experience_min", "experience_max", "added_from", "added_to"}
+SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in", "referral": "Referral", "other": "Other"}
+# source_detail holds the agent / referrer a person typed, but automatic intake stores a machine pointer there.
+MACHINE_SOURCE_DETAIL = r"^(email_message|whatsapp_message|person_review):"
+MAX_SEARCH_TERMS = 10
 ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -60,6 +65,8 @@ class Search:
     passport: str = "any"
     location: str = ""
     matchable: bool = False
+    # Only the resumes of one position (an order id), or "none" for candidates with no active order.
+    order_id: str = ""
 
 
 def normalized(expression):
@@ -69,6 +76,18 @@ def normalized(expression):
 def literal_contains(expression, term):
     escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return expression.ilike(f"%{escaped}%", escape="\\")
+
+
+def search_terms(q: str) -> list[str]:
+    """Comma-separated search terms: trimmed, whitespace collapsed, empty and repeated terms dropped."""
+    terms: list[str] = []
+    for part in q.split(","):
+        term = " ".join(part.split())
+        if term and term.lower() not in (known.lower() for known in terms):
+            terms.append(term)
+    if len(terms) > MAX_SEARCH_TERMS:
+        raise HTTPException(422, f"Use at most {MAX_SEARCH_TERMS} search words separated by commas.")
+    return terms
 
 
 def search_statement(filters: Search):
@@ -83,9 +102,48 @@ def search_statement(filters: Search):
         "stage": func.coalesce(app.c.current_stage, 0), "status": cast(Candidate.status, String),
         "added": Candidate.created_at,
     }
-    query = select(Candidate).outerjoin(User, User.id == Candidate.owner_id).outerjoin(app, app.c.candidate_id == Candidate.id).outerjoin(Order, Order.id == app.c.order_id)
+    intake = aliased(User)
+    query = (select(Candidate).outerjoin(User, User.id == Candidate.owner_id).outerjoin(intake, intake.id == Candidate.intake_owner_id)
+             .outerjoin(app, app.c.candidate_id == Candidate.id).outerjoin(Order, Order.id == app.c.order_id)
+             .outerjoin(Designation, Designation.id == Order.designation_id).outerjoin(Company, Company.id == Order.company_id)
+             .outerjoin(Client, Client.id == Company.client_id))
+    agent = case((Candidate.source_detail.op("~")(MACHINE_SOURCE_DETAIL), ""), else_=func.coalesce(Candidate.source_detail, ""))
+
+    def term_matches(term: str):
+        """True when this one term appears (any case) in at least one of the candidate's details."""
+        lowered = term.lower()
+        text_fields = [Candidate.name, Candidate.phone, Candidate.whatsapp, Candidate.email, Candidate.passport_no, Candidate.ref, Candidate.nationality,
+                       Candidate.current_city, cast(Candidate.skills, String), cast(Candidate.designations, String), agent, User.name, intake.name,
+                       Order.ref, Designation.title, Company.name, Client.name, Order.country, Order.city]
+        clauses = [literal_contains(field, term) for field in text_fields]
+        clauses.append(Candidate.resume_tsv.op("@@")(func.websearch_to_tsquery("simple", term)))
+        squeezed = term.replace(" ", "")
+        if len(squeezed) >= 3:  # "sureshagent" still finds "Suresh Agent": names and agents are also compared without spaces
+            clauses += [literal_contains(func.replace(field, " ", ""), squeezed) for field in (Candidate.name, agent, User.name, intake.name, Designation.title, Company.name, Client.name)]
+        digits = re.sub(r"\D", "", term)
+        if len(digits) >= 4 and re.fullmatch(r"[\d\s+\-()]+", term):  # a phone typed with spaces or a country code
+            clauses += [literal_contains(func.regexp_replace(field, r"\D", "", "g"), digits) for field in (Candidate.phone, Candidate.whatsapp)]
+        sources = [Source(key) for key, label in SOURCE_LABELS.items() if lowered in label.lower() or lowered in key.replace("_", " ")]
+        if sources:
+            clauses.append(Candidate.source.in_(sources))
+        statuses = [CandidateStatus(key) for key, label in STATUS_LABELS.items() if lowered in label.lower()]
+        if statuses:
+            clauses.append(Candidate.status.in_(statuses))
+            if CandidateStatus.needs_review in statuses:
+                clauses.append(Candidate.needs_review.is_(True))
+        stages = {stage.no for stage in STAGES if lowered in stage.title.lower()}
+        number = re.fullmatch(r"(?:stage\s*)?(\d{1,2})", lowered)
+        if number:
+            stages.add(int(number.group(1)))
+        if stages:
+            clauses.append(app.c.current_stage.in_(sorted(stages)))
+        return or_(*clauses)
     if filters.staff:
         query = query.where(Candidate.owner_id == filters.staff)
+    if filters.order_id == "none":
+        query = query.where(app.c.candidate_id.is_(None))
+    elif filters.order_id:
+        query = query.where(app.c.order_id == filters.order_id)
     if filters.matchable:
         query = query.where(Candidate.status != "deployed", User.active.is_(True), app.c.candidate_id.is_(None))
     if filters.designation.strip():
@@ -111,12 +169,9 @@ def search_statement(filters: Search):
         query = query.where(or_(Candidate.needs_review.is_(True), Candidate.status == "needs_review"))
     elif filters.pool != "all":
         raise HTTPException(422, "We do not recognise this candidate list.")
-    term = filters.q.strip()
-    if term:
-        query = query.where(or_(
-            *(literal_contains(column, term) for column in [Candidate.name, Candidate.phone, Candidate.email, Candidate.passport_no, Candidate.ref, cast(Candidate.skills, String), cast(Candidate.designations, String)]),
-            Candidate.resume_tsv.op("@@")(func.websearch_to_tsquery("simple", term)),
-        ))
+    # "ravi, agent kumar": every comma-separated term must match somewhere in the same candidate.
+    for term in search_terms(filters.q):
+        query = query.where(term_matches(term))
     elements = func.jsonb_array_elements_text(Candidate.skills).table_valued("value").alias("saved_skill")
     has_skill = lambda key: exists(select(1).select_from(elements).where(normalized(elements.c.value) == key)).correlate(Candidate)
     keys = [label.lower() for label in normalized_labels(filters.skills)]
@@ -171,6 +226,24 @@ def search_statement(filters: Search):
         raise HTTPException(422, "We cannot sort by this column.")
     ordering = expressions[filters.sort]
     return query.order_by(ordering.desc().nullslast() if filters.direction == "desc" else ordering.asc().nullslast(), Candidate.id)
+
+
+def position_groups(db, filters: Search):
+    """The positions (orders) holding the candidates this search finds, with how many resumes each holds.
+
+    One grouped statement over the same predicates as the list, so the numbers always agree with it.
+    Candidates with no active order form one last group with a null order id."""
+    pool = (search_statement(filters).order_by(None)
+            .with_only_columns(Candidate.id.label("candidate_id"), Order.id.label("order_id"), Order.ref.label("ref"), Designation.title.label("title"),
+                               Company.name.label("company"), Client.name.label("client"), Order.country.label("country"), Order.city.label("city"),
+                               Order.status.label("order_status"))
+            .subquery("position_pool"))
+    resumes = func.count(pool.c.candidate_id)
+    keys = [pool.c.order_id, pool.c.ref, pool.c.title, pool.c.company, pool.c.client, pool.c.country, pool.c.city, pool.c.order_status]
+    rows = db.execute(select(*keys, resumes.label("resumes")).group_by(*keys).order_by(pool.c.order_id.is_(None), resumes.desc(), pool.c.title, pool.c.ref)).all()
+    groups = [{"orderId": row.order_id, "ref": row.ref, "title": row.title, "company": row.company, "client": row.client, "country": row.country,
+               "city": row.city, "orderStatus": row.order_status.value if row.order_status else None, "resumes": row.resumes} for row in rows]
+    return {"groups": groups, "positions": sum(1 for group in groups if group["orderId"]), "resumes": sum(group["resumes"] for group in groups)}
 
 
 def pool_counts(db, staff: str | None = None) -> dict[str, int]:

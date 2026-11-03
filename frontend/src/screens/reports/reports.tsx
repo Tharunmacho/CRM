@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Activity, AlertCircle, Banknote, Check, ClipboardList, Download, FileSpreadsheet, Filter, GitBranch, Inbox, Loader2, Lock, Plane, RefreshCw, RotateCcw, UserX, Users, type LucideIcon } from 'lucide-react'
+import { Activity, AlertCircle, Banknote, CalendarCheck, Check, ClipboardList, Download, FileSpreadsheet, Filter, GitBranch, Inbox, Loader2, Lock, Plane, RefreshCw, RotateCcw, UserX, Users, type LucideIcon } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
@@ -67,7 +67,8 @@ export default function ReportsPage() {
   const Icon = ICONS[report]
   return <div className="reports-page rv">
     <PageHeader title="Reports" description={supervisor ? 'How recruitment is going, how busy each person is, and advance money collected, for the whole team.' : 'How your recruitment is going, how busy you are, and advance money collected.'} actions={
-      <Button size="sm" icon={<RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />} disabled={refreshing} onClick={refresh}>{refreshing ? 'Refreshing' : 'Refresh'}</Button>} />
+      <>{store.can('staff_report') && <Button size="sm" icon={<CalendarCheck size={14} />} onClick={() => navigate('/staff-report')}>Weekly staff report</Button>}
+        <Button size="sm" icon={<RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />} disabled={refreshing} onClick={refresh}>{refreshing ? 'Refreshing' : 'Refresh'}</Button></>} />
 
     {data
       ? <SummaryCards items={[

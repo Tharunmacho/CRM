@@ -197,6 +197,11 @@ class ClientCompanyIn(MasterInput):
     city: str | None = Field(default=None, max_length=100)
     industry: str | None = Field(default=None, max_length=120)
     address: str | None = Field(default=None, max_length=2000)
+    # The company's own point of contact. Left blank, the client contact's details are used.
+    contactPerson: str | None = Field(default=None, max_length=160)
+    contactEmail: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=40)
+    whatsapp: str | None = Field(default=None, max_length=40)
 
 
 class ClientIn(MasterInput):
@@ -311,9 +316,10 @@ def create_client(body: ClientIn, db: Session = Depends(get_db), user: User = De
     # Client contact and first employer commit together, so a failure never leaves a
     # contact without the company the form described.
     client = _master_save(db, user, Client(), body, "client", ClientOut, new=True, commit=False)
-    employer = CompanyIn(clientId=client["id"], status=body.status, contactPerson=body.name, contactEmail=body.email,
-                         phone=body.phone, whatsapp=body.whatsapp, notes=body.notes,
-                         **body.company.model_dump())
+    details = body.company.model_dump()
+    for key, fallback in (("contactPerson", body.name), ("contactEmail", body.email), ("phone", body.phone), ("whatsapp", body.whatsapp)):
+        details[key] = details[key] or fallback
+    employer = CompanyIn(clientId=client["id"], status=body.status, notes=body.notes, **details)
     try:
         company = _master_save(db, user, Company(), employer, "company", CompanyOut, new=True, commit=False)
         db.commit()

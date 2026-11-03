@@ -7,7 +7,6 @@ const SCREENS: Record<string, string> = {
   '/': 'src/screens/dashboard/dashboard.tsx',
   '/inbox': 'src/screens/inbox/inbox.tsx',
   '/clients': 'src/screens/clients/clients.tsx',
-  '/companies': 'src/screens/companies/companies.tsx',
   '/jobs': 'src/screens/jobs/jobs.tsx',
   '/add-candidate': 'src/screens/candidates/add-candidate.tsx',
   '/data-bank': 'src/screens/candidates/data-bank.tsx',

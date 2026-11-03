@@ -1,0 +1,80 @@
+/* Data Bank grouped by position: expandable groups, each opening to its resumes. Tokens only. */
+.dbp-mode { display: inline-flex; flex: none; gap: 2px; padding: 3px; border: 1px solid var(--border-control); border-radius: 8px; }
+.dbp-mode button { height: 32px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.dbp-mode button:hover:not(.is-on) { background: var(--tint-2); color: var(--text-main); }
+.dbp-mode button.is-on { background: var(--primary); color: var(--on-primary); }
+.dbp-mode button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dbp-tip { margin: 0; padding: 0 22px 12px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+.dbp-tip code { padding: 1px 6px; border-radius: 4px; background: var(--tint-2); font-size: 12px; color: var(--text-main); }
+
+.dbp-groups { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 4px 22px 18px; list-style: none; }
+.dbp-group { border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); overflow: hidden; }
+.dbp-group.is-open { border-color: var(--border-hover); }
+.dbp-head { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 14px 16px; border: 0; background: transparent; color: var(--text-main); text-align: left; cursor: pointer; }
+.dbp-head:hover { background: var(--tint-1); }
+.dbp-head:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.dbp-chevron { display: inline-grid; flex: none; place-items: center; color: var(--text-muted); }
+.dbp-icon { display: inline-grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); }
+.dbp-group.is-none .dbp-icon { background: var(--tint-2); color: var(--text-muted); }
+.dbp-title { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
+.dbp-title strong { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dbp-title small { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 13px; color: var(--text-muted); }
+.dbp-title small > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbp-ref { padding: 1px 6px; border-radius: 4px; background: var(--tint-2); font-size: 12px; }
+.dbp-state { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--tint-2); font-size: 12px; color: var(--text-muted); text-transform: capitalize; }
+.dbp-count { flex: none; font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.dbp-count b { font-size: 18px; font-weight: 600; color: var(--text-main); }
+.dbp-body { border-top: 1px solid var(--border-faint); }
+.dbp-body[hidden] { display: none; }
+.dbp-mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--warning-ink) 22%, transparent); color: inherit; }
+
+.dbp-resumes { container-type: inline-size; min-width: 0; }
+.dbp-row { display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(110px, 1fr) minmax(110px, 1.1fr) minmax(100px, .9fr) minmax(130px, 1.2fr) minmax(100px, .8fr) 64px; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border-faint); font-size: 13.5px; }
+.dbp-row:last-of-type { border-bottom: 0; }
+.dbp-row > * { min-width: 0; }
+.dbp-row.is-head { padding-top: 8px; padding-bottom: 8px; background: var(--tint-1); font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--text-muted); }
+.dbp-row:not(.is-head) { cursor: pointer; }
+.dbp-row:not(.is-head):hover { background: var(--tint-1); }
+.dbp-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.dbp-name { display: flex; align-items: center; gap: 10px; }
+.dbp-name-text { display: flex; flex-direction: column; min-width: 0; }
+.dbp-name-text strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dbp-name-text small { color: var(--text-muted); font-size: 12px; }
+.dbp-agent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbp-actions { display: flex; justify-content: flex-end; }
+.dbp-note { margin: 0; padding: 14px 16px; font-size: 13.5px; color: var(--text-muted); }
+.dbp-note.is-error { color: var(--error-ink); }
+.dbp-more { display: flex; justify-content: center; padding: 12px 16px 14px; border-top: 1px solid var(--border-faint); }
+
+/* A narrow position list reads as stacked cards, not a table that scrolls sideways. */
+@container (max-width: 760px) {
+  .dbp-row.is-head { display: none; }
+  .dbp-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; padding: 12px 14px; }
+  .dbp-name { grid-column: 1 / -1; }
+  .dbp-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .dbp-row > [data-label]:not(.dbp-name)::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; color: var(--text-muted); }
+}
+
+/* Seven or six key figures read as two roomy rows instead of one cramped strip. */
+.db-kpis[data-count='7'] { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.db-kpis[data-count='7'] .db-kpi { grid-column: span 3; }
+.db-kpis[data-count='7'] .db-kpi:nth-child(n + 5) { grid-column: span 4; }
+.db-kpis[data-count='6'] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1279px) {
+  .db-kpis[data-count='7'] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .db-kpis[data-count='7'] .db-kpi, .db-kpis[data-count='7'] .db-kpi:nth-child(n + 5) { grid-column: span 2; }
+  .db-kpis[data-count='7'] .db-kpi:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 767px) {
+  .db-kpis[data-count='7'], .db-kpis[data-count='6'] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .db-kpis[data-count='7'] .db-kpi, .db-kpis[data-count='7'] .db-kpi:nth-child(n + 5) { grid-column: auto; }
+  .db-kpis[data-count='7'] .db-kpi:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 767px) {
+  .dbp-groups { padding: 4px 12px 14px; }
+  .dbp-tip { padding: 0 16px 12px; }
+  .dbp-head { flex-wrap: wrap; gap: 8px 10px; padding: 12px; }
+  .dbp-title { flex-basis: calc(100% - 100px); }
+  .dbp-title strong { white-space: normal; }
+  .dbp-mode { order: -1; }
+}

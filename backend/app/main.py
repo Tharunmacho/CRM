@@ -13,7 +13,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.api.routers import applications, auth, candidates, data, files, ocr, inbox, users, reports, workflow, whatsapp, document_jobs, attendance, staff_directory
-from app.api.routers import document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
+from app.api.routers import daily_work as daily_work_router, document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
 from app.db.models import User
@@ -113,6 +113,7 @@ app.include_router(staff_directory.router)
 app.include_router(reports.router)
 app.include_router(reports.dashboard_router)
 app.include_router(workflow.router)
+app.include_router(daily_work_router.router)
 app.include_router(whatsapp.router)
 app.include_router(whatsapp_chat.router)
 app.include_router(document_bundles.router)

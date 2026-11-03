@@ -1,0 +1,181 @@
+/*
+ * Daily work: the "complete your tasks first" banner and the Tasks page's daily list (S.No, Client, Country,
+ * Candidate, Position, Referral, Stage, Remarks + the slot timer and the action). Tokens only, no gradients.
+ */
+
+/* ---------- Banner shown on every page while today's list is unfinished ---------- */
+.dw-prompt { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; padding: 12px 16px; border: 1px solid var(--warning-edge); border-radius: 12px; background: var(--warning-fill); color: var(--warning-ink); }
+.dw-prompt.is-alert { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.dw-prompt-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%; background: color-mix(in srgb, currentColor 12%, transparent); }
+.dw-prompt-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 1.45; }
+.dw-prompt-text b { font-size: 14.5px; font-weight: 600; }
+.dw-prompt-go { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 8px; background: var(--primary); color: var(--on-primary); font-size: 13px; font-weight: 600; text-decoration: none; }
+.dw-prompt-go:hover { background: var(--primary-hover); }
+.dw-prompt-x { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 8px; color: inherit; opacity: .7; }
+.dw-prompt-x:hover { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
+@media (max-width: 640px) {
+  .dw-prompt { flex-wrap: wrap; }
+  .dw-prompt-text { flex-basis: calc(100% - 60px); }
+}
+
+/* ---------- Progress cards ---------- */
+.dw { min-width: 0; }
+.dw .tnum { font-variant-numeric: tabular-nums; }
+.dw-stats { display: grid; grid-template-columns: 1.5fr 1.2fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.dw-stat { min-width: 0; padding: 16px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.dw-stat header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.dw-stat strong { display: block; margin-top: 6px; font-size: 26px; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; color: var(--text-main); }
+.dw-stat strong small { font-size: 14px; font-weight: 500; color: var(--text-muted); letter-spacing: 0; }
+.dw-stat p { margin-top: 4px; font-size: 12.5px; line-height: 1.45; color: var(--text-muted); }
+.dw-stat.is-late { border-color: var(--error-edge); background: var(--error-fill); }
+.dw-stat.is-late strong, .dw-stat.is-late header { color: var(--error-ink); }
+.dw-stat.is-warn { border-color: var(--warning-edge); background: var(--warning-fill); }
+.dw-stat.is-warn strong, .dw-stat.is-warn header { color: var(--warning-ink); }
+.dw-bar { display: block; height: 6px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: var(--tint-3); }
+.dw-bar i { display: block; height: 100%; border-radius: 999px; background: var(--success-ink); transition: width .2s; }
+.dw-bar-sm { width: 72px; height: 4px; margin-top: 4px; }
+@media (max-width: 1100px) { .dw-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .dw-stats { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Alerts ---------- */
+.dw-alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.dw-alerts:empty { display: none; }
+.dw-alerts p { display: flex; align-items: flex-start; gap: 8px; padding: 10px 16px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); font-size: 13px; line-height: 1.5; }
+.dw-alerts p > svg { flex: none; margin-top: 2px; }
+.dw-alerts p.is-late { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.dw-alerts p.is-warn { border-color: var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); }
+
+/* ---------- Panels ---------- */
+.dw-panel { container: dw / inline-size; min-width: 0; margin-bottom: 16px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.dw-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 18px 20px 14px; }
+.dw-panel-head h2 { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; line-height: 1.35; color: var(--text-main); }
+.dw-panel-head p { margin-top: 2px; font-size: 13px; color: var(--text-muted); }
+.dw-panel-head .tk-select { min-width: 200px; }
+.dw-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 20px; text-align: center; color: var(--text-muted); }
+.dw-state-title { font-weight: 600; color: var(--error-ink); }
+
+/* ---------- Table ---------- */
+.dw .tk-table-wrap { min-width: 0; overflow-x: auto; }
+.dw-table { width: 100%; min-width: 940px; table-layout: fixed; border-collapse: collapse; font-size: 13px; line-height: 1.45; color: var(--text-main); }
+.dw-table :is(th, td) { padding: 12px 6px; text-align: left; vertical-align: middle; overflow-wrap: break-word; }
+.dw-table :is(th, td):first-child { padding-left: 20px; }
+.dw-table :is(th, td):last-child { padding-right: 20px; }
+.dw-table thead th { padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-main); border-top: 1px solid var(--border-main); background: var(--tint-1); font-size: 12.5px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.dw-table td { border-bottom: 1px solid var(--border-faint); }
+.dw-table .is-num { text-align: right; padding-right: 12px; color: var(--text-muted); }
+.dw-table th.is-actions, .dw-table td.is-actions { text-align: right; white-space: nowrap; }
+.dw-group th { padding: 10px 20px; border-bottom: 1px solid var(--border-main); background: var(--tint-2); text-align: left; font-weight: 500; }
+.dw-group-title { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-main); }
+.dw-group-title b { padding: 1px 8px; border-radius: 999px; background: var(--bg-card); border: 1px solid var(--border-main); font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.dw-group small { margin-left: 12px; font-size: 12.5px; font-weight: 400; color: var(--text-muted); }
+.dw-group.is-late th { background: var(--error-fill); }
+.dw-group.is-late .dw-group-title { color: var(--error-ink); }
+.dw-row.is-over { background: color-mix(in srgb, var(--error-fill) 55%, var(--bg-card)); }
+.dw-row.is-over > td:first-child { box-shadow: inset 3px 0 0 var(--error-ink); }
+.dw-row.is-soon > td:first-child { box-shadow: inset 3px 0 0 var(--warning-ink); }
+.dw-row.is-done { color: var(--text-muted); }
+.dw-row.is-done > td:first-child { box-shadow: inset 3px 0 0 var(--success-ink); }
+.dw-row.is-done .record-name { text-decoration: line-through; text-decoration-color: var(--text-light); }
+.dw-table tbody > tr:last-child > td { border-bottom: 0; }
+.dw-cell-strong { display: block; font-weight: 600; }
+.dw-sub { display: block; font-size: 12px; color: var(--text-muted); }
+.dw-country { display: inline-flex; align-items: center; gap: 8px; }
+.dw-country .tk-flag { margin-top: 0; }
+.dw-ref { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 2px 8px; border-radius: 999px; background: var(--tint-2); font-size: 12px; color: var(--text-muted); white-space: normal; }
+.dw-ref.is-referral { background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary); font-weight: 500; }
+.dw .record-identity { min-width: 0; gap: 10px; align-items: center; }
+.dw .record-avatar { width: 32px; height: 32px; font-size: 11.5px; }
+.dw .record-name { max-width: none; overflow: visible; white-space: normal; overflow-wrap: break-word; font-size: 13.5px; font-weight: 600; line-height: 1.35; }
+.dw .record-detail { max-width: none; overflow: visible; white-space: normal; font-size: 12px; line-height: 1.4; }
+.dw-table .tk-track { min-width: 0; max-width: 100%; }
+
+/* ---------- Slot timer ---------- */
+.dw-slot { display: flex; flex-direction: column; gap: 1px; margin-bottom: 8px; }
+.dw-last .btn, .dw-last button { white-space: nowrap; }
+.dw-slot-label { font-size: 12px; color: var(--text-muted); }
+.dw-slot b { display: inline-flex; align-items: center; gap: 4px; font-size: 13.5px; font-weight: 600; }
+.dw-slot small { font-size: 12px; color: var(--text-muted); }
+.dw-slot.is-ok b { color: var(--text-main); }
+.dw-slot.is-soon b { color: var(--warning-ink); }
+.dw-slot.is-over b, .dw-slot.is-over .dw-slot-label { color: var(--error-ink); }
+.dw-slot.is-done b { color: var(--success-ink); }
+.dw-row.is-postponed .dw-slot-label { font-weight: 600; color: var(--error-ink); }
+
+/* ---------- Remarks ---------- */
+.dw-remark { min-width: 0; }
+.dw-remark-last { margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12.5px; line-height: 1.4; color: var(--text-muted); }
+.dw-remark form { position: relative; }
+.dw-remark textarea { width: 100%; min-height: 34px; padding: 7px 34px 7px 10px; font-size: 13px; resize: vertical; }
+.dw-remark-save { position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: var(--primary); }
+.dw-remark-save:disabled { color: var(--text-light); }
+.dw-remark-save:not(:disabled):hover { background: var(--tint-2); }
+.dw-remark-error { display: block; margin-top: 4px; font-size: 12px; color: var(--error-ink); }
+
+/* ---------- Staff board ---------- */
+.dw-quota { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.dw-quota label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-muted); }
+.dw-quota input { width: 76px; }
+.dw-staff { min-width: 860px; table-layout: auto; }
+.dw-staff-row { cursor: pointer; }
+.dw-staff-row:hover { background: var(--tint-1); }
+.dw-staff-row.is-active { background: color-mix(in srgb, var(--primary) 7%, var(--bg-card)); box-shadow: inset 3px 0 0 var(--primary); }
+.dw-staff-row.is-late > td:first-child b { color: var(--error-ink); }
+.dw-staff-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.dw-chip { display: inline-grid; place-items: center; min-width: 28px; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--tint-2); font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.dw-chip.is-warn { background: var(--warning-fill); color: var(--warning-ink); font-weight: 600; }
+.dw-chip.is-late { background: var(--error-fill); color: var(--error-ink); font-weight: 600; }
+
+/* ---------- Narrow panels: each candidate becomes a labelled card ---------- */
+@container dw (max-width: 760px) {
+  .dw .tk-table-wrap { overflow-x: visible; }
+  .dw-table { min-width: 0; }
+  .dw-table, .dw-table tbody { display: block; }
+  .dw-table thead { display: none; }
+  .dw-group, .dw-group th { display: block; }
+  .dw-row, .dw-staff-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--border-faint); }
+  .dw-table .dw-row > td, .dw-table .dw-staff-row > td { display: block; padding: 0; border: 0; text-align: left; min-width: 0; }
+  .dw-row > td[data-label]:not([data-label=''])::before, .dw-staff-row > td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+  .dw-row > td[data-label='S.No'] { display: none; }
+  .dw-table colgroup { display: none; }
+  .dw-slot { margin-bottom: 6px; }
+  .dw-row > td[data-label='Candidate'], .dw-row > td[data-label='Remarks'], .dw-row > td.is-actions { grid-column: 1 / -1; }
+  .dw-row > td[data-label='Candidate']::before { display: none; }
+  .dw-remark { max-width: none; }
+  .dw-row.is-over > td:first-child, .dw-row.is-soon > td:first-child, .dw-row.is-done > td:first-child { box-shadow: none; }
+  .dw-row.is-over { box-shadow: inset 3px 0 0 var(--error-ink); }
+  .dw-row.is-soon { box-shadow: inset 3px 0 0 var(--warning-ink); }
+  .dw-row.is-done { box-shadow: inset 3px 0 0 var(--success-ink); }
+  .dw-panel-head { padding-left: 16px; padding-right: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .dw-bar i { transition: none; } }
+
+/* ---------- Today's goals ---------- */
+.dw-goal-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 0 20px 20px; }
+.dw-goal { min-width: 0; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
+.dw-goal header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dw-goal header b { font-size: 14px; font-weight: 600; color: var(--text-main); }
+.dw-goal header span { font-size: 15px; font-weight: 600; color: var(--text-main); }
+.dw-goal p { margin-top: 6px; font-size: 12.5px; color: var(--text-muted); }
+.dw-goal.is-done { border-color: var(--success-edge); background: var(--success-fill); }
+.dw-goal.is-done header span { color: var(--success-ink); }
+.dw-goal-split { display: flex; gap: 6px; margin-top: 10px; }
+.dw-goal-split > div { position: relative; flex-basis: 0; min-width: 0; height: 22px; overflow: hidden; border-radius: 6px; background: var(--tint-3); }
+.dw-goal-split > div > i { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--success-ink) 45%, var(--bg-card)); transition: width .2s; }
+.dw-goal-split > div > span { position: relative; display: block; padding: 0 8px; font-size: 12px; line-height: 22px; white-space: nowrap; color: var(--text-main); }
+.dw-checkpoints { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; list-style: none; padding: 0; }
+.dw-cp { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 6px; padding: 4px 10px 4px 8px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--tint-1); font-size: 12.5px; }
+.dw-cp small { grid-column: 1 / -1; font-size: 11.5px; color: var(--text-muted); }
+.dw-cp-dot { display: inline-flex; color: var(--text-light); }
+.dw-cp.is-met { border-color: var(--success-edge); background: var(--success-fill); }
+.dw-cp.is-met .dw-cp-dot { color: var(--success-ink); }
+.dw-cp.is-late { border-color: var(--warning-edge); background: var(--warning-fill); }
+.dw-cp.is-late .dw-cp-dot { color: var(--warning-ink); }
+.dw-cp.is-missed { border-color: var(--error-edge); background: var(--error-fill); }
+.dw-cp.is-missed .dw-cp-dot, .dw-cp.is-missed b { color: var(--error-ink); }
+.dw-pacing { font-weight: 500; }
+.dw-pacing.is-late { color: var(--error-ink) !important; }
+.dw-goal-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; margin-top: 14px; }
+.dw-goal-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; color: var(--text-main); }
+.dw-goal-field small { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+@media (max-width: 900px) { .dw-goal-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .dw-goal-form { grid-template-columns: minmax(0, 1fr); } }

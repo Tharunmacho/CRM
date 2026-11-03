@@ -58,6 +58,8 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "workflow_tasks": ("tasks",),
     "workflow_task_remarks": ("tasks",),
     "workflow_task_events": ("tasks",),
+    "workflow_daily_work_items": ("tasks",),
+    "workflow_daily_goals": ("tasks",),
     "workflow_settings": ("tasks",),
     "crm_client_contacts": ("clients",),
     "crm_employer_companies": ("companies",),
@@ -105,6 +107,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
 IGNORED_TABLES = frozenset({
     "system_audit_log",           # the audit trail is written beside every change it records
     "workflow_assignment_cursor",  # round-robin cursor
+    "workflow_daily_goal_progress",  # report snapshot refreshed by reads; screens show computed progress, so it announces nothing
     "staff_presence_clients",     # per-page heartbeat ordering checkpoint
     "email_oauth_states",         # short-lived consent handshakes
 })
