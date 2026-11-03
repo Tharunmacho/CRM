@@ -18,6 +18,12 @@ test('entry validation keeps backend identity, experience and date constraints v
   assert.deepEqual(candidateEntryErrors({ ...valid, phone: '９０００００００２０', totalExperience: '0', gulfExperience: '0' }), {})
 })
 
+test('with an uploaded document nothing is required, but a number that is typed must still be real', () => {
+  assert.deepEqual(Object.keys(candidateEntryErrors(EMPTY_CANDIDATE_FORM, '2026-10-22')).sort(), ['name', 'phone'])
+  assert.deepEqual(candidateEntryErrors(EMPTY_CANDIDATE_FORM, '2026-10-22', true), {})
+  assert.deepEqual(Object.keys(candidateEntryErrors({ ...EMPTY_CANDIDATE_FORM, phone: '12' }, '2026-10-22', true)), ['phone'])
+})
+
 test('restoring an intake uses only its saved form and preserves its own deliberately cleared fields', () => {
   const saved = { form: { name: 'Candidate B', phone: '', skills: 'TIG welding', unexpected: 'ignored' }, editedFields: ['name', 'phone', 'unexpected'] }
   const restored = restoredCandidateDraft(saved)

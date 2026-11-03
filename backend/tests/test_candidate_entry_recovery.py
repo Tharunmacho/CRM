@@ -63,6 +63,49 @@ def test_late_form_backup_preserves_saved_binding_and_other_intakes_stay_separat
     assert api.put(f'/api/ocr/jobs/groups/{first.group_id}/draft', json={'savedCandidateId': 'different'}).status_code == 409
 
 
+def test_draft_accepts_every_field_of_the_add_candidate_form(db):
+    # The browser autosaves its whole form; one field the server does not list rejects the entire save.
+    job = intake(db)
+    form = {key: '1' for key in ('name', 'phone', 'whatsapp', 'email', 'dob', 'gender', 'nationality', 'currentCity', 'languages',
+            'passportNo', 'passportIssue', 'passportExpiry', 'passportPlace', 'designation', 'totalExperience',
+            'gulfExperience', 'skills', 'expectedSalary', 'source', 'sourceDetail')}
+    response = client(db).put(f'/api/ocr/jobs/groups/{job.group_id}/draft',
+        json={'form': form, 'editedFields': ['sourceDetail'], 'jobIds': [job.id], 'savedCandidateId': None})
+    assert response.status_code == 200, response.text
+
+
+def test_candidate_from_a_document_needs_no_name_or_phone_and_is_flagged_for_review(db):
+    job = intake(db)
+    api = client(db)
+    created = api.post('/api/candidates', json={'intake_group_id': job.group_id})
+    assert created.status_code == 201, created.text
+    db.expire_all()
+    saved = db.get(m.Candidate, created.json()['id'])
+    assert (saved.name, saved.phone) == ('Name needs review', '')
+    assert saved.needs_review and saved.status == m.CandidateStatus.needs_review
+    # A number that is given must still be a real one.
+    other = intake(db)
+    assert api.post('/api/candidates', json={'phone': '12', 'intake_group_id': other.group_id}).status_code == 422
+
+
+def test_manual_entry_without_a_document_still_needs_name_and_phone(db):
+    api = client(db)
+    assert api.post('/api/candidates', json={'name': 'Only a name'}).status_code == 422
+    assert api.post('/api/candidates', json={'phone': '9000000020'}).status_code == 422
+    assert api.post('/api/candidates', json={'name': 'Both', 'phone': '9000000020'}).status_code == 201
+    # Editing may not wipe a name or number the candidate already has.
+    saved = db.scalar(select(m.Candidate))
+    assert api.patch(f'/api/candidates/{saved.id}', json={'name': saved.name, 'phone': ''}).status_code == 422
+
+
+def test_live_duplicate_check_accepts_an_email_alone(db):
+    api = client(db)
+    api.post('/api/candidates', json={'name': 'Existing', 'phone': '9000000020', 'email': 'same@example.com'})
+    found = api.post('/api/candidates/check-duplicate', json={'email': 'same@example.com'})
+    assert found.status_code == 200 and found.json()['duplicate'] is True, found.text
+    assert api.post('/api/candidates/check-duplicate', json={'email': 'other@example.com'}).json() == {'duplicate': False}
+
+
 def test_intake_owner_and_saved_candidate_permissions_are_checked(db):
     job = intake(db)
     api = client(db, 'b')

@@ -6,14 +6,17 @@ export const EMPTY_CANDIDATE_FORM = {
 export type CandidateEntryForm = typeof EMPTY_CANDIDATE_FORM
 export type CandidateEntryField = keyof CandidateEntryForm
 
-/** Match the server's profile constraints before asking it to save. */
-export function candidateEntryErrors(form: CandidateEntryForm, today = new Date().toISOString().slice(0, 10)) {
+/**
+ * Match the server's profile constraints before asking it to save.
+ * With an uploaded document nothing is required: a blank name or phone is saved as "needs review".
+ */
+export function candidateEntryErrors(form: CandidateEntryForm, today = new Date().toISOString().slice(0, 10), withDocuments = false) {
   const errors: Partial<Record<CandidateEntryField, string>> = {}
-  if (!form.name.trim()) errors.name = 'Enter the candidate’s full name.'
+  if (!form.name.trim() && !withDocuments) errors.name = 'Enter the candidate’s full name.'
   // Dropping the agency's calling code or a leading trunk 0 only ever takes a number from 12 or 11 digits to 10,
   // so the server's "at least seven digits" rule can be checked without knowing the calling code.
   const phone = form.phone.normalize('NFKC').replace(/\D/g, '').replace(/^00/, '')
-  if (phone.length < 7) errors.phone = 'Enter a phone number with at least seven digits.'
+  if (phone.length < 7 && (form.phone.trim() || !withDocuments)) errors.phone = 'Enter a phone number with at least seven digits.'
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = 'Enter a valid email address, or leave it empty.'
   if (form.dob && form.dob > today) errors.dob = 'Date of birth cannot be in the future.'
   if (form.passportIssue && form.passportExpiry && form.passportExpiry < form.passportIssue) {

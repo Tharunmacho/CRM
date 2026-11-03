@@ -41,7 +41,7 @@ export function fieldSources(scans: DocumentScans, edited: ReadonlySet<Candidate
 
 /**
  * What the live duplicate check sends, or null while there is nothing worth checking yet.
- * The server matches on phone, email and passport number only; name and phone are filler the schema insists on.
+ * The server matches on phone, email and passport number only; name and phone may be left blank here.
  */
 export function liveDuplicateQuery(form: CandidateEntryForm) {
   const phoneDigits = form.phone.normalize('NFKC').replace(/\D/g, '')
@@ -52,8 +52,8 @@ export function liveDuplicateQuery(form: CandidateEntryForm) {
   const usablePassport = passport.length >= 6
   if (!usablePhone && !usableEmail && !usablePassport) return null
   return {
-    name: form.name.trim() || 'New candidate',
-    phone: usablePhone ? form.phone.trim() : '0',
+    name: form.name.trim(),
+    phone: usablePhone ? form.phone.trim() : '',
     email: usableEmail ? email : undefined,
     passport_no: usablePassport ? form.passportNo.trim() : undefined,
     dob: form.dob || undefined,

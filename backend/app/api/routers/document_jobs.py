@@ -115,7 +115,7 @@ def group(group_id: str, response: Response, db: Session = Depends(get_db), user
 
 FORM_KEYS = {"name", "phone", "whatsapp", "email", "dob", "gender", "nationality", "currentCity", "languages",
              "passportNo", "passportIssue", "passportExpiry", "passportPlace", "designation", "totalExperience",
-             "gulfExperience", "skills", "expectedSalary", "source"}
+             "gulfExperience", "skills", "expectedSalary", "source", "sourceDetail"}
 
 
 class DraftIn(BaseModel):

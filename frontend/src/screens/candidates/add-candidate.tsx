@@ -139,6 +139,8 @@ export default function AddCandidatePage() {
   }
 
   const chosen = intake.jobs.filter((job) => SCAN_KINDS.some((kind) => job.kind === kind)).map((job) => job.kind)
+  // The server accepts a blank name or phone exactly when an upload is attached (intake_group_id is sent).
+  const hasDocuments = intake.jobs.length > 0
   const recoverIntake = async (groupId: string) => {
     if (saving || reading || intake.uploading || recovering) return
     setRecovering(true)
@@ -179,7 +181,8 @@ export default function AddCandidatePage() {
     readController.current = controller
     setReading(true); setReadErrors({}); if (!auto) setReadMessage('')
     try {
-      await intake.saveDraft(draftRef.current)
+      // A failed autosave must never stop the document from being read; the draft banner already tells the user.
+      await intake.saveDraft(draftRef.current).catch(() => {})
       const jobs = await intake.read(controller.signal)
       if (readController.current !== controller || !store.isCurrentSession()) return
       const read = scansFromJobs(jobs)
@@ -208,7 +211,7 @@ export default function AddCandidatePage() {
 
   const save = async () => {
     if (saving || reading || intake.uploading || recovering) return
-    const next = savedCandidateId ? {} : candidateEntryErrors(form)
+    const next = savedCandidateId ? {} : candidateEntryErrors(form, undefined, hasDocuments)
     setErrors(next)
     if (Object.keys(next).length) {
       setSaveError(VALIDATION_MESSAGE)
@@ -245,7 +248,7 @@ export default function AddCandidatePage() {
   /** From the live match card: the same decision dialog, but only once the required details are valid (a combine sends the whole form). */
   const reviewMatch = () => {
     if (live.status !== 'found' || !live.match) return
-    const next = candidateEntryErrors(form)
+    const next = candidateEntryErrors(form, undefined, hasDocuments)
     setErrors(next)
     if (Object.keys(next).length) { setSaveError(VALIDATION_MESSAGE); return }
     setDuplicate({ candidate: live.match, matchedOn: live.match.matchedOn })
@@ -290,12 +293,12 @@ export default function AddCandidatePage() {
     setSavedResult({ ref: created.ref, name: created.name, ownerName, merged: Boolean(mergeId), at: Date.now() })
     setSavedCandidateId(created.id)
     setDuplicate(null)
-    await intake.saveDraft(snapshotDraft(created.id))
+    await intake.saveDraft(snapshotDraft(created.id)).catch(() => {})
     await uploadDocuments(created.id)
   }
 
   const uploadDocuments = async (candidateId: string) => {
-    await intake.saveDraft(snapshotDraft(candidateId))
+    await intake.saveDraft(snapshotDraft(candidateId)).catch(() => {})
     const failed: Record<string, string> = await intake.attach(candidateId)
     if (!store.isCurrentSession()) return
     setUploadErrors(failed)
@@ -320,9 +323,11 @@ export default function AddCandidatePage() {
   }, [savedCandidateId])
 
   const busyAny = saving || reading || intake.uploading || recovering
-  const missing = [!form.name.trim() && 'full name', !form.phone.trim() && 'phone'].filter(Boolean) as string[]
+  const unfilled = [!form.name.trim() && 'full name', !form.phone.trim() && 'phone'].filter(Boolean) as string[]
+  // With a document nothing is required: whatever it did not give stays blank and the candidate is flagged for review.
+  const missing = hasDocuments ? [] : unfilled
   const steps = [
-    { label: 'Candidate details', detail: 'Name and phone are required.', done: missing.length === 0 },
+    { label: 'Candidate details', detail: hasDocuments ? 'Nothing is required while a document is attached.' : 'Name and phone are required.', done: unfilled.length === 0 },
     { label: 'Documents (optional)', detail: 'Add a resume and we fill in the details.', done: chosen.length > 0 },
     { label: 'Save and assign', detail: 'A free recruiter gets 48 hours to make the initial call.', done: Boolean(savedCandidateId) },
   ]
@@ -616,7 +621,7 @@ export default function AddCandidatePage() {
             <div className="ac-savebar-copy">
               <span className={`ac-pill ${missing.length ? 'is-warn' : 'is-good'}`}><i aria-hidden />{missing.length ? 'Missing details' : 'Ready'}</span>
               <span>
-                <strong>{missing.length ? `Still needed: ${missing.join(' and ')}.` : 'Ready to save.'}</strong>
+                <strong>{missing.length ? `Still needed: ${missing.join(' and ')}.` : unfilled.length ? `Ready to save. No ${unfilled.join(' or ')} yet, so this candidate will be marked for review.` : 'Ready to save.'}</strong>
                 {' '}When you save, we first check if this candidate is already in the Data Bank, then give them to a free recruiter. If no one is free, a supervisor will assign them.
               </span>
             </div>

@@ -146,7 +146,8 @@ def process_job(identifier, *, sessions, settings):
                 job.updated_at = now()
                 db.commit()
     except Exception as exc:
-        log.warning("Manual extraction %s failed (%s); original and checkpoints retained.", identifier, type(exc).__name__)
+        # The traceback stays in the server log (never in the job row or the response) so a file that keeps failing can be diagnosed.
+        log.warning("Manual extraction %s failed (%s); original and checkpoints retained.", identifier, type(exc).__name__, exc_info=True)
         with sessions() as db:
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
             if job is not None and job.status in READY:

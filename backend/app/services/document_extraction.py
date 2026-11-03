@@ -1,7 +1,7 @@
 """Resumable document extraction with caller-owned durable checkpoints.
 
-Only one status poll is performed per invocation. A worker can release its slot
-on ExtractionPending and revisit the same provider job later.
+A provider job is polled for at most ocr_provider_wait_seconds per invocation. A worker can
+release its slot on ExtractionPending and revisit the same provider job later.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from collections.abc import Callable
 from copy import deepcopy
 import hashlib
 import json
+import time
 
 from pydantic import ValidationError
 from veriis import FileDescriptor, VerisOCR, VerisOCRError
@@ -147,6 +148,12 @@ def _provider_result(
                 # before its first status request.
                 _persist(state, save)
             job = provider.jobs.get(record["job_id"])
+            # Most files finish within seconds. Waiting here avoids a full release, a retry delay
+            # and a worker wake-up for every status check; a slower job is still handed back.
+            deadline = time.monotonic() + max(0.0, getattr(settings, "ocr_provider_wait_seconds", 0.0))
+            while job.status in {"queued", "running"} and time.monotonic() < deadline:
+                time.sleep(1.5)
+                job = provider.jobs.get(record["job_id"])
     except (VerisOCRError, ValidationError):
         raise ExtractionFailure(
             "The document reader sent back an answer we could not use. Try again."

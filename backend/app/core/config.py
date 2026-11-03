@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     ocr_max_pages: int = Field(default=300, ge=1, le=1000)
     ocr_page_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
     ocr_document_timeout_seconds: float = Field(default=600.0, ge=10, le=1800)
+    # How long a worker keeps checking an accepted Veris job before it hands the slot back
+    # and revisits the job later. Zero keeps the single-poll behaviour.
+    ocr_provider_wait_seconds: float = Field(default=20.0, ge=0, le=120)
 
     # Incoming mail only. Credentials remain in the environment, never API output.
     email_ingestion_enabled: bool = False
