@@ -121,14 +121,18 @@ def test_intake_owner_and_saved_candidate_permissions_are_checked(db):
     assert api.post('/api/candidates', json={**body, 'intake_group_id': own_job.group_id}).status_code == 403
 
 
-def test_creator_can_resume_after_automatic_assignment_to_another_recruiter(db):
+def test_staff_who_adds_a_candidate_owns_it_and_can_resume_after_a_lost_response(db):
     job = intake(db, owner='b')
     api = client(db, 'b')
     body = {'name': 'Entered by B', 'phone': '9000000020', 'intake_group_id': job.group_id}
     first = api.post('/api/candidates', json=body)
     assert first.status_code == 201, first.text
-    assert first.json()['ownerId'] == 'a'
+    assert first.json()['ownerId'] == 'b'
     assert api.post('/api/candidates', json=body).json()['id'] == first.json()['id']
+    # An admin gives the candidate to A; B may still read the saved result back, but it is no longer B's to work.
+    db.get(m.Candidate, first.json()['id']).owner_id = 'a'; db.commit()
+    assert api.post('/api/candidates', json=body).json()['id'] == first.json()['id']
+    assert api.post(f"/api/ocr/jobs/{job.id}/attach", json={'candidateId': first.json()['id']}).status_code == 403
 
 
 def test_merge_is_recoverable_without_reapplying_evidence_or_resetting_work(db):
@@ -165,16 +169,18 @@ def test_failed_merge_does_not_bind_and_bound_group_cannot_move_to_another_candi
     assert api.post(f"/api/candidates/{second['id']}/merge", json={**body, 'phone': '9000000021'}).status_code == 409
 
 
-def test_non_owner_who_combined_an_upload_can_attach_its_files_but_not_before(db):
-    original = client(db).post('/api/candidates', json={'name': 'Original', 'phone': '9000000020'}).json()
+def test_non_owner_can_neither_combine_an_upload_nor_attach_its_files(db):
+    original = client(db).post('/api/candidates', json={'name': 'Original', 'phone': '9000000020', 'assign_to': 'a'}).json()
     job = intake(db, owner='b')
     other = client(db, 'b')
     assert db.get(m.Candidate, original['id']).owner_id == 'a'
     attach = f"/api/ocr/jobs/{job.id}/attach"
     assert other.post(attach, json={'candidateId': original['id']}).status_code == 403
     merged = other.post(f"/api/candidates/{original['id']}/merge", json={'name': 'Incoming', 'phone': '9000000020', 'intake_group_id': job.group_id})
-    assert merged.status_code == 200, merged.text
-    # A repeat of the merge after the response was lost must not need ownership either.
-    assert other.post(f"/api/candidates/{original['id']}/merge", json={'name': 'Incoming', 'phone': '9000000020', 'intake_group_id': job.group_id}).status_code == 200
-    # The synthetic job has no stored bytes, so the attach now fails on storage (503), not on permission (403).
-    assert other.post(attach, json={'candidateId': original['id']}).status_code == 503
+    assert merged.status_code == 403, merged.text
+    assert other.post(attach, json={'candidateId': original['id']}).status_code == 403
+    db.expire_all()
+    assert 'savedCandidateId' not in (db.get(m.DocumentExtractionJob, job.id).draft or {})
+    # The owner can: the synthetic job has no stored bytes, so this fails on storage (503), not on permission.
+    owner_job = intake(db, owner='a')
+    assert client(db, 'a').post(f"/api/ocr/jobs/{owner_job.id}/attach", json={'candidateId': original['id']}).status_code == 503

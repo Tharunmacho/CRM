@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { canWorkCandidate } from '@/features/candidates/candidate-access'
 import { CircleCheck, Clock3, Eye, GitBranch, Pencil, Search, TimerOff, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, slaState } from '@/shared/lib/format'
@@ -149,7 +150,7 @@ export default function MappedCandidatesPage() {
   )
   const canWork = (a: Application) => {
     const c = store.candidate(a.candidateId)
-    return a.status === 'active' && !!c && (store.can('work_any_candidate') || c.ownerId === store.me.id)
+    return a.status === 'active' && !!c && canWorkCandidate(store.me, c)
   }
   const openButton = (a: Application) => (
     <Button size="sm" variant={a.status === 'active' ? 'primary' : 'secondary'} icon={canWork(a) ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />} onClick={() => setEditing(a.id)}>

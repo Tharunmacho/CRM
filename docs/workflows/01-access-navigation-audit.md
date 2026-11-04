@@ -7,8 +7,9 @@ This module establishes who can see a record, who can change it and how a change
 | Action | Admin | Manager | Staff |
 | --- | --- | --- | --- |
 | Read Data Bank and candidate summaries | All | All | All |
-| Create clients, designations and orders; map or unmap | Yes | Yes | Yes |
-| Correct candidates, record calls, work stages | Any candidate | Any candidate | Own assigned candidates |
+| Create clients, designations and orders | Yes | Yes | Yes |
+| Add a candidate | Yes, may choose the recruiter | Yes, may choose the recruiter | Yes; assigned to the staff member who adds it |
+| Correct candidates, upload or replace their documents, record calls, edit the application form, map or unmap, work stages | Any candidate | Any candidate | Own assigned candidates |
 | Receive automatic candidate allocation | No | No | Eligible Staff only |
 | Reassign candidates and open tasks | Yes | Yes | No |
 | Connect sources; manage users; reopen stages; reset SLA | Yes | No | No |
@@ -17,7 +18,7 @@ This module establishes who can see a record, who can change it and how a change
 | Staff Directory | Team | Team | No access |
 | Attendance | Employee oversight | Own and Staff oversight | Own |
 
-Staff Directory and attendance are later approved additions. Private CRM mail drafts remain private to their author even from an Admin; shared provider folders follow the connected mailbox model. Candidate discovery does not confer permission to edit another recruiter's work.
+Staff Directory and attendance are later approved additions. Private CRM mail drafts remain private to their author even from an Admin; shared provider folders follow the connected mailbox model. Candidate discovery does not confer permission to edit another recruiter's work: the server answers `403 This candidate is assigned to <name>. Only they, a manager or an admin can work on it.` and the screens show the same sentence on the disabled action. An admin reassigns a candidate at any time and the new recruiter takes over everything (tasks, daily work, reminders).
 
 ## User journey
 
@@ -27,7 +28,7 @@ Staff Directory and attendance are later approved additions. Private CRM mail dr
 4. Make an authorized edit. The saved action records the actor, time, target and relevant change details.
 5. Log out. Reopening a protected route requires authentication. Admin force logout or account deactivation also invalidates the old session.
 
-The original sidebar specified Dashboard, Inbox, Clients, Jobs / Positions, Add Candidate, Data Bank, Tasks, To-do List, Reports and User Management. Current navigation also includes Companies, WhatsApp, Mapped Candidates, Attendance and Staff Directory. These extensions are documented rather than counted as literal ten-item parity.
+The original sidebar specified Dashboard, Inbox, Clients, Jobs / Positions, Candidate (formerly Add Candidate), Data Bank, Tasks, To-do List, Reports and User Management. Current navigation also includes Companies, WhatsApp, Mapped Candidates, Attendance and Staff Directory. These extensions are documented rather than counted as literal ten-item parity.
 
 ## Screen and backend contract
 

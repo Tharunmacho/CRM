@@ -70,7 +70,8 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     with engine.begin() as connection:
         connection.execute(text("INSERT INTO crm_job_designations (id, title, category) VALUES ('d1', 'Welder', 'Test 1')"))
     _migrate(engine, "head")
-    assert set(inspect(engine).get_table_names()) - before == {"job_categories", "workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress"}  # 0019 and the later 0020
+    # 0019, plus whatever later migrations add (0020 daily work, 0022 form options): at least the category table is new.
+    assert {"job_categories", "workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress"} <= set(inspect(engine).get_table_names()) - before
     with engine.connect() as connection:
         seeded = connection.scalar(text("SELECT count(*) FROM job_categories"))
         assert connection.scalar(text("SELECT category FROM crm_job_designations WHERE id = 'd1'")) == "Test 1"  # untouched

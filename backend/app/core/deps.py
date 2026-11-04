@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy import event, inspect, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, make_transient_to_detached
+from sqlalchemy.orm import Session, make_transient_to_detached, object_session
 
 from app.core.security import SESSION_COOKIE
 from app.db.models import Application, Candidate, Role, Session as SessionRow, User
@@ -104,17 +104,37 @@ def require_role(*roles: Role):
     return dependency
 
 
-def ensure_can_work(db: Session, app: Application, user: User) -> None:
-    """
-    Admin and manager may work any candidate's stages; staff only their own. Enforced
-    here as well as in the UI, because the UI is only a suggestion.
+def candidate_work_refusal(db: Session | None, candidate, user: User) -> str | None:
+    """Why `user` may not work this candidate, or None when they may.
+
+    Reading a candidate is open to every signed-in user (PRD: every staff member sees the whole Data Bank).
+    Working one (edit details, upload or replace documents, record the initial call, save / complete
+    stages, edit the application form, map or unmap) belongs to the recruiter the candidate is
+    assigned to. Admin and manager (PRD role table: "work any candidate") may work any candidate, and an
+    admin can hand a candidate to someone else at any time.
     """
     if user.role in (Role.admin, Role.manager):
-        return
+        return None
+    owner_id = getattr(candidate, "owner_id", None)
+    if owner_id is not None and owner_id == user.id:
+        return None
+    if owner_id is None:
+        return "This candidate has no recruiter yet. Only a manager or an admin can work on it."
+    session = db if db is not None else object_session(candidate)
+    name = session.scalar(select(User.name).where(User.id == owner_id)) if session is not None else None
+    return f"This candidate is assigned to {name or 'another recruiter'}. Only they, a manager or an admin can work on it."
 
-    candidate = db.get(Candidate, app.candidate_id)
-    if candidate is None or candidate.owner_id != user.id:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "This candidate belongs to another recruiter.",
-        )
+
+def ensure_can_work_candidate(candidate, user: User, db: Session | None = None) -> None:
+    """The one rule behind every candidate write. The UI mirrors it; this is the source of truth."""
+    refusal = candidate_work_refusal(db, candidate, user)
+    if refusal:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, refusal)
+
+
+def ensure_can_work(db: Session, app: Application, user: User) -> None:
+    """Admin and manager may work any candidate's stages; staff only their own. Enforced
+    here as well as in the UI, because the UI is only a suggestion."""
+    if user.role in (Role.admin, Role.manager):
+        return
+    ensure_can_work_candidate(db.get(Candidate, app.candidate_id), user, db)

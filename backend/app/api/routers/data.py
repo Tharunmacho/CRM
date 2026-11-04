@@ -75,7 +75,7 @@ DOCUMENT_SLOTS = [
 ]
 
 
-def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]]) -> CandidateOut:
+def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: type[CandidateOut] = CandidateOut) -> CandidateOut:
     documents = [
         {
             "key": key,
@@ -103,7 +103,7 @@ def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]]) -> Candida
             "remarks": c["call_remarks"],
             "recordedAt": c["call_recorded_at"],
         }
-    return CandidateOut.model_validate({
+    return model.model_validate({
         **c, "added_at": c["created_at"], "documents": documents, "call_outcome": outcome,
     })
 
@@ -619,8 +619,8 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
     c = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
-    if user.role == Role.staff and c.owner_id != user.id:
-        raise HTTPException(403, "This candidate belongs to another recruiter")
+    from app.core.deps import ensure_can_work_candidate
+    ensure_can_work_candidate(c, user, db)
     # The call may be recorded after the candidate was already matched to an order
     # (matching closes the initial-call task, the call result is still worth keeping).
     # In that case the outcome is stored and audited, but the candidate's status and
@@ -762,12 +762,9 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
             raise HTTPException(403, "Only an admin can restart the 48-hour timer when moving candidates")
         if len(restart_reason) < 3:
             raise HTTPException(422, "Give a reason for restarting the 48-hour timer")
-    from app.api.routers.candidates import lock_assignment_cursor
+    from app.api.routers.candidates import ensure_assignable, lock_assignment_cursor
     lock_assignment_cursor(db)
-    target = db.get(User, body.toUserId)
-    from app.services.attendance_availability import unavailable_staff_ids
-    if target is None or target.role != Role.staff or not target.active or target.on_leave or target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, "Choose an active staff member who is not on leave")
+    target = ensure_assignable(db, body.toUserId)
     ids = sorted(set(body.candidateIds))
     if not ids:
         raise HTTPException(422, "Select at least one candidate")
@@ -800,6 +797,14 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
     from app.services.workflow_scheduler import add_event, restart_sla
     changed_candidate_ids = {change[0] for change in ownership_changes}
     task_only_changes = []
+
+    # The follow-up reminder on the to-do list moves with the candidate. (An application keeps the owner it was
+    # mapped under as history; the live recruiter is always the candidate's, which is what every check reads.)
+    if changed_candidate_ids:
+        from app.services.application_form import sync_follow_up_todo
+        for c in candidates:
+            if c.id in changed_candidate_ids and c.next_follow_up_date:
+                sync_follow_up_todo(db, c)
 
     # Open tasks move with the candidate; preserve the previous owner for daily history.
     for t in db.scalars(

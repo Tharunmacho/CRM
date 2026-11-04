@@ -57,7 +57,8 @@ export function mergeOcrForm<T extends Record<string, string>>(
     if (!hasOcrExtraction(scan)) continue
     for (const [key, value] of Object.entries(scan.fields)) {
       if (!Object.hasOwn(defaults, key) || value == null) continue
-      const text = Array.isArray(value) ? value.join(', ') : String(value)
+      // Lists of rows (education, work history) are kept as JSON text; lists of words are comma-separated.
+      const text = Array.isArray(value) ? (value.some((item) => item && typeof item === 'object') ? JSON.stringify(value) : value.join(', ')) : String(value)
       if (text.trim()) extracted[key] = text
     }
   }

@@ -50,6 +50,20 @@ def job_out(job, *, detail=False):
     return result
 
 
+def _with_form_fields(kind, extraction):
+    """Fields saved before the application form existed lack its values; read them from the stored raw result."""
+    fields = dict(extraction.get("fields", {}))
+    try:
+        from app.services.form_extraction import values_for
+        from app.integrations.ocr.mapping import _FORM_ONLY
+        for name, value in values_for(kind, extraction.get("raw")).items():
+            if name in _FORM_ONLY and name not in fields:
+                fields[name] = value
+    except Exception:  # the preview must never fail because of an optional extra
+        pass
+    return fields
+
+
 def _scan_results(output):
     report = output.get("inspection", {})
     scans = {}
@@ -59,7 +73,7 @@ def _scan_results(output):
         if not selected and kind != "resume":
             continue
         scans[kind] = {
-            "fields": OcrFields.model_validate(extraction.get("fields", {})).model_dump(by_alias=True, exclude_none=True, mode="json") if extraction else {},
+            "fields": OcrFields.model_validate(_with_form_fields(kind, extraction)).model_dump(by_alias=True, exclude_none=True, mode="json") if extraction else {},
             "raw": extraction.get("raw", {}) if extraction else {},
             "source": extraction.get("source", {}) if extraction else {},
             "inspection": {**report, "selected_pages": selected},
@@ -126,6 +140,11 @@ def process_job(identifier, *, sessions, settings):
                                    "size_kb": max(1, (len(content) + 1023) // 1024), "content_hash": hashlib.sha256(content).hexdigest()}
                 checkpoint(state)
         with sessions() as db:
+            # A file read for a candidate's application form fills that candidate's form in this same transaction.
+            # Candidate before job, the order every other writer uses.
+            form_candidate = db.scalar(select(DocumentExtractionJob.candidate_id).where(DocumentExtractionJob.id == identifier))
+            if form_candidate:
+                db.scalar(select(Candidate.id).where(Candidate.id == form_candidate).with_for_update())
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
             if job is None or job.status not in READY:
                 return
@@ -134,6 +153,13 @@ def process_job(identifier, *, sessions, settings):
             job.status = "completed" if output["status"] == "complete" else "needs_review"
             job.last_error = None if job.status == "completed" else "Review the saved reading report or enter details manually."
             job.updated_at = now()
+            if form_candidate:
+                try:
+                    from app.services.application_form import apply_job_output
+                    with db.begin_nested():
+                        apply_job_output(db, job, output)
+                except Exception:
+                    log.warning("Filling the application form from job %s failed; the reading itself is saved.", identifier, exc_info=True)
             db.commit()
     except JobFinished:
         return
@@ -175,11 +201,10 @@ def attach_original(db, user, identifier, candidate_id, settings):
     if candidate is None:
         raise HTTPException(404, "Candidate not found")
     job = owned_job(db, identifier, user.id, lock=True)
-    # Someone who combined this saved upload into the candidate (merge) or saved the
-    # candidate from it already passed the access check, so they can add its files.
-    bound_here = candidate.id in {job.candidate_id, (job.draft or {}).get("savedCandidateId")}
-    if user.role == Role.staff and candidate.owner_id != user.id and candidate.created_by != user.id and not bound_here:
-        raise HTTPException(403, "Only the assigned recruiter, candidate creator or a supervisor can attach these documents")
+    # Adding files is work on the candidate: the assigned recruiter, a manager or an admin. Having entered the
+    # candidate, or an earlier merge, no longer counts once an admin has given it to someone else.
+    from app.core.deps import ensure_can_work_candidate
+    ensure_can_work_candidate(candidate, user, db)
     if job.candidate_id:
         if job.candidate_id != candidate.id:
             raise HTTPException(409, "These documents are already attached to another candidate")

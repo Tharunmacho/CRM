@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { Link } from 'react-router-dom'
 import { ExternalLink, RefreshCw } from 'lucide-react'
 import { api } from '@/shared/api/client'
@@ -68,7 +69,8 @@ export function CandidateMatchDrawer({ onClose, orderId }: { onClose: () => void
   const orderOpen = (requirements?.orderStatus ?? order.status) === 'open'
   const selected = ready ? picked.filter(id => result.items.some(candidate => candidate.id === id)) : []
   const facets = coverage.data?.skills ?? []
-  const allOnPage = ready && result.items.length > 0 && result.items.every(candidate => selected.includes(candidate.id))
+  const workable = ready ? result.items.filter(candidate => canWorkCandidate(store.me, candidate)) : []
+  const allOnPage = workable.length > 0 && workable.every(candidate => selected.includes(candidate.id))
   const resetSelection = () => { setPicked([]); setPage(0) }
   const set = <K extends keyof CandidateMatchFilters>(key: K, value: CandidateMatchFilters[K]) => {
     setFilters(current => ({ ...current, [key]: value })); resetSelection()
@@ -142,13 +144,13 @@ export function CandidateMatchDrawer({ onClose, orderId }: { onClose: () => void
         <Button size="sm" variant="ghost" onClick={() => { setFilters(emptyFilters); setQuery(''); resetSelection() }}>Clear filters</Button>
       </div>
     </fieldset>
-    <div className="jv-match-bar"><span><strong>{coverage.loading ? '…' : coverage.data?.total ?? '—'}</strong> candidates available. Candidates already on an order or deployed are not shown. Each candidate needs an active recruiter.</span>{ready && result.items.length > 0 && orderOpen && <Button size="sm" disabled={saving} onClick={() => setPicked(allOnPage ? [] : result.items.map(candidate => candidate.id))}>{allOnPage ? 'Clear selection' : 'Select all on this page'}</Button>}</div>
+    <div className="jv-match-bar"><span><strong>{coverage.loading ? '…' : coverage.data?.total ?? '—'}</strong> candidates available. Candidates already on an order or deployed are not shown. Each candidate needs an active recruiter.</span>{ready && result.items.length > 0 && orderOpen && <Button size="sm" disabled={saving} onClick={() => setPicked(allOnPage ? [] : workable.map(candidate => candidate.id))}>{allOnPage ? 'Clear selection' : 'Select all on this page'}</Button>}</div>
     {!orderOpen && <p role="status" className="border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm text-amber-700">This order is {requirements?.orderStatus.replace('_', ' ')}. Set it to Open before you match candidates.</p>}
     {error && <div role="alert" className="bg-stamp-50 p-5 text-sm text-stamp-700">{error}{refreshNeeded && <Button className="mt-3" disabled={saving} onClick={() => void refresh()}>Refresh list</Button>}</div>}
     {loadError ? <div className="space-y-3 p-5"><p role="alert" className="text-sm text-stamp-700">{loadError}</p><Button disabled={saving} onClick={() => setRevision(value => value + 1)}>Try again</Button></div>
       : !ready ? <p role="status" className="p-8 text-center text-ink-500">Looking for candidates…</p>
       : result.items.length === 0 ? <EmptyState title="No candidates match these filters" description="Change or clear the filters. A candidate needs an active recruiter and must not be on another order." />
-      : <><ul>{result.items.map(candidate => <MatchRow key={candidate.id} candidate={candidate} checked={selected.includes(candidate.id)} disabled={saving || !orderOpen} onToggle={() => setPicked(current => current.includes(candidate.id) ? current.filter(id => id !== candidate.id) : [...current, candidate.id])} />)}</ul>
+      : <><ul>{result.items.map(candidate => <MatchRow key={candidate.id} candidate={candidate} checked={selected.includes(candidate.id)} disabled={saving || !orderOpen || !canWorkCandidate(store.me, candidate)} onToggle={() => setPicked(current => current.includes(candidate.id) ? current.filter(id => id !== candidate.id) : [...current, candidate.id])} />)}</ul>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule p-5"><span className="text-sm text-ink-500">{result.page * result.pageSize + 1}–{Math.min((result.page + 1) * result.pageSize, result.total)} of {result.total}</span><div className="flex gap-2"><Button size="sm" disabled={saving || result.page === 0} onClick={() => { setPage(result.page - 1); setPicked([]) }}>Previous</Button><Button size="sm" disabled={saving || (result.page + 1) * result.pageSize >= result.total} onClick={() => { setPage(result.page + 1); setPicked([]) }}>Next</Button></div></div></>}
     </div>
   </Sheet>
@@ -158,12 +160,14 @@ function MatchRow({ candidate, checked, disabled, onToggle }: { candidate: Match
   const store = useStore()
   const evidence = candidate.matchEvidence
   const skills = normalizedSkills(candidate.skills)
+  const refusal = workRefusal(store.me, candidate, store.user(candidate.ownerId)?.name)
   return <li className={cn('jv-match-row', checked && 'is-picked')}>
     <label className="jv-match-pick"><CheckboxInput checked={checked} onChange={onToggle} disabled={disabled} aria-label={`Select ${candidate.name}`} /></label>
     <span className="jv-avatar" aria-hidden="true">{initials(candidate.name)}</span>
     <div className="jv-match-main">
       <div className="jv-match-head"><button type="button" className="jv-match-name" disabled={disabled} onClick={onToggle}>{candidate.name}</button><Link className="jv-match-link" to={`/candidates/${candidate.id}`} target="_blank" rel="noopener noreferrer">View profile <ExternalLink className="h-3.5 w-3.5" aria-label="Opens in a new tab" /></Link></div>
       <p className="jv-match-line">{candidate.designations.join(', ') || 'Job title not added'} · {candidate.totalExperience} years · {candidate.currentCity || 'Location not added'} · {store.user(candidate.ownerId)?.name ?? 'No recruiter'}</p>
+      {refusal && <p className="jv-match-line" role="note" title={refusal}>Only {store.user(candidate.ownerId)?.name ?? 'a manager or an admin'} (or a manager or an admin) can match this candidate.</p>}
       {(!candidate.passportNo || !evidence.meetsExperience || candidate.status === 'not_interested') && <div className="jv-match-flags">{!candidate.passportNo && <span className="jv-flag"><i aria-hidden="true" />Passport number missing</span>}{!evidence.meetsExperience && <span className="jv-flag"><i aria-hidden="true" />Not enough experience</span>}{candidate.status === 'not_interested' && <span className="jv-flag"><i aria-hidden="true" />Said no to an earlier order</span>}</div>}
       <div className="jv-match-skills">
         {evidence.matchedSkills.length > 0 && <div><span>Has these skills</span>{evidence.matchedSkills.map(skill => <span key={skillKey(skill)} className="jv-match-skill is-hit">{skill}</span>)}</div>}

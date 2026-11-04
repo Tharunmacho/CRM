@@ -210,7 +210,8 @@ export function CountryFlag({ country }: { country?: string | null }) {
 
 /* ---------------------------------------------------------------- row menu */
 
-export interface RowMenuItem { label: string; icon: LucideIcon; onSelect: () => void }
+/** `disabledReason` keeps the item visible but unusable and explains why in its tooltip. */
+export interface RowMenuItem { label: string; icon: LucideIcon; onSelect: () => void; disabledReason?: string }
 
 /** The "..." overflow menu of a row: opens as a fixed popover so a card or table edge can never clip it. */
 export function RowMenu({ label, items }: { label: string; items: RowMenuItem[] }) {
@@ -248,8 +249,8 @@ export function RowMenu({ label, items }: { label: string; items: RowMenuItem[] 
       </button>
       {open && createPortal(
         <div className="db-menu" role="menu" style={{ top: at.top, left: at.left }}>
-          {items.map(({ label: text, icon: Icon, onSelect }) => (
-            <button key={text} type="button" role="menuitem" className="db-menu-item" onClick={(event) => { event.stopPropagation(); setOpen(false); onSelect() }}><Icon size={15} aria-hidden="true" />{text}</button>
+          {items.map(({ label: text, icon: Icon, onSelect, disabledReason }) => (
+            <button key={text} type="button" role="menuitem" className="db-menu-item" disabled={Boolean(disabledReason)} title={disabledReason} onClick={(event) => { event.stopPropagation(); setOpen(false); onSelect() }}><Icon size={15} aria-hidden="true" />{text}</button>
           ))}
         </div>,
         document.body,

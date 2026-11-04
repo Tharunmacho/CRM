@@ -101,6 +101,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "agency_settings": ("settings",),
     "currencies": ("settings",),
     "job_categories": ("settings",),
+    "crm_form_options": ("form_options", "settings"),
 }
 
 # Internal bookkeeping that no screen shows: writing to it announces nothing.
@@ -131,7 +132,7 @@ OWNER_TOPICS = frozenset({"todos", "notifications"})
 # Everything a browser may be told about. The two control topics are deliberately missing.
 CLIENT_TOPICS = frozenset({
     "candidates", "applications", "tasks", "clients", "companies", "orders", "designations", "notifications",
-    "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings",
+    "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings", "form_options",
 })
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
 ID_ROLES = frozenset({"admin", "manager"})
@@ -218,7 +219,7 @@ class Pending:
         if self.auth:
             topics.add(AUTH_TOPIC)
         body: dict = {"t": sorted(topics), "at": now_ms if now_ms is not None else int(time.time() * 1000)}
-        ids = {topic: sorted(found) for topic, found in self.ids.items() if topic in topics and 0 < len(found) <= MAX_IDS_PER_TOPIC}
+        ids = {topic: sorted(found, key=str) for topic, found in self.ids.items() if topic in topics and 0 < len(found) <= MAX_IDS_PER_TOPIC}
         if self.candidates and len(self.candidates) <= MAX_IDS_PER_TOPIC:
             ids["candidates"] = sorted(set(ids.get("candidates", [])) | self.candidates)
         owners = {topic: sorted(found) for topic, found in self.owners.items()

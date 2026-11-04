@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
+import { canWorkCandidate } from '@/features/candidates/candidate-access'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
 import { AlertTriangle, ArrowLeft, ArrowRight, BriefcaseBusiness, Building2, CalendarClock, CalendarX2, ClipboardCopy, Coins, FileText, Gift, Globe2, History, Link2, MapPin, Pause, Pencil, Play, Target, Trash2, Unlink, UserCheck, Users, Wallet } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money } from '@/shared/lib/format'
@@ -184,7 +186,7 @@ export default function OrderDetailPage() {
       width: '12%',
       render: (a) => (
         <div className="jv-row-actions" onClick={(e) => e.stopPropagation()}>
-          {a.status === 'active' && store.can('map_candidates') && (
+          {a.status === 'active' && store.can('map_candidates') && canWorkCandidate(store.me, store.candidate(a.candidateId)) && (
             <button
               type="button"
               onClick={() => { setUnmapping(a.id); setUnmapError('') }}
@@ -195,6 +197,7 @@ export default function OrderDetailPage() {
               <Unlink size={15} aria-hidden="true" />
             </button>
           )}
+          <ApplicationFormButton size="sm" iconOnly candidateId={a.candidateId} orderId={a.orderId} />
           <button type="button" className="jv-open-btn is-icon" aria-label={`Open stages for ${store.candidate(a.candidateId)?.name ?? 'candidate'}`} title="Open stages" onClick={() => setOpenApp(a.id)}>
             <ArrowRight size={15} aria-hidden="true" />
           </button>
@@ -349,7 +352,8 @@ export default function OrderDetailPage() {
                       <div><dt>Updated</dt><dd>{dateTimeLabel(a.updatedAt)}</dd></div>
                     </dl>
                     <div className="jv-mcard-foot">
-                      {a.status === 'active' && store.can('map_candidates') && <Button size="sm" icon={<Unlink className="h-3.5 w-3.5" />} onClick={() => { setUnmapping(a.id); setUnmapError('') }}>Remove from order</Button>}
+                      {a.status === 'active' && store.can('map_candidates') && canWorkCandidate(store.me, store.candidate(a.candidateId)) && <Button size="sm" icon={<Unlink className="h-3.5 w-3.5" />} onClick={() => { setUnmapping(a.id); setUnmapError('') }}>Remove from order</Button>}
+                      <ApplicationFormButton size="sm" candidateId={a.candidateId} orderId={a.orderId} />
                       <Button size="sm" variant="primary" onClick={() => setOpenApp(a.id)}>Open stages</Button>
                     </div>
                   </li>

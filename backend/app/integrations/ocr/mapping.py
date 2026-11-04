@@ -37,6 +37,13 @@ class OcrFields(Wire):
     total_experience: int | None = None
     gulf_experience: int | None = None
     skills: list[str] | None = None
+    # Application-form details (see services/form_extraction.py for how they are read).
+    father_name: str | None = None
+    marital_status: str | None = None
+    current_address: str | None = None
+    experience_india: int | None = None
+    education: list[dict[str, Any]] | None = None
+    work_history: list[dict[str, Any]] | None = None
 
 
 # Day first throughout: these are Indian resumes, where 05/12/1990 is the 5th of December.
@@ -216,6 +223,15 @@ def _low_confidence(kind: str, pages) -> list[str]:
     return [f"We read the {kind} page(s) {listed} with low confidence. Compare the details with the original."]
 
 
+_FORM_ONLY = {"father_name", "marital_status", "current_address", "experience_india", "education", "work_history"}
+
+
+def _form_values(kind: str, response) -> dict[str, Any]:
+    """The application-form-only values read from a validated response (the parsing is shared with the stored-data path)."""
+    from app.services import form_extraction
+    return form_extraction.values_for(kind, response.model_dump(mode="json", exclude={"pages"}))
+
+
 def resume_fields(r: ResumeResponse, designations: list[str]) -> tuple[OcrFields, list[str]]:
     """
     `designations` are the titles the form's select offers. A resume's title only fills
@@ -223,10 +239,10 @@ def resume_fields(r: ResumeResponse, designations: list[str]) -> tuple[OcrFields
     appearing in it), or the select would show "Choose one" and save nothing. The
     resume's own wording is always kept in the stored Veris output.
 
-    Not copied to a Candidate column (kept in the stored verbatim Veris output): address, linkedin,
-    github, social, websites, extra emails/phones, father/mother name, place of birth,
-    religion, marital status, industry, highest qualification, experience entries,
-    Indian/overseas breakdowns, projects, education, achievements, certifications.
+    Address, father's name, marital status, education, the work history and the experience in India are
+    form-only values (application form). Not copied anywhere (kept in the stored verbatim Veris output): linkedin,
+    github, social, websites, extra emails/phones, mother name, place of birth,
+    religion, industry, projects, achievements, certifications.
     """
     designation = match_designation(r.designation, designations)
 
@@ -253,6 +269,9 @@ def resume_fields(r: ResumeResponse, designations: list[str]) -> tuple[OcrFields
         gulf_experience=_years(r.overseas_experience_months),
         skills=_unique(r.skills),
     )
+    for name, value in _form_values("resume", r).items():
+        if name in _FORM_ONLY:
+            setattr(fields, name, value)
     return fields, [*r.warnings, *_low_confidence("resume", r.pages)]
 
 
@@ -292,6 +311,9 @@ def passport_fields(p: PassportResponse) -> tuple[OcrFields, list[str]]:
         passport_place=_printed(p, "Place of Issue"),
     )
 
+    for name, value in _form_values("passport", p).items():
+        if name in _FORM_ONLY:
+            setattr(fields, name, value)
     warnings = [*p.warnings, *_low_confidence("passport", p.pages)]
     if p.mrz_source != "mrz":
         warnings.append(

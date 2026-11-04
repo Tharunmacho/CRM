@@ -27,9 +27,9 @@ const split = (value: string) => value.split(',').map((item) => item.trim()).fil
  * Several values in one field, kept as the comma-separated text the form and the OCR merge already use.
  * Enter, comma or leaving the field turns what is typed into a chip; Backspace on an empty box removes the last one.
  */
-export function TagField({ label, hint, required, value, onChange, suggestions = [], placeholder, className = '' }: {
+export function TagField({ label, hint, required, value, onChange, suggestions = [], placeholder, className = '', aux }: {
   label: string; hint?: string; required?: boolean; value: string; onChange: (value: string) => void
-  suggestions?: string[]; placeholder?: string; className?: string
+  suggestions?: string[]; placeholder?: string; className?: string; aux?: ReactNode
 }) {
   const id = useId()
   const input = useRef<HTMLInputElement>(null)
@@ -57,7 +57,10 @@ export function TagField({ label, hint, required, value, onChange, suggestions =
 
   return (
     <div className={`ui-field block ac-tagfield ${className}`}>
-      <label htmlFor={id} className="ac-tag-label">{label}{required && <span className="text-stamp-600"> *</span>}</label>
+      <div className="ac-lab">
+        <label htmlFor={id} className="ac-tag-label">{label}{required && <span className="ac-req"> *</span>}</label>
+        {aux && <span className="ac-lab-aux">{aux}</span>}
+      </div>
       <div ref={box} className="ac-tags" onClick={() => input.current?.focus()}>
         {tags.map((tag, index) => (
           <span key={tag} className="ac-tag">

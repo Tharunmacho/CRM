@@ -1,7 +1,7 @@
 """Upload validation and blocking work isolation without a real database."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import hashlib
 from io import BytesIO
 from types import SimpleNamespace
@@ -170,7 +170,10 @@ def test_allowed_upload_preserves_response_storage_and_version_in_worker_thread(
     assert stored.read_bytes() == payload
     assert environment.database.reads == 2
     assert environment.database.commits == 1
-    row, audit = environment.database.rows
+    row, audit, reading = environment.database.rows
+    # A resume stored for a candidate is queued for the extraction worker (application form).
+    assert (reading.kind, reading.status, reading.candidate_id, reading.attachment_id) == ("resume", "pending", "candidate-1", row.id)
+    assert reading.object_key == row.object_key and reading.content_hash == row.content_hash
     assert row.content_hash == hashlib.sha256(payload).hexdigest()
     assert row.uploaded_by == environment.user.id
     assert row.uploaded_at.isoformat() == result["uploadedAt"]
@@ -259,27 +262,34 @@ def test_application_upload_uses_workflow_ownership(upload_environment):
     assert allowed.status_code == 201
 
 
-def test_candidate_intake_can_upload_after_round_robin_assignment(upload_environment):
-    environment = upload_environment
-    environment.user.role = Role.staff
-    environment.database.entities[Candidate].owner_id = "assigned-recruiter"
-    environment.database.entities[Candidate].created_by = environment.user.id
-    environment.database.entities[Candidate].created_at = datetime.now(timezone.utc)
-
-    response = post_file(environment, b"%PDF-1.7 document")
-
-    assert response.status_code == 201
-
-
-def test_candidate_upload_denies_other_staff_and_expired_creator_window(upload_environment):
+def test_having_entered_the_candidate_no_longer_allows_uploading_once_someone_else_owns_it(upload_environment):
     environment = upload_environment
     environment.user.role = Role.staff
     record = environment.database.entities[Candidate]
-    record.owner_id = "another-recruiter"
-    assert post_file(environment, b"%PDF document").status_code == 403
+    record.owner_id = "assigned-recruiter"
     record.created_by = environment.user.id
-    record.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
+    record.created_at = datetime.now(timezone.utc)
+
+    refused = post_file(environment, b"%PDF-1.7 document")
+
+    assert refused.status_code == 403
+    assert "Only they, a manager or an admin" in refused.json()["detail"]
+
+
+def test_candidate_upload_is_for_the_assigned_recruiter_a_manager_or_an_admin(upload_environment):
+    environment = upload_environment
+    record = environment.database.entities[Candidate]
+    record.owner_id = "another-recruiter"
+    environment.user.role = Role.staff
     assert post_file(environment, b"%PDF document").status_code == 403
+    record.owner_id = None
+    assert post_file(environment, b"%PDF document").status_code == 403
+    for role in (Role.manager, Role.admin):
+        environment.user.role = role
+        assert post_file(environment, b"%PDF document").status_code == 201
+    environment.user.role = Role.staff
+    record.owner_id = environment.user.id
+    assert post_file(environment, b"%PDF document").status_code == 201
 
 
 def test_source_bundle_cannot_be_replaced_by_manual_upload(upload_environment):
@@ -369,7 +379,7 @@ def test_commit_failure_rolls_back_upload_and_audit_without_losing_previous_vers
 
     assert response.status_code == expected_status
     assert environment.database.rollbacks == 1
-    assert len(environment.database.rows) == 2  # First version and its audit only.
+    assert len(environment.database.rows) == 3  # First version, its audit and its reading job only.
     assert [path for path in environment.storage.rglob("*") if path.is_file()] == [
         environment.storage / first["key"],
     ]

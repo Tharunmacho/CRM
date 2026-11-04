@@ -39,7 +39,10 @@ def test_full_detail_matches_shared_bootstrap_without_private_internal_fields(wo
         with measured(db) as measurement:
             response = client.get("/api/candidates/candidate")
         assert response.status_code == 200
-        assert response.json() == baseline
+        # The one profile also carries the application form's two row lists, which the bootstrap leaves out (heavy).
+        detail = response.json()
+        assert detail.pop("education") == [] and detail.pop("workHistory") == []
+        assert detail == baseline
         assert measurement["queries"] == 1
         assert response.headers["cache-control"] == "private, no-store"
         assert response.json()["resumeText"] == candidate.resume_text

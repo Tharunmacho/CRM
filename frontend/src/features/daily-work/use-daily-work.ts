@@ -46,7 +46,7 @@ export function useDailyWork({ staff, enabled = true, debounceMs = 1500 }: Optio
     const controller = new AbortController()
     setLoading(true)
     void load(controller.signal)
-    const stop = liveInterval(() => { if (document.visibilityState === 'visible') void load(controller.signal) }, 60_000, ['tasks', 'users'], { debounceMs })
+    const stop = liveInterval(() => { if (document.visibilityState === 'visible') void load(controller.signal) }, 60_000, ['tasks', 'users', 'candidates', 'applications'], { debounceMs })
     return () => { controller.abort(); stop() }
   }, [enabled, load, debounceMs])
 

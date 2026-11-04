@@ -7,11 +7,12 @@ export const ENTRY_FIELD_LABELS: Partial<Record<CandidateEntryField, string>> = 
   name: 'Full name', phone: 'Phone', whatsapp: 'WhatsApp', email: 'Email', dob: 'Date of birth', gender: 'Gender', nationality: 'Nationality',
   currentCity: 'Current city', languages: 'Languages', passportNo: 'Passport number', passportIssue: 'Issue date', passportExpiry: 'Expiry date',
   passportPlace: 'Place of issue', designation: 'Job titles', totalExperience: 'Total experience', gulfExperience: 'Gulf experience', skills: 'Skills',
+  fatherName: 'Father’s name', maritalStatus: 'Marital status', currentAddress: 'Current address', experienceIndia: 'Experience in India', education: 'Education', workHistory: 'Previous experience',
 }
 
 export const SCAN_KIND_LABEL: Record<ScanKind, string> = { resume: 'resume', passport: 'passport', aadhaar: 'Aadhaar' }
 
-const scanText = (value: unknown) => Array.isArray(value) ? value.join('') : value == null ? '' : String(value)
+const scanText = (value: unknown) => Array.isArray(value) ? (value.length ? value.map((item) => (item && typeof item === 'object' ? JSON.stringify(item) : String(item))).join('') : '') : value == null ? '' : String(value)
 
 /** Names of the fields one document filled in that the recruiter has not changed. */
 export function appliedFieldLabels(scan: OcrScan, edited: ReadonlySet<CandidateEntryField>): string[] {
@@ -61,4 +62,6 @@ export function liveDuplicateQuery(form: CandidateEntryForm) {
 }
 
 /** The existing candidate the server found for the typed phone, email or passport number. */
-export type DuplicateMatch = { id: string; ref: string; name: string; phone: string; ownerId: string | null; ownerName: string | null; matchedOn: string[] }
+export type DuplicateMatch = { id: string; ref: string; name: string; phone: string; ownerId: string | null; ownerName: string | null; matchedOn: string[]
+  /** False when the signed-in person may look at the candidate but not add to it (another recruiter's candidate). */
+  canMerge?: boolean }

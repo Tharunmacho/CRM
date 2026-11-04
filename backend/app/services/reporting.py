@@ -132,6 +132,9 @@ def sees_team(user):
     return value(user.role) in ("admin", "manager")
 
 
+OVERVIEW_STAGES = (4, 5, 9, 10, 11)  # stage 4 feeds "selected"; 5, 9, 10, 11 feed the pipeline overview cards
+
+
 def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
     """One fresh projection of operational data, excluding historical report input."""
     if not sees_team(user) and staff_id not in (None, user.id):
@@ -168,16 +171,20 @@ def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
                 m.Remark.author_id == m.Task.owner_id, m.Remark.created_at >= start, m.Remark.created_at < end)
         rows = query.subquery(name)
         collections.append(select(func.json_agg(func.row_to_json(rows.table_valued()), type_=JSON)).scalar_subquery().label(name))
-    # Only the effective interview result affects the dashboard's selected count.
-    # Never transfer stage attachments, remarks, receipts or other stage payloads.
+    # The effective interview result (stage 4) and the offer / visa / ticket receipts (5, 9, 10, 11) feed the
+    # dashboard's counts. Never transfer stage attachments, remarks, receipts or other stage payloads.
+    clean = (m.ApplicationStage.reopened_reason.is_(None)) | (m.ApplicationStage.reopened_reason == "")
     stages = (select(m.ApplicationStage.application_id, m.ApplicationStage.stage, m.ApplicationStage.attempt,
         func.json_build_object("result", m.ApplicationStage.data["result"].astext).label("data"), m.ApplicationStage.completed_at)
-        .where(m.ApplicationStage.application_id.in_(apps), m.ApplicationStage.stage == 4,
-            (m.ApplicationStage.reopened_reason.is_(None)) | (m.ApplicationStage.reopened_reason == ""))
-        .distinct(m.ApplicationStage.application_id)
-        .order_by(m.ApplicationStage.application_id, m.ApplicationStage.attempt.desc(), m.ApplicationStage.completed_at.desc())
+        .where(m.ApplicationStage.application_id.in_(apps), m.ApplicationStage.stage.in_(OVERVIEW_STAGES), clean)
+        .distinct(m.ApplicationStage.application_id, m.ApplicationStage.stage)
+        .order_by(m.ApplicationStage.application_id, m.ApplicationStage.stage, m.ApplicationStage.attempt.desc(), m.ApplicationStage.completed_at.desc())
         .subquery("stages"))
     collections.append(select(func.json_agg(func.row_to_json(stages.table_valued()), type_=JSON)).scalar_subquery().label("stages"))
+    # When each placement last moved (any stage), for the "idle" card.
+    moves = (select(m.ApplicationStage.application_id, func.max(m.ApplicationStage.completed_at).label("completed_at"))
+        .where(m.ApplicationStage.application_id.in_(apps), clean).group_by(m.ApplicationStage.application_id).subquery("last_moves"))
+    collections.append(select(func.json_agg(func.row_to_json(moves.table_valued()), type_=JSON)).scalar_subquery().label("lastMoves"))
     return {key: rows or [] for key, rows in db.execute(select(*collections)).mappings().one().items()}
 
 
@@ -208,6 +215,111 @@ def order_counts(applications):
     return {"matched": sum(status == "active" for status, _ in statuses),
             "selected": sum(status == "active" and stage > SELECTED_PAST_STAGE for status, stage in statuses),
             "deployed": sum(status == "deployed" for status, _ in statuses)}
+
+
+OVERVIEW_ITEM_LIMIT = 200  # rows listed per overview card; the counts are always the full numbers
+OFFER_STAGE, VISA_STAGE, STAMPING_STAGE, TICKET_STAGE = 5, 9, 10, 11
+
+
+def _last_moves(data):
+    """When each placement last completed a stage: the compact dashboard read sends it, the full read derives it."""
+    if "lastMoves" in data:
+        return {row["application_id"]: aware(row["completed_at"]) for row in data["lastMoves"] if row.get("completed_at")}
+    moves = {}
+    for row in data["stages"]:
+        if row.get("reopened_reason") or not row.get("completed_at"):
+            continue
+        at = aware(row["completed_at"])
+        moves[row["application_id"]] = max(at, moves.get(row["application_id"], at))
+    return moves
+
+
+def pipeline_overview(data, apps, candidates, now):
+    """The dashboard's four pipeline cards: offer letter, visa, departure and idle placements.
+
+    One definition for every role: `apps` is already limited to the viewer's scope (the staff member's own
+    candidates, or the team / the chosen person for admin and manager). Stage records that were reopened never
+    count. Per card the headline `current` is the number of ACTIVE placements waiting right now; the other
+    numbers are history. Idle uses the weekly staff report's own rule (an active placement with no stage
+    completed for STUCK_DAYS or more; one that never completed a stage is measured from when it was created), so
+    both screens show the same people.
+      offer      current = active at stage 5;                issued = stage 5 completed
+      visa       current = active at stage 9 or 10;          received = stage 9 completed, stamped = stage 10 completed
+      departure  current = active at stage 11 (ticket);      departed = deployed placements
+      idle       count = active placements with no progress for STUCK_DAYS+ days; longestDays = the oldest wait
+    `items` lists the placements behind each number, waiting ones first (longest wait first), capped at
+    OVERVIEW_ITEM_LIMIT; `itemsTotal` is the uncapped list length.
+    """
+    from app.services.staff_weekly import STUCK_DAYS
+
+    effective = _effective_stages(data["stages"])
+    moves = _last_moves(data)
+    orders = {o["id"]: o for o in data["orders"]}
+    companies = {c["id"]: c for c in data["companies"]}
+    clients = {c["id"]: c for c in data["clients"]}
+    designations = {d["id"]: d for d in data["designations"]}
+    users = {u["id"]: u for u in data["users"]}
+
+    def row(app, state, since):
+        order = orders.get(app["order_id"], {})
+        company = companies.get(order.get("company_id"), {})
+        candidate = candidates.get(app["candidate_id"], {})
+        stage_no = app["current_stage"]
+        status = value(app["status"])
+        days = max(0, (now - since).days)
+        return {"applicationId": app["id"], "candidateId": app["candidate_id"], "candidate": candidate.get("name", ""),
+                "orderId": app["order_id"], "order": order.get("ref", ""),
+                "designation": designations.get(order.get("designation_id"), {}).get("title", ""),
+                "company": company.get("name", ""), "client": clients.get(company.get("client_id"), {}).get("name", ""),
+                "stage": stage_no, "stageLabel": "Deployed" if status == "deployed" else STAGES[stage_no - 1],
+                "status": status, "state": state, "ownerId": candidate.get("owner_id"),
+                "owner": users.get(candidate.get("owner_id"), {}).get("name", ""),
+                "since": since.isoformat(), "days": days}
+
+    def finished(app, *numbers):
+        times = [aware(effective[app["id"]][n]["completed_at"]) for n in numbers if n in effective.get(app["id"], {})]
+        return max(times) if times else None
+
+    def pack(waiting, done, extra):
+        # Waiting placements first, longest wait first; then finished ones, newest first.
+        waiting.sort(key=lambda r: (r["since"], r["applicationId"]))
+        done.sort(key=lambda r: (r["since"], r["applicationId"]), reverse=True)
+        rows = waiting + done
+        return {**extra, "itemsTotal": len(rows), "items": rows[:OVERVIEW_ITEM_LIMIT]}
+
+    offer_w, offer_d, visa_w, visa_d, ticket_w, ticket_d, idle = [], [], [], [], [], [], []
+    issued = received = stamped = 0
+    idle_before = now - timedelta(days=STUCK_DAYS)
+    for app in apps:
+        status, stage_no = value(app["status"]), app["current_stage"]
+        active = status == "active"
+        last = moves.get(app["id"]) or aware(app["created_at"])
+        offered, got_visa, got_stamp = finished(app, OFFER_STAGE), finished(app, VISA_STAGE), finished(app, STAMPING_STAGE)
+        issued += offered is not None
+        received += got_visa is not None
+        stamped += got_stamp is not None
+        if active and stage_no == OFFER_STAGE:
+            offer_w.append(row(app, "current", last))
+        elif offered:
+            offer_d.append(row(app, "done", offered))
+        if active and stage_no in (VISA_STAGE, STAMPING_STAGE):
+            visa_w.append(row(app, "current", last))
+        elif got_visa or got_stamp:
+            visa_d.append(row(app, "done", finished(app, VISA_STAGE, STAMPING_STAGE)))
+        if active and stage_no == TICKET_STAGE:
+            ticket_w.append(row(app, "current", last))
+        elif status == "deployed":
+            ticket_d.append(row(app, "done", finished(app, TICKET_STAGE) or last))
+        if active and last < idle_before:
+            idle.append(row(app, "current", last))
+    idle.sort(key=lambda r: (r["since"], r["applicationId"]))
+    return {
+        "idleDays": STUCK_DAYS,
+        "offer": pack(offer_w, offer_d, {"current": len(offer_w), "issued": issued}),
+        "visa": pack(visa_w, visa_d, {"current": len(visa_w), "received": received, "stamped": stamped}),
+        "departure": pack(ticket_w, ticket_d, {"current": len(ticket_w), "departed": len(ticket_d)}),
+        "idle": {"count": len(idle), "longestDays": idle[0]["days"] if idle else 0, "itemsTotal": len(idle), "items": idle[:OVERVIEW_ITEM_LIMIT]},
+    }
 
 
 def _order_rows(orders, cohort, companies, clients, designations, effective, staff_id, inside):
@@ -479,4 +591,5 @@ def dashboard_data(data, user, staff_id=None, zone=None, now=None):
                                            for a in active_apps if a["current_stage"] == n]}
                          for n, title in enumerate(STAGES, 1)],
             "orders": active_orders, "tasks": scoped_task_rows,
-            "myTasks": [t for t in task_rows if t["ownerId"] == user.id]}
+            "myTasks": [t for t in task_rows if t["ownerId"] == user.id],
+            "overview": pipeline_overview(data, apps, candidates, now)}

@@ -82,6 +82,7 @@ const AddCandidatePage = lazy(loaders['candidates/add-candidate'])
 const DataBankPage = lazy(loaders['candidates/data-bank'])
 const MappedCandidatesPage = lazy(() => import('@/screens/workflow/mapped-candidates'))
 const CandidateProfilePage = lazy(loaders['candidates/candidate-profile'])
+const ApplicationFormPage = lazy(() => import('@/screens/candidates/application-form'))
 const TasksPage = lazy(loaders['tasks/tasks'])
 const AttendancePage = lazy(() => import('@/screens/attendance/attendance'))
 const TodoPage = lazy(() => import('@/screens/todos/todo'))
@@ -159,6 +160,7 @@ export default function AppRoutes() {
             <Route path="data-bank" element={<DataBankPage />} />
             <Route path="mapped" element={<MappedCandidatesPage />} />
             <Route path="candidates/:id" element={<CandidateProfilePage />} />
+            <Route path="candidates/:id/application" element={<ApplicationFormPage />} />
             <Route path="tasks" element={<TasksPage />} />
             <Route path="attendance" element={<AttendancePage />} />
             <Route path="staff-directory" element={<RequireStaffSupervisor><StaffDirectoryPage /></RequireStaffSupervisor>} />

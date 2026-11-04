@@ -1,4 +1,6 @@
-import { ExternalLink, FileSearch, Footprints, Link2, Mail, MessageCircle, Pencil, ShieldCheck, ShieldOff, UserCheck, UserPlus, type LucideIcon } from 'lucide-react'
+import { ClipboardList, ExternalLink, FileSearch, Footprints, Link2, Mail, MessageCircle, Pencil, ShieldCheck, ShieldOff, UserCheck, UserPlus, type LucideIcon } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { applicationFormHref } from '@/features/application-form/form-model'
 import { dateLabel } from '@/shared/lib/format'
 import { stageByNo } from '@/shared/workflow/stages'
 import type { Candidate } from '@/shared/model/types'
@@ -8,6 +10,7 @@ import { Avatar, RowMenu, StageTracker, StatusDot, type DotTone, type RowMenuIte
 import type { DbColumn } from '@/features/candidates/components/db-table'
 import type { useStore } from '@/shared/state/crm-store'
 import { agentName } from '@/features/candidates/data-bank-search'
+import { workRefusal } from '@/features/candidates/candidate-access'
 
 export const SOURCE_LABEL: Record<string, string> = {
   email: 'Email',
@@ -102,27 +105,44 @@ interface ColumnContext extends Handlers {
   onOpenStage: (applicationId: string) => void
 }
 
-/** Cards: labelled Open and Assign plus an edit icon (all with tooltips). */
+/** The order a candidate's application form opens on: the live application, else the most recent one. */
+export function formOrderId(store: Store, candidateId: string): string | undefined {
+  const applications = store.applicationsFor(candidateId)
+  return (applications.find((application) => application.status === 'active') ?? applications[applications.length - 1])?.orderId
+}
+
+/** The always-visible way into a candidate's application form (icon and label, never inside a menu). */
+export function ApplicationFormAction({ candidate, store, label = 'Application form' }: { candidate: Candidate; store: Store; label?: string }) {
+  const navigate = useNavigate()
+  return (
+    <button type="button" className="db-act is-label is-form" title={`Open ${candidate.name}'s application form`} aria-label={`Open application form for ${candidate.name}`}
+      onClick={() => navigate(applicationFormHref(candidate.id, formOrderId(store, candidate.id)))}><ClipboardList size={14} /><span>{label}</span></button>
+  )
+}
+
+/** Cards: labelled Open, Application form and Assign plus an edit icon (all with tooltips). */
 export function CandidateActions({ candidate, store, onOpen, onReassign, onEdit }: Handlers & { candidate: Candidate; store: Store }) {
-  const canWork = store.can('work_any_candidate') || candidate.ownerId === store.me.id
+  const refusal = workRefusal(store.me, candidate, store.user(candidate.ownerId)?.name)
   return (
     <div className="db-acts" onClick={(event) => event.stopPropagation()}>
       <button type="button" className="db-act is-label" title={`Open ${candidate.name}'s profile`} aria-label={`Open ${candidate.name}`} onClick={() => onOpen(candidate)}><FileSearch size={14} /><span>Open</span></button>
+      <ApplicationFormAction candidate={candidate} store={store} />
       {store.can('reassign') && <button type="button" className="db-act is-label" title={`Assign ${candidate.name} to a recruiter`} aria-label={`Reassign ${candidate.name}`} onClick={() => onReassign(candidate)}><UserCheck size={14} /><span>Assign</span></button>}
-      {canWork && <button type="button" className="db-act" title={`Edit ${candidate.name}'s profile`} aria-label={`Edit ${candidate.name}`} onClick={() => onEdit(candidate)}><Pencil size={14} /></button>}
+      <button type="button" className="db-act" disabled={Boolean(refusal)} title={refusal ?? `Edit ${candidate.name}'s profile`} aria-label={`Edit ${candidate.name}`} onClick={() => onEdit(candidate)}><Pencil size={14} /></button>
     </div>
   )
 }
 
 /** Table: one Open icon button and a "..." menu holding Assign and Edit. */
 export function RowActions({ candidate, store, onOpen, onReassign, onEdit }: Handlers & { candidate: Candidate; store: Store }) {
-  const canWork = store.can('work_any_candidate') || candidate.ownerId === store.me.id
+  const refusal = workRefusal(store.me, candidate, store.user(candidate.ownerId)?.name)
   const items: RowMenuItem[] = []
   if (store.can('reassign')) items.push({ label: 'Assign to a recruiter', icon: UserCheck, onSelect: () => onReassign(candidate) })
-  if (canWork) items.push({ label: 'Edit profile', icon: Pencil, onSelect: () => onEdit(candidate) })
+  items.push({ label: 'Edit profile', icon: Pencil, onSelect: () => onEdit(candidate), disabledReason: refusal ?? undefined })
   return (
     <div className="db-acts" onClick={(event) => event.stopPropagation()}>
       <button type="button" className="db-act" title={`Open ${candidate.name}'s profile`} aria-label={`Open ${candidate.name}`} onClick={() => onOpen(candidate)}><FileSearch size={15} /></button>
+      <ApplicationFormAction candidate={candidate} store={store} label="Form" />
       <RowMenu label={`More actions for ${candidate.name}`} items={items} />
     </div>
   )
@@ -193,6 +213,6 @@ export function dataBankColumns({ store, onOpen, onReassign, onEdit, onOpenStage
     { key: 'stage', header: 'Stage', sortKey: 'stage', width: 118, render: (c) => <CurrentStage candidate={c} store={store} /> },
     { key: 'status', header: 'Status', sortKey: 'status', width: 118, render: (c) => <StatusText candidate={c} /> },
     { key: 'added', header: 'Added', sortKey: 'added', width: 86, render: (c) => <span className="db-nowrap" title={dateLabel(c.addedAt)}>{shortDate(c.addedAt)}</span> },
-    { key: 'actions', header: '', width: 84, align: 'right', render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /> },
+    { key: 'actions', header: '', width: 104, align: 'right', render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /> },
   ]
 }

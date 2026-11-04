@@ -912,7 +912,7 @@ def test_manual_creation_waits_for_intake_lock_before_duplicate_and_reference_re
             try:
                 candidates.create_candidate(
                     candidates.CandidateIn(name="Concurrent manual", phone="9000000001", passport_no="P1234567"),
-                    db=db, user=SimpleNamespace(id="admin"),
+                    db=db, user=SimpleNamespace(id="admin", role=Role.admin),
                 )
             except HTTPException as exc:
                 return exc.status_code

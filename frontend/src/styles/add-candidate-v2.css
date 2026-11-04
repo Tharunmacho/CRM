@@ -35,12 +35,6 @@
 }
 /* ---------- Layout: one 12-column grid, nothing sticky ---------- */
 .ac .ac-stack { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
-.ac .ac-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 24px; align-items: stretch; min-width: 0; margin: 0; padding: 0; border: 0; }
-.ac .ac-grid > .ac-card { grid-column: span 12; }
-@container ac (min-width: 900px) {
-  .ac .ac-grid > .ac-s-7 { grid-column: span 7; }
-  .ac .ac-grid > .ac-s-5 { grid-column: span 5; }
-}
 
 /* ---------- Section cards ---------- */
 .ac .ac-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: none; }
@@ -64,41 +58,7 @@
 
 .ac .ac-alert { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 16px; border: 1px solid var(--warning-edge); border-radius: 12px; background: var(--warning-fill); color: var(--warning-ink); font-size: 13.5px; line-height: 1.5; }
 .ac .ac-alert svg { flex: none; margin-top: 2px; }
-
-/* status dots, shared by the recovery list, reports and save bar */
-.ac .ac-dot, .ac-dup .ac-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--text-light); }
-.ac .ac-dot.is-good { background: var(--success-ink); }
-.ac .ac-dot.is-warn { background: var(--warning-ink); }
-.ac .ac-dot.is-bad { background: var(--error-ink); }
-.ac .ac-dot.is-busy { background: var(--primary); }
-
-/* ---------- Field grid (12 columns inside every card) ---------- */
-.ac .ac-fields { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px 24px; align-items: start; padding: 24px; }
-.ac .ac-fields > * { grid-column: span 12; min-width: 0; }
-.ac .ac-fields .ui-field > span:first-child, .ac .ac-tag-label { display: flex; align-items: baseline; gap: 4px; margin: 0 0 6px; font-size: 13px; font-weight: 500; line-height: 18px; color: var(--text-main); }
-.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { min-height: 40px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); box-shadow: none; transition: border-color .14s, box-shadow .14s; }
-.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger):hover:not(:disabled) { border-color: var(--border-hover); }
-.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger):focus-visible,
-.ac .ac-fields .ui-input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
-.ac .ac-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger)::placeholder { color: var(--text-light); }
-.ac .ac-fields textarea.ui-input { min-height: 96px; }
-.ac .ac-fields .date-picker-trigger.is-empty { color: var(--text-light); }
-
-@container ac (min-width: 640px) {
-  .ac .ac-fields-basic > *, .ac .ac-fields-passport > * { grid-column: span 6; }
-  .ac .ac-fields-basic > .ac-lang { grid-column: span 12; }
-  .ac .ac-fields-source > .ac-src-a { grid-column: span 5; }
-  .ac .ac-fields-source > .ac-src-b { grid-column: span 7; }
-  .ac .ac-fields-work > :is(.ac-w-tot, .ac-w-gulf, .ac-w-sal) { grid-column: span 4; }
-}
-@container ac (min-width: 900px) {
-  /* nine details fill three even rows; the passport/source pair holds two field rows each */
-  .ac .ac-fields-basic > *, .ac .ac-fields-basic > .ac-lang { grid-column: span 4; }
-  .ac .ac-fields-source > .ac-src-a { grid-column: span 4; }
-  .ac .ac-fields-source > .ac-src-b { grid-column: span 8; }
-  /* every card breaks on the same quarter lines (4 and 8 of 12): details 4/4/4, work 4/4/4, source 4/8, passport 4/4/2/2 */
-  .ac .ac-fields-work > :is(.ac-w-tot, .ac-w-gulf, .ac-w-sal) { grid-column: span 4; }
-}
+.ac .ac-tag-label { display: flex; align-items: baseline; gap: 4px; margin: 0 0 6px; font-size: 13px; font-weight: 500; line-height: 18px; color: var(--text-main); }
 
 /* ---------- Tag field (languages, designations) ---------- */
 .ac .ac-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 40px; padding: 4px 8px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); cursor: text; transition: border-color .14s, box-shadow .14s; }
@@ -110,10 +70,6 @@
 .ac .ac-tag button { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 999px; color: var(--primary); }
 .ac .ac-tag button:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
 .ac .ac-hint { display: block; margin-top: 5px; font-size: 12px; line-height: 1.5; color: var(--text-light); }
-
-/* ---------- Documents: three even slots per row, equal heights ---------- */
-.ac .ac-docs .ac-doc-group { margin-top: 18px; }
-.ac .ac-docs .ac-muted + .ac-doc-group { margin-top: 12px; }
 .ac .ac-slots { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 @container ac (min-width: 900px) { .ac .ac-slots { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
@@ -140,7 +96,6 @@
   .ac .ac-slots .ui-file-row-main { grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-rows: auto; align-items: start; }
   .ac .ac-slots .ui-file-row-actions { grid-column: auto; align-self: end; justify-content: flex-end; }
 }
-@media (max-width: 639px) { .ac-head-save { display: none; } }
 
 .ac .ac-doc-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-faint); }
 .ac .ac-doc-status { display: flex; flex: 1 1 280px; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
@@ -206,7 +161,6 @@
 @container ac (max-width: 639px) {
   .ac .ac-card-head { padding: 16px; gap: 12px; }
   .ac .ac-body { padding: 16px; }
-  .ac .ac-fields { padding: 16px; }
   .ac .ac-steps small { display: none; }
   .ac .ac-savebar { padding: 14px 16px; }
   .ac .ac-savebar-actions { width: 100%; }
@@ -220,7 +174,6 @@
 @media (min-width: 560px) { .ac-dup { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ac-dup-card { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
 .ac-dup-card.is-existing { border-color: var(--primary); box-shadow: inset 0 0 0 .5px var(--primary); }
-.ac-dup-avatar { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--tint-1); color: var(--text-main); font-size: 13px; font-weight: 600; }
 .ac-dup-body { min-width: 0; flex: 1; }
 .ac-dup-label { margin: 0; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-light); }
 .ac-dup-name { margin: 3px 0 0; font-size: 15px; font-weight: 600; color: var(--text-main); overflow-wrap: anywhere; }
@@ -234,9 +187,9 @@
  * The shared button colours (depth.css) sit in :where() and lose to Tailwind's border/background utilities on
  * the button itself, so a primary button rendered without its fill. These scoped copies keep this screen's
  * buttons correct whatever the shared sheet does; they use the same tokens, so they cannot drift visually. */
-:is(.ac, .ac-dialog-actions, .ac-head-save) .ui-button-primary, .ac-head-save.ui-button-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
-:is(.ac, .ac-dialog-actions) .ui-button-primary:hover:not(:disabled), .ac-head-save.ui-button-primary:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); }
-:is(.ac, .ac-dialog-actions) .ui-button-primary:disabled, .ac-head-save.ui-button-primary:disabled { border-color: var(--tint-3); background: var(--tint-3); color: var(--text-light); }
+:is(.ac, .ac-dialog-actions) .ui-button-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+:is(.ac, .ac-dialog-actions) .ui-button-primary:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); }
+:is(.ac, .ac-dialog-actions) .ui-button-primary:disabled { border-color: var(--tint-3); background: var(--tint-3); color: var(--text-light); }
 :is(.ac, .ac-dialog-actions) .ui-button-secondary { border-color: var(--border-control); background: var(--bg-card); color: var(--text-main); }
 :is(.ac, .ac-dialog-actions) .ui-button-secondary:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
 :is(.ac, .ac-dialog-actions) .ui-button-secondary:disabled { background: var(--tint-1); color: var(--text-light); }
@@ -281,20 +234,8 @@
 .ac .ac-result-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
 .ac .ac-result-tile small { font-size: 12.5px; line-height: 1.45; color: var(--text-muted); }
 
-/* One control height everywhere (the shared sheet makes date pickers 42px on phones). */
-.ac .ac-fields :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { height: 40px; min-height: 40px; }
-
 .ac .ac-unfinished { display: grid; gap: 8px; justify-items: start; }
 .ac .ac-unfinished .ac-job-list { width: 100%; }
-
-/* ---------- Optional-documents hint at the top of the form ---------- */
-.ac .ac-grid > .ac-hint-bar { grid-column: span 12; }
-.ac .ac-hint-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px 10px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
-.ac .ac-hint-bar > svg { flex: none; color: var(--primary); }
-.ac .ac-hint-bar p { margin: 0; flex: 1 1 260px; min-width: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-muted); }
-.ac .ac-hint-bar button { flex: none; min-height: 32px; padding: 0 12px; border-radius: 8px; color: var(--primary); font-size: 13px; font-weight: 600; transition: background-color .14s; }
-.ac .ac-hint-bar button:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, transparent); }
-.ac .ac-hint-bar button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* Page details toggle (a real button, so nothing hidden sits in the layout while closed) */
 .ac .ac-report-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 4px 0 0; border-radius: 6px; color: var(--text-main); font-size: 12.5px; font-weight: 500; }
@@ -308,12 +249,6 @@
 .ac .ac-slots .ui-file-row-main .truncate > a { min-width: 0; overflow-wrap: anywhere; }
 /* Screen-reader-only text: overflow: clip hides it without adding scrollable area (overflow: hidden would be reported as clipped text). */
 .ac .sr-only { overflow: clip; }
-
-/* Passport: two rows of two until the date pickers have room for a narrow column, then one row on the quarter lines. */
-@container ac (min-width: 1100px) {
-  .ac .ac-fields-passport > :is(.ac-pp-no, .ac-pp-pl) { grid-column: span 4; }
-  .ac .ac-fields-passport > :is(.ac-pp-is, .ac-pp-ex) { grid-column: span 2; }
-}
 
 /* ---------- Slot that takes several files (education and experience certificates) ---------- */
 .ac .ac-slot-multi > .ac-multi { flex: 1; }
@@ -350,7 +285,7 @@
 @media (max-width: 640px) {
   .ac :is(input, select, textarea, .ui-input, .custom-select-trigger) { font-size: 16px; }
   .ac .ac-tags input { min-height: 40px; font-size: 16px; }
-  .ac .ac-hint-bar button, .ac .ac-report-toggle, .ac .ac-multi-remove, .ac .ac-multi-add, .ac .ac-slots .ui-file-row-button, .ac .ac-slots .ac-multi-add { min-height: 44px; }
+   .ac .ac-report-toggle, .ac .ac-multi-remove, .ac .ac-multi-add, .ac .ac-slots .ui-file-row-button, .ac .ac-slots .ac-multi-add { min-height: 44px; }
   .ac .ac-multi-remove span { display: none; }
   .ac .ac-multi-remove { min-width: 44px; justify-content: center; }
   .ac .ac-multi-add { width: 100%; }
@@ -362,15 +297,13 @@
 @media (pointer: coarse) and (min-width: 641px) {
   .ac :is(input, select, textarea, .ui-input, .custom-select-trigger) { font-size: 16px; }
   .ac .ac-tags input { min-height: 40px; font-size: 16px; }
-  .ac .ac-hint-bar button, .ac .ac-report-toggle, .ac .ac-multi-remove, .ac .ac-multi-add, .ac .ac-slots .ui-file-row-button { min-height: 44px; }
+   .ac .ac-report-toggle, .ac .ac-multi-remove, .ac .ac-multi-add, .ac .ac-slots .ui-file-row-button { min-height: 44px; }
 }
 
 /* ---------- Resume prefill marker: names the document that filled a field, until the recruiter types over it ---------- */
 .ac .ac-f { min-width: 0; }
 .ac .ac-from { display: inline-flex; align-items: center; gap: 4px; margin-top: 5px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); font-size: 11.5px; font-weight: 500; line-height: 18px; }
 .ac .ac-f[data-from] :is(.ui-input, .custom-select-trigger, .date-picker-trigger, .ac-tags) { border-color: color-mix(in srgb, var(--primary) 40%, var(--border-control)); }
-.ac .ac-hint-bar.is-filled { border-color: color-mix(in srgb, var(--primary) 30%, var(--border-main)); }
-.ac .ac-hint-bar strong { font-weight: 600; color: var(--text-main); }
 
 /* ---------- Live duplicate check: a calm card under the contact fields ---------- */
 .ac .ac-match { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin: 0 24px 24px; padding: 14px 16px; border: 1px solid var(--warning-edge); border-radius: 12px; background: var(--warning-fill); }
@@ -387,3 +320,6 @@
   .ac .ac-match-actions { width: 100%; margin-left: 0; }
   .ac .ac-match-actions .ui-button { flex: 1 1 auto; }
 }
+.ac .ac-photo-btn { flex: none; height: 28px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--bg-card); color: var(--text-main); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.ac .ac-photo-btn:hover:not(:disabled) { border-color: var(--primary); background: var(--tint-1); }
+.ac .ac-photo-btn:disabled { opacity: .5; cursor: not-allowed; }

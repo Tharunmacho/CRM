@@ -138,6 +138,20 @@ class CandidateOut(Wire):
     gulf_experience: int = 0
     skills: list[str] = []
     expected_salary: float | None = None
+    # Application form (migration 0021). The two lists are on CandidateWithFormOut only: this class is also built from
+    # whole candidate rows for the bootstrap and the Data Bank, where the deferred lists must not be loaded.
+    father_name: str | None = None
+    marital_status: str | None = None
+    current_address: str | None = None
+    experience_india: int = 0
+    native_place: str | None = None
+    family_member_number: str | None = None
+    job_duration_preference: str | None = None
+    country_preference: str | None = None
+    best_time_to_contact: str | None = None
+    service_charges_status: str = "not_discussed"
+    interest_level: str | None = None
+    next_follow_up_date: date | None = None
     source: str
     source_detail: str | None = None
     status: str
@@ -148,6 +162,13 @@ class CandidateOut(Wire):
     photo_tone: int = 0
     documents: list[DocumentSlotOut] = []
     call_outcome: CallOutcomeOut | None = None
+
+
+class CandidateWithFormOut(CandidateOut):
+    """One candidate's full profile, including the application form's education and work-history rows."""
+
+    education: list[dict[str, Any]] = []
+    work_history: list[dict[str, Any]] = []
 
 
 class StageRecordOut(Wire):

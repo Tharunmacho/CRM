@@ -122,3 +122,31 @@ test('the screen re-reads exactly when the next open deadline passes', () => {
   assert.equal(m.nextCrossing([{ status: 'done', dueAt: '2026-11-03T09:00:00Z' }], NOW), null)
   assert.equal(m.nextCrossing([], NOW), null)
 })
+
+test('the quota card shows what each recruiter gets, and the sum only as a labelled total', () => {
+  assert.deepEqual(m.quotaLine({ daily: 5, morning: 3, evening: 2 }, false), { value: '5', detail: '3 morning · 2 evening each' })
+  assert.deepEqual(m.quotaLine({ daily: 4, morning: 2, evening: 2 }, true), { value: '~4', detail: '2 morning · 2 evening each (goals differ by person)' })
+  assert.equal(m.teamTotalLine(10, 2), '10 across 2 recruiters today')
+  assert.equal(m.teamTotalLine(5, 1), '5 across 1 recruiter today')
+})
+
+test('team progress names how many staff it covers', () => {
+  assert.equal(m.progressLine({ done: 3, total: 10 }, 2, true), '3 of 10 done across 2 staff')
+  assert.equal(m.progressLine({ done: 3, total: 5 }, 1, false), '3 of 5 done')
+  assert.equal(m.progressLine({ done: 0, total: 0 }, 1, true), '0 of 0 done across 1 staff member')
+})
+
+test('averages read cleanly: one decimal at most', () => {
+  assert.equal(m.fmtCount(2), '2')
+  assert.equal(m.fmtCount(1.5), '1.5')
+  assert.equal(m.fmtCount(0.333), '0.3')
+})
+
+test('the staff board explains an empty or short list instead of showing a bare 0/0', () => {
+  const reason = 'No candidates assigned to this staff member. Assign candidates from the Data Bank.'
+  assert.deepEqual(m.candidatesCell({ done: 0, total: 0 }, { target: 5, allocated: 0, reason }, false), { text: '0', warn: true, note: reason })
+  assert.deepEqual(m.candidatesCell({ done: 0, total: 0 }, null, false), { text: '0', warn: true, note: 'No open candidates to allocate' })
+  assert.deepEqual(m.candidatesCell({ done: 0, total: 0 }, null, true), { text: '-', warn: false, note: 'Day off' })
+  assert.deepEqual(m.candidatesCell({ done: 1, total: 2 }, { target: 5, allocated: 2, reason: 'x' }, false), { text: '1/2', warn: true, note: 'Only 2 of 5 new candidates today' })
+  assert.deepEqual(m.candidatesCell({ done: 1, total: 5 }, null, false), { text: '1/5', warn: false, note: '' })
+})

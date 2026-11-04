@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, CheckCircle2, ClipboardList, Clock3, History, ListChecks, RefreshCw, Save, SlidersHorizontal, Sunrise, Sunset, Target, TriangleAlert, Users } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { api } from '@/shared/api/client'
@@ -11,7 +11,7 @@ import { CountryFlag } from '@/shared/ui/country-flag'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import {
-  checkpointLabel, clockTime, countdownLabel, dueTone, goalPercent, goalState, msUntil, pacingMessage, percentDone, postponedLabel,
+  candidatesCell, checkpointLabel, clockTime, countdownLabel, fmtCount, quotaLine, teamTotalLine, dueTone, goalPercent, goalState, msUntil, pacingMessage, percentDone, postponedLabel,
   referralLabel, sessionLabel, sessionProgress, spanLabel, staffNeedingAttention,
   type CheckpointSet, type DailyItem, type DailyStaffSummary, type DailySummary, type GoalBlock, type GoalTable,
 } from '@/features/daily-work/daily-work-model'
@@ -25,11 +25,12 @@ interface Group { key: string; title: string; hint: string; icon: ReactNode; ite
 export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const store = useStore()
   const [params, setParams] = useSearchParams()
+  const navigate = useNavigate()
   const supervisor = store.can('all_reports')
   const staffFilter = supervisor ? params.get('staff') || 'all' : undefined
   const { data, error, loading, skew, refresh } = useDailyWork({ staff: staffFilter })
   const now = useTicker(1000, !!data)
-  const [openApp, setOpenApp] = useState<{ id: string; stage: number } | null>(null)
+  const [openApp, setOpenApp] = useState<{ id: string; stage?: number } | null>(null)
   const [editingGoals, setEditingGoals] = useState(false)
   const zone = store.agencyTimezone
 
@@ -65,10 +66,13 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const mine = !supervisor
   const showStaffColumn = supervisor
   const lateNext = summary.nextDueAt ? msUntil(summary.nextDueAt, now, skew) : null
+  const team = supervisor && data.goalsMode === 'average'
+  const personName = supervisor && staffFilter && staffFilter !== 'all' ? store.user(staffFilter)?.name ?? 'Staff' : ''
+  const quota = quotaLine({ daily: data.dailyQuota, morning: data.morningQuota, evening: data.eveningQuota }, data.targetsVary)
   const nextItem = items.filter((i) => i.status === 'open').sort((a, b) => a.dueAt.localeCompare(b.dueAt))[0]
   const columns = ['S.No', 'Client', 'Country', 'Candidate', 'Position', 'Referral', 'Stage', 'Remarks', 'Deadline'] as const
   // Column shares (percent): the table fits its panel instead of scrolling; the staff column joins for supervisors.
-  const widths = showStaffColumn ? [4, 10, 7, 13, 8, 8, 8, 12, 15, 15] : [4, 12, 9, 15, 9, 9, 14, 16, 12]
+  const widths = showStaffColumn ? [5, 10, 7, 13, 8, 8, 8, 11, 15, 15] : [5, 12, 9, 15, 9, 9, 14, 15, 12]
   let serial = 0
 
   return (
@@ -86,10 +90,12 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
 
       <div className="dw-stats">
         <section className="dw-stat dw-stat-main" aria-label="Today's progress">
-          <header><span>{mine ? "Today's progress" : 'Progress for the selected staff'}</span><ClipboardList size={18} aria-hidden="true" /></header>
+          <header><span>{mine ? "Today's progress" : team ? 'Team progress' : `${personName}'s progress`}</span><ClipboardList size={18} aria-hidden="true" /></header>
           <strong className="tnum">{summary.done} <small>of {summary.total} done</small></strong>
           <span className="dw-bar" role="img" aria-label={`${percentDone(summary)} percent done`}><i style={{ width: `${percentDone(summary)}%` }} /></span>
-          <p>{summary.total ? sessionProgress(summary) : 'Nothing allocated today'}</p>
+          <p>{summary.total
+            ? `${team ? `across ${data.staffCount} staff · ` : ''}${sessionProgress(summary)}`
+            : data.offToday ? 'Day off: nothing allocated' : data.shortfall ? 'No candidates to work today' : 'Nothing allocated today'}</p>
         </section>
         <section className={cn('dw-stat', summary.overdue > 0 && 'is-late')} aria-label="Next deadline">
           <header><span>Next deadline</span><Clock3 size={18} aria-hidden="true" /></header>
@@ -108,8 +114,9 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         </section>
         <section className="dw-stat" aria-label="Quota">
           <header><span>Daily quota</span><Target size={18} aria-hidden="true" /></header>
-          <strong className="tnum">{data.dailyQuota}</strong>
-          <p>{data.morningQuota} morning · {data.eveningQuota} evening{supervisor && staffFilter === 'all' ? ', all staff together' : ''}</p>
+          <strong className="tnum">{quota.value} <small>{team ? 'per staff' : mine ? 'a day' : 'for this person'}</small></strong>
+          <p>{quota.detail}</p>
+          {team && <p className="dw-quota-total">{teamTotalLine(data.teamGoals.candidates.target, data.staffCount)}</p>}
         </section>
       </div>
 
@@ -118,11 +125,13 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
           {summary.overdue} {summary.overdue === 1 ? 'candidate is' : 'candidates are'} past the hourly deadline. {mine ? 'Finish the stage work now; your manager can see this.' : 'These staff members are behind their hourly slots.'}</p>}
         {summary.postponed > 0 && <p className="is-warn"><History size={16} aria-hidden="true" />
           {summary.postponed} {summary.postponed === 1 ? 'candidate was' : 'candidates were'} not finished on an earlier day and {summary.postponed === 1 ? 'is' : 'are'} on today's list on top of the new {data.dailyQuota}.</p>}
+        {data.shortfall && !data.offToday && data.goalsMode === 'person' && <p className="is-warn" role="status"><AlertTriangle size={16} aria-hidden="true" />
+          <span><b>Only {data.shortfall.allocated} {data.shortfall.allocated === 1 ? 'candidate' : 'candidates'} to work today</b> (the goal is {data.shortfall.target}). {data.shortfall.reason}</span></p>}
         {error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({error}). Showing the last version.</p>}
       </div>
 
-      <GoalsPanel goals={data.goals} checkpoints={data.checkpoints} team={supervisor && (staffFilter ?? 'all') === 'all'} zone={zone}
-        admin={store.me.role === 'admin'} onEdit={() => setEditingGoals(true)} />
+      <GoalsPanel goals={data.goals} teamGoals={data.teamGoals} checkpoints={data.checkpoints} average={team} staffCount={data.staffCount}
+        targetsVary={data.targetsVary} personName={mine ? '' : personName} zone={zone} admin={store.me.role === 'admin'} onEdit={() => setEditingGoals(true)} />
 
       {supervisor && <StaffBoard now={now + skew} staff={data.staff ?? []} selected={staffFilter ?? 'all'} onSelect={setStaff} />}
 
@@ -137,8 +146,8 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         </div>
 
         {items.length === 0 ? (
-          <EmptyState title={mine ? 'No candidates to work on today' : 'No daily candidates for this selection'}
-            description={mine
+          <EmptyState title={data.offToday ? 'Day off' : data.shortfall ? 'No candidates to work today' : mine ? 'No candidates to work on today' : 'No daily candidates for this selection'}
+            description={data.offToday ? 'No candidates are allocated on a day off or leave.' : data.shortfall ? data.shortfall.reason : mine
               ? 'Daily candidates are drawn automatically from candidates assigned to you who are matched to an order and waiting on a stage. None are waiting right now, or today is your day off.'
               : 'Candidates appear here once staff have candidates matched to orders and waiting on a stage.'} />
         ) : (
@@ -162,8 +171,9 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
                   {g.items.map((item) => {
                     serial += 1
                     return <ItemRow key={item.id} item={item} serial={serial} now={now} skew={skew} zone={zone} showStaff={showStaffColumn}
-                      staffName={store.user(item.ownerId)?.name} canWork={store.can('work_any_candidate') || item.ownerId === store.me.id}
-                      onOpen={() => setOpenApp({ id: item.applicationId, stage: item.stage })} onRemark={async (text) => { await store.addRemark(item.taskId, text); await refresh() }} />
+                      staffName={store.user(item.ownerId)?.name} canWork={!!item.taskId && (store.can('work_any_candidate') || item.ownerId === store.me.id)}
+                      onOpen={() => item.applicationId ? setOpenApp({ id: item.applicationId, stage: item.stage ?? undefined }) : navigate(`/candidates/${item.candidateId}`)}
+                      onRemark={async (text) => { if (item.taskId) { await store.addRemark(item.taskId, text); await refresh() } }} />
                   })}
                 </Fragment>)}
               </tbody>
@@ -187,13 +197,13 @@ function ItemRow({ item, serial, now, skew, zone, showStaff, staffName, canWork,
   return (
     <tr className={cn('dw-row', `is-${tone}`, item.postponed && 'is-postponed')}>
       <td className="is-num tnum" data-label="S.No">{serial}</td>
-      <td data-label="Client"><span className="dw-cell-strong" title={item.clientContact ? `Contact: ${item.clientContact}` : undefined}>{item.client}</span><small className="dw-sub">{item.orderRef}</small></td>
-      <td data-label="Country"><span className="dw-country"><CountryFlag country={item.country} className="tk-flag" globeClassName="tk-flag-globe" />{item.country || '-'}</span></td>
+      <td data-label="Client"><span className="dw-cell-strong" title={item.clientContact ? `Contact: ${item.clientContact}` : undefined}>{item.client ?? '—'}</span>{item.orderRef && <small className="dw-sub">{item.orderRef}</small>}</td>
+      <td data-label="Country"><span className="dw-country"><CountryFlag country={item.country} className="tk-flag" globeClassName="tk-flag-globe" />{item.country || '—'}</span></td>
       <td data-label="Candidate"><RecordIdentity name={item.candidate} detail={item.candidateRef} /></td>
-      <td data-label="Position">{item.position}</td>
+      <td data-label="Position">{item.position ?? '—'}</td>
       <td data-label="Referral"><span className={cn('dw-ref', item.referral.source === 'referral' && 'is-referral')}>{referralLabel(item.referral)}</span></td>
       {showStaff && <td data-label="Staff">{staffName ?? '-'}</td>}
-      <td data-label="Stage"><StageTrack no={item.stage} /></td>
+      <td data-label="Stage"><StageTrack no={item.stage ?? undefined} />{item.stage === null && <small className="dw-sub">Not matched to an order</small>}</td>
       <td data-label="Remarks"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
       <td data-label="Deadline" className="dw-last">
         <div className={cn('dw-slot', `is-${tone}`)}>
@@ -203,8 +213,8 @@ function ItemRow({ item, serial, now, skew, zone, showStaff, staffName, canWork,
             : <b className="tnum" aria-live="off">{countdownLabel(left)}</b>}
           {!done && <small>{item.postponed ? 'was due ' : 'due '}{clockTime(item.dueAt, zone)}</small>}
         </div>
-        <Button size="sm" variant={done ? 'ghost' : 'primary'} onClick={onOpen} aria-label={`${done ? 'View' : 'Complete'} stage for ${item.candidate}`}>
-          {done ? 'View' : 'Complete'}<ArrowRight size={14} aria-hidden="true" />
+        <Button size="sm" variant={done ? 'ghost' : 'primary'} onClick={onOpen} aria-label={`${done ? 'View' : item.applicationId ? 'Complete the stage for' : 'Open'} ${item.candidate}`}>
+          {done ? 'View' : item.applicationId ? 'Complete' : 'Open'}<ArrowRight size={14} aria-hidden="true" />
         </Button>
       </td>
     </tr>
@@ -263,11 +273,14 @@ function StaffBoard({ now, staff, selected, onSelect }: { now: number; staff: Da
 function StaffRow({ s, now, active, onSelect }: { now: number; s: DailyStaffSummary; active: boolean; onSelect: () => void }) {
   const store = useStore()
   const sum: DailySummary = s.summary
+  const cell = candidatesCell(sum, s.shortfall, s.offToday)
   return (
-    <tr className={cn('dw-staff-row', active && 'is-active', sum.overdue > 0 && 'is-late')} tabIndex={0} onClick={onSelect}
+    <tr className={cn('dw-staff-row', active && 'is-active', sum.overdue > 0 && 'is-late', cell.warn && 'is-short')} tabIndex={0} onClick={onSelect}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect() } }} aria-pressed={active}>
       <td data-label="Staff"><b>{s.name}</b>{!s.active && <small className="dw-sub"> inactive</small>}</td>
-      <td data-label="Done"><span className="tnum">{sum.done}/{sum.total}</span><span className="dw-bar dw-bar-sm" aria-hidden="true"><i style={{ width: `${percentDone(sum)}%` }} /></span></td>
+      <td data-label="Candidates">{cell.warn
+        ? <span className="dw-warn-cell" title={cell.note}><AlertTriangle size={14} aria-hidden="true" /><b className="tnum">{cell.text}</b><small>{cell.note}</small></span>
+        : <><span className="tnum">{cell.text}</span>{sum.total > 0 && <span className="dw-bar dw-bar-sm" aria-hidden="true"><i style={{ width: `${percentDone(sum)}%` }} /></span>}{cell.note && <small className="dw-sub">{cell.note}</small>}</>}</td>
       <td data-label="Morning" className="tnum">{sum.morning.done}/{sum.morning.total}</td>
       <td data-label="Evening" className="tnum">{sum.evening.done}/{sum.evening.total}</td>
       <td data-label="Forwarded" className="tnum">{s.goals ? `${s.goals.forwardedToClient.actual}/${s.goals.forwardedToClient.target}` : '-'}</td>
@@ -279,9 +292,10 @@ function StaffRow({ s, now, active, onSelect }: { now: number; s: DailyStaffSumm
   )
 }
 
-/** Today's goals: the candidate target with its hourly checkpoints, plus the day's other targets as progress bars. */
-function GoalsPanel({ goals, checkpoints, team, zone, admin, onEdit }: {
-  goals: GoalBlock; checkpoints: CheckpointSet | null; team: boolean; zone?: string; admin: boolean; onEdit: () => void
+/** Today's goals, per recruiter: one person's own, or the average per recruiter with the team total shown beside it. */
+function GoalsPanel({ goals, teamGoals, checkpoints, average, staffCount, targetsVary, personName, zone, admin, onEdit }: {
+  goals: GoalBlock; teamGoals: GoalBlock; checkpoints: CheckpointSet | null; average: boolean; staffCount: number; targetsVary: boolean
+  personName: string; zone?: string; admin: boolean; onEdit: () => void
 }) {
   const c = goals.candidates
   const pacing = pacingMessage(checkpoints)
@@ -289,19 +303,23 @@ function GoalsPanel({ goals, checkpoints, team, zone, admin, onEdit }: {
     { key: 'forwarded', label: 'Forwarded to client', hint: 'CVs sent to the client today', actual: goals.forwardedToClient.actual, target: goals.forwardedToClient.target },
     { key: 'moves', label: 'Stage moves', hint: 'Stages completed today', actual: goals.stageMoves.actual, target: goals.stageMoves.target },
   ]
+  const title = average ? 'Goals per staff member' : personName ? `${personName}'s goals today` : "Today's goals"
+  const sub = average
+    ? `Each recruiter's target against the average done per person${targetsVary ? ' (targets differ by person, so these are approximate)' : ''}. Select a staff member below to see their own hourly checkpoints.`
+    : personName ? 'Their targets for today. They update as stages are finished.' : 'Your targets for today. They update as you finish stages.'
+  const t = teamGoals
   return (
     <section className="dw-panel dw-goals" aria-label="Today's goals">
       <div className="dw-panel-head">
-        <div><h2><Target size={16} aria-hidden="true" /> {team ? "Today's goals (all staff together)" : "Today's goals"}</h2>
-          <p>{team ? 'Targets added up across the recruiters shown.' : 'Your targets for today. They update as you finish stages.'}</p></div>
+        <div><h2><Target size={16} aria-hidden="true" /> {title}</h2><p>{sub}</p></div>
         {admin && <Button size="sm" onClick={onEdit}><SlidersHorizontal size={14} aria-hidden="true" />Set goals</Button>}
       </div>
       <div className="dw-goal-grid">
         <div className={cn('dw-goal dw-goal-main', goalState(c.done, c.target) === 'done' && 'is-done')}>
-          <header><b>Candidates</b><span className="tnum">{c.done} / {c.target}</span></header>
-          <div className="dw-goal-split" role="img" aria-label={`Morning ${c.morningDone} of ${c.morning}, evening ${c.eveningDone} of ${c.evening}`}>
-            <div style={{ flexGrow: Math.max(c.morning, 0.0001) }}><i style={{ width: `${goalPercent(c.morningDone, c.morning)}%` }} /><span>Morning {c.morningDone}/{c.morning}</span></div>
-            <div style={{ flexGrow: Math.max(c.evening, 0.0001) }}><i style={{ width: `${goalPercent(c.eveningDone, c.evening)}%` }} /><span>Evening {c.eveningDone}/{c.evening}</span></div>
+          <header><b>Candidates</b><span className="tnum">{fmtCount(c.done)} / {c.target}</span></header>
+          <div className="dw-goal-split" role="img" aria-label={`Morning ${fmtCount(c.morningDone)} of ${c.morning}, evening ${fmtCount(c.eveningDone)} of ${c.evening}`}>
+            <div style={{ flexGrow: Math.max(c.morning, 0.0001) }}><i style={{ width: `${goalPercent(c.morningDone, c.morning)}%` }} /><span>Morning {fmtCount(c.morningDone)}/{c.morning}</span></div>
+            <div style={{ flexGrow: Math.max(c.evening, 0.0001) }}><i style={{ width: `${goalPercent(c.eveningDone, c.evening)}%` }} /><span>Evening {fmtCount(c.eveningDone)}/{c.evening}</span></div>
           </div>
           {checkpoints && checkpoints.points.length > 0 && (
             <ol className="dw-checkpoints" aria-label="Hourly checkpoints">
@@ -318,12 +336,20 @@ function GoalsPanel({ goals, checkpoints, team, zone, admin, onEdit }: {
         </div>
         {bars.map((b) => (
           <div key={b.key} className={cn('dw-goal', goalState(b.actual, b.target) === 'done' && 'is-done')}>
-            <header><b>{b.label}</b><span className="tnum">{b.target > 0 ? `${b.actual} / ${b.target}` : b.actual}</span></header>
+            <header><b>{b.label}</b><span className="tnum">{b.target > 0 ? `${fmtCount(b.actual)} / ${b.target}` : fmtCount(b.actual)}</span></header>
             <span className="dw-bar" role="img" aria-label={b.target > 0 ? `${goalPercent(b.actual, b.target)} percent of the goal` : 'No goal set'}><i style={{ width: `${goalPercent(b.actual, b.target)}%` }} /></span>
-            <p>{b.target > 0 ? b.hint : 'No goal set'}</p>
+            <p>{b.target > 0 ? `${b.hint}${average ? ' (average per staff)' : ''}` : 'No goal set'}</p>
           </div>
         ))}
       </div>
+      {average && (
+        <p className="dw-team-total" aria-label="Team total">
+          <b>Team total ({staffCount} {staffCount === 1 ? 'staff member' : 'staff'})</b>
+          <span className="tnum">Candidates {t.candidates.done} / {t.candidates.target}</span>
+          <span className="tnum">Forwarded {t.forwardedToClient.actual} / {t.forwardedToClient.target}</span>
+          <span className="tnum">Stage moves {t.stageMoves.actual} / {t.stageMoves.target}</span>
+        </p>
+      )}
     </section>
   )
 }

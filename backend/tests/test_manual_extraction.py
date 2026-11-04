@@ -33,7 +33,7 @@ def intake(schema_database, tmp_path, monkeypatch):
                     for value in ("owner", "other")])
         db.flush()
         db.add(Candidate(id="candidate", ref="C-SYNTHETIC", name="Human reviewed name", phone="123456",
-                         owner_id="other", created_by="owner", source=Source.walk_in, skills=["Human skill"]))
+                         owner_id="owner", created_by="owner", source=Source.walk_in, skills=["Human skill"]))
         db.commit()
     settings = SimpleNamespace(storage_dir=str(tmp_path), storage_backend="local", tesseract_cmd=None,
         ocr_languages="eng", ocr_max_pages=300, ocr_page_timeout_seconds=20, ocr_document_timeout_seconds=600,
@@ -171,6 +171,19 @@ def test_saved_original_can_attach_without_reading_and_cannot_be_moved(intake):
     assert intake.client.post(endpoint, json={"candidateId": "second"}).status_code == 409
     with intake.sessions() as db:
         assert db.scalar(select(func.count()).select_from(Attachment)) == 1
+
+
+def test_saved_files_attach_only_to_a_candidate_the_person_may_work(intake):
+    job = upload(intake)
+    endpoint = "/api/ocr/jobs/" + job["id"] + "/attach"
+    with intake.sessions() as db:
+        # Entered by this person, since given to someone else: no longer theirs to add files to.
+        db.add(Candidate(id="theirs", ref="C-THEIRS", name="Theirs", phone="777777", owner_id="other", created_by="owner", source=Source.walk_in))
+        db.commit()
+    refused = intake.client.post(endpoint, json={"candidateId": "theirs"})
+    assert refused.status_code == 403 and "assigned to Other" in refused.json()["detail"]
+    with intake.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Attachment)) == 0
 
 
 def test_owner_access_and_group_draft_validation(intake):

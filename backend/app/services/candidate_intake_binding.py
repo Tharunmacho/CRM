@@ -30,6 +30,9 @@ def saved_candidate_id(jobs):
 
 
 def ensure_intake_candidate_access(candidate, user):
+    """Whoever saved the candidate from this upload may read the saved result back (a retry after a lost
+    response, a reopened draft). Nothing here changes the candidate, so having added it is enough; every
+    write (documents, merge, edits) needs the assigned recruiter, a manager or an admin."""
     if user.role == Role.staff and candidate.owner_id != user.id and candidate.created_by != user.id:
         raise HTTPException(403, "Only the person who added the candidate, the assigned recruiter, a manager or an admin can open this saved candidate.")
 

@@ -100,7 +100,9 @@ def create(kind: Literal["resume", "passport", "aadhaar", "photo", "education", 
 def list_jobs(response: Response, limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(current_user)):
     response.headers["Cache-Control"] = "no-store"
     jobs = db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.owner_id == user.id,
-        DocumentExtractionJob.status.notin_(["attached", "dismissed"])).order_by(DocumentExtractionJob.updated_at.desc()).limit(limit)).all()
+        DocumentExtractionJob.status.notin_(["attached", "dismissed"]),
+        # Files read for a candidate's application form belong to that candidate, not to an unsaved intake.
+        DocumentExtractionJob.candidate_id.is_(None)).order_by(DocumentExtractionJob.updated_at.desc()).limit(limit)).all()
     return [job_out(job) for job in jobs]
 
 
@@ -115,7 +117,11 @@ def group(group_id: str, response: Response, db: Session = Depends(get_db), user
 
 FORM_KEYS = {"name", "phone", "whatsapp", "email", "dob", "gender", "nationality", "currentCity", "languages",
              "passportNo", "passportIssue", "passportExpiry", "passportPlace", "designation", "totalExperience",
-             "gulfExperience", "skills", "expectedSalary", "source", "sourceDetail"}
+             "gulfExperience", "skills", "expectedSalary", "source", "sourceDetail",
+             "fatherName", "maritalStatus", "currentAddress", "experienceIndia", "experienceAbroad", "education", "workHistory",
+             # screening details (application form); education / workHistory travel as JSON-encoded strings
+             "nativePlace", "familyMemberNumber", "jobDurationPreference", "countryPreference", "jobPreference",
+             "serviceChargesStatus", "bestTimeToContact", "interestLevel", "nextFollowUpDate", "whatsappSameAsPhone"}
 
 
 class DraftIn(BaseModel):

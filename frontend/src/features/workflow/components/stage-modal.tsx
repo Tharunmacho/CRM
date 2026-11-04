@@ -21,6 +21,7 @@ import {
   User,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
 import { currencyChoices, currencyLabel } from '@/shared/lib/agency'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { applicationFileSlot, applicationFileVersions, newestFileVersions, type ApplicationFile } from '@/shared/lib/document-files'
@@ -55,6 +56,7 @@ import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { PersonAvatar } from './person-avatar'
 import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { SlaMeter, StageRail } from './stage-rail'
+import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { shortRef } from '@/features/candidates/components/data-bank-columns'
 import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
@@ -121,6 +123,8 @@ export function StageModal({
     let live = true
     setFiles([])
     setFileError(false)
+    // The files of a stage are the assigned recruiter's to open (the server refuses anyone else); nothing to fetch for a read-only visitor.
+    if (!canWorkCandidate(store.me, app ? store.candidate(app.candidateId) : undefined)) return
     api.get<ApplicationFile[]>(`/files?entity_type=application&entity_id=${encodeURIComponent(applicationId)}`)
       .then((rows) => { if (live) setFiles((current) => [...rows, ...current.filter((file) => !rows.some((row) => row.id === file.id))]) })
       .catch(() => { if (live) setFileError(true) })
@@ -134,7 +138,8 @@ export function StageModal({
   if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}><div className="sm sm-state"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the stages…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" variant="primary" onClick={snapshot.retry}>Refresh</Button>}</div></Dialog>
   const owner = store.user(cand.ownerId)
 
-  const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
+  const canWork = canWorkCandidate(store.me, cand)
+  const readOnlyReason = workRefusal(store.me, cand, owner?.name)
   const effective = app.stages.filter((record) => !record.reopenedReason)
   const superseded = app.stages.filter((record) => record.reopenedReason)
   const live = app.status === 'active' ? app.currentStage : null
@@ -157,7 +162,7 @@ export function StageModal({
           {!canWork && (
             <p className="sm-note">
               <Lock className="h-4 w-4" aria-hidden="true" />
-              {owner ? `${owner.name} looks after this candidate` : 'This candidate has no recruiter yet'}. You can read the stages, but you cannot fill them in.
+              {readOnlyReason} You can read the stages, but you cannot fill them in.
             </p>
           )}
 
@@ -316,6 +321,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
           <StageRail status={app.status} currentStage={app.currentStage} reached={[...new Set(effective.map(item => item.stage))]} numbered />
         </div>
         <div className="sm-head-foot">
+          <ApplicationFormButton size="sm" variant="primary" candidateId={cand.id} orderId={order.id} />
           <button type="button" className="sm-record-toggle" aria-expanded={record} onClick={() => setRecord((value) => !value)}>
             <User className="h-4 w-4" aria-hidden="true" />{record ? 'Hide full candidate details' : 'See full candidate details'}<ChevronDown className="h-4 w-4" aria-hidden="true" />
           </button>

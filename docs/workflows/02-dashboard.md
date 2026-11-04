@@ -24,6 +24,17 @@ Overdue uses the stored due time; escalated uses persisted escalation state; mis
 
 Loading must not appear as confirmed zero. Refresh failures should be visible. The health card must distinguish disconnected sources, no recent receipt, queued work and failed extraction, rather than equating every quiet source with a failure.
 
+### Pipeline overview cards
+
+Four pressed-state cards sit under Today's work. They use the same server scope as the pipeline and task cards: staff see only their own candidates, admin and manager see the whole team or the person chosen in the staff picker (staff naming another person get a 403). `GET /api/dashboard` returns them under `overview` (additive; one statement, no extra queries); each card lists at most 200 placements and carries the full count.
+
+- **Overall offer letter**: value = active candidates waiting at stage 5; detail = offer letters issued in total (stage 5 completed, including candidates who moved on or were later closed).
+- **Overall visa**: value = active candidates waiting at stage 9 or 10; detail = visas received (stage 9 completed) and stamped (stage 10 completed).
+- **Overall departure**: value = active candidates waiting at stage 11 (ticket); detail = candidates departed (deployed placements).
+- **Overall idle stage**: active placements with no stage completed for 7 or more days (`STUCK_DAYS` in `staff_weekly.py`, the same rule as the weekly staff report; never-progressed placements count from when they were mapped). Detail shows the longest wait.
+
+Reopened stage records never count. Pressing a card lists the people (name, position and order, client, country, stage, recruiter for the team view, days waiting, Open and Application form). The counts are also in Export. Implementation: `pipeline_overview` in [reporting service](../../backend/app/services/reporting.py), [overview helpers](../../frontend/src/features/dashboard/overview.ts), [panel](../../frontend/src/features/dashboard/components/overview-panel.tsx).
+
 ## Recovery and handoffs
 
 A stale task can close between opening a card and opening the record; show the completed/cancelled context. A source failure leads to [intake recovery](10-automated-intake.md), not an automatic duplicate import. Task actions follow [Tasks and SLA](16-tasks-sla-daily-updates.md); order actions follow [matching](13-order-matching.md).

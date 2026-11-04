@@ -7,8 +7,12 @@ export type DailySession = 'morning' | 'evening'
 
 export interface DailyItem {
   id: string
-  taskId: string
-  applicationId: string
+  /** stage: a matched candidate's open stage; call: an owned candidate worked through the initial call. */
+  kind: 'stage' | 'call'
+  /** Where remarks are kept (the stage task, or the candidate's initial-call task); null when there is none. */
+  taskId: string | null
+  /** The placement to open in the stage modal; null while the candidate is not matched to an order. */
+  applicationId: string | null
   candidateId: string
   ownerId: string
   /** Agency-timezone day the item was allocated, YYYY-MM-DD. */
@@ -17,18 +21,18 @@ export interface DailyItem {
   session: DailySession
   dueAt: string
   allocatedStage: number | null
-  stage: number
+  stage: number | null
   status: 'open' | 'done'
   completedAt: string | null
   postponed: boolean
   daysLate: number
-  client: string
-  clientContact: string
+  client: string | null
+  clientContact: string | null
   country: string | null
   candidate: string
   candidateRef: string
-  position: string
-  orderRef: string
+  position: string | null
+  orderRef: string | null
   referral: { source: string; label: string; detail: string | null }
   remark: { body: string; at: string; by: string; count: number } | null
 }
@@ -70,10 +74,19 @@ export interface CheckpointSet {
   behindBy: number
 }
 
+/** Fewer candidates today than the goal, and why (so an admin can assign candidates). */
+export interface Shortfall {
+  target: number
+  allocated: number
+  reason: string
+}
+
 export interface DailyStaffSummary {
   userId: string
   name: string
   active: boolean
+  offToday: boolean
+  shortfall: Shortfall | null
   summary: DailySummary
   goals?: GoalBlock | null
 }
@@ -86,7 +99,17 @@ export interface DailyWorkResponse {
   eveningQuota: number
   summary: DailySummary
   items: DailyItem[]
+  /** Per recruiter: one person's own goals, or the average per recruiter for a team view. */
   goals: GoalBlock
+  goalsMode: 'person' | 'average'
+  /** In an average view: the people's targets differ, so the figures are approximate. */
+  targetsVary: boolean
+  /** How many recruiters the rows/goals cover. */
+  staffCount: number
+  /** Summed over those recruiters; only ever shown as a labelled total, never as the quota. */
+  teamGoals: GoalBlock
+  shortfall: Shortfall | null
+  offToday: boolean
   /** Hourly checkpoints of one person's day; null when several people are shown together. */
   checkpoints: CheckpointSet | null
   staff?: DailyStaffSummary[]
@@ -239,4 +262,35 @@ export function nextCrossing(items: Pick<DailyItem, 'status' | 'dueAt'>[], nowMs
 
 export function checkpointLabel(state: CheckpointState): string {
   return { met: 'On time', late: 'Finished late', missed: 'Missed', upcoming: 'Coming up' }[state]
+}
+
+/** "3 of 10 done across 2 staff" for a team, "3 of 5 done" for one person. */
+export function progressLine(summary: Pick<DailySummary, 'done' | 'total'>, staffCount: number, team: boolean): string {
+  const base = `${summary.done} of ${summary.total} done`
+  return team ? `${base} across ${staffCount} ${staffCount === 1 ? 'staff member' : 'staff'}` : base
+}
+
+/** The quota card: what each recruiter gets, never the sum. */
+export function quotaLine(quota: { daily: number; morning: number; evening: number }, varies: boolean): { value: string; detail: string } {
+  return {
+    value: `${varies ? '~' : ''}${quota.daily}`,
+    detail: `${quota.morning} morning · ${quota.evening} evening each${varies ? ' (goals differ by person)' : ''}`,
+  }
+}
+
+/** Small secondary text under the quota: the summed team figure, clearly a total. */
+export function teamTotalLine(totalCandidates: number, staffCount: number): string {
+  return `${totalCandidates} across ${staffCount} ${staffCount === 1 ? 'recruiter' : 'recruiters'} today`
+}
+
+/** One decimal at most, no trailing ".0": averages read as "1.5" and whole numbers as "2". */
+export function fmtCount(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+}
+
+/** Staff board cell for a person's candidate count, with the reason when it is short or empty. */
+export function candidatesCell(summary: Pick<DailySummary, 'done' | 'total'>, shortfall: Shortfall | null, offToday: boolean): { text: string; warn: boolean; note: string } {
+  if (offToday) return { text: '-', warn: false, note: 'Day off' }
+  if (summary.total === 0) return { text: '0', warn: true, note: shortfall?.reason ?? 'No open candidates to allocate' }
+  return { text: `${summary.done}/${summary.total}`, warn: !!shortfall, note: shortfall ? `Only ${shortfall.allocated} of ${shortfall.target} new candidates today` : '' }
 }

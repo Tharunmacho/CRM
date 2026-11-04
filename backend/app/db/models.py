@@ -324,6 +324,28 @@ class Candidate(Base, PkMixin, TimestampMixin):
         comment="CRM user who entered this candidate; null for automatic intake or legacy records.",
     )
 
+    # Application-form details (migration 0021). Filled by reading the resume/passport or typed in the form;
+    # field_sources says which ("extracted" or "manual"), and a document read never overwrites a "manual" value.
+    # experience_abroad on the form is gulf_experience above. The three JSONB columns are deferred like
+    # ocr_data: the bootstrap loads every candidate and never reads them.
+    father_name: Mapped[str | None] = mapped_column(String(200))
+    marital_status: Mapped[str | None] = mapped_column(String(30))
+    current_address: Mapped[str | None] = mapped_column(Text)
+    experience_india: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    education: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"), deferred=True)
+    work_history: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"), deferred=True)
+    field_sources: Mapped[dict | None] = mapped_column(JSONB, server_default=text("'{}'::jsonb"), deferred=True)
+    # Screening details from the telemarketer's intake form (also migration 0021). Job preference is `designations`,
+    # the agent is `source_detail`, the assigned staff `owner_id`, the telemarketer notes `call_remarks`.
+    native_place: Mapped[str | None] = mapped_column(String(120))
+    family_member_number: Mapped[str | None] = mapped_column(String(40))
+    job_duration_preference: Mapped[str | None] = mapped_column(String(60))
+    country_preference: Mapped[str | None] = mapped_column(String(200))
+    best_time_to_contact: Mapped[str | None] = mapped_column(String(60))
+    service_charges_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'not_discussed'"))
+    interest_level: Mapped[str | None] = mapped_column(String(20))
+    next_follow_up_date: Mapped[date | None] = mapped_column(Date)
+
     # Parsed resume text, plus the index the Data Bank's full-text search runs on.
     resume_text: Mapped[str | None] = mapped_column(Text)
     resume_tsv: Mapped[str | None] = mapped_column(TSVECTOR)
@@ -346,6 +368,7 @@ class Candidate(Base, PkMixin, TimestampMixin):
         Index("ix_crm_candidates_email_lower", func.lower(email)),
         Index("ix_crm_candidates_passport_upper", func.upper(passport_no)),
         Index("ix_crm_candidates_resume_tsv", "resume_tsv", postgresql_using="gin"),
+        Index("ix_crm_candidates_follow_up", "next_follow_up_date", postgresql_where=text("next_follow_up_date IS NOT NULL")),
         {"comment": "Recruitment candidate profiles, ownership, contact details and extracted document data."},
     )
 
@@ -560,8 +583,11 @@ class DailyWorkItem(Base, PkMixin):
     application-stage tasks; it is finished when that stage task is completed through the stage workflow. An item
     still open after its day is *postponed*: it stays in the list (oldest first) next to the new day's quota.
 
-    `status` values: open (to do), completed (the stage task was completed by the owner) and released (the task was
-    cancelled, or reassigned to someone else, before it was done: it no longer counts for anyone).
+    Two kinds: `stage` (an open application-stage task the recruiter owns) and `call` (a candidate the recruiter owns
+    who is not matched to an order yet, worked through the initial call and then matching). `status` values: open
+    (to do), completed (stage kind: the task was completed by the owner; call kind: the initial call was recorded or a
+    stage was completed after allocation) and released (the task was cancelled, or the task/candidate moved to someone
+    else or was closed, before it was done: it no longer counts for anyone).
     Every moment is stored for reports: allocated_at, started_at (first draft save or owner remark), overdue_at (the
     hourly deadline it missed), postponed_at (start of the day after work_date, while still unfinished), completed_at
     and released_at.
@@ -570,10 +596,11 @@ class DailyWorkItem(Base, PkMixin):
     __tablename__ = "workflow_daily_work_items"
     owner_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False)
     work_date: Mapped[date] = mapped_column(Date, nullable=False, comment="Agency-timezone day the item was allocated.")
-    task_id: Mapped[str] = mapped_column(ForeignKey("workflow_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False, server_default=text("'stage'"), comment="stage (an open application-stage task) or call (an owned candidate not yet matched, worked through the initial call).")
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_tasks.id", ondelete="CASCADE"), index=True, comment="The stage task for kind stage; null for kind call.")
     application_id: Mapped[str | None] = mapped_column(ForeignKey("crm_applications.id", ondelete="CASCADE"))
     candidate_id: Mapped[str] = mapped_column(ForeignKey("crm_candidates.id", ondelete="CASCADE"), nullable=False)
-    stage: Mapped[int | None] = mapped_column(Integer, comment="Stage the candidate was at when allocated.")
+    stage: Mapped[int | None] = mapped_column(Integer, comment="Stage the candidate was at when allocated; null for kind call.")
     slot_no: Mapped[int] = mapped_column(Integer, nullable=False, comment="1-based place in the day's quota.")
     session: Mapped[str] = mapped_column(String(10), nullable=False, comment="morning or evening.")
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="Hourly slot deadline.")
@@ -592,6 +619,9 @@ class DailyWorkItem(Base, PkMixin):
         Index("uq_daily_work_task_owner_live", "task_id", "owner_id", unique=True, postgresql_where=text("status <> 'released'")),
         Index("ix_daily_work_owner_date", "owner_id", "work_date"),
         Index("ix_daily_work_open", "owner_id", postgresql_where=text("status = 'open'")),
+        Index("ix_daily_work_candidate_open", "candidate_id", postgresql_where=text("status = 'open'")),
+        CheckConstraint("kind IN ('stage','call')", name="ck_daily_work_kind"),
+        CheckConstraint("kind = 'call' OR task_id IS NOT NULL", name="ck_daily_work_stage_task"),
         CheckConstraint("session IN ('morning','evening')", name="ck_daily_work_session"),
         CheckConstraint("status IN ('open','completed','released')", name="ck_daily_work_status"),
         CheckConstraint("slot_no >= 1", name="ck_daily_work_slot"),
@@ -1013,6 +1043,26 @@ class JobCategory(Base, PkMixin):
         Index("ux_job_categories_name_lower", func.lower(name), unique=True),
         CheckConstraint("char_length(btrim(name)) BETWEEN 2 AND 120", name="ck_job_categories_name"),
         {"comment": "Admin-managed job category list for job titles; names are unique ignoring case and inactive ones stay valid on saved job titles."},
+    )
+
+
+class FormOption(Base, PkMixin, TimestampMixin):
+    """One choice of an admin-managed list on the candidate / application form (service charges, interest level, ...)."""
+
+    __tablename__ = "crm_form_options"
+    category: Mapped[str] = mapped_column(String(40), nullable=False)
+    value: Mapped[str] = mapped_column(String(60), nullable=False, comment="What is stored on the candidate; never changed after creation.")
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    hint: Mapped[str | None] = mapped_column(String(255))
+    tone: Mapped[str | None] = mapped_column(String(20), comment="neutral, success, info, warning or danger: the colour a screen gives the choice.")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"), comment="Seeded by the product; can be hidden and relabelled but not deleted.")
+    __table_args__ = (
+        UniqueConstraint("category", "value", name="uq_form_options_category_value"),
+        Index("ix_crm_form_options_category", "category", "sort_order"),
+        CheckConstraint("tone IS NULL OR tone IN ('neutral','success','info','warning','danger')", name="ck_form_options_tone"),
+        {"comment": "Admin-managed option lists for the candidate and application form; a hidden option stays valid on candidates that already have it."},
     )
 
 

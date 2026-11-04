@@ -1,0 +1,201 @@
+/*
+ * Add candidate as ONE application-form card.
+ *
+ * The page holds a progress strip, then a single white card. Inside it every part of the form (documents first, then
+ * personal, contact, passport, education, experience, job preference, assessment, follow-up) is a section: icon, bold
+ * title, one-line subtitle, a thin divider, then its fields. Nothing is boxed per section. The actions are the last row of the card, in normal flow.
+ *
+ * Grid: every section uses `.ac-g`, a 12-column grid with the width classes s-2 ... s-12. Four fields per row on a wide
+ * screen (s-3), two per row on a tablet, one on a phone. The grid follows the width of the page's own box (container
+ * queries on `.ac`), so a collapsed or expanded sidebar cannot push it out of shape.
+ * Everything is scoped under `.ac` and built from theme tokens, so light and dark follow.
+ */
+
+/* ---------- Progress strip above the card ---------- */
+.ac .ac-progress-card { border: 1px solid var(--border-main); border-radius: 14px; background: var(--bg-card); overflow: hidden; }
+.ac .ac-prog-main { display: flex; align-items: center; gap: 22px; padding: 18px 24px; }
+.ac .ac-prog-score { display: grid; flex: none; justify-items: center; min-width: 72px; line-height: 1; }
+.ac .ac-prog-score strong { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; color: var(--primary); }
+.ac .ac-prog-score span { margin-top: 5px; font-size: 12px; color: var(--text-muted); }
+.ac .ac-prog-body { display: grid; flex: 1; gap: 10px; min-width: 0; }
+.ac .ac-prog-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; font-size: 13px; line-height: 1.5; }
+.ac .ac-prog-label { display: inline-flex; align-items: flex-start; gap: 8px; min-width: 0; color: var(--text-muted); }
+.ac .ac-prog-label svg { flex: none; margin-top: 3px; color: var(--primary); }
+.ac .ac-prog-count { flex: none; font-weight: 500; color: var(--text-main); }
+.ac .ac-prog-bar { height: 8px; overflow: hidden; border-radius: 999px; background: var(--tint-3); }
+.ac .ac-prog-bar i { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .35s ease; }
+.ac .ac-prog-groups { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 0; padding: 0; list-style: none; }
+.ac .ac-prog-groups button { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-1); color: var(--text-muted); font-size: 12px; font-weight: 500; transition: border-color .14s, background-color .14s; }
+.ac .ac-prog-groups button:hover { border-color: var(--border-hover); background: var(--bg-card); }
+.ac .ac-prog-groups button > i { width: 6px; height: 6px; border-radius: 999px; background: var(--text-light); }
+.ac .ac-prog-groups button > span { color: var(--text-light); }
+.ac .ac-prog-groups button.is-done { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+.ac .ac-prog-groups button.is-done > span { color: inherit; }
+.ac .ac-prog-prompt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; padding: 12px 24px; border-top: 1px solid var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); font-size: 13px; line-height: 1.5; }
+.ac .ac-prog-prompt > div { display: grid; flex: 1 1 320px; min-width: 0; }
+.ac .ac-prog-prompt strong { font-weight: 600; }
+.ac .ac-prog-prompt button { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 34px; padding: 0 14px; border-radius: 8px; background: var(--primary); color: var(--on-primary); font-size: 13px; font-weight: 600; transition: background-color .14s; }
+.ac .ac-prog-prompt button:hover { background: var(--primary-hover); }
+@container ac (max-width: 639px) {
+  .ac .ac-prog-main { flex-direction: column; align-items: stretch; gap: 12px; padding: 16px; }
+  .ac .ac-prog-score { display: flex; align-items: baseline; justify-content: flex-start; gap: 8px; }
+  .ac .ac-prog-score span { margin: 0; }
+  .ac .ac-prog-prompt { padding: 12px 16px; }
+  .ac .ac-prog-prompt button { width: 100%; justify-content: center; min-height: 44px; }
+}
+
+/* ---------- The single form card ---------- */
+.ac .ac-form-card { min-width: 0; border: 1px solid var(--border-main); border-radius: 14px; background: var(--bg-card); }
+.ac .ac-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.ac .ac-sec { min-width: 0; padding: 28px 28px 8px; }
+.ac .ac-sec:last-child { padding-bottom: 30px; }
+.ac .ac-sec-head { display: flex; align-items: center; gap: 14px; margin: 0 0 20px; padding: 0 0 16px; border-bottom: 1px solid var(--border-main); }
+.ac .ac-sec-title { flex: 1; min-width: 0; }
+.ac .ac-sec-title h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; color: var(--text-main); overflow-wrap: anywhere; }
+.ac .ac-sec-title p { margin-top: 1px; font-size: 13px; line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
+.ac .ac-sec-aside { flex: none; }
+.ac .ac-sec-body { display: grid; gap: 22px; min-width: 0; padding-bottom: 22px; }
+.ac .ac-sec-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--text-light); white-space: nowrap; }
+.ac .ac-sec-count.is-done { color: var(--success-ink); }
+.ac .ac-pill.is-muted { background: var(--tint-2); color: var(--text-muted); }
+
+/* ---------- 12-column field grid ---------- */
+.ac .ac-g { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 18px 20px; align-items: start; min-width: 0; }
+.ac .ac-g > * { grid-column: span 12; min-width: 0; }
+@container ac (min-width: 600px) {
+  .ac .ac-g > :is(.s-2, .s-3, .s-4, .s-5, .s-6) { grid-column: span 6; }
+}
+@container ac (min-width: 960px) {
+  .ac .ac-g > .s-2 { grid-column: span 2; }
+  .ac .ac-g > .s-3 { grid-column: span 3; }
+  .ac .ac-g > .s-4 { grid-column: span 4; }
+  .ac .ac-g > .s-5 { grid-column: span 5; }
+  .ac .ac-g > .s-6 { grid-column: span 6; }
+}
+/* the personal block shares its width with the photo, so its four-up layout starts later */
+@container ac (min-width: 960px) and (max-width: 1059px) {
+  .ac .ac-personal .ac-g > :is(.s-3) { grid-column: span 6; }
+}
+/* repeating rows are narrower still (number and remove button) */
+@container ac (min-width: 600px) and (max-width: 899px) {
+  .ac .ac-row-grid > * { grid-column: span 6; }
+  .ac .ac-row-grid > :last-child:nth-child(odd) { grid-column: span 12; }
+}
+
+/* ---------- Labels, badges, controls ---------- */
+.ac .ac-f { min-width: 0; }
+.ac .ac-lab { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; margin: 0 0 6px; }
+.ac .ac-lab label, .ac .ac-lab .ac-tag-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-size: 13px; font-weight: 500; line-height: 18px; color: var(--text-main); }
+.ac .ac-req { color: var(--error-ink); }
+.ac .ac-lab-aux { display: inline-flex; align-items: center; flex: none; gap: 8px; }
+.ac .ac-from { display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); font-size: 11px; font-weight: 500; line-height: 16px; white-space: nowrap; }
+.ac .ac-same { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; line-height: 18px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.ac .ac-same input { margin: 0; }
+.ac .ac-err { display: block; margin-top: 5px; font-size: 12.5px; line-height: 1.45; color: var(--error-ink); }
+.ac .ac-f[data-invalid] :is(.ui-input, .custom-select-trigger, .date-picker-trigger, .ac-tags) { border-color: var(--error-ink); }
+
+.ac .ac-sec :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { min-height: 40px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--tint-1); color: var(--text-main); box-shadow: none; transition: border-color .14s, background-color .14s, box-shadow .14s; }
+.ac .ac-sec :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { height: 40px; }
+.ac .ac-sec :is(.ui-input, .custom-select-trigger, .date-picker-trigger):hover:not(:disabled) { border-color: var(--border-hover); background: var(--bg-card); }
+.ac .ac-sec :is(.custom-select-trigger, .date-picker-trigger):focus-visible, .ac .ac-sec .ui-input:focus { border-color: var(--primary); background: var(--bg-card); outline: none; box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.ac .ac-sec :is(.ui-input, .date-picker-trigger)::placeholder { color: var(--text-light); }
+.ac .ac-sec :is(.ui-input, .custom-select-trigger, .date-picker-trigger):disabled { background: var(--tint-2); color: var(--text-muted); cursor: not-allowed; }
+.ac .ac-sec textarea.ui-input { min-height: 76px; resize: vertical; }
+.ac .ac-sec .date-picker-trigger.is-empty { color: var(--text-light); }
+.ac .ac-sec .ac-tags { background: var(--tint-1); }
+.ac .ac-sec .ac-tags:hover, .ac .ac-sec .ac-tags:focus-within { background: var(--bg-card); }
+.ac .ac-f[data-from] :is(.ui-input, .custom-select-trigger, .date-picker-trigger, .ac-tags) { border-color: color-mix(in srgb, var(--primary) 38%, var(--border-control)); }
+
+/* ---------- Phone with country code ---------- */
+.ac .ac-phone { display: grid; grid-template-columns: minmax(96px, 128px) minmax(0, 1fr); gap: 8px; }
+.ac .ac-phone .ac-cc { appearance: none; padding: 0 28px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238a93a6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center; }
+.ac .ac-phone-hint.is-ok { color: var(--success-ink); }
+.ac .ac-phone-hint.is-warn { color: var(--warning-ink); }
+
+/* ---------- Photo box (the passport-size photo of the paper form) ---------- */
+.ac .ac-personal { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; min-width: 0; }
+.ac .ac-photo-box { display: flex; flex-direction: column; gap: 10px; }
+.ac .ac-photo-frame { display: grid; align-content: center; justify-items: center; gap: 8px; width: 148px; height: 184px; overflow: hidden; border: 1.5px dashed var(--border-control); border-radius: 12px; background: var(--tint-1); color: var(--text-light); font-size: 12px; line-height: 1.35; text-align: center; }
+.ac .ac-photo-frame img { width: 100%; height: 100%; object-fit: cover; }
+.ac .ac-photo-actions { display: flex; gap: 6px; width: 148px; }
+.ac .ac-photo-btn { display: inline-flex; flex: 1; align-items: center; justify-content: center; height: 32px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .14s, background-color .14s; }
+.ac .ac-photo-btn:hover:not(:disabled) { border-color: var(--primary); background: var(--tint-1); }
+.ac .ac-photo-btn:disabled { opacity: .5; cursor: not-allowed; }
+.ac .ac-photo-btn.is-quiet { flex: none; width: 32px; padding: 0; color: var(--text-muted); }
+@container ac (min-width: 960px) {
+  .ac .ac-personal { grid-template-columns: 148px minmax(0, 1fr); gap: 28px; }
+}
+@container ac (max-width: 959px) {
+  .ac .ac-photo-box { flex-direction: row; align-items: center; gap: 14px; }
+  .ac .ac-photo-frame { width: 92px; height: 116px; padding: 6px; font-size: 11px; }
+  .ac .ac-photo-frame svg { width: 18px; height: 18px; }
+  .ac .ac-photo-actions { flex-direction: column; width: 140px; }
+  .ac .ac-photo-btn.is-quiet { width: 100%; }
+}
+
+/* ---------- Repeating rows (education, previous employers) ---------- */
+.ac .ac-rows { display: grid; gap: 12px; min-width: 0; }
+.ac .ac-rows-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ac .ac-rows-count { font-size: 12.5px; font-weight: 500; color: var(--text-muted); }
+.ac .ac-rows-tools { display: inline-flex; align-items: center; gap: 10px; }
+.ac .ac-rows-empty { display: grid; justify-items: center; gap: 6px; padding: 22px 16px; border: 1.5px dashed var(--border-control); border-radius: 12px; background: var(--tint-1); color: var(--text-light); text-align: center; }
+.ac .ac-rows-empty p { margin: 0; max-width: 46ch; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
+.ac .ac-row-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.ac .ac-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) 36px; gap: 14px; align-items: start; padding: 16px; border: 1px solid var(--border-main); border-radius: 12px; background: color-mix(in srgb, var(--tint-1) 55%, var(--bg-card)); }
+.ac .ac-row-no { display: grid; place-items: center; width: 26px; height: 26px; margin-top: 30px; border-radius: 999px; background: var(--tint-3); color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.ac .ac-row-remove { display: grid; place-items: center; width: 36px; height: 36px; margin-top: 28px; border-radius: 8px; color: var(--text-light); transition: background-color .14s, color .14s; }
+.ac .ac-row-remove:hover:not(:disabled) { background: var(--error-fill); color: var(--error-ink); }
+.ac .ac-row-remove:disabled { opacity: .5; cursor: not-allowed; }
+.ac .ac-row .ac-g { gap: 14px 16px; }
+@container ac (max-width: 599px) {
+  .ac .ac-row { grid-template-columns: minmax(0, 1fr) 36px; padding: 14px; gap: 10px; }
+  .ac .ac-row-no { display: none; }
+  .ac .ac-row-remove { margin-top: 0; grid-column: 2; grid-row: 1; align-self: start; }
+  .ac .ac-row .ac-g { grid-column: 1; grid-row: 1; }
+}
+
+/* ---------- Interest level cards ---------- */
+.ac .ac-interest { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.ac .ac-interest-card { --tone: #64748b; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 12px 16px; border: 1.5px solid var(--border-control); border-radius: 12px; background: var(--bg-card); color: var(--text-main); text-align: left; cursor: pointer; transition: border-color .14s, background-color .14s; }
+.ac .ac-interest-card[data-tone='green'] { --tone: #16a34a; }
+.ac .ac-interest-card[data-tone='blue'] { --tone: #2563eb; }
+.ac .ac-interest-card[data-tone='amber'] { --tone: #d97706; }
+.ac .ac-interest-card[data-tone='red'] { --tone: #dc2626; }
+.ac .ac-interest-card[data-tone='gray'] { --tone: #64748b; }
+.ac .ac-interest-card[data-tone='purple'] { --tone: #7c3aed; }
+.ac .ac-interest-card[data-tone='teal'] { --tone: #0d9488; }
+.ac .ac-interest-card > i { flex: none; width: 14px; height: 14px; border: 2px solid var(--tone); border-radius: 999px; transition: background-color .14s, box-shadow .14s; }
+.ac .ac-interest-card > span { display: grid; min-width: 0; }
+.ac .ac-interest-card strong { font-size: 14px; font-weight: 600; line-height: 1.35; }
+.ac .ac-interest-card small { font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+.ac .ac-interest-card:hover:not(:disabled) { border-color: var(--tone); }
+.ac .ac-interest-card.is-on { border-color: var(--tone); background: color-mix(in srgb, var(--tone) 10%, var(--bg-card)); }
+.ac .ac-interest-card.is-on > i { background: var(--tone); box-shadow: inset 0 0 0 2px var(--bg-card); }
+.ac .ac-interest-card:focus-visible { outline: 2px solid var(--tone); outline-offset: 2px; }
+.ac .ac-interest-card:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ---------- Documents inside the card ---------- */
+.ac .ac-sec .ac-docs { display: grid; gap: 12px; }
+.ac .ac-sec .ac-docs .ac-subhead { margin: 0; }
+.ac .ac-sec .ac-docs .ac-slots + .ac-subhead { margin-top: 10px; }
+.ac .ac-sec .ac-docs .ac-doc-foot { margin-top: 6px; }
+
+/* ---------- Duplicate match inside a section ---------- */
+.ac .ac-sec .ac-match { margin: 0; }
+.ac .ac-sec .ac-match-note { margin: -8px 0 0; }
+
+/* ---------- Actions: the last row of the card, in normal flow (nothing floats over the form) ---------- */
+.ac .ac-form-card .ac-savebar { position: static; padding: 20px 28px; border: 0; border-top: 1px solid var(--border-main); border-radius: 0 0 13px 13px; background: var(--bg-card); box-shadow: none; }
+.ac .ac-savebar-note { color: var(--text-muted); }
+@container ac (max-width: 639px) {
+  .ac .ac-sec { padding: 22px 16px 4px; }
+  .ac .ac-sec:last-child { padding-bottom: 22px; }
+  .ac .ac-sec-head { gap: 12px; margin-bottom: 16px; padding-bottom: 14px; }
+  .ac .ac-sec-aside { display: none; }
+  .ac .ac-form-card .ac-savebar { padding: 16px; }
+  .ac .ac-form-card .ac-savebar-actions { flex-direction: column; align-items: stretch; margin-left: 0; }
+  .ac .ac-form-card .ac-savebar-actions .ui-button { flex: none; width: 100%; min-height: 44px; }
+  .ac .ac-sec .ac-match-actions { width: 100%; }
+}

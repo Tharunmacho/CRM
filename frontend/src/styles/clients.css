@@ -448,3 +448,6 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 @media (prefers-reduced-motion: reduce) {
   .cl-bar > i { transition: none; }
 }
+.cd-profile-actions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.cd-cands th:last-child, .cd-cands td.c-profile { width: 132px; }
+@media (max-width: 720px) { .cd-cands td.c-profile { width: auto; } }

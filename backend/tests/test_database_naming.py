@@ -61,9 +61,9 @@ def test_domain_names_cover_renamed_models_and_documented_intake_extension():
                  "staff_attendance_duty_plans", "staff_attendance_calendar", "staff_attendance_adjustments",
                  "staff_attendance_cover_items"}
     expected |= {'whatsapp_send_attempts', 'whatsapp_templates', 'whatsapp_delivery_events', 'intake_acknowledgements', 'document_person_intakes', 'whatsapp_conversations', 'document_person_groups', 'intake_acknowledgement_settings'}
-    expected |= {"agency_settings", "currencies", "job_categories", "workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress"}
+    expected |= {"agency_settings", "currencies", "job_categories", "workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress", "crm_form_options"}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 56
+    assert len(Base.metadata.tables) == 57
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
@@ -590,7 +590,9 @@ def test_attendance_policy_upgrade_preserves_existing_clocks_and_presence(schema
         db.add(User(id="retained-staff", name="Retained staff", email="retained@example.test", role=Role.staff))
         db.flush()
         db.add(SessionRow(id="retained-login", user_id="retained-staff", expires_at=moment + timedelta(days=1)))
-        db.add(Candidate(id="retained-candidate", ref="CND-KEEP", name="Retained candidate", phone="9000000001", source=Source.walk_in, owner_id="retained-staff"))
+        # Raw SQL: this schema predates the application-form columns the Candidate model now has.
+        db.execute(text("INSERT INTO crm_candidates (id, ref, name, phone, source, owner_id) "
+                        "VALUES ('retained-candidate', 'CND-KEEP', 'Retained candidate', '9000000001', 'walk_in', 'retained-staff')"))
         db.add(StaffAttendanceSession(id="retained-clock", user_id="retained-staff", checked_in_at=moment, checkin_request_key="retained-key"))
         db.flush()
         db.add(StaffAttendanceRequest(kind="check_in", request_key="retained-key", user_id="retained-staff", attendance_id="retained-clock"))
@@ -603,13 +605,16 @@ def test_attendance_policy_upgrade_preserves_existing_clocks_and_presence(schema
             return {name: connection.execute(text(f'SELECT * FROM {name}')).mappings().all() for name in retained}
     before = snapshot()
     _migrate(engine, "head")
-    assert snapshot() == before
-    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 56
+    # Later revisions add columns (0021 adds application-form columns to crm_candidates): what was kept must be unchanged.
+    def kept(after):
+        return {name: [{key: row[key] for key in before[name][0]} if before[name] else row for row in rows] for name, rows in after.items()}
+    assert kept(snapshot()) == before
+    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 57
     _migrate(engine, "0014_attendance_ordering", downgrade=True)
     assert snapshot() == before
     assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 35
     _migrate(engine, "head")
-    assert snapshot() == before
+    assert kept(snapshot()) == before
 
 
 def test_communication_migration_preserves_inbound_and_backfills_conversations(schema_database):

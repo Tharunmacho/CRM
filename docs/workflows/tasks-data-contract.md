@@ -1,6 +1,6 @@
 # Tasks data contract (daily quota, goals and report inputs)
 
-This is the stable read contract for reports built on the Tasks daily-quota feature (migration `0020_daily_work_quota`). Table and column names below will not change without a new migration and an update to this file. Times are stored in UTC; "day" columns are the **agency-timezone** calendar day (`AGENCY_TIMEZONE`, default `Asia/Kolkata`). Only read these tables from reports; the application writes them.
+This is the stable read contract for reports built on the Tasks daily-quota feature (migrations `0020_daily_work_quota`, plus `0023_daily_work_call_items` which added `kind` and made `task_id` nullable). Table and column names below will not change without a new migration and an update to this file. Times are stored in UTC; "day" columns are the **agency-timezone** calendar day (`AGENCY_TIMEZONE`, default `Asia/Kolkata`). Only read these tables from reports; the application writes them.
 
 ## `workflow_daily_work_items` (one row per candidate handed to a recruiter for a day)
 
@@ -9,18 +9,21 @@ This is the stable read contract for reports built on the Tasks daily-quota feat
 | `id` | Item id. |
 | `owner_id` | The recruiter (`auth_users.id`) the candidate was allocated to. |
 | `work_date` | Agency day it was allocated. An unfinished item is **postponed** on every later day (see below). |
-| `task_id`, `application_id`, `candidate_id` | The stage task (`workflow_tasks`), placement (`crm_applications`; client/country/position come from its order) and candidate. |
-| `stage` | Stage the candidate was at when allocated (1 to 11). |
+| `kind` | `stage`: a matched candidate's open application-stage task. `call`: a candidate the recruiter owns who is not matched to an order yet, worked through the initial call (then matching). |
+| `task_id`, `application_id`, `candidate_id` | For `stage`: the stage task (`workflow_tasks`) and placement (`crm_applications`; client/country/position come from its order). For `call`: both are null (the candidate's position/country preference is on `crm_candidates`). `candidate_id` is always set. |
+| `stage` | Stage the candidate was at when allocated (1 to 11); null for `call`. |
 | `slot_no`, `session` | Place in the day's quota (1-based) and `morning` or `evening`. Default quota 5: slots 1-3 morning, 4-5 evening. |
 | `due_at` | The hourly deadline for this slot. |
-| `status` | `open` (to do), `completed` (the stage task was completed by the owner), `released` (task cancelled or reassigned before it was done; ignore for performance). |
+| `status` | `open` (to do), `completed`, `released` (cancelled, reassigned, deployed or not interested before it was done; ignore for performance). `completed` means: `stage`: the stage task was completed by the owner; `call`: the initial call was recorded with a real outcome (called, interest yes or no) **after** the allocation, or a stage was completed for the candidate after allocation. |
 | `allocated_at` | When the system allocated it. |
 | `started_at` | First draft save or owner remark; equals `completed_at` when done in one step. Null until work began. |
 | `completed_at`, `completed_by` | When and by whom the stage was completed (`status = completed`). |
 | `overdue_at` | Equals `due_at` when the slot was missed (still open after `due_at`, or completed after it); null when finished on time. |
 | `postponed_at` | Start of the day after `work_date` when the item was still unfinished then; null if finished within `work_date`. |
-| `released_at`, `release_reason` | `task_cancelled` (unmapped, closed or reopened) or `reassigned`. |
+| `released_at`, `release_reason` | `task_cancelled` (unmapped, closed or reopened) or `reassigned` (the task, or for `call` the candidate, moved to someone else; a candidate who became deployed or not interested without a recorded call is also released and stored as `reassigned`). |
 | `overdue_notified_at`, `postponed_notified_at` | Alert bookkeeping; not performance data. |
+
+**Who is in the pool (the allocation rule).** Every working day each active Staff recruiter who is not on leave, a holiday or a weekly off gets up to their goal (default 5) in this priority order: (1) their open application-stage tasks, oldest first; then (2) candidates they **own** with status `new` or `in_process` and not matched to any active order, oldest first, those never called before those already called and interested (a called-and-interested candidate stays on the daily list until matched to an order). Deployed, not-interested and ownerless candidates are never allocated, nobody is allocated twice on the same day, and a candidate with an unfinished (`open`) item is never allocated twice (one open item per candidate), so unfinished work carries over instead. If a recruiter has fewer candidates than the goal they simply get fewer; the Tasks screen and the admin staff board show why ("No candidates assigned to this staff member. Assign candidates from the Data Bank.").
 
 Useful derived facts for a week `[from, to]` and a recruiter (always exclude `status = 'released'`):
 

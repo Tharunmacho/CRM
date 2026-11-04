@@ -324,6 +324,13 @@ export interface OcrFields {
   totalExperience?: number
   gulfExperience?: number
   skills?: string[]
+  /** Application-form details (docx): read from the resume, or the passport where printed. */
+  fatherName?: string
+  maritalStatus?: string
+  currentAddress?: string
+  experienceIndia?: number
+  education?: { level?: string | null; passedYear?: number | null; institute?: string | null }[]
+  workHistory?: { company?: string | null; designation?: string | null; country?: string | null; period?: string | null }[]
 }
 
 export interface OcrInspection {

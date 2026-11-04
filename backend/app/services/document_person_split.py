@@ -472,6 +472,7 @@ def _ocr_for_group(bundle, group):
 
 def commit_review(db, identifier, user, revision, decisions, settings):
     from app.api.routers.candidates import CandidateIn, lock_assignment_cursor, next_owner, PROFILE_CHECK_FIELDS, _validate_profile_relationships
+    from app.core.deps import candidate_work_refusal
     pointer = lock_assignment_cursor(db)
     bundle = get_bundle(db, identifier, user, lock=True)
     if bundle.source_type != "manual" and user.role != Role.admin:
@@ -521,9 +522,14 @@ def commit_review(db, identifier, user, revision, decisions, settings):
         if len(matches) > 1:
             raise HTTPException(409, f"{group.label} matches different existing people through phone, email or passport. Resolve those identity conflicts before confirming.")
         target = matches[0][0] if matches else None
+        refusal = candidate_work_refusal(db, target, user) if target else None
         if target and decisions.get(group.id) != target.id:
             duplicates.append({"groupId": group.id, "label": group.label, "candidateId": target.id, "name": target.name, "ref": target.ref,
-                               "phone": target.phone, "matchedOn": matches[0][1], "canMerge": True})
+                               "phone": target.phone, "matchedOn": matches[0][1], "canMerge": refusal is None,
+                               "ownerName": db.scalar(select(User.name).where(User.id == target.owner_id)) if target.owner_id else None,
+                               **({"refusal": refusal} if refusal else {})})
+        elif target and refusal:
+            raise HTTPException(403, refusal)
         elif decisions.get(group.id) and (not target or decisions[group.id] != target.id):
             raise HTTPException(409, "An existing candidate changed. Check duplicate matches again.")
         if target:
@@ -556,7 +562,8 @@ def commit_review(db, identifier, user, revision, decisions, settings):
             if resume_text:  # the newly confirmed resume is the latest one; Data Bank search follows it
                 candidate.resume_text = resume_text
         else:
-            owner = next_owner(db, pointer=pointer)
+            # A staff member who checked and confirmed this person works them; everyone else gets the next free recruiter.
+            owner = user if bundle.source_type == "manual" and user.role == Role.staff else next_owner(db, pointer=pointer)
             candidate = Candidate(ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}", **values,
                 source=Source.email if bundle.source_type == "email" else Source.whatsapp if bundle.source_type == "whatsapp" else Source(group.fields.get("source", "walk_in")),
                 source_detail=f"person_review:{bundle.id}", created_by=user.id,

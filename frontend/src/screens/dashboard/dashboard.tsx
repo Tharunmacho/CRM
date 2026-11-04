@@ -7,12 +7,14 @@ import { DataTable, type Column } from '@/shared/ui/table'
 import { Dialog } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { dateLabel, dateTimeLabel } from '@/shared/lib/format'
-import { useReportData, type DashboardResult, type DashboardTask, type OrderMetrics } from '@/features/reports/report-api'
+import { useReportData, type DashboardResult, type DashboardTask, type OrderMetrics, type OverviewItem } from '@/features/reports/report-api'
 import { SourceHealth } from '@/features/dashboard/components/source-health'
 import { NeedsAttention } from '@/features/dashboard/components/needs-attention'
 import { IntakeBlock, IntakeSkeleton, SOURCE_KEYS, number, type IntakeOverview } from '@/features/dashboard/components/intake-panel'
 import { CandidateCards, roleLine, OrderCards, TaskCards, useNarrow } from '@/features/dashboard/components/stacked'
 import { Avatar, Flag, Pill, SlaMeter, SourceTag, StageMini } from '@/features/dashboard/components/identity'
+import { PipelineOverview } from '@/features/dashboard/components/overview-panel'
+import { overviewCsvRows } from '@/features/dashboard/overview'
 import { AttentionList, type AttentionItem } from '@/features/dashboard/components/recent-arrivals'
 import { PERIODS, arrivalGrid, inWindow, intakeBuckets, isVerified, periodStart, recentDays, type Period } from '@/features/dashboard/metrics'
 import '@/styles/dashboard-ref.css'
@@ -116,6 +118,7 @@ export default function DashboardPage() {
     ...(['matched', 'selected'] as const).map(key => ({ key, header: key[0].toUpperCase() + key.slice(1), value: (row: OrderMetrics) => row[key], align: 'right' as const, width: '12%' })),
   ]
   function openTask(task: DashboardTask) { if (task.applicationId) { setOpenStage(task.stage || undefined); setOpenApp(task.applicationId) } else navigate(`/candidates/${task.candidateId}`) }
+  function openPlacement(item: OverviewItem) { setOpenStage(item.stage); setOpenApp(item.applicationId) }
   async function finishTodo(id: string) {
     setPendingTodo(id); setTodoError('')
     try { await store.toggleTodo(id) } catch (failure) { setTodoError(failure instanceof Error ? failure.message : 'We could not mark this to-do as done. Please try again.') } finally { setPendingTodo('') }
@@ -132,6 +135,7 @@ export default function DashboardPage() {
       ['Active applications', active], ['Open tasks', data.taskCounts.open], ['Due today', data.taskCounts.dueToday],
       ['Overdue tasks', data.taskCounts.overdue], ['Escalated tasks', data.taskCounts.escalated],
       ...data.pipeline.map(row => [`Stage ${row.stage}: ${row.label}`, row.count]),
+      ...(data.overview ? overviewCsvRows(data.overview) : []),
     ]
     const csv = rows.map(row => row.map(value => {
       const text = String(value)
@@ -207,6 +211,10 @@ export default function DashboardPage() {
           </button>
         })}</div>
       </section>
+
+      {data.overview && <PipelineOverview overview={data.overview} scope={!isTeam ? 'you' : staff ? store.user(staff)?.name.split(' ')[0] ?? 'the chosen recruiter' : 'the whole team'} showOwner={isTeam && !staff} narrow={narrow}
+        placeOf={orderId => store.order(orderId) ?? {}} onOpen={openPlacement} />}
+      {!data.overview && <p role="status" className="dr-error">The Pipeline overview cards (offer letter, visa, departure, idle stage) need the latest server. Restart the CRM API, then press Refresh.<button onClick={refresh}>Refresh</button></p>}
 
       <section className="dr-card dr-recent">
         <CardHeading title="Latest candidates" subtitle="The newest candidates you can see, ready for a first call" action={<label className="dr-search"><Search size={14} /><input type="search" value={query} placeholder="Search name, role or phone" aria-label="Search latest candidates" onChange={event => setQuery(event.target.value)} /></label>} />

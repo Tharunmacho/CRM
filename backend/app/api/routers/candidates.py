@@ -10,9 +10,9 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.api.schemas import CandidateOut as CandidateDetailOut, Wire
+from app.api.schemas import CandidateWithFormOut as CandidateDetailOut, Wire
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -20,8 +20,9 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.services import document_storage
-from app.core.deps import current_user, require_role
+from app.core.deps import candidate_work_refusal, current_user, ensure_can_work_candidate, require_role
 from app.integrations.ocr.mapping import resume_text_from
+from app.services import form_extraction as form_fx
 from app.services.candidate_identity import identity_matches, enrich_empty, normalize_candidate_values, normalize_phone
 from app.services.candidate_intake_binding import bind_intake, lock_intake_group, saved_candidate, saved_candidate_id
 from app.services.candidate_review import UNNAMED
@@ -197,7 +198,7 @@ def candidate_detail(candidate_id: str, response: Response,
     for attachment in result["files"] or []:
         files.setdefault((candidate_id, attachment["slot"]), []).append(attachment)
     response.headers["Cache-Control"] = "private, no-store"
-    return _candidate_out(result["candidate"][0], files)
+    return _candidate_out(result["candidate"][0], files, CandidateDetailOut)
 
 
 class OcrDataIn(BaseModel):
@@ -241,6 +242,31 @@ def _validate_profile_relationships(values, supplied=None):
         raise ValueError("Enter a valid phone number with at least seven digits.")
 
 
+class EducationRowIn(BaseModel):
+    """One educational row of the application form. Same shape as the form contract: {level, passedYear, institute}."""
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    level: str | None = Field(default=None, max_length=200)
+    passedYear: int | None = Field(default=None, ge=1950, le=date.today().year + 6, validation_alias=AliasChoices("passedYear", "passed_year"))
+    institute: str | None = Field(default=None, max_length=300)
+
+
+class WorkRowIn(BaseModel):
+    """One previous job: {company, designation, country, period}."""
+    model_config = ConfigDict(extra="forbid")
+    company: str | None = Field(default=None, max_length=200)
+    designation: str | None = Field(default=None, max_length=200)
+    country: str | None = Field(default=None, max_length=80)
+    period: str | None = Field(default=None, max_length=120)
+
+
+# The application-form contract names a few candidate fields differently from this older snake_case body.
+_FORM_ALIASES = {
+    "candidateName": "name", "mobileNumber": "phone", "dateOfBirth": "dob", "languagesKnown": "languages",
+    "passportNumber": "passport_no", "placeOfIssue": "passport_place", "issueDate": "passport_issue",
+    "expiryDate": "passport_expiry", "experienceAbroad": "gulf_experience", "jobPreference": "designations",
+}
+
+
 class CandidateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # Both are required unless the candidate comes from an uploaded document (see `dates`).
@@ -265,24 +291,69 @@ class CandidateIn(BaseModel):
     skills: list[str] = Field(default_factory=list)
     expected_salary: float | None = Field(default=None, ge=0, le=9999999999.99, allow_inf_nan=False)
 
+    # Application-form details (migration 0021). camelCase names (fatherName, workHistory, experienceIndia,
+    # experienceAbroad, ...) are accepted as well; see docs/workflows/application-form-contract.md.
+    father_name: str | None = None
+    marital_status: str | None = None
+    current_address: str | None = None
+    education: list[EducationRowIn] = Field(default_factory=list, max_length=form_fx.MAX_EDUCATION)
+    work_history: list[WorkRowIn] = Field(default_factory=list, max_length=form_fx.MAX_HISTORY)
+    experience_india: int = Field(default=0, ge=0, le=80)
+
+    # Screening details (telemarketer intake form). Job preference is `designations`, the agent `source_detail`.
+    native_place: str | None = None
+    family_member_number: str | None = None
+    job_duration_preference: str | None = None
+    country_preference: str | None = None
+    best_time_to_contact: str | None = None
+    # Checked against the admin-managed lists (services/form_options.py) when saved, not frozen here.
+    service_charges_status: str = Field(default="not_discussed", min_length=1, max_length=20)
+    interest_level: str | None = Field(default=None, max_length=20)
+    next_follow_up_date: date | None = None
+
     source: Source = Source.walk_in
     source_detail: str | None = None
     resume_text: str | None = None
     ocr_data: OcrDataIn | None = None
     intake_group_id: UUID | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def camel_case_names(cls, data):
+        """Accept the application form's camelCase names beside the snake_case ones (snake_case wins if both are sent)."""
+        if not isinstance(data, dict):
+            return data
+        renamed = {}
+        # "WhatsApp is the same as the phone": a flag, not a stored column. Copies the phone unless a number was sent.
+        same = data.get("whatsappSameAsPhone", data.get("whatsapp_same_as_phone"))
+        data = {k: v for k, v in data.items() if k not in ("whatsappSameAsPhone", "whatsapp_same_as_phone")}
+        phone = data.get("phone", data.get("mobileNumber"))
+        if same is True and phone and not data.get("whatsapp"):
+            data["whatsapp"] = phone
+        for key, value in data.items():
+            snake = _FORM_ALIASES.get(key) or (re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower() if isinstance(key, str) and key != key.lower() else key)
+            if snake != key and snake in data:
+                continue
+            renamed[snake] = value
+        return renamed
+
     @field_validator("name", "phone")
     @classmethod
     def trimmed(cls, raw):
         return raw.strip()
 
-    @field_validator("whatsapp", "email", "gender", "nationality", "current_city", "passport_no", "passport_place", "source_detail")
+    @field_validator("whatsapp", "email", "gender", "nationality", "current_city", "passport_no", "passport_place", "source_detail",
+                     "father_name", "marital_status", "current_address", "native_place", "family_member_number",
+                     "job_duration_preference", "country_preference", "best_time_to_contact")
     @classmethod
     def bounded_text(cls, raw, info):
         if raw is None:
             return None
         limit = {"whatsapp": 40, "email": 255, "gender": 20, "nationality": 80, "current_city": 120,
-                 "passport_no": 40, "passport_place": 120, "source_detail": 255}[info.field_name]
+                 "passport_no": 40, "passport_place": 120, "source_detail": 255,
+                 "father_name": 200, "marital_status": 30, "current_address": 500, "native_place": 120,
+                 "family_member_number": 40, "job_duration_preference": 60, "country_preference": 200,
+                 "best_time_to_contact": 60}[info.field_name]
         if len(raw.strip()) > limit:
             raise ValueError(f"Use at most {limit} characters.")
         return raw.strip() or None
@@ -321,6 +392,8 @@ class DuplicateMatch(Wire):
     owner_name: str | None
     owner_id: str | None = None
     matched_on: list[str]
+    # False when the signed-in person may look at this candidate but not work on it (another recruiter's candidate).
+    can_merge: bool = True
 
 
 class CandidateOut(Wire):
@@ -332,11 +405,48 @@ class CandidateOut(Wire):
     task_id: str | None
 
 
+class CandidateCreate(CandidateIn):
+    # Admin and manager may name the recruiter right away; empty means "the next free recruiter".
+    # A staff member's own entry always goes to that staff member, so this is refused for them.
+    assign_to: str | None = Field(default=None, max_length=36)
+
+
+def duplicate_match(db: Session, existing: Candidate, fields: list[str], user: User) -> dict:
+    """The existing candidate as the duplicate dialog shows it, including who owns it and whether `user` may combine into it."""
+    owner = db.get(User, existing.owner_id) if existing.owner_id else None
+    return DuplicateMatch(
+        id=existing.id, ref=existing.ref, name=existing.name, phone=existing.phone, dob=existing.dob,
+        owner_name=owner.name if owner else None, owner_id=existing.owner_id, matched_on=fields,
+        can_merge=candidate_work_refusal(db, existing, user) is None,
+    ).model_dump(by_alias=True, mode="json")
+
+
+def ensure_assignable(db: Session, user_id: str | None) -> User:
+    """The person a supervisor hands a candidate to: an active staff member who is not on leave."""
+    from app.services.attendance_availability import unavailable_staff_ids
+    target = db.get(User, user_id) if user_id else None
+    if target is None or target.role != Role.staff or not target.active or target.on_leave or target.id in unavailable_staff_ids(db):
+        raise HTTPException(422, "Choose an active staff member who is not on leave")
+    return target
+
+
 def find_duplicate(db: Session, phone: str, dob: date | None, passport_no: str | None, email: str | None = None):
     matches = identity_matches(db, {"phone": phone, "email": email, "passport_no": passport_no})
     if len(matches) > 1:
         raise HTTPException(409, "The phone, email or passport belong to different candidates. Sort out the duplicate before you merge.")
     return matches[0] if matches else None
+
+
+def _check_form_choices(db: Session, body: "CandidateIn", current=None) -> None:
+    """New values of the admin-managed lists must be active options; a value the candidate already has stays valid."""
+    from app.services.form_options import ensure_allowed
+    sent = body.model_fields_set
+    for field, category in (("service_charges_status", "service_charges_status"), ("interest_level", "interest_level")):
+        if field in sent:
+            ensure_allowed(db, category, getattr(body, field), current=getattr(current, field, None) if current is not None else None,
+                           default="not_discussed" if field == "service_charges_status" else None)
+    if "source" in sent and (current is None):
+        ensure_allowed(db, "candidate_source", body.source, default=Source.walk_in)
 
 
 def lock_assignment_cursor(db: Session) -> AssignmentPointer:
@@ -387,11 +497,12 @@ def next_owner(db: Session, *, pointer: AssignmentPointer | None = None) -> User
 
 @router.post("", response_model=CandidateOut, status_code=status.HTTP_201_CREATED)
 def create_candidate(
-    body: CandidateIn,
+    body: CandidateCreate,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> CandidateOut:
     pointer = lock_assignment_cursor(db)
+    _check_form_choices(db, body)
     intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
     recovered = saved_candidate(db, intake_jobs, user)
     if recovered is not None:
@@ -402,25 +513,23 @@ def create_candidate(
     match = find_duplicate(db, body.phone, body.dob, body.passport_no, body.email)
     if match is not None:
         existing, fields = match
-        owner = db.get(User, existing.owner_id) if existing.owner_id else None
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            {
-                "message": f"Duplicate found — {' and '.join(fields)} already on file.",
-                "candidate": DuplicateMatch(
-                    id=existing.id,
-                    ref=existing.ref,
-                    name=existing.name,
-                    phone=existing.phone,
-                    dob=existing.dob,
-                    owner_name=owner.name if owner else None,
-                    owner_id=existing.owner_id,
-                    matched_on=fields,
-                ).model_dump(by_alias=True, mode="json"),
-            },
+            {"message": f"Duplicate found — {' and '.join(fields)} already on file.",
+             "candidate": duplicate_match(db, existing, fields, user)},
         )
 
-    owner = next_owner(db, pointer=pointer)
+    # Who gets the candidate. A staff member who adds a candidate works it: it is assigned to them and the
+    # round-robin is left alone. Admin and manager may name a recruiter, or leave it to the next free one.
+    requested = getattr(body, "assign_to", None)
+    if user.role == Role.staff:
+        if requested and requested != user.id:
+            raise HTTPException(403, "A candidate you add is assigned to you. Only a manager or an admin can choose another recruiter.")
+        owner = user
+    elif requested:
+        owner = ensure_assignable(db, requested)
+    else:
+        owner = next_owner(db, pointer=pointer)
 
     ocr_data = body.ocr_data.stored() if body.ocr_data else {}
     # Saved from a document that did not give a name or number: kept, and flagged for a person to complete.
@@ -446,6 +555,7 @@ def create_candidate(
         gulf_experience=body.gulf_experience,
         skills=body.skills,
         expected_salary=body.expected_salary,
+        **form_fx.form_columns_from(body),
         source=body.source,
         source_detail=body.source_detail,
         status=CandidateStatus.new if owner and not incomplete else CandidateStatus.needs_review,
@@ -462,9 +572,17 @@ def create_candidate(
                                                "phone": body.phone, "whatsapp": body.whatsapp,
                                                "email": body.email, "passport_no": body.passport_no}).items():
         setattr(candidate, key, val)
+    if not ocr_data:
+        # Typed by hand: protect the form values from later document reads. (With OCR output, form_sync stamps the
+        # ones that equal what the document says as "extracted"; anything the person changed stays unmarked, i.e. kept.)
+        form_fx.mark_manual(candidate, [column for column in form_fx.SPECS if column in body.model_fields_set and column not in ("education", "work_history")
+                                        or column in ("education", "work_history") and getattr(body, column)])
     db.add(candidate)
     db.flush()
     bind_intake(intake_jobs, candidate.id)
+    if candidate.next_follow_up_date:
+        from app.services.application_form import sync_follow_up_todo
+        sync_follow_up_todo(db, candidate)
     from app.services.whatsapp_chat import link_conversations_for_candidate
     link_conversations_for_candidate(db, candidate)
 
@@ -614,26 +732,11 @@ def check_duplicate(
     if match is None:
         return {"duplicate": False}
     existing, fields = match
-    owner = db.get(User, existing.owner_id) if existing.owner_id else None
-    return {
-        "duplicate": True,
-        "matched_on": fields,
-        "candidate": DuplicateMatch(
-            id=existing.id,
-            ref=existing.ref,
-            name=existing.name,
-            phone=existing.phone,
-            dob=existing.dob,
-            owner_name=owner.name if owner else None,
-            owner_id=existing.owner_id,
-            matched_on=fields,
-        ).model_dump(by_alias=True, mode="json"),
-    }
+    return {"duplicate": True, "matched_on": fields, "candidate": duplicate_match(db, existing, fields, user)}
 
 
 def ensure_candidate_edit(candidate, user):
-    if user.role == Role.staff and candidate.owner_id != user.id:
-        raise HTTPException(403, "Only the assigned recruiter or a supervisor can change this candidate.")
+    ensure_can_work_candidate(candidate, user)
 
 
 @router.post("/{candidate_id}/merge", response_model=CandidateOut)
@@ -644,9 +747,9 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if not candidate:
         raise HTTPException(404, "Candidate not found.")
-    # Combining a new entry into an existing duplicate is open to every signed-in
-    # user (PRD: merge or cancel). It can only fill empty fields and add documents,
-    # so the owner, status and populated details of the existing candidate stay.
+    # Combining adds documents and fills empty fields of someone's candidate, so it is work on that
+    # candidate: the assigned recruiter, a manager or an admin. Anyone else is told who owns it.
+    ensure_can_work_candidate(candidate, user, db)
     intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
     recovered_id = saved_candidate_id(intake_jobs)
     if recovered_id is not None and recovered_id != candidate_id:
@@ -697,6 +800,7 @@ def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session 
     if not candidate:
         raise HTTPException(404, "Candidate not found.")
     ensure_candidate_edit(candidate, user)
+    _check_form_choices(db, body, candidate)
     if identity_matches(db, body.model_dump(), exclude_id=candidate.id):
         raise HTTPException(409, "The corrected phone, email or passport already belongs to another candidate.")
     if body.mark_reviewed and not candidate.owner_id:
@@ -714,6 +818,11 @@ def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session 
             raise HTTPException(422, f"The candidate's {'name' if key == 'name' else 'phone number'} cannot be removed. Replace it instead.")
     for key, val in changes.items():
         setattr(candidate, key, val)
+    # A person corrected these, so a later document read must leave them alone.
+    form_fx.mark_manual(candidate, [key for key in changes if key in form_fx.SPECS and before[key] != changes[key]])
+    if "next_follow_up_date" in changes or "owner_id" in changes:
+        from app.services.application_form import sync_follow_up_todo
+        sync_follow_up_todo(db, candidate)
     if body.mark_reviewed:
         candidate.needs_review = False
         if candidate.status == CandidateStatus.needs_review:

@@ -26,12 +26,28 @@ export interface DashboardTask {
   id: string; title: string; candidateId: string; candidate: string; applicationId: string | null; stage: number | null
   ownerId: string; owner: string; dueAt: string; overdue: boolean; dueToday: boolean; escalated: boolean; notUpdated: boolean
 }
+/** One placement behind a pipeline overview card. `state` is "current" while it is waiting there, "done" once it has passed. */
+export interface OverviewItem {
+  applicationId: string; candidateId: string; candidate: string; orderId: string; order: string; designation: string; company: string; client: string
+  stage: number; stageLabel: string; status: 'active' | 'closed' | 'deployed' | string; state: 'current' | 'done'; ownerId: string | null; owner: string
+  since: string; days: number
+}
+interface OverviewList { itemsTotal: number; items: OverviewItem[] }
+export interface DashboardOverview {
+  idleDays: number
+  offer: OverviewList & { current: number; issued: number }
+  visa: OverviewList & { current: number; received: number; stamped: number }
+  departure: OverviewList & { current: number; departed: number }
+  idle: OverviewList & { count: number; longestDays: number }
+}
 export interface DashboardResult {
   generatedAt: string; timezone: string; date: string; staffId: string | null; staffOptions: Option[]
   today: { total: number; email: number; whatsapp: number; walk_in: number; referral: number; other: number }
   taskCounts: { open: number; dueToday: number; overdue: number; escalated: number; notUpdated: number }
   pipeline: { stage: number; label: string; count: number; applications: { id: string; candidateId: string; candidate: string; order: string }[] }[]
   orders: OrderMetrics[]; tasks: DashboardTask[]; myTasks: DashboardTask[]
+  /** Absent in a result saved by an older version of the app; the cards are then simply not shown. */
+  overview?: DashboardOverview
 }
 
 /** How often a visible report re-reads, and the least time between two reads triggered by focus. */

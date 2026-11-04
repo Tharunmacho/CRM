@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, Flag, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Trash2, Unlink, UserCog, UserPlus, ListChecks } from 'lucide-react'
+import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, Flag, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Trash2, Unlink, UserCog, UserPlus, ListChecks, Lock } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { DOCUMENT_HELP, newestFileVersions } from '@/shared/lib/document-files'
@@ -16,6 +16,7 @@ import { Button } from '@/shared/ui/primitives'
 import { FileLink } from '@/shared/ui/file-drop'
 import { Dialog } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
+import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
 import { PersonAvatar } from '@/features/workflow/components/person-avatar'
 import { StageCaption, StageRail } from '@/features/workflow/components/stage-rail'
 import { CallDialog } from '@/features/candidates/components/call-dialog'
@@ -32,6 +33,7 @@ import { CandidateIntakeEvidence } from '@/features/candidates/components/candid
 import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
 import { canDeleteCandidate, linkedConversationId, mapToOrderBlocker } from '@/features/candidates/profile-actions'
+import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { DeleteCandidateDialog } from '@/features/candidates/components/delete-candidate-dialog'
 import { conversationHref } from '@/features/whatsapp/chat-types'
 import '@/styles/candidate-v2.css'
@@ -253,7 +255,8 @@ export default function CandidateProfilePage() {
   const apps = store.applicationsFor(cand.id)
   const active = apps.find((a) => a.status === 'active')
   const deployed = apps.some((a) => a.status === 'deployed') || cand.status === 'deployed'
-  const canWork = store.can('work_any_candidate') || cand.ownerId === store.me.id
+  const canWork = canWorkCandidate(store.me, cand)
+  const readOnlyReason = workRefusal(store.me, cand, owner?.name)
   const canAssign = store.can('reassign')
   const ownerActive = !!cand.ownerId && !!store.user(cand.ownerId)?.active
   const initialTask = store.tasks.find(task => task.candidateId === cand.id && task.kind === 'initial_call' && !task.completedAt && !task.cancelledAt)
@@ -262,10 +265,10 @@ export default function CandidateProfilePage() {
 
   // One filled button for the next thing that moves this candidate forward; the rest stay outlined.
   const primary: 'assign' | 'stage' | 'map' | null = !cand.ownerId && canAssign ? 'assign' : active ? 'stage' : !deployed ? 'map' : null
-  const mapBlocker = mapToOrderBlocker(cand, ownerActive)
+  const mapBlocker = readOnlyReason ?? mapToOrderBlocker(cand, ownerActive)
   const mapButton = !active && !deployed && (
     <span title={mapBlocker ?? undefined} className="inline-flex">
-      <Button variant={primary === 'map' ? 'primary' : 'secondary'} icon={<Link2 />} disabled={!ownerActive} aria-describedby={mapBlocker && apps.length === 0 ? 'map-blocker' : undefined} onClick={() => setMapping(true)}>
+      <Button variant={primary === 'map' ? 'primary' : 'secondary'} icon={<Link2 />} disabled={!ownerActive || !canWork} aria-describedby={mapBlocker && apps.length === 0 ? 'map-blocker' : undefined} onClick={() => setMapping(true)}>
         Match to an order
       </Button>
     </span>
@@ -316,7 +319,8 @@ export default function CandidateProfilePage() {
             </div>
           </div>
           <div className="cp-actions">
-            {canWork && <Button icon={<Pencil />} onClick={() => setEditing(true)}>Edit profile</Button>}
+            <ApplicationFormButton candidateId={cand.id} orderId={tracked?.orderId} />
+            <span title={readOnlyReason ?? undefined} className="inline-flex"><Button icon={<Pencil />} disabled={!canWork} onClick={() => setEditing(true)}>Edit profile</Button></span>
             {conversationId && <Button icon={<MessageCircle />} onClick={() => navigate(conversationHref(conversationId))}>Open WhatsApp chat</Button>}
             {resumeFile && (
               <FileLink url={resumeFile.url} download title={`Download ${resumeFile.name}`} className="cp-linkbtn">
@@ -340,6 +344,8 @@ export default function CandidateProfilePage() {
           </div>
         )}
       </header>
+
+      {readOnlyReason && <p role="note" className="cp-readonly"><Lock className="h-4 w-4" aria-hidden="true" /><span>{readOnlyReason} You can look at everything here, but you cannot change it.</span></p>}
 
       <SummaryCards items={stats} />
 
@@ -380,7 +386,7 @@ export default function CandidateProfilePage() {
                 <p className="cp-empty-title">Not matched to any order</p>
                 <p className="cp-empty-text">Until this candidate is matched to an order, there are no stages to work on.</p>
                 {!deployed && mapBlocker && <p id="map-blocker" role="note" className="cp-warn-text">{mapBlocker}</p>}
-                {!deployed && ownerActive && <Button variant="primary" className="mt-4" icon={<Link2 />} onClick={() => setMapping(true)}>Match to an order</Button>}
+                {!deployed && ownerActive && canWork && <Button variant="primary" className="mt-4" icon={<Link2 />} onClick={() => setMapping(true)}>Match to an order</Button>}
               </div>
             ) : (
               <ul className="cp-apps">
@@ -402,7 +408,7 @@ export default function CandidateProfilePage() {
                           <span className="cp-app-when">{dateTimeLabel(a.updatedAt)}</span>
                         </span>
                       </button>
-                      {a.status === 'active' && store.can('map_candidates') && (
+                      {a.status === 'active' && store.can('map_candidates') && canWork && (
                         <div className="cp-app-actions">
                           <Button size="sm" variant="dangerGhost" icon={<Unlink />} onClick={() => { setUnmapError(''); setUnmapping(a.id) }}>Remove from this order</Button>
                         </div>

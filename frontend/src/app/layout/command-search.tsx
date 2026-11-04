@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { CornerDownLeft, FileText, Search, User, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
+import { canWorkCandidate } from '@/features/candidates/candidate-access'
 
 export interface SearchPage { label: string; to: string; icon: typeof Search }
 
@@ -27,7 +28,7 @@ export function CommandSearch({ open, onClose, pages }: { open: boolean; onClose
     const pageHits = pages.filter((page) => !text || page.label.toLowerCase().includes(text)).map((page) => ({ key: `p:${page.to}`, label: page.label, detail: 'Page', to: page.to, kind: 'page' as const, icon: page.icon }))
     if (!text) return pageHits.slice(0, 8)
     const people = store.candidates
-      .filter((candidate) => (store.can('work_any_candidate') || candidate.ownerId === store.me.id)
+      .filter((candidate) => canWorkCandidate(store.me, candidate)
         && `${candidate.name} ${candidate.ref} ${candidate.phone} ${candidate.email ?? ''}`.toLowerCase().includes(text))
       .slice(0, 6)
       .map((candidate) => ({ key: `c:${candidate.id}`, label: candidate.name, detail: [candidate.ref, candidate.phone].filter(Boolean).join(' · '), to: `/candidates/${candidate.id}`, kind: 'candidate' as const, icon: User }))

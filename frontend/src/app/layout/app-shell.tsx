@@ -63,7 +63,7 @@ const NAV: NavItem[] = [
   { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, group: 'main', extension: true },
   { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
   { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, group: 'Recruitment' },
-  { to: '/add-candidate', label: 'Add Candidate', icon: UserPlus, group: 'Recruitment' },
+  { to: '/add-candidate', label: 'Candidate', icon: UserPlus, group: 'Recruitment' },
   { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
   { to: '/mapped', label: 'Matched Candidates', icon: GitBranch, group: 'Recruitment', extension: true },
   { to: '/tasks', label: 'Tasks', icon: ListChecks, signal: 'tasks', group: 'Workspace' },

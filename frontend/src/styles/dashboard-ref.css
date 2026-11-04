@@ -345,3 +345,20 @@ p.dr-error { margin: 0 20px 12px; }
   .dr-open { height: 40px; }
 }
 .dashref .ui-data-table .dr-pill { white-space: normal; line-height: 1.3; }
+
+/* ---------- Pipeline overview: four pressed-state cards and the list under the pressed one ---------- */
+.dr-tone-green { --tone: var(--dr-green); }
+.dr-stat-detail.is-warn { color: var(--warning-ink); }
+.dashref [aria-label="Pipeline overview"] > .dr-grid-4 { margin-bottom: 0; }
+.dr-overview-panel { margin-top: 16px; overflow: hidden; scroll-margin-top: 16px; }
+.dr-tab-count { margin-left: 7px; padding: 1px 7px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dr-tabs button.is-active .dr-tab-count { background: color-mix(in srgb, var(--primary) 14%, var(--bg-card)); color: var(--primary); }
+.dr-row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; white-space: nowrap; }
+.dr-overview-note { margin: 0; padding: 10px 22px 14px; border-top: 1px solid var(--border-faint); font-size: 12.5px; color: var(--text-muted); }
+.dr-mcard > .dr-row-actions { justify-content: flex-start; }
+@media (max-width: 640px) {
+  .dr-overview-note { padding-left: 16px; padding-right: 16px; }
+  .dr-mcard > .dr-row-actions .dr-open, .dr-mcard > .dr-row-actions > * { flex: 1 1 0; justify-content: center; }
+  .dr-mcard > .dr-row-actions { display: flex; }
+}
+.dr-mcard dd.dr-overdue { color: var(--error-ink); font-weight: 500; }

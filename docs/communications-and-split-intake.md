@@ -18,7 +18,7 @@ WhatsApp acknowledgements use the same durable outbox and current reply window a
 
 ## Documents containing several people
 
-1. Open **Add candidate → Documents → Review people in documents**, **Inbox → Candidate documents → Review people in documents**, or **WhatsApp → Candidate intake → Review people**.
+1. Open **Candidate → Documents → Review people in documents**, **Inbox → Candidate documents → Review people in documents**, or **WhatsApp → Candidate intake → Review people**.
 2. The source is reserved for this review. Its original files are preserved, and the ordinary single-person retry/link path cannot attach that mixed source.
 3. The document worker reads page evidence locally and proposes person groups where identities are sufficiently clear. The API returns promptly; preparation progress and errors are saved.
 4. Review each page preview, the proposed identity, and the editable candidate fields. Add or remove groups and move pages to the right person.

@@ -18,10 +18,10 @@ export function useNarrow() {
   return narrow
 }
 
-const press = (action: () => void) => ({ role: 'button' as const, tabIndex: 0, onClick: action, onKeyDown: (event: KeyboardEvent) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); action() } } })
+export const press = (action: () => void) => ({ role: 'button' as const, tabIndex: 0, onClick: action, onKeyDown: (event: KeyboardEvent) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); action() } } })
 
 /** A list that shows a first page and reveals more on request. */
-function Stack({ children, total, step = 5, label, empty }: { children: (limit: number) => ReactNode; total: number; step?: number; label: string; empty: ReactNode }) {
+export function Stack({ children, total, step = 5, label, empty }: { children: (limit: number) => ReactNode; total: number; step?: number; label: string; empty: ReactNode }) {
   const [limit, setLimit] = useState(step)
   if (!total) return <>{empty}</>
   return <div className="dr-stack">

@@ -200,7 +200,7 @@ def test_duplicate_requires_explicit_merge_and_retains_owner_work(env):
         assert db.scalar(select(func.count()).select_from(Task)) == 1
 
 
-def test_any_recruiter_can_combine_a_duplicate_owned_by_someone_else(env):
+def test_only_the_owner_a_manager_or_an_admin_can_combine_a_duplicate(env):
     env.actor = SimpleNamespace(id=env.other, role=Role.staff)
     bundle = prepare(env)
     identifier = str(uuid4())
@@ -211,12 +211,22 @@ def test_any_recruiter_can_combine_a_duplicate_owned_by_someone_else(env):
     first = commit(env, bundle)
     assert first.status_code == 409, first.text
     duplicates = first.json()["detail"]["duplicates"]
-    assert len(duplicates) == 1 and duplicates[0]["canMerge"] is True
+    assert len(duplicates) == 1 and duplicates[0]["canMerge"] is False
+    assert "Only they" in duplicates[0]["refusal"]
     choice = {"groupId": duplicates[0]["groupId"], "candidateId": identifier}
-    response = commit(env, bundle, duplicateDecisions=[choice]); assert response.status_code == 200, response.text
+    refused = commit(env, bundle, duplicateDecisions=[choice])
+    assert refused.status_code == 403, refused.text
+    with env.sessions() as db:
+        assert db.get(Candidate, identifier).email is None and db.scalar(select(func.count()).select_from(Attachment)) == 0
+    # Once the candidate is assigned to the person doing the review, they may combine it.
+    with env.sessions() as db:
+        db.get(Candidate, identifier).owner_id = env.other
+        db.commit()
+    response = commit(env, bundle, duplicateDecisions=[choice])
+    assert response.status_code == 200, response.text
     with env.sessions() as db:
         existing = db.get(Candidate, identifier)
-        assert existing.owner_id == env.staff and existing.name == "Human verified Alice" and existing.skills == ["Human verified skill"]
+        assert existing.owner_id == env.other and existing.name == "Human verified Alice" and existing.skills == ["Human verified skill"]
         assert db.scalar(select(func.count()).select_from(Task)) == 1
 
 

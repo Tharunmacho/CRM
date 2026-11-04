@@ -140,6 +140,8 @@
 .db-track-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .db-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .db-act { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-width: 36px; height: 36px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); font-size: 13px; font-weight: 500; color: var(--text-main); cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
+.db-act:disabled, .db-menu-item:disabled { opacity: .45; cursor: not-allowed; }
+.db-act:disabled:hover { border-color: var(--border-control); background: var(--bg-card); color: var(--text-main); }
 .db-act:hover { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); color: var(--primary); }
 
 /* ---------- List view: one grid for header and body, every column visible, no horizontal scroll ---------- */
@@ -183,6 +185,9 @@
 .db-icon-chip svg { color: inherit !important; }
 .db-tbl .db-acts { gap: 4px; }
 .db-tbl .db-act, .db-menu-trigger { min-width: 32px; width: 32px; height: 32px; padding: 0; }
+.db-tbl .db-act.is-form { width: auto; padding: 0 10px; }
+.db-tbl .db-act.is-form span { white-space: nowrap; }
+@container (max-width: 1800px) { .db-tbl .db-act.is-form { width: 32px; padding: 0; } .db-tbl .db-act.is-form span { display: none; } }
 .db-menu-trigger { display: inline-grid; place-items: center; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
 .db-menu-trigger:hover, .db-menu-trigger[aria-expanded='true'] { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
 .db-menu-trigger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
@@ -212,7 +217,8 @@
 .db-mini-meta .db-owner, .db-mini-meta .db-source { font-size: 13.5px; }
 .db-mini-skills { margin: -4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-muted); }
 .db-mini-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; margin-top: auto; }
-.db-mini-foot .db-acts { margin-left: auto; }
+.db-mini-foot .db-acts { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; margin-left: 0; min-width: 0; }
+.db-mini-foot .db-act.is-label { flex: 0 1 auto; }
 .db-mini-when { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
 
 /* ---------- Footer / pager ---------- */

@@ -8,13 +8,14 @@ import { dateTimeLabel } from '@/shared/lib/format'
 import { Panel } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { CategoryCard } from './category-card'
+import { FormOptionsCard } from './form-options-card'
 import { CurrencyCard } from './currency-card'
 import { PanelHead } from './user-ui'
 import '@/styles/agency-settings.css'
 
 type Errors = Partial<Record<keyof AgencyForm, string>>
 
-/** Users > Agency settings: identity, defaults for new records, the reply text, the fixed rules, the currency list and the job categories. */
+/** Users > Agency settings: identity, defaults for new records, the reply text, the fixed rules, the currency list, the job categories and the form option lists. */
 export function AgencySettingsTab() {
   const store = useStore()
   const settings = store.settings
@@ -96,7 +97,7 @@ export function AgencySettingsTab() {
               <Field label="Home calling code" required error={errors.homeCallingCode} hint="Your country's phone code, for example +91. Numbers with and without it are treated as the same person when checking for duplicates.">
                 <Input value={form.homeCallingCode} maxLength={6} inputMode="tel" onChange={(e) => set('homeCallingCode', e.target.value)} />
               </Field>
-              <Field label="Default nationality" error={errors.defaultNationality} hint="Pre-fills the nationality on the Add candidate form. Leave empty to pre-fill nothing.">
+              <Field label="Default nationality" error={errors.defaultNationality} hint="Pre-fills the nationality on the Candidate form. Leave empty to pre-fill nothing.">
                 <Input value={form.defaultNationality} maxLength={80} onChange={(e) => set('defaultNationality', e.target.value)} />
               </Field>
             </div>
@@ -147,5 +148,7 @@ export function AgencySettingsTab() {
     <CurrencyCard editable={editable} defaultOrder={settings.defaultOrderCurrency} defaultAdvance={settings.defaultAdvanceCurrency} />
 
     <CategoryCard editable={editable} />
+
+    <FormOptionsCard editable={editable} />
   </div>
 }

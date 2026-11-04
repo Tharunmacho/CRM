@@ -133,6 +133,18 @@ def list_users() -> int:
     return 0
 
 
+def backfill_application_forms(candidate_id: str | None, dry_run: bool) -> int:
+    """Fill the application-form columns of existing candidates from the OCR output already stored on them.
+
+    Only empty fields (or ones still marked extracted) are filled; nothing a person entered is touched. Safe to repeat."""
+    from app.services.application_form import backfill
+    with SessionLocal() as db:
+        summary = backfill(db, candidate_id=candidate_id, dry_run=dry_run)
+    print(f"{summary['candidates']} candidates with stored documents checked, {summary['updated']} updated, "
+          f"{summary['fieldsFilled']} fields filled{' (dry run, nothing saved)' if dry_run else ''}.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -147,11 +159,17 @@ def main() -> int:
 
     sub.add_parser("list-users", help="Show accounts and whether a password is set")
 
+    backfill = sub.add_parser("backfill-application-forms", help="Fill application-form fields of existing candidates from stored documents")
+    backfill.add_argument("--candidate", help="Only this candidate id")
+    backfill.add_argument("--dry-run", action="store_true", help="Report what would be filled; save nothing")
+
     args = parser.parse_args()
     if args.command == "create-user":
         return create_user(args.email, args.name, Role(args.role))
     if args.command == "set-password":
         return set_password(args.email)
+    if args.command == "backfill-application-forms":
+        return backfill_application_forms(args.candidate, args.dry_run)
     return list_users()
 
 

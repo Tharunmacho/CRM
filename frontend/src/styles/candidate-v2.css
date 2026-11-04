@@ -159,6 +159,8 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 .cp-empty-title { font-size: 14.5px; font-weight: 600; color: var(--text-main); }
 .cp-empty-text { margin-top: 4px; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
 .cp-empty-text.is-plain { margin-top: 0; font-size: 14px; line-height: 1.6; }
+.cp-readonly { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--warning-edge); border-radius: 12px; background: var(--warning-fill); font-size: 13.5px; line-height: 1.5; color: var(--warning-ink); }
+.cp-readonly svg { flex: none; margin-top: 2px; }
 .cp-warn-text { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--warning-ink); }
 .cp-next-title { font-size: 16px; font-weight: 600; line-height: 1.5; letter-spacing: -.01em; color: var(--text-main); }
 .cp-next-text { margin-top: 4px; font-size: 13.5px; line-height: 1.6; color: var(--text-muted); }

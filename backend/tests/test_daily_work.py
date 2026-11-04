@@ -23,10 +23,11 @@ from app.services.daily_work import ensure_allocations, load_rows, scan_daily_wo
 from test_database_naming import _migrate, schema_database
 
 with patch("app.core.config.get_settings", return_value=SimpleNamespace(
-    database_url="postgresql+psycopg://unused@127.0.0.1:1/unused", storage_dir="unused",
+    database_url="postgresql+psycopg://unused@127.0.0.1:1/unused", storage_dir="unused", agency_timezone="Asia/Kolkata",
 )):
     from app.api.routers import applications as applications_router
     from app.api.routers import daily_work as daily_router
+    from app.api.routers import data as data_router
     from app.api.routers import workflow as workflow_router
 
 TZ = "Asia/Kolkata"
@@ -67,6 +68,7 @@ def desk(schema_database, monkeypatch):
     clock = {"now": TUESDAY}
     monkeypatch.setattr(daily_router, "datetime", frozen(clock))
     monkeypatch.setattr(applications_router, "datetime", frozen(clock))
+    monkeypatch.setattr(data_router, "datetime", frozen(clock))
     monkeypatch.setattr(applications_router, "get_settings", lambda: SimpleNamespace(storage_dir="unused"))
     monkeypatch.setattr(workflow_router, "get_settings", lambda: SimpleNamespace(agency_timezone=TZ))
     actor = SimpleNamespace(id="asha", role=Role.staff)
@@ -74,6 +76,7 @@ def desk(schema_database, monkeypatch):
     app.include_router(applications_router.router)
     app.include_router(daily_router.router)
     app.include_router(workflow_router.router)
+    app.include_router(data_router.router)
 
     def database():
         with sessions() as db:
@@ -570,7 +573,7 @@ def test_migration_adds_three_tables_seeds_the_agency_goals_and_downgrades_clean
     assert "workflow_daily_work_items" not in before
     _migrate(engine, "head")
     added = {"workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress"}
-    assert set(inspect(engine).get_table_names()) - before == added
+    assert added <= set(inspect(engine).get_table_names()) - before  # later migrations may add their own tables too
     with engine.connect() as connection:
         seeded = connection.execute(text("SELECT metric, target, morning_target FROM workflow_daily_goals WHERE user_id IS NULL ORDER BY metric")).all()
     assert seeded == [("candidates", 5, 3), ("forwarded_to_client", 2, None), ("stage_moves", 5, None)]
@@ -589,7 +592,7 @@ def test_migration_adds_three_tables_seeds_the_agency_goals_and_downgrades_clean
                 with connection.begin_nested():
                     connection.execute(text(bad))
     _migrate(engine, "0019_job_categories", downgrade=True)
-    assert set(inspect(engine).get_table_names()) == before
+    assert not added & set(inspect(engine).get_table_names())  # the three tables are gone, nothing else of ours is left
     _migrate(engine, "head")
     assert added <= set(inspect(engine).get_table_names())
 
@@ -599,3 +602,326 @@ def test_the_item_table_is_announced_to_live_screens():
     from app.services.change_feed import IGNORED_TABLES
     assert TOPIC_TABLES["workflow_daily_work_items"] == ("tasks",) and TOPIC_TABLES["workflow_daily_goals"] == ("tasks",)
     assert "workflow_daily_goal_progress" in IGNORED_TABLES  # rewritten by reads, so it must not wake every desk
+
+
+def test_team_view_shows_the_per_recruiter_quota_and_labels_the_sum_as_a_team_total(desk):
+    mapped_candidates(desk, 7)
+    mapped_candidates(desk, 6, owner="ravi", start=40)
+    as_user(desk, "admin")
+    team = desk.client.get("/api/daily-work").json()
+    # The quota is what each recruiter gets (5 = 3 + 2), never the sum across recruiters.
+    assert (team["dailyQuota"], team["morningQuota"], team["eveningQuota"]) == (5, 3, 2)
+    assert (team["goalsMode"], team["staffCount"], team["targetsVary"]) == ("average", 2, False)
+    assert team["goals"]["candidates"] == {"target": 5, "morning": 3, "evening": 2, "done": 0, "morningDone": 0, "eveningDone": 0}
+    assert team["goals"]["forwardedToClient"]["target"] == 2 and team["goals"]["stageMoves"]["target"] == 5
+    assert team["teamGoals"]["candidates"]["target"] == 10 and team["teamGoals"]["forwardedToClient"]["target"] == 4  # the labelled total
+
+    one = desk.client.get("/api/daily-work?staff=ravi").json()
+    assert (one["goalsMode"], one["staffCount"], one["dailyQuota"]) == ("person", 1, 5)
+    assert one["goals"]["candidates"]["target"] == 5 and one["teamGoals"]["candidates"]["target"] == 5
+
+    # An override makes the average only approximate, and says so.
+    assert desk.client.put("/api/daily-goals/staff/ravi", json={"candidates": 3, "morning": 1}).status_code == 200
+    mixed = desk.client.get("/api/daily-work").json()
+    assert mixed["targetsVary"] is True and (mixed["dailyQuota"], mixed["morningQuota"]) == (4, 2)
+    assert desk.client.get("/api/daily-work?staff=ravi").json()["dailyQuota"] == 3
+    assert desk.client.get("/api/daily-work?staff=asha").json()["dailyQuota"] == 5
+
+
+def test_a_recruiter_with_nothing_to_allocate_is_marked_so_and_day_off_is_explained(desk):
+    mapped_candidates(desk, 2)
+    as_user(desk, "manager")
+    staff = {s["userId"]: s for s in desk.client.get("/api/daily-work").json()["staff"]}
+    assert staff["ravi"]["summary"]["total"] == 0 and staff["ravi"]["offToday"] is False  # nothing waiting, not a day off
+    assert staff["ravi"]["shortfall"] == {"target": 5, "allocated": 0, "reason": "No candidates assigned to this staff member. Assign candidates from the Data Bank."}
+    assert staff["asha"]["summary"]["total"] == 2
+    assert staff["asha"]["shortfall"]["allocated"] == 2 and "Only 2 candidates are waiting" in staff["asha"]["shortfall"]["reason"]
+    desk.clock["now"] = ist(date(2026, 11, 8), 9, 0)  # Sunday, the default weekly off
+    sunday = {s["userId"]: s for s in desk.client.get("/api/daily-work").json()["staff"]}
+    assert sunday["ravi"]["offToday"] is True and sunday["asha"]["offToday"] is True
+    assert sunday["ravi"]["shortfall"] is None  # a day off is not a shortage
+
+
+# ------------------------------------------------------------------ owned candidates who are not matched yet
+
+def owned_candidates(env, count, *, owner="asha", start=100, **fields):
+    """Candidates the recruiter owns that no order has been matched to; ages are spread so 'oldest first' is testable."""
+    ids = []
+    with env.sessions() as db:
+        for n in range(start, start + count):
+            db.add(Candidate(id=f"u{n}", ref=f"CND-U{n}", name=f"Owned {n}", phone=f"91000{n:05}", source=Source.walk_in, owner_id=owner,
+                             designations=["Mason"], created_at=TUESDAY - timedelta(days=60 - n), **fields))
+            ids.append(f"u{n}")
+        db.commit()
+    return ids
+
+
+def record_call(env, candidate_id, interested="yes", called=True):
+    return env.client.post(f"/api/candidates/{candidate_id}/call", json={"called": called, "interested": interested})
+
+
+def test_every_recruiter_gets_five_owned_candidates_in_morning_and_evening_slots(desk):
+    owned_candidates(desk, 6)
+    with desk.sessions() as db:  # none of these may ever be handed out
+        db.add_all([
+            Candidate(id="dep", ref="CND-DEP", name="Deployed", phone="9200000001", source=Source.walk_in, owner_id="asha", status="deployed", created_at=TUESDAY - timedelta(days=90)),
+            Candidate(id="ni", ref="CND-NI", name="Not interested", phone="9200000002", source=Source.walk_in, owner_id="asha", status="not_interested", created_at=TUESDAY - timedelta(days=90)),
+            Candidate(id="none", ref="CND-NO", name="No owner", phone="9200000003", source=Source.walk_in, owner_id=None, created_at=TUESDAY - timedelta(days=90)),
+            Candidate(id="called", ref="CND-CA", name="Already called", phone="9200000004", source=Source.walk_in, owner_id="asha", created_at=TUESDAY - timedelta(days=90),
+                      call_called=True, call_interested="yes", call_recorded_at=TUESDAY - timedelta(days=5)),
+        ])
+        db.commit()
+        assert ensure_allocations(db, now=TUESDAY, tz=TZ) == {"asha": 5}
+        db.commit()
+    rows = rows_of(desk, "asha", TUESDAY)
+    assert [r["candidateId"] for r in rows] == ["u100", "u101", "u102", "u103", "u104"]  # oldest first; the 6th waits
+    assert [r["kind"] for r in rows] == ["call"] * 5 and all(r["applicationId"] is None and r["stage"] is None for r in rows)
+    assert [r["session"] for r in rows] == ["morning"] * 3 + ["evening"] * 2
+    assert [r["dueAt"].astimezone(ZoneInfoIST).strftime("%H:%M") for r in rows] == ["11:00", "12:00", "13:00", "15:00", "16:00"]
+    assert (rows[0]["client"], rows[0]["country"], rows[0]["position"], rows[0]["orderRef"]) == (None, None, "Mason", None)  # the form's preferred job
+    assert rows_of(desk, "ravi", TUESDAY) == []
+
+
+def test_matched_candidates_come_first_then_owned_unmatched_ones(desk):
+    mapped_candidates(desk, 2)
+    owned_candidates(desk, 6)
+    with desk.sessions() as db:
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    rows = rows_of(desk, "asha", TUESDAY)
+    assert [(r["kind"], r["candidateId"]) for r in rows] == [("stage", "c0"), ("stage", "c1"), ("call", "u100"), ("call", "u101"), ("call", "u102")]
+    assert rows[0]["client"] == "Gulf Builders" and rows[0]["stage"] == 1
+
+
+def test_the_sixth_candidate_is_allocated_the_next_day_once_the_first_five_are_finished(desk):
+    owned_candidates(desk, 6)
+    with desk.sessions() as db:
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    as_user(desk, "asha")
+    desk.clock["now"] = TUESDAY + timedelta(hours=3)
+    for n in range(100, 105):  # the real initial-call flow
+        assert record_call(desk, f"u{n}").status_code == 200
+    rows = rows_of(desk, "asha", desk.clock["now"])
+    assert all(r["status"] == "done" for r in rows) and len(rows) == 5
+    with desk.sessions() as db:
+        daily_work.reconcile(db, now=desk.clock["now"], tz=TZ)
+        db.commit()
+    done = item_rows(desk)["u100"]
+    assert done.status == "completed" and done.completed_at is not None and done.kind == "call"
+    with desk.sessions() as db:
+        assert ensure_allocations(db, now=desk.clock["now"], tz=TZ) == {}  # five done = the day's quota; nothing more today
+        assert ensure_allocations(db, now=WEDNESDAY, tz=TZ) == {"asha": 5}  # the 6th owned candidate, then those awaiting a match
+        db.commit()
+    rows = rows_of(desk, "asha", WEDNESDAY)
+    # Never-worked candidates come first (the 6th), then the called-and-interested ones that are still unmatched.
+    assert [(r["candidateId"], r["slotNo"], r["session"], r["postponed"]) for r in rows] == [
+        ("u105", 1, "morning", False), ("u100", 2, "morning", False), ("u101", 3, "morning", False),
+        ("u102", 4, "evening", False), ("u103", 5, "evening", False)]
+
+
+def test_unfinished_owned_candidates_carry_over_without_being_duplicated(desk):
+    owned_candidates(desk, 7)
+    with desk.sessions() as db:
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    as_user(desk, "asha")
+    desk.clock["now"] = TUESDAY + timedelta(hours=3)
+    for n in range(100, 103):
+        assert record_call(desk, f"u{n}").status_code == 200  # 3 of 5 finished
+    with desk.sessions() as db:
+        ensure_allocations(db, now=WEDNESDAY, tz=TZ)
+        db.commit()
+    rows = rows_of(desk, "asha", WEDNESDAY)
+    assert [(r["candidateId"], r["postponed"], r["daysLate"]) for r in rows] == [
+        ("u103", True, 1), ("u104", True, 1),  # unfinished yesterday, carried over
+        ("u105", False, 0), ("u106", False, 0),  # never worked: first
+        ("u100", False, 0), ("u101", False, 0), ("u102", False, 0)]  # called and interested, still unmatched: they stay in the pool
+    assert len({r["candidateId"] for r in rows}) == len(rows)
+
+
+def test_an_unanswered_call_does_not_finish_the_work_but_matching_and_a_stage_does(desk):
+    owned_candidates(desk, 2)
+    with desk.sessions() as db:
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    as_user(desk, "asha")
+    assert record_call(desk, "u100", interested="unreachable", called=False).status_code == 200
+    rows = rows_of(desk, "asha", TUESDAY)
+    assert rows[0]["status"] == "open"  # an unreachable candidate stays on the list
+    # Matched to an order and the first stage finished: that finishes the owned-candidate item too.
+    app_id = desk.client.post("/api/applications", json={"candidate_id": "u101", "order_id": "order"}).json()["id"]
+    shown = rows_of(desk, "asha", TUESDAY)
+    assert [r["status"] for r in shown] == ["open", "open"]
+    assert shown[1]["applicationId"] == app_id and shown[1]["stage"] == 1 and shown[1]["client"] == "Gulf Builders"  # the row now opens the stage
+    with desk.sessions() as db:
+        assert ensure_allocations(db, now=TUESDAY, tz=TZ) == {}  # the matched candidate's stage task is not handed out twice
+        db.commit()
+    finish(desk, app_id, 1)
+    with desk.sessions() as db:
+        daily_work.reconcile(db, now=TUESDAY + timedelta(hours=1), tz=TZ)
+        db.commit()
+    assert item_rows(desk)["u101"].status == "completed"
+    assert [r["status"] for r in rows_of(desk, "asha", TUESDAY + timedelta(hours=1))] == ["open", "done"]
+
+
+def test_owned_candidate_items_are_released_when_the_candidate_moves_or_closes(desk):
+    owned_candidates(desk, 7)
+    with desk.sessions() as db:
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+        db.execute(text("UPDATE crm_candidates SET owner_id = 'ravi' WHERE id = 'u100'"))
+        db.execute(text("UPDATE crm_candidates SET status = 'deployed' WHERE id = 'u101'"))
+        db.commit()
+        assert ensure_allocations(db, now=TUESDAY + timedelta(minutes=5), tz=TZ) == {"asha": 2, "ravi": 1}  # replacements; ravi gets his new candidate
+        db.commit()
+        reasons = {(r.candidate_id, r.owner_id): (r.status, r.release_reason) for r in db.scalars(select(DailyWorkItem))}
+    assert reasons[("u100", "asha")] == ("released", "reassigned") and reasons[("u101", "asha")][0] == "released"
+    assert [r["candidateId"] for r in rows_of(desk, "asha", TUESDAY)] == ["u105", "u106", "u102", "u103", "u104"]  # replacements take the freed slots
+    assert [r["candidateId"] for r in rows_of(desk, "ravi", TUESDAY)] == ["u100"]
+
+
+def test_a_recruiter_with_few_candidates_is_told_why_and_the_admin_sees_the_warning(desk):
+    owned_candidates(desk, 2, owner="ravi")
+    as_user(desk, "asha")
+    body = desk.client.get("/api/daily-work").json()
+    assert body["items"] == [] and body["summary"]["total"] == 0
+    assert body["shortfall"] == {"target": 5, "allocated": 0, "reason": "No candidates assigned to this staff member. Assign candidates from the Data Bank."}
+    as_user(desk, "ravi")
+    mine = desk.client.get("/api/daily-work").json()
+    assert len(mine["items"]) == 2 and mine["shortfall"]["allocated"] == 2 and "Only 2 candidates are waiting" in mine["shortfall"]["reason"]
+    as_user(desk, "admin")
+    board = {s["userId"]: s["shortfall"] for s in desk.client.get("/api/daily-work").json()["staff"]}
+    assert board["asha"]["allocated"] == 0 and board["ravi"]["allocated"] == 2
+
+
+def test_opening_the_list_keeps_a_real_transaction_because_it_allocates():
+    # GETs run on autocommit connections unless marked; the allocation uses savepoints and advisory locks.
+    assert getattr(daily_router.daily_work_today, "writes_on_get", False) is True
+
+
+def test_postponed_work_is_counted_in_the_shortage_message(desk):
+    owned_candidates(desk, 2)
+    with desk.sessions() as db:
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    as_user(desk, "manager")
+    desk.clock["now"] = WEDNESDAY
+    # Both were left unfinished; nobody else is waiting, so tomorrow has 2 postponed and no new candidate.
+    ravi_less = {s["userId"]: s for s in desk.client.get("/api/daily-work").json()["staff"]}["asha"]
+    assert ravi_less["summary"]["postponed"] == 2
+    assert ravi_less["shortfall"] == {"target": 5, "allocated": 0,
+                                      "reason": "Only 0 new candidates today besides 2 postponed. Assign more candidates from the Data Bank."}
+
+
+def test_a_candidate_is_never_allocated_twice_or_held_by_two_open_items(desk):
+    # c0 is matched (stage task, owner asha); u100 is owned and unmatched. Two recruiters, repeated top-ups, a
+    # stage task whose owner differs from the candidate's owner: still one open item per candidate.
+    mapped_candidates(desk, 3)
+    owned_candidates(desk, 3)
+    with desk.sessions() as db:
+        db.execute(text("UPDATE workflow_tasks SET owner_id = 'ravi' WHERE application_id = (SELECT id FROM crm_applications WHERE candidate_id = 'c2')"))
+        db.commit()
+        for minutes in (0, 1, 2):
+            ensure_allocations(db, now=TUESDAY + timedelta(minutes=minutes), tz=TZ)
+            db.commit()
+        for day in (1, 2, 3):
+            ensure_allocations(db, now=TUESDAY + timedelta(days=day), tz=TZ)
+            db.commit()
+        open_per_candidate = dict(db.execute(text(
+            "SELECT candidate_id, count(*) FROM workflow_daily_work_items WHERE status = 'open' GROUP BY candidate_id")).all())
+        per_day = db.execute(text(
+            "SELECT work_date, candidate_id, count(*) FROM workflow_daily_work_items WHERE status <> 'released' GROUP BY 1, 2 HAVING count(*) > 1")).all()
+    assert open_per_candidate and set(open_per_candidate.values()) == {1}
+    assert per_day == []
+
+
+def test_called_and_interested_candidates_stay_on_the_list_until_matched_to_an_order(desk):
+    owned_candidates(desk, 1)
+    with desk.sessions() as db:
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    as_user(desk, "asha")
+    desk.clock["now"] = TUESDAY + timedelta(hours=2)
+    assert record_call(desk, "u100", interested="yes").status_code == 200
+    assert rows_of(desk, "asha", desk.clock["now"])[0]["status"] == "done"  # today's call work is done
+
+    # Next day the same candidate is on the list again: interested, but nobody has matched them to an order yet.
+    with desk.sessions() as db:
+        assert ensure_allocations(db, now=WEDNESDAY, tz=TZ) == {"asha": 1}
+        db.commit()
+    again = rows_of(desk, "asha", WEDNESDAY)
+    assert [(r["candidateId"], r["status"], r["workDate"]) for r in again] == [("u100", "open", "2026-11-04")]  # the old call does not count
+    with desk.sessions() as db:
+        assert ensure_allocations(db, now=WEDNESDAY + timedelta(hours=1), tz=TZ) == {}  # once a day, never twice
+
+    # Matching them and finishing a stage is what finishes this item, and then they are a stage candidate.
+    desk.clock["now"] = WEDNESDAY + timedelta(hours=1)
+    app_id = desk.client.post("/api/applications", json={"candidate_id": "u100", "order_id": "order"}).json()["id"]
+    assert rows_of(desk, "asha", desk.clock["now"])[0]["applicationId"] == app_id
+    finish(desk, app_id, 1)
+    with desk.sessions() as db:
+        daily_work.reconcile(db, now=desk.clock["now"], tz=TZ)
+        db.commit()
+    assert item_rows(desk)["u100"].status == "completed"
+
+
+def test_only_not_interested_or_deployed_candidates_leave_the_list(desk):
+    owned_candidates(desk, 3)
+    with desk.sessions() as db:
+        db.execute(text("UPDATE crm_candidates SET call_called = true, call_interested = 'yes', call_recorded_at = :at WHERE id = 'u100'"), {"at": TUESDAY - timedelta(days=2)})
+        db.execute(text("UPDATE crm_candidates SET status = 'not_interested' WHERE id = 'u101'"))
+        db.execute(text("UPDATE crm_candidates SET status = 'deployed' WHERE id = 'u102'"))
+        db.commit()
+        assert ensure_allocations(db, now=TUESDAY, tz=TZ) == {"asha": 1}
+        db.commit()
+    assert [r["candidateId"] for r in rows_of(desk, "asha", TUESDAY)] == ["u100"]  # called and interested: still worked
+
+
+def test_upgrading_a_database_that_already_has_the_first_daily_work_schema_keeps_its_rows(schema_database):
+    """The committed 0020 schema (no kind column, task_id required) upgrades in place to the current head."""
+    engine = schema_database
+    _migrate(engine, "0020_daily_work_quota")
+    cols = {c["name"]: c for c in inspect(engine).get_columns("workflow_daily_work_items")}
+    assert "kind" not in cols and cols["task_id"]["nullable"] is False
+    with engine.begin() as c:
+        c.execute(text("INSERT INTO auth_users (id,name,email,role,active,receives_auto_assign,on_leave) VALUES ('u','U','u@example.test','staff',true,false,false)"))
+        c.execute(text("INSERT INTO crm_candidates (id,ref,name,phone,source,status,needs_review) VALUES ('c','CND-1','Old','9000000001','walk_in','new',false)"))
+        c.execute(text("INSERT INTO workflow_tasks (id,kind,title,candidate_id,owner_id,escalated) VALUES ('t','stage','Stage','c','u',false)"))
+        c.execute(text("INSERT INTO workflow_daily_work_items (id,owner_id,work_date,task_id,candidate_id,slot_no,session,due_at,status) "
+                       "VALUES ('i','u','2026-11-02','t','c',1,'morning','2026-11-02 05:30+00','open')"))
+    _migrate(engine, "head")
+    cols = {c["name"]: c for c in inspect(engine).get_columns("workflow_daily_work_items")}
+    assert cols["kind"]["nullable"] is False and cols["task_id"]["nullable"] is True
+    with engine.connect() as c:
+        assert c.execute(text("SELECT kind, task_id, status FROM workflow_daily_work_items WHERE id = 'i'")).one() == ("stage", "t", "open")
+        assert c.scalar(text("SELECT count(*) FROM pg_indexes WHERE indexname = 'uq_daily_work_one_open_per_candidate'")) == 0
+        assert c.scalar(text("SELECT count(*) FROM pg_indexes WHERE indexname = 'ix_daily_work_candidate_open'")) == 1
+    with engine.begin() as c:  # the database now allows an owned-candidate item, and still refuses a stage item with no task
+        c.execute(text("INSERT INTO workflow_daily_work_items (id,owner_id,work_date,kind,candidate_id,slot_no,session,due_at) "
+                       "VALUES ('j','u','2026-11-02','call','c',2,'morning','2026-11-02 06:30+00')"))
+    with pytest.raises(Exception):
+        with engine.begin() as c:
+            c.execute(text("INSERT INTO workflow_daily_work_items (id,owner_id,work_date,kind,candidate_id,slot_no,session,due_at) "
+                           "VALUES ('k','u','2026-11-02','stage','c',3,'morning','2026-11-02 06:30+00')"))
+    with pytest.raises(Exception):
+        with engine.begin() as c:
+            c.execute(text("INSERT INTO workflow_daily_work_items (id,owner_id,work_date,kind,candidate_id,slot_no,session,due_at) "
+                           "VALUES ('m','u','2026-11-02','bogus','c',4,'morning','2026-11-02 06:30+00')"))
+
+    # A repeat is harmless; the downgrade refuses while owned-candidate items exist, then restores the old shape.
+    with engine.begin() as c:
+        c.execute(text("UPDATE alembic_version SET version_num = '0022_form_options'"))
+    _migrate(engine, "head")
+    with pytest.raises(Exception, match="Cannot downgrade 0023"):
+        _migrate(engine, "0022_form_options", downgrade=True)
+    with engine.begin() as c:
+        c.execute(text("DELETE FROM workflow_daily_work_items WHERE kind = 'call'"))
+    _migrate(engine, "0022_form_options", downgrade=True)
+    cols = {c["name"]: c for c in inspect(engine).get_columns("workflow_daily_work_items")}
+    assert "kind" not in cols and cols["task_id"]["nullable"] is False
+    with engine.connect() as c:
+        assert c.scalar(text("SELECT count(*) FROM workflow_daily_work_items WHERE id = 'i'")) == 1  # the original row survived both ways
+    _migrate(engine, "head")  # up again
+    with engine.connect() as c:
+        assert c.execute(text("SELECT kind FROM workflow_daily_work_items WHERE id = 'i'")).scalar() == "stage"

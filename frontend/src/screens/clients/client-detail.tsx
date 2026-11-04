@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
 import {
   ArrowLeft, BriefcaseBusiness, Building2, History, Mail, MapPin, MessageCircle,
   Pencil, Phone, Plus, Target, Trash2, UserCheck, UserRound, Users,
@@ -276,7 +277,7 @@ export default function ClientDetailPage() {
                     </div>
                   ) : (
                     <table className="cd-cands">
-                      <colgroup><col style={{ width: '27%' }} /><col style={{ width: '31%' }} /><col style={{ width: '14%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '9%' }} /></colgroup>
+                      <colgroup><col style={{ width: '25%' }} /><col style={{ width: '26%' }} /><col style={{ width: '13%' }} /><col style={{ width: '11%' }} /><col style={{ width: '10%' }} /><col style={{ width: '15%' }} /></colgroup>
                       <thead>
                         <tr><th><span>Candidate</span></th><th><span>Stage</span></th><th><span>Recruiter</span></th><th><span>Updated</span></th><th><span>Status</span></th><th aria-label="Profile" /></tr>
                       </thead>
@@ -284,7 +285,7 @@ export default function ClientDetailPage() {
                         {apps.map((application) => {
                           const candidate = store.candidate(application.candidateId)
                           if (!candidate) return null
-                          const owner = store.user(application.ownerId ?? candidate.ownerId)
+                          const owner = store.user(candidate.ownerId ?? application.ownerId)
                           const state = application.status === 'closed' ? 'closed' : application.status === 'deployed' ? 'deployed' : 'live'
                           return (
                             <tr key={application.id} className={application.status === 'closed' ? 'is-closed' : undefined} onClick={() => setOpenApp(application.id)}>
@@ -298,7 +299,7 @@ export default function ClientDetailPage() {
                               <td className="c-owner">{owner ? <span className="cd-owner"><Avatar name={owner.name} size="sm" /><span title={owner.name}>{owner.name.split(' ')[0]}</span></span> : <span className="cd-muted">Not assigned</span>}</td>
                               <td className="c-updated cd-muted">{ago(application.updatedAt)}</td>
                               <td className="c-status"><StatusPill status={application.status} /></td>
-                              <td className="c-profile"><Link to={`/candidates/${candidate.id}`} className="cd-profile" aria-label={`Open profile of ${candidate.name}`} onClick={(event) => event.stopPropagation()}>Profile</Link></td>
+                              <td className="c-profile"><span className="cd-profile-actions"><ApplicationFormButton size="sm" iconOnly candidateId={candidate.id} orderId={application.orderId} /><Link to={`/candidates/${candidate.id}`} className="cd-profile" aria-label={`Open profile of ${candidate.name}`} onClick={(event) => event.stopPropagation()}>Profile</Link></span></td>
                             </tr>
                           )
                         })}

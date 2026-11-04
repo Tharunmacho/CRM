@@ -16,7 +16,7 @@ import hashlib
 import logging
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -28,8 +28,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.core.deps import current_user, ensure_can_work
-from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, Role, User
+from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate
+from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, User
 from app.services import document_storage
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -147,11 +147,10 @@ def upload(
         record = _entity(db, entity_type, entity_id, lock=True)
         if entity_type == "application":
             ensure_can_work(db, record, user)
-        if entity_type == "candidate" and user.role == Role.staff and record.owner_id != user.id:
-            entered_at = getattr(record, "created_at", None)
-            initial_upload = getattr(record, "created_by", None) == user.id and entered_at and entered_at >= datetime.now(timezone.utc) - timedelta(hours=24)
-            if not initial_upload:
-                raise HTTPException(403, "Only the assigned recruiter or a supervisor can upload documents for this candidate")
+        if entity_type == "candidate":
+            # Only the recruiter the candidate is assigned to (or a manager / admin) adds or replaces its documents.
+            # Having entered the candidate no longer counts: an admin may have given it to someone else since.
+            ensure_can_work_candidate(record, user, db)
         if entity_type == "candidate" and slot == "source_bundle":
             raise HTTPException(422, "The original upload is kept as it was received and cannot be replaced by hand")
         previous = db.scalar(
@@ -188,6 +187,11 @@ def upload(
             meta={"attachment_id": row.id, "slot": slot, "version": row.version},
             at=row.uploaded_at,
         ))
+        if entity_type == "candidate" and slot in ("resume", "passport"):
+            # A resume or passport stored for a candidate is read, and what it says fills the application form
+            # (empty fields only; see services/form_extraction.py). The extraction worker picks the job up.
+            from app.services.application_form import queue_reading
+            queue_reading(db, user, record, row, content_type)
         # Detect metadata/constraint failures before writing bytes. The parent
         # remains locked through the commit, including the first upload of a slot.
         db.flush()

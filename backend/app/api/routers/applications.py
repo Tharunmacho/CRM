@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import Wire
 from app.core.config import get_settings
-from app.core.deps import current_user, ensure_can_work, require_role
+from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate, require_role
 from app.db.session import get_db
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry,
@@ -278,6 +278,8 @@ def map_candidate(body: MapIn, db: Session = Depends(get_db), user: User = Depen
     with _mutation(db):
         candidate = _lock(db, Candidate, body.candidate_id, "Candidate")
         order = _lock(db, Order, body.order_id, "Order")
+        # Putting a candidate on an order starts their stage work, which is the assigned recruiter's.
+        ensure_can_work_candidate(candidate, user, db)
         owner = _owner(db, candidate)
         if order.status != OrderStatus.open:
             raise HTTPException(409, "Open this order before matching candidates.")
@@ -313,6 +315,7 @@ def unmap(application_id: str, body: UnmapIn | None = None,
           db: Session = Depends(get_db), user: User = Depends(current_user)):
     with _mutation(db):
         app, candidate, order = _locked_application(db, application_id)
+        ensure_can_work(db, app, user)
         _active(app)
         if body and body.lock_version is not None:
             _check_version(app, body.lock_version)

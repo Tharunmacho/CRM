@@ -8,13 +8,14 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, DailyGoal, Role, User
-from app.db.session import get_db
+from app.db.session import get_db, writes_on_get
 from app.services import daily_work
 
 router = APIRouter(prefix="/api", tags=["daily-work"])
 
 
 @router.get("/daily-work")
+@writes_on_get  # opening the screen tops the quota up, so it needs a real transaction
 def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """
     Staff get their own list. Admin and Manager get every recruiter's progress and, for `staff=<id>` or `all`,
@@ -49,17 +50,35 @@ def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), us
     for row in rows:
         by_owner.setdefault(row["ownerId"], []).append(row)
     items = [r for r in rows if r["ownerId"] in shown]
-    goals = daily_work.add_goal_totals([progress[uid] for uid in shown]) if shown else daily_work.add_goal_totals([])
+    blocks = [progress[uid] for uid in shown]
+    # The goals shown are per recruiter: one person's own, or the average per recruiter for the team. The summed team
+    # figures travel separately so the screen can label them as a total, never as the quota.
+    fallback_goals = daily_work.load_goals(db, ["__agency__"])["__agency__"]
+    fallback = {"candidates": {"target": fallback_goals["candidates"][0], "morning": fallback_goals["candidates"][1],
+                               "evening": fallback_goals["candidates"][0] - fallback_goals["candidates"][1],
+                               "done": 0, "morningDone": 0, "eveningDone": 0},
+                "forwardedToClient": {"target": fallback_goals["forwarded_to_client"], "actual": 0},
+                "stageMoves": {"target": fallback_goals["stage_moves"], "actual": 0}}
+    goals, targets_vary = (blocks[0], False) if len(blocks) == 1 else daily_work.average_goals(blocks, fallback)
+    team = daily_work.add_goal_totals(blocks)
     quota = goals["candidates"]
+    off_today = daily_work.shifts_and_days_off(db, scope, today_date)[1] if scope else set()
+    if scope:
+        off_today |= set(db.scalars(select(User.id).where(User.id.in_(scope), User.on_leave.is_(True))))
+    shortfalls = daily_work.work_shortfalls(db, progress, by_owner, today, off_today, scope)
     result = {
         "agencyDate": today, "serverTime": now,
         "dailyQuota": quota["target"], "morningQuota": quota["morning"], "eveningQuota": quota["evening"],
+        "goalsMode": "person" if len(blocks) == 1 else "average", "targetsVary": targets_vary,
+        "staffCount": len(shown), "teamGoals": team,
+        "shortfall": shortfalls.get(shown[0]) if len(shown) == 1 else None,
+        "offToday": bool(len(shown) == 1 and shown[0] in off_today),
         "summary": daily_work.summarise(items, now, today), "items": items, "goals": goals,
         # Hourly checkpoints only make sense for one person's day.
         "checkpoints": daily_work.checkpoints(items, now, today) if len(shown) == 1 else None,
     }
     if supervisor:
-        result["staff"] = [{"userId": r.id, "name": r.name, "active": r.active,
+        result["staff"] = [{"userId": r.id, "name": r.name, "active": r.active, "offToday": r.id in off_today, "shortfall": shortfalls.get(r.id),
                             "summary": daily_work.summarise(by_owner.get(r.id, []), now, today),
                             "goals": progress.get(r.id)}
                            for r in roster if r.active or by_owner.get(r.id)]

@@ -24,14 +24,15 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, bindparam, exists, func, or_, select, text, tuple_
+from sqlalchemy import and_, bindparam, case, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import ARRAY, insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.types import String
 
 from app.core.config import get_settings
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, AttendanceCalendarDay, AttendanceDutyPlan, AttendanceWeeklyOff,
-    AttendanceWorkTiming, Candidate, Client, Company, DailyGoal, DailyGoalProgress, DailyWorkItem, Designation,
+    AttendanceWorkTiming, Candidate, CandidateStatus, Client, Company, DailyGoal, DailyGoalProgress, DailyWorkItem, Designation,
     Notification, Order, Remark, Role, Source, Task, TaskKind, User,
 )
 
@@ -157,33 +158,47 @@ def shifts_and_days_off(db, user_ids: list[str], day: date) -> tuple[dict[str, t
 
 # ------------------------------------------------------------------------------------------------ lifecycle
 
+# Both kinds in one statement. stage: the linked task decides. call: the owned, unmatched candidate is done when its
+# initial call is recorded (after the allocation) or any stage was completed for it after allocation; it is released
+# if it moved to someone else or was closed (deployed / not interested) without either.
 _RECONCILE = """
 WITH calc AS (
-  SELECT i.id, t.completed_at AS t_done, t.stage AS t_stage, t.cancelled_at AS t_cancelled,
-    CASE WHEN t.completed_at IS NOT NULL AND t.owner_id = i.owner_id THEN 'completed'
-         WHEN t.cancelled_at IS NOT NULL OR t.owner_id <> i.owner_id THEN 'released'
-         ELSE 'open' END AS new_status,
+  SELECT i.id, i.kind, t.stage AS t_stage, t.cancelled_at AS t_cancelled,
+    CASE WHEN i.kind = 'stage' THEN CASE WHEN t.completed_at IS NOT NULL AND t.owner_id = i.owner_id THEN t.completed_at END
+         ELSE CASE WHEN c.owner_id = i.owner_id THEN LEAST(
+           CASE WHEN c.call_recorded_at IS NOT NULL AND c.call_recorded_at >= i.allocated_at AND c.call_called
+                 AND c.call_interested IN ('yes', 'no') THEN c.call_recorded_at END,
+           st.done_at) END END AS done_at,
+    CASE WHEN i.kind = 'stage' THEN (t.cancelled_at IS NOT NULL OR t.owner_id <> i.owner_id)
+         ELSE (c.owner_id IS DISTINCT FROM i.owner_id OR c.status IN ('deployed', 'not_interested')) END AS gone,
     (SELECT MIN(r.created_at) FROM workflow_task_remarks r WHERE r.task_id = i.task_id AND r.author_id = i.owner_id) AS first_remark,
     ((i.work_date + 1)::timestamp AT TIME ZONE :tz) AS next_day
-  FROM workflow_daily_work_items i JOIN workflow_tasks t ON t.id = i.task_id
+  FROM workflow_daily_work_items i
+  JOIN crm_candidates c ON c.id = i.candidate_id
+  LEFT JOIN workflow_tasks t ON t.id = i.task_id
+  LEFT JOIN LATERAL (
+    SELECT MIN(s.completed_at) AS done_at FROM crm_application_stages s JOIN crm_applications a ON a.id = s.application_id
+    WHERE a.candidate_id = i.candidate_id AND s.completed_at >= i.allocated_at AND s.reopened_reason IS NULL) st ON i.kind = 'call'
   WHERE i.status = 'open' {scope}
   FOR UPDATE OF i SKIP LOCKED
+), calc2 AS (
+  SELECT calc.*, CASE WHEN done_at IS NOT NULL THEN 'completed' WHEN gone THEN 'released' ELSE 'open' END AS new_status FROM calc
 )
 UPDATE workflow_daily_work_items i SET
   status = c.new_status,
-  completed_at = CASE WHEN c.new_status = 'completed' THEN c.t_done ELSE i.completed_at END,
+  completed_at = CASE WHEN c.new_status = 'completed' THEN c.done_at ELSE i.completed_at END,
   completed_by = CASE WHEN c.new_status = 'completed' THEN COALESCE(CAST(:actor AS varchar),
       (SELECT s.completed_by FROM crm_application_stages s WHERE s.application_id = i.application_id AND s.stage = c.t_stage
        ORDER BY s.completed_at DESC LIMIT 1)) ELSE i.completed_by END,
   released_at = CASE WHEN c.new_status = 'released' THEN :now ELSE i.released_at END,
   release_reason = CASE WHEN c.new_status = 'released'
       THEN CASE WHEN c.t_cancelled IS NOT NULL THEN 'task_cancelled' ELSE 'reassigned' END ELSE i.release_reason END,
-  started_at = COALESCE(i.started_at, c.first_remark, CASE WHEN c.new_status = 'completed' THEN c.t_done END),
+  started_at = COALESCE(i.started_at, c.first_remark, CASE WHEN c.new_status = 'completed' THEN c.done_at END),
   overdue_at = COALESCE(i.overdue_at, CASE WHEN (c.new_status = 'open' AND i.due_at < :now)
-      OR (c.new_status = 'completed' AND c.t_done > i.due_at) THEN i.due_at END),
+      OR (c.new_status = 'completed' AND c.done_at > i.due_at) THEN i.due_at END),
   postponed_at = COALESCE(i.postponed_at, CASE WHEN (c.new_status = 'open' AND i.work_date < :today)
-      OR (c.new_status = 'completed' AND c.t_done >= c.next_day) THEN c.next_day END)
-FROM calc c
+      OR (c.new_status = 'completed' AND c.done_at >= c.next_day) THEN c.next_day END)
+FROM calc2 c
 WHERE c.id = i.id AND (
   c.new_status <> 'open'
   OR (i.overdue_at IS NULL AND i.due_at < :now)
@@ -193,9 +208,9 @@ WHERE c.id = i.id AND (
 
 
 def reconcile(db, *, now: datetime | None = None, tz=None, task_ids: list[str] | None = None, actor_id: str | None = None) -> int:
-    """Bring the stored status and timestamps of open items up to date with their tasks. One statement; caller commits.
+    """Bring the stored status and timestamps of open items up to date with their tasks/candidates. One statement.
 
-    Only rows that really change are written, so a quiet system produces no change notifications.
+    Only rows that really change are written, so a quiet system produces no change notifications. Caller commits.
     """
     now = now or datetime.now(timezone.utc)
     statement = text(_RECONCILE.format(scope="AND i.task_id = ANY(:task_ids)" if task_ids else ""))
@@ -219,9 +234,43 @@ def mark_started(db, application_id: str, at: datetime) -> None:
                {"at": at, "a": application_id})
 
 
-def _live_item():
-    """An item still counts while its task is not cancelled and still belongs to the item's recruiter."""
-    return and_(DailyWorkItem.status != "released", Task.cancelled_at.is_(None), Task.owner_id == DailyWorkItem.owner_id)
+def _call_done():
+    """The initial call has a real outcome: made, with interest answered yes or no (an unanswered call stays open)."""
+    return and_(Candidate.call_recorded_at.is_not(None), Candidate.call_called.is_(True), Candidate.call_interested.in_(["yes", "no"]))
+
+
+def _pool(db, uid: str, need: int, today: date) -> list[dict]:
+    """Candidates to hand this recruiter, best first, at most `need`.
+
+    1. Their open application-stage tasks (matched candidates waiting on a stage), oldest first.
+    2. Candidates they OWN that are not matched to any order yet (status new or in process), oldest first, those whose
+       initial call is not recorded before the ones already called and interested. A called-and-interested candidate
+       stays on the daily list until matched to an order; only not-interested, deployed or ownerless candidates drop out.
+    A candidate with an unfinished item is never picked again (it carries over instead), and nobody is picked twice
+    on the same day (finishing an item does not hand the same candidate back that day).
+    """
+    busy = or_(
+        exists().where(DailyWorkItem.candidate_id == Candidate.id, DailyWorkItem.status == "open"),
+        exists().where(DailyWorkItem.candidate_id == Candidate.id, DailyWorkItem.work_date == today,
+                       DailyWorkItem.status != "released"),
+    )
+    found: list[dict] = []
+    stage_rows = db.execute(select(Task.id, Task.application_id, Task.candidate_id, Task.stage)
+        .join(Application, Application.id == Task.application_id)
+        .join(Candidate, Candidate.id == Task.candidate_id)
+        .where(Task.owner_id == uid, Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
+               Task.completed_at.is_(None), Task.cancelled_at.is_(None),
+               Application.status == ApplicationStatus.active, ~busy)
+        .order_by(Task.created_at, Task.id).limit(need)).all()
+    found += [{"kind": "stage", "task_id": r[0], "application_id": r[1], "candidate_id": r[2], "stage": r[3]} for r in stage_rows]
+    if len(found) < need:
+        matched = exists().where(Application.candidate_id == Candidate.id, Application.status == ApplicationStatus.active)
+        call_rows = db.scalars(select(Candidate.id).where(
+            Candidate.owner_id == uid, Candidate.status.in_([CandidateStatus.new, CandidateStatus.in_process]),
+            ~matched, ~busy,
+        ).order_by(case((_call_done(), 1), else_=0), Candidate.created_at, Candidate.id).limit(need - len(found))).all()
+        found += [{"kind": "call", "task_id": None, "application_id": None, "candidate_id": cid, "stage": None} for cid in call_rows]
+    return found
 
 
 def ensure_allocations(db, staff_ids: list[str] | None = None, *, now: datetime | None = None, tz=None) -> dict:
@@ -237,8 +286,8 @@ def ensure_allocations(db, staff_ids: list[str] | None = None, *, now: datetime 
         return {}
     goals = load_goals(db, people)
     shifts, off = shifts_and_days_off(db, people, today)
-    have = dict(db.execute(select(DailyWorkItem.owner_id, func.count()).join(Task, Task.id == DailyWorkItem.task_id).where(
-        DailyWorkItem.owner_id.in_(people), DailyWorkItem.work_date == today, _live_item(),
+    have = dict(db.execute(select(DailyWorkItem.owner_id, func.count()).where(
+        DailyWorkItem.owner_id.in_(people), DailyWorkItem.work_date == today, DailyWorkItem.status != "released",
     ).group_by(DailyWorkItem.owner_id)).all())
     created: dict[str, int] = {}
     for uid in people:
@@ -247,38 +296,57 @@ def ensure_allocations(db, staff_ids: list[str] | None = None, *, now: datetime 
             continue
         # One recruiter's top-up at a time, so two requests cannot hand out the same slot or candidate.
         db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"daily-work:{uid}"})
-        used = set(db.scalars(select(DailyWorkItem.slot_no).join(Task, Task.id == DailyWorkItem.task_id).where(
-            DailyWorkItem.owner_id == uid, DailyWorkItem.work_date == today, _live_item())))
+        used = set(db.scalars(select(DailyWorkItem.slot_no).where(
+            DailyWorkItem.owner_id == uid, DailyWorkItem.work_date == today, DailyWorkItem.status != "released")))
         need = quota - len(used)
         if need <= 0:
             continue
-        taken = exists().where(DailyWorkItem.task_id == Task.id, DailyWorkItem.owner_id == uid, DailyWorkItem.status != "released")
-        pool = list(db.execute(select(Task.id, Task.application_id, Task.candidate_id, Task.stage)
-            .join(Application, Application.id == Task.application_id)
-            .where(Task.owner_id == uid, Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
-                   Task.completed_at.is_(None), Task.cancelled_at.is_(None),
-                   Application.status == ApplicationStatus.active, ~taken)
-            .order_by(Task.created_at, Task.id).limit(need)).all())
+        pool = _pool(db, uid, need, today)
         if not pool:
             continue
         start, pause = shifts[uid]
         free = [s for s in slot_plan(today, start, pause, max(quota, max(used, default=0)), morning, tz) if s.no not in used]
         # An allocation made after a slot's deadline still gives the recruiter an hour per candidate.
         previous = None
-        for slot, (task_id, application_id, candidate_id, stage) in zip(free, pool):
+        for slot, pick in zip(free, pool):
             due = slot.due_at
             if previous is not None or due <= now:
                 due = max(due, (previous or now) + timedelta(hours=1))
                 previous = due
-            inserted = db.scalar(insert(DailyWorkItem).values(
-                owner_id=uid, work_date=today, task_id=task_id, application_id=application_id,
-                candidate_id=candidate_id, stage=stage, slot_no=slot.no, session=slot.session, due_at=due,
-                allocated_at=now,
-            ).on_conflict_do_nothing(index_elements=["task_id", "owner_id"], index_where=text("status <> 'released'"))
-                .returning(DailyWorkItem.id))
-            if inserted:
+            try:
+                with db.begin_nested():
+                    db.execute(insert(DailyWorkItem).values(
+                        owner_id=uid, work_date=today, kind=pick["kind"], task_id=pick["task_id"],
+                        application_id=pick["application_id"], candidate_id=pick["candidate_id"], stage=pick["stage"],
+                        slot_no=slot.no, session=slot.session, due_at=due, allocated_at=now))
                 created[uid] = created.get(uid, 0) + 1
+            except IntegrityError:
+                pass  # another request just took this candidate; the next slot will pick the next one
     return created
+
+
+def work_shortfalls(db, goals_by_user: dict, rows_by_owner: dict[str, list[dict]], today: str, off: set[str], people: list[str]) -> dict[str, dict | None]:
+    """Who has fewer candidates today than their goal, and why (so the admin can assign candidates)."""
+    owned = dict(db.execute(select(Candidate.owner_id, func.count()).where(
+        Candidate.owner_id.in_(people or [""]), Candidate.status.in_([CandidateStatus.new, CandidateStatus.in_process]),
+    ).group_by(Candidate.owner_id)).all())
+    result: dict[str, dict | None] = {}
+    for uid in people:
+        target = goals_by_user[uid]["candidates"]["target"]
+        got = sum(1 for r in rows_by_owner.get(uid, []) if r["workDate"] == today)
+        if uid in off or got >= target:
+            result[uid] = None
+            continue
+        carried = sum(1 for r in rows_by_owner.get(uid, []) if r["postponed"])
+        if owned.get(uid, 0) == 0 and got == 0 and carried == 0:
+            reason = "No candidates assigned to this staff member. Assign candidates from the Data Bank."
+        elif carried:
+            reason = (f"Only {got} new {'candidate' if got == 1 else 'candidates'} today besides {carried} postponed. "
+                      "Assign more candidates from the Data Bank.")
+        else:
+            reason = f"Only {got} {'candidate is' if got == 1 else 'candidates are'} waiting for this staff member. Assign more candidates from the Data Bank."
+        result[uid] = {"target": target, "allocated": got, "reason": reason}
+    return result
 
 
 # ------------------------------------------------------------------------------------------------ reads
@@ -302,39 +370,61 @@ def load_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None)
     day_start, _ = day_bounds(today, tz)
     if not owner_ids:
         return []
+    live = or_(
+        and_(DailyWorkItem.kind == "stage", Task.cancelled_at.is_(None), Task.owner_id == DailyWorkItem.owner_id),
+        and_(DailyWorkItem.kind == "call", Candidate.owner_id == DailyWorkItem.owner_id,
+             or_(_call_done(), DailyWorkItem.status == "completed",
+                 Candidate.status.notin_([CandidateStatus.deployed, CandidateStatus.not_interested]))))
+    done_at = case((DailyWorkItem.kind == "stage", Task.completed_at),
+                   else_=func.coalesce(case((and_(_call_done(), Candidate.call_recorded_at >= DailyWorkItem.allocated_at), Candidate.call_recorded_at), else_=None), DailyWorkItem.completed_at))
     rows = db.execute(
-        select(DailyWorkItem, Task, Application, Order, Company, Client, Designation, Candidate)
-        .join(Task, Task.id == DailyWorkItem.task_id)
-        .join(Application, Application.id == DailyWorkItem.application_id)
-        .join(Order, Order.id == Application.order_id)
-        .join(Company, Company.id == Order.company_id)
-        .join(Client, Client.id == Company.client_id)
-        .join(Designation, Designation.id == Order.designation_id)
+        select(DailyWorkItem, Task, Candidate, done_at)
         .join(Candidate, Candidate.id == DailyWorkItem.candidate_id)
-        .where(DailyWorkItem.owner_id.in_(owner_ids), DailyWorkItem.work_date <= today, _live_item(),
-               or_(DailyWorkItem.work_date == today, Task.completed_at.is_(None), Task.completed_at >= day_start))
+        .outerjoin(Task, Task.id == DailyWorkItem.task_id)
+        .where(DailyWorkItem.owner_id.in_(owner_ids), DailyWorkItem.work_date <= today, DailyWorkItem.status != "released", live,
+               or_(DailyWorkItem.work_date == today, done_at.is_(None), done_at >= day_start))
         .order_by(DailyWorkItem.work_date, DailyWorkItem.slot_no, DailyWorkItem.id).limit(MAX_ROWS)
     ).all()
-    remarks = _remarks(db, [task.id for _item, task, *_rest in rows])
+    # The placement behind each row: its own application, or (for an owned candidate matched since) the active one.
+    app_ids = [item.application_id for item, *_ in rows if item.application_id]
+    loose = [cand.id for item, _t, cand, _d in rows if not item.application_id]
+    app_query = (select(Application, Order, Company, Client, Designation)
+                 .join(Order, Order.id == Application.order_id).join(Company, Company.id == Order.company_id)
+                 .join(Client, Client.id == Company.client_id).join(Designation, Designation.id == Order.designation_id))
+    placements = {a.id: (a, o, co, cl, d) for a, o, co, cl, d in db.execute(app_query.where(Application.id.in_(app_ids or [""]))).all()}
+    active = {a.candidate_id: (a, o, co, cl, d) for a, o, co, cl, d in db.execute(
+        app_query.where(Application.candidate_id.in_(loose or [""]), Application.status == ApplicationStatus.active)).all()}
+    # Remarks live on tasks: the stage task, or for a call item the candidate's open initial-call task, if any.
+    call_tasks = dict(db.execute(select(Task.candidate_id, Task.id).where(
+        Task.candidate_id.in_(loose or [""]), Task.kind == TaskKind.initial_call,
+        Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at.desc())).all())
+    remark_tasks = {item.id: (item.task_id or call_tasks.get(cand.id)) for item, _t, cand, _d in rows}
+    remarks = _remarks(db, [t for t in remark_tasks.values() if t])
     out = []
-    for item, task, app, order, company, client, designation, candidate in rows:
-        done = task.completed_at is not None
+    for item, task, cand, finished in rows:
+        placement = placements.get(item.application_id) if item.application_id else active.get(cand.id)
+        app, order, company, client, designation = placement if placement else (None, None, None, None, None)
+        done = finished is not None
         postponed = not done and item.work_date < today
-        remark = remarks.get(task.id)
+        remark_task = remark_tasks.get(item.id)
+        remark = remarks.get(remark_task) if remark_task else None
+        preferred = (cand.designations or [None])[0]
         out.append({
-            "id": item.id, "taskId": task.id, "applicationId": app.id, "candidateId": candidate.id,
-            "ownerId": item.owner_id, "workDate": item.work_date.isoformat(), "slotNo": item.slot_no,
-            "session": item.session, "dueAt": item.due_at, "allocatedStage": item.stage, "stage": app.current_stage,
-            "status": "done" if done else "open", "completedAt": task.completed_at,
+            "id": item.id, "kind": item.kind, "taskId": remark_task, "applicationId": app.id if app else None,
+            "candidateId": cand.id, "ownerId": item.owner_id, "workDate": item.work_date.isoformat(), "slotNo": item.slot_no,
+            "session": item.session, "dueAt": item.due_at, "allocatedStage": item.stage,
+            "stage": app.current_stage if app else None,
+            "status": "done" if done else "open", "completedAt": finished,
             "allocatedAt": item.allocated_at, "startedAt": item.started_at,
-            "overdueAt": item.overdue_at or (item.due_at if (not done and item.due_at < now) or (done and task.completed_at > item.due_at) else None),
+            "overdueAt": item.overdue_at or (item.due_at if (not done and item.due_at < now) or (done and finished > item.due_at) else None),
             "postponed": postponed, "daysLate": (today - item.work_date).days if postponed else 0,
-            "client": company.name, "clientContact": client.name,
-            "country": order.country or company.country,
-            "candidate": candidate.name, "candidateRef": candidate.ref,
-            "position": designation.title, "orderRef": order.ref,
-            "referral": {"source": candidate.source.value, "label": SOURCE_LABELS.get(candidate.source.value, "Other"),
-                         "detail": candidate.source_detail if candidate.source == Source.referral else None},
+            "client": company.name if company else None, "clientContact": client.name if client else None,
+            "country": (order.country or company.country) if order else None,
+            "candidate": cand.name, "candidateRef": cand.ref,
+            "position": designation.title if designation else preferred,
+            "orderRef": order.ref if order else None,
+            "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
+                         "detail": cand.source_detail if cand.source == Source.referral else None},
             "remark": {"body": remark["body"], "at": remark["at"], "by": remark["by"], "count": remark["count"]} if remark else None,
         })
     return out
@@ -444,6 +534,32 @@ def add_goal_totals(parts: list[dict]) -> dict:
     return total
 
 
+def average_goals(parts: list[dict], fallback: dict) -> tuple[dict, bool]:
+    """Per-recruiter average of several goal blocks (targets rounded, achieved counts to one decimal).
+
+    Returns (block, targets_vary). With nobody to average, the `fallback` block (agency default targets) is used.
+    """
+    if not parts:
+        return fallback, False
+    n = len(parts)
+
+    def mean(key, field, digits=None):
+        value = sum(p[key][field] for p in parts) / n
+        return round(value) if digits is None else round(value, digits)
+
+    morning, target = mean("candidates", "morning"), mean("candidates", "target")
+    morning = min(morning, target)
+    block = {
+        "candidates": {"target": target, "morning": morning, "evening": target - morning,
+                       "done": mean("candidates", "done", 1), "morningDone": mean("candidates", "morningDone", 1),
+                       "eveningDone": mean("candidates", "eveningDone", 1)},
+        "forwardedToClient": {"target": mean("forwardedToClient", "target"), "actual": mean("forwardedToClient", "actual", 1)},
+        "stageMoves": {"target": mean("stageMoves", "target"), "actual": mean("stageMoves", "actual", 1)},
+    }
+    shape = lambda p: (p["candidates"]["target"], p["candidates"]["morning"], p["forwardedToClient"]["target"], p["stageMoves"]["target"])  # noqa: E731
+    return block, len({shape(p) for p in parts}) > 1
+
+
 # ------------------------------------------------------------------------------------------------ worker
 
 def scan_daily_work(db, supervisors: list[str], *, now: datetime | None = None, tz=None) -> dict:
@@ -454,23 +570,23 @@ def scan_daily_work(db, supervisors: list[str], *, now: datetime | None = None, 
     names = dict(db.execute(select(User.id, User.name)).all())
     zone = agency_zone(tz)
 
-    overdue = db.execute(select(DailyWorkItem, Candidate.name, Designation.title)
-        .join(Task, Task.id == DailyWorkItem.task_id).join(Candidate, Candidate.id == DailyWorkItem.candidate_id)
-        .join(Application, Application.id == DailyWorkItem.application_id)
-        .join(Order, Order.id == Application.order_id).join(Designation, Designation.id == Order.designation_id)
+    overdue = db.execute(select(DailyWorkItem, Candidate.name, Designation.title, Candidate.designations)
+        .join(Candidate, Candidate.id == DailyWorkItem.candidate_id)
+        .outerjoin(Application, Application.id == DailyWorkItem.application_id)
+        .outerjoin(Order, Order.id == Application.order_id).outerjoin(Designation, Designation.id == Order.designation_id)
         .where(DailyWorkItem.work_date == today, DailyWorkItem.due_at < now, DailyWorkItem.overdue_notified_at.is_(None),
-               DailyWorkItem.status == "open", Task.completed_at.is_(None), _live_item())
+               DailyWorkItem.status == "open")
         .order_by(DailyWorkItem.due_at, DailyWorkItem.id).with_for_update(of=DailyWorkItem, skip_locked=True)).all()
-    for item, candidate, position in overdue:
+    for item, candidate, position, preferred in overdue:
+        label = position or (preferred or [None])[0] or "initial call"
         db.add(Notification(user_id=item.owner_id, kind="daily_work", title="Daily task overdue",
-                            detail=f"{candidate} · {position} was due at {item.due_at.astimezone(zone):%H:%M}. Finish this stage now.",
+                            detail=f"{candidate} · {label} was due at {item.due_at.astimezone(zone):%H:%M}. Finish this now.",
                             link_to="/tasks"))
         item.overdue_notified_at = now
         counts["dailyOverdue"] += 1
 
-    late = db.execute(select(DailyWorkItem).join(Task, Task.id == DailyWorkItem.task_id)
-        .where(DailyWorkItem.work_date < today, DailyWorkItem.postponed_notified_at.is_(None),
-               DailyWorkItem.status == "open", Task.completed_at.is_(None), _live_item())
+    late = db.execute(select(DailyWorkItem)
+        .where(DailyWorkItem.work_date < today, DailyWorkItem.postponed_notified_at.is_(None), DailyWorkItem.status == "open")
         .order_by(DailyWorkItem.owner_id, DailyWorkItem.work_date, DailyWorkItem.slot_no)
         .with_for_update(of=DailyWorkItem, skip_locked=True)).scalars().all()
     grouped: dict[str, list[DailyWorkItem]] = defaultdict(list)

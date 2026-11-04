@@ -4,18 +4,20 @@ Manual entry saves to the same candidate records used by email and WhatsApp. Sav
 
 ## Roles and preparation
 
-All authenticated roles can add candidates. Staff can correct their own assigned profiles; supervisors can correct any profile. Shared visibility does not mean shared edit permission. Prepare the candidate's identity/contact details and any resume, passport, photo, education or experience documents.
+All authenticated roles can add candidates. **Whoever adds a candidate as staff is the owner**: the candidate is assigned to that staff member (not to the next free recruiter) and they do the work and complete the stages. Admin and manager adding a candidate choose the recruiter on the page, or leave it on Automatic (next free recruiter). Email and WhatsApp intake keep the automatic round-robin.
+
+**Who may work a candidate.** Every signed-in user can *see* every candidate. Only the assigned recruiter, a manager or an admin can change its details, add or replace its documents, record the initial call, match it to an order, save/complete stages and edit its application form; any other staff member gets `403 This candidate is assigned to <name>. Only they, a manager or an admin can work on it.` and the screens show the same sentence on disabled buttons. Reopening a finished stage is admin only. An admin (or manager) can reassign one or many candidates at any time; open tasks, daily-work items, the follow-up reminder and the notices move with the candidate and the audit log records who moved it, from whom, to whom and why. Prepare the candidate's identity/contact details and any resume, passport, photo, education or experience documents.
 
 ## User journey
 
-1. Open **Add Candidate**. Start manually or upload a resume first. OCR suggestions help fill the form but are not required for a manual save.
+1. Open **Candidate** in the sidebar. Start manually or upload a resume first. OCR suggestions help fill the form but are not required for a manual save.
 2. Review basic details: full name, phone, WhatsApp, email, date of birth, gender, nationality, current city and languages.
 3. Review passport number, issue/expiry dates and place of issue. Upload the passport copy where available.
 4. Record preferred designations, total and Gulf/overseas experience, skills, expected salary and source. Keep distinct skills as separate values.
 5. Attach the requested supporting documents. The adopted Aadhaar input is an additional supported identity document, not an original PDF requirement.
 6. Correct extraction suggestions before save. Human edits must survive a later OCR result. A future birth date, unusable phone or inconsistent experience/date combination needs correction.
 7. Save. If phone, email **or** passport matches an existing person, inspect the duplicate dialog. Choose **Open**, **Merge** or **Cancel**. Do not pick an arbitrary record when different identifiers match different people.
-8. A merge fills empty fields and adds evidence; it does not replace human corrections, ownership or completed work. A new save assigns according to [rotation](11-staff-assignment-directory.md).
+8. A merge fills empty fields and adds evidence; it does not replace human corrections, ownership or completed work. Only the existing candidate's recruiter, a manager or an admin may combine into it; another staff member is told who the candidate is assigned to and can only open it. A new save by staff is assigned to that staff member; a new save by admin or manager follows their choice or the [rotation](11-staff-assignment-directory.md).
 9. Open the saved profile. Review the actual owner, initial-call deadline, documents and next action. A supervisor can assign an unassigned profile; stage work starts only after [order matching](13-order-matching.md).
 
 ## Screen and backend contract
