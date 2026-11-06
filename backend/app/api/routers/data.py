@@ -38,12 +38,14 @@ from app.db.models import (
     Candidate,
     CandidateStatus,
     Client,
+    ClientStaff,
     Company,
     Designation,
     Notification,
     Order,
     OrderStatus,
     Priority,
+    ReferenceAgency,
     Remark,
     Role,
     Task,
@@ -272,7 +274,7 @@ class MasterInput(BaseModel):
             value = dict(value)
             if isinstance(value.get("website"), str):
                 value["website"] = normalize_website(value["website"])
-            for key in ("email", "contactEmail", "designation", "interviewDate", "deadline"):
+            for key in ("email", "contactEmail", "designation", "interviewDate", "deadline", "state", "agencyName"):
                 if isinstance(value.get(key), str):
                     value[key] = value[key].strip() or None
             for key in ("email", "contactEmail"):
@@ -297,6 +299,32 @@ class MasterInput(BaseModel):
         return result
 
 
+MAX_STAFF_CONTACTS = 50
+
+
+class StaffContactIn(BaseModel):
+    """One person on a client's or reference agency's own team. Blank optional boxes are stored as null."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=160)
+    designation: str | None = Field(default=None, max_length=120)
+    phone: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=255)
+
+    @field_validator("designation", "phone", "email", mode="before")
+    @classmethod
+    def blank_is_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+        return value or None
+
+    @field_validator("email")
+    @classmethod
+    def lowercase_email(cls, value):
+        return value.lower() if value else value
+
+
 class ClientCompanyIn(MasterInput):
     """The employer saved together with a new client contact."""
 
@@ -305,6 +333,7 @@ class ClientCompanyIn(MasterInput):
     city: str | None = Field(default=None, max_length=100)
     industry: str | None = Field(default=None, max_length=120)
     address: str | None = Field(default=None, max_length=2000)
+    state: str | None = Field(default=None, max_length=100)
     # The company's own point of contact. Left blank, the client contact's details are used.
     contactPerson: str | None = Field(default=None, max_length=160)
     contactEmail: str | None = Field(default=None, max_length=255)
@@ -327,6 +356,18 @@ class ClientIn(MasterInput):
     city: str | None = Field(default=None, max_length=100)
     notes: str | None = Field(default=None, max_length=20000)
     status: Literal["active", "inactive"] = "active"
+    # The client's own team. On PUT, a list that is sent replaces the saved one; one that is left out keeps it.
+    staffContacts: list[StaffContactIn] = Field(default_factory=list, max_length=MAX_STAFF_CONTACTS)
+    # CRM users (active, role staff or manager) who look after this client. Same PUT rule as staffContacts.
+    staffIds: list[str] = Field(default_factory=list, max_length=500)
+
+    @field_validator("staffIds")
+    @classmethod
+    def distinct_staff_ids(cls, values):
+        cleaned = [value.strip() for value in values]
+        if any(not value or len(value) > 36 for value in cleaned):
+            raise ValueError("staffIds: each entry must be a user id")
+        return list(dict.fromkeys(cleaned))
 
 
 class CompanyIn(MasterInput):
@@ -341,6 +382,7 @@ class CompanyIn(MasterInput):
     phone: str | None = Field(default=None, max_length=40)
     whatsapp: str | None = Field(default=None, max_length=40)
     address: str | None = Field(default=None, max_length=2000)
+    state: str | None = Field(default=None, max_length=100)
     notes: str | None = Field(default=None, max_length=20000)
     status: Literal["active", "inactive"] = "active"
 
@@ -386,8 +428,9 @@ def _master_values(body: MasterInput):
     aliases = {"clientId": "client_id", "contactPerson": "contact_person", "contactEmail": "contact_email",
                "requiredSkills": "required_skills", "minExperience": "min_experience",
                "companyId": "company_id", "designationId": "designation_id",
-               "contractPeriod": "contract_period", "interviewDate": "interview_date"}
-    return {aliases.get(key, key): value for key, value in body.model_dump(exclude={"company"}).items()}
+               "contractPeriod": "contract_period", "interviewDate": "interview_date",
+               "staffContacts": "staff_contacts", "agencyName": "agency_name"}
+    return {aliases.get(key, key): value for key, value in body.model_dump(exclude={"company", "staffIds"}).items()}
 
 
 def _master_json(value):
@@ -396,9 +439,12 @@ def _master_json(value):
     return value
 
 
-def _master_save(db, user, row, body, kind, schema, *, new=False, commit=True):
-    changes = {}
-    for key, value in _master_values(body).items():
+def _master_save(db, user, row, body, kind, schema, *, new=False, commit=True, extra_changes=None):
+    changes = dict(extra_changes or {})
+    values = _master_values(body)
+    if not new and "staffContacts" not in body.model_fields_set:
+        values.pop("staff_contacts", None)  # a PUT that does not mention the team keeps it
+    for key, value in values.items():
         previous = getattr(row, key)
         if previous != value:
             changes[key] = {"from": _master_json(previous), "to": _master_json(value)}
@@ -421,13 +467,73 @@ def _master_save(db, user, row, body, kind, schema, *, new=False, commit=True):
     return schema.model_validate(row).model_dump(by_alias=True, mode="json")
 
 
+ALLOCATABLE_ROLES = (Role.staff, Role.manager)
+
+
+def _checked_staff_ids(db: Session, ids: list[str]) -> list[str]:
+    """The CRM users a client may be allocated to: active accounts whose role is staff or manager. One statement."""
+    if not ids:
+        return []
+    found = {person.id: person for person in db.execute(
+        select(User.id, User.name, User.active, User.role).where(User.id.in_(ids))).all()}
+    problems = []
+    for identifier in ids:
+        person = found.get(identifier)
+        if person is None:
+            problems.append(f"{identifier} is not a CRM user.")
+        elif not person.active:
+            problems.append(f"{person.name} is deactivated, so they cannot be allocated.")
+        elif person.role not in ALLOCATABLE_ROLES:
+            problems.append(f"{person.name} is an {person.role.value}; only staff or managers can be allocated.")
+    if problems:
+        raise HTTPException(422, {"message": "Choose active staff or managers to allocate.",
+                                  "errors": [{"field": "staffIds", "message": message} for message in problems]})
+    return list(ids)
+
+
+def allocated_staff_ids(db: Session, client_id: str) -> list[str]:
+    """The client's allocated users who can still work its candidates, ordered by name (the desk snapshot's order)."""
+    return list(db.scalars(
+        select(ClientStaff.user_id).join(User, User.id == ClientStaff.user_id)
+        .where(ClientStaff.client_id == client_id, User.active.is_(True), User.role.in_(ALLOCATABLE_ROLES))
+        .order_by(User.name, User.id)))
+
+
+def _replace_client_staff(db: Session, client_id: str, wanted: list[str]) -> dict | None:
+    """Make the saved allocation exactly `wanted`; returns the audit change, or None when nothing moved."""
+    saved = list(db.scalars(select(ClientStaff.user_id).where(ClientStaff.client_id == client_id).order_by(ClientStaff.user_id)))
+    if set(saved) == set(wanted):
+        return None
+    gone = [identifier for identifier in saved if identifier not in wanted]
+    if gone:
+        db.execute(delete(ClientStaff).where(ClientStaff.client_id == client_id, ClientStaff.user_id.in_(gone)))
+    db.add_all([ClientStaff(client_id=client_id, user_id=identifier) for identifier in wanted if identifier not in saved])
+    return {"from": saved, "to": sorted(wanted)}
+
+
+def _commit_or_conflict(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "A related record changed while saving. Refresh and try again.")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(503, "The record could not be saved. Please try again.")
+
+
 @router.post("/clients", status_code=status.HTTP_201_CREATED)
 def create_client(body: ClientIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    if body.company is None:
-        return _master_save(db, user, Client(), body, "client", ClientOut, new=True)
-    # Client contact and first employer commit together, so a failure never leaves a
+    staff_ids = _checked_staff_ids(db, body.staffIds)
+    # Client contact, first employer and staff allocation commit together, so a failure never leaves a
     # contact without the company the form described.
-    client = _master_save(db, user, Client(), body, "client", ClientOut, new=True, commit=False)
+    client = _master_save(db, user, Client(), body, "client", ClientOut, new=True, commit=False,
+                          extra_changes={"staffIds": {"from": [], "to": sorted(staff_ids)}} if staff_ids else None)
+    if staff_ids:
+        db.add_all([ClientStaff(client_id=client["id"], user_id=identifier) for identifier in staff_ids])
+    if body.company is None:
+        _commit_or_conflict(db)
+        return {**client, "staffIds": allocated_staff_ids(db, client["id"])}
     details = body.company.model_dump()
     for key, fallback in (("contactPerson", body.name), ("contactEmail", body.email), ("phone", body.phone), ("whatsapp", body.whatsapp)):
         details[key] = details[key] or fallback
@@ -440,14 +546,22 @@ def create_client(body: ClientIn, db: Session = Depends(get_db), user: User = De
     except SQLAlchemyError:
         db.rollback()
         raise HTTPException(503, "The record could not be saved. Please try again.")
-    return {**client, "company": company}
+    return {**client, "staffIds": allocated_staff_ids(db, client["id"]), "company": company}
 
 
 @router.put("/clients/{client_id}")
 def update_client(client_id: str, body: ClientIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     if body.company is not None:
         raise HTTPException(422, "Employer details are saved on the company, not here")
-    return _master_save(db, user, _master_row(db, Client, client_id), body, "client", ClientOut)
+    row = _master_row(db, Client, client_id)
+    wanted = _checked_staff_ids(db, body.staffIds) if "staffIds" in body.model_fields_set else None
+    extra = None
+    if wanted is not None:
+        moved = _replace_client_staff(db, row.id, wanted)
+        extra = {"staffIds": moved} if moved else None
+    out = _master_save(db, user, row, body, "client", ClientOut, commit=False, extra_changes=extra)
+    _commit_or_conflict(db)
+    return {**out, "staffIds": allocated_staff_ids(db, client_id)}
 
 
 def _company_parent(db, body, row=None):
@@ -548,9 +662,9 @@ def update_order(order_id: str, body: OrderIn, db: Session = Depends(get_db), us
 
 
 @router.get("/master-data/{kind}/{record_id}/audit")
-def master_audit(kind: Literal["client", "company", "designation", "order"], record_id: str,
+def master_audit(kind: Literal["client", "company", "designation", "order", "reference_agency"], record_id: str,
                  db: Session = Depends(get_db), user: User = Depends(current_user)):
-    model = {"client": Client, "company": Company, "designation": Designation, "order": Order}[kind]
+    model = {"client": Client, "company": Company, "designation": Designation, "order": Order, "reference_agency": ReferenceAgency}[kind]
     if db.get(model, record_id) is None: raise HTTPException(404, "Record not found")
     rows = db.scalars(select(AuditEntry).where(AuditEntry.entity_type == kind, AuditEntry.entity_id == record_id)
                       .order_by(AuditEntry.at.desc(), AuditEntry.id.desc()).limit(100)).all()

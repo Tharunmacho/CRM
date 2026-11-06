@@ -563,7 +563,11 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 candidate.resume_text = resume_text
         else:
             # A staff member who checked and confirmed this person works them; everyone else gets the next free recruiter.
-            owner = user if bundle.source_type == "manual" and user.role == Role.staff else next_owner(db, pointer=pointer)
+            # Client staff routing first (designation match; a staff member confirming their own upload keeps it when they are one of that
+            # client's staff); otherwise the staff member who confirmed it, or the ordinary round-robin.
+            from app.services import client_routing
+            own = bundle.source_type == "manual" and user.role == Role.staff
+            owner = client_routing.route_new_candidate(db, values.get("designations"), keep_user_id=user.id if own else None)                 or (user if own else next_owner(db, pointer=pointer))
             candidate = Candidate(ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}", **values,
                 source=Source.email if bundle.source_type == "email" else Source.whatsapp if bundle.source_type == "whatsapp" else Source(group.fields.get("source", "walk_in")),
                 source_detail=f"person_review:{bundle.id}", created_by=user.id,

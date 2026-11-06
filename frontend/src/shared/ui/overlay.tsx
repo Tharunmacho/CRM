@@ -58,6 +58,7 @@ export function Dialog({
   onClose,
   title,
   description,
+  icon,
   children,
   footer,
   width = 'md',
@@ -68,6 +69,8 @@ export function Dialog({
   onClose: () => void
   title: string
   description?: string
+  /** An optional tile shown before the title (the caller styles it). */
+  icon?: ReactNode
   children: ReactNode
   footer?: ReactNode
   /** `clean` lightens the backdrop and keeps every part of the card white. */
@@ -107,7 +110,8 @@ export function Dialog({
         )}
       >
         <header className="dialog-head flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-6 py-5">
-          <div className="min-w-0">
+          {icon && <span className="dialog-icon shrink-0">{icon}</span>}
+          <div className="min-w-0 flex-1">
             <h2 className="text-[19px] font-semibold leading-snug tracking-[-0.02em] text-ink">{title}</h2>
             {description && <p className="mt-1 text-[14px] leading-6 text-ink-500">{description}</p>}
           </div>

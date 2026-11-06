@@ -1,0 +1,172 @@
+/* Clients page and its dialogs: the Dashboard's simple layout in the CRM's original, neutral look. White surfaces, neutral borders,
+   neutral text; the brand colour only marks primary buttons and small active states. The table is the shared DataTable and the avatar,
+   flag and copy button come from the old directory (clients.css). Every selector sits under .clients-simple; the dialogs are portaled
+   out of the page, so their <form> carries the same class. */
+.clients-simple .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.clients-simple button { font-family: inherit; }
+.clients-simple button:focus-visible, .clients-simple a:focus-visible, .clients-simple input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ---------- Page ---------- */
+.clients-simple.cs-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; width: 100%; max-width: 1500px; margin: 0 auto; padding: 4px 0 28px; color: var(--text-main); font-size: 14px; }
+.clients-simple.cs-page > * { min-width: 0; }
+.clients-simple .cs-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
+.clients-simple .cs-head h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.035em; }
+.clients-simple .cs-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.clients-simple .cs-btn-primary, .clients-simple .cs-btn-green { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 42px; padding: 0 18px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
+/* The second header button: the logo green, darkened so white text keeps clear contrast in light and dark mode. */
+.clients-simple .cs-btn-green { --cs-solid: color-mix(in srgb, var(--brand-green, #5ac419) 58%, #0a3d12); border-color: var(--cs-solid); background: var(--cs-solid); color: #fff; font-weight: 600; }
+.clients-simple .cs-btn-green:hover { border-color: color-mix(in srgb, var(--cs-solid) 82%, #000); background: color-mix(in srgb, var(--cs-solid) 82%, #000); }
+.clients-simple .cs-btn-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); font-weight: 600; }
+.clients-simple .cs-btn-primary:hover { border-color: var(--primary-hover); background: var(--primary-hover); }
+
+/* ---------- Switch, search and view toggle in one white panel ---------- */
+.clients-simple .cs-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; padding: 12px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); }
+.clients-simple .cs-seg { display: inline-flex; flex: none; gap: 3px; padding: 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-1); }
+.clients-simple .cs-seg button { height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, color .14s; }
+.clients-simple .cs-seg button:hover:not(.is-active) { color: var(--text-main); }
+.clients-simple .cs-seg button.is-active { background: var(--primary); color: var(--on-primary); box-shadow: 0 1px 3px color-mix(in srgb, var(--primary) 30%, transparent); }
+.clients-simple .cs-search { position: relative; display: flex; flex: 1 1 280px; align-items: center; min-width: 0; }
+.clients-simple .cs-search > svg { position: absolute; left: 15px; color: var(--text-light); pointer-events: none; }
+.clients-simple .cs-search input { width: 100%; height: 48px; padding: 0 42px 0 44px; border: 1px solid var(--border-control); border-radius: 12px; background: var(--bg-card); color: var(--text-main); font-size: 14.5px; transition: border-color .14s, box-shadow .14s; -webkit-appearance: none; appearance: none; }
+.clients-simple .cs-search input::placeholder { color: var(--text-light); opacity: 1; }
+.clients-simple .cs-search input::-webkit-search-cancel-button { display: none; }
+.clients-simple .cs-search input:hover { border-color: var(--border-hover); }
+.clients-simple .cs-search input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); outline: none; }
+.clients-simple .cs-search-clear { position: absolute; right: 10px; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.clients-simple .cs-search-clear:hover { background: var(--tint-2); color: var(--text-main); }
+.clients-simple .cs-layout { display: inline-flex; flex: none; gap: 2px; padding: 4px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); }
+.clients-simple .cs-layout button { display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color .14s, color .14s; }
+.clients-simple .cs-layout button:hover:not(.is-active) { color: var(--text-main); }
+.clients-simple .cs-layout button.is-active { background: var(--bg-card); color: var(--primary); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 12%, transparent); }
+.clients-simple .cs-resultbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px; font-size: 13.5px; color: var(--text-muted); }
+.clients-simple .cs-textbtn { padding: 4px 2px; border: 0; border-radius: 6px; background: none; color: var(--primary); font-size: 13.5px; font-weight: 500; cursor: pointer; }
+.clients-simple .cs-textbtn:hover { text-decoration: underline; }
+
+/* ---------- Search-first, no-match and error states: one compact white card ---------- */
+.clients-simple .cs-state { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 20px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); text-align: center; }
+.clients-simple .cs-hero { min-height: 260px; justify-content: center; }
+.clients-simple .cs-badge { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 4px; border-radius: 999px; background: var(--tint-1); color: var(--text-muted); box-shadow: 0 0 0 8px color-mix(in srgb, var(--primary) 6%, transparent), 0 0 0 1px var(--border-main) inset; }
+.clients-simple .cs-state h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.clients-simple .cs-state p { margin: 0; font-size: 14px; color: var(--text-muted); overflow-wrap: anywhere; }
+.clients-simple .cs-pillbtn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; margin-top: 4px; padding: 0 18px; border: 1px solid var(--border-control); border-radius: 999px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; cursor: pointer; transition: border-color .14s, color .14s, background-color .14s; }
+.clients-simple .cs-pillbtn:hover { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.clients-simple .cs-pillbtn svg { transition: transform .16s; }
+.clients-simple .cs-pillbtn:hover svg { transform: translateX(3px); }
+.clients-simple .cs-state-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; margin-top: 6px; }
+.clients-simple .cs-skel { min-height: 232px; background: linear-gradient(100deg, var(--tint-1) 30%, var(--tint-2) 50%, var(--tint-1) 70%); background-size: 200% 100%; animation: cs-shimmer 1.4s linear infinite; }
+@keyframes cs-shimmer { to { background-position: -200% 0; } }
+
+/* ---------- Table cells (the DataTable supplies the rest; .cl-cell, .cl-place, .cl-open come from clients.css) ---------- */
+.clients-simple .cs-row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.clients-simple .cs-icon-act { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color .12s, color .12s, border-color .12s; }
+.clients-simple .cs-icon-act:hover { background: var(--tint-2); color: var(--text-main); }
+.clients-simple .cs-icon-act.is-danger:hover { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.clients-simple .cl-open.is-danger:hover { border-color: var(--error-ink); color: var(--error-ink); }
+.clients-simple .cl-open { cursor: pointer; }
+
+/* Highlighted search match: a soft tint that reads in both themes, always paired with the text itself. */
+.clients-simple .cs-mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, #e6a817 28%, transparent); color: inherit; }
+
+/* ---------- Staff: overlapping avatars and first names ---------- */
+.clients-simple .cs-stack { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.clients-simple .cs-stack-avs { display: inline-flex; flex: none; align-items: center; }
+.clients-simple .cs-stack-avs > * + * { margin-left: -8px; }
+.clients-simple .cs-stack-avs .cl-avatar, .clients-simple .cs-more { box-shadow: 0 0 0 2px var(--bg-card); }
+.clients-simple .cs-more { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.clients-simple .cs-stack-names { min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; color: var(--text-main); }
+
+/* ---------- Cards: white, 1px neutral border, only the border changes on hover ---------- */
+.clients-simple .cs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 16px; }
+.clients-simple .cs-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border-main); border-radius: 14px; background: var(--bg-card); transition: border-color .14s; }
+.clients-simple .cs-card:hover { border-color: var(--border-hover); }
+.clients-simple .cs-card > header { display: flex; align-items: center; gap: 12px; padding: 16px 16px 12px; }
+.clients-simple .cs-title { min-width: 0; }
+.clients-simple .cs-title h3 { margin: 0; overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.clients-simple .cs-title p { margin: 1px 0 0; overflow: hidden; font-size: 12.5px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.clients-simple .cs-facts { display: grid; gap: 9px; margin: 0; padding: 0 16px 14px; }
+.clients-simple .cs-facts > div { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: baseline; gap: 10px; }
+.clients-simple .cs-facts dt { font-size: 12.5px; color: var(--text-muted); }
+.clients-simple .cs-facts dd { display: flex; align-items: center; min-width: 0; margin: 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.clients-simple .cs-facts dd > a { min-width: 0; color: var(--text-main); overflow-wrap: anywhere; text-decoration: none; }
+.clients-simple .cs-facts dd > a:hover { color: var(--primary); text-decoration: underline; }
+.clients-simple .cs-tnum { font-variant-numeric: tabular-nums; }
+.clients-simple .cs-staff { display: grid; gap: 7px; margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--border-faint); }
+.clients-simple .cs-staff-label { font-size: 12.5px; color: var(--text-muted); }
+.clients-simple .cs-card > footer { display: flex; gap: 8px; margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--border-faint); }
+.clients-simple .cs-staff + footer { margin-top: 0; }
+.clients-simple .cs-wide { flex: 1 1 0; justify-content: center; height: 34px; }
+
+/* ---------- Dialogs ---------- */
+.workspace-dialog:has(.clients-simple) .dialog-icon { margin-top: 1px; }
+.workspace-dialog:has(.clients-simple) .cs-dlg-chip { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.clients-simple.client-form { gap: 16px; }
+.clients-simple .cs-sec { display: grid; gap: 14px; min-width: 0; padding: 18px 20px 20px; border: 1px solid var(--border-main); border-radius: 14px; background: var(--tint-1); }
+.clients-simple .cs-sec > header { display: flex; align-items: center; gap: 10px; }
+.clients-simple .cs-sec-chip { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.clients-simple .cs-sec > header h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.clients-simple .cs-sec-count { margin-left: auto; padding: 2px 10px; border-radius: 999px; background: var(--bg-card); border: 1px solid var(--border-main); font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.clients-simple .cs-sec-body { display: grid; gap: 12px; min-width: 0; }
+.clients-simple .cs-grid6 { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.clients-simple .cs-grid6 > .span-3 { grid-column: span 3; }
+.clients-simple .cs-grid6 > .span-4 { grid-column: span 4; }
+.clients-simple .cs-grid6 > .span-2 { grid-column: span 2; }
+.clients-simple .ui-input { height: 44px; background-color: var(--bg-card); }
+.clients-simple textarea.ui-input { height: auto; min-height: 0; }
+.clients-simple .ui-input:focus, .clients-simple .ui-input:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); outline: none; }
+.clients-simple .cs-form-error { margin: 0; font-size: 12.5px; color: var(--error-ink); }
+
+.clients-simple .cs-staff-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; margin: 0; padding: 14px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.clients-simple .cs-staff-fields { display: grid; flex: 1; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; min-width: 0; }
+.clients-simple .cs-round-btn { display: grid; flex: none; place-items: center; width: 34px; height: 34px; margin-top: 22px; border: 1px solid var(--border-control); border-radius: 999px; background: var(--bg-card); color: var(--text-muted); cursor: pointer; transition: border-color .12s, background-color .12s, color .12s; }
+.clients-simple .cs-round-btn:hover { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.clients-simple .cs-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; justify-self: start; height: 38px; padding: 0 16px; border: 1px dashed var(--border-hover); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 13.5px; font-weight: 500; cursor: pointer; transition: border-color .14s, color .14s, background-color .14s; }
+.clients-simple .cs-add:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.clients-simple .cs-add:disabled { opacity: .55; cursor: not-allowed; }
+
+.clients-simple .cs-picker { display: grid; gap: 10px; min-width: 0; }
+.clients-simple .cs-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.clients-simple .cs-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 8px 3px 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 12.5px; font-weight: 500; }
+.clients-simple .cs-chip > span:not(.record-avatar) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clients-simple .cs-chip button { display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.clients-simple .cs-chip button:hover:not(:disabled) { background: var(--tint-2); color: var(--text-main); }
+.clients-simple .cs-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 44px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-muted); font-size: 14px; text-align: left; cursor: pointer; transition: border-color .14s; }
+.clients-simple .cs-picker-trigger:hover:not(:disabled) { border-color: var(--border-hover); }
+.clients-simple .cs-picker-trigger[aria-expanded='true'] { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); }
+.clients-simple .cs-picker-trigger[aria-invalid='true'] { border-color: var(--error-ink); }
+.clients-simple .cs-picker-panel { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.clients-simple .cs-picker-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-light); }
+.clients-simple .cs-picker-search input { flex: 1; min-width: 0; height: 38px; border: 0; background: transparent; color: var(--text-main); font-size: 14px; outline: none; }
+.clients-simple .cs-picker-search:focus-within { border-color: var(--primary); }
+.clients-simple .cs-picker-panel ul[role='listbox'] { max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.clients-simple .cs-picker-panel li[role='option'] { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.clients-simple .cs-picker-panel li[role='option'].is-cursor { background: var(--tint-2); }
+.clients-simple .cs-picker-panel li[role='option'].is-on { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+.clients-simple .cs-opt-name { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.clients-simple .cs-opt-role { font-size: 12px; color: var(--text-muted); }
+.clients-simple .cs-opt-check { flex: none; color: var(--primary); opacity: 0; }
+.clients-simple .cs-picker-panel li.is-on .cs-opt-check { opacity: 1; }
+.clients-simple .cs-picker-none { padding: 12px 10px; font-size: 13px; color: var(--text-muted); }
+.clients-simple .cs-picker-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 4px 0; font-size: 12.5px; color: var(--text-muted); }
+.clients-simple .cs-picker-foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clients-simple .cs-picker-foot button { border: 0; background: none; color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; }
+
+/* ---------- Phone ---------- */
+@media (max-width: 760px) {
+  .clients-simple .cs-head h1 { font-size: 24px; }
+  .clients-simple .cs-actions { width: 100%; }
+  .clients-simple .cs-actions > * { flex: 1 1 0; padding: 0 10px; }
+  .clients-simple .cs-panel { padding: 10px; }
+  .clients-simple .cs-seg { width: 100%; }
+  .clients-simple .cs-seg button { flex: 1 1 0; padding: 0 10px; }
+  .clients-simple .cs-search { flex-basis: 0; }
+  .clients-simple .cs-hero { min-height: 0; }
+  .clients-simple .cs-grid6 > * { grid-column: 1 / -1; }
+  .clients-simple .cs-sec { padding: 16px; }
+  .clients-simple .cs-staff-row { flex-direction: column; }
+  .clients-simple .cs-round-btn { align-self: flex-end; margin-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clients-simple .cs-btn-primary, .clients-simple .cs-btn-green, .clients-simple .cs-seg button, .clients-simple .cs-search input, .clients-simple .cs-pillbtn, .clients-simple .cs-card { transition: none; }
+  .clients-simple .cs-pillbtn:hover svg { transform: none; }
+  .clients-simple .cs-skel { animation: none; }
+}

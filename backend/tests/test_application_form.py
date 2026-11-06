@@ -46,7 +46,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     _migrate(engine, "head")
     columns = {c["name"]: c for c in inspect(engine).get_columns("crm_candidates")}
     assert FORM_COLUMNS <= set(columns)
-    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities"}  # 0021 adds no table; 0022 adds the option lists; 0024 the lead sheet
+    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies"}  # 0021 adds no table; 0022 adds the option lists; 0024 the lead sheet; 0026 the client staff links and reference agencies
     with engine.connect() as connection:
         row = connection.execute(text("SELECT name, total_experience, father_name, experience_india, education, work_history, field_sources "
                                       "FROM crm_candidates WHERE id='old'")).one()

@@ -1,308 +1,405 @@
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Building2, Download, FileWarning, MessageCircle, Plus, Search, Target, Users, X, Zap } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { ArrowRight, LayoutGrid, Pencil, Plus, Search, Table2, Trash2, Users, X } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
-import type { Client } from '@/shared/model/types'
+import type { Client, Company, ReferenceAgency } from '@/shared/model/types'
+import { initials } from '@/shared/lib/format'
+import { Button } from '@/shared/ui/primitives'
+import { Dialog } from '@/shared/ui/overlay'
+import { Panel } from '@/shared/ui/display'
 import { DataTable, type Column } from '@/shared/ui/table'
-import { EmptyState, PageHeader, Panel, StatusPill } from '@/shared/ui/display'
-import { KpiStrip, RecordIdentity } from '@/shared/ui/workspace'
-import { Button, SearchInput, Select } from '@/shared/ui/primitives'
-import { Tabs } from '@/shared/ui/overlay'
-import { SnapshotState } from '@/shared/ui/page-loading'
 import { ClientDialog } from '@/features/clients/components/client-dialog'
-import {
-  AgreementPill, Avatar, CopyButton, DemandCell, Place, ViewToggle, WebsiteLink, demandByClient, downloadCsv, useElementWidth, useSavedView,
-  type Demand,
-} from '@/features/clients/components/parts'
+import { AgencyDialog } from '@/features/clients/components/agency-dialog'
+import { Avatar, CopyButton, Flag, hueOf } from '@/features/clients/components/parts'
+import { agencyApi, useReferenceAgencies } from '@/features/clients/agency-api'
+import { firstName } from '@/features/clients/client-form'
+import { highlightPhone, highlightPieces, matchesSearch, type Searchable } from '@/features/clients/client-search'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
-import '@/styles/clients.css'
+import '@/styles/clients-simple.css'
 
-type Sort = 'recent' | 'name' | 'demand'
+type Side = 'clients' | 'agencies'
+type Layout = 'cards' | 'table'
 
-const CARD_PAGE = 12
+const LAYOUT_KEY = 'crm-clients-layout'
+const SEARCH_DELAY_MS = 150
+
+/** The remembered choice. The table is the default (every result list opens as one); storage can be blocked, so access is guarded. */
+function readLayout(): Layout {
+  try { return localStorage.getItem(LAYOUT_KEY) === 'cards' ? 'cards' : 'table' } catch { return 'table' }
+}
+
+interface ClientRow {
+  client: Client
+  agencyName: string
+  phone: string
+  email: string
+  address: string
+  city: string
+  country: string
+  staff: { id: string; name: string }[]
+  search: Searchable
+}
+
+interface AgencyRow {
+  agency: ReferenceAgency
+  search: Searchable
+}
+
+/** Text with the matched part of the search lit up. */
+function Hi({ text, query }: { text?: string | null; query: string }) {
+  if (!text) return null
+  return <>{highlightPieces(text, query).map((piece, index) => piece.hit ? <mark key={index} className="cs-mark">{piece.text}</mark> : piece.text)}</>
+}
+
+function HiPhone({ text, query }: { text?: string | null; query: string }) {
+  if (!text) return null
+  return <>{highlightPhone(text, query).map((piece, index) => piece.hit ? <mark key={index} className="cs-mark">{piece.text}</mark> : piece.text)}</>
+}
+
+const Quiet = ({ children = 'Not added' }: { children?: string }) => <span className="cl-quiet">{children}</span>
+
+/** Avatar chip and name, as in the old directory (soft per-name colour). The name can carry the search highlight. */
+function Identity({ name, query }: { name: string; query: string }) {
+  return <div className="record-identity">
+    <span className={`record-avatar avatar-hue-${hueOf(name)}`} aria-hidden="true">{initials(name)}</span>
+    <div className="min-w-0"><p className="record-name" title={name}><Hi text={name} query={query} /></p></div>
+  </div>
+}
+
+/** Contact person, then their phone and email (with the copy button) under it, as the old table showed them. */
+function ContactCell({ name, phone, email, query }: { name: string; phone: string; email: string; query: string }) {
+  return <div className="cl-cell">
+    <b title={name}><Hi text={name} query={query} /></b>
+    {phone && <span className="cl-line ident"><a href={`tel:${phone.replace(/[^\d+]/g, '')}`} title={phone} onClick={(event) => event.stopPropagation()}><HiPhone text={phone} query={query} /></a></span>}
+    {email && <span className="cl-line"><a href={`mailto:${email}`} title={email} onClick={(event) => event.stopPropagation()}><Hi text={email} query={query} /></a><CopyButton value={email} label={`Copy email of ${name}`} /></span>}
+    {!phone && !email && <span className="cl-quiet">No phone or email</span>}
+  </div>
+}
+
+/** Flag in its own colours (a globe when no country is saved), the main place in bold and the finer detail under it. */
+function Location({ primary, secondary, country, query }: { primary: string; secondary?: string; country?: string; query: string }) {
+  if (!primary && !secondary) return <Quiet />
+  return <span className="cl-place is-stacked">
+    {country !== undefined && <Flag country={country} />}
+    <span className="cl-place-text">
+      <b title={primary || secondary}><Hi text={primary || secondary} query={query} /></b>
+      {primary && secondary && <small title={secondary}><Hi text={secondary} query={query} /></small>}
+    </span>
+  </span>
+}
+
+/** A client's place is its country and city (the client and company records carry no state). */
+const clientPlace = (row: { country: string; city: string }) => ({ primary: row.country || row.city, secondary: row.country ? row.city : '', country: row.country })
+
+/** Overlapping small avatars with the first names beside them, or a muted line when nobody is allocated. */
+function StaffStack({ staff, query }: { staff: { id: string; name: string }[]; query: string }) {
+  if (staff.length === 0) return <Quiet>No staff allocated</Quiet>
+  const shown = staff.slice(0, 4)
+  const more = staff.length - shown.length
+  const label = staff.map((person) => person.name).join(', ')
+  return <span className="cs-stack" title={label}>
+    <span className="cs-stack-avs" role="img" aria-label={`Allocated staff: ${label}`}>
+      {shown.map((person) => <Avatar key={person.id} name={person.name} size="sm" />)}
+      {more > 0 && <span className="cs-more" aria-hidden="true">+{more}</span>}
+    </span>
+    <span className="cs-stack-names" aria-hidden="true">{staff.map((person, index) => <span key={person.id}>{index > 0 && ', '}<Hi text={firstName(person.name)} query={query} /></span>)}</span>
+  </span>
+}
+
+const staffCount = (agency: ReferenceAgency) => agency.staffContacts?.length ?? 0
+const staffLabel = (agency: ReferenceAgency) => (agency.staffContacts ?? []).map((person) => person.name).join(', ')
+
+/** One card: avatar, agency, contact person, a short fact list, then (clients) the allocated staff and the actions. */
+function RecordCard({ title, contact, facts, staff, actions }: { title: string; contact: string; facts: { label: string; value: ReactNode }[]; staff?: ReactNode; actions: ReactNode }) {
+  return <article className="cs-card">
+    <header>
+      <Avatar name={title} size="lg" />
+      <div className="cs-title"><h3 title={title}>{title}</h3><p title={contact}>{contact}</p></div>
+    </header>
+    <dl className="cs-facts">{facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
+    {staff && <div className="cs-staff"><span className="cs-staff-label">Allocated staff</span>{staff}</div>}
+    <footer>{actions}</footer>
+  </article>
+}
+
+const tel = (phone: string, query: string) => phone ? <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="cs-tnum"><HiPhone text={phone} query={query} /></a> : <Quiet />
+const mail = (email: string, name: string, query: string) => email ? <><a href={`mailto:${email}`} title={email}><Hi text={email} query={query} /></a><CopyButton value={email} label={`Copy email of ${name}`} /></> : <Quiet />
+const place = (address: string, query: string) => address ? <span title={address}><Hi text={address} query={query} /></span> : <Quiet />
+
+function ClientCards({ rows, query, onOpen, onEdit }: { rows: ClientRow[]; query: string; onOpen: (c: Client) => void; onEdit?: (c: Client) => void }) {
+  return <div className="cs-grid">{rows.map((row) => {
+    const name = row.agencyName || row.client.name
+    return <RecordCard key={row.client.id} title={name} contact={row.client.name}
+      facts={[
+        { label: 'Contact no', value: tel(row.phone, query) },
+        { label: 'Email', value: mail(row.email, row.client.name, query) },
+        { label: 'Address', value: place(row.address, query) },
+        { label: 'Location', value: <Location {...clientPlace(row)} query={query} /> },
+      ]}
+      staff={<StaffStack staff={row.staff} query={query} />}
+      actions={<>
+        <button type="button" className="cl-open cs-wide" onClick={() => onOpen(row.client)} aria-label={`Open ${name}`}>Open<ArrowRight size={14} aria-hidden="true" /></button>
+        {onEdit && <button type="button" className="cl-open cs-wide" onClick={() => onEdit(row.client)} aria-label={`Edit ${name}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
+      </>} />
+  })}</div>
+}
+
+function AgencyCards({ rows, query, onEdit, onDelete }: { rows: AgencyRow[]; query: string; onEdit?: (a: ReferenceAgency) => void; onDelete?: (a: ReferenceAgency) => void }) {
+  return <div className="cs-grid">{rows.map(({ agency }) => <RecordCard key={agency.id} title={agency.agencyName} contact={agency.name}
+    facts={[
+      { label: 'Contact no', value: tel(agency.phone ?? '', query) },
+      { label: 'Email', value: mail(agency.email ?? '', agency.name, query) },
+      { label: 'Address', value: place(agency.address ?? '', query) },
+      { label: 'State', value: <Location primary={agency.state ?? ''} query={query} /> },
+      { label: 'Staff', value: staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
+    ]}
+    actions={<>
+      {onEdit && <button type="button" className="cl-open cs-wide" onClick={() => onEdit(agency)} aria-label={`Edit ${agency.agencyName}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
+      {onDelete && <button type="button" className="cl-open cs-wide is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agency.agencyName}`}><Trash2 size={13} aria-hidden="true" />Delete</button>}
+    </>} />)}</div>
+}
+
+/** The tables use the shared DataTable (the old directory's look and column alignment); on a phone it stacks into labelled rows. */
+function ClientTable({ rows, query, loading, onOpen, onEdit }: { rows: ClientRow[]; query: string; loading: boolean; onOpen: (c: Client) => void; onEdit?: (c: Client) => void }) {
+  const columns: Column<ClientRow>[] = [
+    { key: 'agency', header: 'Company', width: '24%', minWidth: '12rem', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
+    { key: 'contact', header: 'Contact person', width: '25%', align: 'left', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
+    { key: 'location', header: 'Location', width: '17%', align: 'left', render: (row) => <Location {...clientPlace(row)} query={query} /> },
+    { key: 'staff', header: 'Staff', width: '18%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
+    {
+      key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
+      render: (row) => <span className="cs-row-actions">
+        {onEdit && <button type="button" className="cs-icon-act" onClick={(event) => { event.stopPropagation(); onEdit(row.client) }} aria-label={`Edit ${row.agencyName || row.client.name}`} title="Edit"><Pencil size={14} aria-hidden="true" /></button>}
+        <button type="button" className="cl-open" onClick={(event) => { event.stopPropagation(); onOpen(row.client) }} aria-label={`Open ${row.agencyName || row.client.name}`}>Open<ArrowRight size={14} aria-hidden="true" /></button>
+      </span>,
+    },
+  ]
+  return <Panel flush><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.client.id} onRowClick={(row) => onOpen(row.client)} /></Panel>
+}
+
+function AgencyTable({ rows, query, loading, onEdit, onDelete }: { rows: AgencyRow[]; query: string; loading: boolean; onEdit?: (a: ReferenceAgency) => void; onDelete?: (a: ReferenceAgency) => void }) {
+  const columns: Column<AgencyRow>[] = [
+    { key: 'agency', header: 'Agency', width: '24%', minWidth: '12rem', render: ({ agency }) => <Identity name={agency.agencyName} query={query} /> },
+    { key: 'contact', header: 'Contact person', width: '25%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
+    { key: 'location', header: 'Location', width: '27%', align: 'left', render: ({ agency }) => <Location primary={agency.state ?? ''} secondary={agency.address} query={query} /> },
+    { key: 'staff', header: 'Staff details', width: '10%', align: 'left', render: ({ agency }) => staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
+    {
+      key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
+      render: ({ agency }) => <span className="cs-row-actions">
+        {onEdit && <button type="button" className="cl-open" onClick={() => onEdit(agency)} aria-label={`Edit ${agency.agencyName}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
+        {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agency.agencyName}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
+      </span>,
+    },
+  ]
+  return <Panel flush><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={({ agency }) => agency.id} /></Panel>
+}
+
+function Skeleton({ layout, side }: { layout: Layout; side: Side }) {
+  if (layout === 'table') return side === 'clients'
+    ? <ClientTable rows={[]} query="" loading onOpen={() => undefined} />
+    : <AgencyTable rows={[]} query="" loading />
+  return <div className="cs-grid" role="status" aria-label="Loading">{[0, 1, 2].map((i) => <div key={i} className="cs-card cs-skel" />)}</div>
+}
+
+/** A 404 from /reference-agencies means the server has not been updated yet; say so calmly instead of printing "Not Found". */
+const looksOutdated = (message: string) => /not found|404/i.test(message)
 
 /**
- * The directory reads company-first, as the PRD describes a client: the employer, its
- * industry, contact person, location, agreement and hiring demand on one row. The contact
- * person is the client record; the employers behind it are its companies.
+ * Clients and reference agencies. Search first: nothing is listed until the person types or presses "Show all". The search text,
+ * the side and "show all" live in the address (?q=, ?view=, ?all=1) so Back from a client returns to the same results.
  */
 export default function ClientsPage() {
   const store = useStore()
   const snapshot = useWorkspaceReady('clients')
   const navigate = useNavigate()
-  const [query, setQuery] = useState('')
+  const [params, setParams] = useSearchParams()
+  const side: Side = params.get('view') === 'agencies' ? 'agencies' : 'clients'
+  const query = params.get('q') ?? ''
+  const showAll = params.get('all') === '1'
+  const [text, setText] = useState(query)
+  const [layout, setLayoutState] = useState<Layout>(readLayout)
   const [adding, setAdding] = useState(false)
-  const [tab, setTab] = useState<'all' | 'active' | 'inactive'>('all')
-  const [hiring, setHiring] = useState(false)
-  const [noAgreement, setNoAgreement] = useState(false)
-  const [country, setCountry] = useState('')
-  const [industry, setIndustry] = useState('')
-  const [sort, setSort] = useState<Sort>('recent')
-  const [savedView, setView] = useSavedView('crm-clients-view')
-  const [shown, setShown] = useState(CARD_PAGE)
-  // The table needs about 1020px for its columns; with less room the same records read as cards.
-  const [panelRef, panelWidth] = useElementWidth()
-  const narrow = panelWidth > 0 && panelWidth < 1020
-  const view = narrow ? 'cards' : savedView
+  const [editing, setEditing] = useState<Client | null>(null)
+  const [addingAgency, setAddingAgency] = useState(false)
+  const [editingAgency, setEditingAgency] = useState<ReferenceAgency | null>(null)
+  const [deleting, setDeleting] = useState<ReferenceAgency | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const searchBox = useRef<HTMLInputElement>(null)
+  const agencies = useReferenceAgencies(side === 'agencies')
+  // Same roles that may create clients may change them; everyone else reads.
+  const canEdit = store.can('manage_records')
 
-  const companiesByClient = useMemo(() => {
-    const grouped = new Map<string, typeof store.companies>()
-    for (const company of store.companies) {
-      const list = grouped.get(company.clientId)
-      if (list) list.push(company)
-      else grouped.set(company.clientId, [company])
+  const patch = (changes: Record<string, string | null>) => {
+    const next = new URLSearchParams(params)
+    for (const [key, value] of Object.entries(changes)) { if (value) next.set(key, value); else next.delete(key) }
+    setParams(next, { replace: true })
+  }
+
+  // The box follows the address (Back, a link with ?q=), and the address follows the box after a short pause in typing.
+  useEffect(() => { setText((current) => current === query ? current : query) }, [query])
+  useEffect(() => {
+    if (text === query) return undefined
+    const timer = window.setTimeout(() => patch({ q: text.trim() ? text : null }), SEARCH_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text])
+
+  // "/" jumps to the search box, as on most search-first pages (ignored while typing in another field).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+      event.preventDefault(); searchBox.current?.focus()
     }
-    return grouped
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const setLayout = (next: Layout) => { setLayoutState(next); try { localStorage.setItem(LAYOUT_KEY, next) } catch { /* the choice just is not remembered */ } }
+
+  const companyOf = useMemo(() => {
+    const first = new Map<string, Company>()
+    for (const company of store.companies) if (!first.has(company.clientId)) first.set(company.clientId, company)
+    return first
   }, [store.companies])
-  const companiesOf = (client: Client) => companiesByClient.get(client.id) ?? []
 
-  // Open orders, their openings and what is already deployed, per client.
-  const demand = useMemo(() => demandByClient(store.companies, store.orders, store.applications), [store.companies, store.orders, store.applications])
+  // The directory is stored oldest first, so the newest clients come last; show them first.
+  const clientRows = useMemo<ClientRow[]>(() => [...store.clients].reverse().map((client) => {
+    const company = companyOf.get(client.id)
+    const staff = (client.staffIds ?? []).map((id) => ({ id, name: store.user(id)?.name ?? '' })).filter((person) => person.name)
+    const row = {
+      client, agencyName: company?.name ?? '', phone: client.phone ?? company?.phone ?? '', email: client.email ?? company?.contactEmail ?? '',
+      address: company?.address ?? '', city: client.city || company?.city || '', country: client.country || company?.country || '', staff,
+    }
+    return { ...row, search: { name: client.name, agencyName: row.agencyName, email: row.email, address: [row.address, row.city, row.country].filter(Boolean).join(' '), phone: row.phone, staffNames: staff.map((p) => p.name), staffContacts: client.staffContacts } }
+  // store.user is rebuilt with the user list
+  }), [store.clients, store.users, companyOf]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const agreementOf = (client: Client) => {
-    const own = companiesOf(client)
-    return { total: own.length, filed: own.filter((company) => company.agreement).length }
+  const agencyRows = useMemo<AgencyRow[]>(() => (agencies.items ?? []).map((agency) => ({
+    agency,
+    search: { name: agency.name, agencyName: agency.agencyName, email: agency.email, address: agency.address, state: agency.state, phone: agency.phone, staffContacts: agency.staffContacts },
+  })), [agencies.items])
+
+  const searching = query.trim().length > 0
+  const everyone = side === 'clients' ? clientRows : agencyRows
+  const matched = useMemo(
+    () => searching || showAll ? (everyone as { search: Searchable }[]).filter((row) => matchesSearch(row.search, query)) : [],
+    [everyone, searching, showAll, query],
+  )
+  const total = everyone.length
+  const noun = side === 'clients' ? 'client' : 'agency'
+  const nouns = side === 'clients' ? 'clients' : 'agencies'
+  const loading = side === 'clients' ? !snapshot.ready && !snapshot.error : agencies.items === null && !agencies.error
+  const loadError = side === 'clients' ? (!snapshot.ready ? snapshot.error : '') : (agencies.items === null ? agencies.error : '')
+  const retry = side === 'clients' ? snapshot.retry : agencies.refresh
+
+  const clear = () => { setText(''); patch({ q: null, all: null }); searchBox.current?.focus() }
+  const choose = (next: Side) => patch({ view: next === 'agencies' ? 'agencies' : null })
+
+  const confirmDelete = async () => {
+    if (!deleting || deleteBusy) return
+    setDeleteBusy(true); setDeleteError('')
+    try {
+      await agencyApi.remove(deleting.id)
+      store.notify('Agency deleted')
+      agencies.refresh()
+      setDeleting(null)
+    } catch (err) { setDeleteError(err instanceof Error ? err.message : 'We could not delete this agency. Please try again.') }
+    finally { setDeleteBusy(false) }
   }
-  const lacksAgreement = (client: Client) => { const { total, filed } = agreementOf(client); return total > 0 && filed < total }
-  const headline = (client: Client) => companiesOf(client)[0]?.name ?? client.name
-  const title = (client: Client) => { const own = companiesOf(client); return own.length > 1 ? `${headline(client)} +${own.length - 1}` : headline(client) }
-  const sectorsOf = (client: Client) => [...new Set(companiesOf(client).map((company) => company.industry?.trim()).filter(Boolean) as string[])]
-  /** The website of the company shown as the client's headline: the first one that has an address. */
-  const websiteOf = (client: Client) => companiesOf(client).find((company) => company.website?.trim())?.website ?? ''
-  const placeOf = (client: Client) => {
-    const home = companiesOf(client)[0]
-    return { country: client.country || home?.country, city: client.city || home?.city }
-  }
 
-  const countries = useMemo(() => [...new Set([
-    ...store.clients.map((client) => client.country?.trim()),
-    ...store.companies.map((company) => company.country?.trim()),
-  ].filter(Boolean) as string[])].sort(), [store.clients, store.companies])
-  const industries = useMemo(() => [...new Set(store.companies.map((company) => company.industry?.trim()).filter(Boolean) as string[])].sort(), [store.companies])
-  const hasFilters = Boolean(query.trim() || hiring || noAgreement || country || industry || tab !== 'all')
-  const clear = () => { setQuery(''); setHiring(false); setNoAgreement(false); setCountry(''); setIndustry(''); setTab('all'); setShown(CARD_PAGE) }
-
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const matched = store.clients.filter((c) => {
-      const own = companiesByClient.get(c.id) ?? []
-      const filed = own.filter((company) => company.agreement).length
-      return (tab === 'all' || c.status === tab)
-        && (!hiring || (demand.get(c.id)?.orders ?? 0) > 0)
-        && (!noAgreement || (own.length > 0 && filed < own.length))
-        && (!country || c.country?.trim() === country || own.some((co) => co.country?.trim() === country))
-        && (!industry || own.some((co) => co.industry?.trim() === industry))
-        && (!q
-          || c.name.toLowerCase().includes(q)
-          || (c.email ?? '').toLowerCase().includes(q)
-          || (c.designation ?? '').toLowerCase().includes(q)
-          || (c.phone ?? '').includes(q)
-          || (c.city ?? '').toLowerCase().includes(q)
-          || (c.country ?? '').toLowerCase().includes(q)
-          || own.some((co) => [co.name, co.industry, co.contactPerson, co.contactEmail, co.city, co.website].some((value) => (value ?? '').toLowerCase().includes(q))))
-    })
-    const label = (c: Client) => (companiesByClient.get(c.id)?.[0]?.name ?? c.name)
-    if (sort === 'name') return [...matched].sort((a, b) => label(a).localeCompare(label(b)))
-    if (sort === 'demand') return [...matched].sort((a, b) => (demand.get(b.id)?.toFill ?? 0) - (demand.get(a.id)?.toFill ?? 0) || label(a).localeCompare(label(b)))
-    // The directory is stored oldest first, so the newest clients come last.
-    return [...matched].reverse()
-  }, [store.clients, companiesByClient, query, tab, hiring, noAgreement, country, industry, sort, demand])
-
-  if (!snapshot.ready) return <SnapshotState error={snapshot.error} onRetry={snapshot.retry} retryLabel="Try again" label="Loading clients" />
-
-  const idleCaption = (c: Client) => { const count = companiesOf(c).length; return `${count} ${count === 1 ? 'company' : 'companies'}` }
-
-  const columns: Column<Client>[] = [
-    {
-      key: 'name',
-      header: 'Company',
-      width: '22.5%',
-      render: (c) => {
-        const sectors = sectorsOf(c)
-        const detail = sectors.length ? sectors.slice(0, 2).join(' · ') : companiesOf(c).length ? 'No industry added' : 'No company added yet'
-        const website = websiteOf(c)
-        return <RecordIdentity name={title(c)} detail={<><span className="cl-site" title={detail}>{detail}</span>{website && <WebsiteLink value={website} className="cl-site" />}</>} />
-      },
-    },
-    {
-      key: 'contact',
-      header: 'Contact person',
-      width: '22%',
-      align: 'left',
-      render: (c) => (
-        <div className="cl-cell">
-          <b title={c.name}>{c.name}</b>
-          {c.designation && <span title={c.designation}>{c.designation}</span>}
-          {c.phone && <span className="cl-line ident">{c.whatsapp && <MessageCircle size={12} className="cl-wa" aria-label="Has WhatsApp" />}<a href={`tel:${c.phone}`} title={c.phone} onClick={(event) => event.stopPropagation()}>{c.phone}</a></span>}
-          {c.email && <span className="cl-line"><a href={`mailto:${c.email}`} title={c.email} onClick={(event) => event.stopPropagation()}>{c.email}</a><CopyButton value={c.email} label={`Copy email of ${c.name}`} /></span>}
+  const count = matched.length
+  const body = () => {
+    if (loadError) {
+      const outdated = side === 'agencies' && looksOutdated(loadError)
+      return <div role="alert" className="cs-state">
+        <span className="cs-badge" aria-hidden="true"><Users size={24} strokeWidth={1.7} /></span>
+        <h2>{outdated ? 'Agencies need the latest server update' : `We could not load the ${nouns}`}</h2>
+        <p>{outdated ? 'Restart the CRM server, then press Try again.' : side === 'agencies' ? 'Check your connection, then press Try again.' : loadError}</p>
+        <Button onClick={retry}>Try again</Button>
+      </div>
+    }
+    if (loading) return <Skeleton layout={layout} side={side} />
+    if (!searching && !showAll) {
+      return <div className="cs-state cs-hero">
+        <span className="cs-badge" aria-hidden="true"><Search size={26} strokeWidth={1.7} /></span>
+        <h2>{side === 'clients' ? 'Search to find a client' : 'Search to find an agency'}</h2>
+        {total > 0
+          ? <button type="button" className="cs-pillbtn" onClick={() => patch({ all: '1' })}>Show all {total} {total === 1 ? noun : nouns}<ArrowRight size={15} aria-hidden="true" /></button>
+          : <p>No {nouns} saved yet.</p>}
+      </div>
+    }
+    if (count === 0) {
+      return <div className="cs-state" role="status">
+        <span className="cs-badge" aria-hidden="true"><Search size={24} strokeWidth={1.7} /></span>
+        {searching
+          ? <><h2>No {noun} matches “{query.trim()}”</h2><p>Check the spelling or try fewer words.</p></>
+          : <><h2>No {nouns} yet</h2><p>{side === 'clients' ? 'Add your first client to see it here.' : 'Add your first agency to see it here.'}</p></>}
+        <div className="cs-state-actions">
+          {searching && <button type="button" className="cs-pillbtn" onClick={clear}>Clear search</button>}
+          {canEdit && !searching && <button type="button" className="cs-btn-primary" onClick={() => side === 'clients' ? setAdding(true) : setAddingAgency(true)}>{side === 'clients' ? 'New client' : 'Add agency'}</button>}
         </div>
-      ),
-    },
-    {
-      key: 'location',
-      header: 'Location',
-      width: '12%',
-      render: (c) => { const place = placeOf(c); return <Place country={place.country} city={place.city} empty="—" stacked /> },
-    },
-    {
-      key: 'agreement',
-      header: 'Agreement',
-      width: '13.5%',
-      render: (c) => { const { total, filed } = agreementOf(c); return <AgreementPill filed={filed} total={total} /> },
-    },
-    {
-      key: 'demand',
-      header: 'Open orders',
-      width: '12%',
-      render: (c) => <DemandCell demand={demand.get(c.id)} empty={idleCaption(c)} />,
-    },
-    { key: 'status', header: 'Status', width: '8%', render: (c) => <StatusPill status={c.status} /> },
-    {
-      key: 'open',
-      header: 'Actions',
-      actions: true,
-      render: (c) => <span className="cl-open" aria-label={`Open ${title(c)}`}>Open<ArrowRight size={14} aria-hidden="true" /></span>,
-    },
-  ]
-
-  const totals = [...demand.values()].reduce((sum: Demand, entry) => ({ orders: sum.orders + entry.orders, openings: sum.openings + entry.openings, deployed: sum.deployed + entry.deployed, toFill: sum.toFill + entry.toFill }), { orders: 0, openings: 0, deployed: 0, toFill: 0 })
-  const activeCount = store.clients.filter((client) => client.status === 'active').length
-  const missing = store.clients.filter(lacksAgreement).length
-
-  const exportCsv = () => downloadCsv(
-    `clients-${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Company', 'Industry', 'Website', 'Contact person', 'Designation', 'Email', 'Phone', 'WhatsApp', 'Country', 'City', 'Agreement', 'Open orders', 'Openings left', 'Status'],
-    rows.map((c) => {
-      const place = placeOf(c)
-      const { total, filed } = agreementOf(c)
-      const entry = demand.get(c.id)
-      return [title(c), sectorsOf(c).join('; '), websiteOf(c), c.name, c.designation, c.email, c.phone, c.whatsapp, place.country, place.city, !total ? '' : filed === total ? 'Uploaded' : filed ? `${filed} of ${total} uploaded` : 'Missing', entry?.orders ?? 0, entry?.toFill ?? 0, c.status]
-    }),
-  )
-
-  const emptyState = (
-    <EmptyState
-      icon={hasFilters ? <Search size={20} strokeWidth={1.6} /> : <Building2 size={20} strokeWidth={1.6} />}
-      title={hasFilters ? 'No clients found' : 'No clients yet'}
-      description={hasFilters ? 'Try a different name, email, phone number, industry or place.' : 'Add your first client with its company and contact person. Then you can create orders for it.'}
-      action={hasFilters ? <Button onClick={clear}>Clear filters</Button> : <Button variant="primary" onClick={() => setAdding(true)}>New client</Button>}
-    />
-  )
+      </div>
+    }
+    if (side === 'clients') {
+      const rows = matched as ClientRow[]
+      const open = (client: Client) => navigate(`/clients/${client.id}`)
+      return layout === 'table'
+        ? <ClientTable rows={rows} query={query} loading={false} onOpen={open} onEdit={canEdit ? setEditing : undefined} />
+        : <ClientCards rows={rows} query={query} onOpen={open} onEdit={canEdit ? setEditing : undefined} />
+    }
+    const rows = matched as AgencyRow[]
+    const props = { rows, query, onEdit: canEdit ? setEditingAgency : undefined, onDelete: canEdit ? setDeleting : undefined }
+    return layout === 'table' ? <AgencyTable {...props} loading={false} /> : <AgencyCards {...props} />
+  }
 
   return (
-    <div className="clients-v2">
-      <PageHeader
-        title="Clients"
-        eyebrow="Your clients"
-        description="Everything about the clients you hire for in one place: contact people, their companies, agreements and open orders."
-        actions={
-          <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>
-            New client
-          </Button>
-        }
-      />
+    <div className="clients-simple cs-page">
+      <header className="cs-head">
+        <h1>Clients</h1>
+        {canEdit && <div className="cs-actions">
+          <button type="button" className="cs-btn-primary" onClick={() => setAdding(true)}><Plus size={16} />New client</button>
+          <button type="button" className="cs-btn-green" onClick={() => setAddingAgency(true)}><Plus size={16} />Add agency</button>
+        </div>}
+      </header>
 
-      <KpiStrip
-        items={[
-          { label: 'Clients', value: store.clients.length, detail: `${activeCount} active · ${store.companies.length} ${store.companies.length === 1 ? 'company' : 'companies'}`, icon: Users },
-          { label: 'Hiring now', value: demand.size, detail: `${totals.orders} open ${totals.orders === 1 ? 'order' : 'orders'}`, icon: Zap, tone: 'amber', active: hiring, onSelect: () => { setHiring((value) => !value); setShown(CARD_PAGE) } },
-          { label: 'Openings left', value: totals.toFill, detail: totals.deployed ? `${totals.deployed} of ${totals.openings} already deployed` : 'Jobs still to fill', icon: Target, tone: 'green' },
-          { label: 'Agreement missing', value: missing, detail: missing ? 'Get a signed agreement' : 'Every client has an agreement', icon: FileWarning, tone: missing ? 'red' : 'green', active: noAgreement, onSelect: () => { setNoAgreement((value) => !value); setShown(CARD_PAGE) } },
-        ]}
-      />
-
-      <div ref={panelRef} className="cl-measure">
-      <Panel flush>
-        <Tabs tabs={[
-          { key: 'all', label: 'All clients' },
-          { key: 'active', label: 'Active' },
-          { key: 'inactive', label: 'Inactive' },
-        ]} active={tab} onChange={(key) => { setTab(key as typeof tab); setShown(CARD_PAGE) }} />
-        <div className="cl-toolbar">
-          <SearchInput value={query} onChange={(value) => { setQuery(value); setShown(CARD_PAGE) }} placeholder="Search company, contact or website" />
-          <Select aria-label="Filter by industry" value={industry} onChange={(event) => { setIndustry(event.target.value); setShown(CARD_PAGE) }}>
-            <option value="">All industries</option>
-            {industries.map((name) => <option key={name} value={name}>{name}</option>)}
-          </Select>
-          <Select aria-label="Filter by country" value={country} onChange={(event) => { setCountry(event.target.value); setShown(CARD_PAGE) }}>
-            <option value="">All countries</option>
-            {countries.map((name) => <option key={name} value={name}>{name}</option>)}
-          </Select>
-          <Select aria-label="Sort clients" value={sort} onChange={(event) => setSort(event.target.value as Sort)}>
-            <option value="recent">Recently added</option>
-            <option value="name">Company name A to Z</option>
-            <option value="demand">Most openings left</option>
-          </Select>
-          {!narrow && <ViewToggle view={savedView} onChange={setView} />}
+      <div className="cs-panel">
+        <div className="cs-seg" role="group" aria-label="Show">
+          <button type="button" className={side === 'clients' ? 'is-active' : ''} aria-pressed={side === 'clients'} onClick={() => choose('clients')}>Clients</button>
+          <button type="button" className={side === 'agencies' ? 'is-active' : ''} aria-pressed={side === 'agencies'} onClick={() => choose('agencies')}>Agencies</button>
         </div>
-        <div className="cl-resultbar">
-          <div className="cl-resultbar-main">
-            <span role="status">Showing {rows.length} of {store.clients.length} clients</span>
-            {hiring && <button type="button" className="cl-chip" onClick={() => setHiring(false)} aria-label="Remove the hiring now filter">Hiring now<X size={12} aria-hidden="true" /></button>}
-            {noAgreement && <button type="button" className="cl-chip" onClick={() => setNoAgreement(false)} aria-label="Remove the agreement missing filter">Agreement missing<X size={12} aria-hidden="true" /></button>}
-          </div>
-          <div className="cl-resultbar-actions">
-            {hasFilters && <Button size="sm" variant="ghost" onClick={clear}>Clear filters</Button>}
-            {rows.length > 0 && <Button size="sm" variant="secondary" icon={<Download className="h-3.5 w-3.5" />} onClick={exportCsv} title="Download the clients shown here as a spreadsheet (CSV) file">Download CSV</Button>}
-          </div>
+        <label className="cs-search">
+          <Search size={18} aria-hidden="true" />
+          <input ref={searchBox} autoFocus type="search" value={text} onChange={(event) => setText(event.target.value)} maxLength={120} autoComplete="off" spellCheck={false} aria-keyshortcuts="/"
+            placeholder={side === 'clients' ? 'Search by name, company, phone, email or staff' : 'Search by name, agency, phone, email, state or staff'} aria-label={`Search ${nouns}`} />
+          {text && <button type="button" className="cs-search-clear" aria-label="Clear search" onClick={clear}><X size={15} /></button>}
+        </label>
+        <div className="cs-layout" role="group" aria-label="View as">
+          <button type="button" className={layout === 'cards' ? 'is-active' : ''} aria-pressed={layout === 'cards'} aria-label="Cards view" title="Cards" onClick={() => setLayout('cards')}><LayoutGrid size={17} /></button>
+          <button type="button" className={layout === 'table' ? 'is-active' : ''} aria-pressed={layout === 'table'} aria-label="Table view" title="Table" onClick={() => setLayout('table')}><Table2 size={17} /></button>
         </div>
-
-        {view === 'list' ? (
-          <DataTable
-            compact
-            stackBelow={false}
-            resetPageKey={`${query}:${tab}:${hiring}:${noAgreement}:${country}:${industry}:${sort}`}
-            rows={rows}
-            columns={columns}
-            rowKey={(c) => c.id}
-            onRowClick={(c) => navigate(`/clients/${c.id}`)}
-            empty={emptyState}
-          />
-        ) : rows.length === 0 ? emptyState : (
-          <>
-            <div className="cl-grid">
-              {rows.slice(0, shown).map((c) => {
-                const { total, filed } = agreementOf(c)
-                const place = placeOf(c)
-                const sectors = sectorsOf(c)
-                return (
-                  <article key={c.id} className="cl-card">
-                    <header>
-                      <Avatar name={title(c)} size="lg" />
-                      <div className="cl-card-title">
-                        <h3><button type="button" onClick={() => navigate(`/clients/${c.id}`)} title={title(c)}>{title(c)}</button></h3>
-                        <p title={sectors.join(' · ')}>{sectors.length ? sectors.slice(0, 2).join(' · ') : companiesOf(c).length ? 'No industry added' : 'No company added yet'}</p>
-                      </div>
-                      <StatusPill status={c.status} />
-                    </header>
-                    <dl className="cl-facts">
-                      <div><dt>Contact</dt><dd title={c.designation ? `${c.name}, ${c.designation}` : c.name}>{c.designation ? `${c.name} · ${c.designation}` : c.name}</dd></div>
-                      {websiteOf(c) && <div><dt>Website</dt><dd><WebsiteLink value={websiteOf(c)} /></dd></div>}
-                      <div><dt>Phone</dt><dd>{c.phone ? <a className="ident" href={`tel:${c.phone}`}>{c.phone}</a> : <span className="cl-quiet">Not added</span>}</dd></div>
-                      <div><dt>Email</dt><dd>{c.email ? <><a href={`mailto:${c.email}`} title={c.email}>{c.email}</a><CopyButton value={c.email} label={`Copy email of ${c.name}`} /></> : <span className="cl-quiet">Not added</span>}</dd></div>
-                      <div><dt>Location</dt><dd><Place country={place.country} city={place.city} /></dd></div>
-                      <div><dt>Agreement</dt><dd><AgreementPill filed={filed} total={total} /></dd></div>
-                      <div><dt>Open orders</dt><dd><DemandCell demand={demand.get(c.id)} empty={idleCaption(c)} /></dd></div>
-                    </dl>
-                    <footer>
-                      <Button size="sm" variant="secondary" icon={<ArrowRight className="h-3.5 w-3.5" />} onClick={() => navigate(`/clients/${c.id}`)}>Open client</Button>
-                    </footer>
-                  </article>
-                )
-              })}
-            </div>
-            {rows.length > shown && (
-              <div className="cl-more">
-                <span className="tnum">Showing {shown} of {rows.length}</span>
-                <Button size="sm" onClick={() => setShown((value) => value + CARD_PAGE)}>Show more</Button>
-              </div>
-            )}
-          </>
-        )}
-      </Panel>
       </div>
 
+      {(searching || showAll) && !loading && !loadError && count > 0 && (
+        <div className="cs-resultbar">
+          <span role="status" className="cs-count">{count} {count === 1 ? 'result' : 'results'}{!searching && showAll ? ` · all ${nouns}` : ''}</span>
+          <button type="button" className="cs-textbtn" onClick={clear}>Clear</button>
+        </div>
+      )}
+
+      {body()}
+
       {adding && <ClientDialog onClose={() => setAdding(false)} />}
+      {editing && <ClientDialog client={editing} onClose={() => setEditing(null)} />}
+      {addingAgency && <AgencyDialog onClose={() => setAddingAgency(false)} onSaved={agencies.refresh} />}
+      {editingAgency && <AgencyDialog agency={editingAgency} onClose={() => setEditingAgency(null)} onSaved={agencies.refresh} />}
+      {deleting && <Dialog open onClose={() => { if (!deleteBusy) setDeleting(null) }} width="sm" title="Delete agency"
+        footer={<><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="danger" disabled={deleteBusy} onClick={() => void confirmDelete()}>{deleteBusy ? 'Deleting…' : 'Delete'}</Button></>}>
+        {deleteError && <p role="alert" className="client-form-error">{deleteError}</p>}
+        <p>Delete <b>{deleting.agencyName}</b> from the agencies? Candidates already recorded with this agency keep their text.</p>
+      </Dialog>}
     </div>
   )
 }

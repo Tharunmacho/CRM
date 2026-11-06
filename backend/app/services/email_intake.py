@@ -275,7 +275,9 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
     values = candidate_values(fields, raw)
     review = review or not values.get("name") or not values.get("phone")
     if created:
-        owner = next_owner(db, pointer=pointer)
+        # Client staff routing first (designation match); otherwise the ordinary round-robin.
+        from app.services import client_routing
+        owner = client_routing.route_new_candidate(db, values.get("designations")) or next_owner(db, pointer=pointer)
         # A source-derived reference is stable across retries and cannot collide with
         # the legacy manual count-based CND-1001 references.
         candidate = Candidate(

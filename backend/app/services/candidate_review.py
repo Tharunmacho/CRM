@@ -109,16 +109,19 @@ def assign_waiting_candidates(db, actor_id: str | None, actor_name: str) -> dict
     nobody is eligible and reports how many are still waiting.
     """
     from app.api.routers.candidates import lock_assignment_cursor, next_owner
+    from app.services import client_routing
     from app.services.assignment_notifications import notify_assignment_changes
 
     pointer = lock_assignment_cursor(db)
     waiting = list(db.scalars(select(Candidate).where(Candidate.owner_id.is_(None))
                               .order_by(Candidate.created_at, Candidate.id).with_for_update()))
     reasons = review_reasons(db, [candidate for candidate in waiting if candidate.needs_review])
+    routed = bool(waiting) and client_routing.any_allocations(db)  # one statement; the per-candidate lookups are skipped when no client has staff
     now = datetime.now(timezone.utc)
     changes, assigned, cleared, per_owner = [], 0, 0, {}
     for candidate in waiting:
-        owner = next_owner(db, pointer=pointer)
+        # Client staff routing first (designation match); otherwise the ordinary round-robin.
+        owner = (client_routing.route_new_candidate(db, candidate.designations) if routed else None) or next_owner(db, pointer=pointer)
         if owner is None:
             break
         candidate.owner_id = owner.id

@@ -22,6 +22,7 @@ from app.db.session import get_db
 from app.services import document_storage
 from app.core.deps import candidate_work_refusal, current_user, ensure_can_work_candidate, require_role
 from app.integrations.ocr.mapping import resume_text_from
+from app.services import client_routing
 from app.services import form_extraction as form_fx
 from app.services.candidate_identity import identity_matches, enrich_empty, normalize_candidate_values, normalize_phone
 from app.services.candidate_intake_binding import bind_intake, lock_intake_group, saved_candidate, saved_candidate_id
@@ -534,14 +535,16 @@ def create_candidate(
     # Who gets the candidate. A staff member who adds a candidate works it: it is assigned to them and the
     # round-robin is left alone. Admin and manager may name a recruiter, or leave it to the next free one.
     requested = getattr(body, "assign_to", None)
+    # Client staff routing (see services/client_routing.py): a designation that an open order of a client with allocated staff
+    # asks for goes to the least-loaded of that staff. An admin's or manager's explicit choice always wins.
     if user.role == Role.staff:
         if requested and requested != user.id:
             raise HTTPException(403, "A candidate you add is assigned to you. Only a manager or an admin can choose another recruiter.")
-        owner = user
+        owner = client_routing.route_new_candidate(db, body.designations, keep_user_id=user.id) or user
     elif requested:
         owner = ensure_assignable(db, requested)
     else:
-        owner = next_owner(db, pointer=pointer)
+        owner = client_routing.route_new_candidate(db, body.designations) or next_owner(db, pointer=pointer)
 
     ocr_data = body.ocr_data.stored() if body.ocr_data else {}
     # Saved from a document that did not give a name or number: kept, and flagged for a person to complete.

@@ -35,6 +35,7 @@ import { EntryFormPreview } from '@/features/application-form/components/entry-f
 import { educationPayload, historyPayload, previewFormFromEntry } from '@/features/application-form/entry-bridge'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { fileHref } from '@/shared/api/client'
+import { useReferenceAgencies } from '@/features/clients/agency-api'
 import '@/styles/application-form.css'
 import '@/styles/add-candidate-v2.css'
 import '@/styles/application-entry.css'
@@ -365,6 +366,8 @@ export default function AddCandidatePage() {
   // The step the recruiter is on: documents first, then the details, then save.
   const currentStep = savedCandidateId || missing.length === 0 ? 2 : chosen.length > 0 || form.name.trim() || form.phone.trim() ? 1 : 0
   const sourceHint = form.source === 'referral' ? 'Referred by' : form.source === 'other' ? 'Tell us where from' : 'More about the source (optional)'
+  // Reference agency names are offered as suggestions for a referral; what is typed stays free text.
+  const agencyNames = useReferenceAgencies(form.source === 'referral').items?.map((agency) => agency.agencyName) ?? []
   const sourcePlaceholder = form.source === 'referral' ? 'Name of the person who referred them' : form.source === 'other' ? 'Where did this candidate come from?' : form.source === 'walk_in' ? 'Branch or event, e.g. Kochi office' : 'Optional note'
   const failedUploads = Object.keys(uploadErrors).length
   const kindLabel = (kind: ScanKind) => kind === 'resume' ? 'Resume' : kind === 'passport' ? 'Passport' : 'Aadhaar'
@@ -715,8 +718,8 @@ export default function AddCandidatePage() {
                       {choicesFor(formOptions, OPT.source, form.source).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </Select>
                   </EntryField>
-                  <EntryField label={sourceHint} className="s-3">
-                    <Input value={form.sourceDetail} onChange={(e) => set('sourceDetail', e.target.value)} placeholder={sourcePlaceholder} maxLength={255} />
+                  <EntryField label={sourceHint} className="s-3" aux={agencyNames.length > 0 ? <datalist id="reference-agency-names">{[...new Set(agencyNames)].map((name) => <option key={name} value={name} />)}</datalist> : undefined}>
+                    <Input value={form.sourceDetail} onChange={(e) => set('sourceDetail', e.target.value)} placeholder={sourcePlaceholder} maxLength={255} list={agencyNames.length ? 'reference-agency-names' : undefined} />
                   </EntryField>
                   <EntryField label="Assigned recruiter" className="s-3" hint={picksRecruiter ? 'Leave on automatic to give it to a free recruiter.' : 'A candidate you add is assigned to you, so you do the work and complete the stages.'}>
                     {picksRecruiter

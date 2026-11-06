@@ -62,6 +62,8 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "workflow_daily_goals": ("tasks",),
     "workflow_settings": ("tasks",),
     "crm_client_contacts": ("clients",),
+    "crm_client_staff": ("clients",),  # the CRM staff allocated to a client are part of the client's wire form
+    "crm_reference_agencies": ("reference_agencies",),
     "crm_employer_companies": ("companies",),
     "crm_job_orders": ("orders",),
     "crm_job_designations": ("designations",),
@@ -136,6 +138,7 @@ OWNER_TOPICS = frozenset({"todos", "notifications"})
 CLIENT_TOPICS = frozenset({
     "candidates", "applications", "tasks", "clients", "companies", "orders", "designations", "notifications",
     "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings", "form_options", "leads",
+    "reference_agencies",
 })
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
 ID_ROLES = frozenset({"admin", "manager"})

@@ -276,10 +276,20 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
 @router.post("", response_model=MapOut, status_code=status.HTTP_201_CREATED)
 def map_candidate(body: MapIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     with _mutation(db):
+        # Client staff routing: when the order's client has CRM staff allocated, the candidate may be handed to them below.
+        # That decision takes the assignment-cursor lock like every other owner change, and it is taken before the candidate
+        # and order rows are locked so this path never waits for the cursor while holding them.
+        from app.services import client_routing
+        allocated, client_name = client_routing.allocated_ids_for_order(db, body.order_id)
+        if allocated:
+            from app.api.routers.candidates import lock_assignment_cursor
+            lock_assignment_cursor(db)
         candidate = _lock(db, Candidate, body.candidate_id, "Candidate")
         order = _lock(db, Order, body.order_id, "Order")
         # Putting a candidate on an order starts their stage work, which is the assigned recruiter's.
         ensure_can_work_candidate(candidate, user, db)
+        # Only at creation of the application: a later reassignment by an admin is never undone by this.
+        client_routing.reroute_for_order(db, candidate, order, allocated, client_name, actor_id=user.id)
         owner = _owner(db, candidate)
         if order.status != OrderStatus.open:
             raise HTTPException(409, "Open this order before matching candidates.")

@@ -63,8 +63,9 @@ def test_domain_names_cover_renamed_models_and_documented_intake_extension():
     expected |= {'whatsapp_send_attempts', 'whatsapp_templates', 'whatsapp_delivery_events', 'intake_acknowledgements', 'document_person_intakes', 'whatsapp_conversations', 'document_person_groups', 'intake_acknowledgement_settings'}
     expected |= {"agency_settings", "currencies", "job_categories", "workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress", "crm_form_options"}
     expected |= {"crm_lead_batches", "crm_leads", "crm_lead_activities"}
+    expected |= {"crm_client_staff", "crm_reference_agencies"}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 60
+    assert len(Base.metadata.tables) == 62
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:
@@ -610,7 +611,7 @@ def test_attendance_policy_upgrade_preserves_existing_clocks_and_presence(schema
     def kept(after):
         return {name: [{key: row[key] for key in before[name][0]} if before[name] else row for row in rows] for name, rows in after.items()}
     assert kept(snapshot()) == before
-    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 60
+    assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 62
     _migrate(engine, "0014_attendance_ordering", downgrade=True)
     assert snapshot() == before
     assert len(set(inspect(engine).get_table_names()) - {"alembic_version"}) == 35

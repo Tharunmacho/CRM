@@ -6,7 +6,7 @@ password hashes, raw OCR output, search vectors and file storage keys are not re
 This is a fresh database snapshot, not a cross-user cache.
 """
 
-from sqlalchemy import JSON, Select, case, cast, func, literal, or_, select
+from sqlalchemy import JSON, Select, case, cast, func, literal, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.api.schemas import (
     NotificationOut, OrderOut, RemarkOut, StageRecordOut, TaskOut, TodoOut, UserOut,
 )
 from app.db.models import (
-    AgencySettings, Application, ApplicationStage, Attachment, Candidate, Client, Company,
+    AgencySettings, Application, ApplicationStage, Attachment, Candidate, Client, ClientStaff, Company,
     Currency, Designation, JobCategory, Notification, Order, Remark, Role, Task, TodoItem, User,
 )
 from app.services import agency_settings
@@ -28,6 +28,22 @@ def _fields(model, schema, *extra):
     table = model.__table__
     names = dict.fromkeys([*schema.model_fields, *extra])
     return select(*(table.c[name] for name in names if name in table.c))
+
+
+def client_staff_ids():
+    """Each client's allocated CRM users as a JSON array of ids, in one correlated aggregate (no per-row query).
+
+    Only people who can still work the client's candidates count: an active staff or manager account. A user who was
+    deleted has no link left (ON DELETE CASCADE); one who was deactivated or made an admin simply stops being listed.
+    """
+    found = (
+        select(func.json_agg(aggregate_order_by(ClientStaff.user_id, User.name.asc(), User.id.asc()), type_=JSON))
+        .select_from(ClientStaff.__table__.join(User.__table__, User.id == ClientStaff.user_id))
+        .where(ClientStaff.client_id == Client.id, User.active.is_(True), User.role.in_([Role.staff, Role.manager]))
+        .correlate(Client)
+        .scalar_subquery()
+    )
+    return func.coalesce(found, literal_column("'[]'::json")).label("staff_ids")
 
 
 def _rows(name: str, statement: Select, *ordering):
@@ -96,7 +112,7 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
         # and the first browser poll cannot be mistaken for an initial baseline.
         revision_expression().label("ingestionRevision"),
         _rows("users", _fields(User, UserOut)),
-        _rows("clients", _fields(Client, ClientOut)),
+        _rows("clients", _fields(Client, ClientOut).add_columns(client_staff_ids())),
         _rows("companies", _fields(Company, CompanyOut)),
         _rows("designations", _fields(Designation, DesignationOut)),
         _rows("orders", _fields(Order, OrderOut)),

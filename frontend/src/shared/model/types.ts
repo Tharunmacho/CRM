@@ -147,6 +147,32 @@ export interface Client {
   city?: string
   notes?: string
   status: 'active' | 'inactive'
+  /** People on the client's side (their own staff), shown on the client card. */
+  staffContacts?: StaffContact[]
+  /** CRM staff (users) who look after this client end to end: candidates matched to the client's jobs are routed to them. */
+  staffIds?: string[]
+}
+
+/** A person on a client's or reference agency's own team. */
+export interface StaffContact {
+  name: string
+  designation?: string
+  phone?: string
+  email?: string
+}
+
+/** An agency that refers candidates. Same details as a client. */
+export interface ReferenceAgency {
+  id: string
+  /** The contact person. */
+  name: string
+  agencyName: string
+  phone?: string
+  email?: string
+  address?: string
+  state?: string
+  staffContacts?: StaffContact[]
+  createdAt?: string
 }
 
 /** The employer an order is placed for. Always belongs to a client. */
@@ -164,6 +190,8 @@ export interface Company {
   phone?: string
   whatsapp?: string
   address?: string
+  /** The state the company is in. */
+  state?: string
   notes?: string
   status: 'active' | 'inactive'
   /** The latest signed agreement, if one was uploaded. */

@@ -50,6 +50,7 @@ export default function ClientDetailPage() {
   const [employer, setEmployer] = useState('')
 
   const companies = useMemo(() => store.companies.filter((co) => co.clientId === id), [store.companies, id])
+  const assignedStaff = (client?.staffIds ?? []).map((id) => store.user(id)).filter((user): user is NonNullable<typeof user> => !!user)
   const orders = useMemo(() => {
     const ids = new Set(companies.map((co) => co.id))
     const rank = (status: string) => (status === 'open' ? 0 : status === 'on_hold' ? 1 : 2)
@@ -141,6 +142,16 @@ export default function ClientDetailPage() {
               <li><MessageCircle size={16} aria-hidden="true" />{client.whatsapp ? <a href={`https://wa.me/${digits(client.whatsapp)}`} target="_blank" rel="noreferrer" className="ident" title="Open WhatsApp">{client.whatsapp}</a> : empty}</li>
               <li><MapPin size={16} aria-hidden="true" />{location ? <Place country={client.country} city={client.city} /> : empty}</li>
             </ul>
+            <div className="cd-block">
+              <h3>Assigned staff</h3>
+              {assignedStaff.length > 0
+                ? <ul className="cd-staff">{assignedStaff.map((user) => <li key={user.id}><Avatar name={user.name} size="sm" /><span><b>{user.name}</b><small>{user.role === 'manager' ? 'Manager' : 'Recruiter'}</small></span></li>)}</ul>
+                : <p className="cd-none">No staff assigned yet. Edit the client to choose who looks after it.</p>}
+            </div>
+            {(client.staffContacts?.length ?? 0) > 0 && <div className="cd-block">
+              <h3>Staff details</h3>
+              <ul className="cd-staff">{client.staffContacts!.map((person, index) => <li key={`${person.name}:${index}`}><Avatar name={person.name} size="sm" /><span><b>{person.name}</b><small>{[person.designation, person.phone, person.email].filter(Boolean).join(' · ') || 'No contact details'}</small></span></li>)}</ul>
+            </div>}
             {companies.length > 0 && (
               <div className="cd-block">
                 <h3>Agreements</h3>

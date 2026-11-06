@@ -39,6 +39,15 @@ class UserOut(Wire):
     on_leave: bool
 
 
+class StaffContactOut(Wire):
+    """One person on a client's or reference agency's own team."""
+
+    name: str
+    designation: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
 class ClientOut(Wire):
     """A person. Their companies are separate records."""
 
@@ -52,6 +61,22 @@ class ClientOut(Wire):
     city: str | None = None
     notes: str | None = None
     status: str
+    staff_contacts: list[StaffContactOut] = []
+    # CRM users (active staff or manager) who look after this client; filled by the snapshot / endpoints, not a column.
+    staff_ids: list[str] = []
+
+
+class ReferenceAgencyOut(Wire):
+    id: str
+    name: str
+    agency_name: str
+    phone: str | None = None
+    email: str | None = None
+    address: str | None = None
+    state: str | None = None
+    staff_contacts: list[StaffContactOut] = []
+    notes: str | None = None
+    created_at: datetime | None = None
 
 
 class FileRefOut(Wire):
@@ -73,6 +98,7 @@ class CompanyOut(Wire):
     phone: str | None = None
     whatsapp: str | None = None
     address: str | None = None
+    state: str | None = None
     notes: str | None = None
     status: str
     # The latest signed agreement, if one was uploaded.

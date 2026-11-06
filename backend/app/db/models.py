@@ -28,6 +28,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -210,8 +211,43 @@ class Client(Base, PkMixin, TimestampMixin):
     city: Mapped[str | None] = mapped_column(String(100))
     notes: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
+    # People on the client's own team: [{name, designation?, phone?, email?}], at most 50 (migration 0026).
+    staff_contacts: Mapped[list[dict]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False, server_default=text("'[]'"))
 
     companies: Mapped[list["Company"]] = relationship(back_populates="client")
+
+
+class ClientStaff(Base):
+    """A CRM user (staff or manager) who looks after a client end to end. Candidates for the client's orders are routed to them."""
+
+    __tablename__ = "crm_client_staff"
+    __table_args__ = {
+        "comment": "CRM staff allocated to a client; matched and incoming candidates for that client go to them."
+    }
+
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("crm_client_contacts.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), primary_key=True, index=True)
+
+
+class ReferenceAgency(Base, PkMixin, TimestampMixin):
+    """An agency that refers candidates. Same details as a client, kept apart from the client chain."""
+
+    __tablename__ = "crm_reference_agencies"
+    __table_args__ = {
+        "comment": "Reference agencies that refer candidates: contact person, agency name, address and their own team."
+    }
+
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    agency_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(40))
+    email: Mapped[str | None] = mapped_column(String(255))
+    address: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(String(100))
+    staff_contacts: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class Company(Base, PkMixin, TimestampMixin):
@@ -233,6 +269,7 @@ class Company(Base, PkMixin, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(40))
     whatsapp: Mapped[str | None] = mapped_column(String(40))
     address: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str | None] = mapped_column(String(100))  # the agency's state (migration 0026)
     notes: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
 
