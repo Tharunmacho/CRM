@@ -1,55 +1,271 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, BriefcaseBusiness, Database, ListChecks, Mail, Plus, RefreshCw, UserCheck, Users } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpRight, Building2, BriefcaseBusiness, CalendarClock, Check, CheckCheck, ChevronRight, Clock3, Database, FileSearch, ListChecks, Mail, Plus, RefreshCw, Search, UserCheck, UserPlus, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
-import { useReportData } from '@/features/reports/report-api'
-import type { LeadSummaryResponse } from '@/features/leads/lead-api'
+import { Select } from '@/shared/ui/primitives'
+import { DataTable, type Column } from '@/shared/ui/table'
+import { Dialog } from '@/shared/ui/overlay'
+import { StageModal } from '@/features/workflow/components/stage-modal'
+import { dateLabel, dateTimeLabel } from '@/shared/lib/format'
+import { LEAD_REPORT_TOPICS, useReportData, type DashboardResult, type DashboardTask, type OrderMetrics, type OverviewItem } from '@/features/reports/report-api'
+import { IntakeSkeleton, number } from '@/features/dashboard/components/intake-panel'
+import { PlacementJourney } from '@/features/dashboard/components/placement-journey'
+import { CandidateCards, roleLine, OrderCards, TaskCards, useNarrow } from '@/features/dashboard/components/stacked'
+import { Avatar, Flag, Pill, SlaMeter, StageMini } from '@/features/dashboard/components/identity'
+import { PipelineOverview } from '@/features/dashboard/components/overview-panel'
+import { overviewCsvRows } from '@/features/dashboard/overview'
+import { LeadOverview } from '@/features/dashboard/components/lead-overview'
+import { leadCsvRows } from '@/features/dashboard/lead-overview'
+import { gateState, readGate, subscribeGate } from '@/features/leads/lead-gate'
+import { AttentionList, type AttentionItem } from '@/features/dashboard/components/recent-arrivals'
 import { candidatesAfterPrescreening, inView } from '@/features/dashboard/summary'
+import '@/styles/dashboard-ref.css'
 import '@/styles/dashboard-simple.css'
 
-type Tone = 'blue' | 'green' | 'amber' | 'violet' | 'teal' | 'slate' | 'red'
-interface Card { key: string; label: string; value: number | null; icon: typeof Users; tone: Tone; to: string }
+type TaskFilter = 'open' | 'dueToday' | 'overdue' | 'escalated' | 'notUpdated'
+const FILTERS: { key: TaskFilter; label: string; hint?: string }[] = [
+  { key: 'open', label: 'All open' }, { key: 'dueToday', label: 'Due today', hint: 'Tasks that must be finished today, before their 48-hour limit ends' },
+  { key: 'overdue', label: 'Overdue', hint: 'Tasks past their 48-hour limit' }, { key: 'escalated', label: 'Escalated', hint: 'Past the 48-hour limit and reported to the admin and managers' }, { key: 'notUpdated', label: 'Not updated today', hint: 'Open tasks with no remark added today' },
+]
+const STATUS: Record<string, { label: string; tone: 'info' | 'warn' | 'good' | 'bad' | 'muted' | 'accent' }> = {
+  new: { label: 'New', tone: 'info' }, in_process: { label: 'In process', tone: 'accent' }, needs_review: { label: 'Needs review', tone: 'warn' },
+  deployed: { label: 'Deployed', tone: 'good' }, not_interested: { label: 'Not interested', tone: 'muted' },
+}
 
-const count = (value: number | null) => value === null ? '–' : value.toLocaleString('en-IN')
+function CardHeading({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+  return <header className="dr-card-head"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{action}</header>
+}
+function EmptyContent({ title, detail, icon: Icon = BriefcaseBusiness }: { title: string; detail: string; icon?: typeof Users }) {
+  return <div className="dr-empty"><span><Icon size={20} strokeWidth={1.5} /></span><strong>{title}</strong><p>{detail}</p></div>
+}
+function DashboardSkeleton() {
+  return <div className="dr-skeleton"><IntakeSkeleton /></div>
+}
 
-/** Clean overview: one number per area, each opening its own page. Counts follow the viewer's role. */
+/** Charts and tables share the same live, permission-scoped dashboard result. */
 export default function DashboardPage() {
   const store = useStore()
   const navigate = useNavigate()
+  const [staff, setStaff] = useState('')
+  const [query, setQuery] = useState('')
+  const [stage, setStage] = useState<number | null>(null)
+  const [openApp, setOpenApp] = useState<string | null>(null)
+  const [openStage, setOpenStage] = useState<number | undefined>()
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>('open')
+  const [todoError, setTodoError] = useState('')
+  const [pendingTodo, setPendingTodo] = useState('')
+  const { data, error, refresh, refreshing } = useReportData<DashboardResult>(`/dashboard${staff ? `?staff_id=${encodeURIComponent(staff)}` : ''}`, store.me.id, '', LEAD_REPORT_TOPICS)
+  // A staff member who has not finished today's daily tasks cannot work leads yet; the shell publishes that state (read-only here).
+  const leadGate = gateState(store.me.role, useSyncExternalStore(subscribeGate, () => readGate(store.me.id), () => null))
+  const narrow = useNarrow()
+  const isStaff = store.me.role === 'staff'
+  // Admin and manager see the whole team (and can pick one person); staff see only their own work.
   const isTeam = store.me.role === 'admin' || store.me.role === 'manager'
-  // Everything here is live: the workspace refreshes itself when anything changes, the inbox badge is polled, and the
-  // lead total is re-read whenever the lead sheet changes.
-  const leads = useReportData<LeadSummaryResponse>(`/leads/summary?scope=${isTeam ? 'all' : 'mine'}`, store.me.id, '', ['leads'])
+  const stageData = data?.pipeline.find(row => row.stage === stage)
+  // Staff see their own numbers; admin and managers see the team, or the person chosen in the filter.
+  const scopeLabel = (noun: string) => !isTeam ? `My ${noun}` : staff ? `${noun[0].toUpperCase()}${noun.slice(1)} · ${store.user(staff)?.name.split(' ')[0] ?? 'selected'}` : `Team ${noun}`
+  const active = data?.pipeline.reduce((sum, item) => sum + item.count, 0) ?? 0
+  const openings = data?.orders.reduce((sum, item) => sum + item.openings, 0) ?? 0
+  const deployed = data?.orders.reduce((sum, item) => sum + item.deployed, 0) ?? 0
+  const todos = store.todos.filter(todo => todo.ownerId === store.me.id && !todo.done).sort((a, b) => +new Date(a.dueAt) - +new Date(b.dueAt))
 
-  // Admin and manager see the whole team; staff see their own candidates and tasks.
-  const candidates = useMemo(() => inView(store.candidates, { id: store.me.id, isTeam }), [store.candidates, isTeam, store.me.id])
+  const scoped = useMemo(() => inView(store.candidates, { id: store.me.id, isTeam }, staff), [store.candidates, isTeam, staff, store.me.id])
+  const anchorKey = data?.generatedAt
   // A candidate counts once they have been put through to prescreening or any later stage of an order.
-  const afterPrescreening = useMemo(() => candidatesAfterPrescreening(candidates.map(candidate => candidate.id), store.applications), [candidates, store.applications])
-  const openTasks = useMemo(() => store.visibleTasks.filter(task => !task.completedAt && !task.cancelledAt).length, [store.visibleTasks])
+  const afterPrescreening = useMemo(() => candidatesAfterPrescreening(scoped.map(candidate => candidate.id), store.applications), [scoped, store.applications])
+  // Days a candidate has waited at their current stage: since the last stage was completed, or since the application began.
+  const waitingDays = useMemo(() => {
+    const now = Date.now()
+    const days: Record<string, number> = {}
+    for (const application of store.applications) {
+      if (application.status !== 'active') continue
+      const since = Math.max(Date.parse(application.createdAt) || 0, ...application.stages.map(record => Date.parse(record.completedAt ?? '') || 0))
+      if (since) days[application.id] = Math.max(0, Math.floor((now - since) / 86_400_000))
+    }
+    return days
+  }, [store.applications, anchorKey])
+  const recent = useMemo(() => {
+    const term = query.trim().toLowerCase()
+    return [...scoped].sort((a, b) => b.addedAt.localeCompare(a.addedAt))
+      .filter(candidate => !term || [candidate.name, candidate.ref, candidate.designations.join(' '), candidate.email, candidate.phone].join(' ').toLowerCase().includes(term)).slice(0, 6)
+  }, [scoped, query])
 
-  const cards: Card[] = [
+  const taskColumns: Column<DashboardTask>[] = [
+    { key: 'candidate', header: 'Candidate / task', value: row => row.candidate, width: '28%', render: row => <div className="dr-person"><Avatar name={row.candidate} /><div><strong>{row.candidate}</strong><span>{row.title}</span></div></div> },
+    { key: 'stage', header: 'Stage', value: row => row.stage ?? 0, width: '20%', render: row => <StageMini no={row.stage} /> },
+    { key: 'owner', header: 'Assigned to', value: row => row.owner, width: '12%', render: row => <span className="dr-owner"><Avatar name={row.owner} size="sm" />{row.owner.split(' ')[0]}</span> },
+    { key: 'due', header: 'Due', value: row => row.dueAt, width: '22%', render: row => <div className="dr-due"><span className={row.overdue ? 'dr-overdue' : ''}>{dateTimeLabel(row.dueAt)}</span><SlaMeter dueAt={row.dueAt} /></div> },
+    { key: 'updates', header: 'Daily update', value: row => row.notUpdated ? 'Not updated today' : 'Updated today', width: '18%', render: row => <Pill tone={row.notUpdated ? 'warn' : 'good'} title={row.notUpdated ? 'No note from the owner yet today' : undefined}>{row.notUpdated ? 'Not updated today' : 'Updated today'}</Pill> },
+  ]
+  const orderColumns: Column<OrderMetrics>[] = [
+    { key: 'ref', header: 'Order', value: row => row.ref, width: '19%', render: row => <div className="dr-copy"><strong>{row.ref}</strong><small>{row.company}</small></div> },
+    { key: 'designation', header: 'Position', value: row => row.designation, width: '19%', render: row => <div className="dr-copy"><strong>{row.designation}</strong><small>{row.client}</small></div> },
+    { key: 'country', header: 'Country', value: row => store.order(row.id)?.country ?? '', width: '18%', render: row => { const order = store.order(row.id); return <span className="dr-place"><Flag country={order?.country} />{[order?.city, order?.country].filter(Boolean).join(', ') || 'Not added'}</span> } },
+    { key: 'progress', header: 'Deployed', value: row => row.openings ? row.deployed / row.openings : 0, width: '20%', render: row => <div className="dr-progress" title={`${row.deployed} deployed of ${row.openings} openings`}><span><i style={{ width: `${row.openings ? Math.min(100, row.deployed / row.openings * 100) : 0}%` }} /></span><b>{number(row.deployed)}/{number(row.openings)}</b></div> },
+    ...(['matched', 'selected'] as const).map(key => ({ key, header: key[0].toUpperCase() + key.slice(1), value: (row: OrderMetrics) => row[key], align: 'center' as const, width: '12%' })),
+  ]
+  function openTask(task: DashboardTask) { if (task.applicationId) { setOpenStage(task.stage || undefined); setOpenApp(task.applicationId) } else navigate(`/candidates/${task.candidateId}`) }
+  function openPlacement(item: OverviewItem) { setOpenStage(item.stage); setOpenApp(item.applicationId) }
+  async function finishTodo(id: string) {
+    setPendingTodo(id); setTodoError('')
+    try { await store.toggleTodo(id) } catch (failure) { setTodoError(failure instanceof Error ? failure.message : 'We could not mark this to-do as done. Please try again.') } finally { setPendingTodo('') }
+  }
+  function showTasks(filter: TaskFilter) {
+    setTaskFilter(filter)
+    document.getElementById('dashboard-workload')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  function exportOverview() {
+    if (!data) return
+    const rows = [
+      ['Date', data.date], ['Time zone', data.timezone], ['Showing', data.staffId ? data.staffOptions.find(option => option.id === data.staffId)?.label ?? store.user(data.staffId)?.name ?? data.staffId : 'Whole team'],
+      ['Candidates today', data.today.total],
+      ['Active applications', active], ['Open tasks', data.taskCounts.open], ['Due today', data.taskCounts.dueToday],
+      ['Overdue tasks', data.taskCounts.overdue], ['Escalated tasks', data.taskCounts.escalated],
+      ...data.pipeline.map(row => [`Stage ${row.stage}: ${row.label}`, row.count]),
+      ...(data.overview ? overviewCsvRows(data.overview) : []),
+      ...(data.leads ? leadCsvRows(data.leads, 'year') : []),
+    ]
+    const csv = rows.map(row => row.map(value => {
+      const text = String(value)
+      return `"${(/^[=+@\-\t\r]/.test(text) ? `'${text}` : text).replaceAll('"', '""')}"`
+    }).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob(['﻿', csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url; link.download = `recruitment-overview-${data.date}.csv`
+    document.body.appendChild(link); link.click(); link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const tasksView = data?.tasks.filter(task => taskFilter === 'open' || task[taskFilter]) ?? []
+  const needsReview = scoped.filter(candidate => candidate.needsReview || candidate.status === 'needs_review').length
+  const unassigned = scoped.filter(candidate => !candidate.ownerId).length
+  // What needs a person now. Only items that have something waiting are listed; each opens the exact list.
+  const attention: AttentionItem[] = !data ? [] : [
+    ...(isTeam && unassigned > 0 ? [{ key: 'waiting', label: unassigned === 1 ? 'candidate waiting for a recruiter' : 'candidates waiting for a recruiter', hint: 'Open the Data Bank, waiting list', count: unassigned, icon: Users, tone: 'warn' as const, onClick: () => navigate('/data-bank?pool=unassigned') }] : []),
+    ...(needsReview > 0 ? [{ key: 'review', label: needsReview === 1 ? 'profile that needs a review' : 'profiles that need a review', hint: 'Open the Data Bank, profiles to review', count: needsReview, icon: FileSearch, tone: 'warn' as const, onClick: () => navigate(`/data-bank?pool=needs_review${isTeam && staff ? `&staff=${encodeURIComponent(staff)}` : ''}`) }] : []),
+    ...(data.taskCounts.overdue > 0 ? [{ key: 'overdue', label: data.taskCounts.overdue === 1 ? 'overdue task' : 'overdue tasks', hint: 'Show them in the task list below', count: data.taskCounts.overdue, icon: AlertTriangle, tone: 'bad' as const, onClick: () => showTasks('overdue') }] : []),
+    ...(data.taskCounts.dueToday > 0 ? [{ key: 'today', label: data.taskCounts.dueToday === 1 ? 'task due today' : 'tasks due today', hint: 'Show them in the task list below', count: data.taskCounts.dueToday, icon: CalendarClock, tone: 'info' as const, onClick: () => showTasks('dueToday') }] : []),
+    ...(store.inboxUnread > 0 ? [{ key: 'mail', label: store.inboxUnread === 1 ? 'unread message' : 'unread messages', hint: 'Open the inbox', count: store.inboxUnread, icon: Mail, tone: 'info' as const, onClick: () => navigate('/inbox') }] : []),
+  ]
+  const overdueRow = (row: DashboardTask) => row.overdue ? 'dr-row-overdue' : undefined
+  const fulfilled = openings ? Math.min(100, Math.round(deployed / openings * 100)) : 0
+  const fulfilDetail = openings ? data?.staffId ? `${number(deployed)} deployed out of ${number(openings)} openings in this view` : `${number(deployed)} of ${number(openings)} openings filled` : 'No open positions yet'
+  const todayCards = data ? [
+    { label: 'New candidates today', value: data.today.total, icon: UserPlus, tone: 'primary', go: () => navigate('/data-bank') },
+    { label: scopeLabel('open tasks'), value: data.taskCounts.open, icon: ListChecks, tone: 'violet', filter: 'open' as TaskFilter },
+    { label: 'Tasks due today', value: data.taskCounts.dueToday, icon: CalendarClock, tone: 'amber', filter: 'dueToday' as TaskFilter },
+    { label: 'Overdue tasks', value: data.taskCounts.overdue, icon: AlertTriangle, tone: 'red', filter: 'overdue' as TaskFilter, danger: data.taskCounts.overdue > 0 },
+  ] : []
+  // The headline cards: one number per area, each opening its page.
+  const headline = [
     { key: 'inbox', label: 'Inbox', value: store.inboxUnread, icon: Mail, tone: 'blue', to: '/inbox' },
     { key: 'clients', label: 'Clients', value: store.clients.length, icon: Building2, tone: 'green', to: '/clients' },
     { key: 'jobs', label: 'Jobs', value: store.orders.length, icon: BriefcaseBusiness, tone: 'amber', to: '/jobs' },
     { key: 'candidates', label: 'Candidates', value: afterPrescreening, icon: UserCheck, tone: 'violet', to: '/mapped' },
-    { key: 'leads', label: 'Lead sheet', value: leads.data ? leads.data.total : null, icon: Users, tone: 'teal', to: '/leads' },
-    { key: 'databank', label: 'Data Bank', value: candidates.length, icon: Database, tone: 'slate', to: '/data-bank' },
-    { key: 'tasks', label: 'Tasks', value: openTasks, icon: ListChecks, tone: 'red', to: '/tasks' },
+    { key: 'leads', label: 'Lead sheet', value: data?.leads ? data.leads.total : null, icon: Users, tone: 'teal', to: '/leads' },
+    { key: 'databank', label: 'Data Bank', value: scoped.length, icon: Database, tone: 'slate', to: '/data-bank' },
+    { key: 'tasks', label: 'Tasks', value: data ? data.taskCounts.open : null, icon: ListChecks, tone: 'red', to: '/tasks' },
   ]
+  const stageRows = data?.pipeline.map(row => ({ stage: row.stage, label: row.label, count: row.count, people: row.applications.map(application => ({ id: application.id, name: application.candidate, days: waitingDays[application.id] ?? null })) })) ?? []
 
-  return <div className="dashsimple">
-    <header className="ds-head">
-      <h1>Dashboard</h1>
-      <div className="ds-actions">
-        <button type="button" className="ds-btn ds-icon-only" aria-label="Refresh dashboard" title="Refresh" disabled={leads.refreshing} onClick={leads.refresh}><RefreshCw size={15} className={leads.refreshing ? 'is-spinning' : ''} /></button>
-        <button type="button" className="ds-btn is-primary" onClick={() => navigate('/add-candidate')}><Plus size={15} />Add candidate</button>
+  const orderEmpty = <EmptyContent title="No open orders yet" detail="Open orders and how far each one has come will show here." />
+  const myEmpty = <EmptyContent icon={CheckCheck} title="No tasks for you" detail="Tasks given to you will show here." />
+  const tasksEmpty = <EmptyContent icon={CheckCheck} title={taskFilter === 'open' ? 'You’re all caught up' : 'No tasks in this view'} detail={taskFilter === 'open' ? 'New tasks will show here when there is work to do.' : 'Choose another tab to see more tasks.'} />
+
+  return <div className="dashref">
+    <header className="dr-head">
+      <div><h1>Dashboard</h1></div>
+      <div className="dr-actions">
+        {isTeam && <div className="dr-select"><Select aria-label="Show numbers for" value={staff} onChange={e => { setStaff(e.target.value); setStage(null) }}><option value="">Whole team</option>{(data?.staffOptions ?? store.users.map(user => ({ id: user.id, label: user.name }))).map(user => <option key={user.id} value={user.id}>{user.label}</option>)}</Select></div>}
+        <button className="dr-btn dr-icon-only" aria-label="Refresh dashboard" title="Refresh dashboard" disabled={refreshing} onClick={refresh}><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} /></button>
+        {store.can('export') && <button className="dr-btn" onClick={exportOverview} disabled={!data}><ArrowDownToLine size={14} />Export</button>}
+        <button className="dr-btn is-primary" onClick={() => navigate('/add-candidate')}><Plus size={15} />Add candidate</button>
       </div>
     </header>
-    {leads.error && <div role="alert" className="ds-error">{leads.error}<button type="button" onClick={leads.refresh}>Try again</button></div>}
-    <div className="ds-grid">{cards.map(card => <button key={card.key} type="button" className={`ds-card ds-${card.tone}`} onClick={() => navigate(card.to)}>
+    {error && <div role="alert" className="dr-error">{error}{data && ' Showing the last loaded result.'}<button onClick={refresh}>Try again</button></div>}
+    <div className="ds-grid">{headline.map(card => <button key={card.key} type="button" className={`ds-card ds-${card.tone}`} onClick={() => navigate(card.to)}>
       <span className="ds-icon"><card.icon size={20} strokeWidth={1.9} /></span>
       <span className="ds-label">{card.label}</span>
-      <span className="ds-value">{count(card.value)}</span>
+      <span className="ds-value">{card.value === null ? '–' : number(card.value)}</span>
     </button>)}</div>
+    {!data && !error && <DashboardSkeleton />}
+    {data && <>
+      {attention.length > 0 && <section aria-label="Needs your attention now" className="dc-attn-section">
+        <header className="dr-section-head"><div><h2>Needs your attention now</h2></div></header>
+        <AttentionList items={attention} />
+      </section>}
+      <section className="dc-panel dc-stages" aria-label="Placement journey">
+        <header className="dc-head">
+          <div><h3>Placement journey</h3></div>
+          <div className="dc-head-end"><span className="dc-chip"><b>{number(active)}</b> active</span><button type="button" className="dc-link" onClick={() => navigate('/mapped')}>Open pipeline<ArrowRight size={13} /></button></div>
+        </header>
+        {active === 0 && <p className="dc-note" role="status">Nobody is in the stages right now. Candidates appear here as soon as they are matched to an order.</p>}
+        <PlacementJourney rows={stageRows} onOpen={setStage} />
+      </section>
+
+      <section aria-label="Today's work">
+        <header className="dr-section-head"><div><h2>Today&rsquo;s work</h2></div></header>
+        <div className="dr-grid-4">{todayCards.map(item => {
+          const pressed = item.filter ? taskFilter === item.filter : undefined
+          return <button key={item.label} className={`dr-stat dr-tone-${item.tone}${pressed ? ' is-selected' : ''}`} aria-pressed={pressed} onClick={() => item.filter ? showTasks(item.filter) : item.go?.()}>
+            <span className="dr-stat-top"><span>{item.label}</span><span className="dr-icon-circle"><item.icon size={17} strokeWidth={1.9} /></span></span>
+            <span className="dr-stat-value">{number(item.value)}</span>
+          </button>
+        })}</div>
+      </section>
+
+      {data.overview && <PipelineOverview overview={data.overview} scope={!isTeam ? 'you' : staff ? store.user(staff)?.name.split(' ')[0] ?? 'the chosen recruiter' : 'the whole team'} showOwner={isTeam && !staff} narrow={narrow}
+        placeOf={orderId => store.order(orderId) ?? {}} onOpen={openPlacement} />}
+      {data.leads && <LeadOverview leads={data.leads} period="year" gate={leadGate} staffId={isTeam ? staff : ''} personName={staff ? store.user(staff)?.name.split(' ')[0] : null}
+        onOpenSheet={() => navigate('/leads')} onOpenLead={id => navigate(`/leads?lead=${encodeURIComponent(id)}`)} />}
+      {!data.overview && <p role="status" className="dr-error">The Pipeline overview cards (offer letter, visa, departure, idle stage) need the latest server. Restart the CRM API, then press Refresh.<button onClick={refresh}>Refresh</button></p>}
+
+      <section className="dr-card dr-recent">
+        <CardHeading title="Latest candidates" action={<label className="dr-search"><Search size={14} /><input type="search" value={query} placeholder="Search name, role or phone" aria-label="Search latest candidates" onChange={event => setQuery(event.target.value)} /></label>} />
+        {recent.length ? narrow ? <CandidateCards rows={recent} status={candidate => STATUS[candidate.status] ?? STATUS.new} onOpen={candidate => navigate(`/candidates/${candidate.id}`)} /> : <div className="dr-table-wrap"><table className="dr-table"><colgroup><col style={{ width: '34%' }} /><col style={{ width: '24%' }} /><col style={{ width: '16%' }} /><col style={{ width: '14%' }} /><col style={{ width: '12%' }} /></colgroup><thead><tr><th><span>Candidate</span></th><th><span>Job title</span></th><th><span>Added</span></th><th><span>Status</span></th><th><span className="sr-only">Open candidate</span></th></tr></thead><tbody>{recent.map(candidate => {
+          const status = STATUS[candidate.status] ?? STATUS.new
+          return <tr key={candidate.id} onClick={() => navigate(`/candidates/${candidate.id}`)}>
+            <td><span className="dr-person"><Avatar name={candidate.name} /><span><strong>{candidate.name}</strong><small>{candidate.phone || candidate.email || 'No phone or email'}</small></span></span></td>
+            <td>{roleLine(candidate)}</td>
+            <td>{dateLabel(candidate.addedAt)}</td>
+            <td><Pill tone={status.tone}>{status.label}</Pill></td>
+            <td className="dr-cell-end"><button type="button" className="dr-open" aria-label={`Open ${candidate.name}`} onClick={event => { event.stopPropagation(); navigate(`/candidates/${candidate.id}`) }}>Open<ArrowRight size={14} /></button></td>
+          </tr>
+        })}</tbody></table></div> : <EmptyContent icon={Users} title={query ? 'No matching candidates' : 'No candidates yet'} detail={query ? 'Try a different name, job title, phone or email.' : 'Add a candidate to see them here.'} />}
+        <footer className="dr-card-foot">
+          <span className="dr-foot-chips">
+            {needsReview > 0 && <button type="button" className="dr-chip" onClick={() => navigate('/data-bank')}>{number(needsReview)} need review</button>}
+            {isTeam && unassigned > 0 && <button type="button" className="dr-chip" onClick={() => navigate('/data-bank')}>{number(unassigned)} not assigned</button>}
+          </span>
+          <button className="dr-link" onClick={() => navigate('/data-bank')}>View all in Data Bank<ArrowRight size={13} /></button>
+        </footer>
+      </section>
+
+      <div className={`dr-split${isStaff ? ' is-single' : ''}`}>
+        <section className="dr-card dr-orders">
+          <CardHeading title="Active orders" action={<button className="dr-link" onClick={() => navigate('/jobs')}>All orders<ChevronRight size={13} /></button>} />
+          {data.orders.length > 0 && <div className="dr-fulfil" role="img" aria-label={fulfilDetail}>
+            <span className="dr-fulfil-label">{data.staffId ? 'Deployed in this view' : 'Openings filled'}</span>
+            <span className="dr-fulfil-bar"><i style={{ width: `${fulfilled}%` }} /></span>
+            <span className="dr-fulfil-text">{fulfilDetail}</span>
+          </div>}
+          {narrow ? <OrderCards rows={data.orders} country={row => store.order(row.id) ?? {}} onOpen={row => navigate(`/orders/${row.id}`)} empty={orderEmpty} /> : <DataTable rows={data.orders} columns={orderColumns} rowKey={row => row.id} pageSize={5} onRowClick={row => navigate(`/orders/${row.id}`)} empty={orderEmpty} />}
+        </section>
+        {!isStaff && <section className="dr-card dr-todos">
+          <CardHeading title="My to-dos" action={<button className="dr-link" onClick={() => navigate('/todo')}>All to-dos<ChevronRight size={13} /></button>} />
+          {todoError && <p role="alert" className="dr-error">{todoError}</p>}
+          {todos.length ? <ul>{todos.slice(0, 4).map(todo => <li key={todo.id}><button className="dr-check" onClick={() => void finishTodo(todo.id)} disabled={!!pendingTodo} aria-label={`Complete ${todo.title}`}>{pendingTodo === todo.id ? <RefreshCw size={13} /> : <Check size={13} />}</button><div><strong>{todo.title}</strong><span className={+new Date(todo.dueAt) < Date.now() ? 'dr-overdue' : ''}>{dateTimeLabel(todo.dueAt)}</span>{todo.linkTo && <button className="dr-link" onClick={() => navigate(todo.linkTo!)}>{todo.linkLabel || 'Open linked item'}<ArrowUpRight size={11} /></button>}</div></li>)}</ul> : <div className="dr-empty is-small"><span><CheckCheck size={18} /></span><strong>Nothing to do right now</strong><p>Add a to-do to remind yourself of a follow-up.</p></div>}
+        </section>}
+      </div>
+
+      <section className="dr-card" id="dashboard-workload">
+        <CardHeading title={isStaff ? 'My tasks' : 'Task overview'} action={<button className="dr-link" onClick={() => navigate('/tasks')}>All tasks<ChevronRight size={13} /></button>} />
+        <div className="dr-tabs dr-tabs-scroll" role="group" aria-label="Filter tasks">{FILTERS.filter(filter => !isStaff || filter.key !== 'escalated').map(filter => <button key={filter.key} aria-pressed={taskFilter === filter.key} title={filter.hint} className={taskFilter === filter.key ? 'is-active' : ''} onClick={() => setTaskFilter(filter.key)}>{filter.label}</button>)}</div>
+        {narrow ? <TaskCards key={`${staff}:${taskFilter}`} rows={tasksView} showOwner={!isStaff} onOpen={openTask} empty={tasksEmpty} /> : <DataTable rows={tasksView} columns={isStaff ? taskColumns.filter(column => column.key !== 'owner') : taskColumns} rowKey={row => row.id} pageSize={6} resetPageKey={`${staff}:${taskFilter}`} onRowClick={openTask} rowClassName={overdueRow} empty={tasksEmpty} />}
+      </section>
+      {!isStaff && <section className="dr-card"><CardHeading title="My tasks" action={<Clock3 size={16} className="dr-muted-icon" />} />{narrow ? <TaskCards rows={data.myTasks} showOwner={false} onOpen={openTask} empty={myEmpty} /> : <DataTable rows={data.myTasks} columns={taskColumns.filter(column => column.key !== 'owner')} rowKey={row => row.id} pageSize={5} onRowClick={openTask} rowClassName={overdueRow} empty={myEmpty} />}</section>}
+      <footer className="dr-foot"><span><i />Updated {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><span>Times are in {data.timezone}</span></footer>
+      <Dialog open={stage !== null} onClose={() => setStage(null)} title={stageData ? `Stage ${stageData.stage} · ${stageData.label}` : 'Pipeline candidates'} description="Active candidates in this view." width="lg"><DataTable rows={stageData?.applications ?? []} rowKey={row => row.id} columns={[{ key: 'candidate', header: 'Candidate', value: row => row.candidate }, { key: 'order', header: 'Order', value: row => row.order }]} onRowClick={row => { setStage(null); setOpenApp(row.id) }} pageSize={10} /></Dialog>
+    </>}
+    {openApp && <StageModal applicationId={openApp} open focusStage={openStage} onClose={() => { setOpenApp(null); refresh() }} />}
   </div>
 }

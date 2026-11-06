@@ -1,5 +1,5 @@
 /* Dashboard: a header and one card per area. Colour comes from the theme tokens; the hues are mixed with --primary. */
-.dashsimple {
+.dashref {
   --ds-blue: var(--primary);
   --ds-green: color-mix(in srgb, #14a06b 82%, var(--primary));
   --ds-amber: color-mix(in srgb, #e39a14 86%, var(--primary));
@@ -7,27 +7,7 @@
   --ds-teal: color-mix(in srgb, #0f9bb0 82%, var(--primary));
   --ds-slate: color-mix(in srgb, #7d89a3 88%, var(--primary));
   --ds-red: var(--error-ink);
-  display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; width: 100%; max-width: 1400px; margin: 0 auto; padding: 4px 0 28px;
-  color: var(--text-main); font-size: 14px;
 }
-.dashsimple button { font-family: inherit; }
-.dashsimple button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-
-.ds-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
-.ds-head h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.035em; }
-.ds-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.ds-select { width: 180px; }
-.ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; padding: 0 15px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, border-color .14s; }
-.ds-btn:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
-.ds-btn:disabled { opacity: .55; cursor: not-allowed; }
-.ds-btn.is-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
-.ds-btn.is-primary:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); }
-.ds-icon-only { width: 40px; padding: 0; }
-.is-spinning { animation: ds-spin 1s linear infinite; }
-@keyframes ds-spin { to { transform: rotate(360deg); } }
-
-.ds-error { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--error-edge); border-radius: 8px; background: var(--error-fill); color: var(--error-ink); font-size: 13px; }
-.ds-error button { margin-left: auto; border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font-size: 12px; cursor: pointer; }
 
 .ds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
 .ds-card { position: relative; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "label icon" "value icon"; align-items: center; gap: 6px 12px; min-height: 120px; padding: 22px 22px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); color: var(--text-main); text-align: left; cursor: pointer; overflow: hidden; transition: border-color .14s, transform .14s; }
@@ -47,3 +27,5 @@
   .ds-value { font-size: 30px; }
 }
 @media (prefers-reduced-motion: reduce) { .ds-card, .ds-btn { transition: none; } .ds-card:hover { transform: none; } }
+
+.dr-stat.is-danger .dr-stat-value { color: var(--error-ink); }
