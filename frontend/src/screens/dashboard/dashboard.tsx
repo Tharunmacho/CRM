@@ -1,6 +1,6 @@
 import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpRight, Building2, BriefcaseBusiness, CalendarClock, Check, CheckCheck, ChevronRight, Clock3, Database, FileSearch, ListChecks, Mail, Plus, RefreshCw, Search, UserCheck, UserPlus, Users } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpRight, Building2, BriefcaseBusiness, CalendarClock, Check, CheckCheck, ChevronRight, Clock3, Database, FileSearch, ListChecks, Mail, Plus, RefreshCw, Search, UserCheck, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Select } from '@/shared/ui/primitives'
 import { DataTable, type Column } from '@/shared/ui/table'
@@ -8,6 +8,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { dateLabel, dateTimeLabel } from '@/shared/lib/format'
 import { LEAD_REPORT_TOPICS, useReportData, type DashboardResult, type DashboardTask, type OrderMetrics, type OverviewItem } from '@/features/reports/report-api'
+import type { LeadSummaryResponse } from '@/features/leads/lead-api'
 import { IntakeSkeleton, number } from '@/features/dashboard/components/intake-panel'
 import { PlacementJourney } from '@/features/dashboard/components/placement-journey'
 import { CandidateCards, roleLine, OrderCards, TaskCards, useNarrow } from '@/features/dashboard/components/stacked'
@@ -61,6 +62,8 @@ export default function DashboardPage() {
   const isStaff = store.me.role === 'staff'
   // Admin and manager see the whole team (and can pick one person); staff see only their own work.
   const isTeam = store.me.role === 'admin' || store.me.role === 'manager'
+  // The lead total is the Lead sheet's own number; when one recruiter is chosen the dashboard's per-person figure is used.
+  const leadSummary = useReportData<LeadSummaryResponse>(`/leads/summary?scope=${isTeam ? 'all' : 'mine'}`, store.me.id, '', ['leads']).data?.total ?? null
   const stageData = data?.pipeline.find(row => row.stage === stage)
   // Staff see their own numbers; admin and managers see the team, or the person chosen in the filter.
   const scopeLabel = (noun: string) => !isTeam ? `My ${noun}` : staff ? `${noun[0].toUpperCase()}${noun.slice(1)} · ${store.user(staff)?.name.split(' ')[0] ?? 'selected'}` : `Team ${noun}`
@@ -149,21 +152,18 @@ export default function DashboardPage() {
   const overdueRow = (row: DashboardTask) => row.overdue ? 'dr-row-overdue' : undefined
   const fulfilled = openings ? Math.min(100, Math.round(deployed / openings * 100)) : 0
   const fulfilDetail = openings ? data?.staffId ? `${number(deployed)} deployed out of ${number(openings)} openings in this view` : `${number(deployed)} of ${number(openings)} openings filled` : 'No open positions yet'
-  const todayCards = data ? [
-    { label: 'New candidates today', value: data.today.total, icon: UserPlus, tone: 'primary', go: () => navigate('/data-bank') },
-    { label: scopeLabel('open tasks'), value: data.taskCounts.open, icon: ListChecks, tone: 'violet', filter: 'open' as TaskFilter },
-    { label: 'Tasks due today', value: data.taskCounts.dueToday, icon: CalendarClock, tone: 'amber', filter: 'dueToday' as TaskFilter },
-    { label: 'Overdue tasks', value: data.taskCounts.overdue, icon: AlertTriangle, tone: 'red', filter: 'overdue' as TaskFilter, danger: data.taskCounts.overdue > 0 },
-  ] : []
   // The headline cards: one number per area, each opening its page.
+  const noun = (value: number | null, one: string, many: string) => value === 1 ? one : many
+  const overdue = data?.taskCounts.overdue ?? 0
+  const leadValue = staff ? data?.leads?.total ?? null : leadSummary ?? data?.leads?.total ?? null
   const headline = [
-    { key: 'inbox', label: 'Inbox', value: store.inboxUnread, icon: Mail, tone: 'blue', to: '/inbox' },
-    { key: 'clients', label: 'Clients', value: store.clients.length, icon: Building2, tone: 'green', to: '/clients' },
-    { key: 'jobs', label: 'Jobs', value: store.orders.length, icon: BriefcaseBusiness, tone: 'amber', to: '/jobs' },
-    { key: 'candidates', label: 'Candidates', value: afterPrescreening, icon: UserCheck, tone: 'violet', to: '/mapped' },
-    { key: 'leads', label: 'Lead sheet', value: data?.leads ? data.leads.total : null, icon: Users, tone: 'teal', to: '/leads' },
-    { key: 'databank', label: 'Data Bank', value: scoped.length, icon: Database, tone: 'slate', to: '/data-bank' },
-    { key: 'tasks', label: 'Tasks', value: data ? data.taskCounts.open : null, icon: ListChecks, tone: 'red', to: '/tasks' },
+    { key: 'inbox', label: 'Inbox', value: store.inboxUnread, note: `unread ${noun(store.inboxUnread, 'message', 'messages')}`, icon: Mail, tone: 'blue', to: '/inbox' },
+    { key: 'clients', label: 'Clients', value: store.clients.length, note: `${noun(store.clients.length, 'client', 'clients')} created`, icon: Building2, tone: 'green', to: '/clients' },
+    { key: 'jobs', label: 'Jobs', value: store.orders.length, note: `${noun(store.orders.length, 'job', 'jobs')} created`, icon: BriefcaseBusiness, tone: 'amber', to: '/jobs' },
+    { key: 'candidates', label: 'Candidates', value: afterPrescreening, note: 'from prescreening onward', icon: UserCheck, tone: 'violet', to: '/mapped' },
+    { key: 'leads', label: 'Lead sheet', value: leadValue, note: `${noun(leadValue, 'lead', 'leads')} on the sheet`, icon: Users, tone: 'teal', to: '/leads' },
+    { key: 'databank', label: 'Data Bank', value: scoped.length, note: `${noun(scoped.length, 'resume', 'resumes')} stored`, icon: Database, tone: 'slate', to: '/data-bank' },
+    { key: 'tasks', label: 'Tasks', value: data ? data.taskCounts.open : null, note: overdue > 0 ? `${number(overdue)} overdue` : 'open, none overdue', danger: overdue > 0, icon: ListChecks, tone: 'red', to: '/tasks' },
   ]
   const stageRows = data?.pipeline.map(row => ({ stage: row.stage, label: row.label, count: row.count, people: row.applications.map(application => ({ id: application.id, name: application.candidate, days: waitingDays[application.id] ?? null })) })) ?? []
 
@@ -186,6 +186,7 @@ export default function DashboardPage() {
       <span className="ds-icon"><card.icon size={20} strokeWidth={1.9} /></span>
       <span className="ds-label">{card.label}</span>
       <span className="ds-value">{card.value === null ? '–' : number(card.value)}</span>
+      <span className={`ds-note${'danger' in card && card.danger ? ' is-danger' : ''}`}>{card.note}</span>
     </button>)}</div>
     {!data && !error && <DashboardSkeleton />}
     {data && <>
@@ -200,17 +201,6 @@ export default function DashboardPage() {
         </header>
         {active === 0 && <p className="dc-note" role="status">Nobody is in the stages right now. Candidates appear here as soon as they are matched to an order.</p>}
         <PlacementJourney rows={stageRows} onOpen={setStage} />
-      </section>
-
-      <section aria-label="Today's work">
-        <header className="dr-section-head"><div><h2>Today&rsquo;s work</h2></div></header>
-        <div className="dr-grid-4">{todayCards.map(item => {
-          const pressed = item.filter ? taskFilter === item.filter : undefined
-          return <button key={item.label} className={`dr-stat dr-tone-${item.tone}${pressed ? ' is-selected' : ''}`} aria-pressed={pressed} onClick={() => item.filter ? showTasks(item.filter) : item.go?.()}>
-            <span className="dr-stat-top"><span>{item.label}</span><span className="dr-icon-circle"><item.icon size={17} strokeWidth={1.9} /></span></span>
-            <span className="dr-stat-value">{number(item.value)}</span>
-          </button>
-        })}</div>
       </section>
 
       {data.overview && <PipelineOverview overview={data.overview} scope={!isTeam ? 'you' : staff ? store.user(staff)?.name.split(' ')[0] ?? 'the chosen recruiter' : 'the whole team'} showOwner={isTeam && !staff} narrow={narrow}
