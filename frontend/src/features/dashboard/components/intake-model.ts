@@ -4,10 +4,9 @@ export const number = (value: number) => value.toLocaleString()
 export const percentOf = (part: number, total: number) => (total ? Math.round(part / total * 100) : 0)
 export const plural = (count: number, one: string, many = `${one}s`) => `${number(count)} ${count === 1 ? one : many}`
 
-/** The five ways a candidate can arrive. The colour is a chart token and the name is always written beside it. */
+/** The ways a candidate can arrive. The colour is a chart token and the name is always written beside it. */
 export const INTAKE_SOURCES = [
-  { key: 'email', label: 'Email' }, { key: 'whatsapp', label: 'WhatsApp' }, { key: 'walk_in', label: 'Walk-in' },
-  { key: 'referral', label: 'Referral' }, { key: 'other', label: 'Other' },
+  { key: 'email', label: 'Email' }, { key: 'whatsapp', label: 'WhatsApp' }, { key: 'walk_in', label: 'Direct' }, { key: 'other', label: 'Other' },
 ] as const
 export const SOURCE_KEYS: string[] = INTAKE_SOURCES.map(source => source.key)
 export const colourOf = (key: string) => `var(--dc-${key})`
