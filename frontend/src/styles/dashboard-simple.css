@@ -1,0 +1,49 @@
+/* Dashboard: a header and one card per area. Colour comes from the theme tokens; the hues are mixed with --primary. */
+.dashsimple {
+  --ds-blue: var(--primary);
+  --ds-green: color-mix(in srgb, #14a06b 82%, var(--primary));
+  --ds-amber: color-mix(in srgb, #e39a14 86%, var(--primary));
+  --ds-violet: color-mix(in srgb, #7c5cd6 84%, var(--primary));
+  --ds-teal: color-mix(in srgb, #0f9bb0 82%, var(--primary));
+  --ds-slate: color-mix(in srgb, #7d89a3 88%, var(--primary));
+  --ds-red: var(--error-ink);
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; width: 100%; max-width: 1400px; margin: 0 auto; padding: 4px 0 28px;
+  color: var(--text-main); font-size: 14px;
+}
+.dashsimple button { font-family: inherit; }
+.dashsimple button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.ds-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
+.ds-head h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.035em; }
+.ds-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ds-select { width: 180px; }
+.ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; padding: 0 15px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, border-color .14s; }
+.ds-btn:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
+.ds-btn:disabled { opacity: .55; cursor: not-allowed; }
+.ds-btn.is-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+.ds-btn.is-primary:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); }
+.ds-icon-only { width: 40px; padding: 0; }
+.is-spinning { animation: ds-spin 1s linear infinite; }
+@keyframes ds-spin { to { transform: rotate(360deg); } }
+
+.ds-error { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--error-edge); border-radius: 8px; background: var(--error-fill); color: var(--error-ink); font-size: 13px; }
+.ds-error button { margin-left: auto; border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font-size: 12px; cursor: pointer; }
+
+.ds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+.ds-card { position: relative; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "label icon" "value icon"; align-items: center; gap: 6px 12px; min-height: 120px; padding: 22px 22px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); color: var(--text-main); text-align: left; cursor: pointer; overflow: hidden; transition: border-color .14s, transform .14s; }
+.ds-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--tone); }
+.ds-card:hover { border-color: var(--tone); transform: translateY(-1px); }
+.ds-label { grid-area: label; align-self: end; font-size: 15px; font-weight: 500; color: var(--text-muted); }
+.ds-value { grid-area: value; align-self: start; font-size: 40px; font-weight: 600; line-height: 1.1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.ds-icon { grid-area: icon; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: color-mix(in srgb, var(--tone) 12%, var(--bg-card)); color: var(--tone); }
+.ds-blue { --tone: var(--ds-blue); } .ds-green { --tone: var(--ds-green); } .ds-amber { --tone: var(--ds-amber); }
+.ds-violet { --tone: var(--ds-violet); } .ds-teal { --tone: var(--ds-teal); } .ds-slate { --tone: var(--ds-slate); } .ds-red { --tone: var(--ds-red); }
+
+@media (max-width: 640px) {
+  .ds-head h1 { font-size: 24px; }
+  .ds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ds-card { min-height: 104px; padding: 18px 14px 14px; grid-template-areas: "icon icon" "label label" "value value"; grid-template-columns: 1fr; }
+  .ds-icon { width: 36px; height: 36px; }
+  .ds-value { font-size: 30px; }
+}
+@media (prefers-reduced-motion: reduce) { .ds-card, .ds-btn { transition: none; } .ds-card:hover { transform: none; } }
