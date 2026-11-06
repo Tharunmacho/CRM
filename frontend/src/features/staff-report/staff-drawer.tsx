@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { ExternalLink } from 'lucide-react'
 import { Sheet } from '@/shared/ui/overlay'
 import { useStore } from '@/shared/state/crm-store'
-import { useReportData } from '@/features/reports/report-api'
+import { LEAD_REPORT_TOPICS, useReportData } from '@/features/reports/report-api'
 import { staffReportPath } from './staff-report-api'
 import {
-  CLOSURE_LABEL, STATE_LABEL, clockTime, filterCandidates, formatHours, formatPercent, formatSeconds, rangeLabel, scoreTone, stateTone,
+  CLOSURE_LABEL, STATE_LABEL, clockTime, filterCandidates, formatHours, formatPercent, formatSeconds, leadsCalledText, rangeLabel, scoreTone, stateTone,
   weekdayName, type CandidateFilter, type CandidateRow, type StaffRow, type StaffWeeklyReport,
 } from './staff-report-model'
 
@@ -41,7 +41,7 @@ export function StaffDrawer({ row, report, onClose }: { row: StaffRow; report: S
   const navigate = useNavigate()
   const range = { from: report.range.from, to: report.range.to }
   // The detail read follows the same live feed as the page, so a stage move or clock-in updates the open drawer too.
-  const { data, error } = useReportData<StaffWeeklyReport>(staffReportPath(range, row.id), store.me.id)
+  const { data, error } = useReportData<StaffWeeklyReport>(staffReportPath(range, row.id), store.me.id, '', LEAD_REPORT_TOPICS)
   const detail = data?.staff[0] ?? row
   const [filter, setFilter] = useState<CandidateFilter>('all')
   const labels = report.funnel.map(item => item.label)
@@ -70,6 +70,8 @@ export function StaffDrawer({ row, report, onClose }: { row: StaffRow; report: S
         <h3>Questions to ask</h3>
         <ul className="sw-questions">{own.map(item => <li key={item.id} className={`is-${item.severity}`}><b>{item.title}</b><span>{item.detail}</span></li>)}</ul>
       </section>}
+
+      {detail.leads?.available && <LeadBlock leads={detail.leads} />}
 
       <section aria-label="Day by day">
         <h3>Day by day</h3>
@@ -127,4 +129,20 @@ export function StaffDrawer({ row, report, onClose }: { row: StaffRow; report: S
       </section>
     </div>
   </Sheet>
+}
+
+/** The person's Lead sheet numbers for the period. The score counts them only as the optional fourth part above. */
+function LeadBlock({ leads }: { leads: NonNullable<StaffRow['leads']> }) {
+  return <section aria-label="Lead sheet">
+    <h3>Lead sheet</h3>
+    <dl className="sw-facts sw-lead-facts">
+      <div><dt>Leads assigned</dt><dd>{leads.assigned}<small>{leadsCalledText(leads)}</small></dd></div>
+      <div><dt>Calls logged</dt><dd>{leads.calls}<small>{leads.worked} {leads.worked === 1 ? 'lead' : 'leads'} worked</small></dd></div>
+      <div><dt>Interested</dt><dd>{leads.interested}<small>marked interested</small></dd></div>
+      <div><dt>Resumes received</dt><dd>{leads.resumesReceived}<small>on their leads</small></dd></div>
+      <div><dt>Converted</dt><dd>{leads.converted}<small>{leads.conversionPercent == null ? 'no rate yet' : `${formatPercent(leads.conversionPercent)} of leads worked`}</small></dd></div>
+      <div><dt>Follow-ups overdue</dt><dd className={leads.followUpsOverdue ? 'is-bad' : undefined}>{leads.followUpsOverdue}<small>{leads.open} open leads held now</small></dd></div>
+    </dl>
+    <p className="sw-lead-note">Credited to whoever logged the call; resumes and conversions to the lead&rsquo;s owner. Overdue follow-ups are as of now.</p>
+  </section>
 }

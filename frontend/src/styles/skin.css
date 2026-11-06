@@ -151,7 +151,7 @@
 /* Other round icon badges become rounded squares too. */
 :root:root :is(
   .rv-icon, .mb-intake-icon, .mb-draft-icon, .dr-intake-icon, .staff-ownership-icon, .att-clock-icon, .att-chip-icon, .tk-meter-icon,
-  .jv-icon-tile, .jv-option-icon, .client-form-section > header > span, .dr-empty > span, .metric-icon, .mb-prov, .uv-state-icon
+  .jv-icon-tile, .jv-option-icon, .dr-empty > span, .metric-icon, .mb-prov, .uv-state-icon
 ) { border-radius: 10px; }
 :root:root :is(.wa-welcome-icon) { border-radius: 20px; }
 :root:root :is(.rv-fn-name b, .rv-stage b) { border-radius: 8px; }

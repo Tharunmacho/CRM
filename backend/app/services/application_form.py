@@ -14,7 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, undefer
 
 from app.core.config import get_settings
@@ -355,8 +355,17 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
             select(ApplicationStage).join(Application, Application.id == ApplicationStage.application_id)
             .where(Application.candidate_id == candidate_id)))
 
-    found, application_rows, attachments, jobs, stages = parallel_reads(
-        db, read_candidate, read_applications, read_attachments, read_jobs, read_stages)
+    def read_names(session):
+        # Who uploaded a file or completed a stage, resolved inside the same round as everything else (a superset of the
+        # selected application's people, which is harmless): a second round trip just for names is avoided.
+        uploaders = select(Attachment.uploaded_by).where(
+            Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(SLOTS))
+        completers = select(ApplicationStage.completed_by).join(Application, Application.id == ApplicationStage.application_id).where(
+            Application.candidate_id == candidate_id)
+        return dict(session.execute(select(User.id, User.name).where(or_(User.id.in_(uploaders), User.id.in_(completers)))).all())
+
+    found, application_rows, attachments, jobs, stages, names = parallel_reads(
+        db, read_candidate, read_applications, read_attachments, read_jobs, read_stages, read_names)
     if found is None:
         raise HTTPException(404, "Candidate not found")
     candidate, owner_name = found
@@ -364,8 +373,6 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
     application = chosen[0] if chosen else None
     selected_stages = [s for s in stages if application is not None and s.application_id == application.id]
 
-    user_ids = {a.uploaded_by for a in attachments if a.uploaded_by} | {s.completed_by for s in selected_stages if s.completed_by}
-    names = dict(db.execute(select(User.id, User.name).where(User.id.in_(user_ids))).all()) if user_ids else {}
     tz = _tz()
     today = datetime.now(tz).date()
 
@@ -427,6 +434,8 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
             "history": [_history_out(r) for r in (candidate.work_history or []) if isinstance(r, dict)],
         },
         "documents": slots,
+        # Only the last four digits of an Aadhaar card read for this candidate ("XXXX XXXX 1234"); the number itself is never in this payload.
+        "aadhaar": {"maskedNumber": fx.aadhaar_of(candidate)} if fx.aadhaar_of(candidate) else None,
         "recruitment": {
             "client": company.name if company else None, "clientContact": client.name if client else None,
             "country": (order.country or company.country) if order else None,
@@ -729,7 +738,7 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
     found: list[str] = []
     if candidate is not None:
         fx.mark_stored_applied(candidate)
-        for kind in sorted(extractions, key=lambda k: {"resume": 0, "passport": 1}.get(k, 2)):
+        for kind in sorted(extractions, key=lambda k: {"resume": 0, "aadhaar": 1, "passport": 2}.get(k, 3)):
             extraction = extractions[kind]
             raw = extraction.get("raw")
             if not isinstance(raw, dict) or not raw:

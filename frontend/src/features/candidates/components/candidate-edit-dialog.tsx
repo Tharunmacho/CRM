@@ -1,9 +1,14 @@
 import { useState } from 'react'
+import { BriefcaseBusiness, Contact, IdCard, UserRound } from 'lucide-react'
 import type { Candidate } from '@/shared/model/types'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
-import { Button, CheckboxInput, Field, Input, Textarea } from '@/shared/ui/primitives'
+import { Button, CheckboxInput, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
+import { DatePicker } from '@/shared/ui/date-picker'
 import { Dialog } from '@/shared/ui/overlay'
+import { FormSection } from '@/shared/ui/form-section'
+import { useFormOptions } from '@/features/form-options/use-form-options'
+import { choicesFor, FORM_OPTION_CATEGORIES } from '@/features/form-options/form-options-model'
 import { normalizedSkills } from '../candidate-skills'
 import { candidateEntryErrors, EMPTY_CANDIDATE_FORM } from '../entry-model'
 
@@ -28,13 +33,16 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
     setForm(previous => ({ ...previous, [key]: value }))
     setErrors(previous => ({ ...previous, [key]: '' }))
   }
-  const fields: [keyof typeof form, string, string?][] = [
-    ['name', 'Full name'], ['phone', 'Phone'], ['whatsapp', 'WhatsApp'], ['email', 'Email', 'email'],
-    ['dob', 'Date of birth', 'date'], ['gender', 'Gender'], ['nationality', 'Nationality'], ['current_city', 'Current city'],
-    ['languages', 'Languages (separate with commas)'], ['passport_no', 'Passport number'], ['passport_issue', 'Passport issue date', 'date'],
-    ['passport_expiry', 'Passport expiry date', 'date'], ['passport_place', 'Place of issue'], ['designations', 'Job titles (separate with commas)'],
-    ['total_experience', 'Total experience (years)', 'number'], ['gulf_experience', 'Gulf experience (years)', 'number'], ['expected_salary', 'Expected salary', 'number'],
-  ]
+  const { options: formOptions } = useFormOptions()
+  const text = (key: keyof typeof form, label: string, extra: { type?: string; placeholder?: string; className?: string } = {}) => (
+    <Field key={key} label={label} error={errors[key]} required={key === 'name' || key === 'phone'} className={extra.className}>
+      <Input type={extra.type || 'text'} value={form[key]} min={extra.type === 'number' ? 0 : undefined} step={key === 'expected_salary' ? '0.01' : undefined}
+        placeholder={extra.placeholder} onChange={event => set(key, event.target.value)} />
+    </Field>
+  )
+  const date = (key: keyof typeof form, label: string) => (
+    <Field key={key} label={label} error={errors[key]}><DatePicker value={form[key]} onChange={value => set(key, value)} /></Field>
+  )
   const save = async () => {
     if (saving) return
     if (!saved) {
@@ -66,14 +74,42 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
         : error instanceof Error ? error.message : 'We could not save your changes. Please try again.')
     } finally { setSaving(false) }
   }
-  return <Dialog open onClose={() => { if (!saving) onClose() }} title="Edit candidate details" description="Change the details on this profile. The original documents stay saved." width="lg" footer={<><Button disabled={saving} onClick={onClose}>{saved ? 'Close' : 'Cancel'}</Button><Button disabled={saving || !form.name.trim() || !form.phone.trim()} variant="primary" onClick={() => void save()}>{saving ? saved ? 'Refreshing…' : 'Saving…' : saved ? 'Refresh profile' : 'Save changes'}</Button></>}>
-    <fieldset disabled={saving || saved} className="min-w-0">
-    <div className="grid gap-4 sm:grid-cols-2">{fields.map(([key, label, type]) => <Field key={key} label={label} error={errors[key]} required={key === 'name' || key === 'phone'}><Input type={type || 'text'} value={form[key]} min={type === 'number' ? 0 : undefined} step={key === 'expected_salary' ? '0.01' : undefined} onChange={event => set(key, event.target.value)} /></Field>)}
-      <Field className="sm:col-span-2" label="Skills (separate with commas)"><Textarea value={form.skills} onChange={event => set('skills', event.target.value)} /></Field>
-    </div>
+  return <Dialog open onClose={() => { if (!saving) onClose() }} title="Edit candidate details" description="Change the details on this profile. The original documents stay saved." width="lg" footer={<><Button variant="ghost" disabled={saving} onClick={onClose}>{saved ? 'Close' : 'Cancel'}</Button><Button disabled={saving || !form.name.trim() || !form.phone.trim()} variant="primary" onClick={() => void save()}>{saving ? saved ? 'Refreshing…' : 'Saving…' : saved ? 'Refresh profile' : 'Save changes'}</Button></>}>
+    <fieldset disabled={saving || saved} className="ui-fs-stack">
+      <FormSection icon={<UserRound size={18} />} title="Name and contact" hint="Who the candidate is and how to reach them">
+        {text('name', 'Full name')}
+        {text('phone', 'Phone', { placeholder: '+91 98400 00000' })}
+        {text('whatsapp', 'WhatsApp', { placeholder: '+91 98400 00000' })}
+        {text('email', 'Email', { type: 'email', placeholder: 'name@example.com' })}
+      </FormSection>
+      <FormSection icon={<Contact size={18} />} title="Personal details" hint="Taken from the passport or the resume">
+        {date('dob', 'Date of birth')}
+        <Field label="Gender" error={errors.gender}>
+          <Select value={form.gender} onChange={event => set('gender', event.target.value)}>
+            <option value="">Not recorded</option>
+            {choicesFor(formOptions, FORM_OPTION_CATEGORIES.gender, form.gender).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </Select>
+        </Field>
+        {text('nationality', 'Nationality', { placeholder: 'Indian' })}
+        {text('current_city', 'Current city')}
+        {text('languages', 'Languages', { className: 'sm:col-span-2', placeholder: 'English, Hindi, Arabic' })}
+      </FormSection>
+      <FormSection icon={<IdCard size={18} />} title="Passport" hint="As printed in the passport">
+        {text('passport_no', 'Passport number')}
+        {text('passport_place', 'Place of issue')}
+        {date('passport_issue', 'Issue date')}
+        {date('passport_expiry', 'Expiry date')}
+      </FormSection>
+      <FormSection icon={<BriefcaseBusiness size={18} />} title="Work" hint="Job titles, skills and experience" cols={3}>
+        {text('designations', 'Job titles', { className: 'sm:col-span-3', placeholder: 'Welder, Pipe fitter' })}
+        <Field className="sm:col-span-3" label="Skills" hint="Separate with commas"><Textarea rows={2} value={form.skills} placeholder="TIG welding, blueprint reading" onChange={event => set('skills', event.target.value)} /></Field>
+        {text('total_experience', 'Total experience (years)', { type: 'number' })}
+        {text('gulf_experience', 'Gulf experience (years)', { type: 'number' })}
+        {text('expected_salary', 'Expected salary', { type: 'number' })}
+      </FormSection>
     {candidate.needsReview && (candidate.ownerId
-      ? <label className="mt-5 flex items-center gap-2 text-sm"><CheckboxInput checked={reviewed} onChange={setReviewed} />I checked the profile and documents. Mark the review as done.</label>
-      : <p className="mt-5 text-sm text-amber-700">You can save your changes now. Give this candidate a recruiter before you mark the review as done.</p>)}
+      ? <label className="mt-6 flex items-center gap-2 text-sm"><CheckboxInput checked={reviewed} onChange={setReviewed} />I checked the profile and documents. Mark the review as done.</label>
+      : <p className="mt-6 text-sm text-amber-700">You can save your changes now. Give this candidate a recruiter before you mark the review as done.</p>)}
     </fieldset>
     {error && <p role="alert" className="mt-4 text-sm text-stamp-600">{error}</p>}
   </Dialog>

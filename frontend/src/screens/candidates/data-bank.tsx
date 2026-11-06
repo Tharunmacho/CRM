@@ -1,21 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
-import { Briefcase, CircleCheck, Download, FileSearch, RefreshCw, Search, UserCheck, UserCog, UserPlus, UserRoundX, Users, UserSearch } from 'lucide-react'
+import { Briefcase, ChevronsDownUp, ChevronsUpDown, CircleCheck, Download, FileSearch, RefreshCw, Search, UserCheck, UserCog, UserPlus, UserRoundX, Users, UserSearch } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { api, fileHref } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
 import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
+import { LeadsSkeleton } from '@/features/leads/components/leads-skeleton'
 import { Button, Select } from '@/shared/ui/primitives'
 import { useSkillFacets } from '@/features/candidates/use-skill-facets'
 import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
 import { StageModal } from '@/features/workflow/components/stage-modal'
-import { dataBankColumns } from '@/features/candidates/components/data-bank-columns'
+import { bankContext, dataBankColumns } from '@/features/candidates/components/data-bank-columns'
+import { DataBankExpanded } from '@/features/candidates/components/data-bank-expanded'
+import { BANK_GROUPS } from '@/features/candidates/data-bank-fields'
+import { useFormOptions } from '@/features/form-options/use-form-options'
 import { DataBankFilters } from '@/features/candidates/components/data-bank-filters'
 import { DataBankCards } from '@/features/candidates/components/data-bank-cards'
 import { PositionGroupsList } from '@/features/candidates/components/position-groups'
 import { CandidateEditDialog } from '@/features/candidates/components/candidate-edit-dialog'
-import { DbTable, TABLE_MIN_WIDTH, useElementWidth } from '@/features/candidates/components/db-table'
+import { DbTable, useElementWidth } from '@/features/candidates/components/db-table'
+import { fitColumns } from '@/features/candidates/components/column-fit'
+import { ColumnMenu, useColumnChoices } from '@/features/candidates/components/column-menu'
 import { KpiCards, Pager, ViewToggle, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
 import { arrivalTrend, weeklyArrivals } from '@/features/candidates/data-bank-trends'
 import { normalizeSearch, positionGroupsPath, resumeCount, searchTerms, type PositionGroups } from '@/features/candidates/data-bank-search'
@@ -29,6 +35,7 @@ const SORT_OPTIONS: [string, string][] = [
   ['added:desc', 'Newest first'], ['added:asc', 'Oldest first'], ['name:asc', 'Name A–Z'], ['name:desc', 'Name Z–A'],
   ['phone:asc', 'Phone number'], ['designation:asc', 'Job title A–Z'], ['experience:desc', 'Most experience'], ['experience:asc', 'Least experience'],
   ['passport:desc', 'Passport saved first'], ['source:asc', 'Source'], ['owner:asc', 'Recruiter'], ['order:asc', 'Order'],
+  ['country:asc', 'Preferred country'], ['service:asc', 'Service charges'], ['interest:asc', 'Interest level'],
   ['stage:desc', 'Latest stage first'], ['stage:asc', 'Earliest stage first'], ['status:asc', 'Status'],
 ]
 
@@ -40,6 +47,9 @@ const readMode = (): BankMode => { try { return window.localStorage.getItem(MODE
 const AUTO_OPEN_LIMIT = 3
 /** Short, so results follow the typing. */
 const SEARCH_DELAY_MS = 180
+
+/** Below this box width (a window of a window under 1100px wide) the candidates read as cards; above it the one table always fits. */
+const DATA_BANK_TABLE_MIN_WIDTH = 900
 
 export default function DataBankPage() {
   const store = useStore()
@@ -72,6 +82,9 @@ export default function DataBankPage() {
   const [groupsError, setGroupsError] = useState('')
   const [pageSize, setPageSize] = useState(20)
   const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>()
+  const [columnChoices, setColumnChoices] = useColumnChoices('data-bank')
+  const [expanded, setExpanded] = useState<string[]>([])
+  const { options: formOptions } = useFormOptions()
   const [editing, setEditing] = useState<Candidate | null>(null)
   const [snapshot, setSnapshot] = useState<{ items: Candidate[]; total: number; page: number; scope: string } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -207,12 +220,17 @@ export default function DataBankPage() {
     </div></Panel>
   </div>
 
-  // The eleven columns need about TABLE_MIN_WIDTH; narrower than that the same candidates read as stacked cards.
-  const forceCards = boxWidth > 0 && boxWidth < TABLE_MIN_WIDTH
+  // The grid table scrolls sideways (actions and WhatsApp pinned); narrower than GRID_TABLE_MIN_WIDTH the same candidates read as stacked cards.
+  const forceCards = boxWidth > 0 && boxWidth < DATA_BANK_TABLE_MIN_WIDTH
   const showCards = forceCards || view === 'cards'
   const openCandidate = (candidate: Candidate) => navigate(`/candidates/${candidate.id}`)
   const reassignOne = (candidate: Candidate) => { setMutationError(''); setReassigning([candidate.id]) }
-  const columns = dataBankColumns({ store, onOpen: openCandidate, onReassign: reassignOne, onEdit: setEditing, onOpenStage: setOpenStage })
+  const allColumns = dataBankColumns({ store, onOpen: openCandidate, onReassign: reassignOne, onEdit: setEditing, onOpenStage: setOpenStage, options: formOptions })
+  const fieldContext = bankContext(store, formOptions)
+  const toggleExpand = (id: string) => setExpanded(current => (current.includes(id) ? current.filter(value => value !== id) : [...current, id]))
+  const allOpen = rows.length > 0 && rows.every(row => expanded.includes(row.id))
+  const fit = fitColumns(allColumns, boxWidth, columnChoices)
+  const columns = allColumns.filter((column) => fit.keys.includes(column.key))
   const notMapped = counts?.unmapped ?? ownedCandidates.filter((candidate) => !store.activeApplicationFor(candidate.id)).length
   const notInterested = counts?.not_interested ?? ownedCandidates.filter((candidate) => candidate.status === 'not_interested').length
   const needsReview = counts?.needs_review ?? ownedCandidates.filter((candidate) => candidate.needsReview || candidate.status === 'needs_review').length
@@ -231,7 +249,9 @@ export default function DataBankPage() {
   const POOL_TITLE: Record<DataBankPool, string> = { all: 'All candidates', unmapped: 'No order yet', unassigned: NEEDS_ASSIGNMENT_LABEL, needs_review: 'Needs review', not_interested: 'Not interested' }
   const narrowed = filterCount > 0 || Boolean(query.trim())
   const busy = positionsMode ? groupsLoading || groupsStale : loading || stale
-  const emptyState = failure && !loaded ? (
+  const emptyState = searching && !loaded ? (
+    <LeadsSkeleton rows={8} columns={7} label="Loading candidates…" />
+  ) : failure && !loaded ? (
     <EmptyState title="We could not load the candidates" description={failure} action={<Button variant="primary" onClick={() => setRefreshToken(value => value + 1)}>Try again</Button>} />
   ) : (
     <EmptyState
@@ -308,6 +328,10 @@ export default function DataBankPage() {
               <button type="button" className={cn(positionsMode && 'is-on')} aria-pressed={positionsMode} onClick={() => changeMode('positions')}>By position</button>
               <button type="button" className={cn(!positionsMode && 'is-on')} aria-pressed={!positionsMode} onClick={() => changeMode('resumes')}>All resumes</button>
             </div>
+            {!positionsMode && !showCards && <>
+              <button type="button" className="db-refresh" title={allOpen ? 'Collapse every row' : 'Expand every row to see all fields'} aria-label={allOpen ? 'Collapse all rows' : 'Expand all rows'} onClick={() => setExpanded(allOpen ? [] : rows.map(row => row.id))}>{allOpen ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}</button>
+              <ColumnMenu columns={allColumns.filter((column) => column.key !== 'actions')} groups={BANK_GROUPS} shown={fit.keys} choices={columnChoices} onChange={setColumnChoices} hidden={fit.hidden} />
+            </>}
             {!positionsMode && !forceCards && <ViewToggle view={view} onChange={changeView} />}
           </div>
         </div>
@@ -334,7 +358,8 @@ export default function DataBankPage() {
           onClear={resetFilters}
         />
 
-        <div ref={boxRef} className={cn('db-box', busy && loaded && 'is-busy')} aria-busy={busy || undefined}>
+        {!positionsMode && !showCards && fit.hidden > 0 && <p className="ld-fitnote" role="status">{fit.hidden} {fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Open a row (the arrow at its start) to see every field, or choose Columns.</p>}
+        <div ref={boxRef} className={cn('db-box', fit.compact && 'is-compact', busy && loaded && 'is-busy')} aria-busy={busy || undefined}>
           {positionsMode ? (!groups || groups.groups.length === 0 ? emptyState : (
             <PositionGroupsList
               groups={groups.groups}
@@ -351,6 +376,11 @@ export default function DataBankPage() {
             <DataBankCards rows={rows} store={store} onOpen={openCandidate} onReassign={reassignOne} onEdit={setEditing} onOpenStage={setOpenStage} />
           ) : (
             <DbTable
+              variant="grid"
+              fit={!fit.wide}
+              expandedIds={expanded}
+              onToggleExpand={toggleExpand}
+              renderExpanded={(candidate) => <DataBankExpanded candidate={candidate} store={store} context={fieldContext} onOpen={openCandidate} onReassign={reassignOne} onEdit={setEditing} />}
               label="Candidates"
               rows={rows}
               columns={columns}

@@ -45,6 +45,7 @@ class ClientOut(Wire):
     id: str
     name: str
     email: str | None = None
+    designation: str | None = None
     phone: str | None = None
     whatsapp: str | None = None
     country: str | None = None
@@ -68,6 +69,7 @@ class CompanyOut(Wire):
     industry: str | None = None
     contact_person: str | None = None
     contact_email: str | None = None
+    website: str | None = None
     phone: str | None = None
     whatsapp: str | None = None
     address: str | None = None

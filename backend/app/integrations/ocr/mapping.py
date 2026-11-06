@@ -330,9 +330,10 @@ def passport_fields(p: PassportResponse) -> tuple[OcrFields, list[str]]:
 
 def aadhaar_fields(response: AadhaarResponse) -> tuple[OcrFields, list[str]]:
     """
-    Only stated candidate details. Never copied to a column (kept in raw): the Aadhaar
-    number and its validity, masked number, year of birth, address, care_of, pincode, VID,
-    enrollment id and document side.
+    Only stated candidate details: name, date of birth, gender, the address and the father's
+    name from the S/O, D/O or W/O line (form-only values, read by services/form_extraction).
+    Never copied to a column (kept in raw): the Aadhaar number and its validity, masked number,
+    year of birth, pincode, VID, enrollment id, the card's mobile number and document side.
     """
     identity = response.aadhaar
     fields = OcrFields(
@@ -343,6 +344,9 @@ def aadhaar_fields(response: AadhaarResponse) -> tuple[OcrFields, list[str]]:
         dob=identity.date_of_birth,
         gender=identity.gender,
     )
+    for name, value in _form_values("aadhaar", response).items():
+        if name in ("father_name", "current_address"):
+            setattr(fields, name, value)
     warnings = [*response.warnings, *_low_confidence("Aadhaar", response.pages)]
     if identity.year_of_birth and not identity.date_of_birth:
         warnings.append("Only a birth year was read from Aadhaar. Enter the full date of birth manually.")

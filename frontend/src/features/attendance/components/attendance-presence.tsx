@@ -171,7 +171,7 @@ function CorrectionDialog({ session, name, onClose, onSaved }: { session: Attend
     <form id="attendance-correction" onSubmit={(event) => { event.preventDefault(); void save() }}>
       {error && <p role="alert" className="attendance-alert">{error}</p>}
       <p className="attendance-help mb-4">Times use your device time zone: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
-      <fieldset disabled={busy} className="space-y-4">
+      <fieldset disabled={busy} className="ui-form-stack">
         <Field label="Check-in time" required><Input type="datetime-local" step={1} required value={start} onChange={(event) => setStart(event.target.value)} /></Field>
         <Field label="Check-out time" hint="Leave empty only if the person is still checked in."><Input type="datetime-local" step={1} value={end} onChange={(event) => setEnd(event.target.value)} /></Field>
         <Field label="Why are you fixing this?" required><Textarea required minLength={3} maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} rows={3} /></Field>

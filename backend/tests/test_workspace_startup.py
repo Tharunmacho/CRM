@@ -17,7 +17,7 @@ def test_combined_startup_matches_bootstrap_with_two_queries(desk_engine, desk_c
     assert response.status_code == 200
     assert response.headers['cache-control'] == 'no-store'
     assert response.json() == expected
-    assert_select_budget(statements, 2)
+    assert_select_budget(statements, 3)  # sign-in check, snapshot and unread badge
     assert_no_private_data(response.json())
 
 
@@ -29,7 +29,7 @@ def test_compact_startup_omits_only_resume_text(desk_engine, desk_client):
     with recorded_statements(desk_engine) as statements:
         compact = desk_client.get('/api/auth/session?workspace=true&compact=true')
     assert compact.status_code == 200
-    assert_select_budget(statements, 2)
+    assert_select_budget(statements, 3)  # sign-in check, snapshot and unread badge
     expected = full.json()
     assert expected['candidates'][0]['resumeText'] == resume
     for row in expected['candidates']:

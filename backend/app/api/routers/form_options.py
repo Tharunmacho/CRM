@@ -15,6 +15,7 @@ from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, FormOption, Role, User
 from app.db.session import get_db
 from app.services import form_options as service
+from app.services.response_cache import cached, scope_of
 
 router = APIRouter(prefix="/api/form-options", tags=["form-options"])
 admin = require_role(Role.admin)
@@ -79,8 +80,10 @@ def read_options(request: Request, response: Response, includeInactive: bool = Q
     """Every active option grouped by category (an administrator may ask for the hidden ones too). ETag-friendly."""
     if includeInactive and user.role != Role.admin:
         raise HTTPException(403, "Only an administrator can list hidden options.")
-    payload = service.all_options(db, include_inactive=includeInactive)
-    tag = service.etag_of(payload)
+    # The lists change only when an administrator edits them (topic "form_options"), so building the payload and its
+    # ETag is done once per change rather than on every page load. The same for every user: nothing here is personal.
+    payload, tag = cached(("form-options", scope_of(db), includeInactive), ("form_options",), 300,
+                          lambda: _options_with_tag(db, includeInactive))
     headers = {"ETag": tag, "Cache-Control": "private, no-cache"}
     if request.headers.get("if-none-match") == tag:
         return Response(status_code=304, headers=headers)
@@ -88,11 +91,20 @@ def read_options(request: Request, response: Response, includeInactive: bool = Q
     return payload
 
 
+def _options_with_tag(db: Session, include_inactive: bool):
+    payload = service.all_options(db, include_inactive=include_inactive)
+    return payload, service.etag_of(payload)
+
+
 @router.get("/suggestions")
 def read_suggestions(response: Response, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    """Lists built from the data already in the system: countries, job preferences, skills, institutes, previous employers."""
+    """Lists built from the data already in the system: countries, job preferences, skills, institutes, previous employers.
+
+    Five aggregate scans over the candidate table: kept for a minute (and dropped when a candidate, order, company or
+    designation changes). They are the same for every user."""
     response.headers["Cache-Control"] = "private, max-age=60"
-    return service.suggestions(db)
+    return cached(("form-suggestions", scope_of(db)), ("candidates", "orders", "companies", "designations"), 60,
+                  lambda: service.suggestions(db))
 
 
 @router.post("", status_code=201)

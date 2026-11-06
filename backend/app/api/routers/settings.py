@@ -18,6 +18,7 @@ from app.core.deps import current_user, require_role
 from app.db.models import AgencySettings, AuditEntry, Currency, Designation, JobCategory, Role, User
 from app.db.session import get_db
 from app.services import agency_settings as agency
+from app.services.response_cache import cached, scope_of
 
 router = APIRouter(prefix="/api/settings", tags=["Agency settings"])
 admin = require_role(Role.admin)
@@ -100,7 +101,8 @@ def public_profile(db: Session = Depends(get_db)) -> dict:
 
 @router.get("")
 def read_settings(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    return agency.read_payload(db)
+    # Four sequential reads, identical for everyone signed in, changed only by an administrator ("settings" topic).
+    return cached(("agency-settings", scope_of(db)), ("settings",), 120, lambda: agency.read_payload(db))
 
 
 @router.put("")

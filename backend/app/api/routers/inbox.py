@@ -22,6 +22,7 @@ from app.services.document_person_split import ensure_single_person_source
 from app.services.document_bundle_summary import source_summaries
 from app.services.ingestion_revision import read_revision
 from app.services.parallel_reads import parallel_reads
+from app.services.response_cache import cached, scope_of
 from app.services.intake_attention import attention_list, unread_counts
 from app.services import mail_providers
 from app.api.routers.mail_actions import router as actions_router
@@ -213,8 +214,22 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
     }
 
 
+# How long a polled answer may be reused. Real changes (a job failing, a message arriving) empty the memo at once
+# through the change feed; the time limit only covers what the feed ignores, such as worker heartbeats.
+POLL_SECONDS = 5
+SUMMARY_SECONDS = 10
+MAIL_TOPICS = ("mail", "documents")
+PULSE_TOPICS = ("candidates", "mail", "documents", "whatsapp")  # the intake revision also counts completed WhatsApp receipts
+ATTENTION_TOPICS = ("mail", "whatsapp", "documents")
+
+
 @router.get("/health")
 def health(db: Session = Depends(get_db), user: User = Depends(admin)):
+    # Admin only (the dependency above), and the same for every admin: one shared answer, a few seconds old at most.
+    return cached(("inbox-health", scope_of(db)), MAIL_TOPICS, POLL_SECONDS, lambda: _health(db))
+
+
+def _health(db: Session):
     def read_accounts(session):
         return list(session.scalars(select(MailAccount).options(load_only(
             MailAccount.id, MailAccount.address, MailAccount.last_sync_at,
@@ -248,7 +263,7 @@ def health(db: Session = Depends(get_db), user: User = Depends(admin)):
 @router.get("/revision")
 def revision(db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Let every signed-in desk detect completed intake without loading mail."""
-    return {"revision": read_revision(db)}
+    return {"revision": cached(("inbox-revision", scope_of(db)), PULSE_TOPICS, SUMMARY_SECONDS, lambda: read_revision(db))}
 
 
 @router.get("/pulse")
@@ -258,20 +273,25 @@ def pulse(db: Session = Depends(get_db), user: User = Depends(current_user)):
     Replaces separate /revision and /unread-count polls: one request, one sign-in check, and the two reads
     run side by side, so a poll costs one database round trip instead of two requests of one each.
     """
-    revision_token, unread = parallel_reads(db, read_revision, unread_counts)
+    # Nothing here depends on who asks (every role sees the same badge), so one shared answer serves every tab.
+    revision_token, unread = cached(("inbox-pulse", scope_of(db)), PULSE_TOPICS, SUMMARY_SECONDS,
+                                    lambda: tuple(parallel_reads(db, read_revision, unread_counts)))
     return {"revision": revision_token, "unread": unread}
 
 
 @router.get("/unread-count")
 def unread_count(db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Sidebar badge: unread INBOX mail across connected live mailboxes, without loading messages."""
-    return unread_counts(db)
+    return cached(("inbox-unread", scope_of(db)), PULSE_TOPICS, SUMMARY_SECONDS, lambda: unread_counts(db))
 
 
 @router.get("/attention")
 def attention(db: Session = Depends(get_db), user: User = Depends(supervisor)):
     """Failed or needs-review intake across email, WhatsApp and manual uploads (admin retries, manager reads)."""
-    return attention_list(db, user)
+    # Retry rights differ by person (an admin may retry; a manager only reads; manual uploads are the uploader's), so the
+    # key holds the user. Nobody ever receives an answer built for another account.
+    return cached(("inbox-attention", scope_of(db), user.id, user.role.value), ATTENTION_TOPICS, SUMMARY_SECONDS,
+                  lambda: attention_list(db, user))
 
 
 @router.post("/connect")

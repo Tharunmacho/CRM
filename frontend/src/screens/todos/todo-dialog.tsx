@@ -7,19 +7,12 @@ import { useStore } from '@/shared/state/crm-store'
 import type { Priority, TodoItem } from '@/shared/model/types'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
+import { FormSection } from '@/shared/ui/form-section'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { LINK_KINDS, PRIORITIES, linkKindOf, presetDue, presetLabel, toInputValue, type LinkKind, type Preset } from './todo-meta'
 
 function Section({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children: ReactNode }) {
-  return (
-    <section className="form-section">
-      <header>
-        <span aria-hidden="true">{icon}</span>
-        <div><h3>{title}</h3>{hint && <p>{hint}</p>}</div>
-      </header>
-      <div className="td-form-grid">{children}</div>
-    </section>
-  )
+  return <FormSection icon={icon} title={title} hint={hint}>{children}</FormSection>
 }
 
 /** Add a to-do, or edit one. `initialTitle` carries over what was typed in the quick-add row. */
@@ -79,8 +72,9 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
       notes: form.notes.trim() || undefined,
       dueAt: due.toISOString(),
       priority: form.priority,
-      linkTo: chosen?.value ?? null,
-      linkLabel: chosen?.short ?? null,
+      // A link of a kind this form cannot pick (the lead sheet's follow-up to-dos) is kept as it was, so editing the title never unlinks it.
+      linkTo: chosen?.value ?? (item?.linkTo && !initialKind ? item.linkTo : null),
+      linkLabel: chosen?.short ?? (item?.linkTo && !initialKind ? item.linkLabel ?? null : null),
     }
     try {
       if (item) { await api.patch(`/todos/${item.id}`, payload); try { await store.refresh({ keepCurrent: true }) } catch { store.notify('Saved. Refresh to see the latest list.', 'warn') } }
@@ -108,7 +102,7 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
       {error && <p role="alert" className="td-form-error">{error}</p>}
       <fieldset disabled={busy} className="td-form">
         <Section icon={<ListChecks size={16} />} title="What needs doing" hint="A short title is all that is required.">
-          <Field label="Title" required error={titleError} className="td-span-2">
+          <Field label="Title" required error={titleError} className="sm:col-span-2">
             <Input
               value={form.title}
               maxLength={300}
@@ -118,7 +112,7 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
               placeholder="Call the client about the interview slot"
             />
           </Field>
-          <Field label="Notes" hint="Optional" className="td-span-2">
+          <Field label="Notes" hint="Optional" className="sm:col-span-2">
             <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
           </Field>
         </Section>
@@ -142,7 +136,7 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
               ))}
             </div>
           </div>
-          <div className="td-span-2 td-presets" role="group" aria-label="Quick due times">
+          <div className="sm:col-span-2 td-presets" role="group" aria-label="Quick due times">
             <span>Quick times</span>
             {(['soon', 'tomorrow', 'week'] as Preset[]).map((p) => (
               <button key={p} type="button" onClick={() => set('dueAt', format(presetDue(p, now), "yyyy-MM-dd'T'HH:mm"))}>{presetLabel(p, now)}</button>

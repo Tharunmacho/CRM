@@ -31,3 +31,7 @@ Thumbs.db
 
 # Original local upload; canonical specification is under docs/requirements/.
 /Recruitment CRM — Developer Specification.pdf
+
+# Exported lead sheets contain personal data and must never be committed
+*_Leads_*.csv
+*_Leads_*.xlsx

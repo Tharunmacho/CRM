@@ -1,0 +1,4 @@
+/* The masked Aadhaar line under the Documents section: icon, label and the last four digits only. */
+.af-aadhaar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.af-aadhaar svg { width: 14px; height: 14px; flex: none; }
+.af-aadhaar b { color: var(--text-main); font-weight: 600; letter-spacing: .04em; }

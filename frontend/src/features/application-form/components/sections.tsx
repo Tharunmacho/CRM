@@ -74,14 +74,27 @@ function fieldProps(ctx: FormContext) {
   }
 }
 
-export function PersonalSection({ ctx, missing, extras }: { ctx: FormContext; missing: MissingItem[]; extras?: ReactNode }) {
+/**
+ * Section 1 as pairs of cells (mobile / WhatsApp, family contact / native place) with languages, e-mail and address on rows of
+ * their own, so a long e-mail or address never wraps mid-word and no row is left half empty.
+ */
+export function PersonalSection({ ctx, missing, renderExtra }: { ctx: FormContext; missing: MissingItem[]; renderExtra?: (path: string) => ReactNode }) {
   const props = fieldProps(ctx)
+  const field = (path: string, wide?: boolean) => {
+    const def = PERSONAL_FIELDS.find((item) => item.path === path)!
+    return <FormField key={path} def={def} wide={wide} {...props} />
+  }
+  const withExtras = ctx.form.extrasSupported && Boolean(renderExtra)
   return (
     <Section no={1} missing={missing}>
       <div className="af-cells">
-        {PERSONAL_FIELDS.map((def) => <FormField key={def.path} def={def} {...props} />)}
+        {['personal.candidateName', 'personal.fatherName', 'personal.dateOfBirth', 'personal.maritalStatus', 'personal.gender', 'personal.nationality', 'personal.mobileNumber', 'personal.whatsapp'].map((path) => field(path))}
+        {withExtras && renderExtra!('screening.familyMemberNumber')}
+        {withExtras && renderExtra!('screening.nativePlace')}
+        {field('personal.languagesKnown', true)}
+        {field('personal.email', true)}
+        {field('personal.currentAddress', true)}
       </div>
-      {extras}
     </Section>
   )
 }
@@ -237,16 +250,17 @@ export function ExperienceSection({ ctx, missing }: { ctx: FormContext; missing:
 }
 
 /** Client, country, position, source and recruiter come from the order and the candidate; they are shown, not typed here. */
-export function RecruitmentSection({ form, hasOrder, fallbackCountry }: { form: ApplicationFormData; hasOrder: boolean; fallbackCountry?: string }) {
-  void fallbackCountry
+export function RecruitmentSection({ form, hasOrder }: { form: ApplicationFormData; hasOrder: boolean }) {
+  // Five cells (or six with a source detail): when the count is odd the last cell spans the row instead of leaving a gap.
+  const oddRecruitment = isBlank(form.recruitment.sourceDetail)
   return (
     <Section no={6} aside={hasOrder ? undefined : <span className="af-aside-note">Not matched to an order yet</span>}>
       <div className="af-cells">
-        {RECRUITMENT_FIELDS.map((def) => {
+        {RECRUITMENT_FIELDS.map((def, index) => {
           const value = form.recruitment[def.key]
           const blank = isBlank(value)
           return (
-            <Cell key={def.key} label={def.label} path={`recruitment.${def.key}`} missing={blank && hasOrder && def.key !== 'source'}>
+            <Cell key={def.key} label={def.label} path={`recruitment.${def.key}`} wide={oddRecruitment && index === RECRUITMENT_FIELDS.length - 1} missing={blank && hasOrder && def.key !== 'source'}>
               {blank ? <span className="af-empty" aria-label="Not filled">–</span> : <span className="af-text">{value}</span>}
             </Cell>
           )
@@ -254,7 +268,6 @@ export function RecruitmentSection({ form, hasOrder, fallbackCountry }: { form: 
         {!isBlank(form.recruitment.sourceDetail) && (
           <Cell label="Source detail" path="recruitment.sourceDetail"><span className="af-text">{form.recruitment.sourceDetail}</span></Cell>
         )}
-        {(RECRUITMENT_FIELDS.length + (isBlank(form.recruitment.sourceDetail) ? 0 : 1)) % 2 === 1 && <div className="af-cell is-filler" aria-hidden="true" />}
       </div>
     </Section>
   )

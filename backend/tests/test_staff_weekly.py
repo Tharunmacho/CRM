@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, AttendanceCalendarDay, Candidate, Client, Company, DailyGoal,
-    DailyWorkItem, Designation, Order, Role, Source, StaffAttendanceSession, StaffPresenceInterval, Task, TaskKind, User,
+    DailyWorkItem, Designation, Lead, LeadActivity, Order, Role, Source, StaffAttendanceSession, StaffPresenceInterval, Task, TaskKind, User,
 )
 from app.services import staff_weekly, staff_weekly_export
 from test_database_naming import _migrate, schema_database
@@ -179,6 +179,37 @@ def seed_tasks(desk):
         for slot in (1, 2):
             item("ravi", THURSDAY, slot, due=ist(THURSDAY, 16 + slot), candidate="c4")
         item("ravi", date(2026, 10, 30), 1, candidate="c4")
+        db.commit()
+
+
+def seed_leads(desk):
+    """Synthetic leads for the lead-sheet part of the report. asha: 4 assigned this week (3 called), ravi: 3 assigned, none called."""
+    with desk.sessions() as db:
+        def lead(key, owner, status, assigned, *, follow=None, calls=0):
+            db.add(Lead(id=key, name=f"Lead {key}", phone=f"+9190000{abs(hash(key)) % 10**5:05}", owner_id=owner, status=status,
+                        assigned_at=assigned, next_follow_up_at=follow, call_count=calls, created_time=assigned))
+
+        lead("a1", "asha", "interested", ist(MONDAY, 9), calls=2)
+        lead("a2", "asha", "resume_received", ist(MONDAY, 9), calls=1)
+        lead("a3", "asha", "converted", ist(TUESDAY, 9), calls=1)
+        lead("a4", "asha", "new", ist(WEDNESDAY, 9), follow=ist(TUESDAY, 12))          # never called, follow-up already past
+        lead("a5", "asha", "contacted", ist(MONDAY - timedelta(days=3), 9), calls=1)    # assigned last week, called this week
+        for n in (1, 2, 3):
+            lead(f"r{n}", "ravi", "new", ist(TUESDAY, 9))
+        lead("old", "ravi", "new", ist(MONDAY - timedelta(days=9), 9))                  # assigned long ago: not this period
+        db.flush()
+
+        def act(lead_id, user, kind, at, meta=None):
+            db.add(LeadActivity(lead_id=lead_id, user_id=user, kind=kind, summary=kind, meta=meta, created_at=at))
+        act("a1", "asha", "call", ist(MONDAY, 11), {"outcome": "interested"})
+        act("a1", "asha", "call", ist(TUESDAY, 11), {"outcome": "answered"})
+        act("a2", "asha", "call", ist(MONDAY, 12), {"outcome": "answered"})
+        act("a2", "asha", "status", ist(MONDAY, 13), {"from": "contacted", "to": "interested"})
+        act("a2", "asha", "resume", ist(TUESDAY, 12))
+        act("a3", "asha", "call", ist(TUESDAY, 13), {"outcome": "answered"})
+        act("a3", "asha", "convert", ist(WEDNESDAY, 12))
+        act("a5", "asha", "call", ist(TUESDAY, 14), {"outcome": "no_answer"})
+        act("a5", "asha", "call", ist(MONDAY - timedelta(days=2), 10), {"outcome": "answered"})   # last week: outside the period
         db.commit()
 
 
@@ -381,6 +412,88 @@ def test_score_is_empty_when_nothing_can_be_measured(desk):
     assert data["summary"]["averageScore"] is None and data["summary"]["staffWorked"] == 0
 
 
+# ------------------------------------------------------------------ lead sheet numbers and the optional score part
+
+def test_lead_numbers_per_person_for_the_period(desk):
+    seed_leads(desk)
+    data = report(desk)
+    asha, ravi, meena = person(data, "asha"), person(data, "ravi"), person(data, "meena")
+    lead = asha["leads"]
+    assert lead["available"] is True
+    assert (lead["assigned"], lead["contacted"], lead["notContacted"]) == (4, 3, 1)
+    assert lead["calls"] == 5  # six calls logged by asha, one of them last week
+    assert lead["worked"] == 4  # a1, a2, a3, a5
+    assert lead["interested"] == 2  # a1 (call outcome) and a2 (status change)
+    assert (lead["resumesReceived"], lead["converted"], lead["conversionPercent"]) == (1, 1, 25.0)
+    assert lead["followUpsOverdue"] == 1 and lead["open"] == 4  # a1, a2, a4, a5 (a3 is converted)
+    assert (ravi["leads"]["assigned"], ravi["leads"]["contacted"], ravi["leads"]["notContacted"], ravi["leads"]["calls"]) == (3, 0, 3, 0)
+    assert ravi["leads"]["conversionPercent"] is None
+    assert meena["leads"]["assigned"] == 0 and meena["leads"]["available"] is True
+    summary = data["summary"]
+    assert (summary["leadsAssigned"], summary["leadsContacted"], summary["leadsCalls"], summary["leadsWorked"]) == (7, 3, 5, 4)
+    assert (summary["leadsConverted"], summary["leadsConversionPercent"], summary["leadsFollowUpsOverdue"]) == (1, 25.0, 1)
+    assert summary["leadsAvailable"] is True and data["sources"]["leadSheet"]["available"] is True
+    detail = report(desk, staff_id="asha")
+    assert [p["id"] for p in detail["staff"]] == ["asha"] and detail["staff"][0]["leads"] == lead
+
+
+def test_lead_period_follows_the_chosen_range(desk):
+    seed_leads(desk)
+    last_week = report(desk, from_date=date(2026, 10, 26), to_date=date(2026, 11, 1))
+    assert person(last_week, "asha")["leads"]["assigned"] == 1  # only a5
+    assert person(last_week, "asha")["leads"]["calls"] == 1
+    next_week = report(desk, from_date=date(2026, 11, 9), to_date=date(2026, 11, 15))
+    assert person(next_week, "asha")["leads"]["assigned"] == 0
+
+
+def test_lead_follow_up_joins_the_score_only_when_leads_were_assigned(desk):
+    seed_attendance(desk)
+    seed_pipeline(desk)
+    seed_tasks(desk)
+    plain = report(desk)
+    assert [p["key"] for p in person(plain, "asha")["scoreParts"]] == ["tasks", "hours", "stages"]
+    assert {p["key"]: p["weight"] for p in person(plain, "asha")["scoreParts"]} == staff_weekly.WEIGHTS
+    plain_scores = {p["id"]: p["score"] for p in plain["staff"]}
+
+    seed_leads(desk)
+    data = report(desk)
+    asha, ravi, meena = person(data, "asha"), person(data, "ravi"), person(data, "meena")
+    parts = {p["key"]: p for p in asha["scoreParts"]}
+    assert list(parts) == ["tasks", "hours", "stages", "leads"]
+    assert {k: p["weight"] for k, p in parts.items()} == {"tasks": 35, "hours": 30, "stages": 25, "leads": 10}
+    assert parts["leads"]["ratio"] == 0.75 and "optional" in parts["leads"]["label"].lower()
+    assert parts["leads"]["detail"] == "3 of 4 assigned leads called"
+    assert asha["score"] == round(sum(p["ratio"] * p["weight"] for p in parts.values()))
+    # ravi had leads and called none: the part is measured as zero, not dropped.
+    assert ravi["scoreParts"][-1]["key"] == "leads" and ravi["scoreParts"][-1]["ratio"] == 0
+    assert ravi["score"] < plain_scores["ravi"]
+    # meena had no leads: exactly the old three parts and the old score.
+    assert [p["key"] for p in meena["scoreParts"]] == ["tasks", "hours", "stages"] and meena["score"] == plain_scores["meena"]
+    assert data["formula"]["weightsWithLeads"] == {"tasks": 35, "hours": 30, "stages": 25, "leads": 10}
+    assert any("Lead follow-up (optional)" in line and "10%" in line for line in data["formula"]["lines"])
+
+
+def test_lead_questions_to_ask(desk):
+    seed_attendance(desk)
+    seed_leads(desk)
+    kinds = {(h["kind"], h["staffId"]) for h in report(desk)["highlights"]}
+    assert ("leads_untouched", "ravi") in kinds           # 3 assigned, none called
+    assert ("leads_untouched", "asha") not in kinds       # asha called 3 of 4
+    assert ("leads_overdue", "asha") not in kinds         # only one overdue (threshold is 5)
+
+
+def test_report_survives_missing_lead_tables(desk):
+    seed_pipeline(desk)
+    with desk.engine.begin() as connection:
+        connection.execute(text("DROP TABLE crm_lead_activities, crm_leads, crm_lead_batches CASCADE"))
+    data = report(desk)
+    assert data["sources"]["leadSheet"]["available"] is False and data["summary"]["leadsAvailable"] is False
+    assert all(p["leads"]["available"] is False for p in data["staff"])
+    assert [p["key"] for p in person(data, "asha")["scoreParts"]] == ["tasks", "hours", "stages"]
+    assert any("Lead sheet tables are not in this database" in n for n in data["notes"])
+    assert "Leads by staff" in [name for name, _rows in staff_weekly_export.sheets(data)]
+
+
 # ------------------------------------------------------------------ queries, permissions, export
 
 def count_statements(engine, action):
@@ -406,7 +519,7 @@ def test_query_count_does_not_grow_with_the_number_of_staff(desk):
         db.commit()
     large = count_statements(desk.engine, lambda: report(desk))
     print("statements", small, large)
-    assert small == large and large <= 24, (small, large)
+    assert small == large and large <= 25, (small, large)  # was 24 before the one lead-sheet aggregate statement
 
 
 @pytest.fixture
@@ -445,20 +558,27 @@ def test_exports_are_real_files_with_the_report_content(api):
     seed_attendance(api.desk)
     seed_pipeline(api.desk)
     seed_tasks(api.desk)
+    seed_leads(api.desk)
     book = api.client.get("/api/reports/staff-weekly/export?format=xlsx&from_date=2026-11-02&to_date=2026-11-08")
     assert book.status_code == 200 and "spreadsheetml" in book.headers["content-type"]
     assert 'filename="staff-weekly-2026-11-02-2026-11-08.xlsx"' in book.headers["content-disposition"]
     with ZipFile(BytesIO(book.content)) as archive:
         workbook = archive.read("xl/workbook.xml").decode()
-        for name in ("Staff summary", "Day by day", "Stages by staff", "Team funnel", "Questions to ask"):
+        for name in ("Staff summary", "Day by day", "Stages by staff", "Leads by staff", "Team funnel", "Questions to ask"):
             assert name in workbook
         summary = archive.read("xl/worksheets/sheet2.xml").decode()
-        assert "Asha" in summary and "No attendance" in summary
+        assert "Asha" in summary and "No attendance" in summary and "Lead conversion %" in summary
+        sheet_names = [part.split('"')[0] for part in workbook.split('<sheet name="')[1:]]
+        leads_sheet = archive.read(f"xl/worksheets/sheet{sheet_names.index('Leads by staff') + 1}.xml").decode()
+        assert "Assigned leads called" in leads_sheet and "Asha" in leads_sheet and "Ravi" in leads_sheet
     table = api.client.get("/api/reports/staff-weekly/export?format=csv")
     assert table.status_code == 200 and table.headers["content-type"].startswith("text/csv")
     body = table.content.decode("utf-8-sig").splitlines()
     assert body[0].startswith("Staff,Attendance,Days worked") and len(body) == 4  # asha, meena, ravi
     assert any(line.startswith("Asha,Worked,3,1,") for line in body)
+    assert body[0].endswith("Leads assigned,Assigned leads called,Lead calls logged,Leads worked,Leads interested,Resumes received,"
+                            "Leads converted,Lead conversion %,Lead follow-ups overdue")
+    assert next(line for line in body if line.startswith("Asha,")).endswith(",4,3,5,4,2,1,1,25.0,1")
 
 
 def test_csv_neutralises_formula_text():

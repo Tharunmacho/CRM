@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
@@ -6,7 +6,6 @@ import {
   Building2,
   Check,
   ChevronDown,
-  ClipboardCheck,
   Clock3,
   ContactRound,
   Database,
@@ -16,6 +15,8 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Lock,
+  ClipboardList,
   Mail,
   Menu,
   MessageCircle,
@@ -42,6 +43,7 @@ import type { Capability } from '@/shared/state/crm-store'
 import { AttendanceProvider } from '@/features/attendance/attendance-context'
 import { AttendanceClock } from '@/features/attendance/components/attendance-clock'
 import { CommandSearch } from './command-search'
+import { GATE_REASON, gateBlocks, gateState, readGate, subscribeGate } from '@/features/leads/lead-gate'
 import '@/styles/shell.css'
 import '@/styles/surface.css'
 
@@ -64,12 +66,12 @@ const NAV: NavItem[] = [
   { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
   { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, group: 'Recruitment' },
   { to: '/add-candidate', label: 'Candidate', icon: UserPlus, group: 'Recruitment' },
+  { to: '/leads', label: 'Lead sheet', icon: ClipboardList, group: 'Recruitment' },
   { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
   { to: '/mapped', label: 'Matched Candidates', icon: GitBranch, group: 'Recruitment', extension: true },
   { to: '/tasks', label: 'Tasks', icon: ListChecks, signal: 'tasks', group: 'Workspace' },
   { to: '/todo', label: 'To-do List', icon: SquareCheckBig, capability: 'todo_list', group: 'Workspace' },
   { to: '/reports', label: 'Reports', icon: FileBarChart, group: 'Workspace' },
-  { to: '/staff-report', label: 'Staff Report', icon: ClipboardCheck, capability: 'staff_report', group: 'Workspace' },
   { to: '/users', label: 'User Management', icon: Users, capability: 'user_management', group: 'Workspace' },
   { to: '/staff-directory', label: 'Staff Directory', icon: ContactRound, supervisorsOnly: true, group: 'Workspace', extension: true },
   { to: '/attendance', label: 'Attendance', icon: Clock3, group: 'Workspace', extension: true },
@@ -177,6 +179,9 @@ export function AppShell() {
   }, [mobileOpen])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
 
+  // Staff see a small lock on Lead sheet while today's daily tasks are unfinished (read from the daily prompt's own data).
+  const sidebarGate = useSyncExternalStore(subscribeGate, () => readGate(store.me.id), () => null)
+  const leadsLocked = gateBlocks(gateState(store.me.role, sidebarGate))
   const overdue = useMemo(
     () => store.visibleTasks.filter((t) => !t.completedAt && !t.cancelledAt && slaState(taskClockStart(t)).overdue).length,
     [store.visibleTasks],
@@ -346,6 +351,7 @@ export function AppShell() {
                               >
                                 <span className="rail-nav-icon" aria-hidden="true"><item.icon size={20} strokeWidth={1.75} /></span>
                                 <span className="rail-item-label">{item.label}</span>
+                                {item.to === '/leads' && leadsLocked && <span className="rail-lock" role="img" aria-label={GATE_REASON} title={GATE_REASON}><Lock size={13} strokeWidth={2} aria-hidden="true" /></span>}
                                 {count > 0 && <span className={cn('rail-badge', item.signal === 'tasks' && 'is-alert')} role="img" aria-label={item.signal === 'tasks' ? `${count} overdue` : `${count} unread`}>{badgeText(count)}</span>}
                               </NavLink>
                             )

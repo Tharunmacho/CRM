@@ -16,7 +16,20 @@ SUMMARY_COLUMNS = [
     "Daily tasks assigned", "Daily tasks completed", "Completion %", "Postponed", "Overdue", "Backlog (earlier days)",
     "Stage moves", "Forwarded to client", "Interviews scheduled", "Selected", "Visa received", "Visa stamped", "Deployed",
     "Candidates in progress", "Stuck candidates", "Score",
+    "Leads assigned", "Assigned leads called", "Lead calls logged", "Leads worked", "Leads interested", "Resumes received",
+    "Leads converted", "Lead conversion %", "Lead follow-ups overdue",
 ]
+LEAD_COLUMNS = ["Staff", "Leads assigned", "Assigned leads called", "Assigned, not called", "Lead calls logged", "Leads worked",
+                "Leads interested", "Resumes received", "Leads converted", "Lead conversion % (converted / worked)",
+                "Lead follow-ups overdue (now)", "Open leads held (now)"]
+
+
+def _lead_cells(p):
+    lead = p.get("leads") or {}
+    if not lead.get("available"):
+        return [""] * 9
+    return [lead["assigned"], lead["contacted"], lead["calls"], lead["worked"], lead["interested"], lead["resumesReceived"],
+            lead["converted"], lead["conversionPercent"] if lead["conversionPercent"] is not None else "", lead["followUpsOverdue"]]
 
 
 def _local(value, zone):
@@ -41,6 +54,7 @@ def summary_rows(data):
             t["backlog"] if t["available"] else "",
             s["moves"], o["forwarded"], o["interviewsScheduled"], o["selected"], o["visaReceived"], o["visaStamped"],
             o["deployed"], s["activeCandidates"], p["stuck"]["count"], p["score"] if p["score"] is not None else "",
+            *_lead_cells(p),
         ])
     return rows
 
@@ -71,10 +85,20 @@ def sheets(data):
         funnel.append([row["stage"], row["label"], row["reached"], row["inStageNow"], row["closedHere"], row["movesInPeriod"],
                        row["conversionPercent"] if row["conversionPercent"] is not None else "",
                        row["lostFromPrevious"] if row["lostFromPrevious"] is not None else ""])
+    leads = [LEAD_COLUMNS]
+    for p in data["staff"]:
+        lead = p.get("leads") or {}
+        if lead.get("available"):
+            leads.append([p["name"], lead["assigned"], lead["contacted"], lead["notContacted"], lead["calls"], lead["worked"],
+                          lead["interested"], lead["resumesReceived"], lead["converted"],
+                          lead["conversionPercent"] if lead["conversionPercent"] is not None else "",
+                          lead["followUpsOverdue"], lead["open"]])
+    if len(leads) == 1:
+        leads.append(["The Lead sheet has no numbers for this period."])
     highlights = [["Staff", "Severity", "Issue", "Detail"]] + [[h["staffName"], h["severity"], h["title"], h["detail"]]
                                                                   for h in data["highlights"]]
     return [("About this report", about), ("Staff summary", staff), ("Day by day", daily), ("Stages by staff", stages),
-            ("Team funnel", funnel), ("Questions to ask", highlights)]
+            ("Leads by staff", leads), ("Team funnel", funnel), ("Questions to ask", highlights)]
 
 
 def xlsx(data) -> bytes:

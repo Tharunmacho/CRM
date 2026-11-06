@@ -40,6 +40,28 @@ export interface DashboardOverview {
   departure: OverviewList & { current: number; departed: number }
   idle: OverviewList & { count: number; longestDays: number }
 }
+/** Lead sheet numbers of the dashboard (`leads` key; absent on an older server or when the lead tables are missing). */
+export interface DashboardLeads {
+  scope: 'mine' | 'team' | 'person'
+  staffId: string | null
+  newToday: number
+  notContacted: number
+  followUpsDue: number
+  resumesReceived: number
+  converted: { week: number; month: number; quarter: number; year: number; all: number }
+  total: number
+  assigned: number
+  open: number
+  convertedTotal: number
+  conversionPercent: number | null
+  /** Admin and manager only; always the global count of open leads nobody owns. */
+  unassigned: number | null
+}
+export interface DashboardLeadItem {
+  id: string; name: string; position: string | null; country: string | null; status: string; ownerName: string | null
+  callCount: number; nextFollowUpAt: string | null; at: string | null
+}
+export interface DashboardLeadList { card: string; period?: string | null; at?: string; total: number; items: DashboardLeadItem[] }
 export interface DashboardResult {
   generatedAt: string; timezone: string; date: string; staffId: string | null; staffOptions: Option[]
   today: { total: number; email: number; whatsapp: number; walk_in: number; referral: number; other: number }
@@ -48,7 +70,13 @@ export interface DashboardResult {
   orders: OrderMetrics[]; tasks: DashboardTask[]; myTasks: DashboardTask[]
   /** Absent in a result saved by an older version of the app; the cards are then simply not shown. */
   overview?: DashboardOverview
+  /** Absent on an older server; the Lead sheet cards are then not shown. */
+  leads?: DashboardLeads
 }
+
+/** Live topics that make a report stale; screens that also show Lead sheet numbers add `leads`. */
+const REPORT_TOPICS: readonly string[] = ['reports']
+export const LEAD_REPORT_TOPICS: readonly string[] = ['reports', 'leads']
 
 /** How often a visible report re-reads, and the least time between two reads triggered by focus. */
 const REFRESH_MS = 60_000
@@ -62,13 +90,15 @@ const LIVE_REPORT_WINDOW_MS = 1_500
  * The newest answer for each user and query is remembered, so returning to a screen (or reloading the page,
  * for the dashboard) shows the previous numbers at once while the server confirms them.
  */
-export function useReportData<T>(path: string, sessionId: string, revision = '') {
+export function useReportData<T>(path: string | null, sessionId: string, revision = '', topics: readonly string[] = REPORT_TOPICS) {
   const [snapshot, setSnapshot] = useState<{ key: string; data: T } | null>(null)
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null)
   const [reload, setReload] = useState(0)
   const [reading, setReading] = useState<string | null>(null)
   const key = `${sessionId}:${path}:${revision}`
   useEffect(() => {
+    // A null path means this read is switched off (for example the report on another tab); nothing is fetched.
+    if (!path) return undefined
     let active = true
     let request: AbortController | null = null
     let finishedAt = 0
@@ -91,7 +121,7 @@ export function useReportData<T>(path: string, sessionId: string, revision = '')
     void read(true)
     // Any business change makes the numbers stale ('reports' follows every change). A read that was already running
     // began before the change, so it is abandoned and a new one starts.
-    const stopLive = liveInterval(() => void read(true), REFRESH_MS, ['reports'], {
+    const stopLive = liveInterval(() => void read(true), REFRESH_MS, topics, {
       debounceMs: LIVE_REPORT_WINDOW_MS,
       onChange: () => { request?.abort(); request = null; void read(true) },
     })
@@ -100,7 +130,7 @@ export function useReportData<T>(path: string, sessionId: string, revision = '')
     window.addEventListener('focus', visible)
     return () => { active = false; request?.abort(); stopLive(); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
   }, [key, path, reload])
-  const remembered = snapshot?.key === key ? snapshot.data : peekReport<T>(sessionId, path, revision)
+  const remembered = !path ? null : snapshot?.key === key ? snapshot.data : peekReport<T>(sessionId, path, revision)
   return { data: remembered, error: failure?.key === key ? failure.message : '', refreshing: reading === key, refresh: () => setReload(n => n + 1) }
 }
 

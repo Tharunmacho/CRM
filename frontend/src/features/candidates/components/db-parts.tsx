@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, LayoutGrid, MoreHorizontal, Rows3, type LucideIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, MoreHorizontal, Rows3, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/shared/lib/cn'
@@ -6,6 +6,7 @@ import { initials } from '@/shared/lib/format'
 import { CountryFlag as SharedCountryFlag } from '@/shared/ui/country-flag'
 import { Select } from '@/shared/ui/primitives'
 import { trendCaption, type ArrivalTrend } from '@/features/candidates/data-bank-trends'
+import { ALL_PAGE_SIZE, allNote, countText, pageList } from '@/features/candidates/pager-model'
 
 /* Small building blocks shared by the Data Bank and Mapped candidates screens (flat reference look). */
 
@@ -169,7 +170,7 @@ export function saveView(scope: string, view: DbView) {
 
 /* ------------------------------------------------------------------- pager */
 
-export function Pager({ page, pageSize, total, noun, onPage, onPageSize }: {
+export function Pager({ page, pageSize, total, noun, onPage, onPageSize, sizes = [10, 20, 50], allowAll = false, filtered = true }: {
   /** Zero-based page. */
   page: number
   pageSize: number
@@ -178,23 +179,52 @@ export function Pager({ page, pageSize, total, noun, onPage, onPageSize }: {
   onPage: (page: number) => void
   /** Omit to hide the per-page choice. */
   onPageSize?: (size: number) => void
+  /** The per-page choices (the Data Bank keeps 10 / 20 / 50). */
+  sizes?: readonly number[]
+  /** Offer "All" (one request, up to the server's cap, with a note when more exist). */
+  allowAll?: boolean
+  /** Whether the count describes a narrowed list ("matching") or everything. */
+  filtered?: boolean
 }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const safe = Math.min(page, pageCount - 1)
-  const from = total === 0 ? 0 : safe * pageSize + 1
-  const to = Math.min(total, (safe + 1) * pageSize)
+  const [jump, setJump] = useState('')
+  const all = allowAll && pageSize === ALL_PAGE_SIZE
+  const go = (next: number) => onPage(Math.min(pageCount - 1, Math.max(0, next)))
+  const submitJump = () => { const wanted = Number(jump); if (Number.isFinite(wanted) && wanted >= 1) go(Math.floor(wanted) - 1); setJump('') }
+  const choices = [...sizes, ...(sizes.includes(pageSize) || all ? [] : [pageSize])].filter((size) => size !== ALL_PAGE_SIZE).sort((x, y) => x - y)
+  const note = all ? allNote(total, noun) : null
   return (
     <div className="db-foot">
-      <span className="tnum" aria-live="polite">Showing <strong>{from}–{to}</strong> of <strong>{total}</strong> matching {noun}</span>
-      <div className="db-pager" aria-label="Pages">
+      <span className="tnum" aria-live="polite">{countText({ page: safe, pageSize, total, noun, filtered })}{note && <em className="db-foot-note"> {note}</em>}</span>
+      <div className="db-pager" aria-label="Pages"
+        onKeyDown={event => {
+          if (event.target instanceof HTMLInputElement) return
+          if (event.key === 'ArrowLeft') { event.preventDefault(); go(safe - 1) } else if (event.key === 'ArrowRight') { event.preventDefault(); go(safe + 1) }
+        }}>
         {onPageSize && (
-          <Select className="db-pagesize" aria-label={`${noun} per page`} value={String(pageSize)} onChange={event => onPageSize(Number(event.target.value))}>
-            {[10, 20, 50].map(size => <option key={size} value={size}>{size} / page</option>)}
+          <Select className="db-pagesize" aria-label={`${noun} per page`} value={all ? 'all' : String(pageSize)} onChange={event => onPageSize(event.target.value === 'all' ? ALL_PAGE_SIZE : Number(event.target.value))}>
+            {choices.map(size => <option key={size} value={size}>{size} / page</option>)}
+            {allowAll && <option value="all">All</option>}
           </Select>
         )}
-        <button type="button" className="db-pager-btn" onClick={() => onPage(Math.max(0, safe - 1))} disabled={safe === 0} aria-label="Previous page"><ChevronLeft size={15} /></button>
-        <span className="tnum db-pager-text">Page {safe + 1} of {pageCount}</span>
-        <button type="button" className="db-pager-btn" onClick={() => onPage(Math.min(pageCount - 1, safe + 1))} disabled={safe >= pageCount - 1} aria-label="Next page"><ChevronRight size={15} /></button>
+        {pageCount > 1 && (
+          <>
+            <button type="button" className="db-pager-btn" onClick={() => go(0)} disabled={safe === 0} aria-label="First page"><ChevronsLeft size={15} /></button>
+            <button type="button" className="db-pager-btn" onClick={() => go(safe - 1)} disabled={safe === 0} aria-label="Previous page"><ChevronLeft size={15} /></button>
+            {pageList(safe, pageCount).map((entry, index) => entry === '…'
+              ? <span key={`gap${index}`} className="db-pager-gap" aria-hidden="true">…</span>
+              : <button key={entry} type="button" className={cn('db-pager-num tnum', entry === safe + 1 && 'is-on')} aria-label={`Page ${entry}`} aria-current={entry === safe + 1 ? 'page' : undefined} onClick={() => go(entry - 1)}>{entry}</button>)}
+            <button type="button" className="db-pager-btn" onClick={() => go(safe + 1)} disabled={safe >= pageCount - 1} aria-label="Next page"><ChevronRight size={15} /></button>
+            <button type="button" className="db-pager-btn" onClick={() => go(pageCount - 1)} disabled={safe >= pageCount - 1} aria-label="Last page"><ChevronsRight size={15} /></button>
+            {pageCount > 7 && (
+              <label className="db-pager-go">Go to
+                <input type="number" min={1} max={pageCount} value={jump} aria-label="Go to page" placeholder={String(safe + 1)} onChange={event => setJump(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitJump() }} onBlur={() => { if (jump) submitJump() }} />
+              </label>
+            )}
+          </>
+        )}
+        {pageCount <= 1 && <span className="tnum db-pager-text">Page 1 of 1</span>}
       </div>
     </div>
   )

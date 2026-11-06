@@ -45,8 +45,8 @@ def main():
                 if unquote(parsed.fragment) not in heading_anchors(path.read_text(encoding="utf-8")):
                     errors.append(f"{file.name}: missing section {target}")
     modules = sorted(GUIDE.glob("[0-9][0-9]-*.md"))
-    if len(modules) != 22:
-        errors.append(f"Expected 22 module files, found {len(modules)}")
+    if len(modules) != 23:
+        errors.append(f"Expected 23 module files, found {len(modules)}")
     if errors:
         print("\n".join(errors))
         return 1

@@ -100,6 +100,22 @@ export interface Candidate {
   gulfExperience: number
   skills: string[]
   expectedSalary?: number
+  /** Application-form details the list carries (migration 0021). Education and work history are deferred and only in the profile. */
+  fatherName?: string | null
+  maritalStatus?: string | null
+  currentAddress?: string | null
+  experienceIndia?: number
+  nativePlace?: string | null
+  familyMemberNumber?: string | null
+  jobDurationPreference?: string | null
+  bestTimeToContact?: string | null
+  nextFollowUpDate?: string | null
+  /** Application-form screening answers (migration 0021). Free text; may hold several countries. */
+  countryPreference?: string | null
+  /** A value of the "service_charges_status" form-option list; absent on older payloads. */
+  serviceChargesStatus?: string
+  /** A value of the "interest_level" form-option list. */
+  interestLevel?: string | null
   source: Source
   sourceDetail?: string
   status: CandidateStatus
@@ -123,6 +139,8 @@ export interface Client {
   id: string
   name: string
   email?: string
+  /** The contact person's job title. */
+  designation?: string
   phone?: string
   whatsapp?: string
   country?: string
@@ -141,6 +159,8 @@ export interface Company {
   industry?: string
   contactPerson?: string
   contactEmail?: string
+  /** The company's web address, saved as https://... */
+  website?: string
   phone?: string
   whatsapp?: string
   address?: string

@@ -224,3 +224,16 @@ test('the Add candidate save sends ocr_data from ocrSavePayload, not a hand-buil
   assert.match(page, /ocr_data:\s*ocrSavePayload\(scans\)/)
   assert.doesNotMatch(page, /scans\[kind\]!\.raw/)
 })
+
+test('an Aadhaar card outranks a resume for identity, but its address only fills an empty address', () => {
+  const fields = { ...defaults, fatherName: '', currentAddress: '' }
+  const resume = scan({ name: 'Resume Name', fatherName: 'Resume Father', currentAddress: 'Where they live now' })
+  const aadhaar = scan({ name: 'Card Name', fatherName: 'Card Father', currentAddress: 'Registered address' })
+  const passport = scan({ name: 'Passport Name' })
+  const merged = mergeOcrForm(fields, fields, { resume, aadhaar }, new Set())
+  assert.equal(merged.name, 'Card Name')
+  assert.equal(merged.fatherName, 'Card Father')
+  assert.equal(merged.currentAddress, 'Where they live now')
+  assert.equal(mergeOcrForm(fields, fields, { aadhaar }, new Set()).currentAddress, 'Registered address')
+  assert.equal(mergeOcrForm(fields, fields, { resume, aadhaar, passport }, new Set()).name, 'Passport Name')
+})

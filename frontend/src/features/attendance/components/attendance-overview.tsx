@@ -51,7 +51,7 @@ export function AttendanceOverview({ rows, requests, own, month, onRecord, onReq
       </div>
     } },
     { key: 'unpaid', header: 'Unpaid time', width: '11%', render: (row) => <div className="att-two"><strong className={cn(row.summary.unpaidMinutes > 0 && 'att-warn')}>{minutesLabel(row.summary.unpaidMinutes)}</strong><small>After overtime</small></div> },
-    { key: 'open', header: 'Record', width: '7%', actions: true, align: 'right', render: (row) => <Button size="sm" aria-label={`Open attendance record for ${row.name}`} title={`Open attendance record for ${row.name}`} onClick={() => onRecord(row.userId)}>Open<ChevronRight size={14} /></Button> },
+    { key: 'open', header: 'Actions', width: '8%', actions: true, render: (row) => <Button size="sm" aria-label={`Open attendance record for ${row.name}`} title={`Open attendance record for ${row.name}`} onClick={() => onRecord(row.userId)}>Open<ChevronRight size={14} /></Button> },
   ]
   return <Panel flush className="att-card">
     <CardHead title={own ? 'Your monthly overview' : 'Monthly staff overview'} meta={own ? `${title}: your attendance, exceptions and unpaid time.` : `${title}: open an employee to see their daily record.`} action={<span className="att-count">{own ? title : `${rows.length} ${rows.length === 1 ? 'employee' : 'employees'}`}</span>} />

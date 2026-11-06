@@ -103,7 +103,7 @@ export default function WhatsAppPage() {
       {row.documentBundle?.candidateIds.map((id) => <CandidateChip key={id} label={candidateName(id)} title="Open the candidate" onClick={() => navigate(`/candidates/${id}`)} />)}
       {row.candidateId && !row.documentBundle && <CandidateChip label={candidateName(row.candidateId)} title="Open the candidate" onClick={() => navigate(`/candidates/${row.candidateId}`)} />}
     </div> },
-    { key: 'actions', header: 'Actions', width: '26%', align: 'right', render: (row) => <div className="wa-doc-actions">
+    { key: 'actions', header: 'Actions', width: '26%', align: 'center', render: (row) => <div className="wa-doc-actions">
       {row.hasFile && <><a className="wa-act" href={fileHref(`/api/whatsapp/messages/${row.id}/file`)} target="_blank" rel="noreferrer" title={`View ${row.fileName ?? 'document'}`}><ExternalLink size={14} />View</a><a className="wa-act is-icon" aria-label={`Download ${row.fileName}`} title="Download" href={fileHref(`/api/whatsapp/messages/${row.id}/file?download=true`)}><Download size={14} /></a></>}
       {admin && row.hasFile && <Button size="sm" disabled={!!busy || PENDING.includes(row.status)} onClick={() => setBundleSource(row.id)}>Review people</Button>}
       {!row.candidateId && !row.documentBundle && admin && !PENDING.includes(row.status) && <>

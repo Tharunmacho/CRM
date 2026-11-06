@@ -22,6 +22,7 @@ from app.services.document_storage import file_response
 from app.services.whatsapp_intake import attach_original, receive_payload
 from app.services.whatsapp_chat import record_inbound_payload, reconcile_payload
 from app.services.parallel_reads import parallel_reads
+from app.services.response_cache import cached, scope_of
 
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp"])
 admin = require_role(Role.admin)
@@ -104,7 +105,14 @@ def inbox(q: str = "", page: int = Query(1, ge=1), page_size: int = Query(20, ge
 
 @router.get("/health")
 def health(db: Session = Depends(get_db), user: User = Depends(admin)):
-    """Operational counters only; the dashboard does not need message bodies."""
+    """Operational counters only; the dashboard does not need message bodies.
+
+    Admin only and identical for every admin, so one answer is shared for a few seconds; a status change or a new
+    message empties it at once (the worker's own heartbeat does not, which is why it also expires)."""
+    return cached(("whatsapp-health", scope_of(db)), ("whatsapp", "documents"), 5, lambda: _health(db))
+
+
+def _health(db: Session):
     settings = get_settings()
     grouped, channels = parallel_reads(
         db,

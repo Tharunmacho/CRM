@@ -682,6 +682,44 @@ def test_every_recruiter_gets_five_owned_candidates_in_morning_and_evening_slots
     assert rows_of(desk, "ravi", TUESDAY) == []
 
 
+def test_an_unmatched_candidates_row_falls_back_on_the_form_preferences_and_says_so(desk):
+    with desk.sessions() as db:
+        base = dict(source=Source.walk_in, owner_id="asha")
+        db.add_all([
+            Candidate(id="p1", ref="CND-P1", name="Prefers", phone="9300000001", designations=["Welder", "Fitter"], skills=["Rigging"],
+                      country_preference=" Qatar ", current_city="Kochi", created_at=TUESDAY - timedelta(days=50), **base),
+            Candidate(id="p2", ref="CND-P2", name="Skills only", phone="9300000002", designations=[], skills=["Rigging", "Welding"],
+                      current_city="Dubai, UAE", created_at=TUESDAY - timedelta(days=49), **base),
+            Candidate(id="p3", ref="CND-P3", name="Blank form", phone="9300000003", designations=[], skills=[], country_preference="  ",
+                      created_at=TUESDAY - timedelta(days=48), **base),
+        ])
+        db.commit()
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    by_id = {r["candidateId"]: r for r in rows_of(desk, "asha", TUESDAY)}
+    a, b, c = by_id["p1"], by_id["p2"], by_id["p3"]
+    assert (a["country"], a["countrySource"], a["countryIsPreferred"], a["locationHint"]) == ("Qatar", "preference", True, None)
+    assert (a["position"], a["positionSource"], a["positionIsPreferred"]) == ("Welder", "preference", True)
+    assert (a["client"], a["clientContact"], a["orderRef"]) == (None, None, None)  # a client exists only once matched
+    assert (b["country"], b["countrySource"], b["countryIsPreferred"]) == (None, None, False)
+    assert b["locationHint"] == "Dubai, UAE"  # the screen may still recognise a country in the current location
+    assert (b["position"], b["positionSource"], b["positionIsPreferred"]) == ("Rigging", "skill", True)
+    assert (c["country"], c["countrySource"], c["countryIsPreferred"], c["locationHint"]) == (None, None, False, None)
+    assert (c["position"], c["positionSource"], c["positionIsPreferred"]) == (None, None, False)
+
+
+def test_a_matched_candidate_keeps_the_orders_values_whatever_the_form_prefers(desk):
+    mapped_candidates(desk, 1)
+    with desk.sessions() as db:
+        db.execute(text("UPDATE crm_candidates SET country_preference = 'Oman', designations = '[\"Mason\"]'::jsonb WHERE id = 'c0'"))
+        db.commit()
+        ensure_allocations(db, now=TUESDAY, tz=TZ)
+        db.commit()
+    row = rows_of(desk, "asha", TUESDAY)[0]
+    assert (row["kind"], row["client"], row["country"], row["position"]) == ("stage", "Gulf Builders", "Qatar", "Welder")
+    assert (row["countrySource"], row["countryIsPreferred"], row["positionSource"], row["positionIsPreferred"], row["locationHint"]) == ("order", False, "order", False, None)
+
+
 def test_matched_candidates_come_first_then_owned_unmatched_ones(desk):
     mapped_candidates(desk, 2)
     owned_candidates(desk, 6)
@@ -925,3 +963,41 @@ def test_upgrading_a_database_that_already_has_the_first_daily_work_schema_keeps
     _migrate(engine, "head")  # up again
     with engine.connect() as c:
         assert c.execute(text("SELECT kind FROM workflow_daily_work_items WHERE id = 'i'")).scalar() == "stage"
+
+
+def test_daily_work_screen_stays_within_a_round_trip_budget(desk):
+    """The screen used to run 26-28 statements one after another (about 4 s at a 100 ms round trip), then 16 in about nine
+    rounds. The goals, the four attendance tables, owned counts, today's item counts and the progress inputs are now ONE
+    statement, read beside the reconcile, the list's rows and the "who still has candidates" check (one round trip); only the
+    placements and remarks behind the rows follow. Eight to ten statements in about four rounds is the repeat-call budget."""
+    from sqlalchemy import event
+    mapped_candidates(desk, 7)
+    mapped_candidates(desk, 3, owner="ravi", start=20)
+    engine = desk.sessions.kw["bind"]
+
+    def statements(user_id, path="/api/daily-work"):
+        as_user(desk, user_id)
+        seen = []
+        record = lambda conn, cur, statement, *rest: seen.append(" ".join(statement.split()))
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            response = desk.client.get(path)
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        assert response.status_code == 200
+        return seen, response.json()
+
+    statements("asha")  # the first call allocates; the budget is for the usual repeat
+    seen, body = statements("asha")
+    assert len(seen) <= 10, [sql[:60] for sql in seen]
+    assert sum("workflow_daily_goals" in sql for sql in seen) == 1  # goals are read once, not three times
+    assert sum("staff_attendance_duty_plans" in sql for sql in seen) == 1  # and so are the attendance tables
+    assert sum("crm_application_stages" in sql and "count" in sql.lower() for sql in seen) == 1  # both stage counts together
+    assert len(body["items"]) == 5
+
+    statements("manager")
+    seen, team = statements("manager")
+    # ravi has fewer candidates than his quota but nothing left to hand out: no lock, no top-up, no write on a repeat call
+    assert len(seen) <= 12, " | ".join(sql[:48] for sql in seen)
+    assert not any("pg_advisory_xact_lock" in sql for sql in seen)
+    assert {s["userId"] for s in team["staff"]} == {"asha", "ravi"} and len(team["items"]) == 8

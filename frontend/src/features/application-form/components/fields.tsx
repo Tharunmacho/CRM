@@ -126,7 +126,9 @@ export function FormField({
   onChange,
   errors,
   updated,
+  wide: wideOverride,
 }: {
+  wide?: boolean
   def: FieldDef
   form: ApplicationFormData
   draft: FormDraft
@@ -142,7 +144,7 @@ export function FormField({
   const provenance = provenanceOf(form, def.path, !blank, def.from)
   const set = (next: string | string[]) => onChange(def.path, next)
   const id = `af-${def.path.replace('.', '-')}`
-  const wide = def.kind === 'textarea'
+  const wide = wideOverride ?? def.kind === 'textarea'
 
   let body: ReactNode
   let hint: ReactNode
@@ -179,7 +181,7 @@ export function FormField({
       </Select>
     )
   } else if (def.kind === 'textarea') {
-    body = <Textarea id={id} rows={3} value={String(value)} onChange={(event) => set(event.target.value)} aria-label={def.label} />
+    body = <Textarea id={id} rows={2} value={String(value)} onChange={(event) => set(event.target.value)} aria-label={def.label} />
   } else if (def.kind === 'years') {
     body = <Input id={id} type="number" inputMode="decimal" min={0} max={80} step={1} value={String(value)} onChange={(event) => set(event.target.value)} aria-label={def.label} placeholder="Years" />
   } else if (def.kind === 'tel') {

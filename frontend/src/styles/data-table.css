@@ -1,0 +1,140 @@
+/*
+ * Shared DataTable (shared/ui/table.tsx), the reference grid look as the default for every list in the CRM:
+ * white card; a header band of centred, medium-weight, muted titles on a very light grey; thin vertical hairlines
+ * between columns; 72px rows (56px when compact) with everything vertically centred; zebra stripes; centred cells
+ * (the first column, which names the record, starts on the left); a horizontal scroll area whose pinned first and
+ * actions columns show a soft shadow when content has scrolled under them; stacked cards below the table's
+ * stackBelow width. Tokens only (theme.css), so every palette and dark mode follow. `plain` opts a table out.
+ * Rules carry :root:root so they beat the older table skin in depth.css and skin.css and screen overrides.
+ */
+.ui-data-table.is-grid { background: var(--bg-card); }
+.ui-data-table.is-grid .ui-table-scroll { position: relative; overscroll-behavior-x: contain; }
+:root:root .ui-data-table.is-grid table { width: 100%; min-width: var(--tbl-min, 0); border-collapse: separate; border-spacing: 0; color: var(--text-main); }
+@media (max-width: 1279px) { :root:root .ui-data-table.is-grid table { min-width: var(--tbl-min-md, var(--tbl-min, 0)); } }
+@media (max-width: 1023px) { :root:root .ui-data-table.is-grid table { min-width: var(--tbl-min-sm, var(--tbl-min, 0)); } }
+
+/* ---------- header band ---------- */
+:root:root .ui-data-table.is-grid thead tr { border: 0; background: none; }
+:root:root .ui-data-table.is-grid thead th {
+  position: relative; height: 52px; padding: 8px 12px; vertical-align: middle;
+  font-size: 13px; font-weight: 500; line-height: 1.3; white-space: normal; overflow-wrap: break-word; color: var(--text-muted);
+  background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card));
+  border-bottom: 1px solid var(--border-main); border-right: 1px solid var(--border-main); box-shadow: none;
+}
+:root:root .ui-data-table.is-grid.is-compact thead th { height: 46px; padding: 6px 10px; font-size: 12.5px; }
+:root:root .ui-data-table.is-grid thead th:last-child { border-right: 0; }
+:root:root .ui-table-scroll.is-sticky thead th { position: sticky; top: 0; z-index: 3; box-shadow: none; }
+.ui-data-table.is-grid .ui-th-inner { max-width: 100%; }
+.ui-data-table.is-grid th button { text-align: inherit; line-height: 1.3; }
+.ui-data-table.is-grid th.is-sortable button:hover, .ui-data-table.is-grid th.is-sorted button { color: var(--text-main); }
+.ui-data-table.is-grid .ui-sort-hint { flex: none; opacity: .4; transition: opacity .14s; }
+.ui-data-table.is-grid th.is-sortable:hover .ui-sort-hint { opacity: .85; }
+.ui-data-table.is-grid th button:disabled { cursor: default; }
+
+/* ---------- body ---------- */
+:root:root .ui-data-table.is-grid tbody tr { background: var(--bg-card); border: 0; }
+:root:root .ui-data-table.is-grid.is-zebra tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
+:root:root .ui-data-table.is-grid tbody td {
+  height: 72px; padding: 10px 12px; vertical-align: middle; font-size: 13.5px; line-height: 1.45; color: var(--text-main);
+  border-bottom: 1px solid var(--border-faint); border-right: 1px solid var(--border-main);
+}
+:root:root .ui-data-table.is-grid.is-compact tbody td, :root:root .ui-data-table.is-grid.is-dense tbody td { height: 56px; padding: 7px 10px; font-size: 13px; }
+:root:root .ui-data-table.is-grid tbody td:last-child { border-right: 0; }
+:root:root .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: 0; }
+:root:root .ui-data-table.is-grid :is(th, td):first-child { padding-left: 20px; }
+:root:root .ui-data-table.is-grid :is(th, td):last-child { padding-right: 20px; }
+:root:root .ui-data-table.is-grid tbody tr.cursor-pointer:hover { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+:root:root .ui-data-table.is-grid tbody tr:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ui-data-table.is-grid td .text-micro { color: var(--text-muted); }
+
+/* alignment: the column's `align` (first column left, the rest centred by default) */
+.ui-data-table.is-grid .ui-c-left { text-align: left; }
+.ui-data-table.is-grid .ui-c-center { text-align: center; }
+.ui-data-table.is-grid .ui-c-right { text-align: right; }
+.ui-data-table.is-grid td.ui-c-center > :where(div, p, ul, .record-identity) { width: fit-content; max-width: 100%; margin-inline: auto; }
+.ui-data-table.is-grid td.ui-c-right > :where(div, p, ul, .record-identity) { width: fit-content; max-width: 100%; margin-inline-start: auto; }
+.ui-data-table.is-grid td.ui-c-center .record-identity { justify-content: center; }
+.ui-data-table.is-grid td.ui-c-center :is(.staff-tags, .att-exceptions, .as-tags, .uv-actions) { justify-content: center; }
+:root:root .ui-data-table.is-grid .ui-actions-cell { width: 1%; min-width: 88px; white-space: nowrap; text-align: center; }
+:root:root .ui-data-table.is-grid table.is-fixed th.ui-actions-cell { width: auto; }
+:root:root .ui-data-table.is-grid :is(th, td).ui-actions-cell { padding-left: 12px; padding-right: 12px; }
+:root:root .ui-data-table.is-grid :is(th, td).ui-actions-cell:last-child { padding-right: 16px; }
+.ui-data-table.is-grid .ui-actions-cell > * { vertical-align: middle; }
+.ui-data-table.is-grid td.ui-actions-cell > .ui-button + .ui-button, .ui-data-table.is-grid td.ui-actions-cell > .ui-row-menu-trigger { margin-left: 6px; }
+
+/* ---------- pinned columns and the shadow at a pinned edge ---------- */
+:root:root .ui-data-table.is-grid :is(th, td).is-pin-start, :root:root .ui-data-table.is-grid :is(th, td).is-pin-end { position: sticky; }
+:root:root .ui-data-table.is-grid tbody :is(td.is-pin-start, td.is-pin-end) { z-index: 2; background: inherit; }
+:root:root .ui-data-table.is-grid thead :is(th.is-pin-start, th.is-pin-end) { z-index: 5; }
+:root:root .ui-data-table.is-grid .ui-select-cell { width: 44px; min-width: 44px; max-width: 44px; padding: 0; text-align: center; }
+.ui-data-table.is-grid :is(th, td).is-pin-start::after, .ui-data-table.is-grid :is(th, td).is-pin-end::after { content: ''; position: absolute; top: 0; bottom: 0; width: 12px; pointer-events: none; opacity: 0; transition: opacity .14s; }
+.ui-data-table.is-grid :is(th, td).is-pin-start::after { right: -12px; background: linear-gradient(90deg, rgba(15, 23, 42, .13), transparent); }
+.ui-data-table.is-grid :is(th, td).is-pin-end::after { left: -12px; background: linear-gradient(270deg, rgba(15, 23, 42, .13), transparent); }
+.ui-data-table.is-grid .ui-table-scroll[data-edge-start='true'] :is(th, td).is-pin-start::after { opacity: 1; }
+.ui-data-table.is-grid .ui-table-scroll[data-edge-end='true'] :is(th, td).is-pin-end::after { opacity: 1; }
+[data-theme='dark'] .ui-data-table.is-grid :is(th, td).is-pin-start::after { background: linear-gradient(90deg, rgba(0, 0, 0, .4), transparent); }
+[data-theme='dark'] .ui-data-table.is-grid :is(th, td).is-pin-end::after { background: linear-gradient(270deg, rgba(0, 0, 0, .4), transparent); }
+
+/* ---------- loading skeleton ---------- */
+.ui-skel { display: inline-block; height: 12px; max-width: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--tint-2) 25%, var(--tint-3) 45%, var(--tint-2) 65%); background-size: 200% 100%; animation: ui-skel-shimmer 1.4s linear infinite; }
+@keyframes ui-skel-shimmer { to { background-position: -200% 0; } }
+.ui-data-table.is-loading tbody tr { pointer-events: none; }
+
+/* ---------- pagination footer ---------- */
+:root:root .ui-data-table.is-grid .ui-table-pagination { min-height: 56px; padding: 10px 20px; border-top: 1px solid var(--border-main); background: var(--bg-card); font-size: 13px; color: var(--text-muted); }
+:root:root .ui-data-table.is-grid .ui-page-button { width: 34px; height: 34px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); transition: background-color .14s, border-color .14s, color .14s; }
+:root:root .ui-data-table.is-grid .ui-page-button:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
+:root:root .ui-data-table.is-grid .ui-page-button:disabled { opacity: .4; }
+
+/* ---------- row actions: the three-dot menu ---------- */
+.ui-row-menu-trigger { display: inline-grid; flex: none; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
+.ui-row-menu-trigger:hover, .ui-row-menu-trigger[aria-expanded='true'] { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
+.ui-row-menu-trigger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ui-row-menu { position: fixed; z-index: 70; width: 184px; padding: 6px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); box-shadow: 0 10px 30px rgba(0, 0, 0, .14); }
+.ui-row-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; color: var(--text-main); text-align: left; cursor: pointer; }
+.ui-row-menu-item svg { flex: none; color: var(--text-muted); }
+.ui-row-menu-item:hover:not(:disabled), .ui-row-menu-item:focus-visible { background: var(--tint-2); outline: none; }
+.ui-row-menu-item:disabled { opacity: .5; cursor: default; }
+.ui-row-menu-item.is-danger, .ui-row-menu-item.is-danger svg { color: var(--error-ink); }
+@media (pointer: coarse) { .ui-row-menu-trigger { width: 44px; height: 44px; } .ui-row-menu-item { height: 44px; } }
+
+/* ---------- stacked cards below a table's stackBelow width ---------- */
+
+@media (max-width: 767px) {
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 table { min-width: 0; border-spacing: 0; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody tr { height: auto; background: var(--bg-card); border-bottom: 1px solid var(--border-faint); }
+  :root:root .ui-data-table.is-grid.is-zebra.ui-table-stack-768 tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 2.5%, var(--bg-card)); }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td { height: auto; padding: 0; border: 0; text-align: left; background: transparent; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td:is(.ui-c-center, .ui-c-right, .ui-c-left) { text-align: left; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td.ui-actions-cell:not(:has(> .ui-row-open)) { justify-content: flex-start; width: auto; min-width: 0; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody :is(td.is-pin-start, td.is-pin-end):not([data-select], :has(> .ui-row-open)) { position: static; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 :is(th, td)::after { content: none; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td > :is(div, p, ul, .record-identity) { margin-inline: 0; width: auto; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 .ui-skel-row td:not(:first-child) { display: none; }
+}
+
+@media (max-width: 1023px) {
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 table { min-width: 0; border-spacing: 0; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody tr { height: auto; background: var(--bg-card); border-bottom: 1px solid var(--border-faint); }
+  :root:root .ui-data-table.is-grid.is-zebra.ui-table-stack-1024 tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 2.5%, var(--bg-card)); }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td { height: auto; padding: 0; border: 0; text-align: left; background: transparent; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td:is(.ui-c-center, .ui-c-right, .ui-c-left) { text-align: left; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td.ui-actions-cell:not(:has(> .ui-row-open)) { justify-content: flex-start; width: auto; min-width: 0; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody :is(td.is-pin-start, td.is-pin-end):not([data-select], :has(> .ui-row-open)) { position: static; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 :is(th, td)::after { content: none; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td > :is(div, p, ul, .record-identity) { margin-inline: 0; width: auto; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 .ui-skel-row td:not(:first-child) { display: none; }
+}
+
+@media (max-width: 1279px) {
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 table { min-width: 0; border-spacing: 0; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody tr { height: auto; background: var(--bg-card); border-bottom: 1px solid var(--border-faint); }
+  :root:root .ui-data-table.is-grid.is-zebra.ui-table-stack-1280 tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 2.5%, var(--bg-card)); }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td { height: auto; padding: 0; border: 0; text-align: left; background: transparent; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td:is(.ui-c-center, .ui-c-right, .ui-c-left) { text-align: left; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td.ui-actions-cell:not(:has(> .ui-row-open)) { justify-content: flex-start; width: auto; min-width: 0; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody :is(td.is-pin-start, td.is-pin-end):not([data-select], :has(> .ui-row-open)) { position: static; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 :is(th, td)::after { content: none; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td > :is(div, p, ul, .record-identity) { margin-inline: 0; width: auto; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 .ui-skel-row td:not(:first-child) { display: none; }
+}

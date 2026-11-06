@@ -1,0 +1,23 @@
+/* Lead sheet: bulk bar, confirm dialogs and the undo toast (features/leads/components/bulk-*.tsx, undo-toast.tsx). */
+.ld-bulk { position: sticky; top: 0; z-index: 12; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0; padding: 10px 22px; border-top: 1px solid var(--border-main); border-bottom: 1px solid var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); box-shadow: 0 4px 12px rgba(0, 0, 0, .06); }
+.ld-bulk-who { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; min-width: 0; }
+.ld-bulk-count { font-size: 14px; font-weight: 600; color: var(--text-main); }
+.ld-bulk-link { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; font-size: 13.5px; font-weight: 600; color: var(--primary); cursor: pointer; }
+.ld-bulk-link:hover { text-decoration: underline; }
+.ld-bulk-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ld-bulk-note { font-size: 13px; color: var(--text-muted); }
+.ld-bulk-note.is-warn { color: var(--warning-ink); }
+.ld-bulk-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ld-confirm-lines { display: flex; flex-direction: column; gap: 8px; }
+.ld-confirm-lines p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-main); }
+.ld-confirm-lines p + p { color: var(--text-muted); font-size: 13.5px; }
+.ld-confirm-lines p.is-strong { color: var(--error-ink); font-weight: 600; }
+.ld-sundo { position: fixed; right: 24px; bottom: 24px; z-index: 81; display: flex; align-items: center; gap: 14px; max-width: min(420px, calc(100vw - 32px)); padding: 11px 12px 11px 16px; border: 1px solid var(--success-edge); border-radius: 10px; background: var(--success-fill); box-shadow: 0 10px 30px rgba(0, 0, 0, .16); font-size: 13.5px; font-weight: 500; color: var(--success-ink); }
+.ld-sundo-btn { flex: none; height: 30px; padding: 0 12px; border: 1px solid currentColor; border-radius: 7px; background: var(--bg-card); font-size: 13px; font-weight: 600; color: var(--success-ink); cursor: pointer; }
+.ld-sundo-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--success-ink) 10%, var(--bg-card)); }
+.ld-sundo-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ld-sundo-btn:disabled { opacity: .6; cursor: default; }
+@media (max-width: 760px) {
+  .ld-bulk { padding: 10px 12px; }
+  .ld-sundo { right: 12px; left: 12px; bottom: 12px; max-width: none; }
+}

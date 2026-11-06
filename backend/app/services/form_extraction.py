@@ -2,18 +2,22 @@
 
 Two halves:
 
-* Parsing (`resume_values`, `passport_values`): defensive, dict-based, never raising. Veris output is validated by the
+* Parsing (`resume_values`, `passport_values`, `aadhaar_values`): defensive, dict-based, never raising. Veris output is validated by the
   extraction pipeline, but what is stored is a plain JSON blob that has been through older versions, hand-built test data
   and half-read documents, so every key may be missing, null, a different type or empty text.
 * Applying (`apply_values`, `apply_stored_ocr`): the fill rule. A document read fills a field only when the field is
   empty or still marked "extracted" in `field_sources`; a value a person entered ("manual", or an old value with no mark
   that differs from the document) is never overwritten. The passport is the authority for identity and passport fields:
-  a resume cannot replace a value that came from a passport.
+  a resume cannot replace a value that came from a passport. The Aadhaar card comes second for name, date of birth,
+  gender and father's name (passport > Aadhaar > resume); a resume still wins everything about work and education, which
+  an Aadhaar card never states. An Aadhaar address only fills an EMPTY current address.
 
 `field_sources` (JSONB on the candidate) holds `{"personal.fatherName": "extracted"|"manual", ...}` plus two internal
 bookkeeping keys that start with an underscore and never leave the server:
-`_fromPassport` (form fields whose extracted value came from a passport) and `_applied` (ids of documents already
-applied, so a repeated save or backfill is a no-op and a stale primary document cannot undo a newer upload).
+`_fromPassport` / `_fromAadhaar` (form fields whose extracted value came from a passport / an Aadhaar card), `_applied`
+(ids of documents already applied, so a repeated save or backfill is a no-op and a stale primary document cannot undo a
+newer upload) and `_aadhaar` (only the LAST FOUR digits of the Aadhaar number, so the form can show "XXXX XXXX 1234"
+without ever reading the stored number; the full number stays in `ocr_data` and is never copied to a column).
 """
 from __future__ import annotations
 
@@ -32,7 +36,8 @@ from app.integrations.ocr.mapping import (
 )
 
 UNNAMED = "Name needs review"
-SLOT_KINDS = ("resume", "passport")
+# Documents that fill the form, in the order they are applied: later ones outrank earlier ones for identity fields.
+SLOT_KINDS = ("resume", "aadhaar", "passport")
 MAX_EDUCATION = 20
 MAX_HISTORY = 30
 
@@ -84,6 +89,10 @@ BY_KEY = {spec.key: spec for spec in SPECS.values()}
 # Identity and passport fields: the passport outranks a resume for these.
 PASSPORT_AUTHORITY = frozenset({"name", "dob", "gender", "nationality", "father_name",
                                 "passport_no", "passport_place", "passport_issue", "passport_expiry"})
+# Identity fields an Aadhaar card outranks a resume for (the passport outranks both).
+AADHAAR_AUTHORITY = frozenset({"name", "dob", "gender", "father_name"})
+# An Aadhaar address is the registered one, not necessarily where the person lives now: it fills only an empty current address.
+AADHAAR_FILLS_EMPTY_ONLY = frozenset({"current_address"})
 # Values another candidate may already own; a read never moves one onto a second person.
 IDENTITY = frozenset({"phone", "email", "passport_no"})
 # Columns that exist only since the application form. The automatic hook that follows every save of ocr_data fills just
@@ -409,11 +418,74 @@ def passport_values(raw: Any) -> dict[str, Any]:
     return {key: value for key, value in out.items() if value not in (None, "", [])}
 
 
+# ------------------------------------------------------------------ Aadhaar
+
+# "S/O Ramesh", "D/o: Ramesh Kumar", "W/O. Ramesh", "Son of Ramesh". "C/O" (care of) names no relation, so it is not matched.
+_RELATION = re.compile(r"^\s*(?:[sdw]\s*/\s*o|son\s+of|daughter\s+of|wife\s+of)(?![a-z])\s*[:.\-]?\s*(?P<name>.*)$", re.I)
+
+
+def relative_name(value: Any) -> str | None:
+    """The name after an S/O, D/O or W/O prefix (father, or husband for W/O), or None when the text names no relation."""
+    text = _s(value, 300)
+    match = _RELATION.match(text) if text else None
+    if not match:
+        return None
+    name = re.split(r"[,;]", match.group("name"), maxsplit=1)[0].strip(" .:-")
+    return _person_name(name[:200]) if len(name) >= 2 and not any(ch.isdigit() for ch in name) else None
+
+
+def aadhaar_values(raw: Any) -> dict[str, Any]:
+    """Candidate-column values read from one stored Veris Aadhaar result.
+
+    Name, date of birth (a bare year of birth is not a date and is left blank), gender, the address (with a leading
+    S/O, D/O or W/O clause removed) and the father's name from the S/O, D/O or W/O line. The Aadhaar number, VID,
+    enrolment id and the card's mobile number are NEVER returned: there is no column for them (the mobile number is
+    often a relative's or an old SIM).
+    """
+    identity = _dict(_dict(raw).get("aadhaar"))
+    out: dict[str, Any] = {}
+    name = _person_name(_s(identity.get("name")))
+    if name:
+        out["name"] = name
+    dob = _d(identity.get("date_of_birth"))
+    if dob:
+        out["dob"] = dob
+    gender = _gender(_s(identity.get("gender"), 20))
+    if gender:
+        out["gender"] = gender
+    address_text = identity.get("address")
+    father = relative_name(identity.get("care_of")) or (relative_name(address_text) if isinstance(address_text, str) else None)
+    if father:
+        out["father_name"] = father
+    address = _address(address_text)
+    if address and _RELATION.match(address) and "," in address:
+        address = address.split(",", 1)[1].strip(" ,") or None
+    if address and not _RELATION.match(address):
+        out["current_address"] = address
+    return out
+
+
+def aadhaar_last4(raw: Any) -> str | None:
+    """The last four digits of the card's number, from the full number or its masked form; None when neither is usable."""
+    identity = _dict(_dict(raw).get("aadhaar"))
+    digits = re.sub(r"\D", "", str(identity.get("aadhaar_number") or ""))
+    if len(digits) == 12:
+        return digits[-4:]
+    shown = re.search(r"(\d{4})\s*$", str(identity.get("masked_aadhaar_number") or ""))
+    return shown.group(1) if shown else None
+
+
+def masked_aadhaar(last4: str | None) -> str | None:
+    return f"XXXX XXXX {last4}" if last4 and re.fullmatch(r"\d{4}", last4) else None
+
+
 def values_for(kind: str, raw: Any) -> dict[str, Any]:
     if kind == "resume":
         return resume_values(raw)
     if kind == "passport":
         return passport_values(raw)
+    if kind == "aadhaar":
+        return aadhaar_values(raw)
     return {}
 
 
@@ -496,6 +568,7 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
     stamped "extracted" when it already equals the document (so it counts as read, not typed)."""
     sources = sources_of(candidate)
     from_passport = set(sources.get("_fromPassport") or [])
+    from_aadhaar = set(sources.get("_fromAadhaar") or [])
     result = ApplyResult()
     for column, spec in SPECS.items():
         if column not in values:
@@ -512,11 +585,22 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
             if not same:
                 result.kept.append(spec.key)
             continue
+        # Passport > Aadhaar > resume for identity: a resume never replaces what an Aadhaar card gave.
+        if kind == "resume" and column in AADHAAR_AUTHORITY and spec.key in from_aadhaar and not empty:
+            if not same:
+                result.kept.append(spec.key)
+            continue
         if same and not empty:
             if source is None:
                 sources[spec.key] = "extracted"
                 if kind == "passport" and authority:
                     from_passport.add(spec.key)
+                elif kind == "aadhaar" and column in AADHAAR_AUTHORITY:
+                    from_aadhaar.add(spec.key)
+            continue
+        if kind == "aadhaar" and column in AADHAAR_FILLS_EMPTY_ONLY and not empty:
+            if not same:
+                result.kept.append(spec.key)
             continue
         if not fill_all and column not in NEW_COLUMNS:
             continue
@@ -528,17 +612,44 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
             sources[spec.key] = "extracted"
             if kind == "passport" and authority:
                 from_passport.add(spec.key)
+                from_aadhaar.discard(spec.key)
+            elif kind == "aadhaar" and column in AADHAAR_AUTHORITY:
+                from_aadhaar.add(spec.key)
+                from_passport.discard(spec.key)
             else:
                 from_passport.discard(spec.key)
+                from_aadhaar.discard(spec.key)
             result.filled.append(spec.key)
         else:
             result.kept.append(spec.key)
     sources["_fromPassport"] = sorted(from_passport)
     if sources.get("_fromPassport") == []:
         sources.pop("_fromPassport")
+    if from_aadhaar:
+        sources["_fromAadhaar"] = sorted(from_aadhaar)
+    else:
+        sources.pop("_fromAadhaar", None)
     if sources != sources_of(candidate):
         candidate.field_sources = sources
     return result
+
+
+def note_aadhaar(candidate, raw: Any) -> None:
+    """Remember ONLY the last four digits of an Aadhaar card's number (`_aadhaar` in field_sources), so the application form
+    can show "XXXX XXXX 1234" from a column that is already loaded. The number itself stays in `ocr_data`."""
+    last4 = aadhaar_last4(raw)
+    if not last4:
+        return
+    sources = sources_of(candidate)
+    if sources.get("_aadhaar") != {"last4": last4}:
+        sources["_aadhaar"] = {"last4": last4}
+        candidate.field_sources = sources
+
+
+def aadhaar_of(candidate) -> str | None:
+    """"XXXX XXXX 1234" when an Aadhaar card was read for this candidate, else None. Never the full number."""
+    noted = _dict(sources_of(candidate).get("_aadhaar"))
+    return masked_aadhaar(noted.get("last4") if isinstance(noted.get("last4"), str) else None)
 
 
 def document_id(raw: Any) -> str:
@@ -576,6 +687,8 @@ def mark_stored_applied(candidate) -> None:
 def apply_document(candidate, kind: str, raw: Any, db: Session | None = None) -> ApplyResult:
     """Apply a freshly read document, then remember it. Marks the candidate so the ocr_data hook does not repeat it."""
     result = apply_values(candidate, kind, values_for(kind, raw), db)
+    if kind == "aadhaar":
+        note_aadhaar(candidate, raw)
     mark_applied(candidate, kind, raw)
     _flags(candidate)["form_explicit"] = True
     return result
@@ -615,7 +728,7 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
     before = {column: copy.deepcopy(getattr(candidate, column)) for column in SPECS}
     result = ApplyResult()
     ocr_data = candidate.ocr_data
-    for kind in ("resume", "passport"):
+    for kind in SLOT_KINDS:
         documents = stored_documents(ocr_data, kind)
         if not force:
             documents = documents[:1]
@@ -623,6 +736,8 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
             if not force and already_applied(candidate, kind, raw):
                 continue
             result.merge(apply_values(candidate, kind, values_for(kind, raw), db, fill_all=fill_all))
+            if kind == "aadhaar":
+                note_aadhaar(candidate, raw)
             mark_applied(candidate, kind, raw)
     # A replay may set a field once per stored document; report only the ones whose final value differs from the start.
     result.filled = [spec.key for column, spec in SPECS.items() if spec.key in result.filled and before[column] != getattr(candidate, column)]
@@ -650,6 +765,7 @@ def mark_manual(candidate, columns) -> None:
     A column that is now empty (or a zero count) loses its mark so a document may fill it again."""
     sources = sources_of(candidate)
     from_passport = set(sources.get("_fromPassport") or [])
+    from_aadhaar = set(sources.get("_fromAadhaar") or [])
     for column in columns:
         spec = SPECS.get(column)
         if spec is None:
@@ -660,9 +776,14 @@ def mark_manual(candidate, columns) -> None:
         else:
             sources[spec.key] = "manual"
         from_passport.discard(spec.key)
+        from_aadhaar.discard(spec.key)
     if from_passport:
         sources["_fromPassport"] = sorted(from_passport)
     else:
         sources.pop("_fromPassport", None)
+    if from_aadhaar:
+        sources["_fromAadhaar"] = sorted(from_aadhaar)
+    else:
+        sources.pop("_fromAadhaar", None)
     if sources != sources_of(candidate):
         candidate.field_sources = sources

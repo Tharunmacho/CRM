@@ -13,7 +13,7 @@ import { Section, type FormContext } from './sections'
 const byPath = (path: string) => EXTRA_FIELDS.find((item) => item.path === path) as FieldDef
 const dash = <span className="af-empty" aria-label="Not filled">–</span>
 
-function ExtraCell({ ctx, path, wide }: { ctx: FormContext; path: string; wide?: boolean }) {
+export function ExtraCell({ ctx, path, wide }: { ctx: FormContext; path: string; wide?: boolean }) {
   const def = byPath(path)
   const { options: formOptions } = useFormOptions()
   const value = ctx.draft.extras[path] ?? ''
@@ -42,7 +42,7 @@ function ExtraCell({ ctx, path, wide }: { ctx: FormContext; path: string; wide?:
         {(def.category ? choicesFor(formOptions, def.category, value) : []).map((option) => <option key={option.value} value={option.value}>{option.active ? option.label : `${option.label} (no longer offered)`}</option>)}
       </Select>
     )
-  } else if (def.kind === 'tel') body = <PhoneField id={id} value={value} onChange={set} label={def.label} error={ctx.errors[path]} />
+  } else if (def.kind === 'tel') body = <PhoneField id={id} value={value} onChange={set} label={def.label} error={ctx.errors[path]} compact />
   else body = <Input id={id} value={value} onChange={(event) => set(event.target.value)} aria-label={def.label} />
   const manual = ctx.form.fieldSources[path] === 'manual' && !isBlank(value)
   const empty = isBlank(value)
@@ -68,8 +68,8 @@ export function AssessmentSection({ ctx }: { ctx: FormContext }) {
   return (
     <Section no={8} plain>
       <div className="af-cells">
-        <ExtraCell ctx={ctx} path="screening.jobPreference" />
-        <ExtraCell ctx={ctx} path="screening.skills" />
+        <ExtraCell ctx={ctx} path="screening.jobPreference" wide />
+        <ExtraCell ctx={ctx} path="screening.skills" wide />
         <ExtraCell ctx={ctx} path="screening.countryPreference" />
         <ExtraCell ctx={ctx} path="screening.jobDurationPreference" />
         <ExtraCell ctx={ctx} path="screening.bestTimeToContact" />
@@ -90,8 +90,8 @@ export function FollowUpSection({ ctx }: { ctx: FormContext }) {
       <div className="af-cells">
         <ExtraCell ctx={ctx} path="screening.nextFollowUpDate" />
         <Cell label="Assigned to"><span className="af-text">{ctx.form.candidate.ownerName || dash}</span></Cell>
-        <Cell label="Initial call">{call ? <span className="af-text">{call.called ? 'Called' : 'Not called'} · {CALL_RESULT[call.interested] ?? call.interested}{call.recordedAt ? ` · ${formatFormDate(call.recordedAt)}` : ''}</span> : dash}</Cell>
-        <Cell label="Notes from the call" wide>{call?.remarks ? <span className="af-text af-pre">{call.remarks}</span> : dash}</Cell>
+        <Cell label="Initial call" wide>{call ? <span className="af-text">{call.called ? 'Called' : 'Not called'} · {CALL_RESULT[call.interested] ?? call.interested}{call.recordedAt ? ` · ${formatFormDate(call.recordedAt)}` : ''}</span> : dash}</Cell>
+        <Cell label="Call notes" wide>{call?.remarks ? <span className="af-text af-pre">{call.remarks}</span> : dash}</Cell>
       </div>
     </Section>
   )

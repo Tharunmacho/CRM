@@ -183,6 +183,8 @@ export interface ApplicationFormData {
   fieldSources: Record<string, FieldSource>
   warnings: string[]
   processing: boolean
+  /** "XXXX XXXX 1234" when an Aadhaar copy was read for this candidate; only the last four digits ever reach the browser. */
+  aadhaarMasked?: string
   /** Server values for the assessment / follow-up fields (see EXTRA_FIELDS), keyed by dotted path. */
   extras: Record<string, string>
   /** Whether the server sends those fields at all; an older server does not, and the sections are then left out. */

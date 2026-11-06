@@ -371,3 +371,109 @@
 }
 .db-tbl .db-owner.is-empty { align-items: flex-start; font-size: 12px; }
 .db-tbl .db-owner.is-empty > span { overflow: visible; overflow-wrap: anywhere; }
+
+/* ======================================================================================================
+   Grid table (variant="grid"): the reference-style data table. White card, light-grey header with muted
+   medium-weight titles, every column centred and divided by a hairline, roomy zebra rows with two-line
+   cells, solid country pills, coloured status words, a green WhatsApp glyph. It fills the card and scrolls
+   sideways inside .db-scroll (Actions and WhatsApp pinned, a soft shadow marks a pinned edge that has
+   content scrolled under it). Rules carry :root:root so they beat the shared table skin in skin.css.
+   ====================================================================================================== */
+.db-scroll { position: relative; max-height: max(480px, calc(100vh - 150px)); overflow: auto; overscroll-behavior-x: contain; background: var(--bg-card); }
+:root:root .db-tbl.is-grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; color: var(--text-main); }
+:root:root .db-tbl.is-grid thead th {
+  position: sticky; top: 0; z-index: 3; height: 52px; padding: 8px 10px; vertical-align: middle; text-align: center;
+  font-size: 13px; font-weight: 500; line-height: 1.25; white-space: normal; color: var(--text-muted);
+  background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card));
+  border-bottom: 1px solid var(--border-main); border-right: 1px solid var(--border-main); box-shadow: none;
+}
+:root:root .db-tbl.is-grid thead th:last-child { border-right: 0; }
+:root:root .db-tbl.is-grid tbody td {
+  position: relative; height: 80px; padding: 10px; vertical-align: middle; text-align: center; overflow: visible;
+  background: var(--bg-card); border-bottom: 1px solid var(--border-faint); border-right: 1px solid var(--border-main);
+}
+:root:root .db-tbl.is-grid tbody td:last-child { border-right: 0; }
+:root:root .db-tbl.is-grid tbody tr:nth-child(even) > td { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
+:root:root .db-tbl.is-grid tbody tr:last-child > td { border-bottom: 0; }
+:root:root .db-tbl.is-grid tbody tr.is-clickable:hover > td { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+:root:root .db-tbl.is-grid tbody tr.is-selected > td { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); }
+:root:root .db-tbl.is-grid :is(th, td).is-pin-start, :root:root .db-tbl.is-grid :is(th, td).is-pin-end { position: sticky; }
+:root:root .db-tbl.is-grid tbody :is(td.is-pin-start, td.is-pin-end) { z-index: 2; }
+:root:root .db-tbl.is-grid thead :is(th.is-pin-start, th.is-pin-end) { z-index: 5; }
+:root:root .db-tbl.is-grid :is(th, td).is-edge::after { content: ''; position: absolute; top: 0; bottom: 0; width: 12px; pointer-events: none; }
+:root:root .db-tbl.is-grid :is(th, td).is-pin-start.is-edge::after { right: -12px; background: linear-gradient(90deg, rgba(15, 23, 42, .13), transparent); }
+:root:root .db-tbl.is-grid :is(th, td).is-pin-end.is-edge::after { left: -12px; background: linear-gradient(270deg, rgba(15, 23, 42, .13), transparent); }
+.db-tbl.is-grid .db-th-check, .db-tbl.is-grid .db-td-check { padding: 0 !important; text-align: center; }
+.db-tbl.is-grid .db-th-sort { justify-content: center; max-width: 100%; white-space: normal; text-align: center; line-height: 1.25; }
+.db-tbl.is-grid .db-th-sort svg { flex: none; }
+
+/* two-line cells */
+.db-2l { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 0; max-width: 100%; text-align: center; }
+.db-2l > * { max-width: 100%; min-width: 0; }
+.db-2l strong { font-size: 13.5px; font-weight: 600; line-height: 1.3; color: var(--text-main); }
+.db-2l small { font-size: 12.5px; line-height: 1.3; color: var(--text-muted); }
+.db-2l .db-num { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; line-height: 1.35; }
+.db-2l .db-ellip { display: block; }
+.db-2l small .db-source { font-size: 12.5px; gap: 5px; color: var(--text-muted); }
+.db-2l small .db-source svg { width: 13px; height: 13px; }
+.db-2l.is-stage { gap: 6px; width: 100%; }
+.db-2l.is-stage .db-track { width: 100%; align-items: center; }
+.db-2l.is-stage .db-track-text { justify-content: center; text-align: left; }
+.db-2l.is-stage .db-cell { display: flex; justify-content: center; }
+.db-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.3; text-align: center; }
+.db-clamp.is-strong { font-size: 13.5px; font-weight: 600; color: var(--text-main); }
+
+/* coloured words: passport, service charges, interest level */
+.db-tone { display: inline-block; max-width: 100%; font-size: 13.5px; font-weight: 600; line-height: 1.3; text-align: center; overflow-wrap: anywhere; color: var(--text-muted); }
+.db-tone.is-ok { color: var(--success-ink); }
+.db-tone.is-info { color: var(--primary); }
+.db-tone.is-warn { color: var(--warning-ink); }
+.db-tone.is-bad { color: var(--error-ink); }
+.db-tone.is-quiet { font-weight: 500; color: var(--text-muted); }
+
+/* preferred country: solid pill, stable colour per country */
+.db-cpills { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; max-width: 100%; }
+.db-cpill { --cp: hsl(2 66% 46%); display: inline-block; max-width: 100%; padding: 4px 11px; border-radius: 14px; background: var(--cp); font-size: 12px; font-weight: 700; line-height: 1.25; letter-spacing: .01em; text-align: center; overflow-wrap: anywhere; color: #fff; }
+.db-cpill.is-c0 { --cp: hsl(2 66% 46%); }
+.db-cpill.is-c1 { --cp: hsl(214 72% 44%); }
+.db-cpill.is-c2 { --cp: hsl(152 62% 29%); }
+.db-cpill.is-c3 { --cp: hsl(268 50% 48%); }
+.db-cpill.is-c4 { --cp: hsl(20 84% 41%); }
+.db-cpill.is-c5 { --cp: hsl(184 72% 27%); }
+.db-cpill.is-c6 { --cp: hsl(330 62% 46%); }
+.db-cpill.is-c7 { --cp: hsl(222 22% 38%); }
+
+/* WhatsApp */
+.db-wa { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: #1ea952; transition: background-color .14s; }
+.db-wa:hover { background: var(--success-fill); }
+.db-wa:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+[data-theme='dark'] .db-wa { color: #4ade80; }
+.db-phone-line { display: flex; align-items: center; gap: 8px; }
+.db-phone-line .db-wa { width: 28px; height: 28px; }
+.db-phone-line .db-wa svg { width: 18px; height: 18px; }
+.db-mini-meta dd.db-wrapdd { overflow: visible; white-space: normal; }
+
+/* cells of the grid table */
+.db-tbl.is-grid .db-acts.is-grid { justify-content: center; gap: 6px; }
+:root:root .db-tbl.is-grid .db-act.is-form { width: 32px; min-width: 32px; padding: 0; }
+.db-tbl.is-grid .db-act.is-form span { display: none; }
+.db-tbl.is-grid .db-owner { justify-content: center; }
+.db-tbl.is-grid .db-owner.is-empty { align-items: center; justify-content: center; text-align: center; font-size: 12.5px; }
+.db-tbl.is-grid .db-owner.is-empty > span { overflow: visible; overflow-wrap: normal; word-break: normal; white-space: normal; line-height: 1.25; }
+.db-tbl.is-grid .db-owner.is-empty svg { display: none; }
+.db-tbl.is-grid .db-pill { font-size: 12px; gap: 5px; padding: 3px 8px; }
+.db-tbl.is-grid .db-order-link { display: inline-flex; width: auto; max-width: 100%; justify-content: center; font-size: 12px; }
+.db-tbl.is-grid .db-muted { font-size: 13px; }
+
+@media (max-width: 767px) {
+  .db-scroll { max-height: none; }
+}
+
+/* A medium-width card header: the tools wrap onto a second line instead of overlapping. */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .db-panel-tools { flex-wrap: wrap; justify-content: flex-start; }
+  .db-search { flex: 1 1 240px; }
+}
+.db-mini-meta .db-cpills { justify-content: flex-start; }
+.db-mini .db-act.is-label span { white-space: nowrap; }
+.db-mini .db-mini-foot .db-act.is-label { flex: 1 1 auto; min-width: max-content; }

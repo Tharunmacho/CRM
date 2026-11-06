@@ -1,6 +1,6 @@
 import { missingBySection } from '../form-model'
 import type { ApplicationFormData, DocumentKind, MissingItem, TrackingRow } from '../types'
-import { AssessmentSection, FollowUpSection, PersonalExtras } from './extras'
+import { AssessmentSection, ExtraCell, FollowUpSection } from './extras'
 import { DocumentsSection } from './documents-section'
 import { Letterhead } from './letterhead'
 import { EducationSection, ExperienceSection, PassportSection, PersonalSection, RecruitmentSection, type FormContext } from './sections'
@@ -33,7 +33,7 @@ export function FormSheet({
   return (
     <div className="af-sheet">
       <Letterhead header={form.header} photo={form.documents.photo.current} canUpload={canUpload} onPhoto={(file) => upload('photo', file)} reference={form.candidate.ref} />
-      <PersonalSection ctx={ctx} missing={bySection.get(1) ?? []} extras={<PersonalExtras ctx={ctx} />} />
+      <PersonalSection ctx={ctx} missing={bySection.get(1) ?? []} renderExtra={(path) => <ExtraCell key={path} ctx={ctx} path={path} />} />
       <PassportSection ctx={ctx} missing={bySection.get(2) ?? []} />
       <EducationSection ctx={ctx} missing={bySection.get(3) ?? []} />
       <ExperienceSection ctx={ctx} missing={bySection.get(4) ?? []} />

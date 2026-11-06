@@ -119,6 +119,7 @@ export default function OrderDetailPage() {
       key: 'candidate',
       header: 'Candidate',
       sortable: true,
+      align: 'left',
       width: '24%',
       value: (a) => store.candidate(a.candidateId)?.name ?? '',
       render: (a) => {
@@ -181,9 +182,9 @@ export default function OrderDetailPage() {
     },
     {
       key: 'actions',
-      header: '',
-      align: 'right',
-      width: '12%',
+      header: 'Actions',
+      actions: true,
+      width: '13%',
       render: (a) => (
         <div className="jv-row-actions" onClick={(e) => e.stopPropagation()}>
           {a.status === 'active' && store.can('map_candidates') && canWorkCandidate(store.me, store.candidate(a.candidateId)) && (

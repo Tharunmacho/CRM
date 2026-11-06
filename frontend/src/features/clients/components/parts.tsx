@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom'
 import { Check, CheckCircle2, Copy, FileText, FileWarning, LayoutGrid, MoreHorizontal, Rows3 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
+import { websiteHref, websiteLabel } from '@/shared/lib/website'
 import { CountryFlag } from '@/shared/ui/country-flag'
+import { FormSection as SharedFormSection } from '@/shared/ui/form-section'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import type { Application, Company, Order } from '@/shared/model/types'
 import { isDeployed } from '@/features/jobs/order-counts'
@@ -261,19 +263,21 @@ export function RowMenu({ label, items }: { label: string; items: MenuEntry[] })
   )
 }
 
+/* --------------------------------------------------------------- website */
+
+/** A company website as a link that opens in a new tab. A value that is not a plain http(s) address shows as text. */
+export function WebsiteLink({ value, className, empty }: { value?: string | null; className?: string; empty?: ReactNode }) {
+  const href = websiteHref(value)
+  if (!value?.trim()) return <>{empty ?? null}</>
+  if (!href) return <span className={className} title={value}>{value}</span>
+  return <a className={className} href={href} target="_blank" rel="noopener noreferrer" title={href} onClick={(event) => event.stopPropagation()}>{websiteLabel(href)}</a>
+}
+
 /* ----------------------------------------------------------------- forms */
 
-/** A titled block of a dialog form: a soft icon circle, a title and a one-line hint, then the fields. */
+/** A titled block of a dialog form: the shared section (icon tile, title, hint, hairline, field grid). */
 export function FormSection({ icon, title, hint, children, cols = 2 }: { icon: ReactNode; title: string; hint?: string; children: ReactNode; cols?: 1 | 2 }) {
-  return (
-    <section className="client-form-section">
-      <header>
-        <span aria-hidden="true">{icon}</span>
-        <div><h3>{title}</h3>{hint && <p>{hint}</p>}</div>
-      </header>
-      <div className={cols === 2 ? 'grid gap-4 sm:grid-cols-2' : 'grid gap-4'}>{children}</div>
-    </section>
-  )
+  return <SharedFormSection icon={icon} title={title} hint={hint} cols={cols}>{children}</SharedFormSection>
 }
 
 /* -------------------------------------------------------------------- CSV */

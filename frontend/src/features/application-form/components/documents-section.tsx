@@ -5,6 +5,7 @@ import { FileDrop } from '@/shared/ui/file-drop'
 import { DOCUMENT_KINDS, DOCUMENT_LABELS, describeExtraction } from '../form-model'
 import type { ApplicationFormData, DocumentKind, DocumentSlot } from '../types'
 import { Section } from './sections'
+import '@/styles/application-form-aadhaar.css'
 
 const ICONS: Record<DocumentKind, LucideIcon> = { resume: FileText, passport: IdCard, photo: ImageIcon }
 const HELP: Record<DocumentKind, string> = {
@@ -68,6 +69,11 @@ export function DocumentsSection({
           )
         })}
       </div>
+      {form.aadhaarMasked && (
+        <p className="af-doc-meta af-aadhaar" data-testid="aadhaar-masked">
+          <IdCard aria-hidden="true" />Aadhaar copy read: <b className="ident">{form.aadhaarMasked}</b>. Only the last four digits are shown. Name, date of birth, gender, address and father&apos;s name were read from it.
+        </p>
+      )}
     </Section>
   )
 }

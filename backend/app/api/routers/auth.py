@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -56,6 +56,7 @@ class Me(BaseModel):
 
 @router.get("/session")
 def session_state(
+    request: Request,
     response: Response,
     db: DbSession = Depends(get_db),
     crm_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
@@ -82,8 +83,15 @@ def session_state(
     if workspace:
         # Authenticate once and return the desk in the same response. Anonymous
         # visits still return immediately without loading any CRM collections.
-        from app.api.routers.data import bootstrap
-        return bootstrap(db=db, user=user, compact=compact)
+        from app.api.routers.data import desk_response
+        # A finished response (already encoded and compressed); FastAPI does not merge the injected `response`'s
+        # headers into one, so the ones set above are passed along explicitly.
+        headers = {"Cache-Control": "no-store"}
+        sent = [value.decode("latin-1") for name, value in response.raw_headers if name == b"set-cookie"]
+        reply = desk_response(request, db, user, compact, headers)
+        for cookie in sent:
+            reply.headers.append("set-cookie", cookie)
+        return reply
     return {"me": UserOut.model_validate(user)}
 
 

@@ -6,13 +6,16 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.gzip import GZipMiddleware
+from starlette.datastructures import Headers
+from starlette.middleware.gzip import GZipResponder
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from app.api.routers import applications, auth, candidates, data, files, ocr, inbox, users, reports, workflow, whatsapp, document_jobs, attendance, staff_directory
+from app.api.routers import leads as leads_router, lead_campaigns as lead_campaigns_router
+from app.api.routers import lead_bulk as lead_bulk_router
 from app.api.routers import application_form, form_options, daily_work as daily_work_router, document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
@@ -36,28 +39,49 @@ app = FastAPI(
 app.add_middleware(ApiTimingMiddleware)
 
 
-class _CompressWorkspaceSnapshot:
-    """Gzip the large JSON snapshots and the built JS/CSS; documents and streams are left untouched.
+_COMPRESSIBLE = frozenset({
+    "application/json", "application/problem+json", "application/javascript", "text/javascript", "text/css", "text/html",
+    "text/plain", "text/csv", "image/svg+xml",
+})
 
-    The built bundle is ~1.4 MB of JavaScript (~465 kB gzipped). Behind a proxy that does not compress,
-    the first visit downloaded all of it uncompressed; hashed asset files never change, so compressing them
-    on the way out costs little and each browser fetches each file once (see the immutable cache header).
+
+class _CompressibleOnly(GZipResponder):
+    """Starlette's gzip responder, but only for text-like replies.
+
+    Spreadsheets, PDFs, images and uploaded documents are already compressed (or incompressible) and `attachment`
+    downloads must keep their exact bytes; a Server-Sent-Events stream must never be buffered by a compressor, or
+    its events would arrive in batches. Anything else is passed through untouched.
     """
 
-    paths = ("/api/bootstrap", "/api/auth/session")
-    text_assets = (".js", ".css", ".svg", ".json", ".html")
+    async def send_with_gzip(self, message):
+        await super().send_with_gzip(message)
+        if message["type"] == "http.response.start":
+            headers = Headers(raw=message["headers"])
+            kind = headers.get("content-type", "").split(";")[0].strip().lower()
+            if kind not in _COMPRESSIBLE or "attachment" in headers.get("content-disposition", "").lower():
+                self.content_encoding_set = True  # the base class then forwards the reply unchanged
+
+
+class _CompressReplies:
+    """Gzip the JSON API replies and the built JS/CSS (documents and streams are left untouched).
+
+    Every API reply of 1 KB or more is compressed: the desk snapshot, the dashboard (~500 KB for a supervisor) and
+    the candidate lists shrink 5-10x, which on a mobile or office connection costs more than the database. The built
+    bundle is ~1.4 MB of JavaScript (~465 kB gzipped); hashed asset files never change, so compressing them on the
+    way out costs little and each browser fetches each file once (see the immutable cache header).
+    """
 
     def __init__(self, app):
         self.app = app
-        self.compressed = GZipMiddleware(app, minimum_size=1024, compresslevel=5)
+        self.minimum_size = 1024
 
     async def __call__(self, scope, receive, send):
-        path = scope["path"] if scope["type"] == "http" else ""
-        wanted = path in self.paths or (path.startswith("/assets/") and path.endswith(self.text_assets))
-        await (self.compressed if wanted else self.app)(scope, receive, send)
+        if scope["type"] != "http" or scope["path"] == "/api/events" or "gzip" not in Headers(scope=scope).get("accept-encoding", ""):
+            return await self.app(scope, receive, send)
+        await _CompressibleOnly(self.app, self.minimum_size, compresslevel=5)(scope, receive, send)
 
 
-app.add_middleware(_CompressWorkspaceSnapshot)
+app.add_middleware(_CompressReplies)
 
 # Only needed when the SPA is served from a different origin, i.e. `npm run dev`.
 app.add_middleware(
@@ -122,6 +146,9 @@ app.include_router(document_bundles.router)
 app.include_router(intake_acknowledgements.router)
 app.include_router(attendance.router)
 app.include_router(events.router)
+app.include_router(lead_campaigns_router.router)  # before leads: /api/leads/campaigns must not be read as /api/leads/{lead_id}
+app.include_router(leads_router.router)
+app.include_router(lead_bulk_router.router)
 app.include_router(agency_settings_router.router)
 
 

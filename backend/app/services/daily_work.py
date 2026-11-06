@@ -20,16 +20,21 @@ Rules (all times in the agency timezone):
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from functools import lru_cache
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, bindparam, case, exists, func, or_, select, text
+from sqlalchemy import Integer, and_, bindparam, case, cast, column, exists, func, literal, null, or_, select, text, true, update, values
 from sqlalchemy.dialects.postgresql import ARRAY, insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from sqlalchemy.types import String
 
 from app.core.config import get_settings
+from app.services.parallel_reads import _SLOTS, parallel_reads
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, AttendanceCalendarDay, AttendanceDutyPlan, AttendanceWeeklyOff,
     AttendanceWorkTiming, Candidate, CandidateStatus, Client, Company, DailyGoal, DailyGoalProgress, DailyWorkItem, Designation,
@@ -79,6 +84,11 @@ def load_goals(db, user_ids: list[str]) -> dict[str, dict]:
     """
     rows = db.execute(select(DailyGoal.user_id, DailyGoal.metric, DailyGoal.target, DailyGoal.morning_target).where(
         or_(DailyGoal.user_id.is_(None), DailyGoal.user_id.in_(user_ids or [""])))).all()
+    return goals_from_rows(rows, user_ids)
+
+
+def goals_from_rows(rows, user_ids: list[str]) -> dict[str, dict]:
+    """`load_goals` from (user id or None, metric, target, morning target) rows already in hand."""
     agency = {m: v for m, v in FALLBACK_GOALS.items()}
     own: dict[str, dict] = defaultdict(dict)
     for uid, metric, target, morning in rows:
@@ -123,26 +133,45 @@ def _shift_of(raw) -> tuple[time, int]:
     return shift.start, shift.break_minutes
 
 
-def shifts_and_days_off(db, user_ids: list[str], day: date) -> tuple[dict[str, tuple[time, int]], set[str]]:
+def shifts_and_days_off(db, user_ids: list[str], day: date, *, parallel: bool = False) -> tuple[dict[str, tuple[time, int]], set[str]]:
     """Each person's shift for the day and who is off (explicit calendar entry, weekly off, holiday or leave).
 
     Mirrors the attendance rules: a one-date duty plan overrides a weekly off or holiday (never approved leave);
     Sunday is the weekly off until someone picks another day for that week.
+
+    `parallel=True` issues the four independent reads at once (one round trip, not four); use it only when this
+    transaction has not written to the attendance tables, since the reads then run on their own connections.
     """
     if not user_ids:
         return {}, set()
-    plans = {r.user_id: r for r in db.scalars(select(AttendanceDutyPlan).where(
-        AttendanceDutyPlan.user_id.in_(user_ids), AttendanceDutyPlan.attendance_date == day))}
-    timings: dict[str, AttendanceWorkTiming] = {}
-    for r in db.scalars(select(AttendanceWorkTiming).where(
-            AttendanceWorkTiming.user_id.in_(user_ids), AttendanceWorkTiming.effective_from <= day,
-    ).order_by(AttendanceWorkTiming.effective_from.desc())):
-        timings.setdefault(r.user_id, r)
-    marks = {r.user_id: r.status for r in db.scalars(select(AttendanceCalendarDay).where(
-        AttendanceCalendarDay.user_id.in_(user_ids), AttendanceCalendarDay.attendance_date == day))}
+    reads = attendance_reads(user_ids, day)
+    rows = parallel_reads(db, *reads) if parallel else [read(db) for read in reads]
+    return compute_shifts(user_ids, day, *rows)
+
+
+def attendance_reads(user_ids: list[str], day: date) -> tuple:
+    """The four independent attendance reads behind `shifts_and_days_off`, as callables for `parallel_reads`."""
     week = day - timedelta(days=day.weekday())
-    weekly = {r.user_id: r.day for r in db.scalars(select(AttendanceWeeklyOff).where(
-        AttendanceWeeklyOff.user_id.in_(user_ids), AttendanceWeeklyOff.week_start == week))}
+    return (
+        lambda s: list(s.scalars(select(AttendanceDutyPlan).where(
+            AttendanceDutyPlan.user_id.in_(user_ids), AttendanceDutyPlan.attendance_date == day))),
+        lambda s: list(s.scalars(select(AttendanceWorkTiming).where(
+            AttendanceWorkTiming.user_id.in_(user_ids), AttendanceWorkTiming.effective_from <= day,
+        ).order_by(AttendanceWorkTiming.effective_from.desc()))),
+        lambda s: list(s.scalars(select(AttendanceCalendarDay).where(
+            AttendanceCalendarDay.user_id.in_(user_ids), AttendanceCalendarDay.attendance_date == day))),
+        lambda s: list(s.scalars(select(AttendanceWeeklyOff).where(
+            AttendanceWeeklyOff.user_id.in_(user_ids), AttendanceWeeklyOff.week_start == week))),
+    )
+
+
+def compute_shifts(user_ids: list[str], day: date, plan_rows, timing_rows, mark_rows, weekly_rows) -> tuple[dict[str, tuple[time, int]], set[str]]:
+    plans = {r.user_id: r for r in plan_rows}
+    timings: dict[str, AttendanceWorkTiming] = {}
+    for r in timing_rows:
+        timings.setdefault(r.user_id, r)
+    marks = {r.user_id: r.status for r in mark_rows}
+    weekly = {r.user_id: r.day for r in weekly_rows}
     shifts, off = {}, set()
     for uid in user_ids:
         plan = plans.get(uid)
@@ -239,8 +268,33 @@ def _call_done():
     return and_(Candidate.call_recorded_at.is_not(None), Candidate.call_called.is_(True), Candidate.call_interested.in_(["yes", "no"]))
 
 
+def _busy(today: date):
+    """A candidate that is not available: an unfinished item exists, or one was already handed out today."""
+    return or_(
+        exists().where(DailyWorkItem.candidate_id == Candidate.id, DailyWorkItem.status == "open"),
+        exists().where(DailyWorkItem.candidate_id == Candidate.id, DailyWorkItem.work_date == today,
+                       DailyWorkItem.status != "released"),
+    )
+
+
+def _stage_ready(owner, busy):
+    """Conditions of a stage-task pick for `owner` (an id or a column): open stage task, active placement, free candidate."""
+    return [Task.owner_id == owner, Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
+            Task.completed_at.is_(None), Task.cancelled_at.is_(None), Application.status == ApplicationStatus.active, ~busy]
+
+
+def _call_ready(owner, busy):
+    """Conditions of an owned-candidate pick for `owner`: being worked (new / in process), not matched to an order, free."""
+    matched = exists().where(Application.candidate_id == Candidate.id, Application.status == ApplicationStatus.active)
+    return [Candidate.owner_id == owner, Candidate.status.in_([CandidateStatus.new, CandidateStatus.in_process]), ~matched, ~busy]
+
+
+def _call_order():
+    return (case((_call_done(), 1), else_=0), Candidate.created_at, Candidate.id)
+
+
 def _pool(db, uid: str, need: int, today: date) -> list[dict]:
-    """Candidates to hand this recruiter, best first, at most `need`.
+    """Candidates to hand this ONE recruiter, best first, at most `need`. `pool_for` does it for everybody in one statement.
 
     1. Their open application-stage tasks (matched candidates waiting on a stage), oldest first.
     2. Candidates they OWN that are not matched to any order yet (status new or in process), oldest first, those whose
@@ -249,87 +303,289 @@ def _pool(db, uid: str, need: int, today: date) -> list[dict]:
     A candidate with an unfinished item is never picked again (it carries over instead), and nobody is picked twice
     on the same day (finishing an item does not hand the same candidate back that day).
     """
-    busy = or_(
-        exists().where(DailyWorkItem.candidate_id == Candidate.id, DailyWorkItem.status == "open"),
-        exists().where(DailyWorkItem.candidate_id == Candidate.id, DailyWorkItem.work_date == today,
-                       DailyWorkItem.status != "released"),
-    )
+    busy = _busy(today)
     found: list[dict] = []
     stage_rows = db.execute(select(Task.id, Task.application_id, Task.candidate_id, Task.stage)
         .join(Application, Application.id == Task.application_id)
         .join(Candidate, Candidate.id == Task.candidate_id)
-        .where(Task.owner_id == uid, Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
-               Task.completed_at.is_(None), Task.cancelled_at.is_(None),
-               Application.status == ApplicationStatus.active, ~busy)
+        .where(*_stage_ready(uid, busy))
         .order_by(Task.created_at, Task.id).limit(need)).all()
     found += [{"kind": "stage", "task_id": r[0], "application_id": r[1], "candidate_id": r[2], "stage": r[3]} for r in stage_rows]
     if len(found) < need:
-        matched = exists().where(Application.candidate_id == Candidate.id, Application.status == ApplicationStatus.active)
-        call_rows = db.scalars(select(Candidate.id).where(
-            Candidate.owner_id == uid, Candidate.status.in_([CandidateStatus.new, CandidateStatus.in_process]),
-            ~matched, ~busy,
-        ).order_by(case((_call_done(), 1), else_=0), Candidate.created_at, Candidate.id).limit(need - len(found))).all()
+        call_rows = db.scalars(select(Candidate.id).where(*_call_ready(uid, busy))
+                               .order_by(*_call_order()).limit(need - len(found))).all()
         found += [{"kind": "call", "task_id": None, "application_id": None, "candidate_id": cid, "stage": None} for cid in call_rows]
     return found
 
 
-def ensure_allocations(db, staff_ids: list[str] | None = None, *, now: datetime | None = None, tz=None) -> dict:
-    """Top every working recruiter up to today's goal. Returns {user id: new item count}. Caller commits."""
+def pool_for(db, needs: dict[str, int], today: date) -> dict[str, list[dict]]:
+    """`_pool` for every recruiter in `needs` ({user id: how many}) in ONE statement.
+
+    Each recruiter's best `need` stage tasks come from a LATERAL subquery (the same filters, order and limit as `_pool`, so
+    it stays index-friendly per owner); the owned-candidate picks then fill what the stage tasks left (`need` minus the
+    stage picks). One statement for one recruiter or fifty. Returns {user id: picks, best first}.
+    """
+    needs = {uid: n for uid, n in needs.items() if n > 0}
+    if not needs:
+        return {}
+    busy = _busy(today)
+    want = values(column("owner_id", String), column("need", Integer), name="want").data(sorted(needs.items()))
+    stage = (select(Task.id.label("task_id"), Task.application_id.label("application_id"), Task.candidate_id.label("candidate_id"),
+                    Task.stage.label("stage"), func.row_number().over(order_by=(Task.created_at, Task.id)).label("ord"))
+             .join(Application, Application.id == Task.application_id).join(Candidate, Candidate.id == Task.candidate_id)
+             .where(*_stage_ready(want.c.owner_id, busy)).order_by(Task.created_at, Task.id).limit(want.c.need).lateral("stage_pick"))
+    stage_rows = (select(want.c.owner_id.label("owner_id"), literal(0, Integer).label("pri"), stage.c.ord.label("ord"),
+                         stage.c.task_id.label("task_id"), stage.c.application_id.label("application_id"),
+                         stage.c.candidate_id.label("candidate_id"), stage.c.stage.label("stage"))
+                  .select_from(want.join(stage, true())).cte("stage_rows"))
+    taken = select(stage_rows.c.owner_id, func.count().label("n")).group_by(stage_rows.c.owner_id).cte("stage_taken")
+    call = (select(Candidate.id.label("candidate_id"), func.row_number().over(order_by=_call_order()).label("ord"))
+            .where(*_call_ready(want.c.owner_id, busy)).order_by(*_call_order())
+            .limit(func.greatest(want.c.need - func.coalesce(taken.c.n, 0), 0)).lateral("call_pick"))
+    call_rows = (select(want.c.owner_id, literal(1, Integer), call.c.ord, cast(null(), String), cast(null(), String),
+                        call.c.candidate_id, cast(null(), Integer))
+                 .select_from(want.outerjoin(taken, taken.c.owner_id == want.c.owner_id).join(call, true())))
+    picks: dict[str, list] = defaultdict(list)
+    for owner, pri, ord_, task_id, application_id, candidate_id, stage_no in db.execute(select(stage_rows).union_all(call_rows)).all():
+        picks[owner].append((pri, ord_, {"kind": "stage" if pri == 0 else "call", "task_id": task_id,
+                                         "application_id": application_id, "candidate_id": candidate_id, "stage": stage_no}))
+    return {owner: [pick for _p, _o, pick in sorted(found, key=lambda f: (f[0], f[1]))] for owner, found in picks.items()}
+
+
+def pool_waiting(db, uids: list[str], today: date) -> set[str]:
+    """Which of these recruiters have at least one candidate to hand out right now (one statement, no ordering).
+
+    Lets a caller skip the lock-and-allocate path for a short-handed recruiter whose pool is empty, without caching
+    anything: the answer is read in the same round trip as everything else.
+    """
+    if not uids:
+        return set()
+    busy = _busy(today)
+    stage = exists(select(Task.id).join(Application, Application.id == Task.application_id)
+                   .join(Candidate, Candidate.id == Task.candidate_id).where(*_stage_ready(User.id, busy)))
+    call = exists(select(Candidate.id).where(*_call_ready(User.id, busy)))
+    return set(db.scalars(select(User.id).where(User.id.in_(uids), or_(stage, call))))
+
+
+# ------------------------------------------------------------------------------------------------ one-statement reads
+
+# Everything a request needs about the people it covers, in ONE statement: scalar sub-selects returning JSON. Each part
+# is optional. `:ids` are the people, `:day` the agency day, `:week` its Monday, `:start`/`:end` the day's UTC bounds.
+_STATE_PARTS = {
+    "goals": """(SELECT COALESCE(json_agg(json_build_object('u', g.user_id, 'm', g.metric, 't', g.target, 'mt', g.morning_target)), '[]'::json)
+        FROM workflow_daily_goals g WHERE g.user_id IS NULL OR g.user_id = ANY(:ids)) AS goals""",
+    "attendance": """(SELECT COALESCE(json_agg(json_build_object('user_id', p.user_id, 'shift', p.shift)), '[]'::json)
+        FROM staff_attendance_duty_plans p WHERE p.user_id = ANY(:ids) AND p.attendance_date = :day) AS plans,
+      (SELECT COALESCE(json_agg(json_build_object('user_id', t.user_id, 'shift', t.shift) ORDER BY t.effective_from DESC), '[]'::json)
+        FROM staff_attendance_work_timings t WHERE t.user_id = ANY(:ids) AND t.effective_from <= :day) AS timings,
+      (SELECT COALESCE(json_agg(json_build_object('user_id', m.user_id, 'status', m.status)), '[]'::json)
+        FROM staff_attendance_calendar m WHERE m.user_id = ANY(:ids) AND m.attendance_date = :day) AS marks,
+      (SELECT COALESCE(json_agg(json_build_object('user_id', w.user_id, 'day', w.day)), '[]'::json)
+        FROM staff_attendance_weekly_off w WHERE w.user_id = ANY(:ids) AND w.week_start = :week) AS weekly""",
+    "owned": """(SELECT COALESCE(json_object_agg(o.owner_id, o.n), '{}'::json) FROM (
+        SELECT owner_id, count(*) AS n FROM crm_candidates WHERE owner_id = ANY(:ids) AND status IN ('new', 'in_process')
+        GROUP BY owner_id) o) AS owned""",
+    "have": """(SELECT COALESCE(json_object_agg(h.owner_id, h.n), '{}'::json) FROM (
+        SELECT owner_id, count(*) AS n FROM workflow_daily_work_items
+        WHERE owner_id = ANY(:ids) AND work_date = :day AND status <> 'released' GROUP BY owner_id) h) AS have""",
+    "progress": """(SELECT COALESCE(json_agg(json_build_object('o', d.owner_id, 's', d.session, 'n', d.n)), '[]'::json) FROM (
+        SELECT owner_id, session, count(*) AS n FROM workflow_daily_work_items
+        WHERE owner_id = ANY(:ids) AND status = 'completed' AND completed_at >= :start AND completed_at < :end
+        GROUP BY owner_id, session) d) AS done,
+      (SELECT COALESCE(json_agg(json_build_object('o', s.owner_id, 'moves', s.moves, 'fwd', s.fwd)), '[]'::json) FROM (
+        SELECT owner_id, count(*) FILTER (WHERE outcome IS DISTINCT FROM 'Unfit: reapplying') AS moves,
+               count(*) FILTER (WHERE stage = 2 AND outcome = 'Forwarded') AS fwd
+        FROM crm_application_stages WHERE owner_id = ANY(:ids) AND completed_at >= :start AND completed_at < :end
+          AND reopened_reason IS NULL GROUP BY owner_id) s) AS stages,
+      (SELECT COALESCE(json_agg(json_build_object('id', r.id, 'o', r.user_id, 'm', r.metric, 't', r.target, 'mt', r.morning_target,
+                                                  'a', r.actual, 'ma', r.morning_actual)), '[]'::json)
+        FROM workflow_daily_goal_progress r WHERE r.user_id = ANY(:ids) AND r.goal_date = :day) AS snapshot""",
+}
+STATE_PARTS = tuple(_STATE_PARTS)
+
+
+def read_state(db, ids: list[str], day: date, *, tz=None, parts: tuple[str, ...] = STATE_PARTS) -> SimpleNamespace:
+    """The `parts` asked for, about these people on this day, in a single statement.
+
+    goals (effective goals per person plus "__agency__"), attendance (the four row lists `compute_shifts` takes), owned
+    (new / in-process candidates owned), have (today's non-released items) and progress (candidates done per session,
+    stage counts and the stored snapshot rows). Parts that were not asked for are None.
+    """
+    start, end = day_bounds(day, tz)
+    statement = text("SELECT " + ", ".join(_STATE_PARTS[part] for part in parts)).bindparams(bindparam("ids", type_=ARRAY(String)))
+    row = db.execute(statement, {"ids": list(ids), "day": day, "week": day - timedelta(days=day.weekday()), "start": start, "end": end}).one()._mapping
+    state = SimpleNamespace(goals=None, attendance=None, owned=None, have=None, done=None, stages=None, snapshot=None)
+    if "goals" in parts:
+        state.goals = goals_from_rows([(r["u"], r["m"], r["t"], r["mt"]) for r in row["goals"]], list(ids) + ["__agency__"])
+    if "attendance" in parts:
+        state.attendance = tuple([SimpleNamespace(**r) for r in row[name]] for name in ("plans", "timings", "marks", "weekly"))
+    if "owned" in parts:
+        state.owned = {uid: int(n) for uid, n in row["owned"].items()}
+    if "have" in parts:
+        state.have = {uid: int(n) for uid, n in row["have"].items()}
+    if "progress" in parts:
+        state.done, state.stages, state.snapshot = row["done"], row["stages"], row["snapshot"]
+    return state
+
+
+@lru_cache(maxsize=8)
+def _autocommit(engine):
+    return engine.execution_options(isolation_level="AUTOCOMMIT")
+
+
+def read_together(db, *reads):
+    """Run independent read-only callables side by side, each on its own autocommit connection: one round trip for all.
+
+    Autocommit matters at a distance: psycopg sends BEGIN as a message of its own before a transaction's first statement
+    and the pool rolls back when the connection comes back, so a one-statement read in a transaction costs three round
+    trips instead of one. The reads see only committed data, so use them for data the caller's own uncommitted writes
+    cannot change. Results come back in order; the first failure is raised once every read has finished.
+    """
+    _, results = run_beside(db, None, *reads)
+    return results
+
+
+def run_beside(db, main, *reads):
+    """Run `main(db)` on the caller's connection while the read-only `reads` run on autocommit connections of their own.
+
+    See `read_together`. `main` may be None. Returns (main's result, [each read's result]). If `main` wrote, the reads
+    did not see it: re-read on `db` what it could have changed.
+    """
+    try:
+        engine = _autocommit(db.get_bind())
+    except Exception:  # a stand-in session, or one with no bind: run in line
+        engine = None
+    if engine is None:
+        return (main(db) if main else None), [read(db) for read in reads]
+
+    def run(read):
+        with _SLOTS, Session(engine, autoflush=False, expire_on_commit=False) as session:
+            return read(session)
+
+    if not reads:
+        return (main(db) if main else None), []
+    if len(reads) == 1 and main is None:  # nothing to overlap with: no thread needed
+        return None, [run(reads[0])]
+    with ThreadPoolExecutor(max_workers=len(reads)) as pool:
+        futures = [pool.submit(copy_context().run, run, read) for read in reads]
+        try:
+            result = main(db) if main else None
+        finally:
+            outcomes = []
+            for future in futures:
+                try:
+                    outcomes.append(future.result())
+                except BaseException as exc:  # surfaced below, after every thread has finished
+                    outcomes.append(exc)
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+    return result, outcomes
+
+
+# ------------------------------------------------------------------------------------------------ allocation
+
+def _lock_owners(db, uids: list[str]) -> None:
+    """One recruiter's top-up at a time, so two requests cannot hand out the same slot or candidate.
+
+    All the locks are taken in ONE statement, in sorted order, so two requests that overlap on several recruiters cannot
+    deadlock. They are transaction-level: released by the commit/rollback that ends the allocation.
+    """
+    keys = sorted(f"daily-work:{uid}" for uid in uids)
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(s.k, 0)) FROM "
+                    "(SELECT k FROM unnest(CAST(:keys AS text[])) AS k ORDER BY k OFFSET 0) s"), {"keys": keys})
+
+
+def _used_slots(db, uids: list[str], today: date) -> dict[str, set[int]]:
+    return {owner: set(slots) for owner, slots in db.execute(select(DailyWorkItem.owner_id, func.array_agg(DailyWorkItem.slot_no)).where(
+        DailyWorkItem.owner_id.in_(uids), DailyWorkItem.work_date == today, DailyWorkItem.status != "released",
+    ).group_by(DailyWorkItem.owner_id)).all()}
+
+
+def ensure_allocations(db, staff_ids: list[str] | None = None, *, now: datetime | None = None, tz=None,
+                       people: list[str] | None = None, goals: dict | None = None, attendance: tuple | None = None,
+                       have: dict[str, int] | None = None, reconciled: bool = False, pool_hint: set[str] | None = None) -> dict:
+    """Top every working recruiter up to today's goal. Returns {user id: new item count}. Caller commits.
+
+    Set-based: the recruiters who are short are locked in one statement, their free slots and candidate picks are
+    read in one statement each, and all the new items go in with one INSERT, however many recruiters there are.
+
+    A caller that has already read the working recruiters (`people`, sorted by id), their effective `goals` and
+    their `attendance` (the result of `shifts_and_days_off`, which may cover more people) passes them in, so the
+    same reads are not repeated inside this transaction. `have` (today's item count per person), `reconciled`
+    (the caller ran `reconcile`) and `pool_hint` (the people `pool_waiting` found something for) are valid only when
+    the caller has not written to the items since it read them.
+    """
     now = now or datetime.now(timezone.utc)
     today = agency_today(now, tz)
-    reconcile(db, now=now, tz=tz)
-    query = select(User.id).where(User.active.is_(True), User.role == Role.staff, User.on_leave.is_(False))
-    if staff_ids is not None:
-        query = query.where(User.id.in_(staff_ids))
-    people = list(db.scalars(query.order_by(User.id)))
+    if not reconciled:
+        reconcile(db, now=now, tz=tz)
+    if people is None:
+        query = select(User.id).where(User.active.is_(True), User.role == Role.staff, User.on_leave.is_(False))
+        if staff_ids is not None:
+            query = query.where(User.id.in_(staff_ids))
+        people = list(db.scalars(query.order_by(User.id)))
     if not people:
         return {}
-    goals = load_goals(db, people)
-    shifts, off = shifts_and_days_off(db, people, today)
-    have = dict(db.execute(select(DailyWorkItem.owner_id, func.count()).where(
-        DailyWorkItem.owner_id.in_(people), DailyWorkItem.work_date == today, DailyWorkItem.status != "released",
-    ).group_by(DailyWorkItem.owner_id)).all())
+    missing = tuple(part for part, absent in (("goals", goals is None), ("attendance", attendance is None), ("have", have is None)) if absent)
+    if missing:
+        state = read_state(db, people, today, tz=tz, parts=missing)
+        goals = state.goals if goals is None else goals
+        attendance = compute_shifts(people, today, *state.attendance) if attendance is None else attendance
+        have = state.have if have is None else have
+    shifts, off = attendance
+    todo = [uid for uid in people if uid not in off and have.get(uid, 0) < quota_for(goals[uid])[0]]
+    if pool_hint is not None:
+        todo = [uid for uid in todo if uid in pool_hint]
     created: dict[str, int] = {}
-    for uid in people:
-        quota, morning = quota_for(goals[uid])
-        if uid in off or have.get(uid, 0) >= quota:
-            continue
-        # One recruiter's top-up at a time, so two requests cannot hand out the same slot or candidate.
-        db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"daily-work:{uid}"})
-        used = set(db.scalars(select(DailyWorkItem.slot_no).where(
-            DailyWorkItem.owner_id == uid, DailyWorkItem.work_date == today, DailyWorkItem.status != "released")))
-        need = quota - len(used)
-        if need <= 0:
-            continue
-        pool = _pool(db, uid, need, today)
-        if not pool:
-            continue
-        start, pause = shifts[uid]
-        free = [s for s in slot_plan(today, start, pause, max(quota, max(used, default=0)), morning, tz) if s.no not in used]
-        # An allocation made after a slot's deadline still gives the recruiter an hour per candidate.
-        previous = None
-        for slot, pick in zip(free, pool):
-            due = slot.due_at
-            if previous is not None or due <= now:
-                due = max(due, (previous or now) + timedelta(hours=1))
-                previous = due
-            try:
-                with db.begin_nested():
-                    db.execute(insert(DailyWorkItem).values(
-                        owner_id=uid, work_date=today, kind=pick["kind"], task_id=pick["task_id"],
-                        application_id=pick["application_id"], candidate_id=pick["candidate_id"], stage=pick["stage"],
-                        slot_no=slot.no, session=slot.session, due_at=due, allocated_at=now))
-                created[uid] = created.get(uid, 0) + 1
-            except IntegrityError:
-                pass  # another request just took this candidate; the next slot will pick the next one
+    for attempt in range(3):  # a later pass only when another request took a candidate between our read and our insert
+        if not todo:
+            break
+        if attempt == 0:
+            _lock_owners(db, todo)
+        used = _used_slots(db, todo, today)
+        pools = pool_for(db, {uid: quota_for(goals[uid])[0] - len(used.get(uid, ())) for uid in todo}, today)
+        batch = []
+        for uid in todo:
+            quota, morning = quota_for(goals[uid])
+            taken = used.get(uid, set())
+            start, pause = shifts[uid]
+            free = [s for s in slot_plan(today, start, pause, max(quota, max(taken, default=0)), morning, tz) if s.no not in taken]
+            # An allocation made after a slot's deadline still gives the recruiter an hour per candidate.
+            previous = None
+            for slot, pick in zip(free, pools.get(uid, [])):
+                due = slot.due_at
+                if previous is not None or due <= now:
+                    due = max(due, (previous or now) + timedelta(hours=1))
+                    previous = due
+                batch.append(dict(owner_id=uid, work_date=today, kind=pick["kind"], task_id=pick["task_id"],
+                                  application_id=pick["application_id"], candidate_id=pick["candidate_id"], stage=pick["stage"],
+                                  slot_no=slot.no, session=slot.session, due_at=due, allocated_at=now))
+        if not batch:
+            break
+        landed = db.execute(insert(DailyWorkItem).values(batch).on_conflict_do_nothing().returning(DailyWorkItem.owner_id)).scalars().all()
+        wanted: dict[str, int] = defaultdict(int)
+        for item in batch:
+            wanted[item["owner_id"]] += 1
+        for owner in landed:
+            created[owner] = created.get(owner, 0) + 1
+            wanted[owner] -= 1
+        todo = [uid for uid in todo if wanted.get(uid, 0) > 0]  # a conflict: another request took that candidate; pick the next
     return created
 
 
-def work_shortfalls(db, goals_by_user: dict, rows_by_owner: dict[str, list[dict]], today: str, off: set[str], people: list[str]) -> dict[str, dict | None]:
-    """Who has fewer candidates today than their goal, and why (so the admin can assign candidates)."""
-    owned = dict(db.execute(select(Candidate.owner_id, func.count()).where(
+def owned_candidate_counts(db, people: list[str]) -> dict[str, int]:
+    """Candidates each person owns that are still being worked (new or in process)."""
+    return dict(db.execute(select(Candidate.owner_id, func.count()).where(
         Candidate.owner_id.in_(people or [""]), Candidate.status.in_([CandidateStatus.new, CandidateStatus.in_process]),
     ).group_by(Candidate.owner_id)).all())
+
+
+def work_shortfalls(db, goals_by_user: dict, rows_by_owner: dict[str, list[dict]], today: str, off: set[str], people: list[str],
+                    owned: dict[str, int] | None = None) -> dict[str, dict | None]:
+    """Who has fewer candidates today than their goal, and why (so the admin can assign candidates)."""
+    if owned is None:
+        owned = owned_candidate_counts(db, people)
     result: dict[str, dict | None] = {}
     for uid in people:
         target = goals_by_user[uid]["candidates"]["target"]
@@ -355,16 +611,63 @@ def _remarks(db, task_ids: list[str]) -> dict[str, dict]:
     if not task_ids:
         return {}
     result: dict[str, dict] = {}
-    names = dict(db.execute(select(User.id, User.name)).all())
-    for body, author, at, task_id in db.execute(select(Remark.body, Remark.author_id, Remark.created_at, Remark.task_id)
+    # The author's name rides along in the same statement (no separate read of the whole user table).
+    for body, name, at, task_id in db.execute(select(Remark.body, User.name, Remark.created_at, Remark.task_id)
+            .outerjoin(User, User.id == Remark.author_id)
             .where(Remark.task_id.in_(task_ids)).order_by(Remark.created_at.desc(), Remark.id)):
-        entry = result.setdefault(task_id, {"body": body, "at": at, "by": names.get(author, "Unknown"), "count": 0})
+        entry = result.setdefault(task_id, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
         entry["count"] += 1
     return result
 
 
-def load_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None) -> list[dict]:
-    """Today's list for these recruiters: today's quota, everything postponed and backlog cleared today."""
+def _first_text(values) -> str | None:
+    """First non-blank entry of a stored list (job preference, skills) as trimmed text."""
+    for value in values or []:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _location_hint(cand) -> str | None:
+    """Where the candidate lives now, as typed on the form (city first, else the end of the address)."""
+    city = (cand.current_city or "").strip()
+    if city:
+        return city
+    address = (cand.current_address or "").strip()
+    return address[-120:] or None
+
+
+def placement_fields(order, company, client, designation, cand) -> dict:
+    """Client, country and position for one row.
+
+    A candidate matched to an order shows the order's values. One that is not matched yet has no order, so the row falls
+    back on what the candidate's own form says: the preferred country, then the first preferred job (else first skill).
+    `...Source` names where each value came from, `...IsPreferred` is true for the candidate's own wishes, and
+    `locationHint` is the current city/address so the screen can still recognise a country in it. Client has no fallback.
+    """
+    country, country_source = None, None
+    if order is not None and (order.country or company.country):
+        country, country_source = order.country or company.country, "order"
+    elif (cand.country_preference or "").strip():
+        country, country_source = cand.country_preference.strip(), "preference"
+    position, position_source = None, None
+    if designation is not None:
+        position, position_source = designation.title, "order"
+    elif _first_text(cand.designations):
+        position, position_source = _first_text(cand.designations), "preference"
+    elif _first_text(cand.skills):
+        position, position_source = _first_text(cand.skills), "skill"
+    return {
+        "client": company.name if company else None, "clientContact": client.name if client else None,
+        "country": country, "countrySource": country_source, "countryIsPreferred": country_source == "preference",
+        "locationHint": None if country else _location_hint(cand),
+        "position": position, "positionSource": position_source, "positionIsPreferred": position_source in ("preference", "skill"),
+    }
+
+
+def fetch_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None) -> list:
+    """The list's rows (item, stage task, candidate, finished-at) for these recruiters: today's quota, everything postponed
+    and backlog cleared today. One statement; `load_rows` turns them into the screen's dicts."""
     now = now or datetime.now(timezone.utc)
     today = agency_today(now, tz)
     day_start, _ = day_bounds(today, tz)
@@ -377,7 +680,7 @@ def load_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None)
                  Candidate.status.notin_([CandidateStatus.deployed, CandidateStatus.not_interested]))))
     done_at = case((DailyWorkItem.kind == "stage", Task.completed_at),
                    else_=func.coalesce(case((and_(_call_done(), Candidate.call_recorded_at >= DailyWorkItem.allocated_at), Candidate.call_recorded_at), else_=None), DailyWorkItem.completed_at))
-    rows = db.execute(
+    return db.execute(
         select(DailyWorkItem, Task, Candidate, done_at)
         .join(Candidate, Candidate.id == DailyWorkItem.candidate_id)
         .outerjoin(Task, Task.id == DailyWorkItem.task_id)
@@ -385,21 +688,45 @@ def load_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None)
                or_(DailyWorkItem.work_date == today, done_at.is_(None), done_at >= day_start))
         .order_by(DailyWorkItem.work_date, DailyWorkItem.slot_no, DailyWorkItem.id).limit(MAX_ROWS)
     ).all()
+
+
+def load_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None, parallel: bool = False, fetched: list | None = None) -> list[dict]:
+    """Today's list for these recruiters: today's quota, everything postponed and backlog cleared today.
+
+    `parallel=True` runs the three lookups that depend only on the rows (placements, active placements, open call
+    tasks) side by side; only for a caller whose changes are already committed (they run on their own connections).
+    `fetched` is the result of `fetch_rows` when the caller already ran it (and nothing has changed since)."""
+    now = now or datetime.now(timezone.utc)
+    today = agency_today(now, tz)
+    if not owner_ids:
+        return []
+    rows = fetch_rows(db, owner_ids, now=now, tz=tz) if fetched is None else fetched
     # The placement behind each row: its own application, or (for an owned candidate matched since) the active one.
     app_ids = [item.application_id for item, *_ in rows if item.application_id]
     loose = [cand.id for item, _t, cand, _d in rows if not item.application_id]
     app_query = (select(Application, Order, Company, Client, Designation)
                  .join(Order, Order.id == Application.order_id).join(Company, Company.id == Order.company_id)
                  .join(Client, Client.id == Company.client_id).join(Designation, Designation.id == Order.designation_id))
-    placements = {a.id: (a, o, co, cl, d) for a, o, co, cl, d in db.execute(app_query.where(Application.id.in_(app_ids or [""]))).all()}
-    active = {a.candidate_id: (a, o, co, cl, d) for a, o, co, cl, d in db.execute(
-        app_query.where(Application.candidate_id.in_(loose or [""]), Application.status == ApplicationStatus.active)).all()}
-    # Remarks live on tasks: the stage task, or for a call item the candidate's open initial-call task, if any.
-    call_tasks = dict(db.execute(select(Task.candidate_id, Task.id).where(
-        Task.candidate_id.in_(loose or [""]), Task.kind == TaskKind.initial_call,
-        Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at.desc())).all())
+    lookups = (
+        lambda s: s.execute(app_query.where(Application.id.in_(app_ids or [""]))).all(),
+        lambda s: s.execute(app_query.where(Application.candidate_id.in_(loose or [""]), Application.status == ApplicationStatus.active)).all(),
+        # Remarks live on tasks: the stage task, or for a call item the candidate's open initial-call task, if any.
+        lambda s: s.execute(select(Task.candidate_id, Task.id).where(
+            Task.candidate_id.in_(loose or [""]), Task.kind == TaskKind.initial_call,
+            Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at.desc())).all(),
+        # The stage items' remarks need only the rows too, so they ride in the same round; the (rare) call items' open
+        # initial-call tasks are known only after it and are fetched afterwards.
+        lambda s: _remarks(s, stage_tasks),
+    )
+    stage_tasks = sorted({item.task_id for item, *_ in rows if item.task_id})
+    placed, activated, call_task_rows, remarks = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
+    placements = {a.id: (a, o, co, cl, d) for a, o, co, cl, d in placed}
+    active = {a.candidate_id: (a, o, co, cl, d) for a, o, co, cl, d in activated}
+    call_tasks = dict(call_task_rows)
     remark_tasks = {item.id: (item.task_id or call_tasks.get(cand.id)) for item, _t, cand, _d in rows}
-    remarks = _remarks(db, [t for t in remark_tasks.values() if t])
+    late = sorted({t for t in remark_tasks.values() if t and t not in set(stage_tasks)})
+    if late:
+        remarks = {**remarks, **_remarks(db, late)}
     out = []
     for item, task, cand, finished in rows:
         placement = placements.get(item.application_id) if item.application_id else active.get(cand.id)
@@ -408,7 +735,6 @@ def load_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None)
         postponed = not done and item.work_date < today
         remark_task = remark_tasks.get(item.id)
         remark = remarks.get(remark_task) if remark_task else None
-        preferred = (cand.designations or [None])[0]
         out.append({
             "id": item.id, "kind": item.kind, "taskId": remark_task, "applicationId": app.id if app else None,
             "candidateId": cand.id, "ownerId": item.owner_id, "workDate": item.work_date.isoformat(), "slotNo": item.slot_no,
@@ -418,10 +744,8 @@ def load_rows(db, owner_ids: list[str], *, now: datetime | None = None, tz=None)
             "allocatedAt": item.allocated_at, "startedAt": item.started_at,
             "overdueAt": item.overdue_at or (item.due_at if (not done and item.due_at < now) or (done and finished > item.due_at) else None),
             "postponed": postponed, "daysLate": (today - item.work_date).days if postponed else 0,
-            "client": company.name if company else None, "clientContact": client.name if client else None,
-            "country": (order.country or company.country) if order else None,
+            **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref,
-            "position": designation.title if designation else preferred,
             "orderRef": order.ref if order else None,
             "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
                          "detail": cand.source_detail if cand.source == Source.referral else None},
@@ -468,28 +792,25 @@ def checkpoints(rows: list[dict], now: datetime, today: str) -> dict:
     return {"points": points, "expectedByNow": should, "doneToday": done, "behindBy": max(0, should - done)}
 
 
-def goal_progress(db, user_ids: list[str], today: date, *, tz=None, persist: bool = False) -> dict[str, dict]:
+def goal_progress(db, user_ids: list[str], today: date, *, tz=None, persist: bool = False, goals: dict | None = None,
+                  state: SimpleNamespace | None = None, stats: dict | None = None) -> dict[str, dict]:
     """Per person: each goal's target and today's achieved count, computed from the real records.
 
-    With `persist`, the per-day snapshot rows are written when (and only when) they differ.
+    With `persist`, the per-day snapshot rows are written when (and only when) they differ, in at most two statements
+    (one INSERT for the missing rows, one UPDATE for the changed ones). `state` is a `read_state` result with the
+    "progress" part (and "goals", unless `goals` is given) that the caller read in an earlier round trip and that is still
+    valid; otherwise it is read here, in one statement. `stats`, if given, receives {"writes": rows written}.
     """
     if not user_ids:
         return {}
-    start, end = day_bounds(today, tz)
-    goals = load_goals(db, user_ids)
-    done_rows = db.execute(select(DailyWorkItem.owner_id, DailyWorkItem.session, func.count()).where(
-        DailyWorkItem.owner_id.in_(user_ids), DailyWorkItem.status == "completed",
-        DailyWorkItem.completed_at >= start, DailyWorkItem.completed_at < end,
-    ).group_by(DailyWorkItem.owner_id, DailyWorkItem.session)).all()
+    if state is None or state.done is None or (goals is None and state.goals is None):
+        state = read_state(db, user_ids, today, tz=tz, parts=("progress",) if goals is not None else ("goals", "progress"))
+    goals = goals if goals is not None else state.goals
     cand = defaultdict(lambda: {"morning": 0, "evening": 0})
-    for uid, session, n in done_rows:
-        cand[uid][session] = n
-    stage_filter = [ApplicationStage.owner_id.in_(user_ids), ApplicationStage.completed_at >= start,
-                    ApplicationStage.completed_at < end, ApplicationStage.reopened_reason.is_(None)]
-    moves = dict(db.execute(select(ApplicationStage.owner_id, func.count()).where(
-        *stage_filter, ApplicationStage.outcome.is_distinct_from("Unfit: reapplying")).group_by(ApplicationStage.owner_id)).all())
-    forwarded = dict(db.execute(select(ApplicationStage.owner_id, func.count()).where(
-        *stage_filter, ApplicationStage.stage == 2, ApplicationStage.outcome == "Forwarded").group_by(ApplicationStage.owner_id)).all())
+    for row in state.done:
+        cand[row["o"]][row["s"]] = row["n"]
+    moves = {row["o"]: row["moves"] for row in state.stages}
+    forwarded = {row["o"]: row["fwd"] for row in state.stages}
     result = {}
     for uid in user_ids:
         target, morning = goals[uid]["candidates"]
@@ -501,14 +822,20 @@ def goal_progress(db, user_ids: list[str], today: date, *, tz=None, persist: boo
             "stageMoves": {"target": goals[uid]["stage_moves"], "actual": moves.get(uid, 0)},
         }
     if persist:
-        _save_progress(db, result, today)
+        writes = save_progress(db, result, today, state.snapshot)
+        if stats is not None:
+            stats["writes"] = writes
     return result
 
 
-def _save_progress(db, progress: dict[str, dict], day: date) -> None:
-    ids = list(progress)
-    existing = {(r.user_id, r.metric): r for r in db.scalars(select(DailyGoalProgress).where(
-        DailyGoalProgress.user_id.in_(ids), DailyGoalProgress.goal_date == day))}
+def save_progress(db, progress: dict[str, dict], day: date, existing_rows: list[dict] | None = None) -> int:
+    """Write the day's snapshot rows that are missing or differ; returns how many rows were written.
+
+    `existing_rows` are the stored rows (as `read_state` returns them); without them they are read here."""
+    if existing_rows is None:
+        existing_rows = read_state(db, list(progress), day, parts=("progress",)).snapshot
+    existing = {(r["o"], r["m"]): r for r in existing_rows}
+    inserts, updates = [], []
     for uid, goals in progress.items():
         for metric, key in (("candidates", "candidates"), ("forwarded_to_client", "forwardedToClient"), ("stage_moves", "stageMoves")):
             g = goals[key]
@@ -516,11 +843,18 @@ def _save_progress(db, progress: dict[str, dict], day: date) -> None:
                     g.get("morningDone") if metric == "candidates" else None)
             row = existing.get((uid, metric))
             if row is None:
-                db.execute(insert(DailyGoalProgress).values(
-                    user_id=uid, goal_date=day, metric=metric, target=want[0], morning_target=want[1], actual=want[2],
-                    morning_actual=want[3]).on_conflict_do_nothing(constraint="uq_daily_goal_progress"))
-            elif (row.target, row.morning_target, row.actual, row.morning_actual) != want:
-                row.target, row.morning_target, row.actual, row.morning_actual = want
+                inserts.append(dict(user_id=uid, goal_date=day, metric=metric, target=want[0], morning_target=want[1],
+                                    actual=want[2], morning_actual=want[3]))
+            elif (row["t"], row["mt"], row["a"], row["ma"]) != want:
+                updates.append(dict(row_id=row["id"], want_target=want[0], want_morning=want[1], want_actual=want[2], want_morning_actual=want[3]))
+    if inserts:
+        db.execute(insert(DailyGoalProgress).values(inserts).on_conflict_do_nothing(constraint="uq_daily_goal_progress"))
+    if updates:
+        table = DailyGoalProgress.__table__
+        db.execute(update(table).where(table.c.id == bindparam("row_id")).values(
+            target=bindparam("want_target"), morning_target=bindparam("want_morning"), actual=bindparam("want_actual"),
+            morning_actual=bindparam("want_morning_actual")), updates)
+    return len(inserts) + len(updates)
 
 
 def add_goal_totals(parts: list[dict]) -> dict:

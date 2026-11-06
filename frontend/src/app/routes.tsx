@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useStore, type Capability } from '@/shared/state/crm-store'
 import { EmptyState } from '@/shared/ui/display'
 import { Button } from '@/shared/ui/primitives'
 import { PageBoundary, PageLoading } from '@/shared/ui/page-loading'
+import { staffReportRedirect } from '@/features/reports/report-tabs'
 
 import LoginPage from '@/screens/auth/login'
 import NotFoundPage from '@/screens/not-found/not-found'
@@ -16,6 +17,7 @@ const loaders = {
   'jobs/order-detail': () => import('@/screens/jobs/order-detail'),
   'candidates/add-candidate': () => import('@/screens/candidates/add-candidate'),
   'candidates/data-bank': () => import('@/screens/candidates/data-bank'),
+  'leads/leads': () => import('@/screens/leads/leads'),
   'candidates/candidate-profile': () => import('@/screens/candidates/candidate-profile'),
   'tasks/tasks': () => import('@/screens/tasks/tasks'),
   'dashboard/dashboard': () => import('@/screens/dashboard/dashboard'),
@@ -33,6 +35,7 @@ const FIRST_SCREEN: [RegExp, keyof typeof loaders][] = [
   [/^\/orders\/[^/]+\/?$/, 'jobs/order-detail'],
   [/^\/add-candidate\/?$/, 'candidates/add-candidate'],
   [/^\/data-bank\/?$/, 'candidates/data-bank'],
+  [/^\/leads(\/import)?\/?$/, 'leads/leads'],
   [/^\/candidates\/[^/]+\/?$/, 'candidates/candidate-profile'],
   [/^\/tasks\/?$/, 'tasks/tasks'],
 ]
@@ -80,6 +83,7 @@ const JobsPage = lazy(loaders['jobs/jobs'])
 const OrderDetailPage = lazy(loaders['jobs/order-detail'])
 const AddCandidatePage = lazy(loaders['candidates/add-candidate'])
 const DataBankPage = lazy(loaders['candidates/data-bank'])
+const LeadsPage = lazy(loaders['leads/leads'])
 const MappedCandidatesPage = lazy(() => import('@/screens/workflow/mapped-candidates'))
 const CandidateProfilePage = lazy(loaders['candidates/candidate-profile'])
 const ApplicationFormPage = lazy(() => import('@/screens/candidates/application-form'))
@@ -87,7 +91,6 @@ const TasksPage = lazy(loaders['tasks/tasks'])
 const AttendancePage = lazy(() => import('@/screens/attendance/attendance'))
 const TodoPage = lazy(() => import('@/screens/todos/todo'))
 const ReportsPage = lazy(() => import('@/screens/reports/reports'))
-const StaffWeeklyReportPage = lazy(() => import('@/screens/reports/staff-weekly'))
 const UsersPage = lazy(() => import('@/screens/users/users'))
 const StaffDirectoryPage = lazy(() => import('@/screens/staff/staff-directory'))
 const StaffDetailPage = lazy(() => import('@/screens/staff/staff-detail'))
@@ -157,6 +160,8 @@ export default function AppRoutes() {
             <Route path="jobs" element={<JobsPage />} />
             <Route path="orders/:id" element={<OrderDetailPage />} />
             <Route path="add-candidate" element={<AddCandidatePage />} />
+            <Route path="leads" element={<LeadsPage />} />
+            <Route path="leads/import" element={<LeadsPage />} />
             <Route path="data-bank" element={<DataBankPage />} />
             <Route path="mapped" element={<MappedCandidatesPage />} />
             <Route path="candidates/:id" element={<CandidateProfilePage />} />
@@ -174,7 +179,7 @@ export default function AppRoutes() {
               }
             />
             <Route path="reports" element={<ReportsPage />} />
-            <Route path="staff-report" element={<StaffWeeklyReportPage />} />
+            <Route path="staff-report" element={<StaffReportRedirect />} />
             <Route
               path="users"
               element={
@@ -190,4 +195,10 @@ export default function AppRoutes() {
       </Suspense>
     </PageBoundary>
   )
+}
+
+/** The weekly staff report is now the Staff performance tab of Reports; old links and bookmarks land there. */
+function StaffReportRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={staffReportRedirect(search)} replace />
 }

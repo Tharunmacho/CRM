@@ -14,6 +14,8 @@ import { createIngestionRefresh } from '@/shared/api/ingestion-refresh'
 import { agencyDay } from '@/shared/lib/task-time'
 import { EMPTY_SETTINGS } from '@/shared/lib/agency'
 import { indexWorkspace } from './workspace-index'
+import { keepIfSame, reconcile } from './reconcile'
+import { deskUnread } from './desk-unread'
 import { forgetSnapshots, persistSoon, readPersisted, signedInUserHint } from './snapshot-cache'
 import { live, liveInterval } from './live'
 import { matchDoneMessage } from '@/features/candidates/initial-call'
@@ -60,7 +62,8 @@ interface Data {
   notifications: Notification[]
 }
 
-type Bootstrap = Data & { me: User }
+/** `inboxUnread` rides along with the desk (the sidebar badge); older servers omit it and the first pulse supplies it. */
+type Bootstrap = Data & { me: User; inboxUnread?: InboxUnreadCount }
 
 const EMPTY: Data = {
   settings: EMPTY_SETTINGS,
@@ -196,7 +199,7 @@ const NOTIFICATIONS_POLL_MS = 30_000
 const WORKSPACE_TOPICS = ['candidates', 'applications', 'tasks', 'clients', 'companies', 'orders', 'designations', 'users', 'todos', 'settings'] as const
 /** Route-entry revalidation window: short when polling is all we have, longer when the stream keeps the snapshot current. */
 /** Changes arriving within this window are fetched together; kept short because this is the visible latency. */
-const WORKSPACE_LIVE_WINDOW_MS = 120
+const WORKSPACE_LIVE_WINDOW_MS = 200
 const FRESH_MS = 5_000
 const FRESH_WHILE_LIVE_MS = 30_000
 
@@ -216,7 +219,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [hydrated] = useState(remembered)
   const [data, setData] = useState<Data>(() => {
     if (!hydrated) return EMPTY
-    const { me: _who, ...rest } = hydrated.payload
+    const { me: _who, inboxUnread: _unread, ...rest } = hydrated.payload
     return { ...EMPTY, ...rest }
   })
   const [me, setMe] = useState<User | null>(hydrated?.payload.me ?? null)
@@ -226,6 +229,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [publicAgency, setPublicAgency] = useState<StoreValue['publicAgency']>(null)
   const [inboxUnread, setInboxUnread] = useState(0)
   const readInboxUnread = useRef<() => Promise<void>>(() => Promise.resolve())
+  /** The desk response already told us the unread count, so the first /inbox/pulse after load is not needed. */
+  const unreadSeeded = useRef(false)
   const requests = useRef(createLatestRequest<Bootstrap | null>()).current
   const mounted = useRef(false)
   const authVersion = useRef(0)
@@ -266,10 +271,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         },
         (payload) => {
           lastLoadedAt.current = payload ? Date.now() : 0
-          setMe(payload?.me ?? null)
+          setMe((current) => (payload ? keepIfSame(current, payload.me) : null))
           if (payload) {
-            const { me: _who, ...rest } = payload
-            setData({ ...EMPTY, ...rest })
+            const { me: _who, inboxUnread: unread, ...rest } = payload
+            const seeded = deskUnread({ inboxUnread: unread })
+            if (seeded !== null) { unreadSeeded.current = true; setInboxUnread(seeded) }
+            // Unchanged records keep their identity, so a refresh that changed nothing renders nothing.
+            setData((current) => reconcile(current, { ...EMPTY, ...rest }))
             persistSoon('bootstrap', payload.me.id, () => payload)
           } else {
             setData(EMPTY)
@@ -355,7 +363,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // just delivered the current revision, so there is no immediate read: the first one waits a moment.
   useEffect(() => {
     if (!ready || !me || loadError) {
-      if (!me) setInboxUnread(0)
+      if (!me) { setInboxUnread(0); unreadSeeded.current = false }
       return
     }
     const version = authVersion.current
@@ -389,24 +397,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isCurrentSession: () =>
         mounted.current && version === authVersion.current && pendingAuthWrites.current === 0,
     })
-    const read = () => {
-      if (document.visibilityState === 'visible') {
-        // Retain usable data and retry next time if the probe/refresh fails.
-        void observer.check().catch(() => {})
-      }
-    }
+    // Retain usable data and retry next time if the probe/refresh fails. The promise goes back to the timer so a failing
+    // server is asked less often instead of every 20 seconds (the timer backs off and pauses while the tab is hidden).
+    const read = () => (document.visibilityState === 'visible' ? observer.check() : undefined)
+    const readOnce = () => { void read()?.catch(() => {}) }
     readInboxUnread.current = async () => {
       if (document.visibilityState !== 'visible') return
       try { await observer.check() } catch { /* Keep the last known count; the next poll retries. */ }
     }
-    const first = window.setTimeout(read, 1_200)
-    const stopLive = liveInterval(read, PULSE_MS, ['mail', 'whatsapp', 'documents'])
-    document.addEventListener('visibilitychange', read)
+    // The desk response carried the unread count: wait for the first scheduled poll instead of asking 1.2 s after load.
+    const first = unreadSeeded.current ? undefined : window.setTimeout(readOnce, 1_200)
+    const stopLive = liveInterval(read, PULSE_MS, ['mail', 'whatsapp', 'documents'], { onChange: readOnce })
+    document.addEventListener('visibilitychange', readOnce)
     return () => {
       observer.dispose()
-      window.clearTimeout(first)
+      if (first !== undefined) window.clearTimeout(first)
       stopLive()
-      document.removeEventListener('visibilitychange', read)
+      document.removeEventListener('visibilitychange', readOnce)
       readInboxUnread.current = () => Promise.resolve()
     }
   }, [me?.id, ready, loadError, loadWorkspace])
@@ -426,7 +433,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const hasNew = items.some(item => !knownIds.has(item.id))
           setData((current) => {
             const readIds = new Set(current.notifications.filter(item => item.read).map(item => item.id))
-            return { ...current, notifications: items.map(item => ({ ...item, read: item.read || readIds.has(item.id) })) }
+            // Most polls find nothing new: keep the same objects so nothing on screen re-renders.
+            return reconcile(current, { ...current, notifications: items.map(item => ({ ...item, read: item.read || readIds.has(item.id) })) })
           })
           if (hasNew) await loadWorkspace(false, false, true)
         }
@@ -450,11 +458,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!me?.id || !ready) return
     const version = authVersion.current
-    return live.subscribe(WORKSPACE_TOPICS, () => {
+    // At most one live-triggered read runs at a time. Events that arrive while it is in flight (a bulk change, a document
+    // being read page by page) are remembered and answered by ONE follow-up read, instead of each event aborting the read
+    // before it and starting another: against a slow database that loop never delivers a snapshot at all.
+    let running = false
+    let again = false
+    const reload = () => {
       if (version !== authVersion.current || pendingAuthWrites.current > 0) return
+      if (running) { again = true; return }
+      running = true
       lastLoadedAt.current = 0
-      void loadWorkspace(false, true, true).catch(() => {})
-    }, { debounceMs: WORKSPACE_LIVE_WINDOW_MS })
+      void loadWorkspace(false, true, true).catch(() => {}).finally(() => {
+        running = false
+        if (again) { again = false; reload() }
+      })
+    }
+    return live.subscribe(WORKSPACE_TOPICS, reload, { debounceMs: WORKSPACE_LIVE_WINDOW_MS })
   }, [me?.id, ready, loadWorkspace])
 
   const queueAuthWrite = useCallback((write: () => Promise<unknown>) => {

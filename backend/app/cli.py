@@ -145,6 +145,23 @@ def backfill_application_forms(candidate_id: str | None, dry_run: bool) -> int:
     return 0
 
 
+def backfill_lead_matches(dry_run: bool) -> int:
+    """Flag every stored lead whose phone / e-mail is already a Data Bank candidate, and give leads with a follow-up date their to-do.
+
+    One set-based statement each; nothing is overwritten (a lead that is already flagged or linked is left alone). Safe to repeat."""
+    from app.services import lead_followups, lead_matching
+    with SessionLocal() as db:
+        flagged = lead_matching.backfill(db)
+        todos = lead_followups.sync_all(db)
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+    print(f"{flagged} leads flagged as already in the Data Bank; follow-up to-dos: {todos['created']} created, {todos['moved']} updated, "
+          f"{todos['removed']} removed{' (dry run, nothing saved)' if dry_run else ''}.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -163,7 +180,12 @@ def main() -> int:
     backfill.add_argument("--candidate", help="Only this candidate id")
     backfill.add_argument("--dry-run", action="store_true", help="Report what would be filled; save nothing")
 
+    leads = sub.add_parser("backfill-lead-matches", help="Flag existing leads that are already candidates and create the follow-up to-dos of existing leads")
+    leads.add_argument("--dry-run", action="store_true", help="Report the counts; save nothing")
+
     args = parser.parse_args()
+    if args.command == "backfill-lead-matches":
+        return backfill_lead_matches(args.dry_run)
     if args.command == "create-user":
         return create_user(args.email, args.name, Role(args.role))
     if args.command == "set-password":

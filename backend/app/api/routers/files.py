@@ -29,7 +29,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate
-from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, User
+from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, Lead, User
 from app.services import document_storage
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -50,7 +50,7 @@ ALLOWED = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
-ENTITIES = {"client": Client, "company": Company, "candidate": Candidate, "application": Application}
+ENTITIES = {"client": Client, "company": Company, "candidate": Candidate, "application": Application, "lead": Lead}
 
 CONTENT_TYPES = {
     ".pdf": "application/pdf",
@@ -151,6 +151,12 @@ def upload(
             # Only the recruiter the candidate is assigned to (or a manager / admin) adds or replaces its documents.
             # Having entered the candidate no longer counts: an admin may have given it to someone else since.
             ensure_can_work_candidate(record, user, db)
+        if entity_type == "lead":
+            # A lead's resume: only the assigned staff member (once the daily tasks are done), a manager or an admin.
+            from app.services import lead_sheet
+            if slot != "resume":
+                raise HTTPException(422, "Only a resume can be added to a lead.")
+            lead_sheet.ensure_can_work_lead(db, record, user)
         if entity_type == "candidate" and slot == "source_bundle":
             raise HTTPException(422, "The original upload is kept as it was received and cannot be replaced by hand")
         previous = db.scalar(
@@ -187,7 +193,9 @@ def upload(
             meta={"attachment_id": row.id, "slot": slot, "version": row.version},
             at=row.uploaded_at,
         ))
-        if entity_type == "candidate" and slot in ("resume", "passport"):
+        if entity_type == "lead":
+            lead_sheet.note_resume_uploaded(db, record, user, row)
+        if entity_type == "candidate" and slot in ("resume", "passport", "aadhaar"):
             # A resume or passport stored for a candidate is read, and what it says fills the application form
             # (empty fields only; see services/form_extraction.py). The extraction worker picks the job up.
             from app.services.application_form import queue_reading

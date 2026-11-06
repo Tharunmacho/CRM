@@ -11,6 +11,7 @@ import { refreshMasterData } from '@/features/master-data/components/record-audi
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { Flag, FormSection } from '@/features/clients/components/parts'
 import { frequentValues } from '@/shared/lib/suggestions'
+import { WEBSITE_MAX, checkWebsite } from '@/shared/lib/website'
 
 /** Country names already saved on clients, companies and orders, most used first. Any other name can still be typed. */
 export function useCountryOptions() {
@@ -26,7 +27,7 @@ export function CountryInput({ value, onChange, options }: { value: string; onCh
   return (
     <div className="client-form-flag">
       <Flag country={value} />
-      <SuggestInput wrapperClassName="min-w-0 flex-1" maxLength={100} value={value} onChange={onChange} options={options} aria-label="Country" />
+      <SuggestInput wrapperClassName="min-w-0 flex-1" maxLength={100} value={value} onChange={onChange} options={options} aria-label="Country" placeholder="Start typing a country" />
     </div>
   )
 }
@@ -44,12 +45,12 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
   // Industries already saved on companies, most used first. Any other name can still be typed.
   const industries = useMemo(() => frequentValues(store.companies.map((c) => c.industry)), [store.companies])
   const [form, setForm] = useState({
-    name: client?.name ?? '', email: client?.email ?? '', phone: client?.phone ?? '',
+    name: client?.name ?? '', designation: client?.designation ?? '', email: client?.email ?? '', phone: client?.phone ?? '',
     whatsapp: client?.whatsapp ?? '', country: client?.country ?? '', city: client?.city ?? '',
     notes: client?.notes ?? '', status: client?.status ?? 'active',
   })
   // Company-only fields. The contact ones are optional: left blank, the contact person's details apply.
-  const [employer, setEmployer] = useState({ name: '', industry: '', address: '', contactPerson: '', contactEmail: '', phone: '', whatsapp: '' })
+  const [employer, setEmployer] = useState({ name: '', industry: '', website: '', address: '', contactPerson: '', contactEmail: '', phone: '', whatsapp: '' })
   const [agreement, setAgreement] = useState<File | null>(null)
   // Set once the records exist, so a failed agreement upload is retried without a duplicate.
   const [saved, setSaved] = useState<{ companyId: string } | null>(null)
@@ -62,6 +63,8 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
 
   const save = async () => {
     if (saving) return
+    const web = creating ? checkWebsite(employer.website) : { value: '', error: '' }
+    if (web.error) { setError('Website: ' + web.error); return }
     setSaving(true); setError('')
     let companyId = saved?.companyId
     try {
@@ -72,7 +75,7 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
         return
       }
       if (!companyId) {
-        const created = await api.post<Client & { company: Company }>('/clients', { ...form, company: { ...employer, country: form.country, city: form.city } })
+        const created = await api.post<Client & { company: Company }>('/clients', { ...form, company: { ...employer, website: web.value, country: form.country, city: form.city } })
         companyId = created.company.id
         setSaved({ companyId })
       }
@@ -101,19 +104,21 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
     <form id="client-form" className="client-form" onSubmit={(event) => { event.preventDefault(); void save() }}>
       <fieldset disabled={saving || !!saved} className="client-form-fields">
         <FormSection icon={<UserRound size={18} />} title={creating ? 'Client contact person' : 'Contact person'} hint={creating ? 'The person you deal with' : undefined}>
-          <Field label={creating ? 'Contact person' : 'Full name'} required className="sm:col-span-2"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Khalid Rahman" /></Field>
-          <Field label="Email"><Input type="email" maxLength={255} value={form.email} onChange={(e) => set('email', e.target.value)} /></Field>
-          <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
-          <Field label="WhatsApp"><Input type="tel" maxLength={40} value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} /></Field>
+          <Field label={creating ? 'Contact person' : 'Full name'} required><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Khalid Rahman" /></Field>
+          <Field label="Designation" hint="Their job title"><Input maxLength={120} value={form.designation} onChange={(e) => set('designation', e.target.value)} placeholder="HR Manager" /></Field>
+          <Field label="Email"><Input type="email" maxLength={255} value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@company.com" /></Field>
+          <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+971 50 123 4567" /></Field>
+          <Field label="WhatsApp"><Input type="tel" maxLength={40} value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} placeholder="+971 50 123 4567" /></Field>
           <Field label="Status" hint={creating ? 'Inactive clients cannot get new orders.' : 'Inactive clients cannot get new companies or orders.'}><Select value={form.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></Select></Field>
           {!creating && <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>}
-          {!creating && <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>}
+          {!creating && <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" /></Field>}
         </FormSection>
         {creating && <FormSection icon={<Building2 size={18} />} title="Company" hint="The company that will give you orders">
           <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={employer.name} onChange={(e) => setCompany('name', e.target.value)} placeholder="Gulf Build Contracting LLC" /></Field>
           <Field label="Industry"><SuggestInput maxLength={120} value={employer.industry} onChange={(value) => setCompany('industry', value)} options={industries} placeholder="Construction" /></Field>
           <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>
-          <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>
+          <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" /></Field>
+          <Field label="Website" hint="Optional. For example www.gulfbuild.com"><Input type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={WEBSITE_MAX} value={employer.website} onChange={(e) => setCompany('website', e.target.value)} placeholder="www.gulfbuild.com" /></Field>
           <Field label="Address" className="sm:col-span-2"><Textarea rows={2} maxLength={2000} value={employer.address} onChange={(e) => setCompany('address', e.target.value)} placeholder="Building, street, area" /></Field>
         </FormSection>}
         {creating && <FormSection icon={<BookUser size={18} />} title="Company contact" hint="Optional. Leave blank to use the contact person's details above.">

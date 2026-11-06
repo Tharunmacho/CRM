@@ -116,16 +116,15 @@ export function Field({
 }) {
   return (
     <FieldLabelContext.Provider value={label}>
-      <label className={cn('ui-field block', className)}>
+      <label className={cn('ui-field', className)}>
         {label && (
-          <span className="mb-1.5 flex items-baseline gap-1 text-[13px] font-medium text-ink-700">
+          <span className="ui-field-label">
             {label}
-            {required && <span className="text-stamp-600">*</span>}
+            {required && <span className="ui-field-req" aria-hidden="true">*</span>}
           </span>
         )}
         {children}
-        {hint && !error && <span className="mt-1.5 block text-[12.5px] leading-5 text-ink-500">{hint}</span>}
-        {error && <span className="mt-1.5 block text-[12.5px] leading-5 text-stamp-600">{error}</span>}
+        {error ? <span className="ui-field-error" role="alert">{error}</span> : hint ? <span className="ui-field-hint">{hint}</span> : null}
       </label>
     </FieldLabelContext.Provider>
   )

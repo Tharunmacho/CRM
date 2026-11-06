@@ -86,7 +86,9 @@ export default defineConfig(({ mode }) => {
           // except Reports.
           manualChunks(id) {
             if (!id.includes('node_modules')) return undefined
-            if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'vendor-react'
+            // clsx and tailwind-merge are used by every screen. Left unassigned, clsx was pulled into the charts chunk
+            // (its other importer), so the entry bundle statically imported 375 KB of recharts on every page load.
+            if (/node_modules\/(react|react-dom|scheduler|clsx|tailwind-merge)\//.test(id)) return 'vendor-react'
             if (/node_modules\/(react-router|react-router-dom|@remix-run)\//.test(id)) return 'vendor-router'
             if (/node_modules\/(recharts|d3-[^/]+|victory-vendor|recharts-scale|internmap|decimal\.js-light)\//.test(id)) return 'vendor-charts'
             return undefined

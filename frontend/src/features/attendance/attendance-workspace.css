@@ -59,7 +59,8 @@
 .att-tool-label, .att-toolbar .ui-field > span:first-child { margin: 0; font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--text-main); }
 .att-toolbar .ui-field { width: 240px; min-width: 0; }
 .att-toolbar .ui-field > span:first-child { display: block; margin-bottom: 6px; }
-.att-tool-month { width: 244px; }
+.att-tool-month { flex: none; }
+.att-tool-month { width: 268px; }
 .att-stepper { display: flex; align-items: center; gap: 6px; }
 .att-stepper .ui-input { height: 40px; min-width: 0; flex: 1; }
 .att-step.ui-icon-button { width: 40px; height: 40px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); }
@@ -138,7 +139,7 @@
 .att-ot > .att-help { margin-top: 14px; }
 
 /* ---------- Dialog forms (attendance-forms.tsx) ---------- */
-.attendance-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.attendance-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; align-items: start; min-width: 0; border: 0; padding: 0; margin: 0; }
 .attendance-form-wide { grid-column: 1 / -1; }
 .att-shift-note { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
 .att-shift-note strong { font-weight: 600; color: var(--text-main); }

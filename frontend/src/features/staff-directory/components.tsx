@@ -69,13 +69,13 @@ export function AttentionTags({ employee }: { employee: DirectoryEmployee }) {
 export function DirectoryTable({ employees, query }: { employees: DirectoryEmployee[]; query: string }) {
   const href = (employee: DirectoryEmployee) => `/staff-directory/${encodeURIComponent(employee.id)}${query ? '?' + query : ''}`
   const columns: Column<DirectoryEmployee>[] = [
-    { key: 'name', header: 'Employee', width: '22%', render: (employee) => <EmployeeIdentity employee={employee} detailHref={href(employee)} /> },
+    { key: 'name', header: 'Employee', width: '20%', render: (employee) => <EmployeeIdentity employee={employee} detailHref={href(employee)} /> },
     { key: 'intake', header: 'New candidates', width: '19%', render: (employee) => <AvailabilityBadge employee={employee} /> },
     { key: 'candidates', header: 'Candidates', width: '10%', render: (employee) => <Count employee={employee} to={candidateLink(employee.id)} value={employee.assignedCandidates} noun="assigned candidates" /> },
     { key: 'calls', header: 'Initial calls', width: '8%', render: (employee) => <Count employee={employee} to={taskLink(employee.id, 'initial')} value={employee.initialCallsPending} noun="initial calls pending" /> },
     { key: 'open', header: 'Open tasks', width: '8%', render: (employee) => <Count employee={employee} to={taskLink(employee.id, 'open')} value={employee.openTasks} noun="open tasks" /> },
-    { key: 'attention', header: 'Needs attention', width: '23%', render: (employee) => <AttentionTags employee={employee} /> },
-    { key: 'record', header: 'Record', width: '8%', actions: true, align: 'right', render: (employee) => <Link className="staff-open" to={href(employee)} aria-label={`View employee record for ${employee.name}`} title={`View employee record for ${employee.name}`}>Open<ChevronRight size={14} aria-hidden="true" /></Link> },
+    { key: 'attention', header: 'Needs attention', width: '27%', render: (employee) => <AttentionTags employee={employee} /> },
+    { key: 'record', header: 'Actions', width: '9%', actions: true, render: (employee) => <Link className="staff-open" to={href(employee)} aria-label={`View employee record for ${employee.name}`} title={`View employee record for ${employee.name}`}>Open<ChevronRight size={14} aria-hidden="true" /></Link> },
   ]
   return <DataTable compact stackBelow={1280} rows={employees} columns={columns} rowKey={(employee) => employee.id} pageSize={50} />
 }

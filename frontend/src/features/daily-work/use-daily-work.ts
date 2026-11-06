@@ -16,6 +16,12 @@ interface Options {
  * Today's daily list. Loads on mount and whenever the server announces a task change, plus a safety poll. `skew`
  * is the server clock minus the browser's, so hourly countdowns do not depend on the PC being set correctly.
  */
+/**
+ * The shell's daily prompt and the Tasks screen ask for the same list a moment apart: the answer is kept for three seconds so
+ * the second one costs nothing. A task or candidate change (live event or write) drops it at once.
+ */
+const CACHE = { ttlMs: 3_000, tags: ['tasks', 'users', 'candidates', 'applications', 'attendance', 'daily-work', 'daily-goals'] } as const
+
 export function useDailyWork({ staff, enabled = true, debounceMs = 1500 }: Options = {}) {
   const [data, setData] = useState<DailyWorkResponse | null>(null)
   const [error, setError] = useState('')
@@ -24,11 +30,11 @@ export function useDailyWork({ staff, enabled = true, debounceMs = 1500 }: Optio
   const generation = useRef(0)
   const staffKey = staff ?? ''
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async (signal?: AbortSignal, fresh = false) => {
     const mine = ++generation.current
     try {
       const query = staffKey ? `?staff=${encodeURIComponent(staffKey)}` : ''
-      const result = await api.get<DailyWorkResponse>(`/daily-work${query}`, { signal })
+      const result = await api.get<DailyWorkResponse>(`/daily-work${query}`, { signal, cache: CACHE, fresh })
       if (signal?.aborted || mine !== generation.current) return
       setData(result)
       setSkew(clockSkew(result.serverTime, Date.now()))
@@ -60,7 +66,7 @@ export function useDailyWork({ staff, enabled = true, debounceMs = 1500 }: Optio
     return () => window.clearTimeout(timer)
   }, [data, skew, load])
 
-  const refresh = useCallback(() => load(), [load])
+  const refresh = useCallback(() => load(undefined, true), [load])
   return { data, error, loading, skew, refresh }
 }
 

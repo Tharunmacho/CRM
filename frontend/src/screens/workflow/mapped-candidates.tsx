@@ -14,7 +14,7 @@ import { ownerLabel } from '@/features/candidates/data-bank-pools'
 import { arrivalTrend, weeklyArrivals } from '@/features/candidates/data-bank-trends'
 import { OwnerText, SOURCE_LABEL, SourceDot, SourceIcon, StageChip, shortDate } from '@/features/candidates/components/data-bank-columns'
 import { CountryFlag, KpiCards, Pager, StatusDot, ViewToggle, Who, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
-import { DbTable, TABLE_MIN_WIDTH, useElementWidth, type DbColumn } from '@/features/candidates/components/db-table'
+import { DbTable, GRID_TABLE_MIN_WIDTH, useElementWidth, type DbColumn } from '@/features/candidates/components/db-table'
 import '@/styles/data-bank-v2.css'
 
 type TabKey = 'active' | 'deployed' | 'closed'
@@ -138,7 +138,7 @@ export default function MappedCandidatesPage() {
   const onFile = store.applications.filter((a) => a.status === tab && store.candidate(a.candidateId)).length
   const hasFilters = Boolean(query.trim()) || stageFilter !== 'all' || ownerFilter !== 'all' || designationFilter !== 'all' || companyFilter !== 'all' || sourceFilter !== 'all' || overdueOnly
   const clearFilters = () => { setQuery(''); setStageFilter('all'); setOwnerFilter('all'); setDesignationFilter('all'); setCompanyFilter('all'); setSourceFilter('all'); setOverdueOnly(false) }
-  const forceCards = boxWidth > 0 && boxWidth < TABLE_MIN_WIDTH
+  const forceCards = boxWidth > 0 && boxWidth < GRID_TABLE_MIN_WIDTH
   const showCards = forceCards || view === 'cards'
 
   const statusLabel = (a: Application) => (a.status === 'closed' ? (a.closureReason ? closureLabels[a.closureReason] : STATUS_TEXT.closed) : isOverdue(a) ? 'Overdue' : STATUS_TEXT[a.status])
@@ -160,32 +160,32 @@ export default function MappedCandidatesPage() {
 
   const columns: DbColumn<Application>[] = [
     {
-      key: 'candidate', header: 'Candidate', sortKey: 'candidate', width: 132,
+      key: 'candidate', header: 'Candidate', sortKey: 'candidate', width: 200, align: 'left', sticky: 'start',
       render: (a) => { const c = store.candidate(a.candidateId)!; return <Who compact name={c.name} sub={<span className="ident" title={c.phone}>{c.phone}</span>} /> },
     },
     {
-      key: 'passport', header: 'Passport', sortKey: 'passport', width: 92,
+      key: 'passport', header: 'Passport', sortKey: 'passport', width: 120,
       render: (a) => { const c = store.candidate(a.candidateId)!; return c.passportNo ? <span className="ident db-nowrap" title={`Passport ${c.passportNo}`}>{c.passportNo}</span> : <Dash /> },
     },
-    { key: 'order', header: 'Order', sortKey: 'order', width: 92, render: (a) => <span className="db-order-chip ident" title={store.orderLabel(a.orderId)}>{store.order(a.orderId)?.ref ?? '–'}</span> },
-    { key: 'designation', header: 'Job title', sortKey: 'designation', width: 112, render: (a) => <span className="db-wrap" title={designationOf(a)}>{designationOf(a) || <Dash />}</span> },
+    { key: 'order', header: 'Order', sortKey: 'order', width: 110, render: (a) => <span className="db-order-chip ident" title={store.orderLabel(a.orderId)}>{store.order(a.orderId)?.ref ?? '–'}</span> },
+    { key: 'designation', header: 'Job title', sortKey: 'designation', width: 150, render: (a) => <span className="db-wrap" title={designationOf(a)}>{designationOf(a) || <Dash />}</span> },
     {
-      key: 'company', header: 'Company', sortKey: 'company', width: 156,
+      key: 'company', header: 'Company', sortKey: 'company', width: 210,
       render: (a) => {
         const o = store.order(a.orderId)
         const name = companyOf(a)
         return <span className="db-with-flag" title={name}><CountryFlag country={o?.country ?? (o ? store.company(o.companyId)?.country : undefined)} /><span className="db-wrap">{name || <Dash />}</span></span>
       },
     },
-    { key: 'source', header: 'Source', width: 60, render: (a) => <SourceIcon source={sourceOf(a) || 'other'} /> },
-    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 104, render: (a) => <OwnerText candidate={store.candidate(a.candidateId)!} store={store} /> },
+    { key: 'source', header: 'Source', width: 80, render: (a) => <SourceIcon source={sourceOf(a) || 'other'} /> },
+    { key: 'owner', header: 'Recruiter', sortKey: 'owner', width: 130, render: (a) => <OwnerText candidate={store.candidate(a.candidateId)!} store={store} /> },
     {
-      key: 'stage', header: 'Stage', sortKey: 'stage', width: 128,
+      key: 'stage', header: 'Stage', sortKey: 'stage', width: 190,
       render: (a) => (a.status === 'closed' && a.closureReason ? <span className="db-wrap">{closureLabels[a.closureReason]}</span> : <StageChip stage={a.currentStage} />),
     },
-    { key: 'status', header: 'Status', width: 96, render: (a) => statusDot(a) },
-    { key: 'mapped', header: 'Matched', sortKey: 'mapped', width: 82, render: (a) => <span className="db-nowrap" title={dateLabel(a.createdAt)}>{shortDate(a.createdAt)}</span> },
-    { key: 'action', header: '', width: 92, align: 'right', render: (a) => openButton(a) },
+    { key: 'status', header: 'Status', width: 110, render: (a) => statusDot(a) },
+    { key: 'mapped', header: 'Matched', sortKey: 'mapped', width: 110, render: (a) => <span className="db-nowrap" title={dateLabel(a.createdAt)}>{shortDate(a.createdAt)}</span> },
+    { key: 'action', header: 'Actions', width: 110, align: 'center', sticky: 'end', render: (a) => openButton(a) },
   ]
 
   const emptyState = (
@@ -300,6 +300,7 @@ export default function MappedCandidatesPage() {
           ) : (
             <DbTable
               label="Matched candidates"
+              variant="grid"
               rows={pageRows}
               columns={columns}
               rowKey={(a) => a.id}

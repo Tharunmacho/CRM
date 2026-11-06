@@ -9,7 +9,7 @@ from app.db.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)  # keep the app's own loggers (uvicorn.error, app.*) alive after an in-process migration
 
 # The URL comes from the environment, never from alembic.ini, so the same image
 # migrates whichever database it is pointed at.

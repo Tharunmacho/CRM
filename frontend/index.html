@@ -42,7 +42,10 @@
       })()
     </script>
     <style>[data-theme="dark"] .pre-splash{background:#0a0a0b!important}[data-theme="dark"] .pre-logo-light{display:none!important}[data-theme="dark"] .pre-logo-dark{display:block!important}[data-theme="dark"] .pre-splash p{color:#a1a1aa!important}</style>
+    <!-- The three weights every screen paints first (body 400, labels 500, headings 600); the rest load on use, all with font-display: swap. -->
+    <link rel="preload" href="/fonts/poppins-regular.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/poppins-medium.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/poppins-semibold.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
     <div id="root">

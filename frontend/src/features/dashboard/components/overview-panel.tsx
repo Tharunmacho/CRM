@@ -63,7 +63,7 @@ export function PipelineOverview({ overview, scope, showOwner, narrow, placeOf, 
     { key: 'stage', header: 'Stage', value: row => row.stage, width: '16%', render: row => <StageCell item={row} /> },
     ...(showOwner ? [{ key: 'owner', header: 'Recruiter', value: (row: OverviewItem) => row.owner, width: '10%', render: (row: OverviewItem) => <span className="dr-owner"><Avatar name={row.owner || '?'} size="sm" />{row.owner ? row.owner.split(' ')[0] : 'Not assigned'}</span> }] : []),
     { key: 'days', header: active === 'idle' || view === 'current' ? 'Waiting' : 'When', value: row => row.days, width: '10%', render: row => <span className={waitClass(row)} title={new Date(row.since).toLocaleDateString()}>{waitLabel(row)}</span> },
-    { key: 'actions', header: 'Actions', align: 'right', width: '18%', render: actions },
+    { key: 'actions', header: 'Actions', align: 'center', width: '18%', render: actions },
   ]
   const empty = <div className="dr-empty is-small"><span><Hourglass size={18} strokeWidth={1.5} /></span><strong>{active === 'idle' ? 'No one is stuck' : 'No candidates here'}</strong><p>{active === 'idle' ? `Everyone has moved within ${overview.idleDays} days.` : 'Candidates will show here when they reach this step.'}</p></div>
 

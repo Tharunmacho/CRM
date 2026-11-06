@@ -70,10 +70,10 @@ export function ConnectMailbox({ address = '', provider: initial, providers = []
   return <Dialog open onClose={() => { if (!busy) finish() }} title={reconnecting ? 'Reconnect mailbox' : 'Connect a mailbox'} width="lg" scroll="inside" appearance="clean"
     description="Connect as many mailboxes as you need. Mail from every account appears together in one inbox."
     footer={<><Button className="flex-1 sm:flex-none" disabled={busy} onClick={finish}>Cancel</Button><Button className="flex-1 sm:flex-none" icon={<Mail size={17} />} variant="primary" type="submit" form="connect-mailbox" disabled={busy || !ready}>{busy ? (oauth ? 'Opening sign-in…' : 'Connecting…') : oauth ? `Continue with ${PROVIDER_LABEL[provider]}` : 'Connect mailbox'}</Button></>}>
-    <form id="connect-mailbox" onSubmit={(event) => { event.preventDefault(); void submit() }} className="space-y-6">
+    <form id="connect-mailbox" onSubmit={(event) => { event.preventDefault(); void submit() }} className="ui-fs-stack">
       {error && <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-control border border-stamp-100 bg-white p-4 text-sm text-stamp-700"><p className="mb-1 font-semibold">{(error.includes('MAIL_TOKEN_ENCRYPTION_KEY') || /not set up on this server/i.test(error)) ? 'Setup needed on the server' : 'We could not connect the mailbox'}</p><p className="break-words">{error}</p>{signInHint(error, provider) && <p className="mt-2 text-xs text-ink-500">{signInHint(error, provider)}</p>}</div>}
       <fieldset className="min-w-0" disabled={busy || reconnecting}>
-        <legend className="mb-2 text-sm font-semibold text-ink">Mail provider</legend>
+        <legend className="ui-fs-legend">Mail provider</legend>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" role="radiogroup" aria-label="Mail provider">
           {CHOICES.map((choice) => <button key={choice.provider} type="button" role="radio" aria-checked={provider === choice.provider} onClick={() => { setProvider(choice.provider); setError('') }}
             className={cn('rounded-control border p-3 text-left transition-colors disabled:opacity-60', provider === choice.provider ? 'border-navy-600 bg-navy-50 text-navy-900' : 'border-rule hover:bg-field/60')}>
@@ -82,8 +82,8 @@ export function ConnectMailbox({ address = '', provider: initial, providers = []
         </div>
       </fieldset>
       {unavailable && <p role="status" className="rounded-control bg-amber-50 p-3 text-sm text-amber-900">{unavailable}</p>}
-      <fieldset className="min-w-0 space-y-4" disabled={busy}>
-        <legend className="text-sm font-semibold text-ink">Mailbox details</legend>
+      <fieldset className="ui-form-stack" disabled={busy}>
+        <legend className="ui-fs-legend">Mailbox details</legend>
         <Field label="Email address" required><Input type="email" name="username" autoComplete="username" required maxLength={255} placeholder="jobs@yourcompany.com" value={email} readOnly={reconnecting} onChange={(event) => setEmail(event.target.value)} /></Field>
         {oauth
           ? <p className="flex items-start gap-2 text-xs text-ink-500"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-navy-600" />You will sign in on {provider === 'gmail' ? "Google's" : "Microsoft's"} own page and approve access. Your password is never shared with the CRM. The permission you give is stored safely (encrypted).</p>

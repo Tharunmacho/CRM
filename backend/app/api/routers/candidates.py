@@ -29,6 +29,7 @@ from app.services.candidate_review import UNNAMED
 from app.services.candidate_search import Pool, Search, search_candidates, export_candidates, candidate_skill_facets, pool_counts, position_groups
 from app.services.candidate_matching import match_candidates
 from app.services.parallel_reads import parallel_reads
+from app.services.response_cache import cached, scope_of
 from app.db.models import (
     Application,
     ApplicationStatus,
@@ -69,10 +70,20 @@ def candidate_filters(q: str = Query(default="", max_length=500), pool: Pool = "
     return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, staff or None, order_id=position_id)
 
 
+# The Data Bank summaries (pool sizes, skill facets, position groups) are the same for every signed-in user - the bank is
+# shared - and they only change when a candidate, placement, order or recruiter does. They are kept for up to a minute
+# and dropped the moment one of those commits (see services/response_cache.py).
+BANK_TOPICS = ("candidates", "applications", "orders", "designations", "companies", "clients", "users")
+BANK_SECONDS = 60
+
+
 @router.get("")
 def candidate_list(filters: Search = Depends(candidate_filters), page: int = Query(default=0, ge=0), page_size: int = Query(default=20, ge=1, le=100),
                    db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return search_candidates(db, filters, page, page_size)
+    # The bank is shared by every signed-in user and the answer depends only on the search, so it is kept for a few seconds
+    # (and dropped by any candidate, placement, order or recruiter commit): paging back, a second tab and a refresh are free.
+    return cached(("candidate-list", scope_of(db), repr(filters), page, page_size), BANK_TOPICS, 15,
+                  lambda: search_candidates(db, filters, page, page_size))
 
 
 @router.get("/position-groups")
@@ -80,7 +91,7 @@ def candidate_position_groups(response: Response, filters: Search = Depends(cand
                               db: Session = Depends(get_db), user: User = Depends(current_user)):
     """The positions (orders) that hold the candidates this search finds, with a resume count each."""
     response.headers["Cache-Control"] = "private, no-store"
-    return position_groups(db, filters)
+    return cached(("position-groups", scope_of(db), repr(filters)), BANK_TOPICS, BANK_SECONDS, lambda: position_groups(db, filters))
 
 
 @router.get("/export")
@@ -94,7 +105,8 @@ def skill_facets(response: Response, pool: Pool = "all",
                  staff: str | None = Query(default=None, max_length=36), matchable: bool = False,
                  db: Session = Depends(get_db), user: User = Depends(current_user)):
     response.headers["Cache-Control"] = "private, no-store"
-    return candidate_skill_facets(db, Search(pool=pool, staff=staff or None, matchable=matchable))
+    search = Search(pool=pool, staff=staff or None, matchable=matchable)
+    return cached(("skill-facets", scope_of(db), repr(search)), BANK_TOPICS, BANK_SECONDS, lambda: candidate_skill_facets(db, search))
 
 
 @router.get("/matching")
@@ -116,7 +128,7 @@ def candidate_pool_counts(response: Response, staff: str | None = Query(default=
     """Size of every Data Bank pool, so a tab or summary card can show a count and a
     supervisor can see how many candidates are still waiting for a recruiter."""
     response.headers["Cache-Control"] = "private, no-store"
-    return pool_counts(db, staff or None)
+    return cached(("pool-counts", scope_of(db), staff or None), BANK_TOPICS, BANK_SECONDS, lambda: pool_counts(db, staff or None))
 
 
 @router.post("/assign-waiting")

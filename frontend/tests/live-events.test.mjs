@@ -231,3 +231,14 @@ test('events from a replaced stream are ignored', () => {
   time.advance(10)
   assert.equal(calls.filter((c) => !c.resync).length, 0)
 })
+
+test('isOtherRecord only says "not mine" when the server named other records of that topic', async () => {
+  const { isOtherRecord } = await load()
+  const change = (over) => ({ topics: ['candidates'], ids: { candidates: ['c9'] }, at: null, resync: false, ...over })
+  assert.equal(isOtherRecord(change(), 'candidates', 'c1'), true)
+  assert.equal(isOtherRecord(change(), 'candidates', 'c9'), false) // it is this record
+  assert.equal(isOtherRecord(change({ ids: {} }), 'candidates', 'c1'), false) // no ids sent: cannot tell
+  assert.equal(isOtherRecord(change({ ids: { candidates: [] } }), 'candidates', 'c1'), false)
+  assert.equal(isOtherRecord(change({ resync: true }), 'candidates', 'c1'), false)
+  assert.equal(isOtherRecord(change({ topics: ['candidates', 'documents'] }), 'candidates', 'c1'), false) // other topics too
+})

@@ -13,9 +13,10 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import re
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -25,6 +26,10 @@ from app.core.deps import current_user, require_role
 from app.core.config import get_settings
 from app.services import agency_settings
 from app.services.desk_snapshot import read_snapshot
+from app.services.encoded_response import Encoded
+from app.services.intake_attention import unread_counts
+from app.services.parallel_reads import parallel_reads
+from app.services.response_cache import cached, scope_of
 from app.db.models import (
     Application,
     ApplicationStatus,
@@ -108,10 +113,74 @@ def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: typ
     })
 
 
+_DATETIME = TypeAdapter(datetime)
+
+
+def _candidate_json(c: dict, files: dict[tuple[str, str], list[dict]]) -> dict[str, Any]:
+    """The desk's wire form of one candidate, identical to `_candidate_out(c, files).model_dump(by_alias=True, mode="json")`.
+
+    A candidate has seven document slots, most of them empty. Validating and dumping seven nested models per
+    candidate for 4,000 candidates cost ~30% of the snapshot's assembly time; the slots are plain dictionaries (the
+    schema types `versions` as free-form), so they are written directly and only the candidate's own fields go through
+    the model. `test_workspace_startup` and `test_bootstrap_performance` compare the whole wire contract.
+    """
+    documents = []
+    for key, label in DOCUMENT_SLOTS:
+        versions = files.get((c["id"], key))
+        documents.append({"key": key, "label": label, "versions": [
+            {"id": f["id"], "name": f["file_name"], "sizeKb": f["size_kb"], "version": f["version"], "url": f"/api/files/{f['id']}",
+             "uploadedBy": f["uploaded_by"],
+             "uploadedAt": _DATETIME.dump_python(datetime.fromisoformat(f["uploaded_at"]), mode="json")}
+            for f in versions or ()
+        ]})
+    outcome = None
+    if c["call_interested"]:
+        outcome = {"called": bool(c["call_called"]), "interested": c["call_interested"],
+                   "remarks": c["call_remarks"], "recordedAt": c["call_recorded_at"]}
+    out = CandidateOut.model_validate({**c, "added_at": c["created_at"], "documents": [], "call_outcome": outcome}).model_dump(by_alias=True, mode="json")
+    out["documents"] = documents
+    return out
+
+
+# Everything the desk snapshot reads. Mail is here only for the unread badge (`inboxUnread`); a finished intake changes the
+# snapshot through its `ingestionRevision`, which is a write to the job tables (topic "documents").
+DESK_TOPICS = ("users", "clients", "companies", "designations", "orders", "candidates", "documents", "applications",
+               "tasks", "notifications", "todos", "settings", "mail")  # "mail": the unread badge (`inboxUnread`)
+DESK_TTL_SECONDS = 60
+
+
+def desk_response(request: Request, db: Session, user: User, compact: bool, headers: dict[str, str] | None = None) -> Response:
+    """The desk snapshot as a finished HTTP response.
+
+    The snapshot is the slowest thing the app loads (every candidate, ~2 KB each). It is built once per signed-in
+    user and compactness, kept already encoded and compressed, and discarded as soon as any collection it contains
+    changes (see response_cache). A person never receives another person's entry: the key holds the user id, and the
+    sign-in check has already run for this request.
+    """
+    def build() -> Encoded:
+        return Encoded.of(_bootstrap(db, user, compact), json_ready=True)
+
+    encoded = cached(("desk", scope_of(db), user.id, compact), DESK_TOPICS, DESK_TTL_SECONDS, build)
+    return encoded.response(request, headers)
+
+
 @router.get("/bootstrap")
-def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user), compact: bool = False) -> dict[str, Any]:
+def bootstrap(request: Request, db: Session = Depends(get_db), user: User = Depends(current_user), compact: bool = False) -> Response:
     """A fresh desk snapshot with one data query after the session check."""
-    snapshot = read_snapshot(db, user.id, compact=compact)
+    return desk_response(request, db, user, compact)
+
+
+def _unread_badge(session: Session) -> dict:
+    try:
+        return unread_counts(session)
+    except SQLAlchemyError:  # a database without the mail tables yet: the badge is simply empty, the desk still loads
+        return {"total": 0, "accounts": {}}
+
+
+def _bootstrap(db: Session, user: User, compact: bool = False) -> dict[str, Any]:
+    # The sidebar's unread mail badge rides in the same round trip (a second statement beside the snapshot), so the page
+    # does not need a separate /api/inbox/pulse request right after it loads.
+    snapshot, unread = parallel_reads(db, lambda session: read_snapshot(session, user.id, compact=compact), _unread_badge)
 
     files: dict[tuple[str, str], list[dict]] = {}
     for f in snapshot["files"]:
@@ -138,6 +207,7 @@ def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user),
     return {
         "me": UserOut.model_validate(user).model_dump(by_alias=True, mode="json"),
         "ingestionRevision": snapshot["ingestionRevision"],
+        "inboxUnread": unread,
         "agencyTimezone": get_settings().agency_timezone,
         "settings": agency_settings.build_payload(snapshot.get("agency"), snapshot.get("currencies"), snapshot.get("categories")),
         "users": [UserOut.model_validate(u).model_dump(by_alias=True, mode="json") for u in snapshot["users"]],
@@ -145,7 +215,7 @@ def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user),
         "companies": [company_out(c) for c in snapshot["companies"]],
         "designations": [DesignationOut.model_validate(d).model_dump(by_alias=True, mode="json") for d in snapshot["designations"]],
         "orders": [OrderOut.model_validate(o).model_dump(by_alias=True, mode="json") for o in snapshot["orders"]],
-        "candidates": [_candidate_out(c, files).model_dump(by_alias=True, mode="json") for c in snapshot["candidates"]],
+        "candidates": [_candidate_json(c, files) for c in snapshot["candidates"]],
         "applications": [a.model_dump(by_alias=True, mode="json") for a in apps_out],
         "tasks": [TaskOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in snapshot["tasks"]],
         "remarks": [RemarkOut.model_validate(r).model_dump(by_alias=True, mode="json") for r in snapshot["remarks"]],
@@ -156,6 +226,42 @@ def bootstrap(db: Session = Depends(get_db), user: User = Depends(current_user),
 
 # ---------------------------------------------------------------- master data
 
+_WEBSITE_HOST = re.compile(r"^(?=.{1,253}$)([a-z0-9\u00a1-\uffff]([a-z0-9\u00a1-\uffff-]{0,61}[a-z0-9\u00a1-\uffff])?\.)+[a-z\u00a1-\uffff][a-z0-9\u00a1-\uffff-]{0,61}[a-z0-9\u00a1-\uffff]$")
+
+
+def normalize_website(raw: str) -> str | None:
+    """A company website as one https:// (or http://) address. Blank gives None, a bare domain gets https://, and
+    spaces, user:password@ parts, script schemes (javascript:, data:, ...) and anything without a real host are refused."""
+    text_ = raw.strip()
+    if not text_:
+        return None
+    if re.search(r"\s", text_):
+        raise ValueError("website: enter a web address without spaces, such as www.example.com")
+    scheme = re.match(r"^([a-z][a-z0-9+.-]*):", text_, re.I)
+    if scheme:
+        if text_[scheme.end():scheme.end() + 2] == "//":
+            if scheme.group(1).lower() not in ("http", "https"):
+                raise ValueError("website: only http:// or https:// addresses are accepted")
+        elif not re.match(r"^[^/:?#]+:\d+(/|$|\?|#)", text_):  # `example.com:8080` is a host with a port; the rest is javascript:, mailto:, ...
+            raise ValueError("website: only http:// or https:// addresses are accepted")
+        else:
+            text_ = f"https://{text_}"
+    else:
+        text_ = f"https://{text_}"
+    parts = urlsplit(text_)
+    try:
+        host, _port = (parts.hostname or ""), parts.port
+    except ValueError:
+        raise ValueError("website: enter a valid web address, such as www.example.com") from None
+    if "@" in parts.netloc or not _WEBSITE_HOST.match(host):
+        raise ValueError("website: enter a valid web address, such as www.example.com")
+    path = "" if parts.path == "/" and not parts.query and not parts.fragment else parts.path
+    result = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}{'?' + parts.query if parts.query else ''}{'#' + parts.fragment if parts.fragment else ''}"
+    if len(result) > 255:
+        raise ValueError("website: the address is too long (255 characters at most)")
+    return result
+
+
 class MasterInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -164,7 +270,9 @@ class MasterInput(BaseModel):
     def normalize_optional_fields(cls, value):
         if isinstance(value, dict):
             value = dict(value)
-            for key in ("email", "contactEmail", "interviewDate", "deadline"):
+            if isinstance(value.get("website"), str):
+                value["website"] = normalize_website(value["website"])
+            for key in ("email", "contactEmail", "designation", "interviewDate", "deadline"):
                 if isinstance(value.get(key), str):
                     value[key] = value[key].strip() or None
             for key in ("email", "contactEmail"):
@@ -200,6 +308,7 @@ class ClientCompanyIn(MasterInput):
     # The company's own point of contact. Left blank, the client contact's details are used.
     contactPerson: str | None = Field(default=None, max_length=160)
     contactEmail: str | None = Field(default=None, max_length=255)
+    website: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=40)
     whatsapp: str | None = Field(default=None, max_length=40)
 
@@ -210,6 +319,8 @@ class ClientIn(MasterInput):
     company: ClientCompanyIn | None = None
     name: str = Field(min_length=1, max_length=200)
     email: str | None = Field(default=None, max_length=255)
+    # The contact person's job title.
+    designation: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=40)
     whatsapp: str | None = Field(default=None, max_length=40)
     country: str | None = Field(default=None, max_length=100)
@@ -226,6 +337,7 @@ class CompanyIn(MasterInput):
     industry: str | None = Field(default=None, max_length=120)
     contactPerson: str | None = Field(default=None, max_length=160)
     contactEmail: str | None = Field(default=None, max_length=255)
+    website: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=40)
     whatsapp: str | None = Field(default=None, max_length=40)
     address: str | None = Field(default=None, max_length=2000)

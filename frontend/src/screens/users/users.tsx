@@ -1,14 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertTriangle, CalendarDays, Download, KeyRound, LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCw, ScrollText, UserCheck, UserCog, UserX, Users } from 'lucide-react'
+import { AlertTriangle, CalendarDays, Download, KeyRound, LogOut, Pencil, Plus, RefreshCw, RotateCw, ScrollText, UserCheck, UserCog, UserX, Users } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
 import type { Role, User } from '@/shared/model/types'
 import { EmptyState, PageHeader, Panel, StatusPill } from '@/shared/ui/display'
 import { PageSkeleton } from '@/shared/ui/page-loading'
-import { DataTable, type Column } from '@/shared/ui/table'
+import { DataTable, RowMenu, type Column } from '@/shared/ui/table'
 import { Button, SearchInput, Select, Switch } from '@/shared/ui/primitives'
-import { Dropdown, MenuItem, Tabs } from '@/shared/ui/overlay'
+import { Tabs } from '@/shared/ui/overlay'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { cn } from '@/shared/lib/cn'
 import { useStaffAvailability } from '@/features/staff/use-staff-availability'
@@ -178,15 +178,13 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
       key: 'actions', header: 'Actions', actions: true,
       render: (u) => <div className="uv-actions">
         <button type="button" className="uv-edit" title={'Edit ' + u.name} aria-label={'Edit ' + u.name} onClick={() => setEditing({ user: u })}><Pencil size={14} aria-hidden="true" />Edit</button>
-        <Dropdown width="w-60" trigger={({ toggle, open }) => (
-          <button type="button" className="uv-menu-btn" title={'More actions for ' + u.name} aria-label={'Actions for ' + u.name} aria-expanded={open} onClick={toggle}><MoreHorizontal className="h-4 w-4" /></button>
-        )}>{(close) => <>
-          <MenuItem icon={<UserCog className="h-4 w-4" />} onClick={() => { close(); setEditing({ user: u }) }}>Edit account</MenuItem>
-          <MenuItem icon={<ScrollText className="h-4 w-4" />} onClick={() => { close(); setAuditFor(u) }}>See history of changes</MenuItem>
-          <MenuItem icon={<KeyRound className="h-4 w-4" />} onClick={() => { close(); setSecurity({ user: u, kind: 'password' }) }}>Reset password</MenuItem>
-          <MenuItem icon={<LogOut className="h-4 w-4" />} onClick={() => { close(); setSecurity({ user: u, kind: 'logout' }) }}>Sign out everywhere</MenuItem>
-          {u.active && u.id !== store.me.id && <MenuItem tone="danger" icon={<UserX className="h-4 w-4" />} onClick={() => { close(); setEditing({ user: u, deactivate: true }) }}>Deactivate account</MenuItem>}
-        </>}</Dropdown>
+        <RowMenu label={'Actions for ' + u.name} items={[
+          { label: 'Edit account', icon: UserCog, onSelect: () => setEditing({ user: u }) },
+          { label: 'See history of changes', icon: ScrollText, onSelect: () => setAuditFor(u) },
+          { label: 'Reset password', icon: KeyRound, onSelect: () => setSecurity({ user: u, kind: 'password' }) },
+          { label: 'Sign out everywhere', icon: LogOut, onSelect: () => setSecurity({ user: u, kind: 'logout' }) },
+          ...(u.active && u.id !== store.me.id ? [{ label: 'Deactivate account', icon: UserX, tone: 'danger' as const, onSelect: () => setEditing({ user: u, deactivate: true }) }] : []),
+        ]} />
       </div>,
     },
   ]

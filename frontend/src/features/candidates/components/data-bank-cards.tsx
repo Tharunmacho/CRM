@@ -3,8 +3,9 @@ import type { Candidate } from '@/shared/model/types'
 import type { useStore } from '@/shared/state/crm-store'
 import { normalizedSkills } from '@/features/candidates/candidate-skills'
 import { Who } from '@/features/candidates/components/db-parts'
+import { dobParts } from '@/features/candidates/data-bank-view'
 import {
-  CandidateActions, CurrentStage, shortRef, MappedOrder, OwnerText, PassportFlag, SourceDot, StatusText, experienceLabel,
+  CandidateActions, CountryPills, CurrentStage, InterestText, ServiceChargesText, WhatsAppLink, shortRef, MappedOrder, OwnerText, PassportFlag, SourceDot, StatusText, experienceLabel,
 } from '@/features/candidates/components/data-bank-columns'
 
 interface Props {
@@ -27,14 +28,17 @@ export function DataBankCards({ rows, store, onOpen, onReassign, onEdit, onOpenS
             onClick={() => onOpen(candidate)}
             onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(candidate) } }}>
             <div className="db-mini-head">
-              <Who name={candidate.name} sub={<span className="ident" title={`Reference ${candidate.ref}`}>{shortRef(candidate.ref)}</span>} />
+              <Who name={candidate.name} sub={dobParts(candidate.dob)?.label ?? <span className="ident" title={`Reference ${candidate.ref}`}>{shortRef(candidate.ref)}</span>} />
               <StatusText candidate={candidate} />
             </div>
             <dl className="db-mini-meta">
               <div><dt>Job title</dt><dd title={candidate.designations.join(', ')}>{candidate.designations[0] || <span className="db-muted">Not recorded</span>}{candidate.designations.length > 1 && <span className="db-extra"> +{candidate.designations.length - 1}</span>}</dd></div>
               <div><dt>Experience</dt><dd className="tnum">{experienceLabel(candidate.totalExperience)}</dd></div>
-              <div><dt>Phone</dt><dd className="ident" title={candidate.email}>{candidate.phone}</dd></div>
+              <div><dt>Phone</dt><dd className="db-phone-line"><span className="ident" title={candidate.email}>{candidate.phone}</span><WhatsAppLink candidate={candidate} /></dd></div>
               <div><dt>Passport</dt><dd><PassportFlag candidate={candidate} /></dd></div>
+              <div><dt>Preferred country</dt><dd className="db-wrapdd"><CountryPills value={candidate.countryPreference} /></dd></div>
+              <div><dt>Service charges</dt><dd><ServiceChargesText candidate={candidate} /></dd></div>
+              <div><dt>Interest level</dt><dd><InterestText candidate={candidate} /></dd></div>
               <div><dt>Source</dt><dd><SourceDot source={candidate.source} /></dd></div>
               <div><dt>Recruiter</dt><dd><OwnerText candidate={candidate} store={store} /></dd></div>
               <div><dt>Order</dt><dd><MappedOrder candidate={candidate} store={store} onOpenStage={onOpenStage} /></dd></div>

@@ -10,19 +10,20 @@ export type ReportKey = 'funnel' | 'staff' | 'source' | 'orders' | 'rejections' 
 export const REPORTS: { key: ReportKey; label: string; question: string; title: string; note: string; how: string[] }[] = [
   {
     key: 'funnel', label: 'Pipeline', question: 'Where do we lose people?', title: 'Pipeline funnel',
-    note: 'How many candidates reached each stage, and how many were lost before the next one. Only candidates matched to an order in this period are counted. A candidate who is only waiting still counts as active.',
+    note: 'How many candidates reached each stage, how many were lost before the next one, and how long each stage takes. Only candidates matched to an order in this period are counted. A candidate who is only waiting still counts as active.',
     how: [
       'Reached: candidates matched to an order in the period who got to this stage or went past it.',
       'Active or waiting: still sitting at this stage, not ended. Moved on: now at a later stage, or deployed. Ended here: the application was closed at this stage.',
       'Lost before next stage: candidates who reached this stage but never reached the next one (reached here minus reached next). It also includes people still waiting, so it can shrink as they move on.',
+      'Average hours per stage: time from when a task is created to when its stage is finished. Stages with no finished task have no average; they are not counted as zero.',
     ],
   },
   {
     key: 'staff', label: 'Staff performance', question: 'Who is carrying what?', title: 'Staff performance',
-    note: 'Candidates given to each person, tasks finished, average hours per stage, and overdue tasks sent to the admin.',
+    note: 'Candidates given to each person, tasks finished, the average hours each person takes per stage, and overdue tasks sent to the admin.',
     how: [
       'Assigned: candidates that arrived in the period and were first given to this person, within your filters.',
-      'Average hours per stage: time from when a task is created to when its stage is finished. Stages with no finished task have no average; they are not counted as zero.',
+      'Average hours per stage: time from when a task is created to when its stage is finished, for this person. Stages with no finished task have no average; they are not counted as zero.',
       'Sent to admin: tasks that passed the 48-hour limit and were escalated. Missed updates: days an open task got no daily remark.',
     ],
   },
@@ -63,6 +64,15 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
     ],
   },
 ]
+
+/**
+ * What the Staff performance tab says for an admin, who sees the weekly staff report instead of the table below.
+ * (Other roles keep the table above: the weekly report is admin only, see the `staff_report` capability.)
+ */
+export const STAFF_WEEKLY_COPY = {
+  title: 'Staff performance',
+  note: "Each person's attendance, hours, daily tasks and candidates from prescreening to deployment, for a week or any period you choose, worked out from the live records.",
+}
 
 /**
  * Categorical order: logo blue, logo green, amber, violet, pink, cyan. The values are CSS variables

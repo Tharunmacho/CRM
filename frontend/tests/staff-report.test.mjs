@@ -98,3 +98,17 @@ test('task data counts only when the tables exist and rows were allocated', () =
   assert.equal(m.hasTaskData({ sources: { dailyTasks: { available: true, hasData: false } } }), false)
   assert.equal(m.hasTaskData({ sources: { dailyTasks: { available: true, hasData: true } } }), true)
 })
+
+test('the report period comes from the address, falling back to this week and never beyond the server limit', () => {
+  const today = '2026-11-05' // Thursday
+  assert.deepEqual(m.rangeFromParams(null, null, today), { from: '2026-11-02', to: '2026-11-08' })
+  assert.deepEqual(m.rangeFromParams('nonsense', '2026-13-40', today), { from: '2026-11-02', to: '2026-11-08' })
+  assert.deepEqual(m.rangeFromParams('2026-10-26', null, today), { from: '2026-10-26', to: '2026-11-01' }) // a lone start means its week
+  assert.deepEqual(m.rangeFromParams('2026-11-03', '2026-11-05', today), { from: '2026-11-03', to: '2026-11-05' })
+  assert.deepEqual(m.rangeFromParams('2026-11-05', '2026-11-03', today), { from: '2026-11-05', to: '2026-11-08' }) // an end before the start is ignored: the start's week
+  // A 90-day link (Staff Directory) keeps its end and shortens to the longest period the server accepts.
+  const long = m.rangeFromParams('2026-08-08', '2026-11-05', today)
+  assert.equal(long.to, '2026-11-05')
+  assert.equal(long.from, '2026-09-05')
+  assert.equal((Date.parse(`${long.to}T12:00:00Z`) - Date.parse(`${long.from}T12:00:00Z`)) / 86_400_000 + 1, m.MAX_RANGE_DAYS)
+})

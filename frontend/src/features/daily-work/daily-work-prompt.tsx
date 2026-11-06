@@ -5,6 +5,7 @@ import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
 import { promptMessage, promptState, spanLabel, msUntil } from './daily-work-model'
 import { useDailyWork, useTicker } from './use-daily-work'
+import { gateFromDailySummary, publishGate } from '@/features/leads/lead-gate'
 import '@/styles/daily-work.css'
 
 const HIDE_MS = 30 * 60_000
@@ -23,11 +24,16 @@ export function DailyWorkPrompt() {
   const location = useLocation()
   const isStaff = store.me.role === 'staff'
   const { data, skew } = useDailyWork({ enabled: isStaff, debounceMs: 4000 })
-  const onTasks = location.pathname === '/tasks' || location.pathname.startsWith('/tasks/')
+  // The Lead sheet shows its own, fuller version of this reminder (the daily-work gate), so the banner steps aside there too.
+  const onTasks = location.pathname === '/tasks' || location.pathname.startsWith('/tasks/') || location.pathname === '/leads' || location.pathname.startsWith('/leads/')
   const now = useTicker(30_000, isStaff && !onTasks)
   const key = `crm-daily-prompt:${store.me.id}:${data?.agencyDate ?? ''}`
   const [hidden, setHidden] = useState<{ until: number; overdue: number } | null>(null)
   useEffect(() => { setHidden(data ? readHidden(key) : null) }, [key, data])
+
+  // The sidebar's lock on "Lead sheet" reads what this banner already loaded (no request of its own).
+  const gateSummary = data?.summary
+  useEffect(() => { if (isStaff) publishGate(store.me.id, gateFromDailySummary(gateSummary)) }, [isStaff, store.me.id, gateSummary])
 
   if (!isStaff || !data || onTasks) return null
   const state = promptState(data.summary)

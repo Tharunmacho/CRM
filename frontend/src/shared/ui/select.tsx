@@ -294,6 +294,7 @@ export const Select = forwardRef<
         aria-describedby={rest['aria-describedby']}
         disabled={disabled}
         style={style}
+        data-placeholder={!multiple && selectedOptions.length === 1 && selectedOptions[0].value === '' ? '' : undefined}
         className={cn('custom-select-trigger', compact ? 'h-9' : 'h-10', className)}
         onClick={() => (open ? close() : show())}
         onKeyDown={handleKeys}

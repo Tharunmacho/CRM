@@ -1,0 +1,10 @@
+/* Data Bank expandable row: the grid itself is the shared .ld-xgrid (db-fit.css); only the profile pointer is new. */
+.dbx-link { padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.dbx-link:hover { color: var(--primary-strong, var(--primary)); }
+.dbx-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
+.ld-xcell.is-large dt { color: var(--text-muted); }
+
+/* The row's actions under the grid: left aligned with their labels, not the 32px icon buttons of the table cells. */
+.dbx-acts .db-acts { flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
+:root:root .db-tbl.is-grid .dbx-acts .db-act.is-label, :root:root .db-tbl.is-grid .dbx-acts .db-act.is-form { width: auto; min-width: 36px; height: 34px; padding: 0 12px; }
+:root:root .db-tbl.is-grid .dbx-acts .db-act.is-label span, :root:root .db-tbl.is-grid .dbx-acts .db-act.is-form span { display: inline; white-space: nowrap; }

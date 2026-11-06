@@ -320,3 +320,12 @@ test('interest levels map onto the existing initial-call result', () => {
   assert.equal(interest.callInterestFor('not_interested'), 'no')
   assert.equal(interest.callInterestFor(''), '')
 })
+
+test('the form shows only the last four digits of an Aadhaar number, whatever the server sent', () => {
+  assert.equal(model.normalizeForm(server({ aadhaar: { maskedNumber: 'XXXX XXXX 7777' } })).aadhaarMasked, 'XXXX XXXX 7777')
+  assert.equal(model.normalizeForm(server({ aadhaar: { maskedNumber: '999988887777' } })).aadhaarMasked, 'XXXX XXXX 7777')
+  assert.ok(!JSON.stringify(model.normalizeForm(server({ aadhaar: { maskedNumber: '9999 8888 7777' } }))).includes('99998888'))
+  assert.equal(model.normalizeForm(server({ aadhaar: null })).aadhaarMasked, '')
+  assert.equal(model.normalizeForm(server()).aadhaarMasked, '')
+  assert.equal(model.maskedAadhaar('12'), '')
+})

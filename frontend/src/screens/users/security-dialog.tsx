@@ -40,7 +40,7 @@ export function SecurityDialog({ user, kind, onClose }: { user: User; kind: 'pas
   return <Dialog open onClose={close} width="md" title={kind === 'password' ? 'Reset password' : 'Sign out everywhere'}
     description="Account security"
     footer={<><Button disabled={busy} variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" type="submit" form="security-form" disabled={busy}>{busy ? 'Saving…' : kind === 'password' ? 'Reset password' : 'Sign out everywhere'}</Button></>}>
-    <form id="security-form" noValidate className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit() }}>
+    <form id="security-form" noValidate className="ui-form-stack" onSubmit={(event) => { event.preventDefault(); void submit() }}>
       <div className="uv-target"><UserAvatar name={user.name} /><div><p>{user.name}</p><span>{user.email}</span></div></div>
       <p className="uv-note">{kind === 'password'
         ? 'Set a new password. This person will be signed out everywhere. Their account stays active or inactive as it is now. The password is not written in the history.'

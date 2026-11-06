@@ -280,19 +280,23 @@ def test_passport_read_from_the_printed_page_warns_instead_of_trusting_silently(
     assert any("printed page" in w for w in warnings)
 
 
-def test_only_name_birth_date_and_gender_map_from_aadhaar_never_its_mobile_number():
+def test_only_stated_details_map_from_aadhaar_never_its_number_or_mobile_number():
     response = AadhaarResponse.model_validate({
         "request_id": "a1", "page_count": 1, "languages_used": "eng", "total_processing_time_ms": 3,
         "aadhaar": {"name": "ALEX EXAMPLE", "aadhaar_number": "000000000000", "masked_aadhaar_number": "XXXX XXXX 0000",
                     "aadhaar_number_valid": True, "date_of_birth": "1990-01-01", "gender": "male",
-                    "mobile_number": "0000000000", "address": "1 Example Road", "care_of": "S/O X",
+                    "mobile_number": "0000000000", "address": "1 Example Road", "care_of": "S/O Ramesh Example",
                     "pincode": "000000", "vid": "0000000000000000", "enrollment_id": "0000/00000/00000",
                     "document_side": "both"},
         "pages": [PAGE]})
 
     fields, _ = aadhaar_fields(response)
 
-    assert set(fields.model_dump(exclude_none=True)) == {"name", "dob", "gender"}
+    mapped = fields.model_dump(exclude_none=True)
+    assert set(mapped) == {"name", "dob", "gender", "father_name", "current_address"}
+    assert mapped["father_name"] == "Ramesh Example" and mapped["current_address"] == "1 Example Road"
+    # Nothing of the card's numbers (Aadhaar, VID, enrolment id, mobile, pincode) is in the mapped fields.
+    assert not any(secret in str(mapped) for secret in ("000000000000", "0000000000000000", "0000/00000/00000", "0000000000", "000000"))
 
 
 def test_resume_text_joins_the_pages_of_the_stored_resume():

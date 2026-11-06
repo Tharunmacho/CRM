@@ -11,7 +11,7 @@ import { Tabs } from '@/shared/ui/overlay'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import { ClientDialog } from '@/features/clients/components/client-dialog'
 import {
-  AgreementPill, Avatar, CopyButton, DemandCell, Place, ViewToggle, demandByClient, downloadCsv, useElementWidth, useSavedView,
+  AgreementPill, Avatar, CopyButton, DemandCell, Place, ViewToggle, WebsiteLink, demandByClient, downloadCsv, useElementWidth, useSavedView,
   type Demand,
 } from '@/features/clients/components/parts'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
@@ -67,6 +67,8 @@ export default function ClientsPage() {
   const headline = (client: Client) => companiesOf(client)[0]?.name ?? client.name
   const title = (client: Client) => { const own = companiesOf(client); return own.length > 1 ? `${headline(client)} +${own.length - 1}` : headline(client) }
   const sectorsOf = (client: Client) => [...new Set(companiesOf(client).map((company) => company.industry?.trim()).filter(Boolean) as string[])]
+  /** The website of the company shown as the client's headline: the first one that has an address. */
+  const websiteOf = (client: Client) => companiesOf(client).find((company) => company.website?.trim())?.website ?? ''
   const placeOf = (client: Client) => {
     const home = companiesOf(client)[0]
     return { country: client.country || home?.country, city: client.city || home?.city }
@@ -93,10 +95,11 @@ export default function ClientsPage() {
         && (!q
           || c.name.toLowerCase().includes(q)
           || (c.email ?? '').toLowerCase().includes(q)
+          || (c.designation ?? '').toLowerCase().includes(q)
           || (c.phone ?? '').includes(q)
           || (c.city ?? '').toLowerCase().includes(q)
           || (c.country ?? '').toLowerCase().includes(q)
-          || own.some((co) => [co.name, co.industry, co.contactPerson, co.contactEmail, co.city].some((value) => (value ?? '').toLowerCase().includes(q))))
+          || own.some((co) => [co.name, co.industry, co.contactPerson, co.contactEmail, co.city, co.website].some((value) => (value ?? '').toLowerCase().includes(q))))
     })
     const label = (c: Client) => (companiesByClient.get(c.id)?.[0]?.name ?? c.name)
     if (sort === 'name') return [...matched].sort((a, b) => label(a).localeCompare(label(b)))
@@ -117,16 +120,19 @@ export default function ClientsPage() {
       render: (c) => {
         const sectors = sectorsOf(c)
         const detail = sectors.length ? sectors.slice(0, 2).join(' · ') : companiesOf(c).length ? 'No industry added' : 'No company added yet'
-        return <RecordIdentity name={title(c)} detail={<span title={detail}>{detail}</span>} />
+        const website = websiteOf(c)
+        return <RecordIdentity name={title(c)} detail={<><span className="cl-site" title={detail}>{detail}</span>{website && <WebsiteLink value={website} className="cl-site" />}</>} />
       },
     },
     {
       key: 'contact',
       header: 'Contact person',
       width: '22%',
+      align: 'left',
       render: (c) => (
         <div className="cl-cell">
           <b title={c.name}>{c.name}</b>
+          {c.designation && <span title={c.designation}>{c.designation}</span>}
           {c.phone && <span className="cl-line ident">{c.whatsapp && <MessageCircle size={12} className="cl-wa" aria-label="Has WhatsApp" />}<a href={`tel:${c.phone}`} title={c.phone} onClick={(event) => event.stopPropagation()}>{c.phone}</a></span>}
           {c.email && <span className="cl-line"><a href={`mailto:${c.email}`} title={c.email} onClick={(event) => event.stopPropagation()}>{c.email}</a><CopyButton value={c.email} label={`Copy email of ${c.name}`} /></span>}
         </div>
@@ -153,7 +159,7 @@ export default function ClientsPage() {
     { key: 'status', header: 'Status', width: '8%', render: (c) => <StatusPill status={c.status} /> },
     {
       key: 'open',
-      header: 'Open',
+      header: 'Actions',
       actions: true,
       render: (c) => <span className="cl-open" aria-label={`Open ${title(c)}`}>Open<ArrowRight size={14} aria-hidden="true" /></span>,
     },
@@ -165,12 +171,12 @@ export default function ClientsPage() {
 
   const exportCsv = () => downloadCsv(
     `clients-${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Company', 'Industry', 'Contact person', 'Email', 'Phone', 'WhatsApp', 'Country', 'City', 'Agreement', 'Open orders', 'Openings left', 'Status'],
+    ['Company', 'Industry', 'Website', 'Contact person', 'Designation', 'Email', 'Phone', 'WhatsApp', 'Country', 'City', 'Agreement', 'Open orders', 'Openings left', 'Status'],
     rows.map((c) => {
       const place = placeOf(c)
       const { total, filed } = agreementOf(c)
       const entry = demand.get(c.id)
-      return [title(c), sectorsOf(c).join('; '), c.name, c.email, c.phone, c.whatsapp, place.country, place.city, !total ? '' : filed === total ? 'Uploaded' : filed ? `${filed} of ${total} uploaded` : 'Missing', entry?.orders ?? 0, entry?.toFill ?? 0, c.status]
+      return [title(c), sectorsOf(c).join('; '), websiteOf(c), c.name, c.designation, c.email, c.phone, c.whatsapp, place.country, place.city, !total ? '' : filed === total ? 'Uploaded' : filed ? `${filed} of ${total} uploaded` : 'Missing', entry?.orders ?? 0, entry?.toFill ?? 0, c.status]
     }),
   )
 
@@ -213,7 +219,7 @@ export default function ClientsPage() {
           { key: 'inactive', label: 'Inactive' },
         ]} active={tab} onChange={(key) => { setTab(key as typeof tab); setShown(CARD_PAGE) }} />
         <div className="cl-toolbar">
-          <SearchInput value={query} onChange={(value) => { setQuery(value); setShown(CARD_PAGE) }} placeholder="Search company or contact" />
+          <SearchInput value={query} onChange={(value) => { setQuery(value); setShown(CARD_PAGE) }} placeholder="Search company, contact or website" />
           <Select aria-label="Filter by industry" value={industry} onChange={(event) => { setIndustry(event.target.value); setShown(CARD_PAGE) }}>
             <option value="">All industries</option>
             {industries.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -270,7 +276,8 @@ export default function ClientsPage() {
                       <StatusPill status={c.status} />
                     </header>
                     <dl className="cl-facts">
-                      <div><dt>Contact</dt><dd title={c.name}>{c.name}</dd></div>
+                      <div><dt>Contact</dt><dd title={c.designation ? `${c.name}, ${c.designation}` : c.name}>{c.designation ? `${c.name} · ${c.designation}` : c.name}</dd></div>
+                      {websiteOf(c) && <div><dt>Website</dt><dd><WebsiteLink value={websiteOf(c)} /></dd></div>}
                       <div><dt>Phone</dt><dd>{c.phone ? <a className="ident" href={`tel:${c.phone}`}>{c.phone}</a> : <span className="cl-quiet">Not added</span>}</dd></div>
                       <div><dt>Email</dt><dd>{c.email ? <><a href={`mailto:${c.email}`} title={c.email}>{c.email}</a><CopyButton value={c.email} label={`Copy email of ${c.name}`} /></> : <span className="cl-quiet">Not added</span>}</dd></div>
                       <div><dt>Location</dt><dd><Place country={place.country} city={place.city} /></dd></div>

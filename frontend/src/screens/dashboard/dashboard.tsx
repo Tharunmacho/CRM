@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowDownToLine, ArrowRight, ArrowUpRight, BriefcaseBusiness, CalendarClock, Check, CheckCheck, ChevronRight, Clock3, FileSearch, ListChecks, Mail, Plus, RefreshCw, Search, UserPlus, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
@@ -7,7 +7,7 @@ import { DataTable, type Column } from '@/shared/ui/table'
 import { Dialog } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { dateLabel, dateTimeLabel } from '@/shared/lib/format'
-import { useReportData, type DashboardResult, type DashboardTask, type OrderMetrics, type OverviewItem } from '@/features/reports/report-api'
+import { LEAD_REPORT_TOPICS, useReportData, type DashboardResult, type DashboardTask, type OrderMetrics, type OverviewItem } from '@/features/reports/report-api'
 import { SourceHealth } from '@/features/dashboard/components/source-health'
 import { NeedsAttention } from '@/features/dashboard/components/needs-attention'
 import { IntakeBlock, IntakeSkeleton, SOURCE_KEYS, number, type IntakeOverview } from '@/features/dashboard/components/intake-panel'
@@ -15,6 +15,9 @@ import { CandidateCards, roleLine, OrderCards, TaskCards, useNarrow } from '@/fe
 import { Avatar, Flag, Pill, SlaMeter, SourceTag, StageMini } from '@/features/dashboard/components/identity'
 import { PipelineOverview } from '@/features/dashboard/components/overview-panel'
 import { overviewCsvRows } from '@/features/dashboard/overview'
+import { LeadOverview } from '@/features/dashboard/components/lead-overview'
+import { leadCsvRows } from '@/features/dashboard/lead-overview'
+import { gateState, readGate, subscribeGate } from '@/features/leads/lead-gate'
 import { AttentionList, type AttentionItem } from '@/features/dashboard/components/recent-arrivals'
 import { PERIODS, arrivalGrid, inWindow, intakeBuckets, isVerified, periodStart, recentDays, type Period } from '@/features/dashboard/metrics'
 import '@/styles/dashboard-ref.css'
@@ -52,7 +55,9 @@ export default function DashboardPage() {
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('open')
   const [todoError, setTodoError] = useState('')
   const [pendingTodo, setPendingTodo] = useState('')
-  const { data, error, refresh, refreshing } = useReportData<DashboardResult>(`/dashboard${staff ? `?staff_id=${encodeURIComponent(staff)}` : ''}`, store.me.id)
+  const { data, error, refresh, refreshing } = useReportData<DashboardResult>(`/dashboard${staff ? `?staff_id=${encodeURIComponent(staff)}` : ''}`, store.me.id, '', LEAD_REPORT_TOPICS)
+  // A staff member who has not finished today's daily tasks cannot work leads yet; the shell publishes that state (read-only here).
+  const leadGate = gateState(store.me.role, useSyncExternalStore(subscribeGate, () => readGate(store.me.id), () => null))
   const narrow = useNarrow()
   const isStaff = store.me.role === 'staff'
   const isAdmin = store.me.role === 'admin'
@@ -115,7 +120,7 @@ export default function DashboardPage() {
     { key: 'designation', header: 'Position', value: row => row.designation, width: '19%', render: row => <div className="dr-copy"><strong>{row.designation}</strong><small>{row.client}</small></div> },
     { key: 'country', header: 'Country', value: row => store.order(row.id)?.country ?? '', width: '18%', render: row => { const order = store.order(row.id); return <span className="dr-place"><Flag country={order?.country} />{[order?.city, order?.country].filter(Boolean).join(', ') || 'Not added'}</span> } },
     { key: 'progress', header: 'Deployed', value: row => row.openings ? row.deployed / row.openings : 0, width: '20%', render: row => <div className="dr-progress" title={`${row.deployed} deployed of ${row.openings} openings`}><span><i style={{ width: `${row.openings ? Math.min(100, row.deployed / row.openings * 100) : 0}%` }} /></span><b>{number(row.deployed)}/{number(row.openings)}</b></div> },
-    ...(['matched', 'selected'] as const).map(key => ({ key, header: key[0].toUpperCase() + key.slice(1), value: (row: OrderMetrics) => row[key], align: 'right' as const, width: '12%' })),
+    ...(['matched', 'selected'] as const).map(key => ({ key, header: key[0].toUpperCase() + key.slice(1), value: (row: OrderMetrics) => row[key], align: 'center' as const, width: '12%' })),
   ]
   function openTask(task: DashboardTask) { if (task.applicationId) { setOpenStage(task.stage || undefined); setOpenApp(task.applicationId) } else navigate(`/candidates/${task.candidateId}`) }
   function openPlacement(item: OverviewItem) { setOpenStage(item.stage); setOpenApp(item.applicationId) }
@@ -136,6 +141,7 @@ export default function DashboardPage() {
       ['Overdue tasks', data.taskCounts.overdue], ['Escalated tasks', data.taskCounts.escalated],
       ...data.pipeline.map(row => [`Stage ${row.stage}: ${row.label}`, row.count]),
       ...(data.overview ? overviewCsvRows(data.overview) : []),
+      ...(data.leads ? leadCsvRows(data.leads, period) : []),
     ]
     const csv = rows.map(row => row.map(value => {
       const text = String(value)
@@ -214,6 +220,8 @@ export default function DashboardPage() {
 
       {data.overview && <PipelineOverview overview={data.overview} scope={!isTeam ? 'you' : staff ? store.user(staff)?.name.split(' ')[0] ?? 'the chosen recruiter' : 'the whole team'} showOwner={isTeam && !staff} narrow={narrow}
         placeOf={orderId => store.order(orderId) ?? {}} onOpen={openPlacement} />}
+      {data.leads && <LeadOverview leads={data.leads} period={period} gate={leadGate} staffId={isTeam ? staff : ''} personName={staff ? store.user(staff)?.name.split(' ')[0] : null}
+        onOpenSheet={() => navigate('/leads')} onOpenLead={id => navigate(`/leads?lead=${encodeURIComponent(id)}`)} />}
       {!data.overview && <p role="status" className="dr-error">The Pipeline overview cards (offer letter, visa, departure, idle stage) need the latest server. Restart the CRM API, then press Refresh.<button onClick={refresh}>Refresh</button></p>}
 
       <section className="dr-card dr-recent">

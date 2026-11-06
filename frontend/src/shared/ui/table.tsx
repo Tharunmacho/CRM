@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListFilter } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, ListFilter, MoreHorizontal, type LucideIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from './primitives'
 import { EmptyState } from './display'
+import '@/styles/data-table.css'
 
 export interface Column<T> {
   key: string
@@ -20,7 +22,16 @@ export interface Column<T> {
   priority?: 'high' | 'medium' | 'low'
   /** A row-actions column: fixed to its content, right-aligned, never wrapped or clipped. */
   actions?: boolean
+  /**
+   * Header and cell alignment. Short values read best centred (the default), so every column is centred except the
+   * first one, which carries the record's identity and starts on the left. Set 'left' on long text columns.
+   */
   align?: 'left' | 'right' | 'center'
+  /**
+   * Keeps the column in view while the table scrolls sideways. The first column and the actions column pin themselves;
+   * use 'none' to opt out.
+   */
+  pin?: 'start' | 'end' | 'none'
   className?: string
 }
 
@@ -54,6 +65,12 @@ interface DataTableProps<T> {
    * table. 768 (default), 1024 or 1280; `false` keeps a table at every width.
    */
   stackBelow?: 768 | 1024 | 1280 | false
+  /** Shows shaped placeholder rows instead of the rows (first load). */
+  loading?: boolean
+  /** Opts out of the shared grid look (header band, column dividers, zebra rows) for a table that needs the plain list. */
+  plain?: boolean
+  /** Zebra stripes (default true). */
+  zebra?: boolean
   /** Reset pagination for an external search without losing column filters or sort. */
   resetPageKey?: string
   /** For bounded endpoints: sort/filter/page decisions are delegated to the server. */
@@ -82,6 +99,9 @@ export function DataTable<T>({
   sticky = false,
   maxHeight = '70vh',
   stackBelow = 768,
+  loading = false,
+  plain = false,
+  zebra = true,
   resetPageKey,
   server,
 }: DataTableProps<T>) {
@@ -152,23 +172,71 @@ export function DataTable<T>({
       a.localeCompare(b, undefined, { numeric: true }),
     )
 
-  const pad = compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3.5'
-  const headPad = compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3'
-  const fixedLayout = columns.some((col) => col.width)
-  const rule = gridLines ? 'border-r border-rule-soft last:border-r-0' : ''
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const edgeKey = `${pageRows.length}:${columns.length}:${stackBelow}`
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth
+      el.dataset.edgeStart = el.scrollLeft > 2 ? 'true' : 'false'
+      el.dataset.edgeEnd = max > 2 && el.scrollLeft < max - 2 ? 'true' : 'false'
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(el)
+    const table = el.querySelector('table')
+    if (table) observer?.observe(table)
+    return () => { el.removeEventListener('scroll', update); observer?.disconnect() }
+  }, [edgeKey])
 
-  if (!rows.length && !server) {
+  const grid = !plain
+  const pad = grid ? '' : compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3.5'
+  const headPad = grid ? '' : compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3'
+  const fixedLayout = columns.some((col) => col.width)
+  const rule = !grid && gridLines ? 'border-r border-rule-soft last:border-r-0' : ''
+  const alignOf = (col: Column<T>, index: number): 'left' | 'center' | 'right' =>
+    col.actions ? 'center' : col.align ?? (index === 0 ? 'left' : 'center')
+  const pinOf = (col: Column<T>, index: number): 'start' | 'end' | undefined => {
+    if (!grid || col.pin === 'none') return undefined
+    if (col.pin) return col.pin
+    if (col.actions) return 'end'
+    return index === 0 && columns.length > 2 ? 'start' : undefined
+  }
+  const widthOf = (col: Column<T>) => {
+    const raw = col.minWidth ?? col.width ?? ''
+    const px = /^([d.]+)px$/.exec(raw)
+    if (px) return Number(px[1])
+    const rem = /^([d.]+)rem$/.exec(raw)
+    if (rem) return Number(rem[1]) * 16
+    return col.actions ? 96 : 120
+  }
+  const minWidthFor = (skip: (col: Column<T>) => boolean) =>
+    columns.filter((col) => !skip(col)).reduce((sum, col) => sum + widthOf(col), 0) + (selectable ? 44 : 0) + (openColumn ? 64 : 0)
+  const pinStyle = (pin: 'start' | 'end' | undefined): React.CSSProperties | undefined =>
+    pin === 'start' ? { left: selectable ? 44 : 0 } : pin === 'end' ? { right: 0 } : undefined
+  const tableVars = grid
+    ? ({
+        '--tbl-min': `${minWidthFor(() => false)}px`,
+        '--tbl-min-md': `${minWidthFor((col) => col.priority === 'low')}px`,
+        '--tbl-min-sm': `${minWidthFor((col) => col.priority === 'low' || col.priority === 'medium')}px`,
+      } as React.CSSProperties)
+    : undefined
+  const skeletonRows = Array.from({ length: Math.min(pageSize, 6) })
+
+  if (!rows.length && !server && !loading) {
     return <>{empty ?? <EmptyState title="Nothing here yet" />}</>
   }
 
   return (
-    <div className={cn('ui-data-table min-w-0 max-w-full', compact && 'is-compact', stackBelow && `ui-table-stack-${stackBelow}`)}>
-      <div className={cn('ui-table-scroll scrollbar-thin max-w-full overflow-x-auto', sticky && 'is-sticky overflow-y-auto')} style={sticky ? { maxHeight } : undefined}>
-        <table className={cn('w-full border-collapse', compact ? 'text-[13px]' : 'text-[14px]', fixedLayout && 'is-fixed')}>
+    <div className={cn('ui-data-table min-w-0 max-w-full', compact && 'is-compact', dense && 'is-dense', grid ? 'is-grid' : 'is-plain', grid && zebra && 'is-zebra', loading && 'is-loading', stackBelow && `ui-table-stack-${stackBelow}`)}>
+      <div ref={scrollRef} data-edge-start="false" data-edge-end="false" className={cn('ui-table-scroll scrollbar-thin max-w-full overflow-x-auto', sticky && 'is-sticky overflow-y-auto')} style={sticky ? { maxHeight } : undefined}>
+        <table className={cn('w-full border-collapse', compact ? 'text-[13px]' : 'text-[14px]', fixedLayout && 'is-fixed')} style={tableVars} aria-busy={loading || undefined}>
           <thead>
             <tr className="border-b border-rule">
               {selectable && (
-                <th className={cn('w-9 text-left', headPad)}>
+                <th className={cn('w-9 text-left', grid && 'ui-select-cell is-pin-start', headPad)}>
                   <Checkbox
                     checked={allOnPageSelected}
                     indeterminate={
@@ -179,7 +247,9 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {columns.map((col) => {
+              {columns.map((col, colIndex) => {
+                const al = alignOf(col, colIndex)
+                const pin = pinOf(col, colIndex)
                 const isSorted = sort?.key === col.key
                 const active = server ? !!server.filters[col.key] : (filters[col.key] ?? []).length > 0
                 return (
@@ -192,21 +262,19 @@ export function DataTable<T>({
                           : 'none'
                         : undefined
                     }
-                    style={{ width: col.actions ? undefined : col.width, minWidth: col.minWidth }}
+                    style={{ width: col.actions ? undefined : col.width, minWidth: col.minWidth, ...pinStyle(pin) }}
                     className={cn(
                       'relative align-middle text-[13px] font-medium text-ink-500',
                       headPad,
                       rule,
                       col.priority && `col-p-${col.priority}`,
-                      col.actions && 'ui-actions-cell text-right',
-                      col.align === 'right'
-                        ? 'text-right'
-                        : col.align === 'center'
-                          ? 'text-center'
-                          : 'text-left',
+                      col.actions && 'ui-actions-cell',
+                      grid
+                        ? [`ui-c-${al}`, pin && `is-pin-${pin}`, col.sortable && 'is-sortable', isSorted && 'is-sorted']
+                        : [col.actions && 'text-right', col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'],
                     )}
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <span className="ui-th-inner inline-flex items-center gap-1">
                       <button
                         type="button"
                         disabled={!col.sortable}
@@ -224,12 +292,13 @@ export function DataTable<T>({
                       >
                         {col.header}
                       </button>
-                      {isSorted &&
-                        (sort!.dir === 'asc' ? (
+                      {isSorted
+                        ? (sort!.dir === 'asc' ? (
                           <ChevronUp className="h-3 w-3 text-ink-500" />
                         ) : (
                           <ChevronDown className="h-3 w-3 text-ink-500" />
-                        ))}
+                        ))
+                        : grid && col.sortable && <ChevronsUpDown className="ui-sort-hint h-3 w-3" aria-hidden="true" />}
                       {col.filterable && (
                         <button
                           type="button"
@@ -283,11 +352,22 @@ export function DataTable<T>({
                   </th>
                 )
               })}
-              {openColumn && <th className={cn('w-14', headPad)} aria-label="Open" />}
+              {openColumn && <th className={cn('w-14', grid && 'ui-actions-cell ui-c-center is-pin-end', headPad)} style={grid ? pinStyle('end') : undefined} aria-label="Open" />}
             </tr>
           </thead>
           <tbody>
-            {pageRows.map((row) => {
+            {loading && skeletonRows.map((_, rowIndex) => (
+              <tr key={`skeleton-${rowIndex}`} className="ui-skel-row" aria-hidden="true">
+                {selectable && <td className="ui-select-cell is-pin-start" data-label="" />}
+                {columns.map((col, colIndex) => (
+                  <td key={col.key} data-label={col.header} className={cn(`ui-c-${alignOf(col, colIndex)}`, col.priority && `col-p-${col.priority}`, col.actions && 'ui-actions-cell')}>
+                    <span className="ui-skel" style={{ width: `${46 + ((rowIndex * 7 + colIndex * 13) % 40)}%` }} />
+                  </td>
+                ))}
+                {openColumn && <td className="ui-actions-cell ui-c-center" data-label="" />}
+              </tr>
+            ))}
+            {!loading && pageRows.map((row) => {
               const id = rowKey(row)
               const isSelected = selected.includes(id)
               return (
@@ -313,7 +393,7 @@ export function DataTable<T>({
                   )}
                 >
                   {selectable && (
-                    <td className={cn('align-middle', pad)} data-label="" data-select onClick={(e) => e.stopPropagation()}>
+                    <td className={cn('align-middle', grid && 'ui-select-cell is-pin-start', pad)} data-label="" data-select onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={isSelected}
                         aria-label={`Select row ${id}`}
@@ -325,27 +405,32 @@ export function DataTable<T>({
                       />
                     </td>
                   )}
-                  {columns.map((col) => (
+                  {columns.map((col, colIndex) => {
+                    const al = alignOf(col, colIndex)
+                    const pin = pinOf(col, colIndex)
+                    return (
                     <td
                       key={col.key}
                       data-label={col.header}
-                      style={{ minWidth: col.minWidth }}
+                      style={{ minWidth: col.minWidth, ...pinStyle(pin) }}
                       className={cn(
                         'align-middle text-ink-700',
                         pad,
                         rule,
                         col.priority && `col-p-${col.priority}`,
-                        col.actions && 'ui-actions-cell text-right',
-                        col.align === 'right' && 'text-right',
-                        col.align === 'center' && 'text-center',
+                        col.actions && 'ui-actions-cell',
+                        grid
+                          ? [`ui-c-${al}`, pin && `is-pin-${pin}`]
+                          : [col.actions && 'text-right', col.align === 'right' && 'text-right', col.align === 'center' && 'text-center'],
                         col.className,
                       )}
                     >
                       {col.render ? col.render(row) : <span className="block max-w-full break-words line-clamp-2" title={valueOf(col, row) || undefined}>{valueOf(col, row) || '—'}</span>}
                     </td>
-                  ))}
+                    )
+                  })}
                   {openColumn && (
-                    <td className={cn('ui-actions-cell w-14 align-middle text-right', pad)} data-label="">
+                    <td className={cn('ui-actions-cell w-14 align-middle', grid ? 'ui-c-center is-pin-end' : 'text-right', pad)} style={grid ? pinStyle('end') : undefined} data-label="">
                       <RowOpen />
                     </td>
                   )}
@@ -356,14 +441,14 @@ export function DataTable<T>({
         </table>
       </div>
 
-      {!sorted.length && (
+      {!loading && !sorted.length && (
         empty ?? <EmptyState
           title="Nothing matches your filters"
           description="Remove a filter to see more results."
         />
       )}
 
-      {sorted.length > 0 && (
+      {!loading && sorted.length > 0 && (
         <div className="ui-table-pagination flex items-center justify-between border-t border-rule-soft px-4 py-3 text-[13px] text-ink-500">
           <span className="tnum" aria-live="polite">
             <span className="pagination-label">Showing </span>
@@ -394,6 +479,83 @@ export function DataTable<T>({
         </div>
       )}
     </div>
+  )
+}
+
+export interface RowMenuItem {
+  label: string
+  icon?: LucideIcon
+  onSelect: () => void
+  tone?: 'default' | 'danger'
+  /** Keeps the item visible but unusable, with the reason as its tooltip. */
+  disabledReason?: string
+}
+
+/**
+ * The three-dot actions menu of a table row. It opens as a fixed popover in a portal, so the table's scroll area
+ * and the card edge can never clip it, and it closes on scroll, resize, Escape and outside clicks.
+ */
+export function RowMenu({ label = 'Row actions', items }: { label?: string; items: RowMenuItem[] }) {
+  const [open, setOpen] = useState(false)
+  const [at, setAt] = useState({ top: 0, left: 0 })
+  const trigger = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(false); trigger.current?.focus() } }
+    const onDown = (event: MouseEvent) => { if (!(event.target as HTMLElement).closest('.ui-row-menu, .ui-row-menu-trigger')) setOpen(false) }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousedown', onDown)
+    }
+  }, [open])
+  if (items.length === 0) return null
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className="ui-row-menu-trigger"
+        title={label}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(event) => {
+          event.stopPropagation()
+          const box = event.currentTarget.getBoundingClientRect()
+          const height = items.length * 38 + 12
+          setAt({ top: box.bottom + height + 8 > window.innerHeight ? Math.max(8, box.top - height - 4) : box.bottom + 4, left: Math.max(8, box.right - 184) })
+          setOpen((value) => !value)
+        }}
+      >
+        <MoreHorizontal size={16} />
+      </button>
+      {open && createPortal(
+        <div className="ui-row-menu" role="menu" style={{ top: at.top, left: at.left }}>
+          {items.map(({ label: text, icon: Icon, onSelect, tone, disabledReason }) => (
+            <button
+              key={text}
+              type="button"
+              role="menuitem"
+              className={cn('ui-row-menu-item', tone === 'danger' && 'is-danger')}
+              disabled={Boolean(disabledReason)}
+              title={disabledReason}
+              onClick={(event) => { event.stopPropagation(); setOpen(false); onSelect() }}
+            >
+              {Icon && <Icon size={15} aria-hidden="true" />}
+              {text}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }
 

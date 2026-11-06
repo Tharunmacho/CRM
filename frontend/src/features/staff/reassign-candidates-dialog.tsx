@@ -47,7 +47,7 @@ export function ReassignCandidatesDialog({ candidateIds, onClose, onSaved, descr
   return <Dialog open onClose={() => { if (!busy) onClose() }} title={`Reassign ${ids.length === 1 ? 'candidate' : `${ids.length} candidates`}`}
     description={description || 'Choose who will take responsibility for the selected candidates.'}
     footer={<><Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || availability.loading || !!availability.error || !validOwner || !reason.trim() || !ids.length || restartMissing} onClick={() => void save()}>{busy ? 'Reassigning…' : 'Confirm reassignment'}</Button></>}>
-    <div className="space-y-4">
+    <div className="ui-form-stack">
       <p className="rounded-control border border-amber-100 bg-amber-50 p-3 text-sm text-amber-700">All open tasks for these candidates move to the new owner, including tasks from other applications. Original deadlines keep running, and completed work and assignment history are preserved.</p>
       {availability.loading && <p role="status" className="text-sm text-ink-500">Checking current staff availability…</p>}
       {availability.error && <div role="alert" className="rounded-control bg-stamp-50 p-3 text-sm text-stamp-700">{availability.error}<Button size="sm" className="mt-2" onClick={availability.refresh}>Retry availability check</Button></div>}

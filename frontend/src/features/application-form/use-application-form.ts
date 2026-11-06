@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { classifyLoadError, type LoadErrorView } from './load-error'
 import { liveInterval } from '@/shared/state/live'
+import { isOtherRecord } from '@/shared/state/live-events'
 import { FORM_LIVE_TOPICS, loadApplicationForm, saveApplicationForm, uploadFormDocument, type FormTarget } from './form-api'
 import { buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, validateDraft } from './form-model'
 import type { ApplicationFormData, DocumentKind, FormDraft } from './types'
 
 const POLL_MS = 30_000
 const READING_POLL_MS = 4_000
+const READING_POLL_MAX_MS = 30_000
+/** A burst of live events (a document being read announces page after page) becomes one read. */
+const LIVE_WINDOW_MS = 1_200
 
 /**
  * Loads the form, keeps it current (live topics, plus a fast poll while a document is being read), and holds the
@@ -32,6 +36,8 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
   savingRef.current = saving
   const flashTimer = useRef<ReturnType<typeof setTimeout>>()
   const seq = useRef(0)
+  const lastSignature = useRef('')
+  const quietPolls = useRef(0)
 
   const apply = useCallback((next: ApplicationFormData) => {
     const nextBase = toDraft(next)
@@ -59,6 +65,12 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
     try {
       const next = await loadApplicationForm(candidateId, { orderId, applicationId })
       if (mine !== seq.current) return
+      // A background read that finds exactly what is on screen changes nothing (no re-render, no draft rebase).
+      const signature = JSON.stringify(next)
+      const same = quiet && baseRef.current !== null && signature === lastSignature.current
+      lastSignature.current = signature
+      quietPolls.current = same ? quietPolls.current + 1 : 0
+      if (same) return
       apply(next)
       setError(null)
     } catch (cause) {
@@ -71,15 +83,28 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
 
   useEffect(() => {
     baseRef.current = null
+    lastSignature.current = ''
+    quietPolls.current = 0
     setForm(null); setDraft(null); setEditing(false); setError(null); setSaveError('')
     void reload(false)
     return () => { seq.current += 1 }
   }, [reload])
 
   const reading = form ? isReading(form) : false
+  // While a document is being read the form is polled quickly, backing off while nothing changes (a reader that is
+  // not running should not be asked every four seconds for as long as the page stays open).
   useEffect(
-    () => liveInterval(() => { if (!savingRef.current) void reload(true) }, reading ? READING_POLL_MS : POLL_MS, FORM_LIVE_TOPICS, { debounceMs: 250 }),
-    [reload, reading],
+    () => liveInterval(
+      () => (savingRef.current ? undefined : reload(true)),
+      () => (reading ? Math.min(READING_POLL_MAX_MS, READING_POLL_MS * 2 ** Math.min(3, quietPolls.current)) : POLL_MS),
+      FORM_LIVE_TOPICS,
+      {
+        debounceMs: LIVE_WINDOW_MS,
+        // Edits to other people's records are announced to the whole desk; only this candidate's matter here.
+        onChange: (change) => { if (!savingRef.current && !isOtherRecord(change, 'candidates', candidateId)) void reload(true) },
+      },
+    ),
+    [reload, reading, candidateId],
   )
   useEffect(() => () => clearTimeout(flashTimer.current), [])
 
@@ -99,6 +124,7 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
     try {
       const saved = await saveApplicationForm(candidateId, { orderId, applicationId }, body)
       baseRef.current = null // the saved copy is the new base; nothing to rebase
+      lastSignature.current = JSON.stringify(saved)
       apply(saved)
       setEditing(false)
       return true

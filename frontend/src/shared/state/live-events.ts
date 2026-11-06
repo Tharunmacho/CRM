@@ -59,6 +59,17 @@ export interface LiveEvents {
   flushHeld(): void
 }
 
+/**
+ * True when a change cannot concern one record of `topic`: the server named which records changed (admin/manager
+ * only, and only when few) and `id` is not among them. Anything uncertain (a resync, other topics too, no ids sent)
+ * is treated as relevant, so this can only save a refetch, never skip a needed one.
+ */
+export function isOtherRecord(change: LiveChange, topic: string, id: string): boolean {
+  if (change.resync || change.topics.some((name) => name !== topic)) return false
+  const ids = change.ids[topic]
+  return Array.isArray(ids) && ids.length > 0 && !ids.includes(id)
+}
+
 export const DEFAULT_DEBOUNCE_MS = 350
 const BACKOFF_START_MS = 1_000
 const BACKOFF_MAX_MS = 60_000

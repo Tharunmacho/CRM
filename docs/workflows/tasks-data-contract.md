@@ -10,7 +10,7 @@ This is the stable read contract for reports built on the Tasks daily-quota feat
 | `owner_id` | The recruiter (`auth_users.id`) the candidate was allocated to. |
 | `work_date` | Agency day it was allocated. An unfinished item is **postponed** on every later day (see below). |
 | `kind` | `stage`: a matched candidate's open application-stage task. `call`: a candidate the recruiter owns who is not matched to an order yet, worked through the initial call (then matching). |
-| `task_id`, `application_id`, `candidate_id` | For `stage`: the stage task (`workflow_tasks`) and placement (`crm_applications`; client/country/position come from its order). For `call`: both are null (the candidate's position/country preference is on `crm_candidates`). `candidate_id` is always set. |
+| `task_id`, `application_id`, `candidate_id` | For `stage`: the stage task (`workflow_tasks`) and placement (`crm_applications`; client/country/position come from its order). For `call`: both are null (the row falls back on the candidate's `designations[0]` (else first skill) for position and `country_preference` for country, flagged `positionIsPreferred` / `countryIsPreferred`; client has no fallback). `candidate_id` is always set. |
 | `stage` | Stage the candidate was at when allocated (1 to 11); null for `call`. |
 | `slot_no`, `session` | Place in the day's quota (1-based) and `morning` or `evening`. Default quota 5: slots 1-3 morning, 4-5 evening. |
 | `due_at` | The hourly deadline for this slot. |

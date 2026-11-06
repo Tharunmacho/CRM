@@ -99,7 +99,7 @@ export function MailCompose({ initial, address, close, changed }: { initial: Mai
     <Button disabled={!!busy} onClick={leave}>{locked ? 'Close' : 'Save and close'}</Button>
     {!locked && <><Button disabled={!!busy} onClick={() => void run('save', async () => { await persist() })}>Save draft</Button><Button className="mc-send" variant="primary" icon={<Send size={14} />} disabled={!!busy || ![form.to, form.cc, form.bcc].some((value) => addresses(value).length)} onClick={send}>{busy === 'send' ? 'Sending…' : 'Send'}</Button></>}
   </div>}>
-    <div className="space-y-4">
+    <div className="ui-form-stack">
       {error && <div role="alert" className="rounded-control border border-stamp-100 bg-stamp-50 p-3 text-sm text-stamp-700">{error}{attempted && <p className="mt-2">Check if the message was sent before you do anything else. This stops it from being sent twice.</p>}</div>}
       {draft.lastError && <p role="status" className="rounded-control bg-amber-50 p-3 text-sm text-amber-900">{draft.lastError} {draft.remoteState === 'error' && 'Your draft is saved in the CRM. Press Save draft to try saving it to the mailbox again.'}</p>}
       {locked && <div className="space-y-3 rounded-control border border-rule bg-field p-3"><div className="flex flex-wrap items-center gap-2"><Badge tone={draft.status === 'sent' ? 'navy' : 'amber'}>{deliveryLabel}</Badge><Button size="sm" disabled={!!busy} onClick={() => void run('status', status)}>Check if sent</Button>{draft.status === 'unknown' && <Button size="sm" disabled={!!busy} onClick={() => void run('reconcile', async () => { const result = await api.post<SendResult>(`/inbox/drafts/${draft.id}/reconcile`); accept(result.draft); if (result.attempt) setAttempts((rows) => [result.attempt!, ...rows.filter((item) => item.id !== result.attempt!.id)]) })}>Check Sent folder</Button>}</div>
@@ -110,9 +110,9 @@ export function MailCompose({ initial, address, close, changed }: { initial: Mai
         {attempted && verifiedNoAttempt && !currentAttempt && ['draft', 'failed'].includes(draft.status) && <Button size="sm" disabled={!!busy} onClick={() => { setAttempted(false); setVerifiedNoAttempt(false); setError(''); autoPaused.current = false }}>Go back to editing (not sent)</Button>}
         {draft.status === 'unknown' && <p className="text-xs text-ink-600">We could not confirm it was sent. It will not be sent again by itself.</p>}
       </div>}
-      <fieldset disabled={locked || (!!busy && busy !== 'save')} className="space-y-3">
+      <fieldset disabled={locked || (!!busy && busy !== 'save')} className="ui-form-stack">
         <Field label="To"><Input type="text" aria-label="Message recipients" value={form.to} onChange={(event) => change('to', event.target.value)} placeholder="name@example.com, another@example.com" /></Field>
-        <div className="grid gap-3 sm:grid-cols-2"><Field label="Cc"><Input value={form.cc} onChange={(event) => change('cc', event.target.value)} /></Field><Field label="Bcc"><Input value={form.bcc} onChange={(event) => change('bcc', event.target.value)} /></Field></div>
+        <div className="ui-fs-grid is-two"><Field label="Cc"><Input value={form.cc} onChange={(event) => change('cc', event.target.value)} /></Field><Field label="Bcc"><Input value={form.bcc} onChange={(event) => change('bcc', event.target.value)} /></Field></div>
         <Field label="Subject"><Input value={form.subject} onChange={(event) => change('subject', event.target.value)} maxLength={990} /></Field>
         <Field label="Message"><Textarea rows={12} aria-label="Message body" value={form.body} onChange={(event) => change('body', event.target.value)} maxLength={100000} placeholder="Write your message…" /></Field>
       </fieldset>

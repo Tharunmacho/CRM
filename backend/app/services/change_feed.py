@@ -102,6 +102,9 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "currencies": ("settings",),
     "job_categories": ("settings",),
     "crm_form_options": ("form_options", "settings"),
+    "crm_leads": ("leads",),
+    "crm_lead_batches": ("leads",),
+    "crm_lead_activities": ("leads",),
 }
 
 # Internal bookkeeping that no screen shows: writing to it announces nothing.
@@ -132,7 +135,7 @@ OWNER_TOPICS = frozenset({"todos", "notifications"})
 # Everything a browser may be told about. The two control topics are deliberately missing.
 CLIENT_TOPICS = frozenset({
     "candidates", "applications", "tasks", "clients", "companies", "orders", "designations", "notifications",
-    "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings", "form_options",
+    "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings", "form_options", "leads",
 })
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
 ID_ROLES = frozenset({"admin", "manager"})

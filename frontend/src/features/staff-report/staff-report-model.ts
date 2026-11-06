@@ -21,7 +21,14 @@ export interface DayRow {
   stageMoves: number
 }
 
-export interface ScorePart { key: 'tasks' | 'hours' | 'stages'; label: string; weight: number; ratio: number | null; detail: string }
+/** Lead sheet numbers of one person for the period (see backend/app/services/lead_metrics.py for the definitions). */
+export interface LeadNumbers {
+  available: boolean
+  assigned: number; contacted: number; notContacted: number; calls: number; worked: number; interested: number
+  resumesReceived: number; converted: number; conversionPercent: number | null; followUpsOverdue: number; open: number
+}
+
+export interface ScorePart { key: 'tasks' | 'hours' | 'stages' | 'leads'; label: string; weight: number; ratio: number | null; detail: string }
 
 export interface StaffRow {
   id: string
@@ -47,6 +54,8 @@ export interface StaffRow {
   }
   stuck: { count: number; oldestDays: number; examples: { candidateId: string; candidate: string; ref: string; stage: number; stageLabel: string; days: number }[] }
   goals: { candidatesPerDay: number; forwardedPerDay: number; stageMovesPerDay: number; scheduledDays: number }
+  /** Absent in a result from an older server. */
+  leads?: LeadNumbers
   score: number | null
   scoreParts: ScorePart[]
   days: DayRow[]
@@ -88,9 +97,9 @@ export interface StaffWeeklyReport {
   generatedAt: string
   timezone: string
   range: { from: string; to: string; days: string[]; isWeek: boolean; today: string; isCurrent: boolean }
-  formula: { weights: Record<string, number>; lines: string[] }
-  thresholds: { stuckDays: number; lowCompletionPercent: number; lowHoursPercent: number; backlogMin: number }
-  sources: { dailyTasks: { available: boolean; hasData: boolean; goals: Record<string, number> } }
+  formula: { weights: Record<string, number>; weightsWithLeads?: Record<string, number>; lines: string[] }
+  thresholds: { stuckDays: number; lowCompletionPercent: number; lowHoursPercent: number; backlogMin: number; leadsUntouchedMin?: number; leadsOverdueMin?: number }
+  sources: { dailyTasks: { available: boolean; hasData: boolean; goals: Record<string, number> }; leadSheet?: { available: boolean; hasData: boolean } }
   summary: {
     staffTotal: number; staffWorked: number; staffAbsent: number; staffPending: number; staffNotScheduled: number
     hoursWorked: number; hoursExpected: number; activeHours: number
@@ -98,6 +107,9 @@ export interface StaffWeeklyReport {
     taskCompletionPercent: number | null; stageMoves: number
     forwarded: number; interviewsScheduled: number; selected: number; visaReceived: number; visaStamped: number; deployed: number
     stuckCandidates: number; averageScore: number | null; highlights: number
+    leadsAvailable?: boolean; leadsAssigned?: number; leadsContacted?: number; leadsCalls?: number; leadsWorked?: number
+    leadsInterested?: number; leadsResumesReceived?: number; leadsConverted?: number; leadsConversionPercent?: number | null
+    leadsFollowUpsOverdue?: number
   }
   staff: StaffRow[]
   funnel: FunnelRow[]
@@ -130,6 +142,22 @@ export function mondayOf(day: string): string {
 export function weekOf(day: string): { from: string; to: string } {
   const from = mondayOf(day)
   return { from, to: addDays(from, 6) }
+}
+
+/** The server refuses a period longer than this many days. */
+export const MAX_RANGE_DAYS = 62
+
+/**
+ * The period to report on, from the address. Missing or invalid dates fall back to the current Monday-to-Sunday week;
+ * a lone start date means that start's week; a period longer than the server allows keeps its end and loses the
+ * oldest days (an old link with a 90-day range opens as the last 62 days instead of an error).
+ */
+export function rangeFromParams(fromParam: string | null, toParam: string | null, today: string): { from: string; to: string } {
+  const current = weekOf(today)
+  const from = validDay(fromParam) ? fromParam : current.from
+  const to = validDay(toParam) && toParam >= from ? toParam : validDay(fromParam) ? weekOf(from).to : current.to
+  const oldest = addDays(to, 1 - MAX_RANGE_DAYS)
+  return { from: from < oldest ? oldest : from, to }
 }
 
 /** Previous (-1) or next (+1) week of a Monday-to-Sunday range; a custom range moves by its own length. */
@@ -203,6 +231,7 @@ export function severityRank(severity: Severity): number {
 /* ------------------------------------------------------------------ sorting */
 
 export type SortKey = 'name' | 'score' | 'hours' | 'completion' | 'moves' | 'forwarded' | 'visa' | 'deployed' | 'stuck' | 'absent'
+  | 'leadsAssigned' | 'leadCalls' | 'leadsConverted' | 'leadsOverdue'
 
 const sortValue: Record<SortKey, (row: StaffRow) => number | string> = {
   name: row => row.name.toLowerCase(),
@@ -215,6 +244,10 @@ const sortValue: Record<SortKey, (row: StaffRow) => number | string> = {
   deployed: row => row.outcomes.deployed,
   stuck: row => row.stuck.count,
   absent: row => row.attendance.absentDays,
+  leadsAssigned: row => row.leads?.available ? row.leads.assigned : -1,
+  leadCalls: row => row.leads?.available ? row.leads.calls : -1,
+  leadsConverted: row => row.leads?.available ? row.leads.converted : -1,
+  leadsOverdue: row => row.leads?.available ? row.leads.followUpsOverdue : -1,
 }
 
 export function sortStaff(rows: StaffRow[], key: SortKey, direction: 'asc' | 'desc'): StaffRow[] {
@@ -261,4 +294,43 @@ export function ofText(done: number, total: number): string {
 /** True when the screen should treat a result as showing real task data (the tables exist and rows were allocated). */
 export function hasTaskData(report: Pick<StaffWeeklyReport, 'sources'>): boolean {
   return report.sources.dailyTasks.available && report.sources.dailyTasks.hasData
+}
+
+/* ------------------------------------------------------------------ lead sheet */
+
+/** True when the lead sheet has numbers worth showing as columns (the tables exist on the server). */
+export function hasLeadSheet(report: Pick<StaffWeeklyReport, 'sources'>): boolean {
+  return report.sources.leadSheet?.available === true
+}
+
+/** "3 of 4 called" for leads assigned in the period; "None assigned" when nothing was handed out. */
+export function leadsCalledText(leads: Pick<LeadNumbers, 'assigned' | 'contacted'>): string {
+  return leads.assigned ? `${leads.contacted} of ${leads.assigned} called` : 'None assigned'
+}
+
+/** The team cards' two lead figures: leads worked (with the calls behind them) and leads converted (with the rate). */
+export function leadSummaryCards(summary: StaffWeeklyReport['summary']): { worked: { value: string; detail: string }; converted: { value: string; detail: string } } | null {
+  if (!summary.leadsAvailable) return null
+  const worked = summary.leadsWorked ?? 0
+  const assigned = summary.leadsAssigned ?? 0
+  const calls = summary.leadsCalls ?? 0
+  const converted = summary.leadsConverted ?? 0
+  const overdue = summary.leadsFollowUpsOverdue ?? 0
+  return {
+    worked: {
+      value: worked.toLocaleString('en-GB'),
+      detail: `${calls.toLocaleString('en-GB')} ${calls === 1 ? 'call' : 'calls'} logged, ${assigned.toLocaleString('en-GB')} assigned, ${(summary.leadsContacted ?? 0).toLocaleString('en-GB')} of those called`,
+    },
+    converted: {
+      value: converted.toLocaleString('en-GB'),
+      detail: `${summary.leadsConversionPercent == null ? 'No conversion rate yet' : `${formatPercent(summary.leadsConversionPercent)} of leads worked`}${overdue ? `, ${overdue} follow-ups overdue` : ''}`,
+    },
+  }
+}
+
+/** Tone of a person's lead follow-up: nothing assigned is neutral, none called is bad, under half is a warning. */
+export function leadsTone(leads: Pick<LeadNumbers, 'assigned' | 'contacted'> | undefined): Tone {
+  if (!leads || !leads.assigned) return 'muted'
+  const share = leads.contacted / leads.assigned
+  return share === 0 ? 'bad' : share < 0.5 ? 'warn' : 'good'
 }

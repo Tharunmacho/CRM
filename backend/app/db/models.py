@@ -204,6 +204,7 @@ class Client(Base, PkMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(40))
+    designation: Mapped[str | None] = mapped_column(String(120))  # the contact person's job title (migration 0025)
     whatsapp: Mapped[str | None] = mapped_column(String(40))
     country: Mapped[str | None] = mapped_column(String(100))
     city: Mapped[str | None] = mapped_column(String(100))
@@ -228,6 +229,7 @@ class Company(Base, PkMixin, TimestampMixin):
     industry: Mapped[str | None] = mapped_column(String(120))
     contact_person: Mapped[str | None] = mapped_column(String(160))
     contact_email: Mapped[str | None] = mapped_column(String(255))
+    website: Mapped[str | None] = mapped_column(String(255))  # normalised https:// URL (migration 0025)
     phone: Mapped[str | None] = mapped_column(String(40))
     whatsapp: Mapped[str | None] = mapped_column(String(40))
     address: Mapped[str | None] = mapped_column(Text)
@@ -1446,4 +1448,132 @@ class DocumentPersonGroup(Base, PkMixin, TimestampMixin):
         CheckConstraint("status IN ('draft','committed')", name="ck_document_person_group_status"),
         Index("ix_document_person_groups_candidate", "candidate_id", "bundle_id", postgresql_where=text("status = 'committed'")),
         {"comment": "Reviewed person fields and exclusive page selections, committed atomically to candidate records."},
+    )
+
+
+# ---------------------------------------------------------------- lead sheet
+
+LEAD_STATUSES = ("new", "contacted", "interested", "resume_requested", "resume_received", "converted",
+                 "not_interested", "invalid", "wrong_number")
+LEAD_ACTIVITY_KINDS = ("call", "note", "status", "assign", "import", "convert", "resume", "edit")
+
+
+class LeadBatch(Base, PkMixin):
+    __tablename__ = "crm_lead_batches"
+
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True, comment="Hash of the uploaded bytes; warns when the very same file is uploaded again.")
+    source: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'meta_ads'"))
+    file_format: Mapped[str] = mapped_column(String(10), nullable=False, comment="csv, tsv or xlsx, detected from the content.")
+    encoding: Mapped[str | None] = mapped_column(String(20))
+    delimiter: Mapped[str | None] = mapped_column(String(4))
+    uploaded_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    assigned_to: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), comment="assign_to chosen at upload; null when left unassigned or spread automatically.")
+    campaign_label: Mapped[str | None] = mapped_column(String(255))
+    fill_empty: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    status: Mapped[str] = mapped_column(String(12), nullable=False, server_default=text("'completed'"))
+    rows_total: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rows_new: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rows_duplicate: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rows_invalid: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rows_matched_candidates: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    rows_updated: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    column_map: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="File header to lead field (null = kept in extra).")
+    report: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True, comment="Ignored rows with reasons: {duplicates: [...], invalid: [...]} (capped).")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    __table_args__ = (
+        CheckConstraint("status IN ('completed','reverted')", name="ck_lead_batch_status"),
+        CheckConstraint("source IN ('meta_ads','other')", name="ck_lead_batch_source"),
+        Index("ix_crm_lead_batches_created", "created_at"),
+        {"comment": "One row per uploaded lead sheet (CSV, TSV or XLSX) with detected format, column mapping and import totals."},
+    )
+
+
+class Lead(Base, PkMixin, TimestampMixin):
+    __tablename__ = "crm_leads"
+
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey("crm_lead_batches.id", ondelete="SET NULL"), comment="Upload that first brought this person in.")
+    import_row: Mapped[int | None] = mapped_column(Integer)
+    # Dedupe keys (see docs/workflows/lead-sheet-contract.md): lead id, last 10 phone digits, lower-cased e-mail.
+    external_id: Mapped[str | None] = mapped_column(String(64), comment="Platform lead id without its l: prefix.")
+    phone_key: Mapped[str | None] = mapped_column(String(20), comment="Last 10 digits of the phone (all digits when fewer).")
+    email_key: Mapped[str | None] = mapped_column(String(255))
+    created_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When the person answered the ad, as in the file.")
+
+    name: Mapped[str | None] = mapped_column(String(200))
+    phone: Mapped[str | None] = mapped_column(String(40))
+    phone_country_code: Mapped[str | None] = mapped_column(String(6))
+    email: Mapped[str | None] = mapped_column(String(255))
+    whatsapp: Mapped[str | None] = mapped_column(String(40))
+    whatsapp_same: Mapped[bool | None] = mapped_column(Boolean)
+    city: Mapped[str | None] = mapped_column(String(120))
+    state: Mapped[str | None] = mapped_column(String(120))
+    current_location: Mapped[str | None] = mapped_column(String(120))
+    position_applied: Mapped[str | None] = mapped_column(String(200))
+    country_interest: Mapped[str | None] = mapped_column(String(120))
+    experience_restaurant_years: Mapped[float | None] = mapped_column(Numeric(5, 1))
+    experience_restaurant_text: Mapped[str | None] = mapped_column(String(200))
+    experience_total_years: Mapped[float | None] = mapped_column(Numeric(5, 1))
+    experience_total_text: Mapped[str | None] = mapped_column(String(200))
+    gender: Mapped[str | None] = mapped_column(String(20))
+    marital_status: Mapped[str | None] = mapped_column(String(120))
+    dob: Mapped[date | None] = mapped_column(Date)
+    education_level: Mapped[str | None] = mapped_column(String(200))
+    military_status: Mapped[str | None] = mapped_column(String(200))
+
+    platform: Mapped[str | None] = mapped_column(String(30))
+    is_organic: Mapped[bool | None] = mapped_column(Boolean)
+    lead_status_source: Mapped[str | None] = mapped_column(String(60), comment="lead_status column of the platform file.")
+    campaign_id: Mapped[str | None] = mapped_column(String(64))
+    campaign_name: Mapped[str | None] = mapped_column(String(255))
+    adset_id: Mapped[str | None] = mapped_column(String(64))
+    adset_name: Mapped[str | None] = mapped_column(String(255))
+    ad_id: Mapped[str | None] = mapped_column(String(64))
+    ad_name: Mapped[str | None] = mapped_column(String(255))
+    form_id: Mapped[str | None] = mapped_column(String(64))
+    form_name: Mapped[str | None] = mapped_column(String(255))
+    extra: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), comment="Columns of the file that have no lead field (different ad forms ask different questions).")
+    raw: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True, comment="The whole original row, header to text.")
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'new'"))
+    owner_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_contacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    call_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    resume_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id", ondelete="SET NULL"), comment="Data Bank candidate this lead was converted to or linked with.")
+    matched_candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id", ondelete="SET NULL"), comment="Candidate with the same phone or e-mail found at import time (flag only, not a link).")
+
+    __table_args__ = (
+        Index("uq_crm_leads_external_id", "external_id", unique=True, postgresql_where=text("external_id IS NOT NULL")),
+        Index("ix_crm_leads_phone_key", "phone_key", postgresql_where=text("phone_key IS NOT NULL")),
+        Index("ix_crm_leads_email_key", "email_key", postgresql_where=text("email_key IS NOT NULL")),
+        Index("ix_crm_leads_owner_status", "owner_id", "status"),
+        Index("ix_crm_leads_campaign", "campaign_name"),
+        Index("ix_crm_leads_created_time", text("created_time DESC NULLS LAST")),
+        Index("ix_crm_leads_batch", "batch_id"),
+        Index("ix_crm_leads_follow_up", "next_follow_up_at", postgresql_where=text("next_follow_up_at IS NOT NULL")),
+        CheckConstraint("status IN ('new','contacted','interested','resume_requested','resume_received','converted',"
+                        "'not_interested','invalid','wrong_number')", name="ck_crm_leads_status"),
+        {"comment": "People who answered an ad (platform lead exports), stored once each, with the calling workflow: owner, status, follow-up and conversion."},
+    )
+
+
+class LeadActivity(Base, PkMixin):
+    __tablename__ = "crm_lead_activities"
+
+    lead_id: Mapped[str] = mapped_column(ForeignKey("crm_leads.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    meta: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    __table_args__ = (
+        Index("ix_crm_lead_activities_lead", "lead_id", text("created_at DESC")),
+        CheckConstraint("kind IN ('call','note','status','assign','import','convert','resume','edit')", name="ck_crm_lead_activity_kind"),
+        {"comment": "History of calls, notes, status changes, assignments and conversion for each lead."},
     )

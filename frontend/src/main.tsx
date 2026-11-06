@@ -13,6 +13,7 @@ import './styles/crm-theme.css'
 import './styles/compact.css'
 import './styles/depth.css'
 import './styles/skin.css'
+import './styles/forms.css'
 
 initTheme()
 

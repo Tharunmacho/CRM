@@ -121,13 +121,13 @@ export const ALL_EDITABLE_FIELDS: FieldDef[] = [...PERSONAL_FIELDS, ...PASSPORT_
  */
 export const EXTRA_FIELDS: FieldDef[] = [
   field({ path: 'screening.nativePlace', label: 'Native place', section: 1, kind: 'text', required: false }),
-  field({ path: 'screening.familyMemberNumber', label: 'Family member number', section: 1, kind: 'tel', required: false }),
+  field({ path: 'screening.familyMemberNumber', label: 'Family contact no.', section: 1, kind: 'tel', required: false }),
   field({ path: 'screening.jobPreference', label: 'Job preference', section: 8, kind: 'list', required: false }),
   field({ path: 'screening.skills', label: 'Skills', section: 8, kind: 'list', required: false }),
   field({ path: 'screening.countryPreference', label: 'Country looking for', section: 8, kind: 'text', required: false }),
-  field({ path: 'screening.jobDurationPreference', label: 'Job duration preference', section: 8, kind: 'select', required: false, category: 'job_duration_preference' }),
-  field({ path: 'screening.bestTimeToContact', label: 'Best time to contact', section: 8, kind: 'select', required: false, category: 'best_time_to_contact' }),
-  field({ path: 'screening.serviceChargesStatus', label: 'Service charges status', section: 8, kind: 'select', required: false, category: 'service_charges_status' }),
+  field({ path: 'screening.jobDurationPreference', label: 'Job duration', section: 8, kind: 'select', required: false, category: 'job_duration_preference' }),
+  field({ path: 'screening.bestTimeToContact', label: 'Best time to call', section: 8, kind: 'select', required: false, category: 'best_time_to_contact' }),
+  field({ path: 'screening.serviceChargesStatus', label: 'Service charges', section: 8, kind: 'select', required: false, category: 'service_charges_status' }),
   field({ path: 'screening.interestLevel', label: 'Interest level', section: 8, kind: 'text', required: false }),
   field({ path: 'screening.nextFollowUpDate', label: 'Next follow-up date', section: 9, kind: 'date', required: false }),
 ]
@@ -329,6 +329,15 @@ function normaliseApplication(raw: unknown): ApplicationRef | null {
   }
 }
 
+/**
+ * "XXXX XXXX 1234" from whatever the server sent. Only the last four digits are ever kept, so even a server that sent the whole
+ * number could not make the form show it. Empty when there are fewer than four digits.
+ */
+export function maskedAadhaar(value: unknown): string {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  return digits.length >= 4 ? `XXXX XXXX ${digits.slice(-4)}` : ''
+}
+
 /** Turn whatever the server sent (possibly little of it) into a complete, well-typed form. */
 export function normalizeForm(raw: unknown): ApplicationFormData {
   const root = rec(raw)
@@ -403,6 +412,7 @@ export function normalizeForm(raw: unknown): ApplicationFormData {
     fieldSources,
     warnings: list(root.warnings).map(str).filter(Boolean),
     processing: root.processing === true,
+    aadhaarMasked: maskedAadhaar(rec(root.aadhaar).maskedNumber),
   }
 
   const serverCompleteness = rec(root.completeness)

@@ -42,6 +42,7 @@ The unchecked boxes are a review checklist, **not a claim that all listed behavi
 | 20 [Attendance clock and activity](20-attendance-clock-activity.md) | Intentional clock → online/idle/away intervals → corrections/retry | Connected; Staff activity is approximate, Manager activity not tracked |
 | 21 [Monthly attendance and HR](21-attendance-monthly-hr.md) | Policy → requests/approvals → roster/weekly off → leave cover/return | Connected adopted reference rules; no payroll module |
 | 22 [Deployment and operations](22-deployment-operations.md) | Configure → coordinated migration/release → workers → restore/acceptance | Operational checks; no deployment is implied by this guide |
+| 23 [Lead sheet](23-lead-sheet.md) | Upload ad-lead export (CSV/TSV/XLSX) → de-duplicate → assign → call → collect resume → convert to candidate | New; staff work leads only after today's daily tasks; contract in [lead-sheet-contract.md](lead-sheet-contract.md) |
 
 ## Recommended review order
 

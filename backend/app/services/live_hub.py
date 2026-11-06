@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from app.services import change_feed
+from app.services import change_feed, response_cache
 
 log = logging.getLogger("uvicorn.error")
 
@@ -110,6 +110,7 @@ class LiveHub:
 
     def deliver(self, payload: dict) -> None:
         """Hand one decoded NOTIFY payload to every stream that may see it. Event-loop thread."""
+        response_cache.on_notification(payload)  # other processes' commits empty this process's read memo too
         if change_feed.is_auth_event(payload):
             try:  # another process may have ended the session or changed the account
                 from app.core import deps
@@ -124,6 +125,7 @@ class LiveHub:
                 self._put(subscriber, shown)
 
     def resync_all(self) -> None:
+        response_cache.clear()  # notifications were missed while the listener was away
         for subscriber in list(self._subscribers):
             self._put(subscriber, {"topics": [change_feed.RESYNC_TOPIC], "resync": True, "at": int(time.time() * 1000)})
 

@@ -4,6 +4,7 @@ import type { Role } from '@/shared/model/types'
 import { cn } from '@/shared/lib/cn'
 import { Badge } from '@/shared/ui/display'
 import { Button, Field, Input } from '@/shared/ui/primitives'
+import { FormSection as SharedFormSection } from '@/shared/ui/form-section'
 
 export const roleLabels: Record<Role, string> = { admin: 'Admin', manager: 'Manager', staff: 'Staff' }
 export const roleBlurbs: Record<Role, string> = {
@@ -36,15 +37,7 @@ export function RolePill({ role }: { role: Role }) {
 export function FormSection({ icon, title, hint, children, columns = true }: {
   icon: ReactNode; title: string; hint?: string; children: ReactNode; columns?: boolean
 }) {
-  return (
-    <section className="uv-fs">
-      <header>
-        <span aria-hidden="true">{icon}</span>
-        <div><h3>{title}</h3>{hint && <p>{hint}</p>}</div>
-      </header>
-      <div className={columns ? 'uv-fs-grid is-two' : 'uv-fs-grid'}>{children}</div>
-    </section>
-  )
+  return <SharedFormSection icon={icon} title={title} hint={hint} cols={columns ? 2 : 1}>{children}</SharedFormSection>
 }
 
 /** Downloads rows already on screen as a CSV file (no request is made). */

@@ -1,25 +1,21 @@
-import { Fragment, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, CheckCircle2, ClipboardList, Clock3, History, ListChecks, RefreshCw, Save, SlidersHorizontal, Sunrise, Sunset, Target, TriangleAlert, Users } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ClipboardList, Clock3, History, ListChecks, RefreshCw, SlidersHorizontal, Sunrise, Sunset, Target, TriangleAlert } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
-import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
+import { Button, Field, Input, Select } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { EmptyState, PageHeader } from '@/shared/ui/display'
-import { CountryFlag } from '@/shared/ui/country-flag'
-import { RecordIdentity } from '@/shared/ui/workspace'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import {
-  candidatesCell, checkpointLabel, clockTime, countdownLabel, fmtCount, quotaLine, teamTotalLine, dueTone, goalPercent, goalState, msUntil, pacingMessage, percentDone, postponedLabel,
-  referralLabel, sessionLabel, sessionProgress, spanLabel, staffNeedingAttention,
-  type CheckpointSet, type DailyItem, type DailyStaffSummary, type DailySummary, type GoalBlock, type GoalTable,
+  checkpointLabel, clockTime, fmtCount, quotaLine, teamTotalLine, goalPercent, goalState, msUntil, pacingMessage, percentDone, sessionProgress, spanLabel,
+  type CheckpointSet, type GoalBlock, type GoalTable,
 } from '@/features/daily-work/daily-work-model'
 import { useDailyWork, useTicker } from '@/features/daily-work/use-daily-work'
-import { StageTrack } from './task-identity'
+import { DailyTable, type DailyGroup } from './daily-table'
+import { StaffBoard } from './daily-staff-board'
 import '@/styles/daily-work.css'
-
-interface Group { key: string; title: string; hint: string; icon: ReactNode; items: DailyItem[]; tone?: 'late' }
 
 /** The recruiter's daily list: five candidates a day (3 morning, 2 evening), one an hour, with carry-over. */
 export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
@@ -42,7 +38,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
 
   const items = data?.items ?? []
   const today = data?.agencyDate ?? ''
-  const groups: Group[] = useMemo(() => {
+  const groups: DailyGroup[] = useMemo(() => {
     const postponed = items.filter((i) => i.postponed)
     const cleared = items.filter((i) => i.status === 'done' && i.workDate < today)
     const own = items.filter((i) => i.workDate === today)
@@ -70,10 +66,6 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const personName = supervisor && staffFilter && staffFilter !== 'all' ? store.user(staffFilter)?.name ?? 'Staff' : ''
   const quota = quotaLine({ daily: data.dailyQuota, morning: data.morningQuota, evening: data.eveningQuota }, data.targetsVary)
   const nextItem = items.filter((i) => i.status === 'open').sort((a, b) => a.dueAt.localeCompare(b.dueAt))[0]
-  const columns = ['S.No', 'Client', 'Country', 'Candidate', 'Position', 'Referral', 'Stage', 'Remarks', 'Deadline'] as const
-  // Column shares (percent): the table fits its panel instead of scrolling; the staff column joins for supervisors.
-  const widths = showStaffColumn ? [5, 10, 7, 13, 8, 8, 8, 11, 15, 15] : [5, 12, 9, 15, 9, 9, 14, 15, 12]
-  let serial = 0
 
   return (
     <div className="tk dw">
@@ -151,144 +143,16 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
               ? 'Daily candidates are drawn automatically from candidates assigned to you who are matched to an order and waiting on a stage. None are waiting right now, or today is your day off.'
               : 'Candidates appear here once staff have candidates matched to orders and waiting on a stage.'} />
         ) : (
-          <div className="tk-table-wrap">
-            <table className="dw-table" aria-label="Daily candidates">
-              <colgroup>{widths.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
-              <thead><tr>
-                {columns.map((c, i) => <Fragment key={c}>
-                  {i === 6 && showStaffColumn && <th scope="col">Staff</th>}
-                  <th scope="col" className={cn(c === 'S.No' && 'is-num')}>{c}</th>
-                </Fragment>)}
-              </tr></thead>
-              <tbody>
-                {groups.map((g) => <Fragment key={g.key}>
-                  <tr className={cn('dw-group', g.tone === 'late' && 'is-late')}>
-                    <th colSpan={columns.length + (showStaffColumn ? 1 : 0)} scope="colgroup">
-                      <span className="dw-group-title">{g.icon}{g.title}<b className="tnum">{g.items.filter((i) => i.status === 'open').length} open</b></span>
-                      <small>{g.hint}</small>
-                    </th>
-                  </tr>
-                  {g.items.map((item) => {
-                    serial += 1
-                    return <ItemRow key={item.id} item={item} serial={serial} now={now} skew={skew} zone={zone} showStaff={showStaffColumn}
-                      staffName={store.user(item.ownerId)?.name} canWork={!!item.taskId && (store.can('work_any_candidate') || item.ownerId === store.me.id)}
-                      onOpen={() => item.applicationId ? setOpenApp({ id: item.applicationId, stage: item.stage ?? undefined }) : navigate(`/candidates/${item.candidateId}`)}
-                      onRemark={async (text) => { if (item.taskId) { await store.addRemark(item.taskId, text); await refresh() } }} />
-                  })}
-                </Fragment>)}
-              </tbody>
-            </table>
-          </div>
+          <DailyTable groups={groups} now={now} skew={skew} zone={zone} supervisor={showStaffColumn} staffName={(id) => store.user(id)?.name}
+            canWork={(item) => !!item.taskId && (store.can('work_any_candidate') || item.ownerId === store.me.id)}
+            onOpen={(item) => item.applicationId ? setOpenApp({ id: item.applicationId, stage: item.stage ?? undefined }) : navigate(`/candidates/${item.candidateId}`)}
+            onProfile={(item) => navigate(`/candidates/${item.candidateId}`)}
+            onRemark={async (item, text) => { if (item.taskId) { await store.addRemark(item.taskId, text); await refresh() } }} />
         )}
       </section>
       {editingGoals && <GoalsDialog onClose={() => setEditingGoals(false)} onSaved={() => void refresh()} />}
       <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onClose={() => { setOpenApp(null); void refresh() }} />
     </div>
-  )
-}
-
-function ItemRow({ item, serial, now, skew, zone, showStaff, staffName, canWork, onOpen, onRemark }: {
-  item: DailyItem; serial: number; now: number; skew: number; zone?: string; showStaff: boolean; staffName?: string
-  canWork: boolean; onOpen: () => void; onRemark: (text: string) => Promise<void>
-}) {
-  const tone = dueTone(item, now, skew)
-  const done = item.status === 'done'
-  const left = msUntil(item.dueAt, now, skew)
-  return (
-    <tr className={cn('dw-row', `is-${tone}`, item.postponed && 'is-postponed')}>
-      <td className="is-num tnum" data-label="S.No">{serial}</td>
-      <td data-label="Client"><span className="dw-cell-strong" title={item.clientContact ? `Contact: ${item.clientContact}` : undefined}>{item.client ?? '—'}</span>{item.orderRef && <small className="dw-sub">{item.orderRef}</small>}</td>
-      <td data-label="Country"><span className="dw-country"><CountryFlag country={item.country} className="tk-flag" globeClassName="tk-flag-globe" />{item.country || '—'}</span></td>
-      <td data-label="Candidate"><RecordIdentity name={item.candidate} detail={item.candidateRef} /></td>
-      <td data-label="Position">{item.position ?? '—'}</td>
-      <td data-label="Referral"><span className={cn('dw-ref', item.referral.source === 'referral' && 'is-referral')}>{referralLabel(item.referral)}</span></td>
-      {showStaff && <td data-label="Staff">{staffName ?? '-'}</td>}
-      <td data-label="Stage"><StageTrack no={item.stage ?? undefined} />{item.stage === null && <small className="dw-sub">Not matched to an order</small>}</td>
-      <td data-label="Remarks"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
-      <td data-label="Deadline" className="dw-last">
-        <div className={cn('dw-slot', `is-${tone}`)}>
-          <span className="dw-slot-label">{item.postponed ? postponedLabel(item.daysLate) : `${sessionLabel(item.session)} ${item.slotNo}`}</span>
-          {done
-            ? <b><CheckCircle2 size={14} aria-hidden="true" />Done {item.completedAt ? clockTime(item.completedAt, zone) : ''}</b>
-            : <b className="tnum" aria-live="off">{countdownLabel(left)}</b>}
-          {!done && <small>{item.postponed ? 'was due ' : 'due '}{clockTime(item.dueAt, zone)}</small>}
-        </div>
-        <Button size="sm" variant={done ? 'ghost' : 'primary'} onClick={onOpen} aria-label={`${done ? 'View' : item.applicationId ? 'Complete the stage for' : 'Open'} ${item.candidate}`}>
-          {done ? 'View' : item.applicationId ? 'Complete' : 'Open'}<ArrowRight size={14} aria-hidden="true" />
-        </Button>
-      </td>
-    </tr>
-  )
-}
-
-/** Latest remark plus a one-line box to add today's update (the same remark the 48-hour list uses). */
-function RemarkCell({ item, canWork, onSave }: { item: DailyItem; canWork: boolean; onSave: (text: string) => Promise<void> }) {
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    const value = text.trim()
-    if (!value || busy) return
-    setBusy(true); setError('')
-    try { await onSave(value); setText('') }
-    catch (e) { setError(e instanceof Error ? e.message : 'The remark could not be saved.') }
-    finally { setBusy(false) }
-  }
-  return (
-    <div className="dw-remark">
-      {item.remark && <p className="dw-remark-last" title={`${item.remark.by} · ${new Date(item.remark.at).toLocaleString()}`}>{item.remark.body}</p>}
-      {canWork && <form onSubmit={submit}>
-        <Textarea rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={item.remark ? 'Add update' : 'Add remark'} maxLength={10000} disabled={busy}
-          aria-label={`Remark for ${item.candidate}`} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(e as unknown as FormEvent) } }} />
-        <button type="submit" className="dw-remark-save" disabled={busy || !text.trim()} aria-label="Save remark" title="Save remark"><Save size={14} aria-hidden="true" /></button>
-      </form>}
-      {!item.remark && !canWork && <span className="tk-muted">-</span>}
-      {error && <small className="dw-remark-error" role="alert">{error}</small>}
-    </div>
-  )
-}
-
-/** Supervisor view: every recruiter's progress, worst first; a row filters the table below. */
-function StaffBoard({ now, staff, selected, onSelect }: { now: number; staff: DailyStaffSummary[]; selected: string; onSelect: (id: string) => void }) {
-  const sorted = useMemo(() => staffNeedingAttention(staff), [staff])
-  return (
-    <section className="dw-panel dw-board" aria-label="Staff progress">
-      <div className="dw-panel-head">
-        <div><h2><Users size={16} aria-hidden="true" /> Staff progress today</h2><p>Staff who are furthest behind are first. Select a row to see only their candidates.</p></div>
-      </div>
-      <div className="tk-table-wrap">
-        <table className="dw-table dw-staff" aria-label="Progress by staff">
-          <thead><tr><th scope="col">Staff</th><th scope="col">Candidates</th><th scope="col">Morning</th><th scope="col">Evening</th><th scope="col">Forwarded</th><th scope="col">Stage moves</th><th scope="col">Postponed</th><th scope="col">Overdue</th><th scope="col">Next deadline</th></tr></thead>
-          <tbody>
-            {sorted.length === 0 && <tr><td colSpan={9} className="tk-muted">No staff recruiters yet.</td></tr>}
-            {sorted.map((s) => <StaffRow key={s.userId} now={now} s={s} active={selected === s.userId} onSelect={() => onSelect(selected === s.userId ? 'all' : s.userId)} />)}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function StaffRow({ s, now, active, onSelect }: { now: number; s: DailyStaffSummary; active: boolean; onSelect: () => void }) {
-  const store = useStore()
-  const sum: DailySummary = s.summary
-  const cell = candidatesCell(sum, s.shortfall, s.offToday)
-  return (
-    <tr className={cn('dw-staff-row', active && 'is-active', sum.overdue > 0 && 'is-late', cell.warn && 'is-short')} tabIndex={0} onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect() } }} aria-pressed={active}>
-      <td data-label="Staff"><b>{s.name}</b>{!s.active && <small className="dw-sub"> inactive</small>}</td>
-      <td data-label="Candidates">{cell.warn
-        ? <span className="dw-warn-cell" title={cell.note}><AlertTriangle size={14} aria-hidden="true" /><b className="tnum">{cell.text}</b><small>{cell.note}</small></span>
-        : <><span className="tnum">{cell.text}</span>{sum.total > 0 && <span className="dw-bar dw-bar-sm" aria-hidden="true"><i style={{ width: `${percentDone(sum)}%` }} /></span>}{cell.note && <small className="dw-sub">{cell.note}</small>}</>}</td>
-      <td data-label="Morning" className="tnum">{sum.morning.done}/{sum.morning.total}</td>
-      <td data-label="Evening" className="tnum">{sum.evening.done}/{sum.evening.total}</td>
-      <td data-label="Forwarded" className="tnum">{s.goals ? `${s.goals.forwardedToClient.actual}/${s.goals.forwardedToClient.target}` : '-'}</td>
-      <td data-label="Stage moves" className="tnum">{s.goals ? `${s.goals.stageMoves.actual}/${s.goals.stageMoves.target}` : '-'}</td>
-      <td data-label="Postponed"><span className={cn('dw-chip', sum.postponed > 0 && 'is-warn')}>{sum.postponed}</span></td>
-      <td data-label="Overdue"><span className={cn('dw-chip', sum.overdue > 0 && 'is-late')}>{sum.overdue}</span></td>
-      <td data-label="Next deadline" className="tnum">{sum.total === 0 ? 'No work' : sum.complete ? 'All done' : sum.nextDueAt ? `${clockTime(sum.nextDueAt, store.agencyTimezone)} (${spanLabel(msUntil(sum.nextDueAt, now))})` : 'Overdue'}</td>
-    </tr>
   )
 }
 

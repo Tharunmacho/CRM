@@ -11,10 +11,11 @@ async function loadSource(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 }
 
-const { api, takeEarlyRead } = await loadSource('../src/shared/api/client.ts')
+const { api, takeEarlyRead, invalidateReads } = await loadSource('../src/shared/api/client.ts')
 
 const realFetch = globalThis.fetch
 afterEach(() => {
+  invalidateReads()
   globalThis.fetch = realFetch
   delete globalThis.window
 })
@@ -70,17 +71,38 @@ test('the request is cancelled once every caller has left', async () => {
   const b = new AbortController()
   const first = api.get('/notifications', { signal: a.signal })
   const second = api.get('/notifications', { signal: b.signal })
+  const firstGone = assert.rejects(first, { name: 'AbortError' })
+  const secondGone = assert.rejects(second, { name: 'AbortError' })
   a.abort()
   assert.equal(calls[0].aborted, false)
   b.abort()
+  // A moment of grace: an unmount followed by an immediate remount (StrictMode) reuses the request.
+  assert.equal(calls[0].aborted, false)
+  await new Promise((resolve) => setTimeout(resolve, 160))
   assert.equal(calls[0].aborted, true)
-  await assert.rejects(first, { name: 'AbortError' })
-  await assert.rejects(second, { name: 'AbortError' })
+  await firstGone
+  await secondGone
   // A read asked for afterwards starts again instead of joining the cancelled one.
   const again = api.get('/notifications')
   assert.equal(calls.length, 2)
   calls[1].respond([])
   await again
+})
+
+test('a remount right after the last caller left reuses the request instead of cancelling it', async () => {
+  const calls = manualFetch()
+  const first = new AbortController()
+  const gone = api.get('/inbox/health', { signal: first.signal })
+  const goneRejected = assert.rejects(gone, { name: 'AbortError' })
+  first.abort() // StrictMode: the effect cleanup ...
+  const second = new AbortController()
+  const again = api.get('/inbox/health', { signal: second.signal }) // ... and the same effect again
+  assert.equal(calls.length, 1)
+  await goneRejected
+  await new Promise((resolve) => setTimeout(resolve, 160))
+  assert.equal(calls[0].aborted, false)
+  calls[0].respond({ ok: 1 })
+  assert.deepEqual(await again, { ok: 1 })
 })
 
 test('a write stops later reads from joining a read that began before it', async () => {
@@ -95,6 +117,19 @@ test('a write stops later reads from joining a read that began before it', async
   assert.deepEqual(await before, ['old'])
   await write
   assert.deepEqual(await after, ['new'])
+})
+
+test('a presence heartbeat does not split reads that are about to be shared', async () => {
+  const calls = manualFetch()
+  const first = api.get('/daily-work')
+  const beat = api.post('/presence/heartbeat', { active: true })
+  const second = api.get('/daily-work')
+  assert.equal(calls.length, 2) // the read and the heartbeat; the second read joined the first
+  calls[0].respond({ items: [] })
+  calls[1].respond({ ok: true })
+  assert.deepEqual(await first, { items: [] })
+  assert.deepEqual(await second, { items: [] })
+  await beat
 })
 
 test('errors reach every caller of a shared read', async () => {
@@ -113,6 +148,8 @@ test('a read the page started early is handed over once, for the same path only'
     other: early('/dashboard', Response.json({ ok: 1 })),
     broken: early('/dashboard', new Response('nope', { status: 500 })),
   } }
+  assert.deepEqual(await takeEarlyRead('session', '/auth/session?workspace=true'), { me: null })
+  // StrictMode replays the effect at once: the same answer is given one more time, then it is gone.
   assert.deepEqual(await takeEarlyRead('session', '/auth/session?workspace=true'), { me: null })
   assert.equal(await takeEarlyRead('session', '/auth/session?workspace=true'), null)
   assert.equal(await takeEarlyRead('other', '/dashboard?staff_id=u3'), null)

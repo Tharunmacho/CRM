@@ -303,9 +303,9 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
     with recorded_statements(desk_engine) as statements:
         response = desk_client.get("/api/bootstrap")
     assert response.status_code == 200
-    assert_select_budget(statements, 2)
+    assert_select_budget(statements, 3)  # sign-in check, the snapshot, the unread badge (the last two side by side)
     body = response.json()
-    assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision", "agencyTimezone", "settings"}
+    assert set(body) == WIRE_COLLECTIONS | {"me", "ingestionRevision", "inboxUnread", "agencyTimezone", "settings"}
     assert body["settings"]["name"] and body["settings"]["editable"] is True
     assert body["settings"]["timezone"] == "Asia/Kolkata" and body["settings"]["slaHours"] == 48
     with Session(desk_engine) as db:
@@ -425,7 +425,7 @@ def test_bootstrap_isolates_personal_data_for_each_current_user(desk_engine, des
         with recorded_statements(desk_engine) as statements:
             response = desk_client.get("/api/bootstrap")
         assert response.status_code == 200
-        assert_select_budget(statements, 2)
+        assert_select_budget(statements, 3)  # sign-in check, the snapshot, the unread badge (the last two side by side)
         body = response.json()
         assert body["me"]["id"] == user_id
         assert set(by_id(body["todos"])) == todo_ids
@@ -510,7 +510,7 @@ def test_bootstrap_accepts_legacy_call_outcome_without_recorded_time(desk_engine
     with recorded_statements(desk_engine) as statements:
         response = desk_client.get("/api/bootstrap")
     assert response.status_code == 200
-    assert_select_budget(statements, 2)
+    assert_select_budget(statements, 3)  # sign-in check, the snapshot, the unread badge (the last two side by side)
     assert response.json()["candidates"][0]["callOutcome"] == {
         "called": True, "interested": "yes", "remarks": "Available next month",
         "recordedAt": None,

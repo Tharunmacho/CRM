@@ -115,6 +115,12 @@ export default function JobsPage() {
     const q = railQuery.trim().toLowerCase()
     return store.designations.filter((d) => !q || d.title.toLowerCase().includes(q) || (d.category ?? '').toLowerCase().includes(q))
   }, [store.designations, railQuery])
+  // Open orders per job title, counted once per change instead of once per title on every render.
+  const openByDesignation = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const order of scopedOrders) if (order.status === 'open') counts.set(order.designationId, (counts.get(order.designationId) ?? 0) + 1)
+    return counts
+  }, [scopedOrders])
   const designationOrders = scopedOrders.filter((o) => o.designationId === activeId)
   const visibleDesignationOrders = designationOrders.filter((o) => matchesStatus(o, designationStatus))
   const sumOf = (list: Order[], pick: (id: string) => number) => list.reduce((total, o) => total + pick(o.id), 0)
@@ -171,6 +177,7 @@ export default function JobsPage() {
     key: 'client',
     header: 'Company',
     sortable: true,
+    align: 'left',
     width,
     value: (o) => store.company(o.companyId)?.name ?? '',
     render: (o) => {
@@ -222,9 +229,9 @@ export default function JobsPage() {
   })
   const actionsCol = (width: string): Column<Order> => ({
     key: 'actions',
-    header: '',
+    header: 'Actions',
     width,
-    align: 'right',
+    actions: true,
     render: (o) => <OrderRowActions order={o} handlers={handlers} name={`order ${o.ref}`} compact />,
   })
   const allOrderColumns = [jobCol, clientCol('22%'), statusCol('10%'), filledCol('14%'), salaryCol('11%'), deadlineCol('14%'), actionsCol('9%')]
@@ -336,7 +343,7 @@ export default function JobsPage() {
               </div>
               <ul className="scrollbar-thin jv-rail-list">
                 {designations.map((d) => {
-                  const count = scopedOrders.filter((o) => o.designationId === d.id && o.status === 'open').length
+                  const count = openByDesignation.get(d.id) ?? 0
                   return (
                     <li key={d.id}>
                       <button type="button" onClick={() => setActiveId(d.id)} aria-pressed={d.id === activeId} className={cn('jv-option', d.id === activeId && 'is-active')}>

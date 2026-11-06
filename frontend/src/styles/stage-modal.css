@@ -14,8 +14,8 @@
 .dialog-layer:has(> .workspace-dialog .sm) { align-items: center; justify-content: center; padding: 24px; }
 .workspace-dialog:has(.sm) { max-width: 1120px; height: min(100%, 940px); border-radius: 14px; }
 .workspace-dialog > .dialog-scroll-body:has(> .sm) { padding: 0; background: var(--bg-main); scroll-padding-top: 16px; }
-.workspace-dialog:has(.sm) > .dialog-head { padding: 16px 24px; }
-.workspace-dialog:has(.sm) > .dialog-head h2 { font-size: 18px; }
+.workspace-dialog:has(.sm) > .dialog-head { padding: 20px 24px 18px; }
+.workspace-dialog:has(.sm) > .dialog-head h2 { font-size: 19px; }
 .sm-wrap { padding: 24px 24px 40px; overflow-x: clip; }
 .sm-state { padding: 24px; }
 

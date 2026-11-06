@@ -221,11 +221,6 @@
 .jv-person { display: flex; align-items: center; gap: 12px; min-width: 0; }
 
 /* ---------- Dialog sections (order and designation forms) ---------- */
-.jv-form .form-section { padding: 16px 18px 18px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
-.jv-form .form-section > header { border-color: var(--border-faint); }
-.jv-form .form-section > header > span { border: 1px solid var(--border-main); background: var(--tint-1); color: var(--text-main); }
-.jv-form .form-section > header h3 { color: var(--text-main); }
-.jv-form .form-section > header p { color: var(--text-muted); }
 .jv-form .form-context { border: 1px solid var(--border-main); border-radius: 8px; background: var(--tint-1); }
 .jv-form .form-context-label { color: var(--text-muted); }
 .jv-form .form-context-title { color: var(--text-main); }
@@ -405,9 +400,6 @@
 .jv-mcard-meta dd { margin-top: 2px; font-size: 13.5px; color: var(--text-main); }
 .jv-mcard-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-faint); }
 @media (max-width: 700px) { .jv-mcards { grid-template-columns: minmax(0, 1fr); padding: 14px; } }
-/* A last KPI card that would sit alone on a row spans it, so the grid never has an orphan cell. */
-.workspace-page .jv .workspace-summary > :last-child:nth-child(odd) { grid-column: 1 / -1; }
-@media (min-width: 1200px) { .workspace-page .jv .workspace-summary > :last-child:nth-child(odd) { grid-column: auto; } }
 .jv-match-bar > span:first-child { flex: 1 1 320px; }
 
 /* =====================================================================================

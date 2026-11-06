@@ -48,23 +48,56 @@ export function absoluteApiHref(path: string) {
   return new URL(fileHref(path), window.location.origin).href
 }
 
+/** Options for a cached read (see `ReadCache` below). */
+export interface ReadCacheOptions {
+  /** Served without any request while younger than this. */
+  ttlMs: number
+  /** Between ttlMs and ttlMs + staleMs the old copy is returned at once and re-read in the background. */
+  staleMs?: number
+  /**
+   * What changes this data, named like the live topics the server announces (`settings`, `form_options`, ...).
+   * A write whose path starts with the same word as the read, a live change on a listed topic and sign-in/out
+   * all drop the copy. The first word of the read's own path is always included.
+   */
+  tags?: readonly string[]
+  /** Remember a failed read this long and answer from it instead of asking the server again (stops a 404 being hammered). */
+  errorTtlMs?: number
+  /** Called with the new value when a stale copy was re-read in the background and the data changed. */
+  onRevalidated?: (value: never) => void
+}
+
 interface RequestOptions {
   signal?: AbortSignal
+  /** Cache a read-mostly GET. Never use it for data a person must see fresh (leave flags, workflow state). */
+  cache?: ReadCacheOptions
+  /** Skip the cached copy (the response still refreshes it): a deliberate Refresh button. */
+  fresh?: boolean
 }
 
 /** What a GET returned before it is turned into a value or an error. Shared by every caller of the same read. */
 interface RawResponse { status: number; ok: boolean; statusText: string; text: string }
 
-interface SharedRead { startedAt: number; refs: number; controller: AbortController; done: Promise<RawResponse> }
+interface SharedRead { startedAt: number; refs: number; epoch: number; controller: AbortController; done: Promise<RawResponse> }
 
 /**
  * Identical GETs that overlap share one network request (React StrictMode replays effects in development,
  * and two components can mount wanting the same list). Each caller keeps its own AbortSignal: the request is
- * cancelled only when every caller has gone. A read is joined only within JOIN_WINDOW_MS of starting, and any
+ * cancelled only when every caller has gone, and only after ABORT_GRACE_MS so a component that unmounts and
+ * immediately mounts again (StrictMode, a route change that keeps the widget) reuses it instead of cancelling
+ * a request the server has already started. A read is joined only within JOIN_WINDOW_MS of starting, and any
  * write empties the table, so a read that began before a write is never handed to a caller that asked after it.
  */
-const JOIN_WINDOW_MS = 300
+const JOIN_WINDOW_MS = 5_000
+const ABORT_GRACE_MS = 100
 const reads = new Map<string, SharedRead>()
+
+/** Bumped whenever cached data may have become wrong; a read that began before the bump is not stored. */
+let epoch = 0
+
+interface CacheEntry { raw: RawResponse; at: number; tags: ReadonlySet<string>; revalidating: boolean }
+interface ErrorEntry { error: ApiError; at: number; ttlMs: number; tags: ReadonlySet<string> }
+const cached = new Map<string, CacheEntry>()
+const failed = new Map<string, ErrorEntry>()
 
 /**
  * Forget GETs that are in flight. A live change event means any read that started before it may lack the change,
@@ -72,6 +105,33 @@ const reads = new Map<string, SharedRead>()
  */
 export function dropSharedReads() {
   reads.clear()
+}
+
+/**
+ * Drop cached copies (and in-flight reads) that depend on `tags`; with no tags, everything. Called for every write,
+ * for live changes (live.ts) and on sign-in/out, so a cached copy never outlives the change that made it wrong.
+ */
+export function invalidateReads(tags?: readonly string[]) {
+  reads.clear()
+  epoch += 1
+  if (!tags || tags.includes('*')) {
+    cached.clear()
+    failed.clear()
+    return
+  }
+  const wanted = new Set(tags)
+  for (const [key, entry] of cached) if ([...entry.tags].some((tag) => wanted.has(tag))) cached.delete(key)
+  for (const [key, entry] of failed) if ([...entry.tags].some((tag) => wanted.has(tag))) failed.delete(key)
+}
+
+/** The word a path starts with: `/form-options/reorder?x=1` -> `form-options`. */
+function firstSegment(path: string) {
+  return path.replace(/^\/+/, '').split(/[/?#]/, 1)[0] ?? ''
+}
+
+/** Numbers for tests and tuning (client.test): how many copies are held. */
+export function readCacheSize() {
+  return { cached: cached.size, failed: failed.size, inFlight: reads.size }
 }
 
 async function fetchRaw(method: string, path: string, body: unknown, controller: AbortController, timeout: { fired: boolean }): Promise<RawResponse> {
@@ -105,7 +165,7 @@ function startRead(method: string, path: string, body: unknown): SharedRead {
   }, 30_000)
   const done = fetchRaw(method, path, body, controller, timeout).finally(() => clearTimeout(timer))
   done.catch(() => {}) // a read every caller abandoned must not surface as an unhandled rejection
-  return { startedAt: Date.now(), refs: 0, controller, done }
+  return { startedAt: Date.now(), refs: 0, epoch, controller, done }
 }
 
 function interpret<T>(raw: RawResponse): T {
@@ -127,32 +187,18 @@ function abortError() {
   return new DOMException('The operation was aborted.', 'AbortError')
 }
 
-async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  options: RequestOptions = {},
-): Promise<T> {
-  const signal = options.signal
-  if (signal?.aborted) throw abortError()
+function copyOf(error: ApiError) {
+  return new ApiError(error.status, error.message, error.detail)
+}
 
-  if (method !== 'GET') {
-    reads.clear()
-    const write = startRead(method, path, body)
-    const cancel = () => write.controller.abort()
-    signal?.addEventListener('abort', cancel, { once: true })
-    try {
-      return interpret<T>(await write.done)
-    } finally {
-      signal?.removeEventListener('abort', cancel)
-      reads.clear()
-    }
-  }
+/** A shared read's answer, and whether it may be stored (no invalidation happened while it was in flight). */
+interface ReadAnswer { raw: RawResponse; storable: boolean }
 
-  const key = `${BASE}/api${path}`
+/** Share (or start) the one network read for `key`; resolves with the raw response. */
+async function sharedRead(key: string, path: string, signal: AbortSignal | undefined): Promise<ReadAnswer> {
   let read = reads.get(key)
   if (!read || read.controller.signal.aborted || Date.now() - read.startedAt > JOIN_WINDOW_MS) {
-    read = startRead(method, path, undefined)
+    read = startRead('GET', path, undefined)
     reads.set(key, read)
     const created = read
     created.done.then(() => {}, () => {}).finally(() => { if (reads.get(key) === created) reads.delete(key) })
@@ -166,8 +212,13 @@ async function request<T>(
       reject(abortError())
       shared.refs -= 1
       if (shared.refs <= 0) {
-        shared.controller.abort()
-        if (reads.get(key) === shared) reads.delete(key)
+        // Wait a moment: a remount (StrictMode, a widget moving between routes) would otherwise cancel a request the
+        // server is already working on and immediately start the same one again.
+        setTimeout(() => {
+          if (shared.refs > 0) return
+          shared.controller.abort()
+          if (reads.get(key) === shared) reads.delete(key)
+        }, ABORT_GRACE_MS)
       }
     }
     signal.addEventListener('abort', onAbort, { once: true })
@@ -175,9 +226,85 @@ async function request<T>(
   })
   gone.catch(() => {})
   try {
-    return interpret<T>(await (signal ? Promise.race([shared.done, gone]) : shared.done))
+    const raw = await (signal ? Promise.race([shared.done, gone]) : shared.done)
+    return { raw, storable: shared.epoch === epoch }
   } finally {
     leave()
+  }
+}
+
+function storeRead(key: string, path: string, answer: ReadAnswer, options: ReadCacheOptions) {
+  if (!answer.storable) return
+  const { raw } = answer
+  const tags = new Set([firstSegment(path), ...(options.tags ?? [])])
+  if (raw.ok) {
+    failed.delete(key)
+    cached.set(key, { raw, at: Date.now(), tags, revalidating: false })
+  } else if (options.errorTtlMs && options.errorTtlMs > 0) {
+    try { interpret(raw) } catch (caught) {
+      failed.set(key, { error: caught as ApiError, at: Date.now(), ttlMs: options.errorTtlMs, tags })
+    }
+  }
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  const signal = options.signal
+  if (signal?.aborted) throw abortError()
+
+  if (method !== 'GET') {
+    // Anything cached about what this write touches is stale the moment it commits; sign-in/out changes whose data it is.
+    const segment = firstSegment(path)
+    // Presence heartbeats are sent on every focus change and every 30 s and change nothing any read returns; letting them
+    // clear the table would split reads that were about to be shared (the daily list asked for by two components).
+    const invalidate = segment === 'presence' ? () => {} : () => invalidateReads(segment === 'auth' ? undefined : [segment])
+    invalidate()
+    const write = startRead(method, path, body)
+    const cancel = () => write.controller.abort()
+    signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      return interpret<T>(await write.done)
+    } finally {
+      signal?.removeEventListener('abort', cancel)
+      invalidate()
+    }
+  }
+
+  const key = `${BASE}/api${path}`
+  const policy = options.cache
+  if (policy && !options.fresh) {
+    const hit = cached.get(key)
+    const age = hit ? Date.now() - hit.at : Infinity
+    if (hit && age < policy.ttlMs) return interpret<T>(hit.raw)
+    if (hit && age < policy.ttlMs + (policy.staleMs ?? 0)) {
+      if (!hit.revalidating) {
+        hit.revalidating = true
+        const before = hit.raw.text
+        sharedRead(key, path, undefined).then(
+          (answer) => {
+            storeRead(key, path, answer, policy)
+            if (answer.raw.ok && answer.raw.text !== before) policy.onRevalidated?.(interpret<never>(answer.raw))
+          },
+          () => { /* keep serving the stale copy; the next read retries */ },
+        ).finally(() => { if (cached.get(key) === hit) hit.revalidating = false })
+      }
+      return interpret<T>(hit.raw)
+    }
+    const known = failed.get(key)
+    if (known && Date.now() - known.at < known.ttlMs) throw copyOf(known.error)
+  }
+
+  try {
+    const answer = await sharedRead(key, path, signal)
+    if (policy) storeRead(key, path, answer, policy)
+    return interpret<T>(answer.raw)
+  } catch (error) {
+    if (error instanceof ApiError && error.isUnauthorised) invalidateReads() // the session is gone: nothing cached is ours any more
+    throw error
   }
 }
 
@@ -196,9 +323,15 @@ declare global {
  */
 export async function takeEarlyRead<T>(key: string, path: string): Promise<T | null> {
   const early = typeof window === 'undefined' ? undefined : window.__crmEarly?.[key]
-  if (!early) return null
+  if (!early) return replayEarlyRead<T>(key, path)
   delete window.__crmEarly![key]
   if (early.path !== path || Date.now() - early.startedAt > 20_000) return null
+  const answer = readEarly(early)
+  handedOver.set(key, { path, at: Date.now(), answer })
+  return (await answer) as T | null
+}
+
+async function readEarly(early: EarlyRead): Promise<unknown | null> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const res = await Promise.race([
@@ -207,12 +340,27 @@ export async function takeEarlyRead<T>(key: string, path: string): Promise<T | n
     ])
     if (!res.ok || res.status === 204) return null
     const payload = safeParse(await res.text())
-    return payload !== null && typeof payload === 'object' ? (payload as T) : null
+    return payload !== null && typeof payload === 'object' ? payload : null
   } catch {
     return null
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
+}
+
+/**
+ * React StrictMode (development) runs a screen's effect, cleans it up and runs it again at once. The first run took the
+ * early response and its result was thrown away with the cleanup, so the second run would fetch the same data again.
+ * For a moment after the hand-over the same answer (even while it is still arriving) is given once more, as a fresh copy.
+ */
+const REPLAY_MS = 1_500
+const handedOver = new Map<string, { path: string; at: number; answer: Promise<unknown | null> }>()
+async function replayEarlyRead<T>(key: string, path: string): Promise<T | null> {
+  const found = handedOver.get(key)
+  handedOver.delete(key)
+  if (!found || found.path !== path || Date.now() - found.at > REPLAY_MS) return null
+  const value = await found.answer
+  return value === null ? null : (JSON.parse(JSON.stringify(value)) as T)
 }
 
 function safeParse(text: string): unknown {
@@ -251,6 +399,9 @@ async function postForm<T>(
   failure: string,
   options: FormRequestOptions = {},
 ): Promise<T> {
+  // An upload changes what other reads return (candidate documents, intake queues): none that began earlier may be reused.
+  const dropRelated = () => invalidateReads([firstSegment(path), 'documents', 'candidates'])
+  dropRelated()
   const controller = new AbortController()
   const cancel = () => controller.abort()
   if (options.signal?.aborted) cancel()
@@ -285,6 +436,7 @@ async function postForm<T>(
   } finally {
     if (timeout !== undefined) clearTimeout(timeout)
     options.signal?.removeEventListener('abort', cancel)
+    dropRelated()
   }
 }
 

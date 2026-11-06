@@ -36,6 +36,7 @@ import { canDeleteCandidate, linkedConversationId, mapToOrderBlocker } from '@/f
 import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { DeleteCandidateDialog } from '@/features/candidates/components/delete-candidate-dialog'
 import { conversationHref } from '@/features/whatsapp/chat-types'
+import { LeadOriginBadge } from '@/features/leads/components/lead-origin-badge'
 import '@/styles/candidate-v2.css'
 
 const FORMAT: ProfileFormat = { money: (amount) => money(amount), date: (value) => dateLabel(value) }
@@ -334,6 +335,7 @@ export default function CandidateProfilePage() {
           </div>
         </div>
         <ContactChips contacts={model.contacts} />
+        <LeadOriginBadge candidateId={cand.id} />
         {tracked && (
           <div className="cp-track">
             <div className="cp-track-top">

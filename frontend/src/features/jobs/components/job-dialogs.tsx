@@ -10,22 +10,12 @@ import { Badge } from '@/shared/ui/display'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { Dialog } from '@/shared/ui/overlay'
+import { FormSection } from '@/shared/ui/form-section'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import '@/styles/jobs.css'
 
-function FormSection({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children: ReactNode }) {
-  return (
-    <section className="form-section">
-      <header>
-        <span aria-hidden="true">{icon}</span>
-        <div><h3>{title}</h3>{hint && <p>{hint}</p>}</div>
-      </header>
-      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
-    </section>
-  )
-}
 
 export function DesignationDialog({ designation, onClose, onSaved }: { designation?: Designation; onClose: () => void; onSaved: (id: string) => void }) {
   const store = useStore()

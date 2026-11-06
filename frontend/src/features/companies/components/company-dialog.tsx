@@ -13,6 +13,7 @@ import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { CountryInput, useCountryOptions } from '@/features/clients/components/client-dialog'
 import { FormSection } from '@/features/clients/components/parts'
 import { frequentValues } from '@/shared/lib/suggestions'
+import { WEBSITE_MAX, checkWebsite } from '@/shared/lib/website'
 
 export function CompanyDialog({ company, clientId, onClose }: { company?: Company; clientId?: string; onClose: () => void }) {
   const store = useStore()
@@ -22,7 +23,7 @@ export function CompanyDialog({ company, clientId, onClose }: { company?: Compan
   const [form, setForm] = useState({
     clientId: company?.clientId ?? clientId ?? '', name: company?.name ?? '', country: company?.country ?? '',
     city: company?.city ?? '', industry: company?.industry ?? '', contactPerson: company?.contactPerson ?? '',
-    contactEmail: company?.contactEmail ?? '', phone: company?.phone ?? '', whatsapp: company?.whatsapp ?? '', address: company?.address ?? '',
+    contactEmail: company?.contactEmail ?? '', website: company?.website ?? '', phone: company?.phone ?? '', whatsapp: company?.whatsapp ?? '', address: company?.address ?? '',
     notes: company?.notes ?? '', status: company?.status ?? 'active',
   })
   const [savedId, setSavedId] = useState(company?.id)
@@ -48,11 +49,13 @@ export function CompanyDialog({ company, clientId, onClose }: { company?: Compan
   const save = async () => {
     if (saving) return
     if (!form.clientId) { setError('Choose a client for this company.'); return }
+    const web = checkWebsite(form.website)
+    if (web.error) { setError('Website: ' + web.error); return }
     setSaving(true); setError('')
     let identifier = savedId
     let detailsSaved = false
     try {
-      const record = identifier ? await api.put<Company>('/companies/' + identifier, form) : await api.post<Company>('/companies', form)
+      const record = identifier ? await api.put<Company>('/companies/' + identifier, { ...form, website: web.value }) : await api.post<Company>('/companies', { ...form, website: web.value })
       identifier = record.id
       setSavedId(identifier); detailsSaved = true
       if (agreement) {
@@ -77,18 +80,19 @@ export function CompanyDialog({ company, clientId, onClose }: { company?: Compan
       <fieldset disabled={saving} className="client-form-fields">
         <FormSection icon={<Building2 size={18} />} title="Company" hint="The business you create orders for">
           <Field label="Client" required hint="The client this company belongs to" className="sm:col-span-2"><Select value={form.clientId} onChange={(e) => set('clientId', e.target.value)}><option value="">Choose a client</option>{store.clients.filter((client) => client.status === 'active' || client.id === form.clientId).map((client) => <option key={client.id} value={client.id}>{client.name}{client.status === 'inactive' ? ' (inactive)' : ''}</option>)}</Select></Field>
-          <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
-          <Field label="Industry"><SuggestInput maxLength={120} value={form.industry} onChange={(value) => set('industry', value)} options={industries} /></Field>
+          <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Gulf Build Contracting LLC" /></Field>
+          <Field label="Industry"><SuggestInput maxLength={120} value={form.industry} onChange={(value) => set('industry', value)} options={industries} placeholder="Construction" /></Field>
           <Field label="Status"><Select value={form.status} onChange={(e) => set('status', e.target.value)}><option value="active">Active</option><option value="inactive">Inactive</option></Select></Field>
-          <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>
+          <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" /></Field>
           <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>
-          <Field label="Address" className="sm:col-span-2"><Textarea rows={2} maxLength={2000} value={form.address} onChange={(e) => set('address', e.target.value)} /></Field>
+          <Field label="Website" hint="Optional. For example www.gulfbuild.com" className="sm:col-span-2"><Input type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={WEBSITE_MAX} value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="www.gulfbuild.com" /></Field>
+          <Field label="Address" className="sm:col-span-2"><Textarea rows={2} maxLength={2000} value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Building, street, area" /></Field>
         </FormSection>
         <FormSection icon={<UserRound size={18} />} title="Contact" hint="Who you deal with at this company">
-          <Field label="Contact person"><Input maxLength={160} value={form.contactPerson} onChange={(e) => set('contactPerson', e.target.value)} /></Field>
-          <Field label="Contact email"><Input type="email" maxLength={255} value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
-          <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
-          <Field label="WhatsApp"><Input type="tel" maxLength={40} value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} /></Field>
+          <Field label="Contact person"><Input maxLength={160} value={form.contactPerson} onChange={(e) => set('contactPerson', e.target.value)} placeholder="Khalid Rahman" /></Field>
+          <Field label="Contact email"><Input type="email" maxLength={255} value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} placeholder="name@company.com" /></Field>
+          <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+971 50 123 4567" /></Field>
+          <Field label="WhatsApp"><Input type="tel" maxLength={40} value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} placeholder="+971 50 123 4567" /></Field>
         </FormSection>
       </fieldset>
       <FormSection icon={<FileText size={18} />} title="Agreement" hint="If you upload a new one later, the old one is kept." cols={1}>

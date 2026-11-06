@@ -28,10 +28,18 @@ export interface DailyItem {
   daysLate: number
   client: string | null
   clientContact: string | null
+  /** The order's country, else (not matched yet) the candidate's preferred country from the application form. */
   country: string | null
+  countrySource: 'order' | 'preference' | null
+  countryIsPreferred: boolean
+  /** Current city/address, sent only when no country is known, so the screen can still recognise one in it. */
+  locationHint: string | null
   candidate: string
   candidateRef: string
+  /** The order's position, else the candidate's first preferred job, else their first skill. */
   position: string | null
+  positionSource: 'order' | 'preference' | 'skill' | null
+  positionIsPreferred: boolean
   orderRef: string | null
   referral: { source: string; label: string; detail: string | null }
   remark: { body: string; at: string; by: string; count: number } | null
@@ -293,4 +301,77 @@ export function candidatesCell(summary: Pick<DailySummary, 'done' | 'total'>, sh
   if (offToday) return { text: '-', warn: false, note: 'Day off' }
   if (summary.total === 0) return { text: '0', warn: true, note: shortfall?.reason ?? 'No open candidates to allocate' }
   return { text: `${summary.done}/${summary.total}`, warn: !!shortfall, note: shortfall ? `Only ${shortfall.allocated} of ${shortfall.target} new candidates today` : '' }
+}
+
+// ------------------------------------------------------------------------------------------------ table cells
+
+export type CellSource = 'order' | 'preference' | 'location' | 'skill' | 'none'
+
+export interface CountryCell {
+  /** One or more countries (a candidate may prefer several); empty when none is known. */
+  names: string[]
+  source: CellSource
+  /** Tooltip explaining where the value comes from, or why there is none. */
+  hint: string
+}
+
+/** Several preferred countries are stored as one text ("UAE, Qatar"); split them without breaking "Dubai, UAE" style places. */
+export function splitCountries(value: string): string[] {
+  return value.split(/[,;/|\n]+/).map((part) => part.trim()).filter(Boolean)
+}
+
+/**
+ * What the Country column shows. An order's country wins; otherwise the candidate's preferred country; otherwise a country
+ * recognised in their current location (`recognise` is the app's country lookup, passed in so this file stays import-free);
+ * otherwise nothing, with the honest reason (nationality is never used).
+ */
+export function countryCell(item: Pick<DailyItem, 'country' | 'countrySource' | 'locationHint'>, recognise: (text: string) => unknown = () => null): CountryCell {
+  if (item.country?.trim()) {
+    const preferred = item.countrySource === 'preference'
+    const names = preferred ? splitCountries(item.country) : [item.country.trim()]
+    return {
+      names, source: preferred ? 'preference' : 'order',
+      hint: preferred ? "Candidate's preferred country (from the application form), not from an order" : "The order's country",
+    }
+  }
+  const segments = (item.locationHint ?? '').split(/[,\n]+/).map((part) => part.trim()).filter(Boolean).reverse()
+  const found = segments.find((part) => recognise(part))
+  if (found) return { names: [found], source: 'location', hint: "From the candidate's current location: no preferred country saved yet" }
+  return { names: [], source: 'none', hint: 'No preferred country saved yet' }
+}
+
+export interface PositionCell { text: string; source: CellSource; hint: string }
+
+export function positionCell(item: Pick<DailyItem, 'position' | 'positionSource'>): PositionCell {
+  if (!item.position?.trim()) return { text: '', source: 'none', hint: 'No job preference saved yet' }
+  if (item.positionSource === 'preference') return { text: item.position, source: 'preference', hint: "Candidate's preferred job (from the application form), not from an order" }
+  if (item.positionSource === 'skill') return { text: item.position, source: 'skill', hint: "No job preference saved: shown from the candidate's skills" }
+  return { text: item.position, source: 'order', hint: "The order's position" }
+}
+
+/** A client exists only through an order, so an unmatched candidate has none; say that instead of a bare dash. */
+export function clientCell(item: Pick<DailyItem, 'client' | 'kind'>): { text: string; hint: string } {
+  if (item.client) return { text: item.client, hint: '' }
+  return { text: '', hint: item.kind === 'call' ? 'Not matched to an order yet' : 'No client recorded' }
+}
+
+/** Number of colours in the country pill palette (`dw-ctry-0` ... in daily-work.css). */
+export const COUNTRY_TONES = 8
+
+/** A stable colour for a country: the same name always gets the same pill, whatever the casing. */
+export function countryTone(name: string): number {
+  const key = name.trim().toLowerCase()
+  let hash = 0
+  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return hash % COUNTRY_TONES
+}
+
+const SHORT_COUNTRIES: Record<string, string> = {
+  'united arab emirates': 'UAE', 'saudi arabia': 'KSA', 'kingdom of saudi arabia': 'KSA', 'united kingdom': 'UK', 'united states': 'USA',
+  'united states of america': 'USA', 'republic of korea': 'S. Korea', 'south korea': 'S. Korea',
+}
+
+/** The short form recruiters use for the longest Gulf/English names so a pill stays compact; the full name is the tooltip. */
+export function countryShort(name: string): string {
+  return SHORT_COUNTRIES[name.trim().toLowerCase().replace(/\s+/g, ' ')] ?? name.trim()
 }

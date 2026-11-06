@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from collections.abc import Generator
 
@@ -8,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
-from app.services import change_feed, form_sync
+from app.services import change_feed, form_sync, lead_matching, response_cache
 
 settings = get_settings()
 log = logging.getLogger("db")
@@ -52,9 +53,14 @@ def _stamp_new_connection(dbapi_connection, connection_record):
     connection_record.info["last_used"] = time.monotonic()
 
 
+_keeper = threading.local()
+
+
 @event.listens_for(engine, "checkout")
 def _verify_if_idle(dbapi_connection, connection_record, connection_proxy):
     """Ping only connections that were idle long enough for the network to have dropped them."""
+    if getattr(_keeper, "active", False):
+        return  # the pool keeper is about to ping this one itself, in parallel with the others
     if time.monotonic() - connection_record.info.get("last_used", 0.0) < IDLE_VERIFY_SECONDS:
         return
     try:
@@ -114,12 +120,88 @@ def warm_pool(count: int = 6) -> None:
     for connection in opened:
         if connection is not None:
             connection.close()
+    keep_pool_warm(count)
+
+
+KEEPER_SECONDS = 6      # how often the keeper looks at the pool
+KEEPER_PING_AFTER = 4   # a pooled connection idle this long is pinged by the keeper, not by the next request
+RESIDENT_CONNECTIONS = 6
+
+
+def keep_pool_warm(resident: int = RESIDENT_CONNECTIONS) -> None:
+    """Forever (daemon thread): keep `resident` connections open and proven alive, off the request path.
+
+    Without it the first request after a quiet moment finds each idle connection needing its own `SELECT 1`
+    (one round trip, 100-300 ms against a hosted database), and a burst of parallel reads pays that for several
+    connections at once, or ~1 s to open a new one if the pool shrank. The keeper pings stale idle connections in
+    parallel (one round trip in total) and tops the pool back up, so a request finds a connection ready.
+    """
+    while True:
+        time.sleep(KEEPER_SECONDS)
+        try:
+            keep_pool_round(engine, resident)
+        except Exception:
+            log.debug("Pool keeper skipped a round.", exc_info=True)
+
+
+def keep_pool_round(pool_engine, resident: int = RESIDENT_CONNECTIONS, ping_after: float = KEEPER_PING_AFTER) -> dict:
+    """One pass of the keeper; returns what it did (for tests and diagnostics)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def ping(connection):
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            connection.rollback()
+            return True
+        except Exception:
+            connection.invalidate()  # the pool discards it; the next checkout opens a fresh one
+            return False
+        finally:
+            connection.close()
+
+    def open_fresh(_):
+        try:
+            return pool_engine.raw_connection()
+        except Exception:
+            return None
+
+    pool = pool_engine.pool
+    _keeper.active = True
+    try:
+        held = [pool_engine.raw_connection() for _ in range(max(pool.checkedin(), 0))]
+    finally:
+        _keeper.active = False
+    now = time.monotonic()
+    stale = [c for c in held if now - c.info.get("last_used", 0.0) >= ping_after]
+    for connection in held:
+        if not any(connection is other for other in stale):
+            connection.close()  # in use moments ago: leave it where requests will find it
+    missing = resident - (pool.checkedin() + pool.checkedout())  # the stale ones being pinged are counted as checked out
+    with ThreadPoolExecutor(max_workers=max(len(stale), 1)) as workers:
+        pinged = list(workers.map(ping, stale))
+    if missing > 0:
+        # Hold the idle connections so the new checkouts must open fresh ones, open them side by side, then put all back.
+        _keeper.active = True
+        try:
+            idle = [pool_engine.raw_connection() for _ in range(max(pool.checkedin(), 0))]
+        finally:
+            _keeper.active = False
+        with ThreadPoolExecutor(max_workers=missing) as workers:
+            fresh = [c for c in workers.map(open_fresh, range(missing)) if c is not None]
+        for connection in [*idle, *fresh]:
+            connection.close()
+    return {"pinged": len(pinged), "dropped": pinged.count(False), "opened": max(missing, 0)}
 
 
 # Announce committed changes to open browsers (hooks on statements, commits and ORM flushes; no-op off PostgreSQL).
 change_feed.install()
+# Short-lived response memo for the polled read endpoints: emptied by the same commits (see services/response_cache.py).
+response_cache.install()
 # Keep the application-form columns in step with OCR output stored on a candidate (see services/form_sync.py).
 form_sync.install()
+# A candidate who appears (or changes phone / e-mail) after a lead was stored flags that lead, same transaction (services/lead_matching.py).
+lead_matching.install()
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 

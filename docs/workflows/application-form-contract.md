@@ -470,3 +470,24 @@ Document slots (resume / passport / photo) stay fixed: they are tied to storage 
 of the row arrays), `nativePlace`, `familyMemberNumber`, `jobDurationPreference`, `countryPreference`, `jobPreference`,
 `serviceChargesStatus`, `bestTimeToContact`, `interestLevel`, `nextFollowUpDate`, `whatsappSameAsPhone`. Values are strings of at most 20000
 characters; unknown keys are still rejected with 422, so the screen can stop stripping these keys before autosaving.
+
+## 14. Aadhaar copies in the application form (13E)
+
+An Aadhaar copy is read like a resume or a passport (`kind: "aadhaar"`; the Add candidate page already scanned it, and a file uploaded to a candidate's `aadhaar` document slot is now queued for reading as well). What the card says fills the form under the same rules as every other document (section 7):
+
+| Aadhaar value | Form field (`fieldSources` key) | Rule |
+| --- | --- | --- |
+| name | `personal.candidateName` | fills an empty / extracted field |
+| date of birth (a bare year of birth is not a date and is ignored) | `personal.dateOfBirth` | same |
+| gender | `personal.gender` | same |
+| the S/O, D/O or W/O line of the card (`care_of`, or the first clause of the address) | `personal.fatherName` | same. `W/O` is the husband's name; the recruiter checks it. `C/O` and a bare name name no relation and are ignored |
+| address | `personal.currentAddress` | fills an EMPTY current address only (it is the registered address, not necessarily where the person lives); a resume read later may replace the extracted Aadhaar address |
+
+* Provenance is `"extracted"`; a value a person typed (`"manual"`) is never overwritten. Internally the server also remembers which fields came from the card (`_fromAadhaar`, never sent to the client).
+* **Precedence for identity fields (name, date of birth, gender, father's name): passport > Aadhaar > resume**, whatever order the documents arrive in. The resume still wins experience, education and everything else an Aadhaar card never states.
+* The card's mobile number, VID and enrolment id are never mapped. There is no Aadhaar column on the candidate and none was added.
+* **The Aadhaar number is never in a response, an audit entry or a log of these endpoints.** It stays in `ocr_data` (the verbatim Veris result). Beside the candidate the server keeps only the last four digits (`field_sources._aadhaar`, internal). `GET /api/candidates/{id}/application-form` carries `"aadhaar": {"maskedNumber": "XXXX XXXX 1234"}` (or `null` when no card was read), and the Documents section shows that line; the screen re-masks whatever it receives to the last four digits. Audit entries list only field keys (`filled_fields`).
+* Replaying stored documents (`POST .../refresh`, the backfill, the save hook) applies them in the order resume, Aadhaar, passport, so the passport outranks the card and the card outranks the resume.
+* Known gap, not changed here: `GET /api/candidates/{id}/ocr` returns the stored Aadhaar number unmasked to an admin, a manager and the candidate's owner (everyone else gets it masked to the last four digits); the document job result of an Aadhaar read (`/api/ocr/jobs/...`) also holds the verbatim card for the person who read it. Masking those too is a product decision.
+
+Tests: `backend/tests/test_aadhaar_form_mapping.py` (mapping, fill rule, precedence in every order, masking, audit and log checks), `backend/tests/test_ocr_mapping.py`, `frontend/tests/application-form.test.mjs`, `frontend/tests/candidate-ocr.test.mjs`.

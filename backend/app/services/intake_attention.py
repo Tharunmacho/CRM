@@ -4,6 +4,7 @@ Nothing here loads message bodies, OCR state or extraction payloads: only the fe
 columns a person needs to decide whether to retry or open a failed intake.
 """
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -42,6 +43,12 @@ def _reason(error: str | None, status: str) -> str:
 
 
 def _email_items(db: Session, can_retry: bool) -> list[dict]:
+    # The attachment names ride along as a correlated array, so a page of failures costs one statement, not two.
+    names = (
+        select(func.array_agg(aggregate_order_by(MailAttachment.file_name, MailAttachment.file_name)))
+        .where(MailAttachment.message_id == EmailIngestionJob.message_id)
+        .correlate(EmailIngestionJob).scalar_subquery()
+    )
     rows = db.execute(
         select(
             EmailIngestionJob.id, EmailIngestionJob.status, EmailIngestionJob.attempts, EmailIngestionJob.last_error,
@@ -49,24 +56,18 @@ def _email_items(db: Session, can_retry: bool) -> list[dict]:
             EmailIngestionJob.state.has_key("receive_error").label("receive_error"),
             MailMessage.subject, MailMessage.from_name, MailMessage.from_address,
             MailAccount.address, MailAccount.provider, MailAccount.disconnected_at,
+            names.label("file_names"),
         )
         .join(MailMessage, MailMessage.id == EmailIngestionJob.message_id)
         .join(MailAccount, MailAccount.id == MailMessage.account_id)
         .where(EmailIngestionJob.status.in_(ATTENTION_STATUSES))
         .order_by(EmailIngestionJob.updated_at.desc(), EmailIngestionJob.id).limit(ATTENTION_LIMIT)
     ).all()
-    files: dict[str, list[str]] = {}
-    if rows:
-        for message_id, name in db.execute(
-            select(MailAttachment.message_id, MailAttachment.file_name)
-            .where(MailAttachment.message_id.in_([row.message_id for row in rows])).order_by(MailAttachment.file_name)
-        ):
-            files.setdefault(message_id, []).append(name)
     return [{
         "id": f"email:{row.id}", "source": "email", "jobId": row.id, "messageId": row.message_id,
         "status": row.status, "title": row.subject or "(No subject)",
         "sender": row.from_name or row.from_address or "", "channel": row.address,
-        "files": files.get(row.message_id, []), "reason": _reason(row.last_error, row.status),
+        "files": list(row.file_names or []), "reason": _reason(row.last_error, row.status),
         "attempts": row.attempts, "updatedAt": row.updated_at, "candidateId": row.candidate_id,
         # The retry route refuses an unreceivable message or a disconnected/archived mailbox.
         "retryable": can_retry and not row.receive_error and row.disconnected_at is None
@@ -123,18 +124,22 @@ def attention_list(db: Session, user: User) -> dict:
     """Most recent failed or needs-review intake from email, WhatsApp and manual uploads."""
     can_retry = user.role == Role.admin
 
-    def count(model):
-        return lambda session: session.scalar(select(func.count()).select_from(model).where(model.status.in_(ATTENTION_STATUSES))) or 0
+    def counts(session):
+        # The three totals are one statement (three scalar subqueries), not three round trips.
+        return session.execute(select(*(
+            select(func.count()).select_from(model).where(model.status.in_(ATTENTION_STATUSES)).scalar_subquery()
+            for model in (EmailIngestionJob, WhatsAppMessage, DocumentExtractionJob)
+        ))).one()
 
-    # Six independent reads: waiting for them one after another costs six round trips.
-    email, whatsapp, manual, email_total, whatsapp_total, manual_total = parallel_reads(
+    # Four independent statements run side by side: one round trip of waiting instead of six.
+    email, whatsapp, manual, (email_total, whatsapp_total, manual_total) = parallel_reads(
         db,
         lambda session: _email_items(session, can_retry),
         lambda session: _whatsapp_items(session, can_retry),
         lambda session: _manual_items(session, user),
-        count(EmailIngestionJob), count(WhatsAppMessage), count(DocumentExtractionJob),
+        counts,
     )
     items = [*email, *whatsapp, *manual]
     items.sort(key=lambda item: (item["updatedAt"], item["id"]), reverse=True)
-    totals = {"email": email_total, "whatsapp": whatsapp_total, "manual": manual_total}
+    totals = {"email": email_total or 0, "whatsapp": whatsapp_total or 0, "manual": manual_total or 0}
     return {"items": items[:ATTENTION_LIMIT], "totals": {**totals, "all": sum(totals.values())}, "limit": ATTENTION_LIMIT, "canRetry": can_retry}

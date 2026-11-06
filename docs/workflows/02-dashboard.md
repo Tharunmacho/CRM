@@ -55,3 +55,24 @@ The dashboard uses a dedicated operational database projection instead of comput
 Server metrics, stage/task drill-downs and minimal source-health endpoints are implemented with isolated scope/date tests. Real worker health, actual provider traffic and deployed timing still require acceptance.
 
 Implementation: [Dashboard screen](../../frontend/src/screens/dashboard/dashboard.tsx), [reporting service](../../backend/app/services/reporting.py). Related guide: [Reports](17-reports.md).
+
+## Lead sheet cards
+
+Under the Pipeline overview the dashboard shows a **Lead sheet** section (same card style): the work on the people who answered the agency's ads ([Lead sheet](23-lead-sheet.md)). It is role scoped like the rest of the page: **staff see only the leads assigned to them**, admin and manager see the whole team, and the staff picker narrows it to one person. A staff member cannot widen the scope by naming someone else (403, as for the rest of the dashboard).
+
+| Card | Value |
+| --- | --- |
+| New leads today | leads that arrived today (their own created time, agency time zone) |
+| Not contacted | assigned leads still New and never called (same rule as the Lead sheet card) |
+| Follow-ups due | open leads whose follow-up date is today or past |
+| Resumes received | leads at Resume received, waiting to be converted |
+| Converted to candidates | leads converted in the period chosen above (7, 30, 90 days, this year, all time); the line shows the conversion rate = converted leads / assigned leads |
+| Unassigned leads (admin and manager only) | open leads nobody owns; always the whole pool, whichever person is chosen |
+
+Press a card to see the first 8 leads behind it (name, position and country, status, who it is assigned to in the team view, the relevant date, calls); a lead's name opens it on the Lead sheet (`/leads?lead=<id>`) and **Open Lead sheet** goes to the full sheet. A staff member who has not finished today's daily tasks sees "Finish today's tasks first" on the cards that are work (Not contacted, Follow-ups due, Resumes received); the numbers and lists stay readable. The cards are in **Export** as `Lead sheet: ...` rows.
+
+The numbers are the additive `leads` key of `GET /api/dashboard`, read with one aggregate statement beside the pipeline read and cached with the `reports` and `leads` topics per person (so a call or assignment changes them at once, and the dashboard refetches on the live `leads` event). The list behind a card is `GET /api/dashboard/leads?card=...&period=...&staff_id=...`, same scope rules, cached 10 s per person and card. Older servers send no `leads` key and the section is simply not shown.
+
+Checks: [ ] team, one person and staff scopes give different numbers and match the Lead sheet; [ ] a staff member cannot read another person's leads through `staff_id`; [ ] only admin and manager see Unassigned; [ ] a locked staff member sees the lock hint; [ ] a call logged on the Lead sheet updates the cards without a reload.
+
+Implementation: [lead metrics](../../backend/app/services/lead_metrics.py), [dashboard route](../../backend/app/api/routers/reports.py), [card helpers](../../frontend/src/features/dashboard/lead-overview.ts), [section](../../frontend/src/features/dashboard/components/lead-overview.tsx).

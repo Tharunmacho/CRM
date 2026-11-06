@@ -191,6 +191,7 @@ def test_all_document_types_select_exact_pages_and_keep_aadhaar_identity_separat
     aadhaar = output["extractions"]["aadhaar"]
     assert aadhaar["fields"] == {
         "name": "Alex Example", "dob": "1990-01-01", "gender": "male",
+        "current_address": "An example address without a definite city field",  # the address is a form-only value now (13E)
     }
     assert aadhaar["raw"]["aadhaar"]["masked_aadhaar_number"] == "XXXX XXXX 0000"
     assert output["extractions"]["resume"]["fields"]["total_experience"] == 3
@@ -216,7 +217,7 @@ def test_the_stored_document_is_exactly_the_provider_result_for_resume_passport_
         assert extraction["source"]["local_inspection"]["page_count"] == 4
         assert extraction["source"]["source_sha256"] == environment.state["source_sha256"]
     # Aadhaar identifiers and the passport's printed fields are stored although not mapped to columns.
-    assert set(output["extractions"]["aadhaar"]["fields"]) == {"name", "dob", "gender"}
+    assert set(output["extractions"]["aadhaar"]["fields"]) == {"name", "dob", "gender", "current_address"}
     assert output["extractions"]["aadhaar"]["raw"]["aadhaar"]["aadhaar_number"] == "000000000000"
     assert output["extractions"]["passport"]["raw"]["fields"][0]["value"] == "COCHIN"
     assert output["extractions"]["passport"]["fields"]["passport_place"] == "COCHIN"

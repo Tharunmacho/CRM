@@ -85,7 +85,7 @@ def request_bootstrap(client, engine, expected_revision):
     with recorded_statements(engine) as statements:
         response = client.get("/api/bootstrap")
     assert response.status_code == 200
-    assert_select_budget(statements, 2)  # Revision is part of the same snapshot SQL.
+    assert_select_budget(statements, 3)  # Revision is part of the same snapshot SQL; the unread badge is the third statement.
     result = response.json()
     assert result["ingestionRevision"] == expected_revision
     assert_no_private_data(result)

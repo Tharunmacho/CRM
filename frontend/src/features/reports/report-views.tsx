@@ -34,7 +34,7 @@ interface Builders<T> {
 function builders<T>(): Builders<T> {
   return {
     col: (key, header, width, value, extra = {}) => ({ key, header, width, sortable: true, value, render: row => { const v = value(row); return v == null || v === '' ? '—' : typeof v === 'number' ? <span className="tnum">{v.toLocaleString()}</span> : <span className="rv-cell" title={v}>{v}</span> }, ...extra }),
-    num: (key, header, width, value, render) => ({ key, header, width, sortable: true, align: 'right', value, render: render ?? (row => { const v = value(row); return v == null ? '—' : <span className="tnum">{v.toLocaleString()}</span> }) }),
+    num: (key, header, width, value, render) => ({ key, header, width, sortable: true, align: 'center', value, render: render ?? (row => { const v = value(row); return v == null ? '—' : <span className="tnum">{v.toLocaleString()}</span> }) }),
   }
 }
 
@@ -65,7 +65,20 @@ export function FunnelReport({ data }: { data: Data }) {
       {view === 'chart' ? <StepFunnel rows={rows} dropOff={index => stageDropOff(rows, index)} /> : null}
     </ChartCard>
     {view === 'table' && table}
+    <StageHours data={data} />
   </>
+}
+
+/** How long each stage takes to finish. It is a property of the pipeline, so it sits with the funnel rather than with the staff board. */
+function StageHours({ data }: { data: Data }) {
+  const noHours = data.stageHours.every(s => s.averageHours == null)
+  const hours: RankRow[] = data.stageHours.map(s => ({ key: String(s.stage), stage: s.stage, name: s.label, value: s.averageHours, label: fmtHours(s.averageHours), sub: s.completed ? `${plural(s.completed, 'task')} finished` : 'No finished task' }))
+  const slowest = data.stageHours.filter(s => s.averageHours != null).reduce<typeof data.stageHours[number] | null>((best, s) => (!best || (s.averageHours as number) > (best.averageHours as number) ? s : best), null)
+  return <ChartCard title="Average hours per stage" hint="Time from when a task is created to when its stage is finished. Stages with no finished task have no average; they are not counted as zero." empty={noHours}
+    emptyHint="No stage was finished in this period, so there is no average time to show." summary="Average completion time for each of the 11 stages."
+    insight={slowest ? <>Slowest stage: <b>Stage {slowest.stage} · {slowest.label}</b>, {fmtHours(slowest.averageHours)} on average.</> : undefined}>
+    <Lollipops rows={hours} colour={SERIES.violet} ranked={false} label="Average hours for each stage" />
+  </ChartCard>
 }
 
 /* ------------------------------------------------------------------ staff */
@@ -82,36 +95,21 @@ export function StaffReport({ data }: { data: Data }) {
   const [metric, setMetric] = useState<MetricKey>('assigned')
   const active = METRICS.find(item => item.key === metric)!
   const noStaff = !data.staff.length
-  const noHours = data.stageHours.every(s => s.averageHours == null)
   const ranked = [...data.staff].sort((a, b) => b[metric] - a[metric] || a.name.localeCompare(b.name))
   const board: RankRow[] = ranked.map(s => ({ key: s.id, name: s.name, person: true, value: s[metric], label: num(s[metric]), sub: `${num(s.completedTasks)} done · ${fmtHours(s.averageStageHours)} per stage` }))
   const top = ranked[0]
   const leaders = top ? ranked.filter(s => s[metric] === top[metric]) : []
-  const hours: RankRow[] = data.stageHours.map(s => ({ key: String(s.stage), stage: s.stage, name: s.label, value: s.averageHours, label: fmtHours(s.averageHours), sub: s.completed ? `${plural(s.completed, 'task')} finished` : 'No finished task' }))
-  const slowest = data.stageHours.filter(s => s.averageHours != null).reduce<typeof data.stageHours[number] | null>((best, s) => (!best || (s.averageHours as number) > (best.averageHours as number) ? s : best), null)
   return <>
-    <div className="rv-stack">
-      <ChartCard title="Staff board" hint={`Ranked by ${active.long}, highest first. Pick another measure to re-rank.`} empty={noStaff} emptyHint="No staff match these filters." summary={`${data.staff.length} staff members ranked by ${active.long}.`}
+    <ChartCard title="Staff board" hint={`Ranked by ${active.long}, highest first. Pick another measure to re-rank.`} empty={noStaff} emptyHint="No staff match these filters." summary={`${data.staff.length} staff members ranked by ${active.long}.`}
         actions={!noStaff && <Segmented label="Rank staff by" value={metric} onChange={setMetric} options={METRICS.map(item => ({ key: item.key, label: item.label }))} />}
         insight={top && top[metric] > 0 ? (leaders.length === 1 ? <><b>{top.name}</b> leads with {num(top[metric])} {active.long}.</> : <><b>{plural(leaders.length, 'person', 'people')}</b> tie at {num(top[metric])} {active.long}.</>) : `No ${active.long} in this period.`}>
         <Lollipops rows={board} colour={active.colour} label={`Staff ranked by ${active.long}`} />
       </ChartCard>
-      <ChartCard title="Average hours per stage" hint="Time from when a task is created to when its stage is finished, across the staff shown." empty={noHours}
-        emptyHint="No stage was finished in this period, so there is no average time to show." summary="Average completion time for each of the 11 stages."
-        insight={slowest ? <>Slowest stage: <b>Stage {slowest.stage} · {slowest.label}</b>, {fmtHours(slowest.averageHours)} on average.</> : undefined}>
-        <Lollipops rows={hours} colour={SERIES.violet} ranked={false} label="Average hours for each stage" />
-      </ChartCard>
-    </div>
     <RTable rows={data.staff} rowKey={r => r.id} title="Staff detail" caption="One row per person. Admins and managers see the whole team. Staff see only themselves."
       columns={c => [
         c.col('name', 'Staff', '25%', r => r.name, { render: r => <RecordIdentity name={r.name} /> }), c.num('assigned', 'Assigned', '12%', r => r.assigned), c.num('done', 'Tasks done', '12%', r => r.completedTasks),
         c.num('hours', 'Avg hours / stage', '14%', r => r.averageStageHours, r => <span className="tnum">{fmtHours(r.averageStageHours)}</span>),
         c.num('samples', 'Tasks timed', '11%', r => r.durationSamples), c.num('esc', 'Sent to admin', '13%', r => r.escalations), c.num('missed', 'Missed updates', '13%', r => r.missedUpdates),
-      ]} />
-    <RTable rows={data.stageHours} rowKey={r => String(r.stage)} title="Average hours by stage" caption="Stages with no finished task have no average. They are not counted as zero." pageSize={11}
-      columns={c => [
-        c.col('stage', 'Stage', '50%', r => `${r.stage}. ${r.label}`, { render: r => <StageChip stage={r.stage} label={r.label} /> }), c.num('samples', 'Tasks finished', '20%', r => r.completed),
-        c.num('hours', 'Average hours', '30%', r => r.averageHours, r => <span className="tnum">{fmtHours(r.averageHours)}</span>),
       ]} />
   </>
 }

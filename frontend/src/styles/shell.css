@@ -82,6 +82,8 @@ html body .rail :is(a, button):focus-visible { outline: 2px solid var(--primary)
 .rail-item-label { flex: 1; min-width: 0; padding: 3px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: opacity .18s ease, transform .22s var(--ease-rail); }
 /* Live counts: small clean pills on one right edge (unread mail in the logo blue, overdue tasks in red). */
 .rail-badge { display: inline-grid; place-items: center; flex: none; min-width: 22px; height: 20px; margin-left: auto; padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); font-size: 11px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.rail-lock { display: inline-grid; place-items: center; flex: none; width: 22px; height: 20px; margin-left: auto; border-radius: 999px; background: color-mix(in srgb, var(--warning-ink, #b45309) 14%, transparent); color: var(--warning-ink, #b45309); }
+.rail.is-dock .rail-lock { position: absolute; top: 5px; right: 5px; width: 16px; height: 16px; background: var(--nav-bg); box-shadow: 0 0 0 2px var(--nav-bg); }
 .rail-badge.is-alert { background: color-mix(in srgb, var(--nav-alert) 14%, transparent); color: var(--nav-alert); }
 
 /* ---------- Footer: the Light / Dark switch, and (icon rail only) the pin button in the same spot ---------- */

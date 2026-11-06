@@ -11,7 +11,7 @@ from sqlalchemy.orm import aliased, defer
 from sqlalchemy.orm.attributes import set_committed_value
 from app.api.schemas import CandidateOut
 from app.core.config import get_settings
-from app.db.models import Application, Candidate, CandidateStatus, Client, Company, Designation, Order, Source, User
+from app.db.models import Application, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
 from app.domain.stages import STAGES
 from app.services.candidate_identity import normalized_labels
 from app.services.parallel_reads import parallel_reads
@@ -26,6 +26,8 @@ RANGE_KEYS = {"experience_min", "experience_max", "added_from", "added_to"}
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in", "referral": "Referral", "other": "Other"}
 # source_detail holds the agent / referrer a person typed, but automatic intake stores a machine pointer there.
 MACHINE_SOURCE_DETAIL = r"^(email_message|whatsapp_message|person_review):"
+SERVICE_CHARGE_ORDER = ("agreed", "pending", "declined", "not_discussed")
+INTEREST_ORDER = ("more_interested", "interested", "somewhat_interested", "not_interested")
 MAX_SEARCH_TERMS = 10
 ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -100,7 +102,12 @@ def search_statement(filters: Search):
         "passport": case((func.length(func.trim(func.coalesce(Candidate.passport_no, ""))) > 0, "Yes"), else_="No"),
         "source": source, "owner": func.coalesce(User.name, UNASSIGNED_LABEL), "order": func.coalesce(Order.ref, "Not mapped"),
         "stage": func.coalesce(app.c.current_stage, 0), "status": cast(Candidate.status, String),
-        "added": Candidate.created_at,
+        "added": Candidate.created_at, "country": Candidate.country_preference,
+    }
+    # Sorted by meaning, not alphabet (Agreed before Pending; More interested before Not interested). Sort only: not column filters.
+    ranks = {
+        "service": case(*((Candidate.service_charges_status == value, rank) for rank, value in enumerate(SERVICE_CHARGE_ORDER, 1)), else_=len(SERVICE_CHARGE_ORDER) + 1),
+        "interest": case(*((Candidate.interest_level == value, rank) for rank, value in enumerate(INTEREST_ORDER, 1)), else_=len(INTEREST_ORDER) + 1),
     }
     intake = aliased(User)
     query = (select(Candidate).outerjoin(User, User.id == Candidate.owner_id).outerjoin(intake, intake.id == Candidate.intake_owner_id)
@@ -113,7 +120,7 @@ def search_statement(filters: Search):
         """True when this one term appears (any case) in at least one of the candidate's details."""
         lowered = term.lower()
         text_fields = [Candidate.name, Candidate.phone, Candidate.whatsapp, Candidate.email, Candidate.passport_no, Candidate.ref, Candidate.nationality,
-                       Candidate.current_city, cast(Candidate.skills, String), cast(Candidate.designations, String), agent, User.name, intake.name,
+                       Candidate.current_city, Candidate.country_preference, cast(Candidate.skills, String), cast(Candidate.designations, String), agent, User.name, intake.name,
                        Order.ref, Designation.title, Company.name, Client.name, Order.country, Order.city]
         clauses = [literal_contains(field, term) for field in text_fields]
         clauses.append(Candidate.resume_tsv.op("@@")(func.websearch_to_tsquery("simple", term)))
@@ -222,9 +229,10 @@ def search_statement(filters: Search):
         else:
             expression = cast(expression, String)
             query = query.where(literal_contains(expression, term.strip()))
-    if filters.sort not in expressions:
+    sortable = {**expressions, **ranks}
+    if filters.sort not in sortable:
         raise HTTPException(422, "We cannot sort by this column.")
-    ordering = expressions[filters.sort]
+    ordering = sortable[filters.sort]
     return query.order_by(ordering.desc().nullslast() if filters.direction == "desc" else ordering.asc().nullslast(), Candidate.id)
 
 
@@ -261,19 +269,24 @@ def pool_counts(db, staff: str | None = None) -> dict[str, int]:
 def search_candidates(db, filters, page, page_size):
     query = search_statement(filters)
     # Resume text is never returned in a list, so it is not read (it can be many KB per row).
-    listing = query.options(defer(Candidate.resume_text), defer(Candidate.resume_tsv))
-
-    def count(session):
-        return session.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
+    # The total rides along with the page (`count(*) OVER ()` is evaluated before LIMIT), so a page is ONE statement on ONE
+    # connection instead of a count and a page side by side.
+    listing = query.add_columns(func.count().over().label("total")).options(defer(Candidate.resume_text), defer(Candidate.resume_tsv))
 
     def fetch(at):
-        return lambda session: session.scalars(listing.offset(at * page_size).limit(page_size)).all()
+        return lambda session: session.execute(listing.offset(at * page_size).limit(page_size)).all()
 
-    # The count and the requested page do not depend on each other: ask for both at once.
-    total, candidates = parallel_reads(db, count, fetch(page))
+    found = fetch(page)(db)
+    if found:
+        total = found[0].total
+    elif page == 0:
+        total = 0
+    else:  # a page past the end carries no rows, so no total: count, then show the last page
+        total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     clamped = min(page, max(0, (total - 1) // page_size))
     if clamped != page:  # asked for a page past the end: show the last one
-        page, candidates = clamped, fetch(clamped)(db)
+        page, found = clamped, fetch(clamped)(db)
+    candidates = [row[0] for row in found]
     rows = []
     for candidate in candidates:
         set_committed_value(candidate, "resume_text", "")
@@ -294,10 +307,14 @@ def candidate_skill_facets(db, filters: Search):
     label = func.trim(func.regexp_replace(func.normalize(elements.c.value, literal_column("NFKC")), r"\s+", " ", "g"))
     key = func.lower(label)
     has_recorded_skill = exists(select(1).select_from(elements).where(normalized(elements.c.value) != "")).correlate(pool)
+    # The cleaned label and its key are computed once per skill element (OFFSET 0 stops the planner from pulling the
+    # expressions back into the outer query, where they would be evaluated for the filter, the group and the minimum).
+    cleaned = (select(pool.c.id.label("id"), label.label("label"), key.label("key"))
+               .select_from(pool.join(elements, true())).offset(0).subquery("cleaned_skill"))
     rows, (total, recorded) = parallel_reads(
         db,
-        lambda session: session.execute(select(key.label("key"), func.min(label).label("label"), func.count(func.distinct(pool.c.id)).label("count"))
-                          .select_from(pool.join(elements, true())).where(key != "").group_by(key).order_by(key)).all(),
+        lambda session: session.execute(select(cleaned.c.key.label("key"), func.min(cleaned.c.label).label("label"), func.count(func.distinct(cleaned.c.id)).label("count"))
+                          .where(cleaned.c.key != "").group_by(cleaned.c.key).order_by(cleaned.c.key)).all(),
         lambda session: session.execute(select(func.count(), func.count().filter(has_recorded_skill)).select_from(pool)).one(),
     )
     return {"skills": [{"key": row.key, "label": row.label, "count": row.count} for row in rows],
@@ -309,11 +326,19 @@ def export_candidates(db, filters):
     users = {u.id: u.name for u in db.scalars(select(User))}
     current_apps = {a.candidate_id: a for a in db.scalars(select(Application).where(Application.status == "active"))}
     orders = {o.id: o.ref for o in db.scalars(select(Order))}
-    rows = [["Reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at"]]
+    # The labels an admin has set for service charges and interest level; a stored value with no option reads as itself.
+    labels: dict[str, dict[str, str]] = {}
+    for category, value, label in db.execute(select(FormOption.category, FormOption.value, FormOption.label).where(FormOption.category.in_(("service_charges_status", "interest_level")))):
+        labels.setdefault(category, {})[value] = label
+    rows = [["Reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
+             "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level"]]
     for candidate in candidates:
         app = current_apps.get(candidate.id)
+        service = labels.get("service_charges_status", {}).get(candidate.service_charges_status, candidate.service_charges_status)
+        interest = labels.get("interest_level", {}).get(candidate.interest_level, candidate.interest_level) if candidate.interest_level else ""
         rows.append([candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
                      candidate.total_experience, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
-                     candidate.status.value, candidate.created_at.isoformat()])
+                     candidate.status.value, candidate.created_at.isoformat(),
+                     candidate.dob.isoformat() if candidate.dob else "", candidate.whatsapp or "", candidate.country_preference or "", service, interest])
     return xlsx_rows([("Candidates", rows), ("Filters", [[key, str(val)] for key, val in vars(filters).items()])])

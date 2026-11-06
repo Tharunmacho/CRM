@@ -1,0 +1,138 @@
+/*
+ * Fit-to-screen grid table (DbTable variant="grid" fit): one table exactly as wide as its box, no sideways scroll, nothing
+ * pinned. Column widths are shares (colgroup percentages); text wraps at word boundaries only; every header and cell is centred
+ * and vertically centred; the sort caret hangs beside the label so the label stays centred. Used by the Lead sheet and the
+ * Data Bank list. Rules carry :root:root so they beat the shared grid skin (data-bank-v2.css, skin.css).
+ */
+.db-scroll:has(> .db-tbl.is-fit) { overflow-x: hidden; }
+:root:root .db-tbl.is-grid.is-fit { width: 100%; min-width: 0; table-layout: fixed; font-size: 13px; line-height: 18px; }
+:root:root .db-tbl.is-grid.is-fit thead th { height: 46px; padding: 6px 10px; overflow: visible; font-size: 13px; font-weight: 700; line-height: 16px; text-align: center; vertical-align: middle; white-space: nowrap; color: var(--text-main); }
+:root:root .db-tbl.is-grid.is-fit tbody td { height: 76px; padding: 8px 10px; overflow: hidden; text-align: center; vertical-align: middle; }
+.db-tbl.is-fit .db-th-sort { display: inline-flex; align-items: center; justify-content: center; max-width: 100%; padding: 0; font: inherit; font-weight: 700; white-space: nowrap; color: inherit; }
+.db-tbl.is-fit .db-th-sort:hover, .db-tbl.is-fit .db-th-sort.is-on { color: inherit; }
+.db-tbl.is-fit .db-th-label { display: inline-block; overflow-wrap: normal; word-break: normal; hyphens: manual; white-space: nowrap; }
+/* the caret hangs at the right edge of the header cell, so the label stays exactly centred like every other heading */
+.db-tbl.is-fit .db-th-caret { position: absolute; top: 50%; right: 3px; flex: none; margin-top: -6px; pointer-events: none; }
+.db-tbl.is-fit .db-th-caret.is-idle { color: var(--text-muted); opacity: 0; transition: opacity .12s; }
+.db-tbl.is-fit thead th:hover .db-th-caret.is-idle, .db-tbl.is-fit .db-th-sort:focus-visible .db-th-caret.is-idle { opacity: .55; }
+:root:root .db-tbl.is-grid.is-fit thead th { position: sticky; }
+.db-tbl.is-fit .is-select { padding-left: 4px; padding-right: 4px; }
+.db-selcell { display: inline-flex; align-items: center; justify-content: center; gap: 6px; max-width: 100%; }
+.db-selcell > .custom-checkbox, .db-tbl.is-fit th.is-select .custom-checkbox { flex: none; margin: 0; }
+.db-tbl.is-fit .db-2l strong, .db-tbl.is-fit .db-2l .db-num { font-size: 13px; line-height: 18px; }
+/* dates and phone numbers are never cut: the column minimums leave room for them in full */
+.db-tbl.is-fit .db-2l strong.db-num, .db-tbl.is-fit .db-2l .db-num { max-width: none; overflow: visible; text-overflow: clip; white-space: nowrap; }
+.db-tbl.is-fit .ld-contact .db-ellip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-tbl.is-fit .db-2l small { font-size: 12px; line-height: 16px; }
+.db-tbl.is-fit .db-2l { gap: 1px; }
+.db-tbl.is-fit .db-clamp { overflow-wrap: break-word; word-break: normal; hyphens: manual; line-height: 18px; text-align: center; }
+.db-tbl.is-fit .db-tone { overflow-wrap: normal; word-break: normal; hyphens: manual; font-size: 13px; line-height: 17px; }
+.db-tbl.is-fit .db-cpill { padding: 3px 9px; font-size: 11.5px; line-height: 15px; overflow-wrap: normal; word-break: normal; }
+.db-tbl.is-fit .db-cpills { gap: 3px; }
+.db-tbl.is-fit .db-owner { gap: 5px; font-size: 12.5px; }
+.db-tbl.is-fit .db-owner.is-empty > span { font-size: 12px; }
+.db-tbl.is-fit .db-acts.is-grid { gap: 4px; }
+.db-tbl.is-fit .db-order-link, .db-tbl.is-fit .db-pill { max-width: 100%; }
+.db-tbl.is-fit .db-muted { font-size: 13px; }
+
+/* Lead sheet cells inside the fit table */
+.db-tbl.is-fit .ld-line { gap: 2px; flex-wrap: nowrap; }
+.db-tbl.is-fit .ld-line .ident { flex: none; }
+.db-tbl.is-fit .ld-contact .db-wa { flex: none; width: 22px; height: 22px; }
+.db-tbl.is-fit .ld-contact .db-wa svg { width: 16px; height: 16px; }
+.db-tbl.is-fit .ld-copy { width: 20px; height: 20px; }
+.db-tbl.is-fit .ld-camp { gap: 6px; justify-content: center; }
+.db-tbl.is-fit .ld-camp-name { flex: 0 1 auto; font-size: 13px; font-weight: 600; line-height: 18px; color: var(--text-main); }
+.db-tbl.is-fit .ld-platform { width: 22px; height: 22px; }
+.db-tbl.is-fit .ld-resume { gap: 3px; }
+.db-tbl.is-fit .ld-upload { height: 28px; gap: 4px; padding: 0 8px; font-size: 12px; }
+.db-tbl.is-fit .ld-got { gap: 3px; font-size: 11.5px; }
+.db-tbl.is-fit .ld-cand { padding: 3px 8px; }
+.db-tbl.is-fit .ld-match { font-size: 10.5px; padding: 0 6px; }
+
+/* Tighter spacing: used automatically before a column is hidden, or when the person chooses Compact */
+.db-box.is-compact .db-tbl.is-fit { font-size: 12.5px; }
+:root:root .db-box.is-compact .db-tbl.is-grid.is-fit thead th { padding: 6px 6px; font-size: 12.5px; }
+:root:root .db-box.is-compact .db-tbl.is-grid.is-fit tbody td { height: 70px; padding: 6px 6px; }
+.db-box.is-compact .db-tbl.is-fit .db-2l strong, .db-box.is-compact .db-tbl.is-fit .db-2l .db-num, .db-box.is-compact .db-tbl.is-fit .db-tone { font-size: 12.5px; }
+.db-box.is-compact .db-tbl.is-fit .db-2l small { font-size: 11.5px; }
+.db-box.is-compact .db-tbl.is-fit .db-cpill { font-size: 11px; padding: 3px 7px; }
+
+/* Expandable row */
+.db-expand { display: inline-grid; flex: none; place-items: center; width: 20px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; transition: transform .14s, color .14s; }
+.db-expand:hover { background: var(--tint-2); color: var(--text-main); }
+.db-expand:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.db-expand.is-open { transform: rotate(90deg); color: var(--primary); }
+:root:root .db-tbl.is-grid tbody tr.is-open > td { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
+:root:root .db-tbl.is-grid tbody tr.db-xrow > td { height: auto; padding: 0; overflow: visible; text-align: left; background: color-mix(in srgb, var(--primary) 3%, var(--bg-card)); border-bottom: 1px solid var(--border-main); }
+.ld-xpanel { display: flex; flex-direction: column; gap: 12px; padding: 14px 18px 16px; }
+.ld-xgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0 20px; margin: 0; }
+.ld-xcell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 0; padding: 7px 0; border-bottom: 1px solid var(--border-faint); }
+.ld-xcell dt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 600; letter-spacing: .01em; color: var(--text-muted); }
+.ld-xcell dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 18px; color: var(--text-main); }
+.ld-xcell.is-custom dt { color: var(--primary); }
+.ld-xacts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ld-xacts .ld-btn { height: 34px; font-size: 13px; }
+.ld-fitnote { margin: 0; padding: 6px 22px; border-bottom: 1px solid var(--border-faint); font-size: 12.5px; color: var(--text-muted); }
+
+/* Columns menu */
+.db-colmenu { position: relative; display: inline-flex; }
+.db-colmenu .db-refresh.is-on { border-color: var(--primary); color: var(--primary); }
+.db-colmenu-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; display: flex; flex-direction: column; gap: 6px; width: 300px; max-width: calc(100vw - 32px); padding: 10px 8px 8px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); box-shadow: 0 12px 32px rgba(15, 23, 42, .18); }
+.db-colmenu-pop p { margin: 0 6px 4px; font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+.db-colmenu-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; font-size: 13.5px; color: var(--text-main); cursor: pointer; }
+.db-colmenu-row:hover { background: var(--tint-1); }
+.db-colmenu-pop p.is-sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-faint); }
+.db-colmenu-row em { margin-left: auto; font-size: 11.5px; font-style: normal; color: var(--text-muted); }
+.db-colmenu-pop small { margin: 6px 8px 2px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.db-colmenu-reset { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin: 4px 6px 0; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; font-size: 12.5px; font-weight: 500; color: var(--primary); cursor: pointer; }
+.db-colmenu-reset:hover { background: var(--tint-1); }
+
+/* Status over assignee */
+.db-tbl.is-fit .ld-statown { gap: 3px; }
+.db-tbl.is-fit .ld-statown .db-owner { font-size: 12px; }
+
+.db-colmenu-search { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; color: var(--text-muted); }
+.db-colmenu-search input { flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text-main); }
+.db-colmenu-btns { display: flex; gap: 6px; }
+.db-colmenu-btns button { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; gap: 4px; height: 28px; padding: 0 6px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--bg-card); font-size: 12px; font-weight: 500; color: var(--text-main); cursor: pointer; white-space: nowrap; }
+.db-colmenu-btns button:hover { border-color: var(--primary); color: var(--primary); }
+.db-colmenu-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.db-colmenu-group p { position: sticky; top: 0; z-index: 1; margin: 0; padding: 6px 8px 3px; background: var(--bg-card); }
+.db-colmenu-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-colmenu-foot { display: flex; flex-direction: column; gap: 6px; padding: 8px 6px 0; border-top: 1px solid var(--border-faint); font-size: 12px; color: var(--text-muted); }
+.db-colmenu-foot .db-seg { align-self: flex-start; }
+.db-colmenu-foot .db-seg-btn { width: auto; padding: 0 10px; font-size: 12px; }
+.db-colmenu-wide { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-main); cursor: pointer; }
+
+.db-tbl.is-fit .ld-poscountry { gap: 4px; }
+.db-tbl.is-fit .ld-statown .ld-follow { font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+.db-tbl.is-fit .ld-statown { gap: 2px; }
+/* the first cell: arrow, checkbox and menu spaced evenly, nothing clipped */
+:root:root .db-tbl.is-grid.is-fit :is(th, td).is-select { padding-left: 8px; padding-right: 8px; overflow: visible; }
+.db-tbl.is-fit .db-selcell { gap: 8px; }
+.db-tbl.is-fit .db-selcell .custom-checkbox { flex: none; }
+
+.db-tbl.is-fit .ld-platform { width: 18px; height: 18px; background: transparent !important; }
+.db-tbl.is-fit .ld-platform svg { width: 15px; height: 15px; }
+.db-tbl.is-fit .ld-camp { gap: 5px; }
+.db-tbl.is-fit .ld-camp-text { min-width: 0; align-items: flex-start; text-align: left; }
+.db-tbl.is-fit .ld-camp-text small { max-width: 100%; }
+
+/* Pager: numbered pages, first/last, go to page */
+.db-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.db-pager-num { display: inline-grid; place-items: center; min-width: 34px; height: 34px; padding: 0 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; }
+.db-pager-num:hover { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
+.db-pager-num.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); font-weight: 700; color: var(--primary); }
+.db-pager-num:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.db-pager-gap { padding: 0 2px; color: var(--text-muted); }
+.db-pager-go { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; font-size: 12.5px; color: var(--text-muted); }
+.db-pager-go input { width: 58px; height: 34px; padding: 0 8px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); font: inherit; font-size: 13px; color: var(--text-main); }
+.db-foot-note { font-style: normal; color: var(--warning-ink); }
+.ld-hint { }
+.ld-linkbtn { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--primary); text-decoration: underline; cursor: pointer; }
+
+/* Inline failure state for the table / drawer */
+.ld-crash { display: flex; align-items: center; gap: 14px; margin: 16px; padding: 16px 18px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); color: var(--error-ink); }
+.ld-crash > div { flex: 1 1 auto; min-width: 0; }
+.ld-crash p { margin: 2px 0 0; font-size: 13px; color: var(--text-main); }

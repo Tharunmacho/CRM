@@ -5,8 +5,9 @@ import { api } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
 import type { useStore } from '@/shared/state/crm-store'
 import { Button } from '@/shared/ui/primitives'
-import { CurrentStage, OwnerText, RowActions, StatusText, shortRef } from '@/features/candidates/components/data-bank-columns'
-import { Avatar, CountryFlag } from '@/features/candidates/components/db-parts'
+import { CountryPills, CurrentStage, OwnerText, RowActions, StatusText, shortRef } from '@/features/candidates/components/data-bank-columns'
+import { CountryFlag } from '@/features/candidates/components/db-parts'
+import { dobParts } from '@/features/candidates/data-bank-view'
 import {
   agentName, groupKey, groupMeta, groupResumesPath, groupTitle, highlightParts, resumeCount,
   type PositionGroup,
@@ -70,25 +71,31 @@ function GroupResumes({ scope, groupId, terms, store, version, onOpen, onReassig
   return (
     <div className="dbp-resumes" role="table" aria-label="Resumes in this position" aria-busy={loading || undefined}>
       <div className="dbp-row is-head" role="row">
-        <span role="columnheader">Name</span><span role="columnheader">Phone</span><span role="columnheader">Agent</span>
+        <span role="columnheader">Name / DOB</span><span role="columnheader">Contact</span><span role="columnheader">Preferred country</span><span role="columnheader">Agent</span>
         <span role="columnheader">Recruiter</span><span role="columnheader">Stage</span><span role="columnheader">Status</span><span role="columnheader" className="sr-only">Actions</span>
       </div>
       {shown.items.map(candidate => {
         const agent = agentName(candidate)
+        const dob = dobParts(candidate.dob)
         return (
           <div key={candidate.id} className="dbp-row" role="row" tabIndex={0}
             onClick={() => onOpen(candidate)}
             onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(candidate) } }}>
-            <span role="cell" className="dbp-name" data-label="Name">
-              <Avatar name={candidate.name || '?'} size="sm" />
-              <span className="dbp-name-text">
-                <strong title={candidate.name}><Marked text={candidate.name || 'Unnamed'} terms={terms} /></strong>
-                <small className="ident" title={`Reference ${candidate.ref}`}>{shortRef(candidate.ref)}</small>
+            <span role="cell" className="dbp-name" data-label="Name / DOB" title={`${candidate.name}${dob ? ` · born ${dob.label} (${dob.age} years)` : ''} · ${candidate.ref}`}>
+              <span className="db-2l is-name">
+                <strong className="db-clamp"><Marked text={candidate.name || 'Unnamed'} terms={terms} /></strong>
+                {dob ? <small>{dob.label}</small> : <small className="ident">{shortRef(candidate.ref)}</small>}
               </span>
             </span>
-            <span role="cell" className="ident" data-label="Phone" title={candidate.email || candidate.phone}><Marked text={candidate.phone || '–'} terms={terms} /></span>
+            <span role="cell" data-label="Contact" title={candidate.email ? `${candidate.phone} · ${candidate.email}` : candidate.phone}>
+              <span className="db-2l">
+                <span className="ident db-num"><Marked text={candidate.phone || '–'} terms={terms} /></span>
+                {candidate.email && <small className="db-ellip">{candidate.email}</small>}
+              </span>
+            </span>
+            <span role="cell" data-label="Preferred country"><CountryPills value={candidate.countryPreference} /></span>
             <span role="cell" data-label="Agent" className="dbp-agent" title={agent || 'No agent recorded'}>
-              {agent ? <Marked text={agent} terms={terms} /> : <span className="db-muted">–</span>}
+              {agent ? <span className="db-clamp"><Marked text={agent} terms={terms} /></span> : <span className="db-muted">–</span>}
             </span>
             <span role="cell" data-label="Recruiter"><OwnerText candidate={candidate} store={store} /></span>
             <span role="cell" data-label="Stage"><CurrentStage candidate={candidate} store={store} /></span>

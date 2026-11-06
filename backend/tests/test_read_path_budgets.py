@@ -74,27 +74,27 @@ def test_pool_counts_is_one_statement(workspace):
     assert counts["all"] == 1  # the fixture's single candidate
 
 
-def test_candidate_list_reads_count_and_page_but_never_resume_text(workspace):
+def test_candidate_list_reads_page_with_its_total_but_never_resume_text(workspace):
     from app.services.candidate_search import Search, search_candidates
 
     with workspace() as db:
         with statements_of(db.get_bind()) as seen:
             result = search_candidates(db, Search(), 0, 20)
-    assert len(seen) == 2
-    assert not any("resume_text" in sql.split(" FROM ")[0] for sql in seen if "count(" not in sql.lower())
+    assert len(seen) == 1  # the page and its total in one statement (count(*) OVER ())
+    assert "count(*) OVER ()" in seen[0] and "resume_text" not in seen[0].split(" FROM ")[0]
     assert result["total"] == 1 and result["items"][0]["resumeText"] == ""
     with workspace() as db:  # a page past the end falls back to the last page
         assert search_candidates(db, Search(), 9, 20)["page"] == 0
 
 
-def test_attention_list_runs_its_six_reads_together_and_keeps_totals(workspace):
+def test_attention_list_runs_its_four_reads_together_and_keeps_totals(workspace):
     from app.services.intake_attention import attention_list
 
     with workspace() as db:
         admin = db.get(User, "admin")
         with statements_of(db.get_bind()) as seen:
             result = attention_list(db, admin)
-    assert len(seen) == 6
+    assert len(seen) == 4  # three lists and one statement for the three totals
     assert result["totals"] == {"email": 0, "whatsapp": 0, "manual": 0, "all": 0}
     assert result["items"] == [] and result["canRetry"] is True
 

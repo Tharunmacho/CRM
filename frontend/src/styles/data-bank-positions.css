@@ -29,38 +29,53 @@
 .dbp-mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--warning-ink) 22%, transparent); color: inherit; }
 
 .dbp-resumes { container-type: inline-size; min-width: 0; }
-.dbp-row { display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(110px, 1fr) minmax(110px, 1.1fr) minmax(100px, .9fr) minmax(130px, 1.2fr) minmax(128px, .9fr) 164px; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border-faint); font-size: 13.5px; }
+/* Resume rows share the Data Bank table's look: hairline column dividers, zebra stripes, centred two-line cells.
+   The Actions column is a fixed width and the Status cell never clips its chip. */
+.dbp-row { display: grid; grid-template-columns: minmax(140px, 1.4fr) minmax(130px, 1.2fr) minmax(116px, 1.1fr) minmax(92px, .9fr) minmax(100px, .9fr) minmax(130px, 1.2fr) minmax(142px, 1.1fr) 96px; align-items: stretch; min-height: 68px; border-bottom: 1px solid var(--border-faint); font-size: 13.5px; }
 .dbp-row:last-of-type { border-bottom: 0; }
-.dbp-row > * { min-width: 0; }
-.dbp-row.is-head { padding-top: 8px; padding-bottom: 8px; background: var(--tint-1); font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--text-muted); }
+.dbp-row > * { min-width: 0; padding: 8px 10px; border-left: 1px solid var(--border-main); }
+.dbp-row > :first-child { border-left: 0; }
+.dbp-row.is-head { min-height: 44px; border-bottom: 1px solid var(--border-main); background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); font-size: 12.5px; font-weight: 500; color: var(--text-muted); text-align: center; }
+.dbp-row.is-head > * { padding-block: 6px; line-height: 1.25; }
+.dbp-row:not(.is-head):nth-of-type(odd) { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
 .dbp-row:not(.is-head) { cursor: pointer; }
-.dbp-row:not(.is-head):hover { background: var(--tint-1); }
+.dbp-row:not(.is-head):hover { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
 .dbp-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-.dbp-name { display: flex; align-items: center; gap: 10px; }
 .dbp-name-text { display: flex; flex-direction: column; min-width: 0; }
-.dbp-name-text strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.dbp-name-text small { color: var(--text-muted); font-size: 12px; }
-.dbp-agent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dbp-actions { display: flex; justify-content: flex-end; align-items: center; }
-.dbp-row .db-acts { flex-wrap: nowrap; }
-.dbp-row > [role='cell'], .dbp-row > [role='columnheader'] { display: flex; align-items: center; }
-.dbp-row > .dbp-name { display: flex; }
-@container (max-width: 1040px) {
-  .dbp-row { grid-template-columns: minmax(140px, 1.5fr) minmax(100px, 1fr) minmax(100px, 1fr) minmax(90px, .9fr) minmax(120px, 1.1fr) minmax(128px, .9fr) 116px; gap: 10px; }
-  .dbp-row .db-act.is-form { width: 32px; min-width: 32px; padding: 0; }
-  .dbp-row .db-act.is-form span { display: none; }
-}
+.dbp-agent { text-align: center; }
+.dbp-actions { padding-inline: 6px; }
+/* The Status chip gets the cell's whole width, never clipped. */
+.dbp-row > [data-label='Status'] { padding-inline: 6px; }
+.dbp-row .db-track { width: 100%; align-items: center; }
+.dbp-row .db-track-bar { width: 100%; max-width: 132px; }
+.dbp-row .db-track-text { justify-content: center; text-align: left; }
+.dbp-row .db-track-text span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; line-height: 1.25; }
+.dbp-row .db-acts { flex-wrap: nowrap; justify-content: center; gap: 4px; }
+.dbp-row .db-act.is-form { width: 32px; min-width: 32px; padding: 0; }
+.dbp-row .db-act.is-form span { display: none; }
+.dbp-row > [role='cell'], .dbp-row > [role='columnheader'] { display: flex; align-items: center; justify-content: center; text-align: center; }
+.dbp-row .db-owner.is-empty { align-items: center; justify-content: center; text-align: center; white-space: normal; }
+.dbp-row .db-owner.is-empty svg { display: none; }
+.dbp-row .db-owner.is-empty > span { overflow: visible; overflow-wrap: normal; white-space: normal; line-height: 1.25; }
 .dbp-note { margin: 0; padding: 14px 16px; font-size: 13.5px; color: var(--text-muted); }
 .dbp-note.is-error { color: var(--error-ink); }
 .dbp-more { display: flex; justify-content: center; padding: 12px 16px 14px; border-top: 1px solid var(--border-faint); }
 
 /* A narrow position list reads as stacked cards, not a table that scrolls sideways. */
-@container (max-width: 760px) {
+@container (max-width: 940px) {
   .dbp-row.is-head { display: none; }
   .dbp-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; padding: 12px 14px; }
+  .dbp-row > * { padding: 0; border-left: 0; }
   .dbp-name { grid-column: 1 / -1; }
-  .dbp-actions { grid-column: 1 / -1; justify-content: flex-start; }
-  .dbp-row > [role='cell']:not(.dbp-name):not(.dbp-actions) { flex-direction: column; align-items: flex-start; justify-content: flex-start; }
+  .dbp-actions { grid-column: 1 / -1; padding: 0; }
+  .dbp-row .db-acts { justify-content: flex-start; }
+  .dbp-row > .dbp-actions { justify-content: flex-start; }
+  .dbp-row .db-track { align-items: flex-start; }
+  .dbp-row .db-track-text { justify-content: flex-start; }
+  .dbp-row > [role='cell']:not(.dbp-actions) { flex-direction: column; align-items: flex-start; justify-content: flex-start; text-align: left; }
+  .dbp-row .db-2l { align-items: flex-start; text-align: left; }
+  .dbp-row .db-cpills { justify-content: flex-start; }
+  .dbp-row .db-clamp { text-align: left; }
   .dbp-row .db-act.is-form { width: auto; min-width: 36px; padding: 0 10px; }
   .dbp-row .db-act.is-form span { display: inline; }
   .dbp-row > [data-label]:not(.dbp-name)::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; color: var(--text-muted); }

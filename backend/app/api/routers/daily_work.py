@@ -10,6 +10,7 @@ from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, DailyGoal, Role, User
 from app.db.session import get_db, writes_on_get
 from app.services import daily_work
+from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(prefix="/api", tags=["daily-work"])
 
@@ -25,8 +26,9 @@ def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), us
     supervisor = user.role in (Role.admin, Role.manager)
     roster, everyone = [], []
     if supervisor:
-        roster = list(db.execute(select(User.id, User.name, User.active).where(User.role == Role.staff)
-                                 .order_by(User.name, User.id)).all())
+        # On an autocommit connection of its own: one round trip, and this transaction's first statement is then the reconcile.
+        (roster,) = daily_work.read_together(db, lambda s: list(s.execute(select(User.id, User.name, User.active, User.on_leave)
+                                                                           .where(User.role == Role.staff).order_by(User.name, User.id)).all()))
         everyone = [r.id for r in roster if r.active]
         if staff in (None, "all"):
             shown = everyone
@@ -39,13 +41,41 @@ def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), us
         if staff not in (None, "all", user.id):
             raise HTTPException(403, "You can only see your own daily tasks.")
         scope = shown = [user.id] if user.role == Role.staff else []
-    if scope:
-        daily_work.ensure_allocations(db, scope, now=now)
     today_date = daily_work.agency_today(now)
     today = today_date.isoformat()
-    progress = daily_work.goal_progress(db, scope, today_date, persist=True)
-    db.commit()
-    rows = daily_work.load_rows(db, scope, now=now)
+    # Who is on leave comes from rows already in hand (the roster, or the signed-in account), not from another statement.
+    on_leave = ({r.id for r in roster if r.on_leave} if supervisor else {user.id} if getattr(user, "on_leave", False) else set()) & set(scope)
+    people = sorted(uid for uid in scope if uid not in on_leave)
+    # Round 1: the reconcile (on this transaction) runs beside ONE read of the goals, the four attendance tables, owned counts,
+    # today's item counts and the progress inputs, plus the list's rows and who still has candidates to hand out. Those reads
+    # are valid exactly when the reconcile changed nothing and nobody needs a top-up (the usual repeat call). Otherwise the
+    # allocation runs (set-based, whatever the number of recruiters), is committed, and the progress and rows are read again.
+    # Round 2: the placements, remarks and call tasks behind the rows, beside the progress snapshot write (if it changed).
+    if scope:
+        changed, (state, fetched, waiting) = daily_work.run_beside(
+            db,
+            lambda s: daily_work.reconcile(s, now=now),
+            lambda s: daily_work.read_state(s, scope, today_date),
+            lambda s: daily_work.fetch_rows(s, scope, now=now),
+            lambda s: daily_work.pool_waiting(s, people, today_date),
+        )
+        goals, owned = state.goals, state.owned
+        attendance = daily_work.compute_shifts(scope, today_date, *state.attendance)
+        created = daily_work.ensure_allocations(
+            db, scope, now=now, people=people, goals=goals, attendance=attendance, reconciled=True,
+            have=None if changed else state.have, pool_hint=None if changed else waiting)
+        if changed or created:
+            db.commit()
+            again, fetched = daily_work.read_together(
+                db, lambda s: daily_work.read_state(s, scope, today_date, parts=("progress",)), lambda s: daily_work.fetch_rows(s, scope, now=now))
+            state.done, state.stages, state.snapshot = again.done, again.stages, again.snapshot
+        progress = daily_work.goal_progress(db, scope, today_date, goals=goals, state=state)
+        rows, _ = daily_work.run_beside(
+            db, lambda s: daily_work.load_rows(s, scope, now=now, parallel=True, fetched=fetched),
+            lambda s: daily_work.save_progress(s, progress, today_date, state.snapshot))
+    else:
+        goals, owned, attendance = daily_work.load_goals(db, ["__agency__"]), {}, ({}, set())
+        progress, rows = {}, []
     by_owner: dict[str, list[dict]] = {}
     for row in rows:
         by_owner.setdefault(row["ownerId"], []).append(row)
@@ -53,7 +83,7 @@ def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), us
     blocks = [progress[uid] for uid in shown]
     # The goals shown are per recruiter: one person's own, or the average per recruiter for the team. The summed team
     # figures travel separately so the screen can label them as a total, never as the quota.
-    fallback_goals = daily_work.load_goals(db, ["__agency__"])["__agency__"]
+    fallback_goals = goals["__agency__"]
     fallback = {"candidates": {"target": fallback_goals["candidates"][0], "morning": fallback_goals["candidates"][1],
                                "evening": fallback_goals["candidates"][0] - fallback_goals["candidates"][1],
                                "done": 0, "morningDone": 0, "eveningDone": 0},
@@ -62,10 +92,8 @@ def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), us
     goals, targets_vary = (blocks[0], False) if len(blocks) == 1 else daily_work.average_goals(blocks, fallback)
     team = daily_work.add_goal_totals(blocks)
     quota = goals["candidates"]
-    off_today = daily_work.shifts_and_days_off(db, scope, today_date)[1] if scope else set()
-    if scope:
-        off_today |= set(db.scalars(select(User.id).where(User.id.in_(scope), User.on_leave.is_(True))))
-    shortfalls = daily_work.work_shortfalls(db, progress, by_owner, today, off_today, scope)
+    off_today = set(attendance[1]) | on_leave
+    shortfalls = daily_work.work_shortfalls(db, progress, by_owner, today, off_today, scope, owned=owned)
     result = {
         "agencyDate": today, "serverTime": now,
         "dailyQuota": quota["target"], "morningQuota": quota["morning"], "eveningQuota": quota["evening"],

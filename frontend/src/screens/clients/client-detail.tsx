@@ -20,7 +20,7 @@ import { OrderDialog } from '@/features/jobs/components/job-dialogs'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { orderCounts } from '@/features/jobs/order-counts'
-import { AgreementPill, Avatar, CopyButton, Flag, Place, Progress, StageMini } from '@/features/clients/components/parts'
+import { AgreementPill, Avatar, CopyButton, Flag, Place, Progress, StageMini, WebsiteLink } from '@/features/clients/components/parts'
 import type { Company } from '@/shared/model/types'
 import '@/styles/clients.css'
 
@@ -133,7 +133,7 @@ export default function ClientDetailPage() {
           <Panel>
             <div className="cd-person">
               <Avatar name={client.name} size="lg" />
-              <div><p className="cd-person-name">{client.name}</p><p className="cd-person-role">Contact person</p></div>
+              <div><p className="cd-person-name">{client.name}</p><p className="cd-person-role">{client.designation ? <>{client.designation} · Contact person</> : 'Contact person'}</p></div>
             </div>
             <ul className="cd-contact">
               <li><Mail size={16} aria-hidden="true" />{client.email ? <><a href={`mailto:${client.email}`}>{client.email}</a><CopyButton value={client.email} label="Copy email address" /></> : empty}</li>
@@ -191,6 +191,7 @@ export default function ClientDetailPage() {
                       <Detail label="Contact email">{company.contactEmail ? <a href={`mailto:${company.contactEmail}`}>{company.contactEmail}</a> : empty}</Detail>
                       <Detail label="Phone">{company.phone ? <a href={`tel:${company.phone}`} className="ident">{company.phone}</a> : empty}</Detail>
                       <Detail label="WhatsApp">{company.whatsapp ? <a href={`https://wa.me/${digits(company.whatsapp)}`} target="_blank" rel="noreferrer" className="ident">{company.whatsapp}</a> : empty}</Detail>
+                      <Detail label="Website" className="cd-span2">{company.website ? <WebsiteLink value={company.website} /> : empty}</Detail>
                       <Detail label="Agreement" className="cd-span2">
                         {company.agreement
                           ? <FileLink url={company.agreement.url} className="cd-file">{company.agreement.name}</FileLink>
@@ -279,7 +280,7 @@ export default function ClientDetailPage() {
                     <table className="cd-cands">
                       <colgroup><col style={{ width: '25%' }} /><col style={{ width: '26%' }} /><col style={{ width: '13%' }} /><col style={{ width: '11%' }} /><col style={{ width: '10%' }} /><col style={{ width: '15%' }} /></colgroup>
                       <thead>
-                        <tr><th><span>Candidate</span></th><th><span>Stage</span></th><th><span>Recruiter</span></th><th><span>Updated</span></th><th><span>Status</span></th><th aria-label="Profile" /></tr>
+                        <tr><th><span>Candidate</span></th><th><span>Stage</span></th><th><span>Recruiter</span></th><th><span>Updated</span></th><th><span>Status</span></th><th>Actions</th></tr>
                       </thead>
                       <tbody>
                         {apps.map((application) => {

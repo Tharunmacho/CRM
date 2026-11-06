@@ -150,3 +150,39 @@ test('the staff board explains an empty or short list instead of showing a bare 
   assert.deepEqual(m.candidatesCell({ done: 1, total: 2 }, { target: 5, allocated: 2, reason: 'x' }, false), { text: '1/2', warn: true, note: 'Only 2 of 5 new candidates today' })
   assert.deepEqual(m.candidatesCell({ done: 1, total: 5 }, null, false), { text: '1/5', warn: false, note: '' })
 })
+
+const country = (over = {}) => ({ country: null, countrySource: null, locationHint: null, ...over })
+
+test('the country cell prefers the order, then the form preference, then a country recognised in the location', () => {
+  const known = (text) => ['UAE', 'India'].includes(text) ? 'x' : null
+  const order = m.countryCell(country({ country: 'Qatar', countrySource: 'order' }), known)
+  assert.deepEqual([order.names, order.source], [['Qatar'], 'order'])
+  const pref = m.countryCell(country({ country: 'Saudi Arabia, United Arab Emirates', countrySource: 'preference' }), known)
+  assert.deepEqual([pref.names, pref.source], [['Saudi Arabia', 'United Arab Emirates'], 'preference'])
+  assert.match(pref.hint, /preferred country/)
+  const place = m.countryCell(country({ locationHint: 'Dubai, UAE' }), known)
+  assert.deepEqual([place.names, place.source], [['UAE'], 'location'])
+  assert.equal(m.countryCell(country({ locationHint: 'Kochi' }), known).source, 'none')
+})
+
+test('with nothing saved the country cell says so honestly (nationality is never used)', () => {
+  const none = m.countryCell(country())
+  assert.deepEqual([none.names, none.source, none.hint], [[], 'none', 'No preferred country saved yet'])
+})
+
+test('position and client cells say where the value came from or why it is missing', () => {
+  assert.equal(m.positionCell({ position: 'Welder', positionSource: 'order' }).source, 'order')
+  assert.equal(m.positionCell({ position: 'Mason', positionSource: 'preference' }).source, 'preference')
+  assert.equal(m.positionCell({ position: 'Rigging', positionSource: 'skill' }).source, 'skill')
+  assert.deepEqual(m.positionCell({ position: null, positionSource: null }), { text: '', source: 'none', hint: 'No job preference saved yet' })
+  assert.deepEqual(m.clientCell({ client: null, kind: 'call' }), { text: '', hint: 'Not matched to an order yet' })
+  assert.equal(m.clientCell({ client: 'Gulf Builders', kind: 'stage' }).text, 'Gulf Builders')
+})
+
+test('a country keeps one pill colour whatever its casing, and long names get their short form', () => {
+  assert.equal(m.countryTone('Qatar'), m.countryTone(' qatar '))
+  assert.ok(m.countryTone('Oman') >= 0 && m.countryTone('Oman') < m.COUNTRY_TONES)
+  assert.equal(m.countryShort('United Arab Emirates'), 'UAE')
+  assert.equal(m.countryShort('Saudi Arabia'), 'KSA')
+  assert.equal(m.countryShort('Qatar'), 'Qatar')
+})

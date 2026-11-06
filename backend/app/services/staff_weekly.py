@@ -26,6 +26,7 @@ from sqlalchemy.exc import ProgrammingError
 from app.db import models as m
 from app.domain.stages import STAGES, TOTAL_STAGES
 from app.services import attendance_hr as hr
+from app.services import lead_metrics
 from app.services.attendance_policy import AttendancePolicy, shift_bounds
 from app.services.parallel_reads import parallel_reads
 from app.services.staff_activity import intersections, merged, presence_end, seconds
@@ -43,6 +44,13 @@ BACKLOG_MIN = 3
 # Score weights (percent). A component without a basis (no tasks allocated, no expected hours...) is left out and
 # the remaining weights are scaled up, so being on leave never counts against anyone.
 WEIGHTS = {"tasks": 40, "hours": 30, "stages": 30}
+# Lead follow-up is an OPTIONAL fourth part: it joins the score only for a person who had leads assigned in the period,
+# and then the weights are these (tasks 40->35, stage moves 30->25, lead follow-up 10). Everyone else keeps WEIGHTS, so a
+# week without leads scores exactly as it did before the Lead sheet existed.
+WEIGHTS_WITH_LEADS = {"tasks": 35, "hours": 30, "stages": 25, "leads": 10}
+# Questions to ask about the lead sheet.
+LEADS_UNTOUCHED_MIN = 3   # this many leads assigned in the period and none called
+LEADS_OVERDUE_MIN = 5     # this many follow-ups already overdue
 
 PRESENT_STATUSES = {"P", "LT", "EE", "PP", "OD", "WFH"}
 CREDITED_STATUSES = {"OD", "WFH"}  # approved duty away from the office: credited the full day, no punches exist
@@ -191,8 +199,12 @@ def _read_all(db, start, end, first, last, now, staff_id):
         """When attendance was first recorded by anyone: days before that were never tracked, so nobody was 'absent'."""
         return session.scalar(select(func.min(S.checked_in_at)))
 
-    reads = [users, sessions, presence, moves, snapshot, stuck_totals, stuck_list, daily, events, first_punch]
-    names = ["users", "sessions", "presence", "moves", "snapshot", "stuck_totals", "stuck_list", "daily", "events", "first_punch"]
+    def leads(session):
+        """Lead sheet numbers per person (one aggregate statement), or None when the lead tables are missing."""
+        return lead_metrics.weekly_lead_numbers(session, start, end, now, staff_id)
+
+    reads = [users, sessions, presence, moves, snapshot, stuck_totals, stuck_list, daily, events, first_punch, leads]
+    names = ["users", "sessions", "presence", "moves", "snapshot", "stuck_totals", "stuck_list", "daily", "events", "first_punch", "leads"]
     return dict(zip(names, parallel_reads(db, *reads)))
 
 
@@ -317,7 +329,8 @@ def build_report(db, from_date: date | None, to_date: date | None, zone: str, *,
             person, days, day_bounds, tz, now, today, cut, policy, inputs, _goals_for(person.id, goal_rows),
             sessions_by_user[person.id], presence_by_user[person.id], moves_by_user[person.id],
             snapshot[person.id], stuck_total.get(person.id), stuck_names.get(person.id, []),
-            event_counts[person.id], daily_by_user[person.id] if daily else None, local_day, team_start))
+            event_counts[person.id], daily_by_user[person.id] if daily else None, local_day, team_start,
+            leads=lead_metrics.person_numbers(data["leads"].get(person.id)) if data["leads"] is not None else lead_metrics.unavailable_numbers()))
 
     funnel = _team_funnel(team_snapshot, data["moves"], people_ids)
     highlights = _highlights(staff_rows)
@@ -337,6 +350,12 @@ def build_report(db, from_date: date | None, to_date: date | None, zone: str, *,
     ]
     if daily is None:
         notes.append("The daily-task tables are not in this database yet, so task numbers are unavailable.")
+    if data["leads"] is None:
+        notes.append("The Lead sheet tables are not in this database yet, so lead numbers are unavailable.")
+    else:
+        notes.append("Lead sheet: assigned = leads given to the person in the period; contacted = those called at least once in the period; "
+                     "calls and leads worked are credited to whoever logged the call; resumes and conversions to the lead's owner; "
+                     "conversion % = converted / leads worked; overdue follow-ups are as of now.")
 
     return {
         "generatedAt": now.isoformat(), "timezone": zone,
@@ -345,10 +364,12 @@ def build_report(db, from_date: date | None, to_date: date | None, zone: str, *,
                   "isCurrent": first <= today <= last},
         "formula": _formula(_goals_for(None, goal_rows)),
         "thresholds": {"stuckDays": STUCK_DAYS, "lowCompletionPercent": LOW_COMPLETION_PERCENT,
-                       "lowHoursPercent": LOW_HOURS_PERCENT, "backlogMin": BACKLOG_MIN},
+                       "lowHoursPercent": LOW_HOURS_PERCENT, "backlogMin": BACKLOG_MIN,
+                       "leadsUntouchedMin": LEADS_UNTOUCHED_MIN, "leadsOverdueMin": LEADS_OVERDUE_MIN},
         "sources": {"dailyTasks": {"available": daily is not None,
                                     "hasData": bool(daily and daily["rows"]),
-                                    "goals": _goals_for(None, goal_rows)}},
+                                    "goals": _goals_for(None, goal_rows)},
+                    "leadSheet": {"available": data["leads"] is not None, "hasData": bool(data["leads"])}},
         "summary": summary, "staff": staff_rows, "funnel": funnel, "highlights": highlights, "notes": notes,
         **({"candidates": candidate_block,
             "moves": [{"at": r.completed_at, "stage": r.stage, "stageLabel": STAGE_LABELS[r.stage - 1], "outcome": r.outcome,
@@ -370,12 +391,16 @@ def _goals_for(user_id, rows):
 
 def _formula(goals):
     return {
-        "weights": WEIGHTS,
+        "weights": WEIGHTS, "weightsWithLeads": WEIGHTS_WITH_LEADS,
         "lines": [
             f"Tasks {WEIGHTS['tasks']}%: daily tasks completed divided by daily tasks assigned in the period.",
             f"Hours {WEIGHTS['hours']}%: hours worked divided by hours expected from the shift on scheduled days (capped at 100%).",
             f"Stage moves {WEIGHTS['stages']}%: stages completed divided by the daily stage-move goal (agency default {goals['stage_moves']}) "
             "times the days the person worked (capped at 100%).",
+            f"Lead follow-up (optional): only for a person who had leads assigned in the period. Then it counts "
+            f"{WEIGHTS_WITH_LEADS['leads']}% (leads assigned in the period that were called at least once, divided by leads assigned) and the weights become "
+            f"tasks {WEIGHTS_WITH_LEADS['tasks']}%, hours {WEIGHTS_WITH_LEADS['hours']}%, stage moves {WEIGHTS_WITH_LEADS['stages']}%. "
+            "Without assigned leads the score uses the three parts above.",
             "A part with nothing to measure (no tasks assigned, a day off all week) is left out and the others count for more. "
             "No measurable part means no score.",
         ],
@@ -389,7 +414,7 @@ def _clip(intervals, a, b):
 
 
 def _staff_row(person, days, day_bounds, tz, now, today, cut, policy, inputs, goals, sessions, presence, moves,
-               snapshot, stuck, stuck_list, events, daily_rows, local_day, team_start):
+               snapshot, stuck, stuck_list, events, daily_rows, local_day, team_start, leads=None):
     today_start = day_bounds[today][0] if today in day_bounds else _utc(today, tz)
     clocked, missing_checkout = [], set()
     for row in sessions:
@@ -504,7 +529,8 @@ def _staff_row(person, days, day_bounds, tz, now, today, cut, policy, inputs, go
 
     stage_move_total = sum(stage_moves.values())
     tasks_block = _tasks_block(task_info, events)
-    score = _score(tasks_block, worked_hours, expected_hours, stage_move_total, counts["present"], goals["stage_moves"])
+    leads = leads or lead_metrics.unavailable_numbers()
+    score = _score(tasks_block, worked_hours, expected_hours, stage_move_total, counts["present"], goals["stage_moves"], leads)
     return {
         "id": person.id, "name": person.name, "email": person.email, "active": person.active, "status": status,
         "attendance": {"workedDays": counts["present"], "absentDays": counts["absent"], "leaveDays": counts["leave"],
@@ -521,6 +547,7 @@ def _staff_row(person, days, day_bounds, tz, now, today, cut, policy, inputs, go
         "stuck": {"count": stuck[0] if stuck else 0, "oldestDays": (now - stuck[1]).days if stuck else 0, "examples": stuck_list},
         "goals": {"candidatesPerDay": goals["candidates"], "forwardedPerDay": goals["forwarded_to_client"],
                   "stageMovesPerDay": goals["stage_moves"], "scheduledDays": counts["present"] + counts["absent"]},
+        "leads": leads,
         "score": score["score"], "scoreParts": score["parts"],
         "days": day_rows,
     }
@@ -572,19 +599,29 @@ def _tasks_block(info, events):
             "completionPercent": _percent(info["completed"], info["assigned"]), **base}
 
 
-def _score(tasks, hours, expected_hours, moves, worked_days, daily_goal):
-    """0-100 from up to three explainable parts; each part is None when there is nothing to measure."""
+def _score(tasks, hours, expected_hours, moves, worked_days, daily_goal, leads=None):
+    """0-100 from up to four explainable parts; each part is None when there is nothing to measure.
+
+    The lead follow-up part exists only for a person who had leads assigned in the period (and then the weights are
+    WEIGHTS_WITH_LEADS); for everybody else the score is the original three parts.
+    """
+    with_leads = bool(leads and leads.get("available") and leads.get("assigned", 0) > 0)
+    weights = WEIGHTS_WITH_LEADS if with_leads else WEIGHTS
     parts = []
     task_ratio = tasks["completed"] / tasks["assigned"] if tasks["available"] and tasks["assigned"] else None
-    parts.append({"key": "tasks", "label": "Daily tasks", "weight": WEIGHTS["tasks"], "ratio": task_ratio,
+    parts.append({"key": "tasks", "label": "Daily tasks", "weight": weights["tasks"], "ratio": task_ratio,
                   "detail": f"{tasks['completed']} of {tasks['assigned']} completed" if task_ratio is not None else "No daily tasks assigned"})
     hours_ratio = min(1.0, hours / expected_hours) if expected_hours > 0 else None
-    parts.append({"key": "hours", "label": "Hours", "weight": WEIGHTS["hours"], "ratio": hours_ratio,
+    parts.append({"key": "hours", "label": "Hours", "weight": weights["hours"], "ratio": hours_ratio,
                   "detail": f"{hours:g} h of {expected_hours:g} h expected" if hours_ratio is not None else "No hours expected"})
     target = daily_goal * worked_days
     stage_ratio = min(1.0, moves / target) if target > 0 else None
-    parts.append({"key": "stages", "label": "Stage moves", "weight": WEIGHTS["stages"], "ratio": stage_ratio,
+    parts.append({"key": "stages", "label": "Stage moves", "weight": weights["stages"], "ratio": stage_ratio,
                   "detail": f"{moves} moves against {target} ({daily_goal} a day x {worked_days} days)" if stage_ratio is not None else "No worked days to measure"})
+    if with_leads:
+        lead_ratio = min(1.0, leads["contacted"] / leads["assigned"])
+        parts.append({"key": "leads", "label": "Lead follow-up (optional)", "weight": weights["leads"], "ratio": lead_ratio,
+                      "detail": f"{leads['contacted']} of {leads['assigned']} assigned leads called"})
     measured = [p for p in parts if p["ratio"] is not None]
     total_weight = sum(p["weight"] for p in measured)
     score = round(sum(p["ratio"] * p["weight"] for p in measured) / total_weight * 100) if total_weight else None
@@ -653,6 +690,14 @@ def _highlights(staff):
             add("backlog", "medium", p, "Postponed and overdue backlog",
                 f"{t['backlog']} unfinished from earlier days (oldest {t['oldestBacklogDays']} days), {t['overdue']} past their deadline.",
                 t["backlog"])
+        lead = p.get("leads") or {}
+        if lead.get("available"):
+            if lead["assigned"] >= LEADS_UNTOUCHED_MIN and lead["contacted"] == 0:
+                add("leads_untouched", "medium", p, "Leads assigned but none called",
+                    f"{lead['assigned']} leads were assigned in this period and none of them was called.", lead["assigned"])
+            if lead["followUpsOverdue"] >= LEADS_OVERDUE_MIN:
+                add("leads_overdue", "low", p, "Lead follow-ups overdue",
+                    f"{lead['followUpsOverdue']} lead follow-ups are already past their date.", lead["followUpsOverdue"])
         if st["count"]:
             first = st["examples"][0] if st["examples"] else None
             idle = p["stages"]["moves"] == 0 and p["status"] == "worked"
@@ -680,6 +725,11 @@ def _summary(staff, funnel, tasks_available):
     def outcome(key):
         return sum(p["outcomes"][key] for p in staff)
 
+    def lead(key):
+        return sum((p.get("leads") or {}).get(key, 0) for p in staff)
+
+    leads_worked = lead("worked")
+
     return {
         "staffTotal": len(staff), "staffWorked": sum(p["status"] == "worked" for p in staff),
         "staffAbsent": sum(p["status"] == "no_attendance" for p in staff),
@@ -695,4 +745,9 @@ def _summary(staff, funnel, tasks_available):
         "visaReceived": outcome("visaReceived"), "visaStamped": outcome("visaStamped"), "deployed": outcome("deployed"),
         "stuckCandidates": sum(p["stuck"]["count"] for p in staff),
         "averageScore": round(sum(scores) / len(scores)) if scores else None,
+        "leadsAvailable": bool(staff) and all((p.get("leads") or {}).get("available") for p in staff),
+        "leadsAssigned": lead("assigned"), "leadsContacted": lead("contacted"), "leadsCalls": lead("calls"),
+        "leadsWorked": leads_worked, "leadsInterested": lead("interested"), "leadsResumesReceived": lead("resumesReceived"),
+        "leadsConverted": lead("converted"), "leadsConversionPercent": _percent(lead("converted"), leads_worked),
+        "leadsFollowUpsOverdue": lead("followUpsOverdue"),
     }

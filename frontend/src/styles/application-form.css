@@ -76,7 +76,7 @@ body.af-open { overflow: hidden; }
 .af-banner.is-error { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
 
 /* ------------------------------------------------------------ Side panel */
-.af-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.af-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; max-height: calc(100dvh - 60px - 48px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px 4px 6px 2px; margin: -2px -4px -6px -2px; }
 .af-card { background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow-card); }
 .af-complete { display: flex; align-items: center; gap: 14px; }
 .af-complete-title { margin: 0; font-weight: 600; font-size: 15px; }
@@ -91,7 +91,7 @@ body.af-open { overflow: hidden; }
 .af-ring small { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-left: 1px; }
 .af-side-h { margin: 0 0 10px; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-light); font-weight: 600; }
 .af-missing { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.af-missing li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--border-faint); font-size: 13.5px; }
+.af-missing li { display: grid; grid-template-columns: 16px minmax(0, 1fr) 96px; align-items: center; gap: 8px; min-height: 42px; padding: 6px 0; border-top: 1px solid var(--border-faint); font-size: 13.5px; }
 .af-missing li:first-child { border-top: 0; }
 .af-missing li > svg { width: 15px; height: 15px; color: var(--warning-ink); }
 .af-missing li > span { overflow-wrap: anywhere; }
@@ -117,14 +117,14 @@ body.af-open { overflow: hidden; }
   --af-brand: var(--primary-deep);
   --af-label-bg: var(--tint-1);
 }
-/* An A4 sheet on a soft grey desk: 210mm wide on a wide screen (it scales down fluidly), at least 297mm tall, with a faint dashed guide
-   where each further A4 page would begin. Print uses the same sheet, so what you see is what prints. */
+/* An A4 sheet on a soft grey desk: 210mm wide on a wide screen (it scales down fluidly), at least 297mm tall, with a Print uses the same sheet,
+   so what you see is what prints. */
 .af-sheet {
   width: 100%;
   max-width: 210mm;
   min-height: 297mm;
   margin: 0 auto;
-  padding: 12mm 14mm 14mm;
+  padding: 11mm 11mm 13mm;
   background-color: var(--bg-card);
   position: relative;
   border: 1px solid var(--af-line);
@@ -132,13 +132,11 @@ body.af-open { overflow: hidden; }
   box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 10px 30px rgba(15, 23, 42, .1);
 }
 [data-theme="dark"] .af-sheet { box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
-/* Where each further A4 page begins (drawn over the content so it is always visible; not printed). */
-.af-sheet::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(297mm - 2px), color-mix(in srgb, var(--text-light) 60%, transparent) calc(297mm - 2px), color-mix(in srgb, var(--text-light) 60%, transparent) 297mm); -webkit-mask-image: repeating-linear-gradient(to right, #000 0 8px, transparent 8px 14px); mask-image: repeating-linear-gradient(to right, #000 0 8px, transparent 8px 14px); }
 
 /* Header band: logo | centred title | photo on one centre line, address below, brand rule after */
 .af-letterhead {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-columns: 150px minmax(0, 1fr) 150px;
   grid-template-areas: "brand heading photo" "address address address";
   column-gap: 16px;
   row-gap: 12px;
@@ -146,7 +144,7 @@ body.af-open { overflow: hidden; }
   padding-bottom: 12px;
   border-bottom: 2px solid var(--af-brand);
 }
-.af-brand { grid-area: brand; justify-self: start; width: 100%; max-width: 170px; }
+.af-brand { grid-area: brand; justify-self: start; align-self: center; width: 100%; max-width: 150px; }
 .af-logo { display: block; width: 100%; height: auto; }
 .af-logo.is-dark { display: none; }
 [data-theme="dark"] .af-logo.is-light { display: none; }
@@ -156,7 +154,7 @@ body.af-open { overflow: hidden; }
 .af-form-title { margin: 4px 0 0; font-size: 12px; letter-spacing: .24em; font-weight: 700; color: var(--af-brand); }
 [data-theme="dark"] .af-form-title { color: var(--primary); }
 .af-ref { margin: 6px 0 0; font-size: 11.5px; color: var(--text-light); }
-.af-photo-wrap { grid-area: photo; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.af-photo-wrap { grid-area: photo; justify-self: end; align-self: center; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .af-photo {
   position: relative; width: 105px; aspect-ratio: 35 / 45; display: grid; place-items: center; overflow: hidden;
   border: 1.5px solid var(--text-muted); border-radius: 3px; background: var(--tint-1); text-align: center;
@@ -180,7 +178,7 @@ body.af-open { overflow: hidden; }
 /* Section bars */
 .af-section { margin-top: 14px; break-inside: avoid; }
 .af-section-head {
-  display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 5px 12px;
+  display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; box-sizing: border-box;
   background: var(--af-brand); color: #fff; border-radius: 4px 4px 0 0;
 }
 .af-section-head h2 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; min-width: 0; color: inherit; }
@@ -197,31 +195,37 @@ body.af-open { overflow: hidden; }
 [data-theme="dark"] .af-aside-note, [data-theme="dark"] .af-section-aside { color: var(--text-muted); }
 .af-section-body { border: 1px solid var(--af-line); border-top: 0; border-radius: 0 0 4px 4px; overflow: hidden; background: var(--bg-card); }
 
-/* Label / value pairs: [label][value] [label][value], hairline borders, equal rows */
-.af-cells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; }
-.af-cells-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.af-cells > .af-cell { border-top: 1px solid var(--af-line); }
-.af-cells > .af-cell:nth-child(-n+2) { border-top: 0; }
-.af-cells-3 > .af-cell:nth-child(-n+3) { border-top: 0; }
-.af-cells > .af-cell:nth-child(2n) { border-left: 1px solid var(--af-line); }
-.af-cells-3 > .af-cell:nth-child(2n) { border-left: 0; }
-.af-cells-3 > .af-cell:not(:nth-child(3n+1)) { border-left: 1px solid var(--af-line); }
-.af-cells > .af-cell.is-wide { grid-column: 1 / -1; border-left: 0; }
-.af-cells-extra { border-top: 1px solid var(--af-line); }
-.af-cells > .af-cell.is-wide + .af-cell { border-left: 0; }
-.af-cell { display: grid; grid-template-columns: var(--af-label-w) minmax(0, 1fr); min-width: 0; min-height: var(--af-row-h); background: var(--bg-card); }
-.af-cells-3 .af-cell { grid-template-columns: 1fr; }
-.af-cell.is-filler { background: var(--af-label-bg); grid-template-columns: 1fr; }
-.af-cell-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 10px 6px 12px; background: var(--af-label-bg); border-right: 1px solid var(--af-line); min-width: 0; }
+/* Label / value pairs: one fixed 4-column grid (label | value | label | value) shared by every section, so the columns line up
+   down the whole sheet. The cell wrappers dissolve (display: contents); hairlines are the 1px grid gaps. */
+.af { --af-label-w: 154px; --af-row-h: 44px; --af-field-h: 36px; }
+.af-cells {
+  display: grid;
+  grid-template-columns: var(--af-label-w) minmax(0, 1fr) var(--af-label-w) minmax(0, 1fr);
+  grid-auto-rows: minmax(var(--af-row-h), auto);
+  gap: 1px;
+  background: var(--af-line);
+}
+.af-cells > .af-cell { display: contents; }
+.af-cells > .af-cell.is-wide > .af-cell-head { grid-column: 1; }
+.af-cells > .af-cell.is-wide > .af-value-cell { grid-column: 2 / -1; }
+.af-cells > .af-cell.is-filler { display: block; grid-column: span 2; background: var(--af-label-bg); }
+/* Three stacked pairs (total / India / abroad experience) */
+.af-cells-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: auto; }
+.af-cells-3 > .af-cell { display: grid; grid-template-columns: 1fr; grid-column: auto; background: var(--bg-card); }
+.af-cells-3 > .af-cell > .af-cell-head { grid-column: auto; border-right: 0; border-bottom: 1px solid var(--af-line); padding-top: 5px; padding-bottom: 5px; }
+.af-cells-3 > .af-cell > .af-value-cell { grid-column: auto; }
+.af-cell-head { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 10px 0 12px; background: var(--af-label-bg); min-width: 0; }
 .af-cells-3 .af-cell-head { border-right: 0; border-bottom: 1px solid var(--af-line); padding-top: 5px; padding-bottom: 5px; }
-.af-label { font-size: 11.5px; font-weight: 600; color: var(--text-label); letter-spacing: .02em; line-height: 1.3; overflow-wrap: anywhere; }
+.af-label { font-size: 11.5px; font-weight: 600; color: var(--text-label); letter-spacing: .02em; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.af-cells-3 .af-label { white-space: normal; }
 .af-cell-chips { display: inline-flex; align-items: center; flex: none; }
-.af-value-cell { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; padding: 5px 12px; }
-.af-value { display: flex; flex-direction: column; justify-content: center; min-height: var(--af-field-h); min-width: 0; font-size: 14px; font-weight: 400; color: var(--text-main); overflow-wrap: anywhere; word-break: break-word; }
-.af-text { overflow-wrap: anywhere; }
-.af-link { color: var(--primary-deep); text-decoration: none; }
-.af-link:hover { text-decoration: underline; }
-[data-theme="dark"] .af-link { color: var(--primary); }
+.af-value-cell { box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; padding: 4px 12px; background: var(--bg-card); }
+.af-value { display: flex; flex-direction: column; justify-content: center; min-height: var(--af-field-h); min-width: 0; font-size: 14px; line-height: 20px; font-weight: 400; color: var(--text-main); overflow-wrap: break-word; }
+.af-value .af-text, .af-value a { font-size: 14px; line-height: 20px; font-weight: 400; color: var(--text-main); overflow-wrap: anywhere; }
+.af-link { text-decoration: none; }
+.af-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.af-link::after { content: ''; }
+.af-age { font-size: 12.5px !important; color: var(--text-muted) !important; }
 .af-empty { color: var(--text-light); font-weight: 400; }
 .af-note { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.35; }
 .af-note.is-error { color: var(--error-ink); }
@@ -238,7 +242,7 @@ body.af-open { overflow: hidden; }
 
 /* Controls fill the value cell at one height, so view and edit do not jump */
 .af :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { height: var(--af-field-h); min-height: var(--af-field-h); width: 100%; font-size: 14px; border-radius: 6px; padding-top: 0; padding-bottom: 0; }
-.af textarea.ui-input { min-height: 88px; width: 100%; border-radius: 6px; font-size: 14px; }
+.af textarea.ui-input { min-height: 56px; width: 100%; border-radius: 6px; font-size: 14px; }
 .af .date-picker, .af .custom-select { display: block; width: 100%; }
 
 /* Provenance: a tiny icon with a tooltip. The only chip left is the passport/"Missing" style one used outside the grid. */
@@ -254,14 +258,14 @@ body.af-open { overflow: hidden; }
 .af-prov svg { width: 10px; height: 10px; }
 
 /* Languages */
-.af-langs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-height: var(--af-field-h); }
-.af-langs.is-editing { padding: 3px 8px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--bg-card); }
+.af-langs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-height: var(--af-field-h); }
+.af-langs.is-editing { box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--bg-card); max-height: 96px; overflow-y: auto; align-content: flex-start; width: 100%; }
 .af-langs.is-editing:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
-.af-lang { display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px; background: var(--tint-2); font-size: 13px; }
+.af-lang { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border-radius: 999px; background: var(--tint-2); font-size: 13px; line-height: 1; white-space: nowrap; }
 .af-lang button { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; }
 .af-lang button:hover { background: var(--tint-3); color: var(--text-main); }
 .af-lang button svg { width: 12px; height: 12px; }
-.af-lang-input { flex: 1 1 100px; min-width: 80px; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; padding: 2px 0; }
+.af-lang-input { flex: 1 1 64px; min-width: 64px; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; padding: 2px 0; }
 
 /* Repeating-row tables (education, experience): column header band, hairline rows and column rules */
 .af-rowtable { border-top: 1px solid var(--af-line); }
@@ -346,7 +350,7 @@ body.af-open { overflow: hidden; }
 /* ------------------------------------------------------------ Tablet and phone */
 @media screen and (max-width: 1190px) {
   .af-layout { grid-template-columns: minmax(0, 210mm); padding: 16px 16px 48px; gap: 16px; }
-  .af-side { position: static; display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .af-side { position: static; max-height: none; overflow: visible; display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
   .af-missing { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
   .af-missing li:nth-child(2) { border-top: 0; }
   .af-side > .af-complete { grid-column: 1 / -1; }
@@ -368,14 +372,11 @@ body.af-open { overflow: hidden; }
   .af-letterhead { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand photo" "heading heading" "address address"; row-gap: 10px; }
   .af-brand { max-width: 140px; }
   .af-photo { width: 92px; }
-  .af-cells, .af-cells-3 { grid-template-columns: minmax(0, 1fr); }
-  .af-cells > .af-cell, .af-cells > .af-cell:nth-child(-n+2), .af-cells-3 > .af-cell:nth-child(-n+3) { border-top: 1px solid var(--af-line); border-left: 0; }
-  .af-cells > .af-cell:first-child { border-top: 0; }
-  .af-cells-3 .af-cell { grid-template-columns: var(--af-label-w) minmax(0, 1fr); }
-  .af-cells-3 .af-cell-head { border-right: 1px solid var(--af-line); border-bottom: 0; }
-  .af-cell { grid-template-columns: 118px minmax(0, 1fr); }
-  .af-cells-3 .af-cell { grid-template-columns: 118px minmax(0, 1fr); }
-  .af-cell.is-filler { display: none; }
+  .af-cells { grid-template-columns: 118px minmax(0, 1fr); }
+  .af-cells > .af-cell.is-wide > .af-value-cell { grid-column: 2; }
+  .af-cells > .af-cell.is-filler { display: none; }
+  .af-label { white-space: normal; }
+  .af-cells-3 { grid-template-columns: minmax(0, 1fr); }
   /* Row tables become one block per row, each value with its own caption. */
   .af-rowtable-head { display: none; }
   .af-rowtable-row, .af-rowtable.is-editing .af-rowtable-row { grid-template-columns: minmax(0, 1fr); padding: 6px 0; }
@@ -411,7 +412,7 @@ body.af-open { overflow: hidden; }
   .af-split-hint, .af-note.is-error, .af-doc .ui-file-row-actions, .af-extract, .af-section-missing { display: none !important; }
   .af-layout { display: block; max-width: none; padding: 0; margin: 0; }
   .af-main { width: 210mm; }
-  .af-sheet { width: 210mm; max-width: none; min-height: 0; margin: 0; padding: 12mm 14mm; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
+  .af-sheet { width: 210mm; max-width: none; min-height: 0; margin: 0; padding: 11mm 11mm; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
   .af-sheet::after { display: none; }
   .af-logo.is-light { display: block !important; }
   .af-logo.is-dark { display: none !important; }
@@ -498,9 +499,13 @@ body.af-open { overflow: hidden; }
 .afp-interest-chip { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
 .afp-interest-chip i { width: 10px; height: 10px; border-radius: 50%; background: var(--tone); }
 .afp-interest-chip.is-green { --tone: #16a34a; } .afp-interest-chip.is-blue { --tone: #2563eb; } .afp-interest-chip.is-amber { --tone: #d97706; } .afp-interest-chip.is-red { --tone: #dc2626; }
-.af-cell .afp-phone-row { display: grid; grid-template-columns: minmax(110px, 40%) minmax(0, 1fr); gap: 8px; }
-.af-cell .afp-hint { margin-top: 4px; }
-.af-cell .afp-interest { gap: 10px; }
+.af-cell .afp-phone-row { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 6px; }
+.af-cell .afp-hint:not(.is-error) { display: none; }
+.af-cell .afp-interest { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.af-cell .afp-interest-card { padding: 8px 10px 8px 16px; min-height: 52px; justify-content: center; }
+.af-cell .afp-interest-card b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.af-cell .afp-interest-card small { font-size: 12px; line-height: 1.3; }
+.af-cell .afp-interest-card i { top: 8px; bottom: 8px; }
 @media print { .afp-interest, .af-cells-extra .afp-phone-row select { display: none; } }
 .af-section-no.is-plain { display: none; }
 .af-section-aside .af-prov { color: #fff; background: rgba(255,255,255,.2); }
@@ -535,3 +540,17 @@ body.af-open { overflow: hidden; }
 .afp-interest-card.is-gray { --tone: #64748b; }
 .afp-interest-chip.is-gray { --tone: #64748b; }
 @media screen and (max-width: 900px) { .af-sheet { padding: 24px 22px 26px; } }
+
+/* Top bar: every button the same height and radius, the Live pill on the same axis */
+.af-bar { align-items: center; }
+.af-bar-actions { align-items: center; }
+.af-bar-actions .ui-button { height: 38px; border-radius: 8px; padding: 0 14px; }
+.af-bar-actions .ui-button[disabled] { opacity: .55; }
+.af-live { height: 28px; align-self: center; }
+.af-missing button { justify-content: center; width: 100%; }
+@media screen and (max-width: 760px) {
+  .af-cells-3 > .af-cell { grid-template-columns: 118px minmax(0, 1fr); }
+  .af-cells-3 > .af-cell > .af-cell-head { border-bottom: 0; padding-top: 0; padding-bottom: 0; }
+}
+.af-pre { white-space: pre-wrap; }
+.afp-phone { min-width: 0; width: 100%; }

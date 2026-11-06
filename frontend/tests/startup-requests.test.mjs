@@ -14,7 +14,7 @@ async function loadSource(path) {
 }
 
 const { createLatestRequest } = await loadSource('../src/shared/api/latest-request.ts')
-const { api, ApiError } = await loadSource('../src/shared/api/client.ts')
+const { api, ApiError, invalidateReads } = await loadSource('../src/shared/api/client.ts')
 
 function deferred() {
   let resolve
@@ -30,6 +30,7 @@ const realFetch = globalThis.fetch
 const realSetTimeout = globalThis.setTimeout
 const realClearTimeout = globalThis.clearTimeout
 afterEach(() => {
+  invalidateReads() // a read left hanging by one test must not be joined by the next
   globalThis.fetch = realFetch
   globalThis.setTimeout = realSetTimeout
   globalThis.clearTimeout = realClearTimeout
