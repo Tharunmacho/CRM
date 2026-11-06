@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { AlertTriangle, Archive, ArrowLeft, ChevronLeft, ChevronRight, Download, Eye, FileText, FolderPlus, Info, Mail, MailOpen, MessageCircle, MoreVertical, Paperclip, Pencil, Plus, RefreshCw, Reply, ReplyAll, Send, Settings2, SlidersHorizontal, Star, Trash2, Undo2, UserCheck } from 'lucide-react'
+import { AlertTriangle, Archive, ArrowLeft, ChevronLeft, ChevronRight, Download, Eye, FileText, FolderPlus, Info, Mail, MailOpen, MoreVertical, Paperclip, Pencil, Plus, RefreshCw, Reply, ReplyAll, Send, Settings2, SlidersHorizontal, Star, Trash2, Undo2, UserCheck } from 'lucide-react'
 import { api, fileHref, type InboxAccount, type InboxSnapshot, type InboxJob, type MailProvider } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { smartTime } from '@/shared/lib/format'
@@ -296,7 +296,6 @@ export default function InboxScreen() {
       actions={<>
         <Button icon={<RefreshCw size={15} />} disabled={loading || busy} onClick={refresh}>Refresh</Button>
         {admin && <Button icon={<Settings2 size={15} />} disabled={busy} onClick={() => setManaging(true)}>Mailboxes</Button>}
-        <Button icon={<MessageCircle size={15} />} onClick={() => navigate('/whatsapp')}>WhatsApp</Button>
         {liveMailbox && admin && <Button icon={<FolderPlus size={15} />} disabled={busy} onClick={() => { setFolderName(''); setNewFolder(true) }}>New folder</Button>}
         <Button variant="primary" icon={<Pencil size={15} />} disabled={busy || !composeAccount || composeAccount.connectionStatus === 'disconnected'} title={composeAccount ? undefined : 'Connect a mailbox to compose'} onClick={() => createDraft('compose')}>Compose</Button>
       </>} />
