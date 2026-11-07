@@ -3,13 +3,22 @@ import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
 
-async function load(path) {
-  const source = await readFile(new URL(path, import.meta.url), 'utf8')
+function moduleUrl(source) {
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+  return `data:text/javascript;base64,${Buffer.from(js).toString('base64')}`
 }
 
-const fields = await load('../src/features/candidates/data-bank-fields.ts')
+async function load(path, imports = {}) {
+  let source = await readFile(new URL(path, import.meta.url), 'utf8')
+  for (const [from, url] of Object.entries(imports)) source = source.replaceAll(`'${from}'`, `'${url}'`)
+  const url = moduleUrl(source)
+  return { url, module: await import(url) }
+}
+
+const slotsUrl = moduleUrl(await readFile(new URL('../src/shared/model/document-slots.ts', import.meta.url), 'utf8'))
+const documentsModule = await load('../src/features/candidates/data-bank-documents.ts', { '@/shared/model/document-slots': slotsUrl })
+const fields = (await load('../src/features/candidates/data-bank-fields.ts', { './data-bank-documents': documentsModule.url })).module
+const { documentsOnFile } = documentsModule.module
 
 const context = {
   ownerName: (id) => (id === 'u1' ? 'Asha Rao' : ''),
@@ -28,7 +37,7 @@ const candidate = {
   fatherName: 'Test Father', maritalStatus: 'single', currentAddress: '1 Test Street', nativePlace: 'Madurai', familyMemberNumber: '+910000000003',
   jobDurationPreference: 'long', bestTimeToContact: 'evening', countryPreference: 'Qatar', serviceChargesStatus: 'agreed', interestLevel: 'high',
   nextFollowUpDate: '2026-11-20', source: 'email', sourceDetail: 'Agent One', status: 'in_process', ownerId: 'u1', addedAt: '2026-11-01T10:00:00Z',
-  documents: [{ key: 'resume', label: 'Resume', versions: [{}] }, { key: 'passport', label: 'Passport copy', versions: [] }],
+  documents: [{ key: 'resume', label: 'Resume', versions: [{}] }, { key: 'passport', label: 'Passport', versions: [] }],
   callOutcome: { called: true, interested: 'yes', remarks: '', recordedAt: '2026-11-02T10:00:00Z' },
 }
 
@@ -117,4 +126,28 @@ test('the list API does not load the deferred education and work history', async
   const server = await readFile(new URL('../../backend/app/api/schemas.py', import.meta.url), 'utf8')
   const list = server.slice(server.indexOf('class CandidateOut(Wire):'), server.indexOf('class CandidateWithFormOut'))
   assert.ok(!/\beducation\b|\bwork_history\b/.test(list.replace(/#.*$/gm, '')))
+})
+
+test('documents on file use the shared labels in the shared order, folding the old certificate keys', () => {
+  const file = [{}]
+  const held = documentsOnFile([
+    { key: 'other', label: 'Other', versions: file },
+    { key: 'experience', label: 'Experience', versions: file },
+    { key: 'photo', label: 'Photograph', versions: file },
+    { key: 'passport', label: 'Passport copy', versions: file },
+    { key: 'education', label: 'Education', versions: file },
+    { key: 'resume', label: 'Resume', versions: [] },
+    { key: 'pcc', label: 'PCC', versions: file },
+    { key: 'aadhaar', label: 'Aadhaar copy', versions: file },
+  ])
+  assert.deepEqual(held, ['Passport', 'Photo', 'Education certificate', 'Experience certificate', 'Police clearance certificate (PCC)', 'Other documents', 'Aadhaar'])
+  assert.deepEqual(documentsOnFile([{ key: 'education_certificate', versions: file }, { key: 'education', versions: file }]), ['Education certificate'])
+  assert.deepEqual(documentsOnFile(undefined), [])
+  assert.deepEqual(documentsOnFile([]), [])
+})
+
+test('the documents column writes the shared labels', () => {
+  const held = { ...candidate, documents: [{ key: 'photo', label: 'Photograph', versions: [{}] }, { key: 'passport', label: 'Passport copy', versions: [{}] }] }
+  const rows = Object.fromEntries(fields.bankFieldRows(held, context).map((row) => [row.key, row]))
+  assert.equal(rows.documents.value, 'Passport, Photo')
 })

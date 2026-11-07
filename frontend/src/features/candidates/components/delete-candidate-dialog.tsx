@@ -31,18 +31,14 @@ export function DeleteCandidateDialog({
       .map((application) => ({ status: application.status, orderRef: store.order(application.orderId)?.ref })),
   )
   const close = () => { if (!busy) onClose() }
-  const remove = async () => {
+  const remove = () => {
     if (busy || blocker) return
     setBusy(true); setError('')
-    try {
-      await store.deleteCandidate(candidateId)
-      onClose()
-      onDeleted()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'We could not delete this candidate. Please try again.')
-    } finally {
-      setBusy(false)
-    }
+    // The store takes the candidate out of every list at once and sends the delete; if the server refuses, it puts
+    // the candidate back and says why in a message, so there is nothing to wait for here. Leave for the Data Bank now.
+    store.deleteCandidate(candidateId).catch(() => { /* already shown by the store */ })
+    onClose()
+    onDeleted()
   }
 
   return (

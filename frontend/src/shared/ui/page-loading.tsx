@@ -81,11 +81,17 @@ export function PageLoading({ fullScreen = false, onRetry }: { fullScreen?: bool
 }
 
 /** A failed page download or render should offer recovery instead of a blank screen. */
-export class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false }
+export class PageBoundary extends Component<{ children: ReactNode }, { failed: boolean; reason: string }> {
+  state = { failed: false, reason: '' }
 
-  static getDerivedStateFromError() {
-    return { failed: true }
+  static getDerivedStateFromError(error: unknown) {
+    // A short, safe reason (an error name and message, never page data) so a failure can be reported and fixed.
+    const reason = error instanceof Error ? `${error.name}: ${error.message}`.replace(/\s+/g, ' ').slice(0, 220) : ''
+    return { failed: true, reason }
+  }
+
+  componentDidCatch(error: unknown, info: { componentStack?: string | null }) {
+    console.error('Page failed to render', error, info.componentStack?.split('\n').slice(0, 6).join('\n'))
   }
 
   render() {
@@ -95,6 +101,7 @@ export class PageBoundary extends Component<{ children: ReactNode }, { failed: b
         <div role="alert" className="max-w-sm text-center">
           <h1 className="text-h3 font-semibold text-ink">This page did not open</h1>
           <p className="mt-2 text-sm text-ink-500">Reload the page to try again. If it keeps happening, tell your administrator.</p>
+          {this.state.reason && <p className="mt-2 break-words text-xs text-ink-400" data-testid="page-failure-reason">{this.state.reason}</p>}
           <button
             type="button"
             onClick={() => window.location.reload()}

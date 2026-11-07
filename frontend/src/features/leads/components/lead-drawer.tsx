@@ -206,7 +206,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
         </Section>
 
         <Section title="About the person">
-          <Row label="Position applied">{shown.positionApplied}</Row>
+          <Row label="Job applied">{shown.positionApplied}</Row>
           <Row label="Country interest">{shown.countryInterest}</Row>
           <Row label="Restaurant experience">{experienceText(shown.experienceRestaurantText, shown.experienceRestaurantYears)}</Row>
           <Row label="Total experience">{experienceText(shown.experienceTotalText, shown.experienceTotalYears)}</Row>

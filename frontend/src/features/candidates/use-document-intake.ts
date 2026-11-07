@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-import { api, ApiError, fileHref, type OcrScan } from '@/shared/api/client'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { api, ApiError, fileHref, type OcrInspection, type OcrScan } from '@/shared/api/client'
 import type { DocumentScans, ScanKind } from './ocr-form'
+import { MAX_DOCUMENT_FILES, isQueued, trackNextInLine, type QueueClock } from './entry-upload'
+import { createDraftSaver } from './draft-saver'
 
 export type IntakeDraft = { form: Record<string, string>; editedFields: string[]; jobIds?: string[]; savedCandidateId?: string | null; splitCandidateIds?: string[] }
 export type IntakeKind = ScanKind | 'photo' | 'education' | 'experience'
@@ -8,16 +10,32 @@ export type IntakeKind = ScanKind | 'photo' | 'education' | 'experience'
 export const MULTI_FILE_KINDS: readonly IntakeKind[] = ['education', 'experience']
 export const MAX_FILES_PER_KIND = 6
 export const isMultiFileKind = (kind: IntakeKind) => MULTI_FILE_KINDS.includes(kind)
+/** Is a reading worker alive? Sent with every job by newer servers (older ones omit it, which the screen must tolerate). */
+export type ReaderState = { alive: boolean; workers: number; busy: number; lastSeenSeconds: number | null; outdated: boolean }
+export type WaitingReason = 'reader_not_running' | 'queue' | null
 export type IntakeJob = {
   id: string; groupId: string; kind: IntakeKind; filename: string; sizeKb: number; status: string;
   lastError: string | null; candidateId: string | null; attachmentId: string | null;
+  /** How many reading attempts have failed so far (the server gives up after 4). Older servers omit it. */
+  attempts?: number;
+  /** Newer servers also send the attempt limit, a short safe reason for the last failure and when the job is next ready. Older ones omit them. */
+  maxAttempts?: number; lastErrorHint?: string | null; readyAt?: string | null;
   originalUrl: string; createdAt: string; updatedAt: string;
-  result?: { scans?: DocumentScans }; draft?: IntakeDraft
+  /** Where a waiting job stands in line (integers while pending or retrying, null otherwise). Older servers omit them. */
+  queuedAt?: string | null; startedAt?: string | null; finishedAt?: string | null; queuePosition?: number | null; aheadOfYou?: number | null;
+  /** Why a waiting file is waiting: no reader is running (after about a minute) or others come first. Older servers omit it. */
+  waitingReason?: WaitingReason; reader?: ReaderState | null;
+  result?: { scans?: DocumentScans; inspection?: OcrInspection; warnings?: string[]; /** What was read and what was not (additive: older servers omit it). */ coverage?: unknown }; draft?: IntakeDraft
 }
 const active = new Set(['pending', 'processing', 'retry'])
-const pause = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+const SCAN_KINDS: readonly string[] = ['resume', 'passport', 'aadhaar']
+/** How often the server is asked while any file is queued or being read. */
+export const READ_POLL_MS = 1000
+/** The slower look while nothing is being waited on (after Stop waiting, or after coming back to a saved upload). */
+export const IDLE_POLL_MS = 5000
+const pause = (signal: AbortSignal, delay = READ_POLL_MS) => new Promise<void>((resolve, reject) => {
   const cancel = () => { clearTimeout(timer); reject(new DOMException('Stopped waiting', 'AbortError')) }
-  const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve() }, 2500)
+  const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve() }, delay)
   signal.addEventListener('abort', cancel, { once: true })
   if (signal.aborted) cancel()
 })
@@ -30,42 +48,72 @@ export function scansFromJobs(jobs: IntakeJob[]): DocumentScans {
   return scans
 }
 
+/** A clock for the queued rows: ticks every second while any file waits (and not at all otherwise), and remembers since when each file has been "next in line". */
+export function useQueueClock(jobs: IntakeJob[]): QueueClock {
+  const waiting = jobs.some((job) => isQueued(job))
+  const [now, setNow] = useState(() => Date.now())
+  const since = useRef<Record<string, number>>({})
+  useEffect(() => {
+    if (!waiting) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [waiting])
+  return useMemo(() => {
+    since.current = trackNextInLine(since.current, jobs, now)
+    return { now, nextSince: since.current }
+  }, [jobs, now])
+}
+
 export function useDocumentIntake(ownerId: string) {
   const group = useRef<string>(crypto.randomUUID())
   const current = useRef<IntakeJob[]>([])
   const [jobs, setJobs] = useState<IntakeJob[]>([])
-  const [available, setAvailable] = useState<IntakeJob[]>([])
   const [uploading, setUploading] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const [draftError, setDraftError] = useState('')
-  const queue = useRef<Promise<unknown>>(Promise.resolve())
   const mounted = useRef(true)
   const update = (value: IntakeJob[]) => { current.current = value; if (mounted.current) setJobs(value) }
-  const list = async () => {
-    setLoading(true)
-    try { const values = await api.get<IntakeJob[]>('/ocr/jobs'); if (mounted.current) { setAvailable(values); setError('') } }
-    catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : 'We could not load your saved uploads.') }
-    finally { if (mounted.current) setLoading(false) }
-  }
+  // A fresh page starts clean: earlier uploads are never listed or reopened here (they stay saved on the server).
   useEffect(() => {
     mounted.current = true
-    void list()
-    return () => { mounted.current = false }
+    return () => { mounted.current = false; void saver.current?.flush().catch(() => {}) } // leaving the page: send what is still waiting
   }, [ownerId])
 
+  // Draft autosave (see draft-saver.ts): typing is debounced to one request per 2.5 s, a request is never sent while another is
+  // out, an unchanged draft is not sent, and what changed meanwhile goes in ONE follow-up with the latest values.
+  const saver = useRef<ReturnType<typeof createDraftSaver<IntakeDraft>> | null>(null)
+  if (!saver.current) {
+    saver.current = createDraftSaver<IntakeDraft>({
+      // The draft endpoint holds at most 60 job ids; the files beyond that stay saved in the upload and are read as usual.
+      send: (draft) => api.put('/ocr/jobs/groups/' + group.current + '/draft', { ...draft, jobIds: current.current.map((job) => job.id).slice(0, 60) }),
+      onResult: (error) => { if (mounted.current) setDraftError(error ? 'We could not save your latest changes. Keep this page open and try again.' : '') },
+    })
+  }
+  const withIds = (draft: IntakeDraft): IntakeDraft => ({ ...draft, jobIds: current.current.map((job) => job.id).slice(0, 60) })
+  /** Save now and wait for it (before reading, attaching or saving the candidate); an unchanged draft costs nothing. Rejects when saving failed. */
   const saveDraft = async (draft: IntakeDraft) => {
     if (!current.current.length) return
-    const identifier = group.current
-    const payload = { ...draft, jobIds: current.current.map((job) => job.id) }
-    const work = queue.current.catch(() => {}).then(() => api.put('/ocr/jobs/groups/' + identifier + '/draft', payload))
-    queue.current = work
-    try { await work; if (mounted.current) setDraftError('') }
-    catch (err) { if (mounted.current) setDraftError('We could not save your latest changes. Keep this page open and try again.'); throw err }
+    await saver.current!.flush(withIds(draft))
   }
-  const upload = async (kind: IntakeKind, file: File) => {
-    setUploading(true); setError('')
-    if (isMultiFileKind(kind) && current.current.filter((value) => value.kind === kind).length >= MAX_FILES_PER_KIND) { setUploading(false); const message = `You can add up to ${MAX_FILES_PER_KIND} files here.`; setError(message); throw new Error(message) }
+  /** Typing: plan ONE request at most every 2.5 s with the latest values. Returns at once. */
+  const queueDraft = (draft: IntakeDraft) => {
+    if (!current.current.length) return
+    saver.current!.queue(withIds(draft))
+  }
+  /** Leaving a field, hiding the tab or leaving the page: send whatever is still waiting, now. */
+  const flushDraft = () => { if (current.current.length) void saver.current!.flush().catch(() => {}) }
+  const sending = useRef(0)
+  /**
+   * `many` adds the file next to the others instead of replacing the one of its kind. The documents zone uses it: any file may hold
+   * a resume, a passport and an Aadhaar card, so every file is sent as kind "resume" (the server classifies the pages of every file and
+   * reads each kind it finds) and none of them replaces another.
+   */
+  const upload = async (kind: IntakeKind, file: File, options: { many?: boolean } = {}) => {
+    const many = Boolean(options.many) || isMultiFileKind(kind)
+    sending.current += 1; setUploading(true)
+    const done = () => { sending.current -= 1; if (mounted.current && sending.current <= 0) { sending.current = 0; setUploading(false) } }
+    if (isMultiFileKind(kind) && current.current.filter((value) => value.kind === kind).length >= MAX_FILES_PER_KIND) { done(); const message = `You can add up to ${MAX_FILES_PER_KIND} files here.`; throw new Error(message) }
+    if (options.many && current.current.filter((value) => SCAN_KINDS.includes(value.kind)).length >= MAX_DOCUMENT_FILES) { done(); const message = `You can add up to ${MAX_DOCUMENT_FILES} files here.`; throw new Error(message) }
     const form = new FormData()
     form.append('kind', kind); form.append('group_id', group.current); form.append('file', file)
     const controller = new AbortController()
@@ -76,7 +124,7 @@ export function useDocumentIntake(ownerId: string) {
       if (!response.ok) throw new ApiError(response.status, typeof payload.detail === 'string' ? payload.detail : 'We could not save the file. Please try again.')
       const job = payload as IntakeJob
       if (job.status === 'dismissed') throw new Error('You removed this exact file from this upload earlier. Add it from the candidate profile after saving, or use a different copy.')
-      if (isMultiFileKind(kind)) {
+      if (many) {
         // Another file of the same kind is added next to the others; the same file twice returns the job it already has.
         update([...current.current.filter((value) => value.id !== job.id), job])
         return job
@@ -87,39 +135,59 @@ export function useDocumentIntake(ownerId: string) {
       return job
     } catch (err) {
       const message = err instanceof Error && err.name !== 'AbortError' ? err.message : 'The upload did not finish. Please try again.'
-      if (mounted.current) setError(message)
       throw new Error(message)
-    } finally { clearTimeout(timeout); if (mounted.current) setUploading(false) }
+    } finally { clearTimeout(timeout); done() }
   }
-  const recover = async (identifier: string) => {
-    setLoading(true); setError('')
-    try {
-      const all = await api.get<IntakeJob[]>('/ocr/jobs/groups/' + identifier)
-      const draft = [...all].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).find((job) => job.draft?.form)?.draft
-      const selected = draft?.jobIds?.length ? all.filter((job) => draft.jobIds!.includes(job.id)) : all.filter((job) => job.status !== 'dismissed')
-      // One file per kind, except the kinds that take several: those keep every selected file.
-      const byKey = new Map<string, IntakeJob>()
-      for (const job of selected) byKey.set(isMultiFileKind(job.kind) ? job.id : job.kind, job)
-      group.current = identifier
-      update([...byKey.values()])
-      return { jobs: current.current, draft }
-    } catch (err) { setError(err instanceof Error ? err.message : 'We could not open this saved upload.'); throw err }
-    finally { setLoading(false) }
+  const replaceJob = (saved: IntakeJob) => update(current.current.map((value) => value.id === saved.id ? saved : value))
+  /** Puts the server's latest view of this upload over what the page has: files added or removed meanwhile are kept as the page has them. */
+  const merge = (fetched: IntakeJob[]) => {
+    const latest = new Map(fetched.map((job) => [job.id, job]))
+    update(current.current.map((job) => latest.get(job.id) ?? job))
+    return current.current
   }
-  const read = async (signal: AbortSignal) => {
-    const identifiers = current.current.map((job) => job.id)
-    for (const job of current.current) {
-      if (['resume', 'passport', 'aadhaar'].includes(job.kind) && ['uploaded', 'failed', 'needs_review', 'dismissed'].includes(job.status)) await api.post('/ocr/jobs/' + job.id + '/retry')
-    }
+  const isReadable = (job: IntakeJob) => SCAN_KINDS.includes(job.kind)
+  /** A file saved but not yet queued for reading (it arrived while the last round was finishing). */
+  const hasUnqueued = () => current.current.some((job) => isReadable(job) && job.status === 'uploaded')
+  /** Puts one file back in the queue (Failed, or Needs a look). */
+  const retry = async (jobId: string) => {
+    const saved = await api.post<IntakeJob>('/ocr/jobs/' + jobId + '/retry')
+    replaceJob(saved)
+    return saved
+  }
+  /**
+   * Waits for every readable file, polling about once a second while any is queued or being read. Files added while it waits are queued
+   * and followed too. `retryFailed` (the Read again button) also re-queues files that failed or needed a look; an automatic round does not.
+   */
+  const read = async (signal: AbortSignal, options: { retryFailed?: boolean; onProgress?: (jobs: IntakeJob[]) => void } = {}) => {
+    const { retryFailed = true, onProgress } = options
     const stopAt = Date.now() + 20 * 60000
+    let first = true
+    // A file the server refuses to queue (for example one that holds several people) must not stop the others: it shows as Failed with the reason.
+    const refused = new Map<string, string>()
     while (!signal.aborted) {
-      const values = (await api.get<IntakeJob[]>('/ocr/jobs/groups/' + group.current, { signal })).filter((job) => identifiers.includes(job.id))
-      update(values)
-      if (!values.some((job) => active.has(job.status))) return values
+      for (const job of [...current.current]) {
+        if (!isReadable(job) || refused.has(job.id)) continue
+        if (job.status === 'uploaded' || (first && retryFailed && ['failed', 'needs_review', 'dismissed'].includes(job.status))) {
+          try { await retry(job.id) }
+          catch (err) { if (signal.aborted) throw err; refused.set(job.id, err instanceof Error ? err.message : 'We could not read this file.') }
+        }
+      }
+      first = false
+      const fetched = await api.get<IntakeJob[]>('/ocr/jobs/groups/' + group.current, { signal })
+      merge(fetched)
+      if (refused.size) update(current.current.map((job) => refused.has(job.id) ? { ...job, status: 'failed', lastError: refused.get(job.id)! } : job))
+      const values = current.current
+      onProgress?.(values)
+      if (!values.some((job) => active.has(job.status) || (isReadable(job) && job.status === 'uploaded'))) return values
       if (Date.now() > stopAt) throw new Error('We are still reading. Your files are saved. Come back to this upload later.')
       await pause(signal)
     }
     throw new DOMException('Stopped waiting', 'AbortError')
+  }
+  /** One look at the upload, without waiting: keeps the rows honest after Stop waiting or when a saved upload is opened. */
+  const refresh = async (signal?: AbortSignal) => {
+    if (!current.current.length) return current.current
+    return merge(await api.get<IntakeJob[]>('/ocr/jobs/groups/' + group.current, { signal }))
   }
   const attach = async (candidateId: string) => {
     const failures: Record<string, string> = {}
@@ -132,23 +200,18 @@ export function useDocumentIntake(ownerId: string) {
     }
     return failures
   }
-  const dismiss = async (identifier: string) => {
-    const selected = available.filter((job) => job.groupId === identifier)
-    await Promise.all(selected.map((job) => api.post('/ocr/jobs/' + job.id + '/dismiss')))
-    await list()
-  }
   /** Takes one file out of this upload before the candidate is saved (it is set aside on the server, never deleted). */
   const remove = async (jobId: string) => {
     const job = current.current.find((value) => value.id === jobId)
-    if (!job) return
+    if (!job) return current.current
     await api.post('/ocr/jobs/' + jobId + '/dismiss')
     update(current.current.filter((value) => value.id !== jobId))
-    void list()
+    return current.current
   }
   const reset = () => {
     group.current = crypto.randomUUID()
     update([])
-    setError(''); setDraftError('')
+    setDraftError('')
   }
-  return { jobs, available, uploading, loading, error, draftError, upload, remove, recover, read, attach, saveDraft, reload: list, dismiss, reset }
+  return { jobs, uploading, draftError, upload, remove, read, retry, refresh, hasUnqueued, attach, saveDraft, queueDraft, flushDraft, reset }
 }

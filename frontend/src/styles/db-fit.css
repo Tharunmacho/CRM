@@ -32,7 +32,7 @@
 .db-tbl.is-fit .db-owner { gap: 5px; font-size: 12.5px; }
 .db-tbl.is-fit .db-owner.is-empty > span { font-size: 12px; }
 .db-tbl.is-fit .db-acts.is-grid { gap: 4px; }
-.db-tbl.is-fit .db-order-link, .db-tbl.is-fit .db-pill { max-width: 100%; }
+.db-tbl.is-fit .db-pill { max-width: 100%; }
 .db-tbl.is-fit .db-muted { font-size: 13px; }
 
 /* Lead sheet cells inside the fit table */

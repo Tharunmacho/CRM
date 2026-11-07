@@ -1,12 +1,7 @@
-import { dateLabel } from '@/shared/lib/format'
 import type { Candidate } from '@/shared/model/types'
 import type { useStore } from '@/shared/state/crm-store'
-import { normalizedSkills } from '@/features/candidates/candidate-skills'
-import { Who } from '@/features/candidates/components/db-parts'
-import { dobParts } from '@/features/candidates/data-bank-view'
-import {
-  CandidateActions, CountryPills, CurrentStage, InterestText, ServiceChargesText, WhatsAppLink, shortRef, MappedOrder, OwnerText, PassportFlag, SourceDot, StatusText, experienceLabel,
-} from '@/features/candidates/components/data-bank-columns'
+import { agentLabel } from '@/features/candidates/data-bank-table'
+import { AgentLine, CandidateActions, CandidateCell, ContactLines, OwnerText, StageCell, StatusText } from '@/features/candidates/components/data-bank-columns'
 
 interface Props {
   rows: Candidate[]
@@ -14,44 +9,33 @@ interface Props {
   onOpen: (candidate: Candidate) => void
   onReassign: (candidate: Candidate) => void
   onEdit: (candidate: Candidate) => void
-  onOpenStage: (applicationId: string) => void
+  /** Opens the 11-stage modal from the stage indicator. */
+  onOpenStage?: (applicationId: string) => void
 }
 
-/** Grid view: one card per candidate carrying the same eleven PRD facts as the list columns. */
+/** Cards (phones and the card view): name and status on top; contact, recruiter and stage below; the actions at the foot. Same cells as the table. */
 export function DataBankCards({ rows, store, onOpen, onReassign, onEdit, onOpenStage }: Props) {
   return (
     <ul className="db-grid" aria-label="Candidates">
-      {rows.map((candidate) => {
-        const skills = normalizedSkills(candidate.skills)
-        return (
-          <li key={candidate.id} className="db-mini" tabIndex={0}
-            onClick={() => onOpen(candidate)}
-            onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(candidate) } }}>
-            <div className="db-mini-head">
-              <Who name={candidate.name} sub={dobParts(candidate.dob)?.label ?? <span className="ident" title={`Reference ${candidate.ref}`}>{shortRef(candidate.ref)}</span>} />
-              <StatusText candidate={candidate} />
-            </div>
-            <dl className="db-mini-meta">
-              <div><dt>Job title</dt><dd title={candidate.designations.join(', ')}>{candidate.designations[0] || <span className="db-muted">Not recorded</span>}{candidate.designations.length > 1 && <span className="db-extra"> +{candidate.designations.length - 1}</span>}</dd></div>
-              <div><dt>Experience</dt><dd className="tnum">{experienceLabel(candidate.totalExperience)}</dd></div>
-              <div><dt>Phone</dt><dd className="db-phone-line"><span className="ident" title={candidate.email}>{candidate.phone}</span><WhatsAppLink candidate={candidate} /></dd></div>
-              <div><dt>Passport</dt><dd><PassportFlag candidate={candidate} /></dd></div>
-              <div><dt>Preferred country</dt><dd className="db-wrapdd"><CountryPills value={candidate.countryPreference} /></dd></div>
-              <div><dt>Service charges</dt><dd><ServiceChargesText candidate={candidate} /></dd></div>
-              <div><dt>Interest level</dt><dd><InterestText candidate={candidate} /></dd></div>
-              <div><dt>Source</dt><dd><SourceDot source={candidate.source} /></dd></div>
-              <div><dt>Recruiter</dt><dd><OwnerText candidate={candidate} store={store} /></dd></div>
-              <div><dt>Order</dt><dd><MappedOrder candidate={candidate} store={store} onOpenStage={onOpenStage} /></dd></div>
-              <div><dt>Stage</dt><dd><CurrentStage candidate={candidate} store={store} /></dd></div>
-            </dl>
-            {skills.length > 0 && <p className="db-mini-skills" title={skills.join(', ')}>{skills.slice(0, 4).join(' · ')}{skills.length > 4 ? ` +${skills.length - 4}` : ''}</p>}
-            <div className="db-mini-foot">
-              <span className="db-mini-when">Added {dateLabel(candidate.addedAt)}</span>
-              <CandidateActions candidate={candidate} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} />
-            </div>
-          </li>
-        )
-      })}
+      {rows.map((candidate) => (
+        <li key={candidate.id} className="db-mini" tabIndex={0}
+          onClick={() => onOpen(candidate)}
+          onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(candidate) } }}>
+          <div className="db-mini-head">
+            <CandidateCell candidate={candidate} />
+            <StatusText candidate={candidate} />
+          </div>
+          <dl className="db-mini-meta">
+            <div className="is-wide"><dt>Contact</dt><dd><ContactLines candidate={candidate} /></dd></div>
+            <div><dt>Recruiter</dt><dd><OwnerText candidate={candidate} store={store} /></dd></div>
+            <div><dt>Stage</dt><dd><StageCell candidate={candidate} store={store} onOpenStage={onOpenStage} /></dd></div>
+            {agentLabel(candidate.sourceDetail) && <div className="is-wide"><dt>Agent</dt><dd><AgentLine candidate={candidate} /></dd></div>}
+          </dl>
+          <div className="db-mini-foot">
+            <CandidateActions candidate={candidate} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} />
+          </div>
+        </li>
+      ))}
     </ul>
   )
 }

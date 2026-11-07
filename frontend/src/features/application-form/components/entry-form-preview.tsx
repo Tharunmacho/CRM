@@ -34,7 +34,7 @@ export function EntryFormPreview({ open, onClose, form, savedCandidateId, onOpen
       </>}
     >
       <div className="af af-embed af-preview">
-        <FormSheet ctx={ctx} missing={form.completeness.missing} canUpload={false} upload={async () => {}} busyKinds={[]} canOpenStage={false} onOpenStage={() => {}} />
+        <FormSheet ctx={ctx} missing={form.completeness.missing} canOpenStage={false} onOpenStage={() => {}} />
       </div>
     </Dialog>
   )

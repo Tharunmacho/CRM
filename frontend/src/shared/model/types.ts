@@ -37,6 +37,8 @@ export interface AgencySettings {
   slaHours: number
   /** False when the server has no settings tables yet (the values shown are last-resort defaults). */
   editable: boolean
+  /** Whether new candidates are given to a free recruiter automatically. Off by default; absent on an older server. */
+  autoAssign?: boolean
 }
 
 export type Role = 'admin' | 'manager' | 'staff'

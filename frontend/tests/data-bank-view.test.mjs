@@ -71,10 +71,10 @@ test('a WhatsApp link needs a plausible number and keeps only its digits', () =>
   assert.equal(view.whatsappHref('1'.repeat(16)), null)
 })
 
-test('the grid table sorts on keys the server knows', async () => {
+test('the optional registry columns sort on keys the server knows', async () => {
   const server = await readFile(new URL('../../backend/app/services/candidate_search.py', import.meta.url), 'utf8')
-  const columns = await readFile(new URL('../src/features/candidates/components/data-bank-columns.tsx', import.meta.url), 'utf8')
-  const keys = [...columns.matchAll(/sortKey: '(\w+)'/g)].map((match) => match[1])
-  assert.ok(keys.length >= 10)
+  const fields = await readFile(new URL('../src/features/candidates/data-bank-fields.ts', import.meta.url), 'utf8')
+  const keys = [...fields.matchAll(/sortKey: '(\w+)'/g)].map((match) => match[1])
+  assert.ok(keys.length >= 8)
   for (const key of new Set(keys)) assert.match(server, new RegExp(`"${key}":`), `server cannot sort on "${key}"`)
 })

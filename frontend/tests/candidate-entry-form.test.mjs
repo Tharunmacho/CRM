@@ -18,10 +18,11 @@ const load = async (path, imports = {}) => {
 const phoneModule = await load('candidates/entry-phone.ts')
 const modelModule = await load('candidates/entry-model.ts')
 const extrasModule = await load('candidates/entry-extras.ts', { './entry-phone': phoneModule.url })
-const formModelModule = await load('application-form/form-model.ts')
+const slotsUrl = moduleUrl(await readFile(new URL('../src/shared/model/document-slots.ts', import.meta.url), 'utf8'))
+const formModelModule = await load('application-form/form-model.ts', { '@/shared/model/document-slots': slotsUrl })
 const bridgeModule = await load('application-form/entry-bridge.ts', { './form-model': formModelModule.url })
 const completenessModule = await load('candidates/entry-completeness.ts', {
-  '@/features/application-form/entry-bridge': bridgeModule.url, './entry-extras': extrasModule.url,
+  '@/features/application-form/entry-bridge': bridgeModule.url, './entry-extras': extrasModule.url, '@/shared/model/document-slots': slotsUrl,
 })
 const ocrModule = await load('candidates/ocr-form.ts')
 

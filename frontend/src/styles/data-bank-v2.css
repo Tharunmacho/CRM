@@ -117,19 +117,14 @@
 .db-source.is-whatsapp svg { color: var(--success-ink); }
 .db-source.is-email svg, .db-source.is-referral svg { color: var(--primary); }
 .db-source.is-walk_in svg { color: var(--warning-ink); }
-.db-badge { display: inline-block; padding: 2px 10px; border-radius: 6px; background: var(--tint-2); font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
-.db-badge.is-yes { background: var(--success-fill); color: var(--success-ink); }
 .db-with-flag { display: inline-flex; align-items: center; gap: 8px; }
 .db-flag { flex: none; width: 18px; height: 13px; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px var(--border-main); }
 .db-flag-globe { flex: none; color: var(--text-light); }
 .db-owner { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; font-size: 14px; color: var(--text-main); white-space: nowrap; }
 .db-owner > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .db-owner svg { flex: none; }
-.db-owner.is-empty, .db-owner.is-empty svg { color: var(--warning-ink); }
-.db-order-link, .db-order-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 9px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); font-size: 13px; font-weight: 600; color: var(--primary); text-align: left; text-decoration: none; transition: background-color .14s; }
-.db-order-link { cursor: pointer; }
-.db-order-link:hover { background: color-mix(in srgb, var(--primary) 18%, var(--bg-card)); }
-.db-order-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.db-owner.is-empty, .db-owner.is-empty svg { color: var(--text-light); }
+.db-order-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 9px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); font-size: 13px; font-weight: 600; color: var(--primary); text-align: left; text-decoration: none; transition: background-color .14s; }
 .db-track { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .db-track-bar { display: flex; gap: 2px; width: 132px; }
 .db-track-bar i { flex: 1; height: 5px; border-radius: 2px; background: var(--tint-3); }
@@ -171,14 +166,13 @@
 .db-tbl .db-pill { font-size: 11.5px; gap: 5px; padding: 2px 8px 2px 7px; }
 .db-tbl .db-pill-dot { width: 5px; height: 5px; }
 .db-tbl .db-owner { font-size: 12.5px; gap: 6px; max-width: 100%; }
-.db-tbl .db-order-link, .db-tbl .db-order-chip { max-width: 100%; padding: 2px 7px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.db-tbl .db-order-chip { max-width: 100%; padding: 2px 7px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .db-tbl .db-track { gap: 4px; }
 .db-tbl .db-track-bar { width: 100%; }
 .db-tbl .db-track-text { align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.3; }
 .db-tbl .db-track-text b { flex: none; min-width: 18px; height: 18px; font-size: 11px; border-radius: 5px; }
 .db-tbl .db-track-text span { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .db-icon-chip { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--tint-2); color: var(--text-muted); }
-.db-icon-chip.is-yes { background: var(--success-fill); color: var(--success-ink); }
 .db-icon-chip.db-source.is-email, .db-icon-chip.db-source.is-referral { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
 .db-icon-chip.db-source.is-whatsapp { background: var(--success-fill); color: var(--success-ink); }
 .db-icon-chip.db-source.is-walk_in { background: var(--warning-fill); color: var(--warning-ink); }
@@ -215,7 +209,6 @@
 .db-mini-meta dt { font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
 .db-mini-meta dd { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 500; color: var(--text-main); }
 .db-mini-meta .db-owner, .db-mini-meta .db-source { font-size: 13.5px; }
-.db-mini-skills { margin: -4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-muted); }
 .db-mini-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; margin-top: auto; }
 .db-mini-foot .db-acts { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; margin-left: 0; min-width: 0; }
 .db-mini-foot .db-act.is-label { flex: 0 1 auto; }
@@ -327,7 +320,6 @@
   .db-act { height: 44px; min-width: 44px; padding: 0 14px; }
   .db-mini-foot .db-acts { width: 100%; justify-content: stretch; margin-left: 0; }
   .db-mini-foot .db-act.is-label { flex: 1 1 0; }
-  .db-mini .db-order-link { min-height: 40px; padding: 0 12px; }
   .db-menu-trigger { width: 44px; height: 44px; }
   .db-menu-item { height: 44px; }
   .db-mini-meta { gap: 14px 16px; }
@@ -347,7 +339,6 @@
   .db-more-toggle, .db-clear, .db-chip, .db-act { min-height: 44px; }
   .db-acts { gap: 8px; }
   .db-menu-item { height: 44px; }
-  .db-mini .db-order-link { min-height: 40px; padding: 0 12px; }
 }
 
 @media (pointer: coarse), (max-width: 640px) {
@@ -448,10 +439,6 @@
 .db-wa:hover { background: var(--success-fill); }
 .db-wa:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 [data-theme='dark'] .db-wa { color: #4ade80; }
-.db-phone-line { display: flex; align-items: center; gap: 8px; }
-.db-phone-line .db-wa { width: 28px; height: 28px; }
-.db-phone-line .db-wa svg { width: 18px; height: 18px; }
-.db-mini-meta dd.db-wrapdd { overflow: visible; white-space: normal; }
 
 /* cells of the grid table */
 .db-tbl.is-grid .db-acts.is-grid { justify-content: center; gap: 6px; }
@@ -462,7 +449,6 @@
 .db-tbl.is-grid .db-owner.is-empty > span { overflow: visible; overflow-wrap: normal; word-break: normal; white-space: normal; line-height: 1.25; }
 .db-tbl.is-grid .db-owner.is-empty svg { display: none; }
 .db-tbl.is-grid .db-pill { font-size: 12px; gap: 5px; padding: 3px 8px; }
-.db-tbl.is-grid .db-order-link { display: inline-flex; width: auto; max-width: 100%; justify-content: center; font-size: 12px; }
 .db-tbl.is-grid .db-muted { font-size: 13px; }
 
 @media (max-width: 767px) {

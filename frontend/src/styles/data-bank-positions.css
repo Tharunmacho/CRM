@@ -7,78 +7,51 @@
 .dbp-tip { margin: 0; padding: 0 22px 12px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
 .dbp-tip code { padding: 1px 6px; border-radius: 4px; background: var(--tint-2); font-size: 12px; color: var(--text-main); }
 
-.dbp-groups { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 4px 22px 18px; list-style: none; }
+.dbp-groups { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 4px 22px 18px; list-style: none; }
 .dbp-group { border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); overflow: hidden; }
 .dbp-group.is-open { border-color: var(--border-hover); }
-.dbp-head { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 14px 16px; border: 0; background: transparent; color: var(--text-main); text-align: left; cursor: pointer; }
+/* One compact line: chevron, job title (bold), client (muted), count chip on the right. */
+.dbp-head { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 52px; padding: 0 16px; border: 0; background: transparent; color: var(--text-main); text-align: left; cursor: pointer; }
 .dbp-head:hover { background: var(--tint-1); }
 .dbp-head:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .dbp-chevron { display: inline-grid; flex: none; place-items: center; color: var(--text-muted); }
-.dbp-icon { display: inline-grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); }
-.dbp-group.is-none .dbp-icon { background: var(--tint-2); color: var(--text-muted); }
-.dbp-title { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
-.dbp-title strong { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.dbp-title small { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 13px; color: var(--text-muted); }
-.dbp-title small > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dbp-ref { padding: 1px 6px; border-radius: 4px; background: var(--tint-2); font-size: 12px; }
+.dbp-title { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: 14.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dbp-group.is-none .dbp-title { font-weight: 500; color: var(--text-muted); }
+.dbp-client { flex: 1 1 0; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .dbp-state { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--tint-2); font-size: 12px; color: var(--text-muted); text-transform: capitalize; }
-.dbp-count { flex: none; font-size: 13px; color: var(--text-muted); white-space: nowrap; }
-.dbp-count b { font-size: 18px; font-weight: 600; color: var(--text-main); }
+.dbp-count { flex: none; margin-left: auto; padding: 3px 10px; border-radius: 999px; background: var(--tint-2); font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.dbp-count b { font-weight: 600; color: var(--text-main); }
 .dbp-body { border-top: 1px solid var(--border-faint); }
 .dbp-body[hidden] { display: none; }
 .dbp-mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--warning-ink) 22%, transparent); color: inherit; }
 
-.dbp-resumes { container-type: inline-size; min-width: 0; }
-/* Resume rows share the Data Bank table's look: hairline column dividers, zebra stripes, centred two-line cells.
-   The Actions column is a fixed width and the Status cell never clips its chip. */
-.dbp-row { display: grid; grid-template-columns: minmax(140px, 1.4fr) minmax(130px, 1.2fr) minmax(116px, 1.1fr) minmax(92px, .9fr) minmax(100px, .9fr) minmax(130px, 1.2fr) minmax(142px, 1.1fr) 96px; align-items: stretch; min-height: 68px; border-bottom: 1px solid var(--border-faint); font-size: 13.5px; }
+.dbp-resumes { --dbp-cols: repeat(7, minmax(0, 1fr)); container-type: inline-size; min-width: 0; }
+/* Resume rows use the same seven columns, widths, padding and alignment as the Data Bank table (data-bank-table.ts sets the shares). */
+.dbp-row { display: grid; grid-template-columns: var(--dbp-cols); align-items: center; min-height: 64px; border-bottom: 1px solid var(--border-faint); font-size: 13px; }
 .dbp-row:last-of-type { border-bottom: 0; }
-.dbp-row > * { min-width: 0; padding: 8px 10px; border-left: 1px solid var(--border-main); }
-.dbp-row > :first-child { border-left: 0; }
-.dbp-row.is-head { min-height: 44px; border-bottom: 1px solid var(--border-main); background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); font-size: 12.5px; font-weight: 500; color: var(--text-muted); text-align: center; }
-.dbp-row.is-head > * { padding-block: 6px; line-height: 1.25; }
-.dbp-row:not(.is-head):nth-of-type(odd) { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
+.dbp-row > * { display: flex; align-items: center; min-width: 0; padding: 8px 16px; text-align: left; }
+.dbp-row.is-head { min-height: 44px; border-bottom: 1px solid var(--border-main); background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
+.dbp-row.is-head > * { padding-block: 0; white-space: nowrap; }
 .dbp-row:not(.is-head) { cursor: pointer; }
-.dbp-row:not(.is-head):hover { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.dbp-row:not(.is-head):hover { background: var(--tint-1); }
 .dbp-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-.dbp-name-text { display: flex; flex-direction: column; min-width: 0; }
-.dbp-agent { text-align: center; }
-.dbp-actions { padding-inline: 6px; }
-/* The Status chip gets the cell's whole width, never clipped. */
-.dbp-row > [data-label='Status'] { padding-inline: 6px; }
-.dbp-row .db-track { width: 100%; align-items: center; }
-.dbp-row .db-track-bar { width: 100%; max-width: 132px; }
-.dbp-row .db-track-text { justify-content: center; text-align: left; }
-.dbp-row .db-track-text span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; line-height: 1.25; }
-.dbp-row .db-acts { flex-wrap: nowrap; justify-content: center; gap: 4px; }
-.dbp-row .db-act.is-form { width: 32px; min-width: 32px; padding: 0; }
-.dbp-row .db-act.is-form span { display: none; }
-.dbp-row > [role='cell'], .dbp-row > [role='columnheader'] { display: flex; align-items: center; justify-content: center; text-align: center; }
-.dbp-row .db-owner.is-empty { align-items: center; justify-content: center; text-align: center; white-space: normal; }
-.dbp-row .db-owner.is-empty svg { display: none; }
-.dbp-row .db-owner.is-empty > span { overflow: visible; overflow-wrap: normal; white-space: normal; line-height: 1.25; }
+.dbp-row > [data-col='actions'] { justify-content: flex-end; padding-left: 0; }
 .dbp-note { margin: 0; padding: 14px 16px; font-size: 13.5px; color: var(--text-muted); }
 .dbp-note.is-error { color: var(--error-ink); }
 .dbp-more { display: flex; justify-content: center; padding: 12px 16px 14px; border-top: 1px solid var(--border-faint); }
 
-/* A narrow position list reads as stacked cards, not a table that scrolls sideways. */
-@container (max-width: 940px) {
+/* Narrow: each resume becomes a stacked card (name and status on top, contact, recruiter and stage below). */
+@container (max-width: 760px) {
   .dbp-row.is-head { display: none; }
-  .dbp-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; padding: 12px 14px; }
-  .dbp-row > * { padding: 0; border-left: 0; }
-  .dbp-name { grid-column: 1 / -1; }
-  .dbp-actions { grid-column: 1 / -1; padding: 0; }
-  .dbp-row .db-acts { justify-content: flex-start; }
-  .dbp-row > .dbp-actions { justify-content: flex-start; }
-  .dbp-row .db-track { align-items: flex-start; }
-  .dbp-row .db-track-text { justify-content: flex-start; }
-  .dbp-row > [role='cell']:not(.dbp-actions) { flex-direction: column; align-items: flex-start; justify-content: flex-start; text-align: left; }
-  .dbp-row .db-2l { align-items: flex-start; text-align: left; }
-  .dbp-row .db-cpills { justify-content: flex-start; }
-  .dbp-row .db-clamp { text-align: left; }
-  .dbp-row .db-act.is-form { width: auto; min-width: 36px; padding: 0 10px; }
-  .dbp-row .db-act.is-form span { display: inline; }
-  .dbp-row > [data-label]:not(.dbp-name)::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 11.5px; color: var(--text-muted); }
+  .dbp-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'candidate status' 'contact contact' 'owner stage' 'agent actions'; gap: 6px 12px; padding: 12px 14px; min-height: 0; }
+  .dbp-row > * { padding: 0; }
+  .dbp-row > [data-col='candidate'] { grid-area: candidate; }
+  .dbp-row > [data-col='status'] { grid-area: status; justify-self: end; }
+  .dbp-row > [data-col='contact'] { grid-area: contact; }
+  .dbp-row > [data-col='owner'] { grid-area: owner; }
+  .dbp-row > [data-col='stage'] { grid-area: stage; }
+  .dbp-row > [data-col='agent'] { grid-area: agent; }
+  .dbp-row > [data-col='actions'] { grid-area: actions; justify-self: end; padding: 0; }
 }
 
 /* Seven or six key figures read as two roomy rows instead of one cramped strip. */
@@ -99,8 +72,6 @@
 @media (max-width: 767px) {
   .dbp-groups { padding: 4px 12px 14px; }
   .dbp-tip { padding: 0 16px 12px; }
-  .dbp-head { flex-wrap: wrap; gap: 8px 10px; padding: 12px; }
-  .dbp-title { flex-basis: calc(100% - 100px); }
-  .dbp-title strong { white-space: normal; }
+  .dbp-head { padding: 0 12px; }
   .dbp-mode { order: -1; }
 }

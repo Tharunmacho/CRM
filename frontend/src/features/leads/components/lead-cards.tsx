@@ -43,7 +43,7 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
         <StatusText lead={lead} />
       </div>
       <dl className="db-mini-meta">
-        <div><dt>Position</dt><dd><PositionPill value={lead.positionApplied} /></dd></div>
+        <div><dt>Job</dt><dd><PositionPill value={lead.positionApplied} /></dd></div>
         <div><dt>Phone</dt><dd className="ld-copyrow">{phone ? <><span className="ident">{phone}</span><CopyButton value={phone} label="Copy phone" /></> : '–'}</dd></div>
         <div><dt>Assigned to</dt><dd><OwnerCell lead={lead} userById={context.userById} /></dd></div>
         <div><dt>Follow-up</dt><dd className={cn(follow === 'overdue' && 'ld-late-text')}>{follow === 'none' || follow === 'closed' ? '–' : followUpLabel(lead.nextFollowUpAt)}</dd></div>

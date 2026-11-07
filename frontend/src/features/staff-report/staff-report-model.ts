@@ -56,6 +56,9 @@ export interface StaffRow {
   goals: { candidatesPerDay: number; forwardedPerDay: number; stageMovesPerDay: number; scheduledDays: number }
   /** Absent in a result from an older server. */
   leads?: LeadNumbers
+  /** Recruiter notes the person wrote in the period, and the delay notes among them. Absent in a result from an older server. */
+  feedbackNotes?: number
+  delayNotes?: number
   score: number | null
   scoreParts: ScorePart[]
   days: DayRow[]
@@ -334,3 +337,6 @@ export function leadsTone(leads: Pick<LeadNumbers, 'assigned' | 'contacted'> | u
   const share = leads.contacted / leads.assigned
   return share === 0 ? 'bad' : share < 0.5 ? 'warn' : 'good'
 }
+
+/** Whether the server sent the notes figure for the people in the table (an older server does not; then no column is drawn). */
+export const hasNotesFigure = (rows: readonly { feedbackNotes?: number }[]): boolean => rows.some(row => typeof row.feedbackNotes === 'number')

@@ -1,0 +1,94 @@
+/* Jobs page and the New job dialog. The page reuses the Clients page's layout, search panel, table and cards (clients-simple.css; the page
+   root carries both classes); this file adds only what is specific to jobs. Every selector sits under .jobs-simple. The dialog is portaled
+   out of the page, so its <form> carries the class too. */
+
+/* ---------- Table and card cells ---------- */
+.jobs-simple .js-openings { display: grid; gap: 5px; min-width: 0; width: 100%; max-width: 170px; font-size: 13px; }
+.jobs-simple .js-openings .cl-progress { gap: 0; }
+.jobs-simple .js-client { display: grid; min-width: 0; line-height: 1.4; }
+.jobs-simple .js-client b { overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.jobs-simple .js-client small { font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+/* The card's icon chip is neutral: a soft grey tile, not a colour. */
+.jobs-simple .js-chip { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); color: var(--text-muted); }
+.jobs-simple .js-facts > div { grid-template-columns: 78px minmax(0, 1fr); }
+.jobs-simple .js-facts dd { align-items: flex-start; }
+
+/* A job just saved: a soft tint that fades, always next to the job itself. */
+.jobs-simple tr.js-new > td { animation: js-new-fade 6s ease-out; }
+.jobs-simple .cs-card.js-new { animation: js-new-card 6s ease-out; }
+@keyframes js-new-fade { 0%, 60% { background-color: color-mix(in srgb, var(--primary) 9%, transparent); } 100% { background-color: transparent; } }
+@keyframes js-new-card { 0%, 60% { border-color: var(--primary); } 100% { border-color: var(--border-main); } }
+
+/* ---------- New job / Edit job dialog ---------- */
+.jobs-simple .js-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.jobs-simple .ui-field-hint, .jobs-simple .ui-field-error { display: block; margin-top: 6px; }
+
+/* The client dropdown: a field-like button that opens a searchable list in the page flow. */
+.jobs-simple .js-picker { display: grid; gap: 8px; min-width: 0; }
+.jobs-simple .js-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; height: 44px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-muted); font: inherit; font-size: 14px; text-align: left; cursor: pointer; transition: border-color .14s; }
+.jobs-simple .js-trigger:hover:not(:disabled) { border-color: var(--border-hover); }
+.jobs-simple .js-trigger[aria-expanded='true'] { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); }
+.jobs-simple .js-trigger[aria-invalid='true'] { border-color: var(--error-ink); }
+.jobs-simple .js-trigger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.jobs-simple .js-trigger-value { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text-main); }
+.jobs-simple .js-trigger-empty { color: var(--text-light); }
+.jobs-simple .js-fixed { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 12px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
+.jobs-simple .js-panel { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.jobs-simple .js-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-light); }
+.jobs-simple .js-search:focus-within { border-color: var(--primary); }
+.jobs-simple .js-search input { flex: 1; min-width: 0; height: 38px; border: 0; background: transparent; color: var(--text-main); font-size: 14px; outline: none; }
+.jobs-simple .js-panel ul[role='listbox'] { max-height: 232px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.jobs-simple :is(.js-panel, .js-combo-list) li[role='option'] { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.jobs-simple :is(.js-panel, .js-combo-list) li[role='option'].is-cursor { background: var(--tint-2); }
+.jobs-simple :is(.js-panel, .js-combo-list) li[role='option'].is-on { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+.jobs-simple .js-opt-text { display: grid; flex: 1; min-width: 0; line-height: 1.3; text-align: left; }
+.jobs-simple .js-opt-text b { overflow: hidden; font-size: 14px; font-weight: 600; color: var(--text-main); text-overflow: ellipsis; white-space: nowrap; }
+.jobs-simple .js-opt-text small { overflow: hidden; font-size: 12.5px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.jobs-simple .js-opt-jobs { flex: none; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.jobs-simple .js-opt-check { flex: none; color: var(--primary); opacity: 0; }
+.jobs-simple :is(.js-panel, .js-combo-list) li.is-on .js-opt-check { opacity: 1; }
+.jobs-simple .js-none { padding: 12px 10px; font-size: 13px; color: var(--text-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .jobs-simple tr.js-new > td, .jobs-simple .cs-card.js-new { animation: none; }
+}
+
+/* ---------- Filters in the search panel ---------- */
+.jobs-simple .js-filter { flex: none; }
+.jobs-simple .js-picker.is-popover { position: relative; }
+.jobs-simple .js-picker.is-popover .js-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: min(340px, 86vw); box-shadow: 0 10px 28px color-mix(in srgb, var(--text-main) 16%, transparent); }
+.jobs-simple .js-picker.is-compact .js-trigger { width: 200px; height: 48px; min-height: 48px; border-radius: 12px; color: var(--text-main); }
+.jobs-simple .js-picker.is-compact .js-trigger-empty { color: var(--text-main); }
+
+/* ---------- Typed dropdowns (job title, country): one bordered row of flag, text and chevron, the list opens under it ---------- */
+.jobs-simple .js-combo { display: grid; gap: 6px; min-width: 0; }
+.jobs-simple .js-control { display: flex; align-items: center; gap: 10px; min-width: 0; height: 44px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); transition: border-color .14s, background-color .14s, box-shadow .14s; }
+.jobs-simple .js-control:hover:not(.is-disabled) { border-color: var(--border-hover); }
+.jobs-simple .js-control:focus-within { border-color: var(--primary); background: var(--bg-card); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); }
+.jobs-simple .js-control.is-invalid { border-color: var(--error-ink); }
+.jobs-simple .js-control.is-disabled { background: var(--tint-2); color: var(--text-muted); }
+.jobs-simple .js-control-input { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; outline: none; }
+.jobs-simple .js-control-input::placeholder { color: var(--text-light); opacity: 1; }
+.jobs-simple .js-prefix { display: flex; flex: none; align-items: center; }
+.jobs-simple .js-chevron { flex: none; color: var(--text-muted); }
+.jobs-simple .js-combo-list { max-height: 208px; margin: 0; padding: 6px; overflow-y: auto; list-style: none; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+
+/* ---------- The dialog's boxes share one height and one look, so every row lines up ---------- */
+.jobs-simple .js-fields :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { height: 44px; min-height: 44px; }
+.jobs-simple .js-fields :is(.js-control, .js-trigger) { background: var(--tint-1); }
+.jobs-simple .js-fields :is(.js-control, .js-trigger):hover:not(.is-disabled):not(:disabled) { background: var(--bg-card); }
+.jobs-simple .js-fields .ui-field { display: block; }
+
+@media (max-width: 760px) {
+  .jobs-simple .js-filter { width: 100%; }
+  .jobs-simple .js-picker.is-compact .js-trigger { width: 100%; }
+  .jobs-simple .js-picker.is-popover .js-panel { left: 0; right: auto; width: 100%; }
+}
+
+/* ---------- Required skills: chips and the typing box share one bordered row that grows with its chips ---------- */
+.jobs-simple .js-control.is-tags { flex-wrap: wrap; gap: 6px; height: auto; min-height: 44px; padding: 6px 10px; cursor: text; }
+.jobs-simple .js-control.is-tags .js-control-input { flex: 1 1 140px; height: 30px; }
+.jobs-simple .js-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 28px; padding: 0 4px 0 10px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 13px; font-weight: 500; color: var(--text-main); }
+.jobs-simple .js-tag button { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.jobs-simple .js-tag button:hover:not(:disabled) { background: var(--tint-2); color: var(--text-main); }
+.jobs-simple .js-fields textarea.ui-input { height: auto; min-height: 88px; }

@@ -7,7 +7,7 @@
  *  - StaffWeeklyPeriod: the week picker, in the same slot as the other tabs' Filters card.
  *  - StaffWeeklyBody: cards, questions, staff table, stage matrix, team funnel and the staff drawer.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, ArrowDown, ArrowUp, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock, Download, FileSpreadsheet, GitBranch, Loader2, PhoneCall, Plane, Send, UserCheck, UserX, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { useLiveStatus } from '@/shared/state/live'
@@ -17,7 +17,7 @@ import { LEAD_REPORT_TOPICS, useReportData } from '@/features/reports/report-api
 import { downloadStaffReport, staffReportPath } from './staff-report-api'
 import { StaffDrawer } from './staff-drawer'
 import {
-  STATUS_LABEL, clockTime, formatHours, formatPercent, funnelWidth, hasLeadSheet, isWholeWeek, leadSummaryCards, leadsCalledText, leadsTone,
+  STATUS_LABEL, clockTime, formatHours, formatPercent, funnelWidth, hasLeadSheet, hasNotesFigure, isWholeWeek, leadSummaryCards, leadsCalledText, leadsTone,
   rangeLabel, scoreTone, severityRank, shiftRange, sortStaff, statusTone, validDay, weekOf, type SortKey, type StaffRow, type StaffWeeklyReport,
 } from './staff-report-model'
 import '@/styles/staff-report.css'
@@ -105,6 +105,8 @@ const LEAD_COLUMNS: { key?: SortKey; label: string; title?: string }[] = [
   { key: 'leadsOverdue', label: 'Overdue', title: 'Open leads whose follow-up date has already passed (as of now)' },
 ]
 
+const NOTES_COLUMN = { label: 'Notes written', title: 'Recruiter notes the person wrote on candidates in this period' }
+
 const COLUMNS: { key: SortKey; label: string; title?: string }[] = [
   { key: 'name', label: 'Staff' }, { key: 'absent', label: 'Days', title: 'Days worked and days absent' },
   { key: 'hours', label: 'Hours', title: 'Hours worked against hours expected' }, { key: 'completion', label: 'Daily tasks' },
@@ -118,6 +120,7 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
   const rows = useMemo(() => data ? sortStaff(data.staff, sort.key, sort.direction) : [], [data, sort])
   const highlights = useMemo(() => data ? [...data.highlights].sort((a, b) => severityRank(a.severity) - severityRank(b.severity)) : [], [data])
   const open = data && staffId ? data.staff.find(item => item.id === staffId) : undefined
+  const notes = hasNotesFigure(rows)
   const leadSheet = !!data && hasLeadSheet(data)
   const leadCards = data ? leadSummaryCards(data.summary) : null
   const sortBy = (key: SortKey) => setSort(previous => ({ key, direction: previous.key === key ? (previous.direction === 'asc' ? 'desc' : 'asc') : key === 'name' ? 'asc' : 'desc' }))
@@ -155,9 +158,12 @@ export function StaffWeeklyBody({ weekly, staffId, onOpenStaff }: { weekly: Staf
       <section className="rv-card sw-card" aria-label="Staff">
         <header className="sw-head"><div><h3>Staff</h3><p>One row per person. Select a row to see every day and every candidate.</p></div></header>
         {rows.length === 0 ? <p className="sw-empty">No staff accounts to report on.</p> : <div className="sw-scroll"><table className="sw-table sw-staff">
-          <thead><tr>{COLUMNS.map(column => <th key={column.key} aria-sort={sort.key === column.key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'} title={column.title}>
-            <button type="button" onClick={() => sortBy(column.key)}>{column.label}{sort.key === column.key && (sort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}</button></th>)}</tr></thead>
-          <tbody>{rows.map(row => <StaffLine key={row.id} row={row} onOpen={() => onOpenStaff(row.id)} />)}</tbody>
+          <thead><tr>{COLUMNS.map(column => <Fragment key={column.key}>
+            <th aria-sort={sort.key === column.key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'} title={column.title}>
+              <button type="button" onClick={() => sortBy(column.key)}>{column.label}{sort.key === column.key && (sort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}</button></th>
+            {notes && column.key === 'completion' && <th className="num" title={NOTES_COLUMN.title}>{NOTES_COLUMN.label}</th>}
+          </Fragment>)}</tr></thead>
+          <tbody>{rows.map(row => <StaffLine key={row.id} row={row} notes={notes} onOpen={() => onOpenStaff(row.id)} />)}</tbody>
         </table></div>}
         <details className="sw-how"><summary>How the score is worked out</summary>
           <ul>{data.formula.lines.map(line => <li key={line}>{line}</li>)}</ul>
@@ -213,7 +219,7 @@ function LiveBadge({ status, updatedAt, zone, flash }: { status: string; updated
   </span>
 }
 
-function StaffLine({ row, onOpen }: { row: StaffRow; onOpen: () => void }) {
+function StaffLine({ row, notes, onOpen }: { row: StaffRow; notes: boolean; onOpen: () => void }) {
   const a = row.attendance
   const t = row.tasks
   const hoursShare = a.expectedHours ? Math.min(100, Math.round((a.hoursWorked / a.expectedHours) * 100)) : a.hoursWorked ? 100 : 0
@@ -226,6 +232,7 @@ function StaffLine({ row, onOpen }: { row: StaffRow; onOpen: () => void }) {
       <i className="sw-meter" aria-hidden="true"><b style={{ width: `${hoursShare}%` }} /></i>
       {a.activeHours ? <small>{formatHours(a.activeHours)} active in the CRM</small> : null}</td>
     <td>{t.available && t.assigned ? <><b>{t.completed}</b> of {t.assigned}<small>{formatPercent(t.completionPercent)}{t.postponed ? ` - ${t.postponed} postponed` : ''}{t.overdue ? ` - ${t.overdue} overdue` : ''}</small></> : <span className="sw-muted">{t.available ? 'None assigned' : 'No data yet'}</span>}</td>
+    {notes && <td className="num">{row.feedbackNotes || <span className="sw-muted">0</span>}</td>}
     <td className="num">{row.stages.moves || <span className="sw-muted">0</span>}</td>
     <td className="num">{row.outcomes.forwarded}</td>
     <td className="num">{row.outcomes.visaReceived}{row.outcomes.visaStamped ? <small>{row.outcomes.visaStamped} stamped</small> : null}</td>

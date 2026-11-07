@@ -10,6 +10,7 @@ import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { CategoryCard } from './category-card'
 import { FormOptionsCard } from './form-options-card'
 import { WaTemplatesCard } from './wa-templates-card'
+import { AutoAssignCard } from './auto-assign-card'
 import { CurrencyCard } from './currency-card'
 import { PanelHead } from './user-ui'
 import '@/styles/agency-settings.css'
@@ -145,6 +146,8 @@ export function AgencySettingsTab() {
         </Panel>
       </aside>
     </div>
+
+    <AutoAssignCard />
 
     <CurrencyCard editable={editable} defaultOrder={settings.defaultOrderCurrency} defaultAdvance={settings.defaultAdvanceCurrency} />
 

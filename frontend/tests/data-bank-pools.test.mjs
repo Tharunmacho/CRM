@@ -12,10 +12,10 @@ async function load(path) {
 const pools = await load('../src/features/candidates/data-bank-pools.ts')
 const actions = await load('../src/features/candidates/profile-actions.ts')
 
-test('an unassigned candidate reads "Needs assignment", never a blank or dash', () => {
-  assert.equal(pools.ownerLabel(undefined), 'Needs assignment')
-  assert.equal(pools.ownerLabel(null), 'Needs assignment')
-  assert.equal(pools.ownerLabel('   '), 'Needs assignment')
+test('an unassigned candidate reads "Not assigned", never a blank, a dash or a name', () => {
+  assert.equal(pools.ownerLabel(undefined), 'Not assigned')
+  assert.equal(pools.ownerLabel(null), 'Not assigned')
+  assert.equal(pools.ownerLabel('   '), 'Not assigned')
   assert.equal(pools.ownerLabel('Asha Nair'), 'Asha Nair')
   assert.equal(pools.NEEDS_ASSIGNMENT_LABEL, 'Needs assignment')
 })
@@ -44,7 +44,7 @@ test('Assign waiting candidates is offered to supervisors only while somebody is
 test('the assignment outcome says what happened and when nobody is eligible', () => {
   assert.deepEqual(pools.assignWaitingMessage({ assigned: 2, reviewCleared: 2, remaining: 0 }), { text: 'Assigned 2 waiting candidates.', tone: 'ok' })
   assert.deepEqual(pools.assignWaitingMessage({ assigned: 1, reviewCleared: 0, remaining: 2 }),
-    { text: 'Assigned 1 waiting candidate. 2 candidates still waiting for a free recruiter.', tone: 'warn' })
+    { text: 'Assigned 1 waiting candidate. 2 candidates still not assigned.', tone: 'warn' })
   assert.equal(pools.assignWaitingMessage({ assigned: 0, reviewCleared: 0, remaining: 4 }).tone, 'warn')
 })
 

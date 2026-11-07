@@ -36,6 +36,14 @@ export function FormSkeleton() {
     <div className="af-sk-row" key={index}><div className="af-sk-label">{bar('70%')}</div><div className="af-sk-value">{bar(`${55 + ((index * 17) % 35)}%`)}</div><div className="af-sk-label">{bar('64%')}</div><div className="af-sk-value">{bar(`${40 + ((index * 23) % 45)}%`)}</div></div>
   ))
   return (
+    <>
+    <div className="af-assign-wrap" aria-hidden="true">
+      <div className="af-assign-inner">
+        <div className="af-assign">
+          {[0, 1, 2, 3, 4].map((index) => <div className="af-assign-field" key={index}>{bar('40%')}<span className="af-sk af-sk-field" /></div>)}
+        </div>
+      </div>
+    </div>
     <div className="af-layout" role="status" aria-label="Loading the application form" aria-busy="true">
       <aside className="af-side" aria-hidden="true">
         <div className="af-card af-complete"><span className="af-sk af-sk-ring" /><div style={{ flex: 1 }}>{bar('60%')}<br />{bar('80%')}</div></div>
@@ -57,5 +65,6 @@ export function FormSkeleton() {
         </div>
       </div>
     </div>
+    </>
   )
 }

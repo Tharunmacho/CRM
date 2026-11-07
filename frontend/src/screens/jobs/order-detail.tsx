@@ -30,7 +30,7 @@ import '@/styles/jobs.css'
 type AppFilter = 'all' | 'active' | 'selected' | 'deployed' | 'closed'
 const FILTERS: [AppFilter, string][] = [['all', 'All'], ['active', 'Active'], ['selected', 'Selected'], ['deployed', 'Deployed'], ['closed', 'Closed']]
 /** Plain wording for why a candidate's application closed. */
-const closureText = (reason: ClosureReason) => (reason === 'unmapped' ? 'Removed from this order' : closureLabels[reason])
+const closureText = (reason: ClosureReason) => (reason === 'unmapped' ? 'Removed from this job' : closureLabels[reason])
 const APP_STATUS: Record<Application['status'], { text: string; tone: string }> = {
   active: { text: 'Active', tone: 's-open' },
   deployed: { text: 'Deployed', tone: 's-filled' },
@@ -73,11 +73,11 @@ export default function OrderDetailPage() {
     })
   }, [apps, filter, query, store.candidates, store.users])
 
-  if (!snapshot.ready) return <SnapshotState variant="detail" error={snapshot.error} onRetry={snapshot.retry} retryLabel="Try again" label="Loading order" />
+  if (!snapshot.ready) return <SnapshotState variant="detail" error={snapshot.error} onRetry={snapshot.retry} retryLabel="Try again" label="Loading job" />
   if (!order) {
     return (
       <EmptyState
-        title="We could not find this order"
+        title="We could not find this job"
         description="It may have been deleted."
         action={<Button onClick={() => navigate('/jobs')}>Back to Jobs</Button>}
       />
@@ -86,7 +86,7 @@ export default function OrderDetailPage() {
 
   const client = store.company(order.companyId)
   const designation = store.designation(order.designationId)
-  if (!client || !designation) return <EmptyState title="This order's company or job title is missing" description="Refresh the page to load the latest records." action={<Button onClick={snapshot.retry}>Refresh</Button>} />
+  if (!client || !designation) return <EmptyState title="This job's company or job title is missing" description="Refresh the page to load the latest records." action={<Button onClick={snapshot.retry}>Refresh</Button>} />
   const canMatch = order.status === 'open'
   const counts = orderCounts(apps)
   const deployedCount = counts.deployed
@@ -108,7 +108,7 @@ export default function OrderDetailPage() {
       `Shortlist for ${designation.title}, ${client.name} (${order.ref})`,
       `Openings: ${order.openings} · Deployed: ${deployedCount} · Matched: ${counts.matched} · Selected: ${counts.selected}`,
       '',
-      ...(lines.length ? lines : ['No candidates are matched to this order yet.']),
+      ...(lines.length ? lines : ['No candidates are matched to this job yet.']),
     ].join('\n')
     try { await navigator.clipboard.writeText(text); store.notify('Shortlist copied') }
     catch { store.notify('The shortlist could not be copied. Copy it from the table instead.', 'warn') }
@@ -191,8 +191,8 @@ export default function OrderDetailPage() {
             <button
               type="button"
               onClick={() => { setUnmapping(a.id); setUnmapError('') }}
-              aria-label={`Remove ${store.candidate(a.candidateId)?.name ?? 'candidate'} from this order`}
-              title="Remove from order"
+              aria-label={`Remove ${store.candidate(a.candidateId)?.name ?? 'candidate'} from this job`}
+              title="Remove from job"
               className="jv-icon-btn"
             >
               <Unlink size={15} aria-hidden="true" />
@@ -209,9 +209,9 @@ export default function OrderDetailPage() {
 
   return (
     <div className="jv">
-      <Link to={`/jobs?designation=${encodeURIComponent(order.designationId)}`} className="jv-back">
+      <Link to="/jobs" className="jv-back">
         <ArrowLeft className="h-3.5 w-3.5" />
-        Jobs / Positions
+        Jobs
       </Link>
 
       <PageHeader
@@ -219,16 +219,16 @@ export default function OrderDetailPage() {
         description={[client.name, place].filter(Boolean).join(' · ')}
         actions={
           <>
-            <Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={!canMatch} title={canMatch ? undefined : 'Matching is off while the order is not open'} onClick={() => setMatching(true)}>Match candidates</Button>
-            <Button icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit order</Button>
+            <Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={!canMatch} title={canMatch ? undefined : 'Matching is off while the job is not open'} onClick={() => setMatching(true)}>Match candidates</Button>
+            <Button icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit job</Button>
             <Button icon={<History className="h-4 w-4" />} onClick={() => setHistory(true)}>History</Button>
-            <ActionMenu label="More actions for this order" text="More">
+            <ActionMenu label="More actions for this job" text="More">
               {(close) => (
                 <>
                   {order.status === 'open' && <MenuButton icon={<Pause size={15} />} onClick={() => { close(); void actions.setStatus(order, 'on_hold') }}>Put on hold</MenuButton>}
                   {order.status === 'on_hold' && <MenuButton icon={<Play size={15} />} onClick={() => { close(); void actions.setStatus(order, 'open') }}>Start matching again</MenuButton>}
                   <MenuButton icon={<ClipboardCopy size={15} />} onClick={() => { close(); void copyShortlist() }}>Copy shortlist</MenuButton>
-                  {store.can('delete_records') && <MenuButton danger icon={<Trash2 size={15} />} onClick={() => { close(); setDeleting(true) }}>Delete order</MenuButton>}
+                  {store.can('delete_records') && <MenuButton danger icon={<Trash2 size={15} />} onClick={() => { close(); setDeleting(true) }}>Delete job</MenuButton>}
                 </>
               )}
             </ActionMenu>
@@ -251,8 +251,8 @@ export default function OrderDetailPage() {
           <div className="jv-alert-copy">
             <AlertTriangle size={18} aria-hidden="true" />
             <div>
-              <strong>{late === 0 ? 'This order is due today' : `The deadline passed ${Math.abs(late ?? 0)} ${Math.abs(late ?? 0) === 1 ? 'day' : 'days'} ago`}</strong>
-              <span>The deadline was {dateLabel(order.deadline)}. Extend it, or use Edit order to put the order on hold or close it.</span>
+              <strong>{late === 0 ? 'This job is due today' : `The deadline passed ${Math.abs(late ?? 0)} ${Math.abs(late ?? 0) === 1 ? 'day' : 'days'} ago`}</strong>
+              <span>The deadline was {dateLabel(order.deadline)}. Extend it, or use Edit job to put the job on hold or close it.</span>
             </div>
           </div>
           <div className="jv-alert-actions">
@@ -266,7 +266,7 @@ export default function OrderDetailPage() {
       <SummaryCards
         items={[
           { label: 'Openings', value: order.openings, detail: 'People needed', icon: Users },
-          { label: 'Matched', value: counts.matched, detail: 'Candidates on this order', icon: Link2, onSelect: () => setFilter(filter === 'active' ? 'all' : 'active'), active: filter === 'active' },
+          { label: 'Matched', value: counts.matched, detail: 'Candidates on this job', icon: Link2, onSelect: () => setFilter(filter === 'active' ? 'all' : 'active'), active: filter === 'active' },
           { label: 'Selected', value: counts.selected, detail: 'Past the interview stage', icon: Target, onSelect: () => setFilter(filter === 'selected' ? 'all' : 'selected'), active: filter === 'selected' },
           { label: 'Deployed', value: deployedCount, detail: `${apps.filter((a) => a.status === 'closed').length} closed`, icon: UserCheck, onSelect: () => setFilter(filter === 'deployed' ? 'all' : 'deployed'), active: filter === 'deployed' },
         ]}
@@ -274,10 +274,10 @@ export default function OrderDetailPage() {
 
       <div className="jv-detail-grid">
         <Panel flush>
-          <PanelHeader title="Order details" meta="What was agreed with the client for this order" action={<OrderStatusText order={order} />} />
+          <PanelHeader title="Job details" meta="What was agreed with the client for this job" action={<OrderStatusText order={order} />} />
           <div className="jv-card-body">
             <dl className="jv-fields">
-              <div className="jv-field"><dt><FileText size={14} aria-hidden="true" />Order reference</dt><dd className="ident">{order.ref}</dd></div>
+              <div className="jv-field"><dt><FileText size={14} aria-hidden="true" />Job reference</dt><dd className="ident">{order.ref}</dd></div>
               <div className="jv-field"><dt><Building2 size={14} aria-hidden="true" />Client</dt><dd><Link to={`/clients/${client.clientId}`}>{client.name}</Link></dd></div>
               <div className="jv-field"><dt><BriefcaseBusiness size={14} aria-hidden="true" />Job title</dt><dd>{designation.title}</dd></div>
               <div className="jv-field"><dt><Users size={14} aria-hidden="true" />Number of openings</dt><dd className="tnum">{order.openings}</dd></div>
@@ -287,7 +287,7 @@ export default function OrderDetailPage() {
               <div className="jv-field"><dt><Coins size={14} aria-hidden="true" />Currency</dt><dd>{order.currency}</dd></div>
               <div className="jv-field"><dt><FileText size={14} aria-hidden="true" />Contract period</dt><dd>{order.contractPeriod || <i>Not set</i>}</dd></div>
               <div className="jv-field"><dt><CalendarClock size={14} aria-hidden="true" />Interview date</dt><dd>{order.interviewDate ? dateLabel(order.interviewDate) : <i>Not set</i>}</dd></div>
-              <div className="jv-field"><dt><CalendarX2 size={14} aria-hidden="true" />Order deadline</dt><dd className={cn(overdue && 'jv-late')}>{order.deadline ? dateLabel(order.deadline) : <i>No deadline</i>}</dd></div>
+              <div className="jv-field"><dt><CalendarX2 size={14} aria-hidden="true" />Deadline</dt><dd className={cn(overdue && 'jv-late')}>{order.deadline ? dateLabel(order.deadline) : <i>No deadline</i>}</dd></div>
               <div className="jv-field"><dt><Gift size={14} aria-hidden="true" />Benefits</dt><dd>{order.benefits.length ? <span className="jv-chips">{order.benefits.map((b) => <span key={b}>{b}</span>)}</span> : <i>None added</i>}</dd></div>
             </dl>
           </div>
@@ -300,7 +300,7 @@ export default function OrderDetailPage() {
             <p className="jv-require-copy">{designation.description || 'Check each candidate\'s skills and experience before you start. If something is missing from a profile, ask the candidate.'}</p>
             <p className="jv-subtle">Required skills</p>
             <div className="jv-chips">{designation.requiredSkills.length ? designation.requiredSkills.map((skill) => <span key={skill}>{skill}</span>) : <i>No skills added</i>}</div>
-            {!canMatch && <p role="status" className="jv-pause">You cannot match new candidates because this order is {order.status === 'on_hold' ? 'on hold' : order.status}. Candidates already matched stay on the order.</p>}
+            {!canMatch && <p role="status" className="jv-pause">You cannot match new candidates because this job is {order.status === 'on_hold' ? 'on hold' : order.status}. Candidates already matched stay on the job.</p>}
           </div>
         </Panel>
       </div>
@@ -308,7 +308,7 @@ export default function OrderDetailPage() {
       <Panel flush className="jv-matched">
         <PanelHeader
           title="Matched candidates"
-          meta={`${apps.length} ${apps.length === 1 ? 'candidate' : 'candidates'} on this order, with their stage and recruiter`}
+          meta={`${apps.length} ${apps.length === 1 ? 'candidate' : 'candidates'} on this job, with their stage and recruiter`}
           action={<Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={!canMatch} onClick={() => setMatching(true)}>Match candidates</Button>}
         />
         {apps.length > 0 && (
@@ -324,14 +324,14 @@ export default function OrderDetailPage() {
           <EmptyState
             icon={<Users size={30} strokeWidth={1.4} />}
             title="No candidates matched yet"
-            description="Search the Data Bank and match candidates to this order. Once matched, you can work on their stages."
+            description="Search the Data Bank and match candidates to this job. Once matched, you can work on their stages."
             action={<Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={!canMatch} onClick={() => setMatching(true)}>Match candidates</Button>}
           />
         ) : visibleApps.length === 0 ? (
           <EmptyState
             icon={<Users size={30} strokeWidth={1.4} />}
             title="No candidates in this view"
-            description="Try a different status or search. Or show everyone on this order."
+            description="Try a different status or search. Or show everyone on this job."
             action={<Button onClick={() => { setFilter('all'); setQuery('') }}>Show all candidates</Button>}
           />
         ) : !wideScreen ? (
@@ -353,7 +353,7 @@ export default function OrderDetailPage() {
                       <div><dt>Updated</dt><dd>{dateTimeLabel(a.updatedAt)}</dd></div>
                     </dl>
                     <div className="jv-mcard-foot">
-                      {a.status === 'active' && store.can('map_candidates') && canWorkCandidate(store.me, store.candidate(a.candidateId)) && <Button size="sm" icon={<Unlink className="h-3.5 w-3.5" />} onClick={() => { setUnmapping(a.id); setUnmapError('') }}>Remove from order</Button>}
+                      {a.status === 'active' && store.can('map_candidates') && canWorkCandidate(store.me, store.candidate(a.candidateId)) && <Button size="sm" icon={<Unlink className="h-3.5 w-3.5" />} onClick={() => { setUnmapping(a.id); setUnmapError('') }}>Remove from job</Button>}
                       <ApplicationFormButton size="sm" candidateId={a.candidateId} orderId={a.orderId} />
                       <Button size="sm" variant="primary" onClick={() => setOpenApp(a.id)}>Open stages</Button>
                     </div>

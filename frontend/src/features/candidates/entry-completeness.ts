@@ -1,6 +1,7 @@
 import { parseRows, EDUCATION_KEYS, HISTORY_KEYS } from '@/features/application-form/entry-bridge'
 import type { CandidateEntryForm } from './entry-model'
 import { effectiveNativePlace } from './entry-extras'
+import { documentLabel } from '@/shared/model/document-slots'
 
 export type CompletenessSection = 'documents' | 'personal' | 'passport' | 'education' | 'experience'
 export interface CompletenessItem { key: string; label: string; section: CompletenessSection; anchor: string }
@@ -36,9 +37,9 @@ export function entryCompleteness(form: CandidateEntryForm, documents: EntryDocu
     ...FIELD_ITEMS.map((item) => ({ key: item.key as string, label: item.label, section: item.section, anchor: item.anchor, filled: Boolean(form[item.key].trim()) })),
     { key: 'education', label: 'Education', section: 'education', anchor: 'candidate-education', filled: hasRow(form.education, EDUCATION_KEYS) },
     { key: 'workHistory', label: 'Previous employer', section: 'experience', anchor: 'candidate-experience', filled: hasRow(form.workHistory, HISTORY_KEYS) },
-    { key: 'documents.resume', label: 'Resume', section: 'documents', anchor: 'candidate-documents', filled: documents.resume },
-    { key: 'documents.passport', label: 'Passport copy', section: 'documents', anchor: 'candidate-documents', filled: documents.passport },
-    { key: 'documents.photo', label: 'Photo', section: 'documents', anchor: 'candidate-documents', filled: documents.photo },
+    { key: 'documents.resume', label: documentLabel('resume'), section: 'documents', anchor: 'candidate-documents', filled: documents.resume },
+    { key: 'documents.passport', label: documentLabel('passport'), section: 'documents', anchor: 'candidate-documents', filled: documents.passport },
+    { key: 'documents.photo', label: documentLabel('photo'), section: 'documents', anchor: 'candidate-documents', filled: documents.photo },
   ]
   const filled = items.filter((item) => item.filled).length
   const missing = items.filter((item) => !item.filled)

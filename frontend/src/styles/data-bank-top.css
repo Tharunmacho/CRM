@@ -1,0 +1,71 @@
+/*
+ * Data Bank top: three stat cards, one toolbar row, one filter row. Tokens only (theme.css), so every palette and dark mode follow.
+ * Cards share the Dashboard cards' language: white, 16px radius, neutral border, small tinted icon chip, big number, tiny label.
+ * Every control in the toolbar and the filter row is 44px high on one baseline.
+ */
+
+/* ---------- Stat cards ---------- */
+.dbs {
+  --dbs-blue: var(--primary);
+  --dbs-amber: color-mix(in srgb, #e39a14 86%, var(--primary));
+  --dbs-violet: color-mix(in srgb, #7c5cd6 84%, var(--primary));
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px;
+}
+.dbs[data-count='2'] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dbs[data-count='1'] { grid-template-columns: minmax(0, 1fr); }
+.dbs-card { --tone: var(--dbs-blue); display: flex; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); color: var(--text-main); text-align: left; cursor: pointer; transition: border-color .16s, box-shadow .16s, background-color .16s; }
+.dbs-card.is-blue { --tone: var(--dbs-blue); }
+.dbs-card.is-amber { --tone: var(--dbs-amber); }
+.dbs-card.is-violet { --tone: var(--dbs-violet); }
+.dbs-card:hover { border-color: color-mix(in srgb, var(--tone) 45%, var(--border-main)); background: color-mix(in srgb, var(--tone) 4%, var(--bg-card)); }
+.dbs-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dbs-card.is-on, .dbs-card.is-on:hover { border-color: var(--tone); background: color-mix(in srgb, var(--tone) 7%, var(--bg-card)); box-shadow: 0 0 0 1px var(--tone); }
+.dbs-chip { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: color-mix(in srgb, var(--tone) 14%, var(--bg-card)); color: var(--tone); }
+.dbs-text { display: flex; flex-direction: column; min-width: 0; }
+.dbs-value { font-size: 28px; font-weight: 650; line-height: 1.05; letter-spacing: -.03em; color: var(--text-main); }
+.dbs-label { overflow: hidden; margin-top: 2px; font-size: 12.5px; font-weight: 500; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.dbs-card.is-muted:not(.is-on) .dbs-chip { background: var(--tint-2); color: var(--text-light); }
+.dbs-card.is-muted:not(.is-on) .dbs-value { color: var(--text-light); }
+
+/* ---------- Toolbar: search (wide), sort, By job | All resumes, refresh ---------- */
+.dbt-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 18px 22px 14px; }
+.dbt-toolbar .db-search { flex: 1 1 320px; max-width: none; height: 44px; border-radius: 10px; }
+.dbt-sort { flex: 0 0 200px; min-width: 0; }
+.dbt-toolbar .dbp-mode { box-sizing: border-box; height: 44px; align-items: center; border-radius: 10px; }
+.dbt-toolbar .dbp-mode button { height: 36px; }
+.dbt-toolbar .db-refresh { width: 44px; height: 44px; border-radius: 10px; }
+.dbt-toolbar .custom-select, .dbt-bar .custom-select { display: block; width: 100%; }
+:is(.dbt-toolbar, .dbt-bar) .custom-select-trigger { width: 100%; height: 44px; min-height: 44px; padding-inline: 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); font-size: 13.5px; box-shadow: none; }
+
+/* ---------- Filter row: four equal selects, then Clear and More filters ---------- */
+.dbt-filters { padding: 0 22px 14px; border-bottom: 1px solid var(--border-main); }
+.dbt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dbt-bar > .custom-select { flex: 1 1 160px; min-width: 150px; max-width: 260px; }
+.dbt-bar-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.dbt-bar .db-more-toggle, .dbt-bar .db-clear { height: 44px; border-radius: 10px; }
+.dbt-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dbt-field > span { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.dbt-field .custom-select { display: block; width: 100%; }
+
+/* ---------- Count line above the list ---------- */
+.dbt-subbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 22px; border-bottom: 1px solid var(--border-faint); }
+.dbt-count { margin: 0; font-size: 13px; color: var(--text-muted); }
+.dbt-subtools { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 767px) {
+  .dbs { gap: 10px; }
+  .dbs-card { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
+  .dbs-value { font-size: 24px; }
+  .dbt-toolbar { padding: 16px 16px 12px; }
+  .dbt-toolbar .db-search { flex: 1 1 100%; }
+  .dbt-sort { flex: 1 1 0; }
+  .dbt-filters { padding: 0 16px 14px; }
+  .dbt-bar > .custom-select { flex: 1 1 calc(50% - 5px); max-width: none; min-width: 0; }
+  .dbt-bar-end { width: 100%; justify-content: space-between; }
+  .dbt-subbar { padding: 10px 16px; }
+}
+@media (max-width: 420px) {
+  .dbs-label { white-space: normal; }
+  .dbt-bar > .custom-select { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .dbs-card { transition: none; } }

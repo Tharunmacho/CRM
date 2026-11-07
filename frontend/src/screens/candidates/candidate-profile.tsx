@@ -460,7 +460,7 @@ export default function CandidateProfilePage() {
             action={canAssign && <Button size="sm" onClick={() => setReassigning(true)}>{cand.ownerId ? 'Reassign' : 'Assign'}</Button>}
           >
             <div className="cp-owner">
-              {owner ? <RecordIdentity name={owner.name} detail={ownerRole} /> : <RecordIdentity name="Needs assignment" detail="No recruiter yet" icon={UserCog} />}
+              {owner ? <RecordIdentity name={owner.name} detail={ownerRole} /> : <RecordIdentity name="Not assigned" detail="Choose a recruiter to start the initial call" icon={UserCog} />}
               <CandidateAssignmentHistory candidateId={cand.id} />
             </div>
           </ProfileCard>
@@ -473,7 +473,7 @@ export default function CandidateProfilePage() {
                 emptyFor={(slot) => hasOriginals && ['resume', 'passport', 'aadhaar'].includes(slot.key) ? 'In the original upload' : undefined}
                 onUpload={canWork ? (slot) => {
                   if (slot.key === 'source_bundle') return undefined
-                  const multi = slot.key === 'education' || slot.key === 'experience'
+                  const multi = slot.multiple
                   return async (file) => {
                     await api.upload('candidate', cand.id, slot.key, file)
                     try {
@@ -510,7 +510,7 @@ export default function CandidateProfilePage() {
       {deleting && <DeleteCandidateDialog open candidateId={cand.id} name={cand.name} onClose={() => setDeleting(false)}
         onDeleted={() => { navigate('/data-bank', { replace: true }) }} />}
       {mapping && <MapToOrderDialog open onClose={() => setMapping(false)} candidateId={cand.id} />}
-      {reassigning && <ReassignCandidatesDialog candidateIds={[cand.id]} onClose={() => setReassigning(false)} description={cand.ownerId ? 'Change the recruiter responsible for this candidate and their open tasks.' : 'Pick a free recruiter. Once assigned, the initial call task starts.'} />}
+      {reassigning && <ReassignCandidatesDialog candidateIds={[cand.id]} onClose={() => setReassigning(false)} description={cand.ownerId ? 'Change the recruiter responsible for this candidate and their open tasks.' : 'Choose a recruiter. Once assigned, the initial call task starts.'} />}
       <Dialog
         open={!!unmapApp}
         onClose={() => { if (!unmapSaving) setUnmapping(null) }}

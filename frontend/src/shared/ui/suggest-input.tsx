@@ -15,7 +15,7 @@ import { ChevronDown } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Input } from './primitives'
 
-const MAX_SHOWN = 60
+const MAX_SHOWN = 300
 
 /** Unique, trimmed suggestions that match what has been typed; names that start with it come first. */
 export function matchSuggestions(options: readonly string[], query: string): string[] {

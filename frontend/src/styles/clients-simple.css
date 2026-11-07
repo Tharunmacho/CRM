@@ -110,6 +110,8 @@
 .clients-simple .cs-grid6 > .span-3 { grid-column: span 3; }
 .clients-simple .cs-grid6 > .span-4 { grid-column: span 4; }
 .clients-simple .cs-grid6 > .span-2 { grid-column: span 2; }
+.clients-simple .cs-grid6 > .span-6 { grid-column: 1 / -1; }
+.clients-simple .cs-sections { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .clients-simple .ui-input { height: 44px; background-color: var(--bg-card); }
 .clients-simple textarea.ui-input { height: auto; min-height: 0; }
 .clients-simple .ui-input:focus, .clients-simple .ui-input:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); outline: none; }

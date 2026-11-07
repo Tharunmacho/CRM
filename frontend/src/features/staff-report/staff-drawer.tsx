@@ -61,6 +61,7 @@ export function StaffDrawer({ row, report, onClose }: { row: StaffRow; report: S
           <div><dt>Active in the CRM</dt><dd>{formatHours(a.activeHours)}<small>browser open and in use</small></dd></div>
           <div><dt>Days</dt><dd>{a.workedDays} worked, {a.absentDays} absent<small>{a.leaveDays} leave, {a.offDays} off</small></dd></div>
           <div><dt>Daily tasks</dt><dd>{t.available ? `${t.completed} of ${t.assigned}` : '-'}<small>{t.available ? `${formatPercent(t.completionPercent)} done, ${t.postponed} postponed, ${t.overdue} overdue` : 'No task data yet'}</small></dd></div>
+          {typeof detail.feedbackNotes === 'number' && <div><dt>Notes written</dt><dd>{detail.feedbackNotes}{typeof detail.delayNotes === 'number' && <small>{detail.delayNotes} delay {detail.delayNotes === 1 ? 'note' : 'notes'}</small>}</dd></div>}
           <div><dt>Stage moves</dt><dd>{detail.stages.moves}<small>goal {detail.goals.stageMovesPerDay} a day</small></dd></div>
           <div><dt>Forwarded to client</dt><dd>{detail.outcomes.forwarded}<small>goal {detail.goals.forwardedPerDay} a day</small></dd></div>
         </dl>

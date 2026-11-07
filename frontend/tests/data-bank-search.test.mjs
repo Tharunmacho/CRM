@@ -30,14 +30,14 @@ test('an agent is the typed referrer, never the pointer automatic intake stores'
   assert.equal(search.agentName({ sourceDetail: null }), '')
 })
 
-test('positions read as title, client and country; candidates without an order form "No position yet"', () => {
+test('positions read as title, client and country; candidates without an order form "No job yet"', () => {
   const group = { orderId: 'o-1', ref: 'ORD-1', title: 'Welder', company: 'Al Noor', client: 'Gulf Hiring', country: 'UAE', city: null, orderStatus: 'open', resumes: 2 }
   assert.equal(search.groupTitle(group), 'Welder')
   assert.equal(search.groupMeta(group), 'Al Noor · Gulf Hiring · UAE')
   assert.equal(search.groupMeta({ ...group, client: 'al noor' }), 'Al Noor · UAE')
   assert.equal(search.groupKey(group), 'o-1')
   const none = { ...group, orderId: null, title: null, company: null, client: null, country: null }
-  assert.equal(search.groupTitle(none), 'No position yet')
+  assert.equal(search.groupTitle(none), 'No job yet')
   assert.equal(search.groupKey(none), 'none')
   assert.equal(search.groupMeta(none), 'Not matched to an order')
   assert.equal(search.resumeCount(1), '1 resume')

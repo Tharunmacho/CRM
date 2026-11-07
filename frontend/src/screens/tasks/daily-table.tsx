@@ -20,7 +20,7 @@ const COLUMNS = [
   { key: 'client', title: 'Client', width: 98 },
   { key: 'country', title: 'Country', width: 108 },
   { key: 'candidate', title: 'Candidate', width: 146, left: true },
-  { key: 'position', title: 'Position', width: 92 },
+  { key: 'position', title: 'Job', width: 92 },
   { key: 'referral', title: 'Referral', width: 82 },
   { key: 'staff', title: 'Staff', width: 96, supervisor: true },
   { key: 'stage', title: 'Stage', width: 120 },
@@ -112,9 +112,9 @@ function ItemRow({ item, serial, now, skew, zone, showStaff, staffName, canWork,
       <td data-label="Client"><ClientCell item={item} /></td>
       <td data-label="Country"><CountryCell item={item} onAdd={onProfile} /></td>
       <td data-label="Candidate" className="is-left"><RecordIdentity name={item.candidate} detail={item.candidateRef} /></td>
-      <td data-label="Position"><PositionCellView item={item} /></td>
+      <td data-label="Job"><PositionCellView item={item} /></td>
       <td data-label="Referral"><span className={cn('dw-ref', item.referral.source === 'referral' && 'is-referral')}>{referralLabel(item.referral)}</span></td>
-      {showStaff && <td data-label="Staff">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">-</span>}</td>}
+      {showStaff && <td data-label="Staff">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">Not assigned</span>}</td>}
       <td data-label="Stage"><StageCell item={item} /></td>
       <td data-label="Remarks" className="is-left"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
       <td data-label="Deadline">

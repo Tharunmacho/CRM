@@ -64,7 +64,7 @@ function collectOptions(children: ReactNode, group?: string, disabled = false): 
 
 export const Select = forwardRef<
   HTMLSelectElement,
-  SelectHTMLAttributes<HTMLSelectElement> & { compact?: boolean }
+  SelectHTMLAttributes<HTMLSelectElement> & { compact?: boolean; /** Show the search box whatever the number of choices (default: more than 8). */ searchable?: boolean }
 >(function Select(
   {
     children,
@@ -75,6 +75,7 @@ export const Select = forwardRef<
     disabled,
     multiple,
     compact,
+    searchable: searchableProp,
     id,
     style,
     'aria-label': ariaLabel,
@@ -113,7 +114,7 @@ export const Select = forwardRef<
   const filtered = options.filter((option) =>
     option.label.toLowerCase().includes(query.trim().toLowerCase()),
   )
-  const searchable = options.length > 8
+  const searchable = searchableProp ?? options.length > 8
   const [position, setPosition] = useState({ top: 0, left: 0, width: 220, maxHeight: 304 })
 
   const close = (restoreFocus = true) => {

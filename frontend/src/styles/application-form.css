@@ -27,11 +27,12 @@ body.af-open { overflow: hidden; }
   align-items: center;
   gap: 12px;
   flex: none;
-  min-height: 60px;
-  padding: 8px 20px;
+  min-height: 64px;
+  padding: 8px 24px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--af-line);
 }
+.af-bar { box-shadow: var(--af-shadow); position: relative; z-index: 1; }
 .af-bar-back {
   display: inline-flex; align-items: center; gap: 6px;
   height: 36px; padding: 0 10px 0 6px; border-radius: 8px; border: 0; background: transparent;
@@ -40,9 +41,15 @@ body.af-open { overflow: hidden; }
 .af-bar-back:hover { background: var(--tint-2); color: var(--text-main); }
 .af-bar-back svg { width: 18px; height: 18px; }
 .af-bar-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; line-height: 1.25; }
-.af-bar-title b { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-light); font-weight: 600; }
-.af-bar-title span { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.af-bar-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.af-bar-name { font-size: 16px; font-weight: 600; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-bar-name.is-muted { color: var(--text-muted); font-weight: 500; }
+.af-bar-title small { font-size: 12px; line-height: 16px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-pct { display: inline-flex; align-items: center; flex: none; height: 28px; padding: 0 12px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary-deep); font-size: 12px; font-weight: 600; white-space: nowrap; }
+[data-theme="dark"] .af-pct { color: var(--primary); }
+.af-bar-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; flex: none; }
+/* The small amber dot and its words: shown beside Save changes whenever something is typed and not yet saved. */
+.af-unsaved { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--warning-fill); border: 1px solid var(--warning-edge); color: var(--warning-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.af-unsaved i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .af-docx { text-decoration: none; }
 .af-live {
   display: inline-flex; align-items: center; gap: 7px; flex: none; height: 28px; padding: 0 11px;
@@ -53,65 +60,119 @@ body.af-open { overflow: hidden; }
 .af-live.is-up i { background: var(--success-ink); animation: af-pulse 2s ease-in-out infinite; }
 @keyframes af-pulse { 50% { opacity: .35; } }
 
-.af { --af-desk: #e4e8ef; }
-[data-theme="dark"] .af { --af-desk: #0c0d10; }
+.af { --af-desk: #eef1f6; --af-shadow: 0 1px 2px rgba(15, 23, 42, .06); }
+[data-theme="dark"] .af { --af-desk: #0c0d10; --af-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
 .af-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-padding-top: 12px; background: var(--af-desk); }
+/* The side panel and the working card share one top edge; the panel stays in view while the page scrolls. */
 .af-layout {
   display: grid;
-  grid-template-columns: 290px minmax(0, 210mm);
-  justify-content: center;
-  gap: 28px;
+  grid-template-columns: 296px minmax(0, 1fr);
+  column-gap: 24px;
   align-items: start;
   max-width: 1280px;
   margin: 0 auto;
-  padding: 24px 24px 56px;
+  padding: 16px 24px 56px;
 }
-.af-main { min-width: 0; }
+.af-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+
+/* The assignment is a card of its own at the top; the working area under it is ONE white card: sections split by thin dividers, each with an icon chip and a title, no card chrome of their own. */
+.af-work { padding: 32px 24px; }
+.af-assign-card { padding: 0; overflow: visible; }
+.af-assign-card > .af-sh { margin: 0; padding: 12px 24px; min-height: 56px; border-radius: 16px 16px 0 0; background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); border-bottom: 1px solid var(--border-faint); }
+.af-assign-card > .af-assign { padding: 24px; }
+/* Every block of the working card (the details from the Fill view, then Documents, Process tracking and Recruiter notes) has the same
+   side padding, the same hairline divider, 32px above and below, and the same header (see SectionHeader). */
+.af-sec { min-width: 0; padding: 32px 0; border-top: 1px solid var(--af-line); scroll-margin-top: 16px; }
+.af-work > .af-sec:last-child { padding-bottom: 0; }
+/* The header every block shares (it mirrors the Fill details sections): icon chip, title, chip at the right, a hairline under it. */
+.af-sh { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
+.af-sh.is-compact { min-height: 32px; margin-bottom: 16px; padding-bottom: 12px; }
+.af-sh-tile { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.af-sh-tile svg { width: 17px; height: 17px; }
+.af-sh-title { flex: 1 1 auto; min-width: 0; }
+.af-sh-title h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.af-sh-title p { margin: 0; font-size: 13px; line-height: 20px; color: var(--text-muted); }
+.af-sh-chip { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 8px; min-height: 24px; }
+.af-sh-count { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+
+/* The preview drawer: the paper form, live, on the right. */
+.af-print-sheet { display: none; }
+.af-drawer-shade { position: fixed; inset: 0; z-index: 41; background: rgba(15, 23, 42, .45); animation: af-fade .18s ease; }
+.af-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 42; display: flex; flex-direction: column; width: min(900px, 100vw);
+  background: var(--af-desk); border-left: 1px solid var(--af-line); box-shadow: -12px 0 40px rgba(15, 23, 42, .25); animation: af-drawer-in .22s ease;
+}
+.af-drawer-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; flex: none; min-height: 64px; padding: 8px 24px; background: var(--bg-card); border-bottom: 1px solid var(--af-line); }
+.af-drawer-title { display: flex; flex-direction: column; flex: 1 1 160px; min-width: 0; line-height: 1.25; }
+.af-drawer-title b { font-size: 16px; font-weight: 600; }
+.af-drawer-title span { font-size: 12px; color: var(--text-muted); }
+.af-drawer-head .ui-button { height: 40px; border-radius: 8px; padding: 0 16px; }
+.af-drawer-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px; }
+@keyframes af-fade { from { opacity: 0; } }
+@keyframes af-drawer-in { from { transform: translateX(32px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .af-drawer, .af-drawer-shade { animation: none; } }
+@media screen and (max-width: 760px) {
+  .af-drawer-head { padding: 8px 16px; }
+  .af-drawer-body { padding: 12px; }
+}
+
 .af-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 80px 24px; color: var(--text-muted); text-align: center; }
 .af-state svg { width: 22px; height: 22px; }
 .af-banner {
-  margin: 0 auto 14px; max-width: 900px; padding: 10px 14px; border-radius: 10px; font-size: 13.5px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0; padding: 12px 16px; border-radius: 12px; font-size: 13.5px;
   background: var(--tint-1); border: 1px solid var(--af-line); color: var(--text-muted);
 }
+.af-banner-link { margin-left: auto; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .af-banner.is-error { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
 
 /* ------------------------------------------------------------ Side panel */
-.af-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; max-height: calc(100dvh - 60px - 48px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px 4px 6px 2px; margin: -2px -4px -6px -2px; }
-.af-card { background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow-card); }
-.af-complete { display: flex; align-items: center; gap: 14px; }
-.af-complete-title { margin: 0; font-weight: 600; font-size: 15px; }
-.af-complete-sub { margin: 2px 0 0; color: var(--text-muted); font-size: 13px; }
-.af-ring { position: relative; width: 72px; height: 72px; flex: none; }
+.af-side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-height: calc(100dvh - 64px - 32px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px 4px 6px 2px; margin: -2px -4px -6px -2px; }
+/* One card style everywhere on this screen: white, neutral border, 16px radius, a hairline shadow. */
+.af-card { background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 16px; padding: 16px; box-shadow: var(--af-shadow); min-width: 0; }
+.af-complete { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.af-complete-main { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.af-complete-text { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; }
+.af-complete-title { margin: 0; font-weight: 600; font-size: 15px; line-height: 20px; }
+.af-complete-sub { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 18px; }
+.af-complete-docs { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border-faint); }
+.af-complete-docs-line { margin: 0; font-size: 13px; line-height: 18px; color: var(--text-muted); }
+.af .af-complete .af-docs-bar { flex: none; width: 100%; }
+.af-ring { position: relative; width: 84px; height: 84px; flex: none; }
 .af-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.af-ring circle { fill: none; stroke-width: 7; }
+.af-ring circle { fill: none; stroke-width: 8; }
 .af-ring-track { stroke: var(--tint-3); }
-.af-ring-bar { stroke: var(--primary); stroke-linecap: round; transition: stroke-dashoffset .5s ease; }
+.af-ring-bar { stroke-linecap: round; transition: stroke-dashoffset .5s ease; }
 .af-ring-bar.is-full { stroke: var(--success-ink); }
-.af-ring > span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 19px; font-weight: 700; }
-.af-ring small { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-left: 1px; }
-.af-side-h { margin: 0 0 10px; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-light); font-weight: 600; }
-.af-missing { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.af-missing li { display: grid; grid-template-columns: 16px minmax(0, 1fr) 96px; align-items: center; gap: 8px; min-height: 42px; padding: 6px 0; border-top: 1px solid var(--border-faint); font-size: 13.5px; }
+/* The percentage is ONE label centred on the ring (a grid with two children used to stack the number above the sign). */
+.af-ring-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.af-side-h { margin: 0 0 12px; font-size: 13px; line-height: 16px; color: var(--text-muted); font-weight: 600; }
+.af-missing { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.af-missing li { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 12px; min-height: 48px; padding: 8px 0; border-top: 1px solid var(--border-faint); font-size: 13.5px; line-height: 18px; }
+.af-missing.has-action li { grid-template-columns: 16px minmax(0, 1fr) 88px; }
 .af-missing li:first-child { border-top: 0; }
-.af-missing li > svg { width: 15px; height: 15px; color: var(--warning-ink); }
-.af-missing li > span { overflow-wrap: anywhere; }
+.af-missing-dot { justify-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--warning-ink); box-shadow: 0 0 0 4px var(--warning-fill); }
+.af-missing li > span { min-width: 0; overflow-wrap: break-word; }
 .af-missing button {
-  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border-radius: 7px; white-space: nowrap;
-  border: 1px solid var(--border-control); background: var(--bg-card); color: var(--primary-deep); font-size: 12px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid transparent; background: transparent; color: var(--primary-deep); font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color .14s, border-color .14s;
 }
-.af-missing button:hover { background: var(--tint-1); border-color: var(--primary); }
+.af-missing button:hover { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); border-color: color-mix(in srgb, var(--primary) 30%, transparent); }
 .af-missing button svg { width: 12px; height: 12px; }
-.af-allgood { display: flex; align-items: center; gap: 10px; color: var(--success-ink); background: var(--success-fill); border-color: var(--success-edge); font-weight: 500; font-size: 13.5px; box-shadow: none; }
+.af-allgood { display: flex; align-items: center; gap: 12px; color: var(--success-ink); background: var(--success-fill); border-color: var(--success-edge); font-weight: 500; font-size: 13.5px; box-shadow: none; }
 .af-allgood svg { width: 18px; height: 18px; flex: none; }
 .af-nav ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.af-nav button { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; color: var(--text-main); font-size: 13.5px; }
+.af-nav button { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; color: var(--text-main); font-size: 13.5px; }
 .af-nav button:hover { background: var(--tint-2); }
-.af-nav-no { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--tint-2); font-size: 12px; font-weight: 700; color: var(--text-muted); }
+.af-nav-no { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--tint-2); font-size: 12px; font-weight: 700; color: var(--text-muted); }
+.af-nav button:focus-visible, .af-missing button:focus-visible, .af-bar-back:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.af-nav-no.is-icon svg { width: 13px; height: 13px; }
+.af-nav-count.is-plain { background: var(--tint-2); color: var(--text-muted); border-color: var(--border-main); }
+.af-nav-count.is-over { background: var(--error-fill); color: var(--error-ink); border-color: var(--error-edge); }
 .af-nav-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; background: var(--warning-fill); color: var(--warning-ink); border: 1px solid var(--warning-edge); }
 
 /* ------------------------------------------------------------ The sheet: a dense, official form that mirrors the docx */
 .af {
-  --af-label-w: 148px;
+  --af-label-w: 160px;
   --af-row-h: 44px;
   --af-field-h: 34px;
   --af-brand: var(--primary-deep);
@@ -151,7 +212,7 @@ body.af-open { overflow: hidden; }
 [data-theme="dark"] .af-logo.is-dark { display: block; }
 .af-heading { grid-area: heading; text-align: center; min-width: 0; }
 .af-company { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.005em; line-height: 1.25; overflow-wrap: anywhere; }
-.af-form-title { margin: 4px 0 0; font-size: 12px; letter-spacing: .24em; font-weight: 700; color: var(--af-brand); }
+.af-form-title { margin: 4px 0 0; font-size: 12px; letter-spacing: .2em; font-weight: 700; color: var(--af-brand); }
 [data-theme="dark"] .af-form-title { color: var(--primary); }
 .af-ref { margin: 6px 0 0; font-size: 11.5px; color: var(--text-light); }
 .af-photo-wrap { grid-area: photo; justify-self: end; align-self: center; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
@@ -161,7 +222,7 @@ body.af-open { overflow: hidden; }
 }
 .af-photo[data-has-photo="false"] { border-style: dashed; border-color: var(--border-hover); }
 .af-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.af-photo-hint { font-size: 9.5px; letter-spacing: .1em; font-weight: 600; color: var(--text-light); line-height: 1.6; }
+.af-photo-hint { font-size: 12px; font-weight: 600; color: var(--text-light); }
 .af-photo-busy { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 4px; font-size: 11px; background: color-mix(in srgb, var(--bg-card) 84%, transparent); }
 .af-photo-busy svg { width: 16px; height: 16px; animation: af-spin 1s linear infinite; }
 @keyframes af-spin { to { transform: rotate(360deg); } }
@@ -178,26 +239,26 @@ body.af-open { overflow: hidden; }
 /* Section bars */
 .af-section { margin-top: 14px; break-inside: avoid; }
 .af-section-head {
-  display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; box-sizing: border-box;
   background: var(--af-brand); color: #fff; border-radius: 4px 4px 0 0;
 }
 .af-section-head h2 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; min-width: 0; color: inherit; }
 .af-section-no { flex: none; font-size: 12px; font-weight: 700; opacity: .9; }
 .af-section-no::after { content: '.'; }
 .af-section-no.is-plain { opacity: .75; }
-.af-section-missing { margin-left: auto; font-size: 11.5px; font-weight: 600; color: #fde68a; white-space: nowrap; }
+.af-section-missing { margin-left: auto; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: #fde68a; background: rgba(253, 230, 138, .14); border: 1px solid rgba(253, 230, 138, .45); white-space: nowrap; }
 .af-section-aside { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 11.5px; color: rgba(255,255,255,.85); }
 .af-section-missing + .af-section-aside { margin-left: 12px; }
 .af-aside-note { font-size: 11.5px; color: rgba(255,255,255,.85); font-weight: 500; }
 .af-section-aside .af-chip { background: rgba(255,255,255,.14); border-color: transparent; color: #fff; }
 [data-theme="dark"] .af-section-head { background: color-mix(in srgb, var(--primary) 26%, var(--bg-card)); color: var(--text-main); }
-[data-theme="dark"] .af-section-missing { color: #fbbf24; }
+[data-theme="dark"] .af-section-missing { color: #fbbf24; background: rgba(251, 191, 36, .1); border-color: rgba(251, 191, 36, .4); }
 [data-theme="dark"] .af-aside-note, [data-theme="dark"] .af-section-aside { color: var(--text-muted); }
 .af-section-body { border: 1px solid var(--af-line); border-top: 0; border-radius: 0 0 4px 4px; overflow: hidden; background: var(--bg-card); }
 
 /* Label / value pairs: one fixed 4-column grid (label | value | label | value) shared by every section, so the columns line up
    down the whole sheet. The cell wrappers dissolve (display: contents); hairlines are the 1px grid gaps. */
-.af { --af-label-w: 154px; --af-row-h: 44px; --af-field-h: 36px; }
+.af { --af-label-w: 160px; --af-row-h: 44px; --af-field-h: 36px; }
 .af-cells {
   display: grid;
   grid-template-columns: var(--af-label-w) minmax(0, 1fr) var(--af-label-w) minmax(0, 1fr);
@@ -214,9 +275,9 @@ body.af-open { overflow: hidden; }
 .af-cells-3 > .af-cell { display: grid; grid-template-columns: 1fr; grid-column: auto; background: var(--bg-card); }
 .af-cells-3 > .af-cell > .af-cell-head { grid-column: auto; border-right: 0; border-bottom: 1px solid var(--af-line); padding-top: 5px; padding-bottom: 5px; }
 .af-cells-3 > .af-cell > .af-value-cell { grid-column: auto; }
-.af-cell-head { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 10px 0 12px; background: var(--af-label-bg); min-width: 0; }
+.af-cell-head { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 10px 6px 12px; background: var(--af-label-bg); min-width: 0; }
 .af-cells-3 .af-cell-head { border-right: 0; border-bottom: 1px solid var(--af-line); padding-top: 5px; padding-bottom: 5px; }
-.af-label { font-size: 11.5px; font-weight: 600; color: var(--text-label); letter-spacing: .02em; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.af-label { font-size: 12px; font-weight: 600; color: var(--text-label); line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
 .af-cells-3 .af-label { white-space: normal; }
 .af-cell-chips { display: inline-flex; align-items: center; flex: none; }
 .af-value-cell { box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; padding: 4px 12px; background: var(--bg-card); }
@@ -234,6 +295,12 @@ body.af-open { overflow: hidden; }
 .af-cell.is-missing .af-value-cell { background: color-mix(in srgb, var(--warning-fill) 55%, var(--bg-card)); box-shadow: inset 3px 0 0 var(--warning-edge); }
 .af-cell.is-updated .af-value-cell { animation: af-flash 4s ease-out; }
 @keyframes af-flash { 0%, 55% { background: color-mix(in srgb, var(--primary) 16%, var(--bg-card)); } 100% { background: var(--bg-card); } }
+/* Section 5 of the paper form: a document and its file names, on the same label column as every other section. */
+.af-received { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: var(--af-label-w) minmax(0, 1fr); gap: 1px; background: var(--af-line); }
+.af-received > li { display: contents; }
+.af-received-label { display: flex; align-items: center; min-height: var(--af-row-h); padding: 4px 12px; background: var(--af-label-bg); font-size: 12px; font-weight: 600; line-height: 16px; color: var(--text-label); }
+.af-received-files { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; padding: 4px 12px; background: var(--bg-card); font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.af-sheet-empty { margin: 0; padding: 12px; font-size: 13px; color: var(--text-muted); }
 .af-split-hint { margin: 0; padding: 6px 12px; font-size: 12px; color: var(--warning-ink); background: var(--warning-fill); border-top: 1px solid var(--warning-edge); }
 .af-expiry { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; }
 .af-expiry svg { width: 12px; height: 12px; }
@@ -285,15 +352,7 @@ body.af-open { overflow: hidden; }
 .af-rowtable-add { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--af-line); background: var(--af-label-bg); font-size: 12px; color: var(--text-muted); }
 .af-rowtable-row.is-print-blank { display: none; }
 
-/* Documents: one hairline row per document */
-.af-docs { display: flex; flex-direction: column; }
-.af-doc { padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--af-line); }
-.af-doc:first-child { border-top: 0; }
-.af-doc.is-missing { background: color-mix(in srgb, var(--warning-fill) 45%, var(--bg-card)); box-shadow: inset 3px 0 0 var(--warning-edge); }
-.af-doc-title { display: flex; align-items: center; gap: 8px; }
-.af-doc-title > svg { width: 15px; height: 15px; color: var(--text-muted); }
-.af-doc-title b { font-size: 13px; font-weight: 600; }
-.af-doc .ui-file-row { border: 0; padding: 0; background: transparent; box-shadow: none; }
+/* Documents: the checklist itself is in application-form-v2.css */
 .af-doc-meta { margin: 0; font-size: 12px; color: var(--text-light); }
 .af-extract { display: flex; align-items: center; gap: 7px; margin: 0; padding: 5px 10px; border-radius: 6px; font-size: 12.5px; font-weight: 500; }
 .af-extract svg { width: 14px; height: 14px; flex: none; }
@@ -349,7 +408,7 @@ body.af-open { overflow: hidden; }
 
 /* ------------------------------------------------------------ Tablet and phone */
 @media screen and (max-width: 1190px) {
-  .af-layout { grid-template-columns: minmax(0, 210mm); padding: 16px 16px 48px; gap: 16px; }
+  .af-layout { grid-template-columns: minmax(0, 960px); justify-content: center; padding: 16px 16px 48px; row-gap: 16px; }
   .af-side { position: static; max-height: none; overflow: visible; display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
   .af-missing { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
   .af-missing li:nth-child(2) { border-top: 0; }
@@ -357,19 +416,27 @@ body.af-open { overflow: hidden; }
   .af-nav { display: none; }
 }
 @media screen and (max-width: 760px) {
-  .af-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
+  .af-bar { flex-wrap: wrap; padding: 8px 16px; gap: 8px 12px; }
   .af-bar-title { order: 1; flex: 1 1 0; }
   .af-bar-back { order: 0; padding-right: 6px; }
   .af-bar-back span { display: none; }
   .af-live { order: 2; }
-  .af-bar-actions { order: 3; width: 100%; }
-  .af-bar-actions > * { flex: 1 1 0; }
-  .af-bar-actions .ui-button { padding: 0 10px; }
+  .af-bar-actions { order: 3; width: 100%; justify-content: stretch; }
+  .af-bar-actions { flex-wrap: wrap; }
+  .af-bar-actions > .ui-button { flex: 1 1 calc(50% - 4px); min-width: 0; }
+  .af-bar-actions > .af-unsaved { flex: 1 1 100%; justify-content: center; }
+  .af-bar-actions .ui-button { padding: 0 12px; }
+  .af-work { padding: 24px 16px; }
+  .af-sec { padding: 24px 0; }
+  .af-pct { order: 2; }
+  .af-assign-card > .af-sh { padding: 12px 16px; }
+  .af-assign-card > .af-assign { padding: 16px; }
+  .af-received { grid-template-columns: 118px minmax(0, 1fr); }
   .af-missing { grid-template-columns: minmax(0, 1fr); }
   .af-missing li:nth-child(2) { border-top: 1px solid var(--border-faint); }
   .af-sheet { padding: 16px 12px 18px; min-height: 0; }
   .af-sheet::after { display: none; }
-  .af-letterhead { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand photo" "heading heading" "address address"; row-gap: 10px; }
+  .af-letterhead { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand photo" "heading heading" "address address"; row-gap: 12px; }
   .af-brand { max-width: 140px; }
   .af-photo { width: 92px; }
   .af-cells { grid-template-columns: 118px minmax(0, 1fr); }
@@ -381,7 +448,7 @@ body.af-open { overflow: hidden; }
   .af-rowtable-head { display: none; }
   .af-rowtable-row, .af-rowtable.is-editing .af-rowtable-row { grid-template-columns: minmax(0, 1fr); padding: 6px 0; }
   .af-rowtable-row > .af-rowtable-cell + .af-rowtable-cell, .af-rowtable-row > .af-rowtable-ctl { border-left: 0; }
-  .af-rowtable-cell { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; padding: 4px 12px; }
+  .af-rowtable-cell { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; align-items: center; padding: 4px 12px; }
   .af-rowtable-cell::before { content: attr(data-label); font-size: 11.5px; font-weight: 600; color: var(--text-label); line-height: 1.3; }
   .af-rowtable-cell .af-note { grid-column: 2; }
   .af-rowtable-ctl { justify-content: flex-end; }
@@ -408,10 +475,13 @@ body.af-open { overflow: hidden; }
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .af-scroll { overflow: visible !important; background: #fff; }
-  .af-bar, .af-side, .af-banner, .af-switch, .af-photo-btn, .af-rowtable-ctl, .af-rowtable-add, .af-chip, .af-prov, .af-track-go,
-  .af-split-hint, .af-note.is-error, .af-doc .ui-file-row-actions, .af-extract, .af-section-missing { display: none !important; }
+  .af-bar, .af-side, .af-scroll, .af-drawer-shade, .af-drawer-head, .af-banner, .af-photo-btn, .af-rowtable-ctl, .af-rowtable-add, .af-chip, .af-prov, .af-track-go,
+  .af-split-hint, .af-note.is-error, .af-extract, .af-section-missing, .af-assign-wrap, .af-clockbar, .af-notes { display: none !important; }
   .af-layout { display: block; max-width: none; padding: 0; margin: 0; }
-  .af-main { width: 210mm; }
+  /* Whatever is on screen, only the paper form prints: it is in the drawer while that is open and in a print-only place otherwise. */
+  .af-print-sheet { display: block; width: 210mm; }
+  .af-drawer { position: static; display: block; width: 210mm; max-width: none; height: auto; background: #fff; border: 0; box-shadow: none; animation: none; }
+  .af-drawer-body { overflow: visible; padding: 0; height: auto; background: #fff; }
   .af-sheet { width: 210mm; max-width: none; min-height: 0; margin: 0; padding: 11mm 11mm; border: 0; border-radius: 0; box-shadow: none; background: #fff; }
   .af-sheet::after { display: none; }
   .af-logo.is-light { display: block !important; }
@@ -421,26 +491,22 @@ body.af-open { overflow: hidden; }
   .af-section-head h2 { color: #fff !important; }
   .af-section-aside { display: none; }
   .af-cell-head, .af-rowtable-head, .af-track-head { background: #f1f1f1 !important; }
-  .af-cell.is-missing .af-value-cell, .af-doc.is-missing, .af-rowtable-empty { background: #fff !important; box-shadow: none !important; }
+  .af-cell.is-missing .af-value-cell, .af-rowtable-empty { background: #fff !important; box-shadow: none !important; }
   .af-empty { color: #777; }
   .af-rowtable-row, .af-track-row, .af-cell { break-inside: avoid; page-break-inside: avoid; }
   .af-rowtable-row.is-print-blank { display: grid; min-height: 28px; }
   .af-track-row { box-shadow: none !important; background: #fff !important; }
   .af-status { background: none !important; padding: 0; color: #000 !important; }
   .af-box { color: #000 !important; }
-  .af-docs { flex-direction: column; }
-  .af-doc .ui-file-row, .af-doc .ui-file-row-main { padding: 0; border: 0; background: none; box-shadow: none; }
-  .af-sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 28px; break-inside: avoid; }
+    .af-sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 28px; break-inside: avoid; }
   .af-sign div { border-top: 1px solid #000; padding-top: 3px; font-size: 10px; text-align: center; color: #333; }
 }
 
 /* Order switcher and server warnings */
 .af-banner.is-warn { list-style: none; background: var(--warning-fill); border-color: var(--warning-edge); color: var(--warning-ink); }
 .af-banner.is-warn li + li { margin-top: 4px; }
-.af-switch { display: flex; align-items: center; gap: 10px; max-width: 900px; margin: 0 auto 14px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
-.af-switch select { flex: 1 1 auto; min-width: 0; height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-control); background: var(--bg-card); color: var(--text-main); font: inherit; font-weight: 500; }
 .af-box.is-na { color: var(--border-hover); opacity: .6; }
-@media print { .af-switch, .af-banner { display: none !important; } }
+@media print { .af-banner { display: none !important; } }
 
 /* The form embedded in another page (Add candidate): same look, no full-screen shell. */
 .af.af-embed { position: static; inset: auto; z-index: auto; display: block; background: transparent; font-size: 14px; }
@@ -520,14 +586,14 @@ body.af-open { overflow: hidden; }
 .af-sk-lines { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .af-sk-head { background: var(--tint-3); }
 .af-sk-body { padding: 0; }
-.af-sk-row { display: grid; grid-template-columns: 148px 1fr 148px 1fr; min-height: 44px; border-top: 1px solid var(--af-line); }
+.af-sk-row { display: grid; grid-template-columns: 160px 1fr 160px 1fr; min-height: 44px; border-top: 1px solid var(--af-line); }
 .af-sk-row:first-child { border-top: 0; }
 .af-sk-label { display: flex; align-items: center; padding: 0 12px; background: var(--af-label-bg); border-right: 1px solid var(--af-line); }
 .af-sk-value { display: flex; align-items: center; padding: 0 12px; }
 .af-sk-row > .af-sk-value + .af-sk-label { border-left: 1px solid var(--af-line); }
 @media screen and (max-width: 760px) { .af-sk-row { grid-template-columns: 118px 1fr; } .af-sk-row > :nth-child(n+3) { display: none; } }
 @media (prefers-reduced-motion: reduce) { .af-sk { animation: none; } }
-.af-error { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 480px; margin: 72px auto; padding: 32px 28px; text-align: center; background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 14px; box-shadow: var(--shadow-card); }
+.af-error { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 480px; margin: 72px auto; padding: 32px 24px; text-align: center; background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 16px; box-shadow: var(--shadow-card); }
 .af-error-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 14px; background: var(--warning-fill); color: var(--warning-ink); border: 1px solid var(--warning-edge); }
 .af-error-icon svg { width: 24px; height: 24px; }
 .af-error h2 { margin: 6px 0 0; font-size: 18px; font-weight: 700; }
@@ -535,8 +601,6 @@ body.af-open { overflow: hidden; }
 .af-error-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
 @media print { .af-error, .af-sk { display: none; } }
 .af-age { color: var(--text-muted); font-size: 12.5px; }
-.af-doc .ui-file-row-title, .af-doc .ui-file-row-icon { display: none; }
-.af-doc .ui-file-row-main { gap: 10px; }
 .afp-interest-card.is-gray { --tone: #64748b; }
 .afp-interest-chip.is-gray { --tone: #64748b; }
 @media screen and (max-width: 900px) { .af-sheet { padding: 24px 22px 26px; } }
@@ -544,13 +608,17 @@ body.af-open { overflow: hidden; }
 /* Top bar: every button the same height and radius, the Live pill on the same axis */
 .af-bar { align-items: center; }
 .af-bar-actions { align-items: center; }
-.af-bar-actions .ui-button { height: 38px; border-radius: 8px; padding: 0 14px; }
+.af-bar-actions .ui-button { height: 40px; border-radius: 8px; padding: 0 16px; }
 .af-bar-actions .ui-button[disabled] { opacity: .55; }
 .af-live { height: 28px; align-self: center; }
 .af-missing button { justify-content: center; width: 100%; }
+.af-missing:not(.has-action) li > span { grid-column: 2; }
 @media screen and (max-width: 760px) {
   .af-cells-3 > .af-cell { grid-template-columns: 118px minmax(0, 1fr); }
   .af-cells-3 > .af-cell > .af-cell-head { border-bottom: 0; padding-top: 0; padding-bottom: 0; }
 }
 .af-pre { white-space: pre-wrap; }
 .afp-phone { min-width: 0; width: 100%; }
+
+/* The loading skeleton keeps the ring and its lines side by side. */
+.af-card.af-complete:has(> .af-sk-ring) { flex-direction: row; align-items: center; gap: 16px; }

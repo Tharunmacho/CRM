@@ -3,9 +3,22 @@ import { ApiError } from '@/shared/api/client'
 import { classifyLoadError, type LoadErrorView } from './load-error'
 import { liveInterval } from '@/shared/state/live'
 import { isOtherRecord } from '@/shared/state/live-events'
-import { FORM_LIVE_TOPICS, loadApplicationForm, saveApplicationForm, uploadFormDocument, type FormTarget } from './form-api'
-import { buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, validateDraft } from './form-model'
-import type { ApplicationFormData, DocumentKind, FormDraft } from './types'
+import { FORM_LIVE_TOPICS, addFeedback, deleteFeedback, loadApplicationForm, saveApplicationForm, saveAssignment, uploadFormDocument, type FeedbackDraft, type FormTarget } from './form-api'
+import { applyAssignmentChange, applyOptimisticUploads, buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, validateDraft } from './form-model'
+import type { ApplicationFormData, AssignmentChange, AssignmentData, DocumentKind, FormDraft } from './types'
+
+/** What the screen adds to the assignment block of an older server; it is told who may work the candidate and which job the form shows. */
+export type AssignmentCompleter = (assignment: AssignmentData, context: { canEdit: boolean; activeOrderId: string }) => AssignmentData
+const contextOf = (form: ApplicationFormData) => ({ canEdit: form.candidate.canEdit, activeOrderId: form.application?.orderId ?? '' })
+
+/** The five fields of the assignment block, for the per-field saving flag and error. */
+export type AssignmentField = 'client' | 'job' | 'source' | 'agency' | 'recruiter'
+
+/** Shown when the server does not know the assignment route: it is an older build than this screen. */
+export const RESTART_MESSAGE = 'Restart the CRM server to save this change'
+export const NOTES_RESTART_MESSAGE = 'Restart the CRM server to save notes'
+
+const messageOf = (cause: unknown, fallback: string): string => (cause instanceof ApiError || cause instanceof Error ? cause.message : fallback)
 
 const POLL_MS = 30_000
 const READING_POLL_MS = 4_000
@@ -17,7 +30,7 @@ const LIVE_WINDOW_MS = 1_200
  * Loads the form, keeps it current (live topics, plus a fast poll while a document is being read), and holds the
  * in-place edit state. A refresh that arrives mid-edit only replaces the fields the person has not touched.
  */
-export function useApplicationForm(candidateId: string, target: FormTarget) {
+export function useApplicationForm(candidateId: string, target: FormTarget, completeAssignment?: AssignmentCompleter) {
   const { orderId, applicationId } = target
   const [form, setForm] = useState<ApplicationFormData | null>(null)
   const [draft, setDraft] = useState<FormDraft | null>(null)
@@ -27,9 +40,23 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [justUpdated, setJustUpdated] = useState<string[]>([])
+  /** Files being sent, by slot: shown as uploaded at once, so the checklist and the percentage move before the answer lands. */
+  const [pendingUploads, setPendingUploads] = useState<Record<DocumentKind, { fileName: string; sizeKb: number }>>({})
+  /** The assignment block with the change being saved already applied. */
+  const [assignmentDraft, setAssignmentDraft] = useState<AssignmentData | null>(null)
+  const [assignmentSaving, setAssignmentSaving] = useState<Partial<Record<AssignmentField, boolean>>>({})
+  const [assignmentErrors, setAssignmentErrors] = useState<Partial<Record<AssignmentField, string>>>({})
+  const [feedbackBusy, setFeedbackBusy] = useState(false)
+  const [feedbackError, setFeedbackError] = useState('')
+  const assignmentInFlight = useRef(0)
+  /** Fills in what an older server leaves out of the assignment block (options, permissions); the server's own values win. */
+  const completeRef = useRef(completeAssignment)
+  completeRef.current = completeAssignment
   const baseRef = useRef<FormDraft | null>(null)
   const draftRef = useRef<FormDraft | null>(null)
+  const baseFormRef = useRef<ApplicationFormData | null>(null)
   draftRef.current = draft
+  baseFormRef.current = form
   const editingRef = useRef(false)
   editingRef.current = editing
   const savingRef = useRef(false)
@@ -86,6 +113,7 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
     lastSignature.current = ''
     quietPolls.current = 0
     setForm(null); setDraft(null); setEditing(false); setError(null); setSaveError('')
+    setPendingUploads({}); setAssignmentDraft(null); setAssignmentSaving({}); setAssignmentErrors({}); setFeedbackError('')
     void reload(false)
     return () => { seq.current += 1 }
   }, [reload])
@@ -110,8 +138,15 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
 
   const errors = useMemo(() => (draft ? validateDraft(draft) : {}), [draft])
   const dirty = Boolean(baseRef.current && draft && isDirty(baseRef.current, draft))
-  /** Completeness of the form as it stands, so the checklist follows what is typed before it is saved. */
-  const completeness = useMemo(() => (form && draft ? completenessOf(draft, form.documents) : null), [form, draft])
+  /** The form as the person should see it: uploads in flight counted, the assignment change being saved applied. */
+  const view = useMemo(() => {
+    if (!form) return null
+    const documents = applyOptimisticUploads(form.documents, pendingUploads)
+    if (documents === form.documents && !assignmentDraft && !completeAssignment) return form
+    return { ...form, documents, assignment: assignmentDraft ?? (completeAssignment ? completeAssignment(form.assignment, contextOf(form)) : form.assignment) }
+  }, [form, pendingUploads, assignmentDraft, completeAssignment])
+  /** Completeness of the form as it stands, so the checklist follows what is typed (and uploaded) before it is saved. */
+  const completeness = useMemo(() => (view && draft ? completenessOf(draft, view.documents) : null), [view, draft])
 
   const save = useCallback(async (): Promise<boolean> => {
     const base = baseRef.current
@@ -142,10 +177,73 @@ export function useApplicationForm(candidateId: string, target: FormTarget) {
   }, [form])
 
   const upload = useCallback(async (kind: DocumentKind, file: File) => {
-    const answered = await uploadFormDocument(candidateId, kind, file)
-    if (answered) apply(answered) // shows "Reading…" at once; the finished reading arrives as a live change
-    else await reload(true)
+    setPendingUploads((current) => ({ ...current, [kind]: { fileName: file.name, sizeKb: Math.max(1, Math.round(file.size / 1024)) } }))
+    try {
+      const answered = await uploadFormDocument(candidateId, kind, file)
+      if (answered) {
+        lastSignature.current = JSON.stringify(answered)
+        apply(answered) // shows "Reading…" at once; the finished reading arrives as a live change
+      } else await reload(true)
+    } finally {
+      setPendingUploads((current) => { const { [kind]: _done, ...rest } = current; return rest })
+    }
   }, [candidateId, apply, reload])
 
-  return { form, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, reading, completeness }
+  /**
+   * Save one change to the assignment block. The block shows the new value at once; the server's answer (the whole form) replaces it,
+   * and a refusal puts the old value back and keeps the server's sentence next to the field. Resolves to the new form, or null.
+   */
+  const changeAssignment = useCallback(async (field: AssignmentField, change: AssignmentChange): Promise<ApplicationFormData | null> => {
+    const servedForm = baseFormRef.current
+    const current = assignmentDraft ?? (servedForm ? (completeRef.current ? completeRef.current(servedForm.assignment, contextOf(servedForm)) : servedForm.assignment) : null)
+    if (!current) return null
+    assignmentInFlight.current += 1
+    setAssignmentErrors((errors) => ({ ...errors, [field]: '' }))
+    setAssignmentSaving((saving) => ({ ...saving, [field]: true }))
+    setAssignmentDraft(applyAssignmentChange(current, change))
+    try {
+      const saved = await saveAssignment(candidateId, change)
+      lastSignature.current = JSON.stringify(saved)
+      apply(saved)
+      return saved
+    } catch (cause) {
+      // A server that has no such route yet answers 404 or 405: one calm sentence, and the old value is back (the draft is cleared below).
+      const outdated = cause instanceof ApiError && (cause.status === 405 || (cause.status === 404 && /^not found$/i.test(cause.message.trim())))
+      setAssignmentErrors((errors) => ({ ...errors, [field]: outdated ? RESTART_MESSAGE : messageOf(cause, 'This change could not be saved.') }))
+      return null
+    } finally {
+      assignmentInFlight.current -= 1
+      if (assignmentInFlight.current === 0) setAssignmentDraft(null)
+      setAssignmentSaving((saving) => ({ ...saving, [field]: false }))
+    }
+  }, [candidateId, apply, assignmentDraft])
+
+  const sendFeedback = useCallback(async (note: FeedbackDraft): Promise<boolean> => {
+    setFeedbackBusy(true); setFeedbackError('')
+    try {
+      const saved = await addFeedback(candidateId, { ...note, applicationId: note.applicationId ?? baseFormRef.current?.application?.id })
+      lastSignature.current = JSON.stringify(saved)
+      apply(saved)
+      return true
+    } catch (cause) {
+      // An older server has no notes route: one calm sentence, and the typed text stays in the box (the composer keeps it when this answers false).
+      const outdated = cause instanceof ApiError && (cause.status === 405 || (cause.status === 404 && /^not found$/i.test(cause.message.trim())))
+      setFeedbackError(outdated ? NOTES_RESTART_MESSAGE : messageOf(cause, 'The note could not be saved.'))
+      return false
+    } finally {
+      setFeedbackBusy(false)
+    }
+  }, [candidateId, apply])
+
+  const removeFeedback = useCallback(async (feedbackId: string): Promise<void> => {
+    setFeedbackError('')
+    try {
+      const saved = await deleteFeedback(candidateId, feedbackId)
+      if (saved) { lastSignature.current = JSON.stringify(saved); apply(saved) } else await reload(true)
+    } catch (cause) {
+      setFeedbackError(messageOf(cause, 'The note could not be deleted.'))
+    }
+  }, [candidateId, apply, reload])
+
+  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
 }

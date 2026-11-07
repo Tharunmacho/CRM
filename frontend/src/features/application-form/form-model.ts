@@ -6,9 +6,19 @@
  * The API payload (docs/workflows/application-form-contract.md) is read through `normalizeForm`, which tolerates
  * absent parts: an application with no order, a candidate with no passport yet, or an older server.
  */
+import { DOCUMENT_SLOTS, documentExpected, documentLabel, documentSlot } from '@/shared/model/document-slots'
 import type {
   ApplicationFormData,
   ApplicationRef,
+  AssignmentClientOption,
+  AssignmentData,
+  FeedbackData,
+  FeedbackItem,
+  FeedbackKind,
+  FeedbackReason,
+  AssignmentChange,
+  OptionalDocument,
+  StageClock,
   DocumentKind,
   DocumentSlot,
   EducationRow,
@@ -52,10 +62,10 @@ export const SECTION_TITLES: Record<number, string> = {
   3: 'Educational details',
   4: 'Previous experience',
   5: 'Documents',
-  6: 'Client & recruitment details',
+  6: 'Client and recruitment details',
   7: 'Recruitment process tracking',
-  8: 'Assessment & preferences',
-  9: 'Follow-up & notes',
+  8: 'Assessment and preferences',
+  9: 'Follow-up and notes',
 }
 
 
@@ -63,50 +73,70 @@ const field = (def: Omit<FieldDef, 'counted'> & { counted?: boolean }): FieldDef
 
 /** Section 1, in the paper form's order (WhatsApp and e-mail are extras, placed last so the pairs stay aligned). */
 export const PERSONAL_FIELDS: FieldDef[] = [
-  field({ path: 'personal.candidateName', label: 'Candidate Name', section: 1, kind: 'text', required: true, from: 'resume' }),
-  field({ path: 'personal.fatherName', label: "Father's Name", section: 1, kind: 'text', required: true, from: 'passport' }),
-  field({ path: 'personal.dateOfBirth', label: 'Date of Birth', section: 1, kind: 'date', required: true, from: 'passport' }),
-  field({ path: 'personal.maritalStatus', label: 'Marital Status', section: 1, kind: 'select', required: true, from: 'resume', category: 'marital_status' }),
+  field({ path: 'personal.candidateName', label: 'Candidate name', section: 1, kind: 'text', required: true, from: 'resume' }),
+  field({ path: 'personal.fatherName', label: "Father's name", section: 1, kind: 'text', required: true, from: 'passport' }),
+  field({ path: 'personal.dateOfBirth', label: 'Date of birth', section: 1, kind: 'date', required: true, from: 'passport' }),
+  field({ path: 'personal.maritalStatus', label: 'Marital status', section: 1, kind: 'select', required: true, from: 'resume', category: 'marital_status' }),
   field({ path: 'personal.gender', label: 'Gender', section: 1, kind: 'select', required: true, from: 'passport', category: 'gender' }),
   field({ path: 'personal.nationality', label: 'Nationality', section: 1, kind: 'text', required: true, from: 'passport' }),
-  field({ path: 'personal.languagesKnown', label: 'Language Known', section: 1, kind: 'languages', required: true, from: 'resume' }),
-  field({ path: 'personal.mobileNumber', label: 'Mobile Number', section: 1, kind: 'tel', required: true, from: 'resume' }),
-  field({ path: 'personal.whatsapp', label: 'WhatsApp Number', section: 1, kind: 'tel', required: false, from: 'resume' }),
-  field({ path: 'personal.email', label: 'E-Mail', section: 1, kind: 'email', required: false, from: 'resume' }),
-  field({ path: 'personal.currentAddress', label: 'Current Address', section: 1, kind: 'textarea', required: true, from: 'resume' }),
+  field({ path: 'personal.languagesKnown', label: 'Languages known', section: 1, kind: 'languages', required: true, from: 'resume' }),
+  field({ path: 'personal.mobileNumber', label: 'Mobile number', section: 1, kind: 'tel', required: true, from: 'resume' }),
+  field({ path: 'personal.whatsapp', label: 'WhatsApp number', section: 1, kind: 'tel', required: false, from: 'resume' }),
+  field({ path: 'personal.email', label: 'Email address', section: 1, kind: 'email', required: false, from: 'resume' }),
+  field({ path: 'personal.currentAddress', label: 'Current address', section: 1, kind: 'textarea', required: true, from: 'resume' }),
 ]
 
 export const PASSPORT_FIELDS: FieldDef[] = [
-  field({ path: 'passport.passportNumber', label: 'Passport Number', section: 2, kind: 'text', required: true, from: 'passport' }),
-  field({ path: 'passport.placeOfIssue', label: 'Place of Issue', section: 2, kind: 'text', required: true, from: 'passport' }),
-  field({ path: 'passport.issueDate', label: 'Issue Date', section: 2, kind: 'date', required: true, from: 'passport' }),
-  field({ path: 'passport.expiryDate', label: 'Expiry Date', section: 2, kind: 'date', required: true, from: 'passport' }),
+  field({ path: 'passport.passportNumber', label: 'Passport number', section: 2, kind: 'text', required: true, from: 'passport' }),
+  field({ path: 'passport.placeOfIssue', label: 'Place of issue', section: 2, kind: 'text', required: true, from: 'passport' }),
+  field({ path: 'passport.issueDate', label: 'Date of issue', section: 2, kind: 'date', required: true, from: 'passport' }),
+  field({ path: 'passport.expiryDate', label: 'Date of expiry', section: 2, kind: 'date', required: true, from: 'passport' }),
 ]
 
 /** Total and the history are counted; India and abroad are on the paper form and highlighted when empty, but not counted. */
 export const EXPERIENCE_FIELDS: FieldDef[] = [
-  field({ path: 'experience.totalExperience', label: 'Total Experience', section: 4, kind: 'years', required: true, from: 'resume' }),
+  field({ path: 'experience.totalExperience', label: 'Total experience', section: 4, kind: 'years', required: true, from: 'resume' }),
   field({ path: 'experience.experienceIndia', label: 'Experience in India', section: 4, kind: 'years', required: true, counted: false, from: 'resume' }),
-  field({ path: 'experience.experienceAbroad', label: 'Experience Abroad', section: 4, kind: 'years', required: true, counted: false, from: 'resume' }),
+  field({ path: 'experience.experienceAbroad', label: 'Experience abroad', section: 4, kind: 'years', required: true, counted: false, from: 'resume' }),
 ]
 
 export const EDUCATION_COLUMNS = [
-  { key: 'level', label: 'Educational Level / Course', placeholder: 'e.g. B.Tech Mechanical' },
-  { key: 'passedYear', label: 'Passed Year', placeholder: 'YYYY' },
-  { key: 'institute', label: 'Institute Name & Address', placeholder: 'Institute, city' },
+  { key: 'level', label: 'Qualification or course', placeholder: 'For example B.Tech Mechanical' },
+  { key: 'passedYear', label: 'Year of passing', placeholder: 'YYYY' },
+  { key: 'institute', label: 'Name and address of institution', placeholder: 'Name of institution, address' },
 ] as const
 
+/** The education table of the form itself: the server keeps one text for the institution, the form shows it as two inputs. */
+export const EDUCATION_FORM_COLUMNS = [
+  { key: 'level', label: 'Qualification or course', placeholder: 'For example B.Tech Mechanical' },
+  { key: 'passedYear', label: 'Year of passing', placeholder: 'YYYY' },
+  { key: 'institutionName', label: 'Name of institution', placeholder: 'For example ABC College' },
+  { key: 'institutionAddress', label: 'Address of institution', placeholder: 'For example Chennai' },
+] as const
+
+/** "ABC College, Chennai" -> name "ABC College", address "Chennai". The first comma separates them; no comma means a name only. */
+export function splitInstitution(text: string): { name: string; address: string } {
+  const at = text.indexOf(',')
+  if (at < 0) return { name: text, address: '' }
+  return { name: text.slice(0, at), address: text.slice(at + 1).replace(/^\s/, '') }
+}
+
+/** The reverse. Nothing is trimmed here, so a space typed at the end of a box is not eaten while the person is still typing. */
+export function joinInstitution(name: string, address: string): string {
+  return address === '' ? name : `${name}, ${address}`
+}
+
 export const EXPERIENCE_COLUMNS = [
-  { key: 'company', label: 'Company Name', placeholder: 'Company' },
+  { key: 'company', label: 'Name of company', placeholder: 'Company' },
   { key: 'designation', label: 'Designation', placeholder: 'Designation' },
   { key: 'country', label: 'Country', placeholder: 'Country' },
-  { key: 'period', label: 'Period / Duration', placeholder: 'e.g. Jan 2018 - Mar 2020' },
+  { key: 'period', label: 'Period of employment', placeholder: 'For example Jan 2018 to Mar 2020' },
 ] as const
 
 export const RECRUITMENT_FIELDS = [
   { key: 'client', label: 'Client' },
   { key: 'country', label: 'Country' },
-  { key: 'position', label: 'Position' },
+  { key: 'position', label: 'Job' },
   { key: 'source', label: 'Source' },
   { key: 'recruiter', label: 'Recruiter' },
 ] as const
@@ -121,19 +151,20 @@ export const ALL_EDITABLE_FIELDS: FieldDef[] = [...PERSONAL_FIELDS, ...PASSPORT_
  */
 export const EXTRA_FIELDS: FieldDef[] = [
   field({ path: 'screening.nativePlace', label: 'Native place', section: 1, kind: 'text', required: false }),
-  field({ path: 'screening.familyMemberNumber', label: 'Family contact no.', section: 1, kind: 'tel', required: false }),
-  field({ path: 'screening.jobPreference', label: 'Job preference', section: 8, kind: 'list', required: false }),
+  field({ path: 'screening.familyMemberNumber', label: 'Contact number of a family member', section: 1, kind: 'tel', required: false }),
+  field({ path: 'screening.jobPreference', label: 'Preferred job titles', section: 8, kind: 'list', required: false }),
   field({ path: 'screening.skills', label: 'Skills', section: 8, kind: 'list', required: false }),
-  field({ path: 'screening.countryPreference', label: 'Country looking for', section: 8, kind: 'text', required: false }),
-  field({ path: 'screening.jobDurationPreference', label: 'Job duration', section: 8, kind: 'select', required: false, category: 'job_duration_preference' }),
+  field({ path: 'screening.countryPreference', label: 'Countries preferred', section: 8, kind: 'text', required: false }),
+  field({ path: 'screening.jobDurationPreference', label: 'Preferred job duration', section: 8, kind: 'select', required: false, category: 'job_duration_preference' }),
   field({ path: 'screening.bestTimeToContact', label: 'Best time to call', section: 8, kind: 'select', required: false, category: 'best_time_to_contact' }),
   field({ path: 'screening.serviceChargesStatus', label: 'Service charges', section: 8, kind: 'select', required: false, category: 'service_charges_status' }),
   field({ path: 'screening.interestLevel', label: 'Interest level', section: 8, kind: 'text', required: false }),
-  field({ path: 'screening.nextFollowUpDate', label: 'Next follow-up date', section: 9, kind: 'date', required: false }),
+  field({ path: 'screening.nextFollowUpDate', label: 'Date of next follow-up', section: 9, kind: 'date', required: false }),
 ]
 
-export const DOCUMENT_KINDS: DocumentKind[] = ['resume', 'passport', 'photo']
-export const DOCUMENT_LABELS: Record<DocumentKind, string> = { resume: 'Resume', passport: 'Passport', photo: 'Passport-size photo' }
+/** The slots in the contract's order. The list itself (labels, hints, rules) lives in shared/model/document-slots.ts. */
+export const DOCUMENT_KINDS: DocumentKind[] = DOCUMENT_SLOTS.map((entry) => entry.slot)
+export const documentName = (slot: DocumentKind): string => documentLabel(slot)
 
 /* ------------------------------------------------------------------ Tracking */
 
@@ -255,19 +286,57 @@ function normaliseExtraction(raw: unknown): Extraction | null {
     kept: list(value.kept).map(str),
     kindsFound: list(value.kindsFound).map(str),
     updatedAt: str(value.updatedAt),
+    ...(value.jobId != null ? { jobId: str(value.jobId) } : {}),
+    ...(value.coverage != null ? { coverage: value.coverage } : {}),
+    ...(Array.isArray(value.unmapped) && value.unmapped.length ? { unmapped: value.unmapped } : {}),
   }
 }
 
-function normaliseSlot(slot: DocumentKind, raw: unknown): DocumentSlot {
+/**
+ * One document slot. The server's own `required` wins; an older server that does not send it (or the slot at all) gets the
+ * rule from shared/model/document-slots.ts for the application's current stage, so the checklist is complete either way.
+ */
+function normaliseSlot(slot: DocumentKind, raw: unknown, stage: number | null): DocumentSlot {
   const value = rec(raw)
+  const entry = documentSlot(slot)
   const current = normaliseDocument(value.current)
+  const files = list(value.files).map(normaliseDocument).filter((item): item is FormDocument => item !== null)
+  const multiple = value.multiple === true || entry?.multiple === true
   return {
     slot,
-    label: str(value.label) || DOCUMENT_LABELS[slot],
-    uploaded: value.uploaded === true || current !== null,
+    // The shared label always wins: an older server still says "Passport size photo" for the photo.
+    label: entry?.label || str(value.label) || documentLabel(slot),
+    hint: str(value.hint) || entry?.hint || '',
+    uploaded: value.uploaded === true || current !== null || files.length > 0,
     current,
     versions: num(value.versions, current ? 1 : 0),
     extraction: normaliseExtraction(value.extraction),
+    required: typeof value.required === 'boolean' ? value.required : entry ? documentExpected(entry, stage) : false,
+    requiredFromStage: value.requiredFromStage == null ? (entry?.fromStage ?? null) : num(value.requiredFromStage),
+    multiple,
+    files,
+    listed: raw != null && typeof raw === 'object',
+  }
+}
+
+/** The slots in display order: the server's `documentOrder`, else the contract's, then any slot the lists above do not know. */
+function normaliseDocuments(root: Record<string, unknown>, stage: number | null) {
+  const documents = rec(root.documents)
+  const sent = list(root.documentOrder).map(str).filter(Boolean)
+  const order = [...new Set([...(sent.length ? sent : DOCUMENT_KINDS), ...Object.keys(documents)])]
+  const out: Record<DocumentKind, DocumentSlot> = {}
+  for (const slot of order) {
+    const raw = slot === 'photo' ? (documents.photo ?? (root.photo ? { uploaded: true, current: root.photo } : null)) : documents[slot]
+    out[slot] = normaliseSlot(slot, raw, stage)
+  }
+  const optional = list(root.optionalDocuments).map((item): OptionalDocument => {
+    const value = rec(item)
+    return { slot: str(value.slot), label: documentSlot(str(value.slot))?.label || str(value.label) || documentLabel(str(value.slot)), uploaded: value.uploaded === true }
+  }).filter((item) => item.slot)
+  return {
+    documents: out,
+    documentOrder: order,
+    optionalDocuments: optional.length || 'optionalDocuments' in root ? optional : order.filter((slot) => !out[slot].required && out[slot].requiredFromStage == null).map((slot) => ({ slot, label: out[slot].label, uploaded: out[slot].uploaded })),
   }
 }
 
@@ -346,7 +415,6 @@ export function normalizeForm(raw: unknown): ApplicationFormData {
   const expiry = rec(passport.expiry)
   const experience = rec(root.experience)
   const recruitment = rec(root.recruitment)
-  const documents = rec(root.documents)
   const candidate = rec(root.candidate)
   const header = rec(root.header)
   const application = normaliseApplication(root.application)
@@ -394,15 +462,13 @@ export function normalizeForm(raw: unknown): ApplicationFormData {
         return { rowId: newRowId(), company: str(row.company), designation: str(row.designation), country: str(row.country), period: str(row.period) }
       }),
     },
-    documents: {
-      resume: normaliseSlot('resume', documents.resume),
-      passport: normaliseSlot('passport', documents.passport),
-      photo: normaliseSlot('photo', documents.photo ?? (root.photo ? { uploaded: true, current: root.photo } : null)),
-    },
+    ...normaliseDocuments(root, application ? application.currentStage : null),
+    assignment: normaliseAssignment(root.assignment, rec(root.recruitment), application),
+    feedback: normaliseFeedback(root.feedback),
     recruitment: {
       client: str(recruitment.client), clientContact: str(recruitment.clientContact), country: str(recruitment.country),
       position: str(recruitment.position), orderRef: str(recruitment.orderRef), source: str(recruitment.source),
-      sourceDetail: str(recruitment.sourceDetail), recruiter: personName(recruitment.recruiter),
+      sourceDetail: cleanAgencyName(str(recruitment.sourceDetail)), recruiter: personName(recruitment.recruiter),
     },
     tracking: normaliseTracking(root.tracking, application),
     extras: readExtras(root),
@@ -410,9 +476,18 @@ export function normalizeForm(raw: unknown): ApplicationFormData {
     call: readCall(root),
     completeness: { percent: 0, filled: 0, total: 0, missing: [] },
     fieldSources,
-    warnings: list(root.warnings).map(str).filter(Boolean),
+    // The three experience totals are independent numbers; a server that still words a mismatch as a warning is not echoed.
+    warnings: list(root.warnings).map(str).filter((text) => text && !/^Experience in India plus experience abroad does not match/i.test(text)),
     processing: root.processing === true,
     aadhaarMasked: maskedAadhaar(rec(root.aadhaar).maskedNumber),
+  }
+
+  if (root.deployment && typeof root.deployment === 'object') {
+    const deployment = rec(root.deployment)
+    form.deployment = {
+      ready: deployment.ready === true,
+      missing: list(deployment.missing).map((item) => { const value = rec(item); return { slot: str(value.slot), label: documentSlot(str(value.slot))?.label || str(value.label) || documentLabel(str(value.slot)) } }).filter((item) => item.slot),
+    }
   }
 
   const serverCompleteness = rec(root.completeness)
@@ -477,7 +552,7 @@ export function toDraft(form: (FormDraft | Pick<ApplicationFormData, 'personal' 
 export function labelForPath(path: string): string {
   const found = ALL_EDITABLE_FIELDS.find((item) => item.path === path)
   if (found) return found.label
-  if (path.startsWith('documents.')) return DOCUMENT_LABELS[path.slice(10) as DocumentKind] ?? path
+  if (path.startsWith('documents.')) return documentLabel(path.slice(10))
   if (path === 'education') return 'Educational details'
   if (path === 'experience.history') return 'Previous experience'
   return path
@@ -504,18 +579,28 @@ export function valueAt(source: FormDraft, path: string): unknown {
 
 export interface Completeness { percent: number; filled: number; total: number; missing: MissingItem[] }
 
+/** The three slots every version of the server counts. */
+const ORIGINAL_SLOTS: DocumentKind[] = ['resume', 'passport', 'photo']
+
+type CountedDocument = Pick<DocumentSlot, 'uploaded'> & Partial<Pick<DocumentSlot, 'required' | 'listed' | 'label'>>
+
 /**
- * Completeness of the form as it stands (the draft, while editing), by the server's own rule: 19 counted items, the
- * nine personal fields, four passport fields, education, total experience, work history and the three documents.
+ * Completeness of the form as it stands (the draft, while editing), by the server's own rule: the nine personal fields, four
+ * passport fields, education, total experience, work history and every document the server marks `required` for this
+ * application's stage (contract v2 section 2). A newer slot an older server never sent (`listed: false`) is not counted, so the
+ * percentage never disagrees with the server.
  */
-export function completenessOf(draft: FormDraft, documents?: Record<DocumentKind, Pick<DocumentSlot, 'uploaded'>>): Completeness {
+export function completenessOf(draft: FormDraft, documents?: Record<DocumentKind, CountedDocument>): Completeness {
   const missing: MissingItem[] = []
   let total = 0
   if (documents) {
-    for (const kind of DOCUMENT_KINDS) {
+    for (const kind of Object.keys(documents)) {
+      const slot = documents[kind]
+      if (!slot || slot.required === false || (slot.listed === false && !ORIGINAL_SLOTS.includes(kind))) continue
       total += 1
-      if (!documents[kind]?.uploaded) {
-        missing.push({ key: `documents.${kind}`, label: DOCUMENT_LABELS[kind], section: 5, kind: 'document', message: `${DOCUMENT_LABELS[kind]} not uploaded` })
+      if (!slot.uploaded) {
+        const label = documentSlot(kind)?.label || slot.label || documentLabel(kind)
+        missing.push({ key: `documents.${kind}`, label, section: 5, kind: 'document', message: `${label} not uploaded` })
       }
     }
   }
@@ -603,7 +688,7 @@ export function describeExtraction(kind: DocumentKind, slot: Pick<DocumentSlot, 
 }
 
 export const isReading = (form: Pick<ApplicationFormData, 'documents' | 'processing'>): boolean =>
-  form.processing || DOCUMENT_KINDS.some((kind) => form.documents[kind]?.extraction?.status === 'processing')
+  form.processing || Object.values(form.documents).some((slot) => slot?.extraction?.status === 'processing')
 
 /* ------------------------------------------------------------------ Dates, age, experience */
 
@@ -639,16 +724,6 @@ export function yearsLabel(value: string | number | null | undefined): string {
   return `${number} ${number === 1 ? 'year' : 'years'}`
 }
 
-/** Total experience should cover India plus abroad; a mismatch is shown as a hint, not blocked. */
-export function experienceSplitHint(experience: { totalExperience: string; experienceIndia: string; experienceAbroad: string }): string {
-  const total = Number(experience.totalExperience)
-  const india = Number(experience.experienceIndia || 0)
-  const abroad = Number(experience.experienceAbroad || 0)
-  if (![total, india, abroad].every(Number.isFinite) || experience.totalExperience === '') return ''
-  if (india + abroad !== total && experience.experienceIndia !== '' && experience.experienceAbroad !== '') return `India (${india}) and abroad (${abroad}) do not add up to the total (${total}).`
-  return ''
-}
-
 /* ------------------------------------------------------------------ Validation */
 
 export type FormErrors = Record<string, string>
@@ -672,7 +747,7 @@ export function validateDraft(draft: FormDraft, now: Date = new Date()): FormErr
   if (passport.issueDate && !isRealDate(passport.issueDate)) errors['passport.issueDate'] = 'Enter a real date.'
   if (passport.expiryDate && !isRealDate(passport.expiryDate)) errors['passport.expiryDate'] = 'Enter a real date.'
   if (!errors['passport.issueDate'] && !errors['passport.expiryDate'] && passport.issueDate && passport.expiryDate && passport.expiryDate <= passport.issueDate) {
-    errors['passport.expiryDate'] = 'Expiry must be after the issue date.'
+    errors['passport.expiryDate'] = 'The date of expiry must be after the date of issue.'
   }
 
   for (const def of EXPERIENCE_FIELDS) {
@@ -794,4 +869,289 @@ export function rebaseDraft(oldBase: FormDraft, draft: FormDraft, newBase: FormD
 export function applicationFormHref(candidateId: string, orderId?: string | null, applicationId?: string | null): string {
   const query = applicationId ? `?application=${encodeURIComponent(applicationId)}` : orderId ? `?order=${encodeURIComponent(orderId)}` : ''
   return `/candidates/${encodeURIComponent(candidateId)}/application${query}`
+}
+
+/* ------------------------------------------------------------------ Documents: checklist, groups, progress */
+
+/** The pipeline stage names, to say "Needed from Offer letter" (contract section 3 of the form contract). */
+export const STAGE_NAMES: Record<number, string> = {
+  1: 'Prescreening', 2: 'Forwarded to client', 3: 'Interview scheduling', 4: 'Interview result', 5: 'Offer letter', 6: 'Medical',
+  7: 'Passport', 8: 'Advance payment', 9: 'Visa arrival', 10: 'Visa stamping', 11: 'Air ticket',
+}
+
+export type DocumentState = 'uploaded' | 'required' | 'later' | 'optional'
+
+/** What the status chip says. An uploaded document is Uploaded whatever else is true of it. */
+export function documentState(slot: Pick<DocumentSlot, 'uploaded' | 'required' | 'requiredFromStage'>): DocumentState {
+  if (slot.uploaded) return 'uploaded'
+  if (slot.required) return 'required'
+  return slot.requiredFromStage != null ? 'later' : 'optional'
+}
+
+export const DOCUMENT_STATE_LABELS: Record<DocumentState, string> = { uploaded: 'Uploaded', required: 'Required', later: 'Not needed yet', optional: 'Optional' }
+
+/** "Needed from Offer letter" for a document that is not asked for yet; empty for the others. */
+export function requiredByStageText(slot: Pick<DocumentSlot, 'required' | 'requiredFromStage'>): string {
+  if (slot.required || slot.requiredFromStage == null) return ''
+  return `Needed from ${STAGE_NAMES[slot.requiredFromStage] ?? `stage ${slot.requiredFromStage}`}`
+}
+
+export interface DocumentGroups { required: DocumentSlot[]; later: DocumentSlot[]; optional: DocumentSlot[] }
+
+/** Required now, then later in the process, then optional; the contract's order is kept inside each group. */
+export function groupDocuments(documents: Record<DocumentKind, DocumentSlot>, order: DocumentKind[] = Object.keys(documents)): DocumentGroups {
+  const groups: DocumentGroups = { required: [], later: [], optional: [] }
+  for (const key of order) {
+    const slot = documents[key]
+    if (!slot) continue
+    if (slot.required) groups.required.push(slot)
+    else if (slot.requiredFromStage != null) groups.later.push(slot)
+    else groups.optional.push(slot)
+  }
+  return groups
+}
+
+/** "3 of 5 required documents": uploaded and total among the required ones. */
+export function requiredDocumentProgress(documents: Record<DocumentKind, Pick<DocumentSlot, 'uploaded' | 'required'>>) {
+  const required = Object.values(documents).filter((slot) => slot.required)
+  const uploaded = required.filter((slot) => slot.uploaded).length
+  return { uploaded, total: required.length, percent: required.length ? Math.round((uploaded / required.length) * 100) : 100 }
+}
+
+export const sizeLabel = (sizeKb: number): string => (sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(sizeKb))} KB`)
+
+/**
+ * The documents as they will be once the uploads in flight land, so the checklist and the percentage move the moment a file
+ * is chosen. `pending` maps a slot to the file being sent; the real answer (or a failure) removes it again.
+ */
+export function applyOptimisticUploads(documents: Record<DocumentKind, DocumentSlot>, pending: Record<DocumentKind, { fileName: string; sizeKb: number }>): Record<DocumentKind, DocumentSlot> {
+  const keys = Object.keys(pending).filter((key) => documents[key])
+  if (!keys.length) return documents
+  const next = { ...documents }
+  for (const key of keys) {
+    const slot = documents[key]
+    const file: FormDocument = { attachmentId: `pending-${key}`, fileName: pending[key].fileName, sizeKb: pending[key].sizeKb, version: slot.versions + 1, url: '', uploadedAt: '', uploadedBy: '' }
+    next[key] = slot.multiple ? { ...slot, uploaded: true, files: [file, ...slot.files] } : { ...slot, uploaded: true, current: file, versions: slot.versions + 1 }
+  }
+  return next
+}
+
+/* ------------------------------------------------------------------ Assignment block */
+
+/** Automatic intake keeps a pointer to the message a candidate came from in the same field a person types an agency into. */
+const MACHINE_DETAIL = /^(email_message|whatsapp_message|person_review):/i
+
+/** An agency name as a person typed it; the intake pointers ("email_message:8a9c...") are not names and read as empty everywhere. */
+export function cleanAgencyName(name: string | null | undefined): string {
+  const text = (name ?? '').trim()
+  return MACHINE_DETAIL.test(text) ? '' : text
+}
+
+export const SOURCE_OPTIONS: { key: string; label: string }[] = [
+  { key: 'whatsapp', label: 'WhatsApp' },
+  { key: 'email', label: 'Email' },
+  { key: 'walk_in', label: 'Direct' },
+  { key: 'referral', label: 'Referral' },
+  { key: 'other', label: 'Other' },
+]
+
+/** "walk_in" -> "Direct". Anything else the server names is shown as it names it. */
+export function sourceLabel(key: string, fallback = ''): string {
+  return SOURCE_OPTIONS.find((item) => item.key === key)?.label ?? (fallback || key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()))
+}
+
+/** "Walk-in" / "WhatsApp" / "walk_in" -> the source key. */
+export function sourceKeyFrom(text: string): string {
+  const key = text.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (key === 'direct') return 'walk_in'
+  return SOURCE_OPTIONS.some((item) => item.key === key) ? key : key ? 'other' : ''
+}
+
+function normaliseAssignment(raw: unknown, recruitment: Record<string, unknown>, application: ApplicationRef | null): AssignmentData {
+  const supported = Boolean(raw) && typeof raw === 'object' && !Array.isArray(raw)
+  const value = rec(raw)
+  const can = rec(value.can)
+  const options = rec(value.options)
+  const pick = (item: unknown) => (item && typeof item === 'object' ? rec(item) : null)
+  const client = pick(value.client)
+  const job = pick(value.job)
+  const agency = pick(value.agency)
+  const recruiter = pick(value.recruiter)
+  const source = rec(value.source)
+
+  if (!supported) {
+    // An older server: show what the recruitment details already say, read only.
+    const clientName = str(recruitment.client)
+    const sourceKey = str(recruitment.sourceCode) || sourceKeyFrom(str(recruitment.source))
+    const detail = cleanAgencyName(str(recruitment.sourceDetail))
+    const hasJob = Boolean(application) || Boolean(str(recruitment.position))
+    return {
+      supported: false,
+      serverOptions: false,
+      serverCan: false,
+      client: clientName ? { id: '', name: clientName, companyId: '', companyName: clientName } : null,
+      job: hasJob ? { orderId: application?.orderId ?? '', ref: str(recruitment.orderRef) || application?.orderRef || '', title: str(recruitment.position) || application?.position || '', applicationId: application?.id ?? '', stage: application?.currentStage ?? 0, country: str(recruitment.country) || application?.country || '' } : null,
+      source: { key: sourceKey, label: sourceKey ? sourceLabel(sourceKey, str(recruitment.source)) : '' },
+      agency: detail ? { id: '', name: detail } : null,
+      recruiter: personName(recruitment.recruiter) ? { id: str(rec(recruitment.recruiter).id), name: personName(recruitment.recruiter) } : null,
+      can: { job: false, source: false, agency: false, recruiter: false },
+      options: { clients: [], agencies: [], recruiters: [] },
+    }
+  }
+  const sourceKey = str(source.key)
+  return {
+    supported: true,
+    serverOptions: Array.isArray(options.clients),
+    serverCan: Boolean(value.can) && typeof value.can === 'object',
+    client: client ? { id: str(client.id), name: str(client.name), companyId: str(client.companyId), companyName: str(client.companyName) } : null,
+    job: job ? { orderId: str(job.orderId), ref: str(job.ref), title: str(job.title), applicationId: str(job.applicationId), stage: num(job.stage), country: str(job.country) } : null,
+    source: { key: sourceKey, label: sourceKey ? sourceLabel(sourceKey, str(source.label)) : '' },
+    agency: agency && cleanAgencyName(str(agency.name)) ? { id: str(agency.id), name: cleanAgencyName(str(agency.name)) } : null,
+    recruiter: recruiter ? { id: str(recruiter.id), name: str(recruiter.name) } : null,
+    can: { job: can.job === true, source: can.source === true, agency: can.agency === true, recruiter: can.recruiter === true },
+    options: {
+      clients: list(options.clients).map((item): AssignmentClientOption => {
+        const entry = rec(item)
+        return {
+          id: str(entry.id), name: str(entry.name), companyId: str(entry.companyId), companyName: str(entry.companyName),
+          jobs: list(entry.jobs).map((job) => {
+            const row = rec(job)
+            return { orderId: str(row.orderId), ref: str(row.ref), title: str(row.title), openings: row.openings == null ? null : num(row.openings), status: str(row.status) }
+          }).filter((job) => job.orderId),
+        }
+      }).filter((item) => item.id),
+      agencies: list(options.agencies).map((item) => ({ id: str(rec(item).id), name: str(rec(item).name) })).filter((item) => item.name),
+      recruiters: list(options.recruiters).map((item) => ({ id: str(rec(item).id), name: str(rec(item).name), role: str(rec(item).role) })).filter((item) => item.id),
+    },
+  }
+}
+
+const BLOCKED_JOB_STATUS: Record<string, string> = {
+  closed: 'Closed', filled: 'Filled', on_hold: 'On hold', hold: 'On hold', cancelled: 'Cancelled', canceled: 'Cancelled', completed: 'Completed',
+}
+
+/** Why a job cannot be chosen ("Filled", "On hold", ...), or an empty string when it can. */
+export function jobUnavailableReason(job: Pick<AssignmentClientOption['jobs'][number], 'status' | 'openings'>): string {
+  const status = job.status.toLowerCase().replace(/[\s-]+/g, '_')
+  if (BLOCKED_JOB_STATUS[status]) return BLOCKED_JOB_STATUS[status]
+  if (job.openings != null && job.openings <= 0) return 'No openings left'
+  return ''
+}
+
+/** The text of one job in the Job picker: "Welder · ORD-2026-00004 · 3 openings". */
+export function jobOptionText(job: Pick<AssignmentClientOption['jobs'][number], 'title' | 'ref' | 'openings'>): string {
+  return [job.title, job.ref, job.openings != null && job.openings > 0 ? `${job.openings} ${job.openings === 1 ? 'opening' : 'openings'}` : ''].filter(Boolean).join(' · ')
+}
+
+/** The client that owns a job, looked up in the picker options. */
+export function clientOfJob(options: AssignmentData['options'], orderId: string): AssignmentClientOption | undefined {
+  return options.clients.find((item) => item.jobs.some((job) => job.orderId === orderId))
+}
+
+/**
+ * The assignment block as it will look once a change is saved, so the page answers at once (the server's answer then replaces it).
+ * A change of job also changes the client, because the client is implied by the job.
+ */
+export function applyAssignmentChange(assignment: AssignmentData, change: AssignmentChange): AssignmentData {
+  const next: AssignmentData = { ...assignment }
+  if ('orderId' in change) {
+    if (!change.orderId) next.job = null
+    else {
+      const owner = clientOfJob(assignment.options, change.orderId)
+      const found = owner?.jobs.find((job) => job.orderId === change.orderId)
+      next.job = { orderId: change.orderId, ref: found?.ref ?? '', title: found?.title ?? '', applicationId: '', stage: 0, country: '' }
+      if (owner) next.client = { id: owner.id, name: owner.name, companyId: owner.companyId, companyName: owner.companyName }
+    }
+  }
+  if (change.source) next.source = { key: change.source, label: sourceLabel(change.source) }
+  if ('agencyId' in change || 'agencyName' in change) {
+    const known = change.agencyId ? assignment.options.agencies.find((item) => item.id === change.agencyId) : undefined
+    const name = known?.name ?? (change.agencyName ?? '').trim()
+    next.agency = name ? { id: change.agencyId ?? '', name } : null
+  }
+  if (change.recruiterId) {
+    const known = assignment.options.recruiters.find((item) => item.id === change.recruiterId)
+    next.recruiter = known ? { id: known.id, name: known.name } : assignment.recruiter
+  }
+  return next
+}
+
+/* ------------------------------------------------------------------ Recruiter notes and the stage clock */
+
+export const FEEDBACK_KINDS: { value: FeedbackKind; label: string }[] = [
+  { value: 'update', label: 'Update' },
+  { value: 'delay', label: 'Delay' },
+  { value: 'issue', label: 'Issue' },
+  { value: 'client', label: 'Client feedback' },
+  { value: 'candidate', label: 'Candidate feedback' },
+]
+
+export const FEEDBACK_REASONS: { value: FeedbackReason; label: string }[] = [
+  { value: 'waiting_candidate', label: 'Waiting for the candidate' },
+  { value: 'waiting_client', label: 'Waiting for the client' },
+  { value: 'waiting_documents', label: 'Waiting for documents' },
+  { value: 'waiting_visa', label: 'Waiting for the visa' },
+  { value: 'waiting_payment', label: 'Waiting for payment' },
+  { value: 'other', label: 'Other' },
+]
+
+export const FEEDBACK_MAX_LENGTH = 2000
+/** Staff can delete their own note for this long; an administrator can always delete. */
+export const FEEDBACK_DELETE_MINUTES = 15
+
+export const feedbackKindLabel = (kind: string): string => FEEDBACK_KINDS.find((item) => item.value === kind)?.label ?? kind
+export const feedbackReasonLabel = (reason: string): string => FEEDBACK_REASONS.find((item) => item.value === reason)?.label ?? ''
+
+function normaliseFeedback(raw: unknown): FeedbackData {
+  const supported = Boolean(raw) && typeof raw === 'object' && !Array.isArray(raw)
+  const value = rec(raw)
+  const clock = value.stageClock && typeof value.stageClock === 'object' ? rec(value.stageClock) : null
+  const kinds = FEEDBACK_KINDS.map((item) => item.value as string)
+  return {
+    supported,
+    items: list(value.items).map((item): FeedbackItem => {
+      const row = rec(item)
+      return {
+        id: str(row.id), kind: (kinds.includes(str(row.kind)) ? str(row.kind) : 'update') as FeedbackKind, reason: str(row.reason) as FeedbackReason | '',
+        body: str(row.body), stage: row.stage == null ? null : num(row.stage), authorId: str(row.authorId), authorName: str(row.authorName), createdAt: str(row.createdAt),
+        canDelete: typeof row.canDelete === 'boolean' ? row.canDelete : null,
+      }
+    }).filter((item) => item.id),
+    canWrite: value.canWrite === true,
+    stageClock: clock ? {
+      stage: num(clock.stage), stageLabel: str(clock.stageLabel) || STAGE_NAMES[num(clock.stage)] || '', since: str(clock.since), hours: num(clock.hours),
+      limitHours: num(clock.limitHours), overdue: clock.overdue === true, needsReason: clock.needsReason === true,
+    } : null,
+  }
+}
+
+/** 61 -> "2 days 13 hours", 48 -> "2 days", 5 -> "5 hours", 0.4 -> "less than an hour". */
+export function durationText(hours: number): string {
+  const total = Math.max(0, Math.floor(hours))
+  if (total < 1) return 'less than an hour'
+  const days = Math.floor(total / 24)
+  const rest = total % 24
+  const part = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`
+  if (days === 0) return part(rest, 'hour')
+  return rest === 0 ? part(days, 'day') : `${part(days, 'day')} ${part(rest, 'hour')}`
+}
+
+/** "Interview scheduling, 2 days 13 hours, limit 2 days". */
+export function stageClockText(clock: Pick<StageClock, 'stageLabel' | 'hours' | 'limitHours'>): string {
+  return [clock.stageLabel, durationText(clock.hours), clock.limitHours > 0 ? `limit ${durationText(clock.limitHours)}` : ''].filter(Boolean).join(', ')
+}
+
+/** Calm while inside the limit, amber when three quarters of it is used, red once it is overdue. */
+export function stageClockTone(clock: Pick<StageClock, 'hours' | 'limitHours' | 'overdue'>): 'ok' | 'warn' | 'over' {
+  if (clock.overdue || (clock.limitHours > 0 && clock.hours > clock.limitHours)) return 'over'
+  return clock.limitHours > 0 && clock.hours >= clock.limitHours * 0.75 ? 'warn' : 'ok'
+}
+
+/** An administrator may delete any note; the author only within 15 minutes of writing it. */
+export function canDeleteFeedback(item: Pick<FeedbackItem, 'authorId' | 'createdAt'> & { canDelete?: boolean | null }, viewer: { id: string; role: string }, now: Date = new Date()): boolean {
+  if (typeof item.canDelete === 'boolean') return item.canDelete // the server knows its own clock
+  if (viewer.role === 'admin') return true
+  if (!viewer.id || item.authorId !== viewer.id) return false
+  const written = new Date(item.createdAt).getTime()
+  return Number.isFinite(written) && now.getTime() - written <= FEEDBACK_DELETE_MINUTES * 60_000
 }

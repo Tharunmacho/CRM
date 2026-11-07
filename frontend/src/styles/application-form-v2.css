@@ -1,0 +1,221 @@
+/* Application form v2: the assignment block, the documents list, the stage clock and the recruiter notes.
+ * The working area is one white card (16px radius, one 1px --af-line border) split by thin dividers; spacing comes from one scale
+ * (4, 8, 12, 16, 24); the brand blue is the only accent, amber and red only for pending / overdue. Everything is token based, so dark
+ * mode follows. Every rule starts with .af so it wins over application-form.css whichever file the browser loads first. */
+
+/* Spacing on this screen comes from one scale: 4, 8, 12, 16, 24. The working card is 16px radius, one border. */
+
+/* ------------------------------------------------------------ Assignment (the first block of the working card) */
+/* Three columns of equal width: three fields on the first row, two under them; labels 13px over 44px controls, 20px between rows. */
+.af .af-assign { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 16px; align-items: start; }
+.af .af-assign-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* While the page is still loading, the same block stands alone in a card of its own. */
+.af .af-assign-wrap { padding: 16px 24px 0; }
+.af .af-assign-inner { max-width: 1232px; margin: 0 auto; padding: 16px; background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 16px; box-shadow: var(--shadow-card); }
+.af .af-assign-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; line-height: 20px; font-size: 13px; font-weight: 600; color: var(--text-label); }
+.af .af-assign-label label { cursor: default; }
+.af .af-assign-saving { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 500; color: var(--primary-deep); }
+[data-theme="dark"] .af .af-assign-saving { color: var(--primary); }
+.af .af-assign-saving svg { width: 11px; height: 11px; animation: af-spin 1s linear infinite; }
+.af .af-assign-value {
+  display: flex; align-items: center; min-height: 44px; margin: 0; padding: 0 4px; border: 0;
+  background: none; font-size: 14px; font-weight: 500; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.af .af-assign-empty { color: var(--text-light); }
+.af .af-assign :is(.ui-input:not(textarea), .custom-select-trigger) { height: 44px; min-height: 44px; }
+.af .af-assign-field.has-error :is(.ui-input, .custom-select-trigger) { border-color: var(--error-ink); }
+.af .af-assign .af-note { font-size: 12px; line-height: 1.35; }
+@media screen and (max-width: 640px) {
+  .af .af-assign { grid-template-columns: minmax(0, 1fr); }
+  .af .af-assign-wrap { padding: 16px 16px 0; }
+}
+
+/* The same four facts in the printed header */
+/* Only the entries that are known: they share the width, and a short row never leaves an empty cell. */
+.af .af-ident {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 1px; margin: 0;
+  background: var(--af-line); border: 1px solid var(--af-line); border-radius: 4px; overflow: hidden;
+}
+.af .af-ident > div { flex: 1 1 140px; min-width: 0; padding: 8px 12px; background: var(--bg-card); }
+.af .af-ident dt { font-size: 11px; font-weight: 600; color: var(--text-muted); line-height: 16px; }
+.af .af-ident dd { margin: 0; font-size: 13px; font-weight: 500; line-height: 20px; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------ Documents */
+.af .af-docs-progress { display: flex; align-items: center; gap: 12px; }
+.af .af-docs-count { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.af .af-docs-bar { flex: 1 1 auto; height: 6px; border-radius: 999px; background: var(--tint-3); overflow: hidden; }
+.af .af-docs-progress .af-docs-bar { flex: none; width: 120px; }
+.af .af-docs-bar i { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .4s ease; }
+.af .af-docs-bar.is-full i { background: var(--success-ink); }
+/* One compact row per document, on fixed columns: icon, name, chip, file, actions. */
+.af .af-doclist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--af-line); border-radius: 12px; overflow: hidden; }
+.af .af-docrow {
+  position: relative; display: grid; grid-template-columns: 28px minmax(112px, 200px) 80px minmax(0, 1fr) 148px; column-gap: 12px; row-gap: 8px; align-items: center;
+  min-height: 48px; padding: 8px 12px; border-top: 1px solid var(--border-faint); background: var(--bg-card);
+}
+.af .af-docrow:first-child { border-top: 0; }
+.af .af-docrow { transition: background-color .14s; }
+.af .af-docrow:hover { background: var(--tint-1); }
+.af .af-docrow.is-dragging { outline: 2px dashed var(--primary); outline-offset: -3px; background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+.af .af-docrow-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--tint-2); color: var(--text-light); }
+.af .af-docrow-icon svg { width: 16px; height: 16px; }
+.af .af-docrow-icon i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.af .af-docrow-icon.is-uploaded { background: var(--success-fill); color: var(--success-ink); border: 1px solid var(--success-edge); }
+.af .af-docrow-icon.is-pending { background: var(--warning-fill); color: var(--warning-ink); border: 1px solid var(--warning-edge); }
+.af .af-docrow-name { min-width: 0; font-size: 14px; font-weight: 600; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.af .af-doc-chip { justify-self: start; display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.af .af-doc-chip.is-uploaded { background: var(--success-fill); color: var(--success-ink); border: 1px solid var(--success-edge); }
+.af .af-doc-chip.is-pending { background: var(--warning-fill); color: var(--warning-ink); border: 1px solid var(--warning-edge); }
+.af 
+.af .af-docrow-file { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.af .af-docfile { display: flex; align-items: baseline; gap: 8px; margin: 0; min-width: 0; font-size: 13px; line-height: 20px; }
+.af .af-docfile a, .af .af-docfile > span { min-width: 0; color: var(--text-main); font-weight: 500; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af .af-docfile a:hover { color: var(--primary-deep); text-decoration: underline; text-underline-offset: 2px; }
+.af .af-docfile small { flex: none; font-size: 12px; color: var(--text-light); white-space: nowrap; }
+.af .af-docrow-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 32px; }
+.af .af-docbtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--border-control); background: transparent; color: var(--text-main); font: inherit; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color .14s, border-color .14s;
+}
+.af .af-docbtn.is-icon { width: 32px; padding: 0; border-radius: 50%; }
+.af .af-docbtn:hover:not(:disabled) { background: var(--tint-1); border-color: var(--primary); }
+.af .af-docbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.af .af-docbtn:disabled { opacity: .55; cursor: not-allowed; }
+.af .af-docbtn svg { width: 14px; height: 14px; flex: none; }
+.af .af-docbtn .is-spin { animation: af-spin 1s linear infinite; }
+.af .af-docbtn.is-primary { border-color: color-mix(in srgb, var(--primary) 55%, transparent); color: var(--primary-deep); }
+[data-theme="dark"] .af .af-docbtn.is-primary { color: var(--primary); }
+.af .af-docbtn.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); border-color: var(--primary); }
+.af .af-docrow-progress { display: block; height: 4px; border-radius: 999px; background: var(--tint-3); overflow: hidden; }
+.af .af-docrow-progress i { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--primary); animation: af-slide 1.2s ease-in-out infinite; }
+@keyframes af-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+.af .af-docrow .af-extract { padding: 4px 8px; }
+@media screen and (max-width: 760px) {
+  .af .af-docrow { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .af .af-docrow-file, .af .af-docrow-actions { grid-column: 2 / -1; }
+  .af .af-docrow-actions { justify-content: flex-start; min-height: 0; }
+  .af .af-docs-progress .af-docs-bar { width: 80px; }
+}
+@media (prefers-reduced-motion: reduce) { .af .af-docrow-progress i, .af .af-assign-saving svg { animation: none; } }
+
+/* ------------------------------------------------------------ Process tracking: the eleven stages, locked until reached */
+/* A thin line joins the status icons: green where a stage is done, grey after the current one. */
+.af .af-stages { list-style: none; margin: 0; padding: 0; }
+.af .af-stage { position: relative; }
+.af .af-stage::before, .af .af-stage::after { content: ''; position: absolute; left: 25px; width: 2px; background: var(--border-main); }
+.af .af-stage::before { top: 0; height: 22px; }
+.af .af-stage::after { top: 22px; bottom: 0; }
+.af .af-stage:first-child::before, .af .af-stage:last-child::after { display: none; }
+.af .af-stage.is-done::after, .af .af-stage.is-done + .af-stage::before { background: var(--success-ink); }
+.af .af-stage-icon { position: relative; z-index: 1; }
+.af .af-stage-row {
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) 104px 104px 16px; column-gap: 12px; align-items: start; width: 100%; min-height: 48px;
+  padding: 8px 12px; border: 0; background: var(--bg-card); color: inherit; font: inherit; text-align: left;
+}
+.af .af-stage-row.is-openable { cursor: pointer; }
+.af .af-stage-row { border-radius: 12px; }
+.af .af-stage-row.is-openable:hover { background: var(--tint-1); }
+.af .af-stage-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.af .af-stage-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--tint-2); color: var(--text-light); }
+.af .af-stage-icon svg { width: 16px; height: 16px; }
+.af .af-stage-icon.is-current { background: var(--bg-card); color: var(--primary); box-shadow: inset 0 0 0 2px var(--primary), 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent); }
+.af .af-stage-icon.is-done { background: var(--success-ink); color: var(--bg-card); }
+.af .af-stage-icon.is-done svg { stroke-width: 3; }
+.af .af-stage-icon.is-failed { background: var(--error-fill); color: var(--error-ink); border: 1px solid var(--error-edge); }
+.af .af-stage-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.af .af-stage-main > b { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; line-height: 28px; overflow-wrap: anywhere; }
+.af .af-stage.is-locked .af-stage-main > b { color: var(--text-muted); font-weight: 600; }
+.af .af-stage-no { flex: none; display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 6px; background: var(--tint-2); color: var(--text-muted); font-size: 12px; font-weight: 700; }
+.af .af-stage-docs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.af .af-stage-docs li { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--tint-2); font-size: 12.5px; line-height: 24px; color: var(--text-muted); }
+.af .af-stage-docs li.is-done { background: var(--success-fill); color: var(--success-ink); }
+.af .af-stage-docs li svg { width: 12px; height: 12px; flex: none; color: var(--success-ink); }
+.af .af-stage-docs li i { width: 6px; height: 6px; margin: 0 3px; border-radius: 50%; background: var(--warning-ink); flex: none; }
+.af .af-stage-ready { align-self: flex-start; display: inline-flex; align-items: center; min-height: 24px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 20px; }
+.af .af-stage-ready::before { content: ''; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: currentColor; }
+.af .af-stage-ready.is-ready { background: var(--success-fill); color: var(--success-ink); border: 1px solid var(--success-edge); }
+.af .af-stage-ready.is-needs { background: var(--warning-fill); color: var(--warning-ink); border: 1px solid var(--warning-edge); }
+.af .af-stage-chip { justify-self: start; display: inline-flex; align-items: center; height: 24px; margin-top: 2px; padding: 0 8px; border-radius: 999px; background: var(--tint-2); color: var(--text-light); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.af .af-stage-chip.is-current { background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary-deep); }
+[data-theme="dark"] .af .af-stage-chip.is-current { color: var(--primary); }
+.af .af-stage-chip.is-done { background: var(--success-fill); color: var(--success-ink); border: 1px solid var(--success-edge); }
+.af .af-stage-chip.is-failed { background: var(--error-fill); color: var(--error-ink); border: 1px solid var(--error-edge); }
+.af .af-stage-date { font-size: 13px; line-height: 28px; color: var(--text-muted); text-align: right; white-space: nowrap; }
+.af .af-stage-go { width: 16px; height: 16px; margin-top: 6px; color: var(--text-light); }
+.af .af-stage-row:not(.is-openable) .af-stage-go { visibility: hidden; }
+.af .af-process-empty { margin: 12px 0 0; font-size: 13px; color: var(--text-muted); }
+@media screen and (max-width: 760px) {
+  .af .af-stage-row { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .af .af-stage-date { grid-column: 2 / -1; line-height: 20px; }
+  .af .af-stage-date:empty, .af .af-stage-go { display: none; }
+}
+
+/* ------------------------------------------------------------ Stage clock and the "tell us why" banner */
+.af .af-clockbar { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 0; }
+.af .af-clock {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 28px; padding: 4px 12px; border-radius: 999px;
+  background: var(--bg-card); border: 1px solid var(--af-line); color: var(--text-muted); font-size: 12.5px; font-weight: 600; line-height: 1.3;
+}
+.af .af-clock svg { width: 14px; height: 14px; flex: none; }
+.af .af-clock.is-warn { background: var(--warning-fill); border-color: var(--warning-edge); color: var(--warning-ink); }
+.af .af-clock.is-over { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
+.af .af-ask {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 12px 16px;
+  border-radius: 12px; background: var(--warning-fill); border: 1px solid var(--warning-edge); color: var(--warning-ink);
+}
+.af .af-ask-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; }
+.af .af-ask-text b { font-weight: 600; }
+.af .af-ask-form { flex: 1 1 100%; padding-top: 4px; color: var(--text-main); }
+
+/* ------------------------------------------------------------ Recruiter notes */
+.af .af-notes { display: flex; flex-direction: column; gap: 16px; margin: 0; }
+.af .af-notes > .af-sh { margin: 0; }
+.af .af-notes-readonly, .af .af-notes-empty { margin: 0; font-size: 13.5px; color: var(--text-muted); }
+.af .af-notes-empty { padding: 16px; border: 1px dashed var(--af-line); border-radius: 12px; text-align: center; }
+
+.af .af-composer { display: flex; flex-direction: column; gap: 12px; }
+.af .af-composer-kinds { display: flex; flex-wrap: wrap; gap: 8px; }
+.af .af-kind {
+  height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-control); background: var(--bg-card);
+  color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.af .af-kind:hover { border-color: var(--primary); color: var(--text-main); }
+.af .af-kind { transition: background-color .14s, border-color .14s, color .14s; }
+.af .af-kind.is-on { border-color: var(--primary); background: var(--primary); color: var(--on-primary); box-shadow: 0 1px 3px color-mix(in srgb, var(--primary) 30%, transparent); }
+.af .af-kind:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.af .af-composer-row { display: flex; }
+.af .af-composer-reason { display: flex; flex-direction: column; gap: 4px; width: min(100%, 300px); font-size: 12px; font-weight: 600; color: var(--text-label); }
+.af .af-composer-text { position: relative; }
+.af .af-composer-text textarea.ui-input { width: 100%; min-height: 72px; padding-bottom: 24px; resize: vertical; }
+.af .af-composer.is-compact .af-composer-text textarea.ui-input { min-height: 56px; }
+.af .af-composer-count { position: absolute; right: 10px; bottom: 6px; font-size: 11.5px; color: var(--text-light); pointer-events: none; }
+.af .af-composer-foot { display: flex; justify-content: flex-end; }
+
+.af .af-timeline { list-style: none; margin: 0; padding: 0; border: 1px solid var(--af-line); border-radius: 12px; overflow: hidden; }
+/* Every entry on the same three columns: avatar, text (with who and when above it), and the delete button. */
+.af .af-note-item { display: grid; grid-template-columns: 28px minmax(0, 1fr) 32px; column-gap: 12px; align-items: start; min-height: 48px; padding: 8px 12px; border-top: 1px solid var(--border-faint); background: var(--bg-card); }
+.af .af-note-item:first-child { border-top: 0; }
+.af .af-note-item > :nth-child(3) { justify-self: end; }
+.af .af-avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary-deep); font-size: 12px; font-weight: 700; }
+[data-theme="dark"] .af .af-avatar { color: var(--primary); }
+.af .af-note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; color: var(--text-muted); }
+.af .af-note-meta b { color: var(--text-main); font-size: 13.5px; font-weight: 600; }
+.af .af-note-meta time { color: var(--text-light); }
+.af .af-kind-chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11.5px; font-weight: 600; }
+.af .af-kind-chip.is-delay { background: var(--warning-fill); color: var(--warning-ink); border: 1px solid var(--warning-edge); }
+.af .af-kind-chip.is-issue { background: var(--error-fill); color: var(--error-ink); border: 1px solid var(--error-edge); }
+.af .af-note-reason, .af .af-note-stage { padding-left: 8px; border-left: 1px solid var(--af-line); }
+.af .af-note-meta { min-height: 28px; align-content: center; }
+.af .af-note-text { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media screen and (max-width: 760px) {
+  .af .af-notes-head .af-clock { flex: 1 1 100%; }
+  .af .af-composer-reason { width: 100%; }
+}
+
+@media print {
+  /* The working page is not part of the printed form (the paper form lists the documents received). */
+  .af .af-assign-wrap, .af .af-clockbar { display: none !important; }
+}
+.af .af-sk-field { display: block; width: 100%; height: 34px; border-radius: 6px; }
+.af .af-docs-card .af-doc-meta { margin: 16px 0 0; }

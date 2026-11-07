@@ -86,6 +86,8 @@ function useScrollEdges(active: boolean) {
  */
 export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, selectable, selected = [], onSelectedChange, rowClassName, label, variant = 'classic', fit = false, expandedIds, onToggleExpand, renderExpanded }: Props<T>) {
   const grid = variant === 'grid'
+  // A fit table whose columns all state their alignment (the Data Bank) is a flush-left table: header and cells share one padding and one alignment.
+  const flush = grid && fit && columns.length > 0 && columns.every(column => column.align === 'left' || column.align === 'right')
   const merged = grid && fit && !!selectable  // fit mode: the checkbox lives inside the first column
   const expandable = grid && fit && !!renderExpanded && !!onToggleExpand
   const [scrollRef, edges] = useScrollEdges(grid)
@@ -128,7 +130,7 @@ export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, se
   }
 
   const table = (
-    <table className={cn('db-tbl', grid && 'is-grid', fit && grid && 'is-fit')} aria-label={label} style={grid && !fit ? { minWidth: total } : undefined}>
+    <table className={cn('db-tbl', grid && 'is-grid', fit && grid && 'is-fit', flush && 'is-bank')} aria-label={label} style={grid && !fit ? { minWidth: total } : undefined}>
       <colgroup>
         {selectable && !merged && <col style={{ width: grid ? checkWidth : share(checkWidth) }} />}
         {columns.map(column => <col key={column.key} style={{ width: grid && !fit ? column.width : share(column.width) }} />)}
@@ -144,15 +146,21 @@ export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, se
           {columns.map((column, index) => {
             const active = !!column.sortKey && sort?.key === column.sortKey
             const selectAll = merged && index === 0
+            const selectAllBox = (
+              <Checkbox checked={allSelected} indeterminate={someSelected} aria-label="Select all rows on this page"
+                onChange={() => onSelectedChange?.(allSelected ? selected.filter(id => !ids.includes(id)) : [...new Set([...selected, ...ids])])} />
+            )
+            const label = column.sortKey
+              ? <button type="button" className={cn('db-th-sort', active && 'is-on')} onClick={() => onSort?.(column.sortKey!)}><span className="db-th-label">{column.header}</span>{fit ? <ChevronsUpDown className="db-th-caret is-idle" size={12} aria-hidden="true" /> : active ? (sort!.dir === 'asc' ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />) : null}</button>
+              : column.header || <span className="sr-only">Actions</span>
             return (
-              <th key={column.key} className={cn(cellClass(column), selectAll && 'is-select')} style={cellStyle(column)}
+              <th key={column.key} className={cn(cellClass(column), (selectAll || (flush && expandable && index === 0)) && 'is-select')} style={cellStyle(column)}
                 aria-sort={column.sortKey ? (active ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}>
-                {selectAll
-                  ? <Checkbox checked={allSelected} indeterminate={someSelected} aria-label="Select all rows on this page"
-                      onChange={() => onSelectedChange?.(allSelected ? selected.filter(id => !ids.includes(id)) : [...new Set([...selected, ...ids])])} />
-                  : column.sortKey
-                  ? <button type="button" className={cn('db-th-sort', active && 'is-on')} onClick={() => onSort?.(column.sortKey!)}><span className="db-th-label">{column.header}</span>{fit ? <ChevronsUpDown className="db-th-caret is-idle" size={12} aria-hidden="true" /> : active ? (sort!.dir === 'asc' ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />) : null}</button>
-                  : column.header || <span className="sr-only">Actions</span>}
+                {selectAll && !flush
+                  ? selectAllBox
+                  : flush && index === 0 && (selectAll || expandable)
+                  ? <span className="db-selcell">{expandable && <span className="db-expand-gap" aria-hidden="true" />}{selectAll && selectAllBox}{label}</span>
+                  : label}
               </th>
             )
           })}
@@ -228,7 +236,5 @@ export function useElementWidth<E extends HTMLElement>() {
   return [setElement, width] as const
 }
 
-/** Below this card width the eleven columns would no longer fit without scrolling, so cards take over. */
-export const TABLE_MIN_WIDTH = 1130
 /** The grid table scrolls sideways with pinned edge columns; below this width it still gives way to cards. */
 export const GRID_TABLE_MIN_WIDTH = 720

@@ -43,7 +43,10 @@ export function activeFilterCount(columnFilters: Record<string, string>, staff: 
 /** What the Assigned-to column shows when a candidate has no recruiter (the server filters on this label too). */
 export const NEEDS_ASSIGNMENT_LABEL = 'Needs assignment'
 
-export const ownerLabel = (name?: string | null): string => name?.trim() || NEEDS_ASSIGNMENT_LABEL
+/** What an empty recruiter reads as in a table or card. Muted, never a name. */
+export const NOT_ASSIGNED_LABEL = 'Not assigned'
+
+export const ownerLabel = (name?: string | null): string => name?.trim() || NOT_ASSIGNED_LABEL
 
 /** Pool counts honour the same optional staff scope as the list. */
 export const poolCountsPath = (staff?: string): string =>
@@ -63,9 +66,9 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 
 export function assignWaitingMessage(result: AssignWaitingResult): { text: string; tone: 'ok' | 'warn' } {
   if (result.assigned === 0) {
-    return { text: 'No recruiter is free right now. Candidates stay on the waiting list until one is.', tone: 'warn' }
+    return { text: 'No recruiter was available to take them. Candidates stay unassigned until you choose a recruiter.', tone: 'warn' }
   }
-  const rest = result.remaining > 0 ? ` ${plural(result.remaining, 'candidate')} still waiting for a free recruiter.` : ''
+  const rest = result.remaining > 0 ? ` ${plural(result.remaining, 'candidate')} still not assigned.` : ''
   return { text: `Assigned ${plural(result.assigned, 'waiting candidate')}.${rest}`, tone: result.remaining > 0 ? 'warn' : 'ok' }
 }
 
@@ -74,7 +77,7 @@ export function emptyPoolCopy(pool: DataBankPool): { title: string; description:
     case 'not_interested':
       return { title: 'Nobody is marked not interested', description: 'Candidates who are not interested show up here, so you can offer them another order later.' }
     case 'unassigned':
-      return { title: 'No candidates are waiting for a recruiter', description: 'New candidates are given to a free recruiter automatically.' }
+      return { title: 'No candidates are waiting for a recruiter', description: 'New candidates stay here until an admin or a manager assigns a recruiter.' }
     case 'needs_review':
       return { title: 'Nothing needs review', description: 'Candidates with missing details or document problems show up here until a recruiter checks them.' }
     default:

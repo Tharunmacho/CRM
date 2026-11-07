@@ -13,7 +13,7 @@ export function Flag({ country }: { country?: string | null }) {
 
 /** Owner as a circular hue avatar plus first name; the full name is the tooltip. */
 export function OwnerTag({ name }: { name?: string }) {
-  if (!name) return <span className="tk-muted">Unassigned</span>
+  if (!name) return <span className="tk-muted">Not assigned</span>
   const hue = [...name].reduce((total, character) => total + character.charCodeAt(0), 0) % 6
   return (
     <span className="tk-owner" title={name}>

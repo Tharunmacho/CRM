@@ -9,7 +9,8 @@ function moduleUrl(source) {
 }
 const read = (path) => readFile(new URL(`../src/features/application-form/${path}`, import.meta.url), 'utf8')
 
-const modelUrl = moduleUrl(await read('form-model.ts'))
+const slotsUrl = moduleUrl(await readFile(new URL('../src/shared/model/document-slots.ts', import.meta.url), 'utf8'))
+const modelUrl = moduleUrl((await read('form-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`))
 const model = await import(modelUrl)
 const bridge = await import(moduleUrl((await read('entry-bridge.ts')).replace("'./form-model'", `'${modelUrl}'`)))
 const phone = await import(moduleUrl(await read('parts/phone.ts')))
@@ -147,8 +148,6 @@ test('date, age and years formatting', () => {
   assert.equal(model.yearsLabel(1), '1 year')
   assert.equal(model.yearsLabel('4'), '4 years')
   assert.equal(model.yearsLabel(''), '')
-  assert.match(model.experienceSplitHint({ totalExperience: '5', experienceIndia: '1', experienceAbroad: '2' }), /do not add up/)
-  assert.equal(model.experienceSplitHint({ totalExperience: '5', experienceIndia: '3', experienceAbroad: '2' }), '')
 })
 
 test('validation: dates, passport order, years, passed year, phone, e-mail', () => {

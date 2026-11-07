@@ -42,7 +42,7 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
       <div className="db-filterbar" style={{ '--db-cols': 6 } as React.CSSProperties}>
         <span className="db-filterbar-label">Filters</span>
         {choice('campaign', 'Filter by campaign', 'Any campaign', plain(facets?.campaigns, filters.campaign))}
-        {choice('position', 'Filter by position', 'Any position', plain(facets?.positions, filters.position))}
+        {choice('position', 'Filter by job', 'Any job', plain(facets?.positions, filters.position))}
         {choice('country', 'Filter by country', 'Any country', plain(facets?.countries, filters.country))}
         {choice('status', 'Filter by status', 'Any status', LEAD_STATUSES.map((status) => [status.value, status.label]))}
         {choice('platform', 'Filter by platform', 'Any platform', withCurrent(facets?.platforms, filters.platform).map((item) => [item, `${PLATFORM_LABEL[platformKind(item)]}${platformKind(item) === 'other' ? ` (${item})` : ''}`]))}

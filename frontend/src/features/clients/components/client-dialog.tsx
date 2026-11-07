@@ -8,25 +8,31 @@ import { Dialog } from '@/shared/ui/overlay'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
-import { Flag, FormSection } from '@/features/clients/components/parts'
-import { StaffPicker, allocatableUsers } from '@/features/clients/components/party-fields'
+import { Flag } from '@/features/clients/components/parts'
+import { Section, StaffPicker, allocatableUsers } from '@/features/clients/components/party-fields'
 import '@/styles/clients-simple.css'
 import { frequentValues } from '@/shared/lib/suggestions'
+import { COUNTRY_NAMES } from '@/shared/lib/country-flag'
 import { WEBSITE_MAX, checkWebsite } from '@/shared/lib/website'
 
-/** Country names already saved on clients, companies and orders, most used first. Any other name can still be typed. */
+/** Countries already saved on clients, companies and orders come first (most used first), then every other country A to Z. */
 export function useCountryOptions() {
   const store = useStore()
-  return useMemo(
-    () => frequentValues([...store.clients.map((c) => c.country), ...store.companies.map((c) => c.country), ...store.orders.map((o) => o.country)]),
-    [store.clients, store.companies, store.orders],
-  )
+  return useMemo(() => {
+    const used = frequentValues([...store.clients.map((c) => c.country), ...store.companies.map((c) => c.country), ...store.orders.map((o) => o.country)])
+    const seen = new Set(used.map((name) => name.toLowerCase()))
+    return [...used, ...COUNTRY_NAMES.filter((name) => !seen.has(name.toLowerCase()))]
+  }, [store.clients, store.companies, store.orders])
 }
 
 /** A country field that suggests names as you type and shows the flag it recognises. */
 export function CountryInput({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[] }) {
+  const canonical = () => {
+    const match = options.find((name) => name.toLowerCase() === value.trim().toLowerCase())
+    if (match && match !== value) onChange(match)
+  }
   return (
-    <div className="client-form-flag">
+    <div className="client-form-flag" onBlur={canonical}>
       <Flag country={value} />
       <SuggestInput wrapperClassName="min-w-0 flex-1" maxLength={100} value={value} onChange={onChange} options={options} aria-label="Country" placeholder="Start typing a country" />
     </div>
@@ -46,7 +52,7 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
     country: client?.country ?? '', city: client?.city ?? '',
   })
   // Company-only fields, used when a client is created.
-  const [employer, setEmployer] = useState({ name: '', website: '', address: '' })
+  const [employer, setEmployer] = useState({ name: '', website: '', address: '', state: '' })
   // CRM staff who look after this client. Only people who can still be allocated are kept: the server refuses inactive users and admins.
   const staffUsers = useMemo(() => allocatableUsers(store.users), [store.users])
   const [staffIds, setStaffIds] = useState<string[]>(() => (client?.staffIds ?? []).filter((id) => staffUsers.some((user) => user.id === id)))
@@ -69,7 +75,7 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
           ...form, whatsapp: client.whatsapp ?? '', status: client.status, notes: client.notes ?? '', staffContacts: client.staffContacts ?? [], staffIds,
         })
       } else {
-        await api.post<Client & { company: Company }>('/clients', { ...form, staffIds, company: { name: employer.name, website: web.value, address: employer.address, country: form.country, city: form.city } })
+        await api.post<Client & { company: Company }>('/clients', { ...form, staffIds, company: { name: employer.name, website: web.value, address: employer.address, state: employer.state, country: form.country, city: form.city } })
       }
       await refreshMasterData(store, 'Client saved')
       onClose()
@@ -79,29 +85,35 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
 
   return <Dialog open onClose={close} width="lg" scroll="inside"
     title={creating ? 'New client' : 'Edit client'}
+    icon={<span className="cs-dlg-chip"><Building2 size={22} strokeWidth={1.9} /></span>}
     footer={<><Button variant="ghost" disabled={saving} onClick={close}>Cancel</Button><Button variant="primary" type="submit" form="client-form" disabled={saving}>{saving ? 'Saving…' : 'Save client'}</Button></>}>
     <DialogMark />
     {error && <p role="alert" className="client-form-error">{error}</p>}
-    <form id="client-form" className="client-form" onSubmit={(event) => { event.preventDefault(); void save() }}>
-      <fieldset disabled={saving} className="client-form-fields">
-        <FormSection icon={<UserRound size={18} />} title="Contact person">
-          <Field label={creating ? 'Contact person' : 'Full name'} required><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Khalid Rahman" /></Field>
-          <Field label="Designation"><Input maxLength={120} value={form.designation} onChange={(e) => set('designation', e.target.value)} placeholder="HR Manager" /></Field>
-          <Field label="Email"><Input type="email" maxLength={255} value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@company.com" /></Field>
-          <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+971 50 123 4567" /></Field>
-          {!creating && <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>}
-          {!creating && <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" /></Field>}
-        </FormSection>
-        {creating && <FormSection icon={<Building2 size={18} />} title="Company">
-          <Field label="Company name" required className="sm:col-span-2"><Input required maxLength={200} value={employer.name} onChange={(e) => setCompany('name', e.target.value)} placeholder="Gulf Build Contracting LLC" /></Field>
-          <Field label="Website"><Input type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={WEBSITE_MAX} value={employer.website} onChange={(e) => setCompany('website', e.target.value)} placeholder="www.gulfbuild.com" /></Field>
-          <Field label="Country"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>
-          <Field label="City"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" /></Field>
-          <Field label="Address" className="sm:col-span-2"><Textarea rows={2} maxLength={2000} value={employer.address} onChange={(e) => setCompany('address', e.target.value)} placeholder="Building, street, area" /></Field>
-        </FormSection>}
-        <FormSection icon={<UserCheck size={18} />} title="Allocate staff" cols={1}>
-          <div className="clients-simple"><StaffPicker users={staffUsers} value={staffIds} onChange={setStaffIds} disabled={saving} /></div>
-        </FormSection>
+    <form id="client-form" className="client-form clients-simple" onSubmit={(event) => { event.preventDefault(); void save() }}>
+      <fieldset disabled={saving} className="client-form-fields cs-sections">
+        <Section icon={<UserRound size={17} />} title="Contact person">
+          <div className="cs-grid6">
+            <Field label={creating ? 'Contact person' : 'Full name'} required className="span-3"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Khalid Rahman" autoComplete="off" /></Field>
+            <Field label="Designation" className="span-3"><Input maxLength={120} value={form.designation} onChange={(e) => set('designation', e.target.value)} placeholder="HR Manager" autoComplete="off" /></Field>
+            <Field label="Email" className="span-3"><Input type="email" maxLength={255} value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@company.com" autoComplete="off" /></Field>
+            <Field label="Phone" className="span-3"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+971 50 123 4567" autoComplete="off" /></Field>
+            {!creating && <Field label="Country" className="span-3"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>}
+            {!creating && <Field label="City" className="span-3"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" autoComplete="off" /></Field>}
+          </div>
+        </Section>
+        {creating && <Section icon={<Building2 size={17} />} title="Company">
+          <div className="cs-grid6">
+            <Field label="Company name" required className="span-4"><Input required maxLength={200} value={employer.name} onChange={(e) => setCompany('name', e.target.value)} placeholder="Gulf Build Contracting LLC" autoComplete="off" /></Field>
+            <Field label="Website" className="span-2"><Input type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={WEBSITE_MAX} value={employer.website} onChange={(e) => setCompany('website', e.target.value)} placeholder="www.gulfbuild.com" /></Field>
+            <Field label="Country" className="span-2"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>
+            <Field label="State" className="span-2"><Input maxLength={100} value={employer.state} onChange={(e) => setCompany('state', e.target.value)} placeholder="Dubai" autoComplete="off" /></Field>
+            <Field label="City" className="span-2"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" autoComplete="off" /></Field>
+            <Field label="Address" className="span-6"><Textarea rows={2} maxLength={2000} value={employer.address} onChange={(e) => setCompany('address', e.target.value)} placeholder="Building, street, area" /></Field>
+          </div>
+        </Section>}
+        <Section icon={<UserCheck size={17} />} title="Allocate staff">
+          <StaffPicker users={staffUsers} value={staffIds} onChange={setStaffIds} disabled={saving} />
+        </Section>
       </fieldset>
     </form>
   </Dialog>

@@ -99,7 +99,7 @@ export function ListChips({ value, onChange, placeholder }: { value: string[]; o
       <input
         className="af-lang-input"
         value={text}
-        placeholder={value.length ? 'Add another' : (placeholder ?? 'e.g. English, Hindi')}
+        placeholder={value.length ? 'Add another' : (placeholder ?? 'For example English, Hindi')}
         aria-label="Add a language"
         onChange={(event) => setText(event.target.value)}
         onKeyDown={onKey}
@@ -175,7 +175,7 @@ export function FormField({
     const options = def.category ? choicesFor(formOptions, def.category, current).map((option) => ({ value: option.value, label: option.active ? option.label : `${option.label} (no longer offered)` })) : (def.options ?? [])
     body = (
       <Select id={id} value={current} onChange={(event) => set(event.target.value)} aria-label={def.label}>
-        <option value="">Select…</option>
+        <option value="">Select an option</option>
         {current && !options.some((option) => option.value === current) && <option value={current}>{current}</option>}
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </Select>

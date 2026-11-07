@@ -38,7 +38,7 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
   },
   {
     key: 'orders', label: 'Order status', question: 'Are orders getting filled?', title: 'Order status',
-    note: 'For each order: open positions compared with candidates matched, selected and deployed.',
+    note: 'For each order: open jobs compared with candidates matched, selected and deployed.',
     how: [
       'Openings: how many people the order needs.',
       'Matched, selected and deployed count candidates who were added to the order during the chosen dates, so matched can be higher than openings.',

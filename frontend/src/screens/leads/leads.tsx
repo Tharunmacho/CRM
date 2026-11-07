@@ -255,7 +255,7 @@ export default function LeadsPage() {
               <div className="db-panel-tools">
                 <label className="db-search">
                   <Search size={15} aria-hidden="true" />
-                  <input type="search" value={filters.q} onChange={(event) => patchFilters({ q: event.target.value })} placeholder="Search name, phone, position, campaign…" aria-label="Search leads. Separate words with commas to match all of them." />
+                  <input type="search" value={filters.q} onChange={(event) => patchFilters({ q: event.target.value })} placeholder="Search name, phone, job, campaign…" aria-label="Search leads. Separate words with commas to match all of them." />
                 </label>
                 <Select className="db-sort" aria-label="Sort leads by" value={`${sort.key}:${sort.dir}`} onChange={(event) => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
                   {LEAD_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}

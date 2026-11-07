@@ -102,23 +102,23 @@ export function CandidateMatchDrawer({ onClose, orderId }: { onClose: () => void
     setPicked(failed); setSaving(false); setRefreshNeeded(needsRefresh)
     setRevision(value => value + 1)
     if (failed.length) setError(`${selected.length - failed.length} matched. ${failed.length} could not be matched. ${failureMessage}`)
-    else if (needsRefresh) setError('Candidates were matched. Refresh the list to see them on the order.')
+    else if (needsRefresh) setError('Candidates were matched. Refresh the list to see them on the job.')
     else onClose()
   }
 
   const requirementSkills = requirements?.skills ?? designation.requiredSkills
   const requirementYears = requirements?.minExperience ?? designation.minExperience
 
-  return <Sheet open onClose={() => { if (!saving) onClose() }} width="xl" title="Match candidates to this order"
+  return <Sheet open onClose={() => { if (!saving) onClose() }} width="xl" title="Match candidates to this job"
     description={`${designation.title} · ${store.company(order.companyId)?.name} · ${order.ref}`}
     footer={<div className="flex w-full flex-wrap items-center justify-end gap-2">
       <p className="mr-auto w-full text-sm text-ink-500 sm:w-auto">{selected.length} selected · {ready ? result.total : '…'} candidates found</p>
       <Button variant="ghost" disabled={saving} onClick={onClose}>Cancel</Button>
       <Button variant="primary" disabled={!selected.length || saving || !ready || !orderOpen} onClick={() => void matchSelected()}>{saving ? 'Please wait…' : `Match ${selected.length || ''} and start Stage 1`}</Button>
     </div>}>
-    <div className="jv-match jv-form"><DialogMark /><section className="jv-match-needs" aria-label="Order requirements">
+    <div className="jv-match jv-form"><DialogMark /><section className="jv-match-needs" aria-label="Job requirements">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><h3>What this order needs</h3><p className="mt-1 text-sm">{requirements?.title ?? designation.title} · {requirementYears > 0 ? `at least ${requirementYears} years of experience` : 'any experience'}</p></div>
+        <div><h3>What this job needs</h3><p className="mt-1 text-sm">{requirements?.title ?? designation.title} · {requirementYears > 0 ? `at least ${requirementYears} years of experience` : 'any experience'}</p></div>
         <Button size="sm" icon={<RefreshCw className="h-4 w-4" />} disabled={saving} onClick={() => void refresh()}>Refresh results</Button>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">{requirementSkills.map(skill => <span key={skillKey(skill)} className="jv-match-skill">{skill}</span>)}</div>
@@ -140,16 +140,16 @@ export function CandidateMatchDrawer({ onClose, orderId }: { onClose: () => void
         {filters.skills.map(skill => <Button size="sm" key={skillKey(skill)} aria-label={`Remove ${skill} filter`} onClick={() => set('skills', filters.skills.filter(value => skillKey(value) !== skillKey(skill)))}>{skill} ×</Button>)}
       </div>}
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => { setFilters(current => ({ ...current, designation: requirements?.title ?? designation.title, minExperience: String(requirements?.minExperience ?? designation.minExperience), skills: requirements?.skills ?? designation.requiredSkills, skillMode: 'all' })); resetSelection() }}>Use what this order needs</Button>
+        <Button size="sm" onClick={() => { setFilters(current => ({ ...current, designation: requirements?.title ?? designation.title, minExperience: String(requirements?.minExperience ?? designation.minExperience), skills: requirements?.skills ?? designation.requiredSkills, skillMode: 'all' })); resetSelection() }}>Use what this job needs</Button>
         <Button size="sm" variant="ghost" onClick={() => { setFilters(emptyFilters); setQuery(''); resetSelection() }}>Clear filters</Button>
       </div>
     </fieldset>
-    <div className="jv-match-bar"><span><strong>{coverage.loading ? '…' : coverage.data?.total ?? '—'}</strong> candidates available. Candidates already on an order or deployed are not shown. Each candidate needs an active recruiter.</span>{ready && result.items.length > 0 && orderOpen && <Button size="sm" disabled={saving} onClick={() => setPicked(allOnPage ? [] : workable.map(candidate => candidate.id))}>{allOnPage ? 'Clear selection' : 'Select all on this page'}</Button>}</div>
-    {!orderOpen && <p role="status" className="border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm text-amber-700">This order is {requirements?.orderStatus.replace('_', ' ')}. Set it to Open before you match candidates.</p>}
+    <div className="jv-match-bar"><span><strong>{coverage.loading ? '…' : coverage.data?.total ?? '—'}</strong> candidates available. Candidates already on a job or deployed are not shown. Each candidate needs an active recruiter.</span>{ready && result.items.length > 0 && orderOpen && <Button size="sm" disabled={saving} onClick={() => setPicked(allOnPage ? [] : workable.map(candidate => candidate.id))}>{allOnPage ? 'Clear selection' : 'Select all on this page'}</Button>}</div>
+    {!orderOpen && <p role="status" className="border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm text-amber-700">This job is {requirements?.orderStatus.replace('_', ' ')}. Set it to Open before you match candidates.</p>}
     {error && <div role="alert" className="bg-stamp-50 p-5 text-sm text-stamp-700">{error}{refreshNeeded && <Button className="mt-3" disabled={saving} onClick={() => void refresh()}>Refresh list</Button>}</div>}
     {loadError ? <div className="space-y-3 p-5"><p role="alert" className="text-sm text-stamp-700">{loadError}</p><Button disabled={saving} onClick={() => setRevision(value => value + 1)}>Try again</Button></div>
       : !ready ? <p role="status" className="p-8 text-center text-ink-500">Looking for candidates…</p>
-      : result.items.length === 0 ? <EmptyState title="No candidates match these filters" description="Change or clear the filters. A candidate needs an active recruiter and must not be on another order." />
+      : result.items.length === 0 ? <EmptyState title="No candidates match these filters" description="Change or clear the filters. A candidate needs an active recruiter and must not be on another job." />
       : <><ul>{result.items.map(candidate => <MatchRow key={candidate.id} candidate={candidate} checked={selected.includes(candidate.id)} disabled={saving || !orderOpen || !canWorkCandidate(store.me, candidate)} onToggle={() => setPicked(current => current.includes(candidate.id) ? current.filter(id => id !== candidate.id) : [...current, candidate.id])} />)}</ul>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule p-5"><span className="text-sm text-ink-500">{result.page * result.pageSize + 1}–{Math.min((result.page + 1) * result.pageSize, result.total)} of {result.total}</span><div className="flex gap-2"><Button size="sm" disabled={saving || result.page === 0} onClick={() => { setPage(result.page - 1); setPicked([]) }}>Previous</Button><Button size="sm" disabled={saving || (result.page + 1) * result.pageSize >= result.total} onClick={() => { setPage(result.page + 1); setPicked([]) }}>Next</Button></div></div></>}
     </div>

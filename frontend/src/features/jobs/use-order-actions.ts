@@ -7,8 +7,8 @@ import { extendedDeadline, orderPayload } from '@/features/jobs/order-meta'
 
 /**
  * Quick edits that do not need the full order form: pause or reopen matching, or push the
- * deadline out. They send the same payload the order dialog does, so the server applies the
- * same rules (for example an order whose openings are all deployed cannot be reopened).
+ * deadline out. They send the same payload the job dialog does, so the server applies the
+ * same rules (for example a job whose openings are all deployed cannot be reopened).
  */
 export function useOrderActions() {
   const store = useStore()
@@ -21,13 +21,13 @@ export function useOrderActions() {
       await api.put<Order>('/orders/' + order.id, orderPayload(order, changes))
       await refreshMasterData(store, message)
     } catch (error) {
-      store.notify(error instanceof Error ? error.message : 'We could not update the order. Please try again.', 'warn')
+      store.notify(error instanceof Error ? error.message : 'We could not update the job. Please try again.', 'warn')
     } finally {
       setBusyId(null)
     }
   }, [busyId, store])
 
-  const setStatus = useCallback((order: Order, status: OrderStatus) => save(order, { status }, status === 'on_hold' ? 'Order is on hold' : 'Order is open again'), [save])
+  const setStatus = useCallback((order: Order, status: OrderStatus) => save(order, { status }, status === 'on_hold' ? 'Job is on hold' : 'Job is open again'), [save])
   const extend = useCallback((order: Order, days: number) => save(order, { deadline: extendedDeadline(order.deadline, days) }, `Deadline extended by ${days} days`), [save])
 
   return { busyId, setStatus, extend }

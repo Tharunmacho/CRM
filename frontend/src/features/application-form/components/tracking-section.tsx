@@ -31,7 +31,7 @@ export function TrackingSection({
       {!hasOrder || rows.length === 0 ? (
         <div className="af-rowtable">
           <div className="af-track-empty">
-            {hasOrder ? 'No stage information yet.' : 'This candidate is not matched to an order, so there are no stages to track. Match them to an order to start the process.'}
+            {hasOrder ? 'No stage information yet.' : 'This candidate is not matched to a job yet, so there are no stages to track. Choose a job at the top of the page to start the process.'}
           </div>
         </div>
       ) : (
@@ -54,9 +54,9 @@ export function TrackingSection({
                     <StatusMark status={row.status} />
                     <span className="af-track-label">
                       <b>{row.label}</b>
-                      {row.extra && <small>Extra CRM stage</small>}
+                      {row.extra && <small>Additional stage</small>}
                       {!row.extra && row.systemLabel && row.systemLabel.toLowerCase() !== row.label.toLowerCase() && <small>{row.systemLabel}</small>}
-                      {!row.tracked && <small>Not a stage in this system</small>}
+                      {!row.tracked && <small>Not tracked in this system</small>}
                       {(row.outcome || row.note) && <small className="af-track-note">{[row.outcome, row.note].filter(Boolean).join(' · ')}</small>}
                     </span>
                   </span>

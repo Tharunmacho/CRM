@@ -21,7 +21,7 @@ export function EntryProgress({ completeness, reading, filledByDocuments, next, 
     : next === 'resume'
       ? { title: 'Only the passport is added', text: 'Add the resume to fill in education, experience and skills.', action: 'Upload resume' }
       : next === 'photo'
-        ? { title: 'One more thing', text: 'The passport-size photo is the only document still missing.', action: 'Add photo' }
+        ? { title: 'One more thing', text: 'The photo is the only document still missing.', action: 'Add photo' }
         : null
   return (
     <section className="ac-progress-card" aria-label="Application form progress">

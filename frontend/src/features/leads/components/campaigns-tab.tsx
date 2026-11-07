@@ -67,7 +67,7 @@ export function campaignColumns(): DbColumn<CampaignRow>[] {
     { key: 'converted', header: 'Converted', sortKey: 'conversionRate', width: 128, render: (r) => <ConversionCell row={r} /> },
     { key: 'upload', header: 'Last upload', sortKey: 'lastUploadAt', width: 96, optional: 4, render: (r) => <span className="lc-num"><strong className="tnum" style={{ fontSize: 13 }}>{uploadAgo(r.lastUploadAt)}</strong></span> },
     { key: 'platform', header: 'Platform', width: 124, optional: 5, render: (r) => <PlatformCell row={r} /> },
-    { key: 'positions', header: 'Top positions', width: 190, optional: 6, align: 'left', render: (r) => <span className="lc-text" title={topText(r.topPositions)}>{topText(r.topPositions) || '–'}</span> },
+    { key: 'positions', header: 'Top jobs', width: 190, optional: 6, align: 'left', render: (r) => <span className="lc-text" title={topText(r.topPositions)}>{topText(r.topPositions) || '–'}</span> },
     { key: 'countries', header: 'Country interest', width: 130, optional: 7, align: 'left', render: (r) => <span className="lc-text" title={topText(r.topCountries)}>{topText(r.topCountries) || '–'}</span> },
   ]
 }
@@ -77,7 +77,7 @@ function Expanded({ row }: { row: CampaignRow }) {
   return (
     <div className="lc-forms" onClick={(event) => event.stopPropagation()}>
       <dl className="lc-xfacts">
-        <div><dt>Top positions</dt><dd>{topText(row.topPositions) || '–'}</dd></div>
+        <div><dt>Top jobs</dt><dd>{topText(row.topPositions) || '–'}</dd></div>
         <div><dt>Country interest</dt><dd>{topText(row.topCountries) || '–'}</dd></div>
         <div><dt>Platform</dt><dd>Facebook {row.platform.fb} · Instagram {row.platform.ig} · other {row.platform.other}</dd></div>
         <div><dt>Last upload</dt><dd>{uploadAgo(row.lastUploadAt)}</dd></div>

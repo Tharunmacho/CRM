@@ -9,7 +9,8 @@
 
 export type FieldSource = 'extracted' | 'manual'
 export type SourceDocument = 'resume' | 'passport'
-export type DocumentKind = 'resume' | 'passport' | 'photo'
+/** A document slot key (`resume`, `passport`, `photo`, `education_certificate`, ... see shared/model/document-slots.ts). */
+export type DocumentKind = string
 
 export interface PersonalDetails {
   candidateName: string
@@ -128,15 +129,30 @@ export interface Extraction {
   kept: string[]
   kindsFound: string[]
   updatedAt: string
+  /** The reading this belongs to, what was read (`coverage`) and what has no place on the form (`unmapped`). Additive: an older server sends neither. */
+  jobId?: string
+  coverage?: unknown
+  unmapped?: unknown
 }
 
 export interface DocumentSlot {
   slot: DocumentKind
   label: string
+  hint: string
   uploaded: boolean
   current: FormDocument | null
   versions: number
   extraction: Extraction | null
+  /** Counted towards completeness for this application (the server decides; worked out from the stage for an older server). */
+  required: boolean
+  /** The stage from which it is expected; null when always expected or optional. */
+  requiredFromStage: number | null
+  /** More than one file is kept (Other documents). */
+  multiple: boolean
+  /** Newest first; only filled for slots that keep several files. */
+  files: FormDocument[]
+  /** Whether the server sent this slot (false: filled in locally so the checklist is complete on an older server). */
+  listed: boolean
 }
 
 export interface MissingItem {
@@ -167,6 +183,89 @@ export interface ExpiryInfo {
   daysLeft: number | null
 }
 
+/** One job a client has, for the Job picker. */
+export interface AssignmentJobOption {
+  orderId: string
+  ref: string
+  title: string
+  openings: number | null
+  status: string
+}
+
+export interface AssignmentClientOption {
+  id: string
+  name: string
+  companyId: string
+  companyName: string
+  jobs: AssignmentJobOption[]
+}
+
+/** What this candidate is for: client, job, source, agency, recruiter (contract v2 section 1). */
+export interface AssignmentData {
+  /** False when the server does not send `assignment`: the block is then read only and built from the recruitment details. */
+  supported: boolean
+  /** Whether the server sent the pickers' options / the permissions; when it did not, the screen builds them from what it already holds. */
+  serverOptions: boolean
+  serverCan: boolean
+  client: { id: string; name: string; companyId: string; companyName: string } | null
+  job: { orderId: string; ref: string; title: string; applicationId: string; stage: number; country: string } | null
+  source: { key: string; label: string }
+  agency: { id: string; name: string } | null
+  recruiter: { id: string; name: string } | null
+  can: { job: boolean; source: boolean; agency: boolean; recruiter: boolean }
+  options: {
+    clients: AssignmentClientOption[]
+    agencies: { id: string; name: string }[]
+    recruiters: { id: string; name: string; role: string }[]
+  }
+}
+
+/** A partial change to the assignment block, as the PUT sends it. */
+export interface AssignmentChange {
+  orderId?: string | null
+  source?: string
+  agencyId?: string | null
+  agencyName?: string | null
+  recruiterId?: string
+}
+
+export type FeedbackKind = 'update' | 'delay' | 'issue' | 'client' | 'candidate'
+export type FeedbackReason = 'waiting_candidate' | 'waiting_client' | 'waiting_documents' | 'waiting_visa' | 'waiting_payment' | 'other'
+
+export interface FeedbackItem {
+  id: string
+  kind: FeedbackKind
+  reason: FeedbackReason | ''
+  body: string
+  stage: number | null
+  authorId: string
+  authorName: string
+  createdAt: string
+  /** What the server says this viewer may do with the note; null when it does not say (an older server), then the 15 minute rule is worked out here. */
+  canDelete: boolean | null
+}
+
+export interface StageClock {
+  stage: number
+  stageLabel: string
+  since: string
+  hours: number
+  limitHours: number
+  overdue: boolean
+  needsReason: boolean
+}
+
+/** Recruiter notes ("why is this taking time") and the clock of the stage the candidate is in. */
+export interface FeedbackData {
+  /** False when the server has no feedback yet: the panel is then left out. */
+  supported: boolean
+  items: FeedbackItem[]
+  canWrite: boolean
+  stageClock: StageClock | null
+}
+
+export interface OptionalDocument { slot: string; label: string; uploaded: boolean }
+
 export interface ApplicationFormData {
   header: { company: string; title: string; address: string; phone: string; email: string }
   candidate: { id: string; ref: string; name: string; status: string; needsReview: boolean; ownerId: string; ownerName: string; updatedAt: string; canEdit: boolean }
@@ -176,7 +275,15 @@ export interface ApplicationFormData {
   passport: PassportDetails & { expiry: ExpiryInfo }
   education: EducationRow[]
   experience: ExperienceDetails
+  /** Every document slot, keyed by slot. */
   documents: Record<DocumentKind, DocumentSlot>
+  /** The slots in display order. */
+  documentOrder: DocumentKind[]
+  optionalDocuments: OptionalDocument[]
+  /** Whether the candidate can be deployed, and the documents still to upload before that (the last stage row says so). Absent on an older server. */
+  deployment?: { ready: boolean; missing: { slot: string; label: string }[] }
+  assignment: AssignmentData
+  feedback: FeedbackData
   recruitment: RecruitmentDetails
   tracking: { summary: TrackingSummary; rows: TrackingRow[] }
   completeness: { percent: number; filled: number; total: number; missing: MissingItem[] }

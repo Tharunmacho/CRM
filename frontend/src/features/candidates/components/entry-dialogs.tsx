@@ -4,7 +4,6 @@ import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import type { CandidateEntryForm } from '../entry-model'
 import type { DuplicateMatch } from '../entry-signals'
-import type { useDocumentIntake } from '../use-document-intake'
 import { EntryAvatar } from './entry-avatar'
 
 /**
@@ -87,29 +86,6 @@ export function DuplicateDialog({ duplicate, form, saving, error, onCancel, onOp
         </p>
       )}
       {error && <p role="alert" className="mt-3 text-sm text-stamp-600">{error}</p>}
-    </Dialog>
-  )
-}
-
-/** Asked before a saved upload replaces what is on the form. */
-export function RecoveryDialog({ open, recovering, hasFiles, intake, onStay, onOpen }: {
-  open: boolean
-  recovering: boolean
-  hasFiles: boolean
-  intake: ReturnType<typeof useDocumentIntake>
-  onStay: () => void
-  onOpen: () => void
-}) {
-  return (
-    <Dialog
-      open={open}
-      onClose={() => { if (!recovering) onStay() }}
-      title="Open a different saved upload?"
-      description={hasFiles ? 'Your current form and files will be kept as their own saved upload. The one you pick will open with its own details.' : 'Your current form has no files and is not backed up. Opening the saved upload will replace what you typed.'}
-      footer={<div className="ac-dialog-actions"><Button disabled={recovering} onClick={onStay}>Stay on this form</Button><Button variant="primary" disabled={recovering} onClick={onOpen}>{recovering ? 'Opening…' : 'Open saved upload'}</Button></div>}
-    >
-      <p className="text-sm text-ink-500">Details of different candidates are kept apart. Check the name and contact details before you save.</p>
-      {intake.draftError && <p role="alert" className="mt-3 text-sm text-stamp-600">{intake.draftError}</p>}
     </Dialog>
   )
 }

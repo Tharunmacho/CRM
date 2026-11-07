@@ -1,11 +1,14 @@
+import type { ReactNode } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { stageByNo } from '@/shared/workflow/stages'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Select } from '@/shared/ui/primitives'
-import { NEEDS_ASSIGNMENT_LABEL, PRD_COLUMNS, type DataBankPool } from '@/features/candidates/data-bank-pools'
+import { PRD_COLUMNS, type DataBankPool } from '@/features/candidates/data-bank-pools'
+import { poolChoices, scopeValue, staffForScope, visibleFilters } from '@/features/candidates/data-bank-stats'
 import { SOURCE_LABEL } from '@/features/candidates/components/data-bank-columns'
 import type { SkillCoverage } from '@/features/candidates/use-skill-facets'
+import '@/styles/data-bank-top.css'
 
 const STATUS_LABEL: Record<string, string> = {
   new: 'New',
@@ -15,22 +18,16 @@ const STATUS_LABEL: Record<string, string> = {
   needs_review: 'Needs review',
 }
 
-const POOL_LABEL: [DataBankPool, string][] = [
-  ['all', 'Everyone'],
-  ['unmapped', 'No order yet'],
-  ['unassigned', NEEDS_ASSIGNMENT_LABEL],
-  ['needs_review', 'Needs review'],
-  ['not_interested', 'Not interested'],
-]
-
 const labelOf = (key: string) => PRD_COLUMNS.find((column) => column.key === key)?.label ?? key
 
-/** The filters that live behind "More filters": text matches, exact years, order reference, date and skills. */
-const HIDDEN_KEYS = ['name', 'phone', 'designation', 'experience', 'experience_min', 'experience_max', 'order', 'added', 'added_from', 'added_to']
-export const hasMoreFilters = (filters: Record<string, string>, skills: string[], skillStatus: string) =>
-  HIDDEN_KEYS.some((key) => (filters[key] ?? '').trim()) || skills.length > 0 || skillStatus !== 'all'
+/** The filters that live behind "More filters": the pool list, source, passport, text matches, exact years, order reference, date and skills. */
+const HIDDEN_KEYS = ['source', 'passport', 'name', 'phone', 'designation', 'experience', 'experience_min', 'experience_max', 'order', 'added', 'added_from', 'added_to']
+export const hasMoreFilters = (filters: Record<string, string>, skills: string[], skillStatus: string, pool: DataBankPool = 'all') =>
+  HIDDEN_KEYS.some((key) => (filters[key] ?? '').trim()) || skills.length > 0 || skillStatus !== 'all' || pool !== 'all'
 
 interface Props {
+  /** The signed-in person: staff get Everyone / My candidates, admin and manager also get the Staff filter. */
+  me: { id: string; role: string }
   filters: Record<string, string>
   onFilter: (key: string, value: string) => void
   pool: DataBankPool
@@ -52,14 +49,15 @@ interface Props {
 }
 
 /**
- * The FILTERS row of white selects (pool, status, source, passport, stage, assigned staff), a
- * "More filters" drawer for the remaining PRD columns (name, phone, designation, experience,
- * mapped order, date added) and the skills filter. Every PRD column therefore stays filterable.
+ * One row of equal selects: Everyone / My candidates, Status, Stage and (admin, manager) Staff. "More filters" holds the rest: the pool
+ * list, source, passport, name, phone, job title, experience, mapped order, date added and skills. Every PRD column stays filterable.
  */
 export function DataBankFilters(props: Props) {
-  const { filters, onFilter, pool, onPool, staff, onStaff, users, skills, onSkills, skillMode, onSkillMode, skillStatus, onSkillStatus, coverage, moreOpen, onMoreToggle, canClear, onClear } = props
+  const { me, filters, onFilter, pool, onPool, staff, onStaff, users, skills, onSkills, skillMode, onSkillMode, skillStatus, onSkillStatus, coverage, moreOpen, onMoreToggle, canClear, onClear } = props
   const facets = coverage.data?.skills ?? []
-  const moreActive = hasMoreFilters(filters, skills, skillStatus)
+  const moreActive = hasMoreFilters(filters, skills, skillStatus, pool)
+  const shown = visibleFilters(me.role)
+  const scope = scopeValue(staff, me.id)
   const today = new Date().toISOString().slice(0, 10)
   const years = (key: 'experience_min' | 'experience_max', label: string, placeholder: string) => (
     <Field label={label} error={key === 'experience_max' && filters.experience_min && filters.experience_max && Number(filters.experience_max) < Number(filters.experience_min) ? 'Must not be less than the first number.' : undefined}>
@@ -77,40 +75,38 @@ export function DataBankFilters(props: Props) {
     </Field>
   )
   const choice = (key: string, any: string, options: [string, string][]) => (
-    <span className="db-sel">
-      <Select aria-label={`Filter by ${labelOf(key)}`} value={filters[key] ?? ''} onChange={(event) => onFilter(key, event.target.value)}>
-        <option value="">{any}</option>
-        {options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </Select>
-    </span>
+    <Select aria-label={`Filter by ${labelOf(key)}`} value={filters[key] ?? ''} onChange={(event) => onFilter(key, event.target.value)}>
+      <option value="">{any}</option>
+      {options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </Select>
   )
+  const labelled = (label: string, control: ReactNode) => <div className="dbt-field"><span>{label}</span>{control}</div>
   return (
-    <div className="db-filters" aria-label="Filters">
-      <div className="db-filterbar">
-        <span className="db-filterbar-label">Filters</span>
-        <span className="db-sel">
-          <Select aria-label="Show" value={pool} onChange={(event) => onPool(event.target.value as DataBankPool)}>
-            {POOL_LABEL.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    <div className="dbt-filters" aria-label="Filters">
+      <div className="dbt-bar">
+        {shown.includes('scope') && (
+          <Select aria-label="Whose candidates" value={scope} onChange={(event) => onStaff(staffForScope(event.target.value, me.id))}>
+            <option value="everyone">Everyone</option>
+            <option value="mine">My candidates</option>
+            {scope === 'other' && <option value="other" disabled>Chosen staff member</option>}
           </Select>
-        </span>
-        {choice('status', 'Any status', Object.entries(STATUS_LABEL))}
-        {choice('source', 'Any source', Object.values(SOURCE_LABEL).map((label) => [label, label]))}
-        {choice('passport', 'Any passport', [['Yes', 'Has a passport'], ['No', 'No passport']])}
-        {choice('stage', 'Any stage', [['0', 'No order yet'], ...Array.from({ length: 11 }, (_, index): [string, string] => [String(index + 1), `Stage ${index + 1} · ${stageByNo(index + 1).title}`])])}
-        <span className="db-sel">
+        )}
+        {shown.includes('status') && choice('status', 'Any status', Object.entries(STATUS_LABEL))}
+        {shown.includes('stage') && choice('stage', 'Any stage', [['0', 'No order yet'], ...Array.from({ length: 11 }, (_, index): [string, string] => [String(index + 1), `Stage ${index + 1} · ${stageByNo(index + 1).title}`])])}
+        {shown.includes('staff') && (
           <Select aria-label="Filter by assigned staff" value={staff} onChange={(event) => onStaff(event.target.value)}>
             <option value="">All staff</option>
             {users.filter((user) => user.role !== 'admin' || user.id === staff).map((user) => <option key={user.id} value={user.id}>{user.name}{!user.active ? ' (inactive)' : ''}</option>)}
           </Select>
-        </span>
-        <span className="db-more-cell">
+        )}
+        <div className="dbt-bar-end">
           {canClear && <button type="button" className="db-clear" onClick={onClear}><X size={13} aria-hidden="true" />Clear</button>}
           <button type="button" className={cn('db-more-toggle', moreOpen && 'is-open')} aria-expanded={moreOpen} aria-controls="db-more-filters" onClick={onMoreToggle}>
             More filters
             {moreActive && <i className="db-more-dot" aria-label="Some of these filters are active" />}
             <ChevronDown size={15} aria-hidden="true" className="db-chevron" />
           </button>
-        </span>
+        </div>
       </div>
 
       {skills.length > 0 && (
@@ -124,6 +120,13 @@ export function DataBankFilters(props: Props) {
 
       <div id="db-more-filters" className="db-more" hidden={!moreOpen}>
         <div className="db-more-grid">
+          {labelled('Show', (
+            <Select aria-label="Show list" value={pool} onChange={(event) => onPool(event.target.value as DataBankPool)}>
+              {poolChoices(me.role, pool).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </Select>
+          ))}
+          {labelled('Source', choice('source', 'Any source', Object.values(SOURCE_LABEL).map((label) => [label, label])))}
+          {labelled('Passport', choice('passport', 'Any passport', [['Yes', 'Has a passport'], ['No', 'No passport']]))}
           {text('name', 'Contains')}
           {text('phone', 'Contains')}
           {text('designation', 'Contains')}

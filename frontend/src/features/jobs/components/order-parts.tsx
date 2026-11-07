@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowRight, CalendarClock, LayoutGrid, List, MoreHorizontal, Pause, Pencil, Play, Trash2 } from 'lucide-react'
+import { CalendarClock, MoreHorizontal } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { Order } from '@/shared/model/types'
 import { dateLabel } from '@/shared/lib/format'
@@ -22,39 +22,7 @@ export function DueChip({ order, short }: { order: Pick<Order, 'status' | 'deadl
   return <span className={cn("jv-due", tone)} title={note || undefined}><CalendarClock size={14} aria-hidden="true" />{dateLabel(order.deadline)}{!short && note && <small>{note}</small>}</span>
 }
 
-/* ---------------------------------------------------------------- List / grid toggle */
-
-export type OrdersLayout = 'list' | 'grid'
-
-/** A remembered per-viewer layout choice; storage may be unavailable, so it only ever degrades to the default. */
-export function useStoredLayout(key: string, fallback: OrdersLayout): [OrdersLayout, (value: OrdersLayout) => void] {
-  const [layout, setLayout] = useState<OrdersLayout>(() => {
-    try { const saved = window.localStorage.getItem(key); return saved === 'list' || saved === 'grid' ? saved : fallback } catch { return fallback }
-  })
-  const update = useCallback((value: OrdersLayout) => {
-    setLayout(value)
-    try { window.localStorage.setItem(key, value) } catch { /* the choice just is not remembered */ }
-  }, [key])
-  return [layout, update]
-}
-
-export function LayoutToggle({ value, onChange }: { value: OrdersLayout; onChange: (value: OrdersLayout) => void }) {
-  return (
-    <div className="jv-seg" role="group" aria-label="Layout">
-      <button type="button" aria-pressed={value === 'list'} className={cn(value === 'list' && 'is-on')} onClick={() => onChange('list')} title="List view"><List size={15} aria-hidden="true" />List</button>
-      <button type="button" aria-pressed={value === 'grid'} className={cn(value === 'grid' && 'is-on')} onClick={() => onChange('grid')} title="Card view"><LayoutGrid size={15} aria-hidden="true" />Cards</button>
-    </div>
-  )
-}
-
-/* ---------------------------------------------------------------- Row actions */
-
-export interface OrderActionHandlers {
-  onOpen: (order: Order) => void
-  onEdit: (order: Order) => void
-  onSetStatus: (order: Order, status: 'open' | 'on_hold') => void
-  onDelete?: (order: Order) => void
-}
+/* ---------------------------------------------------------------- Menus */
 
 interface MenuPosition { top: number; left: number }
 
@@ -123,42 +91,6 @@ export function ActionMenu({ label, text, children }: { label: string; text?: st
 
 export function MenuButton({ icon, danger, onClick, children }: { icon: ReactNode; danger?: boolean; onClick: () => void; children: ReactNode }) {
   return <button type="button" role="menuitem" className={cn('jv-menu-item', danger && 'is-danger')} onClick={onClick}>{icon}{children}</button>
-}
-
-/** The bordered arrow that opens an order, plus a menu of quick actions. */
-export function OrderRowActions({ order, handlers, name, compact }: { order: Order; handlers: OrderActionHandlers; name: string; compact?: boolean }) {
-  return (
-    <div className="jv-row-actions" onClick={(event) => event.stopPropagation()}>
-      <ActionMenu label={`More actions for ${name}`}>
-        {(close) => (
-          <>
-            <MenuButton icon={<ArrowRight size={15} />} onClick={() => { close(); handlers.onOpen(order) }}>Open order</MenuButton>
-            <MenuButton icon={<Pencil size={15} />} onClick={() => { close(); handlers.onEdit(order) }}>Edit order</MenuButton>
-            {order.status === 'open' && <MenuButton icon={<Pause size={15} />} onClick={() => { close(); handlers.onSetStatus(order, 'on_hold') }}>Put on hold</MenuButton>}
-            {order.status === 'on_hold' && <MenuButton icon={<Play size={15} />} onClick={() => { close(); handlers.onSetStatus(order, 'open') }}>Start matching again</MenuButton>}
-            {handlers.onDelete && <MenuButton danger icon={<Trash2 size={15} />} onClick={() => { close(); handlers.onDelete?.(order) }}>Delete order</MenuButton>}
-          </>
-        )}
-      </ActionMenu>
-      <button type="button" className={cn('jv-open-btn', compact && 'is-icon')} aria-label={`Open order ${order.ref}`} title="Open order" onClick={() => handlers.onOpen(order)}>
-        {!compact && 'Open'}<ArrowRight size={15} aria-hidden="true" />
-      </button>
-    </div>
-  )
-}
-
-/** Content width of an element, kept current as it resizes (0 until it has been measured). */
-export function useElementWidth(element: HTMLElement | null): number {
-  const [width, setWidth] = useState(0)
-  useLayoutEffect(() => {
-    if (!element) return
-    setWidth(Math.round(element.getBoundingClientRect().width))
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)))
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [element])
-  return width
 }
 
 /** True while the window is at least `px` wide; tables give way to cards below it. */

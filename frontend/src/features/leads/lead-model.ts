@@ -109,7 +109,7 @@ export interface LeadFacets {
 
 /** The table's headings, in one place: a rename is a one-line change here. Custom question headings come from the uploaded sheets. */
 export const LEAD_HEADINGS = {
-  actions: 'Actions', created: 'Created', name: 'Name / DOB', contact: 'Contact', position: 'Position applied', experience: 'Experience',
+  actions: 'Actions', created: 'Created', name: 'Name / DOB', contact: 'Contact', position: 'Job applied', experience: 'Experience',
   location: 'Location', campaign: 'Campaign', country: 'Country', status: 'Status', followup: 'Follow‑up', resume: 'Resume',
 } as const
 
@@ -185,7 +185,7 @@ export const isClosed = (status?: string | null) => CLOSED.has((status ?? '').tr
 
 export const LEAD_SORTS: [string, string][] = [
   ['created:desc', 'Newest first'], ['created:asc', 'Oldest first'], ['name:asc', 'Name A-Z'], ['name:desc', 'Name Z-A'],
-  ['position:asc', 'Position A-Z'], ['campaign:asc', 'Campaign A-Z'], ['status:asc', 'Status'], ['owner:asc', 'Assigned to'], ['follow_up:asc', 'Follow-up soonest'],
+  ['position:asc', 'Job A-Z'], ['campaign:asc', 'Campaign A-Z'], ['status:asc', 'Status'], ['owner:asc', 'Assigned to'], ['follow_up:asc', 'Follow-up soonest'],
   ['last_contacted:desc', 'Last contacted'], ['calls:desc', 'Most calls'], ['experience:desc', 'Most experience'],
 ]
 
@@ -479,7 +479,7 @@ export const LEAD_FIELDS: { value: string; label: string }[] = [
   { value: 'city', label: 'City' },
   { value: 'state', label: 'State' },
   { value: 'currentLocation', label: 'Current location' },
-  { value: 'positionApplied', label: 'Position applied' },
+  { value: 'positionApplied', label: 'Job applied' },
   { value: 'experienceRestaurant', label: 'Restaurant experience' },
   { value: 'experienceTotal', label: 'Total experience' },
   { value: 'gender', label: 'Gender' },

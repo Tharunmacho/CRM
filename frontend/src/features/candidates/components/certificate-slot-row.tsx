@@ -6,12 +6,9 @@ import { fileHref } from '@/shared/api/client'
 import type { FileVersion } from '@/shared/model/types'
 import { FileLink } from '@/shared/ui/file-drop'
 
-/** Document slots that hold several files side by side (a candidate usually has more than one certificate). */
-export const MULTI_DOCUMENT_KEYS = ['education', 'experience']
-
 /**
- * The candidate's certificates, every file on its own row (newest first) with View and Download.
- * Each file added is kept, so "Add certificate" never replaces an earlier one.
+ * A slot that keeps several files side by side (Other documents), every file on its own row (newest first) with View and Download.
+ * Each file added is kept, so adding never replaces an earlier one.
  */
 export function CertificateSlotRow({ label, files, onUpload, uploaderName, emptyLabel = 'Not uploaded' }: {
   label: string

@@ -49,6 +49,8 @@ export function DeleteRecordDialog({
   const agreements = companies.filter((company) => company.agreement)
   const retained = apps.length > 0 || agreements.length > 0
   const close = () => { if (!busy) onClose() }
+  /** What the person calls it: an order is a job on screen. */
+  const word = kind === 'order' ? 'job' : kind
 
   const name =
     kind === 'client'
@@ -62,7 +64,7 @@ export function DeleteRecordDialog({
     goes.push(`${plural(companies.length, 'company', 'companies')}: ${companies.map((c) => c.name).join(', ')}`)
   }
   if (kind !== 'order' && orders.length > 0) {
-    goes.push(`${plural(orders.length, 'order', 'orders')}: ${orders.map((o) => o.ref).join(', ')}`)
+    goes.push(`${plural(orders.length, 'job', 'jobs')}: ${orders.map((o) => o.ref).join(', ')}`)
   }
   const remove = async () => {
     if (busy || retained) return
@@ -84,7 +86,7 @@ export function DeleteRecordDialog({
     <Dialog
       open={open}
       onClose={close}
-      title={`Delete ${name ?? `this ${kind}`}?`}
+      title={`Delete ${name ?? `this ${word}`}?`}
       description="This cannot be undone."
       footer={
         <>
@@ -93,7 +95,7 @@ export function DeleteRecordDialog({
           </Button>
           {onEdit && <Button disabled={busy} onClick={() => { onClose(); onEdit() }}>Change status instead</Button>}
           <Button variant="danger" onClick={remove} disabled={busy || retained}>
-            {busy ? 'Deleting…' : `Delete ${kind}`}
+            {busy ? 'Deleting…' : `Delete ${word}`}
           </Button>
         </>
       }
@@ -103,12 +105,12 @@ export function DeleteRecordDialog({
         <div className="rounded-control border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <p className="flex items-center gap-2 font-medium">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-            This {kind} has records we must keep
+            This {word} has records we must keep
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-6">
             {blockers.map((a) => {
               const who = store.candidate(a.candidateId)?.name ?? 'A candidate'
-              const ref = store.order(a.orderId)?.ref ?? 'an order'
+              const ref = store.order(a.orderId)?.ref ?? 'a job'
               return (
                 <li key={a.id}>
                   {a.status === 'active'
@@ -120,13 +122,13 @@ export function DeleteRecordDialog({
             {history.length > 0 && <li>{plural(history.length, 'closed candidate application', 'closed candidate applications')} and their history are kept.</li>}
             {agreements.length > 0 && <li>{plural(agreements.length, 'company has an agreement', 'companies have agreements')} that is kept.</li>}
           </ul>
-          <p className="mt-3">{kind === 'order' ? 'Set the order to On hold while candidates are active, or Closed when the work is done.' : 'Set the status to Inactive to keep this record and its history.'}</p>
+          <p className="mt-3">{kind === 'order' ? 'Set the job to On hold while candidates are active, or Closed when the work is done.' : 'Set the status to Inactive to keep this record and its history.'}</p>
         </div>
       ) : (
         <div className="space-y-3 text-sm text-ink-700">
           {goes.length > 0 ? (
             <>
-              <p>Deleting this {kind} also deletes:</p>
+              <p>Deleting this {word} also deletes:</p>
               <ul className="list-disc space-y-1 pl-5">
                 {goes.map((g) => (
                   <li key={g}>{g}</li>
@@ -134,7 +136,7 @@ export function DeleteRecordDialog({
               </ul>
             </>
           ) : (
-            <p>Nothing else is linked to this {kind}. We also check saved documents before deleting.</p>
+            <p>Nothing else is linked to this {word}. We also check saved documents before deleting.</p>
           )}
           {orders.length > 0 && <p className="text-xs text-ink-500">Candidates themselves stay in the Data Bank.</p>}
         </div>

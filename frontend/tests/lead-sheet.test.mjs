@@ -186,7 +186,7 @@ test('mapping preview model: confidence tiers, split, overrides and duplicate ta
   assert.equal(m.applyOverrides(columns, overrides)[0].confidence, 'override')
   assert.deepEqual(m.duplicateTargets(columns, {}), ['phone'])
   assert.deepEqual(m.duplicateTargets(columns, { contact: null }), [])
-  assert.equal(m.fieldLabel('positionApplied'), 'Position applied')
+  assert.equal(m.fieldLabel('positionApplied'), 'Job applied')
   assert.equal(m.fieldLabel('someNewField'), 'Some new field')
   assert.deepEqual(m.sampleValues([{ name: 'A' }, { name: 'A' }, { name: 'B' }, { name: 'C' }], 'name'), ['A', 'B'])
   assert.deepEqual(m.sampleValues([{ experienceRestaurantText: '10+ years' }], 'experienceRestaurant'), ['10+ years'])

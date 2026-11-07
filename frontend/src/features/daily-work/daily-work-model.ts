@@ -346,7 +346,7 @@ export function positionCell(item: Pick<DailyItem, 'position' | 'positionSource'
   if (!item.position?.trim()) return { text: '', source: 'none', hint: 'No job preference saved yet' }
   if (item.positionSource === 'preference') return { text: item.position, source: 'preference', hint: "Candidate's preferred job (from the application form), not from an order" }
   if (item.positionSource === 'skill') return { text: item.position, source: 'skill', hint: "No job preference saved: shown from the candidate's skills" }
-  return { text: item.position, source: 'order', hint: "The order's position" }
+  return { text: item.position, source: 'order', hint: "The order's job" }
 }
 
 /** A client exists only through an order, so an unmatched candidate has none; say that instead of a bare dash. */

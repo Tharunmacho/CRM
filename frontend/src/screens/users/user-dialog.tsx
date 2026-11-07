@@ -8,6 +8,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { useStaffAvailability } from '@/features/staff/use-staff-availability'
 import { canReceiveManualAssignment, manualAssignmentLabel } from '@/features/staff/availability-model'
 import { availabilityWords } from '@/features/staff-directory/model'
+import { autoAssignValue } from '@/features/candidates/assignment-labels'
 import { FormSection, PasswordOnce, PasswordPair, RolePill, UserAvatar, failureText, generatePassword, roleBlurbs } from './user-ui'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -31,6 +32,7 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
   const replacementValid = replacementOptions.some(candidate => candidate.id === form.reassignToUserId)
   const currentAvailability = availability.data?.staff.find(candidate => candidate.id === user?.id)?.availability
   const set = <K extends keyof typeof form>(key: K, value: typeof form[K]) => setForm((current) => ({ ...current, [key]: value }))
+  const autoOn = autoAssignValue(store.settings) === true
   const own = user?.id === store.me.id
   const owned = user ? store.candidates.filter((c) => c.ownerId === user.id).length : 0
   const tasks = user ? store.tasks.filter((t) => t.ownerId === user.id && !t.completedAt && !t.cancelledAt).length : 0
@@ -101,11 +103,11 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
               <Switch label="Account active" description="Inactive accounts cannot sign in." checked={form.active} disabled={busy || own} onChange={(value) => set('active', value)} />
             </div>
           </FormSection>
-          <FormSection icon={<RotateCw size={18} />} title="New candidates" hint="Sharing new candidates one after another" columns={false}>
+          <FormSection icon={<RotateCw size={18} />} title="New candidates" hint="Only used while automatic assignment is on" columns={false}>
             {isStaff ? <div className="uv-toggle">
-              <Switch label="Gets new candidates" description="Include this person when new candidates are shared out." checked={form.receivesAutoAssign} disabled={busy || !form.active} onChange={(value) => set('receivesAutoAssign', value)} />
+              <Switch label="Can be given new candidates automatically" description={autoOn ? 'Include this person when new candidates are shared out.' : 'Automatic assignment is off. This only matters if an admin switches it on.'} checked={form.receivesAutoAssign} disabled={busy || !form.active} onChange={(value) => set('receivesAutoAssign', value)} />
               <Switch label="On leave" description="Stops new candidates being given, but keeps the work they have. Approved leave in Attendance also stops them." checked={form.onLeave} disabled={busy || !form.active} onChange={(value) => set('onLeave', value)} />
-            </div> : <p className="uv-note">Only Staff get new candidates automatically. {form.role === 'admin' ? 'Admins' : 'Managers'} never do, so these options do not apply.</p>}
+            </div> : <p className="uv-note">Only Staff can be given new candidates automatically. {form.role === 'admin' ? 'Admins' : 'Managers'} never are, so these options do not apply.</p>}
             {isStaff && currentAvailability && <p className="uv-note">Right now: <strong>{availabilityWords(currentAvailability.status, currentAvailability.label)}</strong>. Your changes start when you save.</p>}
           </FormSection>
         </>}

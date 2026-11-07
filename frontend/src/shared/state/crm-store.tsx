@@ -16,6 +16,7 @@ import { EMPTY_SETTINGS } from '@/shared/lib/agency'
 import { indexWorkspace } from './workspace-index'
 import { keepIfSame, reconcile } from './reconcile'
 import { deskUnread } from './desk-unread'
+import { dropDeleted, markCandidateDeleted, removeCandidate, restoreCandidate, unmarkCandidateDeleted } from './candidate-removal'
 import { forgetSnapshots, persistSoon, readPersisted, signedInUserHint } from './snapshot-cache'
 import { live, liveInterval } from './live'
 import { matchDoneMessage } from '@/features/candidates/initial-call'
@@ -277,7 +278,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const seeded = deskUnread({ inboxUnread: unread })
             if (seeded !== null) { unreadSeeded.current = true; setInboxUnread(seeded) }
             // Unchanged records keep their identity, so a refresh that changed nothing renders nothing.
-            setData((current) => reconcile(current, { ...EMPTY, ...rest }))
+            // A snapshot read before a delete finished must not bring the deleted candidate back.
+            setData((current) => reconcile(current, dropDeleted({ ...EMPTY, ...rest })))
             persistSoon('bootstrap', payload.me.id, () => payload)
           } else {
             setData(EMPTY)
@@ -407,7 +409,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     // The desk response carried the unread count: wait for the first scheduled poll instead of asking 1.2 s after load.
     const first = unreadSeeded.current ? undefined : window.setTimeout(readOnce, 1_200)
-    const stopLive = liveInterval(read, PULSE_MS, ['mail', 'whatsapp', 'documents'], { onChange: readOnce })
+    const stopLive = liveInterval(read, PULSE_MS, ['mail', 'whatsapp', 'documents'], { onChange: readOnce, debounceMs: 2_500 }) // events cannot make the badge poll more than once per 2.5 s (the server memo lasts 3-10 s)
     document.addEventListener('visibilitychange', readOnce)
     return () => {
       observer.dispose()
@@ -683,7 +685,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await run(() => api.del(`/orders/${id}`), 'Order deleted')
       },
       deleteCandidate: async (id) => {
-        await run(() => api.del(`/candidates/${id}`), 'Candidate deleted')
+        // Optimistic: the candidate leaves every list now (the call below only has to confirm it), and comes
+        // back with the server's reason if it refuses. The server's answer already says what changed, so there is
+        // no full workspace reload; the live feed refreshes other desks and the lists that are fetched by search.
+        const version = authVersion.current
+        const { removed } = removeCandidate(currentData.current, id)
+        markCandidateDeleted(id)
+        setData((current) => removeCandidate(current, id).data)
+        notify('Candidate deleted')
+        try {
+          await api.del(`/candidates/${id}`)
+        } catch (err) {
+          unmarkCandidateDeleted(id)
+          if (version === authVersion.current) {
+            setData((current) => restoreCandidate(current, removed))
+            notify((err as ApiError).message || 'We could not delete this candidate. Please try again.', 'warn')
+            void refresh({ keepCurrent: true }).catch(() => undefined)
+          }
+          throw err
+        }
       },
       addDesignation: async (payload) => {
         await run(() => api.post('/designations', payload), 'Designation saved')

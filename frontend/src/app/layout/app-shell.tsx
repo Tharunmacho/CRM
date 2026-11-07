@@ -64,7 +64,7 @@ const NAV: NavItem[] = [
   { to: '/inbox', label: 'Inbox', icon: Inbox, signal: 'inbox', group: 'main' },
   { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, group: 'main', extension: true },
   { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
-  { to: '/jobs', label: 'Jobs / Positions', icon: Briefcase, group: 'Recruitment' },
+  { to: '/jobs', label: 'Jobs', icon: Briefcase, group: 'Recruitment' },
   { to: '/add-candidate', label: 'Candidate', icon: UserPlus, group: 'Recruitment' },
   { to: '/leads', label: 'Lead sheet', icon: ClipboardList, group: 'Recruitment' },
   { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },

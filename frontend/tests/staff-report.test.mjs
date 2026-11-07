@@ -112,3 +112,9 @@ test('the report period comes from the address, falling back to this week and ne
   assert.equal(long.from, '2026-09-05')
   assert.equal((Date.parse(`${long.to}T12:00:00Z`) - Date.parse(`${long.from}T12:00:00Z`)) / 86_400_000 + 1, m.MAX_RANGE_DAYS)
 })
+
+test('the notes column is drawn only when the server sends the figure', () => {
+  assert.equal(m.hasNotesFigure([staff(), staff({ id: 'b' })]), false)
+  assert.equal(m.hasNotesFigure([staff(), staff({ id: 'b', feedbackNotes: 0 })]), true)
+  assert.equal(m.hasNotesFigure([]), false)
+})

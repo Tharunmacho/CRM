@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { cn } from '@/shared/lib/cn'
 import type { Candidate } from '@/shared/model/types'
 import { bankFieldRows, EMPTY_VALUE, type BankContext } from '@/features/candidates/data-bank-fields'
 import { CandidateActions } from '@/features/candidates/components/data-bank-columns'
@@ -18,18 +17,18 @@ interface Props {
 }
 
 /**
- * The panel under an expanded Data Bank row: every field of the candidate with its own heading, in the same aligned grid the
- * Lead sheet uses, then the row's actions (Open, Application form, Assign, Edit). Fields with no answer stay listed with a dash so
- * two candidates can be compared line by line. Education and work history are long and not loaded in the list: they are
- * summarised as a pointer to the profile.
+ * The panel under an expanded Data Bank row: every field of the candidate (preferred country, passport, job, documents on file ...)
+ * as a label and its value, two pairs per line with the labels aligned, then the row's actions (Open, Application form, Assign,
+ * Edit). Fields with no answer stay listed with a dash so two candidates can be compared line by line. Education and work history
+ * are long and not loaded in the list: they point to the profile.
  */
 export function DataBankExpanded({ candidate, store, context, onOpen, onReassign, onEdit }: Props): ReactNode {
   const rows = bankFieldRows(candidate, context)
   return (
-    <div className="ld-xpanel" onClick={(event) => event.stopPropagation()}>
-      <dl className="ld-xgrid">
+    <div className="dbx-panel" onClick={(event) => event.stopPropagation()}>
+      <dl className="dbx-grid">
         {rows.map((row) => (
-          <div key={row.key} className={cn('ld-xcell', row.large && 'is-large')}>
+          <div key={row.key} className="dbx-row">
             <dt title={row.label}>{row.label}</dt>
             <dd title={row.value || undefined}>
               {row.large

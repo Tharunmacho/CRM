@@ -15,6 +15,7 @@ import { useStaffAvailability } from '@/features/staff/use-staff-availability'
 import type { StaffAvailability } from '@/features/staff/availability-model'
 import { useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { availabilityWords } from '@/features/staff-directory/model'
+import { autoAssignValue, receivesFlagText } from '@/features/candidates/assignment-labels'
 import { AgencySettingsTab } from './agency-settings'
 import { AuditHistory } from './audit-sheet'
 import { SecurityDialog } from './security-dialog'
@@ -49,6 +50,7 @@ export default function UsersPage() {
 
 function TeamPage({ tabs }: { tabs: ReactNode }) {
   const store = useStore()
+  const [, setParams] = useSearchParams()
   const accountRead = useWorkspaceRead()
   const [editing, setEditing] = useState<{ user: User | null; deactivate?: boolean } | null>(null)
   const [security, setSecurity] = useState<{ user: User; kind: 'password' | 'logout' } | null>(null)
@@ -60,6 +62,9 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState('')
   const availability = useStaffAvailability({ revision: store.users.map(user => `${user.id}:${user.role}:${user.active}:${user.receivesAutoAssign}:${user.onLeave}`).join('|') })
+  // New candidates are only given out automatically while the agency setting is on; until then the per-person flags are muted.
+  const autoOn = autoAssignValue(store.settings) === true
+  const flagText = receivesFlagText(autoOn)
   const availabilityFor = (id: string) => availability.data?.staff.find(user => user.id === id)?.availability
   const eligible = (availability.data?.staff ?? []).filter(user => user.availability.eligible)
   const onLeave = (availability.data?.staff ?? []).filter(user => user.active && isLeave(user.availability))
@@ -163,7 +168,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
     {
       key: 'assignment', header: 'New candidates', width: '16%',
       render: (u) => u.role === 'staff' && u.active ? <div className="uv-flags">
-        <label><Switch checked={u.receivesAutoAssign} disabled={!!pending} label={'Gets new candidates: ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /><span>Auto-assign</span></label>
+        <label className={cn(flagText.muted && 'is-muted')} title={flagText.note || undefined}><Switch checked={u.receivesAutoAssign} disabled={!!pending} label={flagText.label + ': ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /><span>{flagText.muted ? flagText.note : flagText.label}</span></label>
         <label><Switch checked={u.onLeave} disabled={!!pending} label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /><span>On leave</span></label>
       </div> : <span className="uv-none">{u.role !== 'staff' ? 'Staff only' : 'Account inactive'}</span>,
     },
@@ -196,22 +201,22 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
     <SummaryCards items={[
       { label: 'Team members', value: store.users.length, detail: `${store.users.length - activeCount} inactive`, icon: Users },
       { label: 'Active accounts', value: activeCount, detail: 'With access to the CRM', icon: UserCheck, tone: 'green', onSelect: () => toggleStatus('active'), active: statusFilter === 'active' },
-      { label: 'Getting new candidates', value: availability.data ? eligible.length : '—', detail: 'Can be given new candidates now', icon: RotateCw, onSelect: () => toggleStatus('in_rotation'), active: statusFilter === 'in_rotation' },
+      { label: 'Getting new candidates', value: autoOn && availability.data ? eligible.length : '—', detail: autoOn ? 'Can be given new candidates automatically' : 'Automatic assignment is off', icon: RotateCw, onSelect: () => toggleStatus('in_rotation'), active: statusFilter === 'in_rotation' },
       { label: 'On leave', value: availability.data ? onLeave.length : '—', detail: 'On leave today', icon: CalendarDays, tone: 'amber', onSelect: () => toggleStatus('on_leave'), active: statusFilter === 'on_leave' },
     ]} />
 
     <Panel flush className="uv-panel uv-rotation">
       <PanelHead id="uv-rotation-title" title="Candidate assignment"
-        description="New candidates are shared out equally, one after another, among active staff who get new candidates and are not on leave. Approved leave and the On leave switch both pause this."
-        actions={<><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></>} />
-      <div className="uv-rotation-body" role="group" aria-labelledby="uv-rotation-title">
+        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active staff who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or a manager assigns a recruiter. An admin can switch it on in Agency settings.'}
+        actions={autoOn ? <><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></> : <Button size="sm" onClick={() => setParams({ tab: 'agency' }, { replace: true })}>Agency settings</Button>} />
+      {autoOn && <div className="uv-rotation-body" role="group" aria-labelledby="uv-rotation-title">
         {availability.loading ? <p role="status" className="uv-note">Checking who is free…</p>
           : availability.error ? <p role="alert" className="uv-error">{availability.error}</p>
           : <>
             <div className="uv-rotation-group">
               <h3>Getting new candidates</h3>
               {eligible.length ? <div className="uv-rotation-list">{eligible.map((u) => <span key={u.id} className="uv-rotation-chip" title={u.name + ' · ' + work(u.id).candidates + ' candidates'}><UserAvatar name={u.name} size="sm" /><span>{u.name}</span><small>{work(u.id).candidates}</small></span>)}</div>
-                : <p role="status" className="uv-warn">No staff can get new candidates right now. Check leave and the Auto-assign switches.</p>}
+                : <p role="status" className="uv-warn">No staff can be given new candidates automatically right now. Check leave and the switches in the table.</p>}
             </div>
             {onLeave.length > 0 && <div className="uv-rotation-group">
               <h3>Paused</h3>
@@ -219,7 +224,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
             </div>}
             {availability.data && <p className="uv-foot">Status for {availability.data.today} ({availability.data.timezone}). The number next to each name is how many candidates they already have.</p>}
           </>}
-      </div>
+      </div>}
     </Panel>
 
     {error && <p role="alert" className="uv-error uv-banner">{error}</p>}

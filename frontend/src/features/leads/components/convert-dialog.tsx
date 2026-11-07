@@ -139,11 +139,11 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
             <Field label="Full name" required><Input value={fields.name} onChange={set('name')} /></Field>
             <Field label="Phone"><Input value={fields.phone} onChange={set('phone')} inputMode="tel" ident /></Field>
             <Field label="Email"><Input value={fields.email} onChange={set('email')} inputMode="email" /></Field>
-            <Field label="Position"><Input value={fields.designation} onChange={set('designation')} /></Field>
+            <Field label="Job"><Input value={fields.designation} onChange={set('designation')} /></Field>
             <Field label="Preferred country"><Input value={fields.country} onChange={set('country')} /></Field>
             <Field label="Current city"><Input value={fields.city} onChange={set('city')} /></Field>
           </div>
-          <p className="ld-hint">Also carried over: {[lead.dob ? `born ${dobLabel(lead.dob)}` : '', lead.gender ?? '', lead.experienceTotalYears !== null && lead.experienceTotalYears !== undefined ? `${lead.experienceTotalYears} years of experience` : '', lead.campaignName ? `source: ${lead.campaignName}` : ''].filter(Boolean).join(' · ') || 'nothing else'}. The candidate is assigned to {lead.ownerName ?? 'the next free recruiter'}.</p>
+          <p className="ld-hint">Also carried over: {[lead.dob ? `born ${dobLabel(lead.dob)}` : '', lead.gender ?? '', lead.experienceTotalYears !== null && lead.experienceTotalYears !== undefined ? `${lead.experienceTotalYears} years of experience` : '', lead.campaignName ? `source: ${lead.campaignName}` : ''].filter(Boolean).join(' · ') || 'nothing else'}. {lead.ownerName ? `The candidate stays with ${lead.ownerName}.` : 'The candidate is not assigned. An admin can choose a recruiter later.'}</p>
         </section>
 
         <section className="ld-section">

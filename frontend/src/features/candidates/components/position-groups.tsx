@@ -1,15 +1,14 @@
-import { useEffect, useState } from 'react'
-import { Briefcase, ChevronDown, ChevronRight, UserRoundX } from 'lucide-react'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { api } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
 import type { useStore } from '@/shared/state/crm-store'
 import { Button } from '@/shared/ui/primitives'
-import { CountryPills, CurrentStage, OwnerText, RowActions, StatusText, shortRef } from '@/features/candidates/components/data-bank-columns'
-import { CountryFlag } from '@/features/candidates/components/db-parts'
-import { dobParts } from '@/features/candidates/data-bank-view'
+import { AgentLine, CandidateCell, ContactLines, OwnerText, RowActions, StageCell, StatusText } from '@/features/candidates/components/data-bank-columns'
+import { BANK_TABLE_COLUMNS, bankGridTemplate, groupClientLine, groupHeading } from '@/features/candidates/data-bank-table'
 import {
-  agentName, groupKey, groupMeta, groupResumesPath, groupTitle, highlightParts, resumeCount,
+  groupKey, groupResumesPath, highlightParts, resumeCount,
   type PositionGroup,
 } from '@/features/candidates/data-bank-search'
 import '@/styles/data-bank-positions.css'
@@ -44,6 +43,7 @@ function GroupResumes({ scope, groupId, terms, store, version, onOpen, onReassig
   const [shown, setShown] = useState<{ items: Candidate[]; total: number; page: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const mark = (text: string) => <Marked text={text} terms={terms} />
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true); setError('')
@@ -69,41 +69,24 @@ function GroupResumes({ scope, groupId, terms, store, version, onOpen, onReassig
       : <p role="status" className="dbp-note">Loading resumes…</p>
   }
   return (
-    <div className="dbp-resumes" role="table" aria-label="Resumes in this position" aria-busy={loading || undefined}>
+    <div className="dbp-resumes" role="table" aria-label="Resumes in this job" aria-busy={loading || undefined} style={{ '--dbp-cols': bankGridTemplate() } as CSSProperties}>
       <div className="dbp-row is-head" role="row">
-        <span role="columnheader">Name / DOB</span><span role="columnheader">Contact</span><span role="columnheader">Preferred country</span><span role="columnheader">Agent</span>
-        <span role="columnheader">Recruiter</span><span role="columnheader">Stage</span><span role="columnheader">Status</span><span role="columnheader" className="sr-only">Actions</span>
+        {BANK_TABLE_COLUMNS.map(column => <span key={column.key} role="columnheader" data-col={column.key}>{column.header}</span>)}
       </div>
-      {shown.items.map(candidate => {
-        const agent = agentName(candidate)
-        const dob = dobParts(candidate.dob)
-        return (
-          <div key={candidate.id} className="dbp-row" role="row" tabIndex={0}
-            onClick={() => onOpen(candidate)}
-            onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(candidate) } }}>
-            <span role="cell" className="dbp-name" data-label="Name / DOB" title={`${candidate.name}${dob ? ` · born ${dob.label} (${dob.age} years)` : ''} · ${candidate.ref}`}>
-              <span className="db-2l is-name">
-                <strong className="db-clamp"><Marked text={candidate.name || 'Unnamed'} terms={terms} /></strong>
-                {dob ? <small>{dob.label}</small> : <small className="ident">{shortRef(candidate.ref)}</small>}
-              </span>
-            </span>
-            <span role="cell" data-label="Contact" title={candidate.email ? `${candidate.phone} · ${candidate.email}` : candidate.phone}>
-              <span className="db-2l">
-                <span className="ident db-num"><Marked text={candidate.phone || '–'} terms={terms} /></span>
-                {candidate.email && <small className="db-ellip">{candidate.email}</small>}
-              </span>
-            </span>
-            <span role="cell" data-label="Preferred country"><CountryPills value={candidate.countryPreference} /></span>
-            <span role="cell" data-label="Agent" className="dbp-agent" title={agent || 'No agent recorded'}>
-              {agent ? <span className="db-clamp"><Marked text={agent} terms={terms} /></span> : <span className="db-muted">–</span>}
-            </span>
-            <span role="cell" data-label="Recruiter"><OwnerText candidate={candidate} store={store} /></span>
-            <span role="cell" data-label="Stage"><CurrentStage candidate={candidate} store={store} /></span>
-            <span role="cell" data-label="Status"><StatusText candidate={candidate} /></span>
-            <span role="cell" className="dbp-actions"><RowActions candidate={candidate} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /></span>
-          </div>
-        )
-      })}
+      {shown.items.map(candidate => (
+        <div key={candidate.id} className="dbp-row" role="row" tabIndex={0}
+          onClick={() => onOpen(candidate)}
+          onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(candidate) } }}>
+          <span role="cell" data-col="candidate" data-label="Candidate"><CandidateCell candidate={candidate} mark={mark} /></span>
+          <span role="cell" data-col="contact" data-label="Contact"><ContactLines candidate={candidate} mark={mark} /></span>
+          <span role="cell" data-col="agent" data-label="Agent"><AgentLine candidate={candidate} mark={mark} /></span>
+          <span role="cell" data-col="owner" data-label="Recruiter"><OwnerText candidate={candidate} store={store} /></span>
+          <span role="cell" data-col="stage" data-label="Stage"><StageCell candidate={candidate} store={store} /></span>
+          <span role="cell" data-col="status" data-label="Status"><StatusText candidate={candidate} /></span>
+          <span role="cell" data-col="actions"><RowActions candidate={candidate} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /></span>
+        </div>
+      ))}
+
       {shown.items.length === 0 && <p className="dbp-note">No resumes here for this search.</p>}
       {error && <p role="alert" className="dbp-note is-error">{error}</p>}
       {shown.items.length < shown.total && (
@@ -130,25 +113,19 @@ export function PositionGroupsList({ groups, scope, terms, store, version, autoO
   const [chosen, setChosen] = useState<Record<string, boolean>>({})
   useEffect(() => { setChosen({}) }, [scope])
   return (
-    <ul className="dbp-groups" aria-label="Positions">
+    <ul className="dbp-groups" aria-label="Jobs">
       {groups.map(group => {
         const key = groupKey(group)
         const open = chosen[key] ?? autoOpen
-        const title = groupTitle(group)
+        const title = groupHeading(group)
+        const client = groupClientLine(group)
         const panelId = `dbp-${key}`
         return (
           <li key={key} className={cn('dbp-group', open && 'is-open', !group.orderId && 'is-none')}>
             <button type="button" className="dbp-head" aria-expanded={open} aria-controls={panelId} onClick={() => setChosen(current => ({ ...current, [key]: !open }))}>
               <span className="dbp-chevron" aria-hidden="true">{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
-              <span className="dbp-icon" aria-hidden="true">{group.orderId ? <Briefcase size={16} /> : <UserRoundX size={16} />}</span>
-              <span className="dbp-title">
-                <strong><Marked text={title} terms={terms} /></strong>
-                <small>
-                  {group.country && <CountryFlag country={group.country} />}
-                  <span><Marked text={groupMeta(group)} terms={terms} /></span>
-                  {group.ref && <span className="ident dbp-ref"><Marked text={group.ref} terms={terms} /></span>}
-                </small>
-              </span>
+              <strong className="dbp-title" title={group.ref ? `${title} (${group.ref})` : title}><Marked text={title} terms={terms} /></strong>
+              {client && <span className="dbp-client" title={client}><Marked text={client} terms={terms} /></span>}
               {group.orderStatus && group.orderStatus !== 'open' && <span className="dbp-state">{group.orderStatus.replace('_', ' ')}</span>}
               <span className="dbp-count tnum" title={resumeCount(group.resumes)}><b>{group.resumes}</b> {group.resumes === 1 ? 'resume' : 'resumes'}</span>
             </button>

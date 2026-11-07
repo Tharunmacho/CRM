@@ -50,13 +50,13 @@ export interface PositionGroups {
   resumes: number
 }
 
-export const NO_POSITION_LABEL = 'No position yet'
+export const NO_POSITION_LABEL = 'No job yet'
 
 /** The key a position is requested by (`position_id`); candidates without an order use "none". */
 export const groupKey = (group: Pick<PositionGroup, 'orderId'>): string => group.orderId ?? 'none'
 
 export const groupTitle = (group: Pick<PositionGroup, 'title' | 'orderId'>): string =>
-  group.orderId ? group.title?.trim() || 'Position' : NO_POSITION_LABEL
+  group.orderId ? group.title?.trim() || 'Job' : NO_POSITION_LABEL
 
 /** Company, client and country on one line; the client is left out when it only repeats the company. */
 export function groupMeta(group: Pick<PositionGroup, 'company' | 'client' | 'country' | 'orderId'>): string {

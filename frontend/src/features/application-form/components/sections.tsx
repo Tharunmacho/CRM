@@ -3,16 +3,14 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Button, IconButton, Input } from '@/shared/ui/primitives'
 import {
-  EDUCATION_COLUMNS,
+  EDUCATION_FORM_COLUMNS,
   EXPERIENCE_COLUMNS,
   EXPERIENCE_FIELDS,
   PASSPORT_FIELDS,
   PERSONAL_FIELDS,
-  RECRUITMENT_FIELDS,
   SECTION_TITLES,
   emptyEducationRow,
   emptyExperienceRow,
-  experienceSplitHint,
   isBlank,
   isBlankRow,
   moveRow,
@@ -20,6 +18,7 @@ import {
   removeRow,
   updateRow,
 } from '../form-model'
+import { RECRUITMENT_EMPTY_TEXT, type PaperLine, type ReceivedDocument } from '../paper-model'
 import type { ApplicationFormData, FormDraft, MissingItem } from '../types'
 import { Cell, FormField, ProvenanceChip } from './fields'
 
@@ -35,12 +34,15 @@ export interface FormContext {
 /** A numbered section band of the paper form. */
 export function Section({
   no,
+  title,
   missing = [],
   aside,
   plain,
   children,
 }: {
   no: number
+  /** Overrides the standard title of the section (the paper form calls section 5 "Documents received"). */
+  title?: string
   /** An extra section the paper form does not number: the badge shows a dot instead of the number. */
   plain?: boolean
   missing?: MissingItem[]
@@ -48,10 +50,10 @@ export function Section({
   children: ReactNode
 }) {
   return (
-    <section className={cn('af-section', plain && 'is-extra', no === 5 && 'is-documents')} id={`af-section-${no}`} aria-labelledby={`af-section-title-${no}`}>
+    <section className={cn('af-section', plain && 'is-extra')} id={`af-section-${no}`} aria-labelledby={`af-section-title-${no}`}>
       <header className="af-section-head">
         <span className={cn('af-section-no', plain && 'is-plain')} aria-hidden="true">{plain ? '' : no}</span>
-        <h2 id={`af-section-title-${no}`}>{SECTION_TITLES[no]}</h2>
+        <h2 id={`af-section-title-${no}`}>{title ?? SECTION_TITLES[no]}</h2>
         {missing.length > 0 && <span className="af-section-missing">{missing.length} missing</span>}
         {aside && <span className="af-section-aside">{aside}</span>}
       </header>
@@ -75,24 +77,19 @@ function fieldProps(ctx: FormContext) {
 }
 
 /**
- * Section 1 as pairs of cells (mobile / WhatsApp, family contact / native place) with languages, e-mail and address on rows of
- * their own, so a long e-mail or address never wraps mid-word and no row is left half empty.
+ * Section 1 as the official form has it: pairs of cells (name and father's name, date of birth and marital status, gender and
+ * nationality, languages and mobile number) and the address on a row of its own, so no row is left half empty.
  */
-export function PersonalSection({ ctx, missing, renderExtra }: { ctx: FormContext; missing: MissingItem[]; renderExtra?: (path: string) => ReactNode }) {
+export function PersonalSection({ ctx, missing }: { ctx: FormContext; missing: MissingItem[] }) {
   const props = fieldProps(ctx)
   const field = (path: string, wide?: boolean) => {
     const def = PERSONAL_FIELDS.find((item) => item.path === path)!
     return <FormField key={path} def={def} wide={wide} {...props} />
   }
-  const withExtras = ctx.form.extrasSupported && Boolean(renderExtra)
   return (
     <Section no={1} missing={missing}>
       <div className="af-cells">
-        {['personal.candidateName', 'personal.fatherName', 'personal.dateOfBirth', 'personal.maritalStatus', 'personal.gender', 'personal.nationality', 'personal.mobileNumber', 'personal.whatsapp'].map((path) => field(path))}
-        {withExtras && renderExtra!('screening.familyMemberNumber')}
-        {withExtras && renderExtra!('screening.nativePlace')}
-        {field('personal.languagesKnown', true)}
-        {field('personal.email', true)}
+        {['personal.candidateName', 'personal.fatherName', 'personal.dateOfBirth', 'personal.maritalStatus', 'personal.gender', 'personal.nationality', 'personal.languagesKnown', 'personal.mobileNumber'].map((path) => field(path))}
         {field('personal.currentAddress', true)}
       </div>
     </Section>
@@ -165,7 +162,7 @@ export function RowTable<T extends { rowId: string }>({
               <div className={cn('af-rowtable-cell', error && 'has-error')} role="cell" data-label={column.label} key={column.key}>
                 {editing ? (
                   <>
-                    <Input value={value} placeholder={column.placeholder} aria-label={`${column.label}, row ${index + 1}`} inputMode={column.key === 'year' ? 'numeric' : undefined} onChange={(event) => onChange(row.rowId, column.key, event.target.value)} />
+                    <Input value={value} placeholder={column.placeholder} aria-label={`${column.label}, row ${index + 1}`} inputMode={column.key === 'passedYear' ? 'numeric' : undefined} onChange={(event) => onChange(row.rowId, column.key, event.target.value)} />
                     {error && <p className="af-note is-error" role="alert">{error}</p>}
                   </>
                 ) : isBlank(value) ? <span className="af-empty">–</span> : <span className="af-text">{value}</span>}
@@ -192,6 +189,13 @@ export function RowTable<T extends { rowId: string }>({
   )
 }
 
+/** The education table as the official form words it: one column for the name and address of the institution. */
+const PAPER_EDUCATION_COLUMNS = [
+  { key: 'level', label: 'Educational level or course', placeholder: '' },
+  { key: 'passedYear', label: 'Year passed', placeholder: '' },
+  { key: 'institute', label: 'Name and address of institution', placeholder: '' },
+] as const
+
 export function EducationSection({ ctx, missing }: { ctx: FormContext; missing: MissingItem[] }) {
   const { draft, setDraft, editing, form } = ctx
   const set = (update: (rows: FormDraft['education']) => FormDraft['education']) => setDraft((current) => ({ ...current, education: update(current.education) }))
@@ -199,19 +203,19 @@ export function EducationSection({ ctx, missing }: { ctx: FormContext; missing: 
   return (
     <Section no={3} missing={missing} aside={hasRows ? <ProvenanceChip kind={provenanceOf(form, 'education', true, 'resume')} /> : undefined}>
       <RowTable
-        label="Add every course, newest first."
-        columns={EDUCATION_COLUMNS}
+        label="List every qualification, newest first."
+        columns={PAPER_EDUCATION_COLUMNS}
         rows={draft.education}
         editing={editing}
-        cols="minmax(0,1.4fr) minmax(0,.55fr) minmax(0,1.8fr)"
+        cols="minmax(0,1.3fr) minmax(0,.6fr) minmax(0,2.2fr)"
         errors={ctx.errors}
         errorPrefix="education"
         onChange={(rowId, key, value) => set((rows) => updateRow(rows, rowId, { [key]: value }))}
         onMove={(rowId, direction) => set((rows) => moveRow(rows, rowId, direction))}
         onRemove={(rowId) => set((rows) => removeRow(rows, rowId))}
         onAdd={() => set((rows) => [...rows, emptyEducationRow()])}
-        addLabel="Add education"
-        emptyText="No educational details yet. Upload a resume or add a row."
+        addLabel="Add qualification"
+        emptyText="No qualifications yet. Upload a resume or add one."
         printBlankRows={2}
       />
     </Section>
@@ -224,15 +228,13 @@ export function ExperienceSection({ ctx, missing }: { ctx: FormContext; missing:
   const set = (update: (rows: FormDraft['experience']['history']) => FormDraft['experience']['history']) =>
     setDraft((current) => ({ ...current, experience: { ...current.experience, history: update(current.experience.history) } }))
   const hasRows = draft.experience.history.some((row) => !isBlankRow(row as unknown as Record<string, unknown>))
-  const split = experienceSplitHint(draft.experience)
   return (
     <Section no={4} missing={missing} aside={hasRows ? <ProvenanceChip kind={provenanceOf(form, 'experience.history', true, 'resume')} /> : undefined}>
       <div className="af-cells af-cells-3">
         {EXPERIENCE_FIELDS.map((def) => <FormField key={def.path} def={def} {...props} />)}
       </div>
-      {split && <p className="af-split-hint" role="status">{split}</p>}
       <RowTable
-        label="Add every employer, newest first."
+        label="List every employer, newest first."
         columns={EXPERIENCE_COLUMNS}
         rows={draft.experience.history}
         editing={editing}
@@ -241,34 +243,58 @@ export function ExperienceSection({ ctx, missing }: { ctx: FormContext; missing:
         onMove={(rowId, direction) => set((rows) => moveRow(rows, rowId, direction))}
         onRemove={(rowId) => set((rows) => removeRow(rows, rowId))}
         onAdd={() => set((rows) => [...rows, emptyExperienceRow()])}
-        addLabel="Add employer"
-        emptyText="No previous experience yet. Upload a resume or add a row."
+        addLabel="Add previous employer"
+        emptyText="No previous employers yet. Upload a resume or add one."
         printBlankRows={2}
       />
     </Section>
   )
 }
 
-/** Client, country, position, source and recruiter come from the order and the candidate; they are shown, not typed here. */
-export function RecruitmentSection({ form, hasOrder }: { form: ApplicationFormData; hasOrder: boolean }) {
-  // Five cells (or six with a source detail): when the count is odd the last cell spans the row instead of leaving a gap.
-  const oddRecruitment = isBlank(form.recruitment.sourceDetail)
+/**
+ * Section 5 of the paper form: the documents that have arrived, with their file names. Documents that have not arrived are not
+ * listed (the checklist card says what is missing); this part only records what the paper form can show as received.
+ */
+export function ReceivedDocumentsSection({ received, missing }: { received: ReceivedDocument[]; missing: MissingItem[] }) {
   return (
-    <Section no={6} aside={hasOrder ? undefined : <span className="af-aside-note">Not matched to an order yet</span>}>
-      <div className="af-cells">
-        {RECRUITMENT_FIELDS.map((def, index) => {
-          const value = form.recruitment[def.key]
-          const blank = isBlank(value)
-          return (
-            <Cell key={def.key} label={def.label} path={`recruitment.${def.key}`} wide={oddRecruitment && index === RECRUITMENT_FIELDS.length - 1} missing={blank && hasOrder && def.key !== 'source'}>
-              {blank ? <span className="af-empty" aria-label="Not filled">–</span> : <span className="af-text">{value}</span>}
+    <Section no={5} title="Documents received" missing={missing}>
+      {received.length === 0 ? (
+        <p className="af-sheet-empty">No documents received yet.</p>
+      ) : (
+        <ul className="af-received">
+          {received.map((item) => (
+            <li key={item.kind}>
+              <span className="af-received-label">{item.label}</span>
+              <span className="af-received-files">
+                {item.fileNames.length ? item.fileNames.map((name, index) => <span key={`${name}-${index}`}>{name}</span>) : <span>Received</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
+
+/**
+ * Section 6: Client, Job, Country, Source, Agency and Recruiter, from the live assignment the pickers above the form edit.
+ * Only what is known is shown; when nothing is, one muted line says so. They are shown here, not typed here.
+ */
+export function RecruitmentSection({ rows }: { rows: PaperLine[] }) {
+  return (
+    <Section no={6}>
+      {rows.length === 0 ? (
+        <p className="af-sheet-empty">{RECRUITMENT_EMPTY_TEXT}</p>
+      ) : (
+        <div className="af-cells">
+          {/* An odd count would leave a gap in the last row, so the last cell spans it. */}
+          {rows.map((row, index) => (
+            <Cell key={row.key} label={row.label} path={`recruitment.${row.key}`} wide={rows.length % 2 === 1 && index === rows.length - 1}>
+              <span className="af-text">{row.value}</span>
             </Cell>
-          )
-        })}
-        {!isBlank(form.recruitment.sourceDetail) && (
-          <Cell label="Source detail" path="recruitment.sourceDetail"><span className="af-text">{form.recruitment.sourceDetail}</span></Cell>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </Section>
   )
 }

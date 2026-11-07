@@ -8,6 +8,7 @@
  * JSONB columns the list never loads, so the expanded row points to the profile for them.
  */
 import type { Candidate } from '@/shared/model/types'
+import { documentsOnFile } from './data-bank-documents'
 
 export const BANK_GROUPS = ['Person', 'Contact', 'Passport', 'Job & experience', 'Screening', 'Workflow'] as const
 export type BankGroup = (typeof BANK_GROUPS)[number]
@@ -112,7 +113,7 @@ export const BANK_FIELD_DEFS: readonly BankFieldDef[] = [
   { id: 'stage', label: 'Stage', group: 'Workflow', width: 120, sortKey: 'stage', inColumns: true, value: (c, x) => x.application(c.id)?.stage ?? '' },
   { id: 'order', label: 'Order', group: 'Workflow', width: 110, sortKey: 'order', inColumns: true, value: (c, x) => x.application(c.id)?.order ?? '' },
   { id: 'status', label: 'Status', group: 'Workflow', width: 110, sortKey: 'status', inColumns: true, value: (c, x) => x.statusLabel(c) },
-  { id: 'documents', label: 'Documents on file', group: 'Workflow', width: 160, inColumns: true, value: (c) => (c.documents ?? []).filter((slot) => slot.versions.length > 0).map((slot) => slot.label).join(', ') },
+  { id: 'documents', label: 'Documents on file', group: 'Workflow', width: 160, inColumns: true, value: (c) => documentsOnFile(c.documents).join(', ') },
 ]
 
 function callOutcomeText(candidate: Candidate): string {

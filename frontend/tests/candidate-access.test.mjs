@@ -70,11 +70,12 @@ test('the sidebar and the page say Candidate, the old route keeps working', asyn
   assert.match(routes, /path="add-candidate"/)
 })
 
-test('staff see that the candidate will be assigned to them; admin and manager keep the recruiter choice', async () => {
+test('staff own what they add; admin and manager choose a recruiter by hand or leave it unassigned', async () => {
   const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
-  assert.match(page, /This candidate will be assigned to you/)
-  assert.match(page, /picksRecruiter \? 'Save and assign' : 'Save candidate'/)
-  assert.match(page, /Automatic: a free recruiter/)
+  assert.match(page, /saveButtonLabel\(picksRecruiter, chosenRecruiterName\)/)
+  assert.match(page, /\{picksRecruiter && <EntryField label="Recruiter"/)
+  assert.match(page, /NOT_ASSIGNED_YET/)
+  assert.doesNotMatch(page, /Automatic: a free recruiter|Leave on automatic|free recruiter gets/)
   // The chosen recruiter goes with the create request itself, and only for the roles that may choose.
   assert.match(page, /picksRecruiter && form\.assignTo \? \{ assign_to: form\.assignTo \} : \{\}/)
   assert.doesNotMatch(page, /store\.reassign\(\[created\.id\]/)

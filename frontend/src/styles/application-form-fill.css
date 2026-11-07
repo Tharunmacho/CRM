@@ -1,0 +1,184 @@
+/*
+ * Application form, "Fill details" view: flat sections in the Add candidate look (brand blue as the only accent, amber for
+ * what is still to add). The page wraps every block (assignment, these sections, documents, notes) in ONE white card, so a
+ * section has no border, background, radius or shadow of its own: just a 1px divider above it and 32px of air around it,
+ * and no side padding (the wrapper's 24px is the edge shared with the other blocks). Everything is scoped under .aff.
+ *
+ * One grid, one scale:
+ *  - Spacing uses 4 / 8 / 12 / 16 / 24 / 32 only. Every section has the same header height and no side padding, so the
+ *    left edge of every label and every control is the same in all sections and in the blocks around them.
+ *  - Every card body, every mini-card of the education and work history lists and the passport block share one 12-column
+ *    grid (4 across = 3 columns each). A field is `--span` columns wide; a row that would end half empty is widened by
+ *    fill-fields.ts, never left with a gap. Each repeating row is a mini-card with its own padding and the
+ *    move and remove buttons in the fixed top-right end of its header; its fields use the same 12 columns.
+ *  - Label row 20px, 8px, control 44px: the same rhythm for text, date, select, phone, tags and textarea.
+ *  - The grid follows the width of the page's own box (container queries), so the side panel cannot push it out of shape:
+ *    12 columns from 760px, two across from 480px, one across below.
+ */
+.aff {
+  container: aff / inline-size;
+  width: 100%;
+  max-width: 1000px;
+  min-width: 0;
+  margin: 0 auto;
+  color: var(--text-main);
+  font-family: inherit;
+}
+.aff :is(button, input, select, textarea) { font-family: inherit; }
+.aff.aff-embedded { max-width: none; margin: 0; }
+.aff .aff-stack { display: flex; flex-direction: column; min-width: 0; }
+
+/* ---------- Section: identical header, divider above, 32px rhythm ---------- */
+.aff .aff-card { display: flex; flex-direction: column; min-width: 0; padding: 32px 0; border-top: 1px solid var(--border-main); scroll-margin-top: 16px; }
+.aff .aff-card:first-child { padding-top: 0; border-top: 0; }
+.aff .aff-card-head { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
+.aff .aff-tile { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.aff .aff-tile svg { width: 17px; height: 17px; }
+.aff .aff-card-title { flex: 1 1 auto; min-width: 0; }
+.aff .aff-card-title h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; letter-spacing: -0.01em; color: var(--text-main); overflow-wrap: anywhere; }
+.aff .aff-card-title p { margin: 0; font-size: 13px; line-height: 20px; color: var(--text-muted); overflow-wrap: anywhere; }
+.aff .aff-card-aside { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.aff .aff-card-aside > .aff-note { flex-basis: 100%; margin: 0; text-align: right; }
+.aff .aff-small-btn { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 12.5px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; transition: border-color .14s, background-color .14s; }
+.aff .aff-small-btn svg { width: 13px; height: 13px; }
+.aff .aff-small-btn:hover:not(:disabled) { border-color: var(--primary); background: var(--tint-1); }
+.aff .aff-small-btn:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.aff .aff-small-btn:disabled { opacity: .55; cursor: not-allowed; }
+.aff .aff-doc { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; font-weight: 500; line-height: 24px; white-space: nowrap; }
+.aff .aff-doc svg { width: 13px; height: 13px; }
+.aff .aff-doc.is-done { background: var(--success-fill); color: var(--success-ink); }
+.aff .aff-doc.is-pending { background: var(--tint-2); color: var(--text-muted); }
+.aff .aff-doc.is-busy { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
+.aff .aff-doc.is-busy svg { animation: aff-spin .9s linear infinite; }
+.aff .aff-card-body { min-width: 0; }
+.aff .aff-card-body > * + * { margin-top: 24px; }
+
+.aff .aff-count { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 24px; white-space: nowrap; }
+.aff .aff-count svg { width: 13px; height: 13px; }
+.aff .aff-count.is-missing { background: var(--warning-fill); color: var(--warning-ink); box-shadow: inset 0 0 0 1px var(--warning-edge); }
+/* Sections without a hint keep the same header height */
+.aff .aff-count.is-done { background: var(--success-fill); color: var(--success-ink); box-shadow: inset 0 0 0 1px var(--success-edge); }
+
+/* ---------- The shared 12-column grid ---------- */
+.aff .aff-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px 16px; align-items: start; min-width: 0; }
+.aff .aff-grid > * { grid-column: span var(--span, 12); min-width: 0; }
+
+/* ---------- A field: label row (20px), 8px, control (44px), then a note ---------- */
+.aff .aff-field { display: flex; flex-direction: column; min-width: 0; }
+.aff .aff-lab, .aff .ac-lab { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; margin: 0 0 8px; }
+.aff .aff-lab :is(label, .aff-label-text), .aff .ac-lab label, .aff .ac-tag-label { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; line-height: 20px; color: var(--text-label); }
+.aff .aff-req, .aff .ac-req { color: color-mix(in srgb, var(--error-ink) 65%, var(--bg-card)); }
+.aff .aff-lab-aux, .aff .ac-lab-aux { display: inline-flex; flex: none; align-items: center; gap: 8px; }
+.aff .aff-from { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); font-size: 11.5px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+.aff .aff-from svg { width: 11px; height: 11px; flex: none; }
+.aff .aff-note, .aff .ac-hint { display: block; margin: 4px 0 0; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
+.aff .aff-note.is-error { color: var(--error-ink); }
+.aff .aff-note.is-warn { color: var(--warning-ink); }
+
+/* ---------- Controls: one look, 44px ---------- */
+.aff :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { box-sizing: border-box; width: 100%; height: 44px; min-height: 44px; }
+.aff :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { border: 1px solid var(--border-control); border-radius: 10px; background: var(--tint-1); color: var(--text-main); font-size: 14px; box-shadow: none; transition: border-color .14s, background-color .14s, box-shadow .14s; }
+.aff :is(.ui-input, .custom-select-trigger, .date-picker-trigger):hover:not(:disabled) { border-color: var(--border-hover); background: var(--bg-card); }
+.aff :is(.custom-select-trigger, .date-picker-trigger):focus-visible, .aff .ui-input:focus { border-color: var(--primary); background: var(--bg-card); outline: none; box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.aff :is(.ui-input, .date-picker-trigger)::placeholder { color: var(--text-light); }
+.aff :is(.ui-input, .custom-select-trigger, .date-picker-trigger):disabled { background: var(--tint-2); color: var(--text-muted); cursor: not-allowed; }
+.aff .date-picker-trigger.is-empty { color: var(--text-light); }
+.aff textarea.ui-input { box-sizing: border-box; width: 100%; min-height: 88px; padding: 12px; line-height: 20px; resize: vertical; }
+.aff .ui-input.uppercase { text-transform: uppercase; }
+.aff .aff-field.has-error :is(.ui-input, .custom-select-trigger, .date-picker-trigger, .ac-tags) { border-color: var(--error-ink); }
+.aff .aff-field.is-from :is(.ui-input, .custom-select-trigger, .date-picker-trigger, .ac-tags) { border-color: color-mix(in srgb, var(--primary) 38%, var(--border-control)); }
+.aff .aff-field.is-updated :is(.ui-input, .custom-select-trigger, .date-picker-trigger, .ac-tags) { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+
+/* Phone: country-code select and number box (the select is native, so its chevron is drawn inside the box) */
+.aff .ac-phone-wrap { min-width: 0; }
+.aff .ac-phone { display: grid; grid-template-columns: minmax(96px, 128px) minmax(0, 1fr); gap: 8px; }
+.aff .ac-phone .ac-cc { appearance: none; padding: 0 28px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238a93a6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center; }
+.aff .ac-phone-hint.is-ok { color: var(--success-ink); }
+.aff .ac-phone-hint.is-warn { color: var(--warning-ink); }
+
+/* Tag field (languages known) */
+.aff .ac-tagfield { display: flex; flex-direction: column; min-width: 0; }
+.aff .ac-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; box-sizing: border-box; min-height: 44px; padding: 6px 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--tint-1); cursor: text; transition: border-color .14s, background-color .14s, box-shadow .14s; }
+.aff .ac-tags:hover { border-color: var(--border-hover); background: var(--bg-card); }
+.aff .ac-tags:focus-within { border-color: var(--primary); background: var(--bg-card); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.aff .ac-tags input { flex: 1 1 64px; min-width: 64px; min-height: 30px; padding: 0; border: 0; background: transparent; box-shadow: none; outline: none; font-size: 14px; color: var(--text-main); }
+.aff .ac-tags input::placeholder { color: var(--text-light); }
+.aff .ac-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary); font-size: 12.5px; font-weight: 500; line-height: 28px; overflow-wrap: anywhere; }
+.aff .ac-tag button { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 999px; color: var(--primary); }
+.aff .ac-tag button:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+
+
+/* ---------- Read only: plain text, no boxes ---------- */
+.aff .aff-value { display: flex; align-items: center; min-height: 24px; font-size: 14px; line-height: 24px; color: var(--text-main); overflow-wrap: anywhere; }
+.aff .aff-text.is-pre { white-space: pre-wrap; }
+.aff .aff-muted { color: var(--text-muted); }
+.aff .aff-empty { color: var(--text-light); }
+.aff .aff-link { color: var(--primary); text-decoration: none; }
+.aff .aff-link:hover { text-decoration: underline; }
+.aff .aff-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.aff .aff-chips li { height: 28px; padding: 0 12px; border-radius: 999px; background: var(--tint-2); font-size: 12.5px; line-height: 28px; }
+
+/* ---------- Photo tile: the first three columns of the Personal card, three field rows tall ---------- */
+.aff .aff-grid > .aff-photo { grid-column: 1 / span 3; grid-row: 1 / span 3; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.aff .aff-photo-frame { position: relative; padding: 0; cursor: pointer; transition: border-color .14s, background-color .14s; display: grid; align-content: center; justify-items: center; gap: 8px; box-sizing: border-box; width: 156px; aspect-ratio: 4 / 5; overflow: hidden; border: 1.5px dashed var(--border-control); border-radius: 12px; background: var(--tint-1); color: var(--text-light); font-size: 12px; line-height: 16px; text-align: center; }
+.aff .aff-photo-frame:hover:not(:disabled) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); color: var(--primary); }
+.aff .aff-photo-frame:disabled { cursor: default; }
+.aff .aff-photo-frame[data-has-photo='true'] { border-style: solid; border-color: var(--border-main); }
+.aff .aff-photo-frame svg { width: 22px; height: 22px; }
+.aff .aff-photo-frame img { width: 100%; height: 100%; object-fit: cover; }
+.aff .aff-photo-busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--bg-card) 82%, transparent); color: var(--text-main); font-size: 12.5px; font-weight: 500; }
+.aff .aff-photo-busy svg { width: 14px; height: 14px; animation: aff-spin .9s linear infinite; }
+.aff .aff-photo-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 156px; height: 36px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 13px; font-weight: 600; cursor: pointer; transition: border-color .14s, background-color .14s; }
+.aff .aff-photo-btn:hover:not(:disabled) { border-color: var(--primary); background: var(--tint-1); }
+.aff .aff-photo-btn:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.aff .aff-photo-btn:disabled { opacity: .55; cursor: not-allowed; }
+@keyframes aff-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .aff .aff-photo-busy svg { animation: none; } }
+
+/* ---------- Repeating rows: tidy mini-cards on the same grid, controls in a fixed top-right column ---------- */
+.aff .aff-rows { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.aff .aff-rows-bar { display: flex; justify-content: flex-end; }
+.aff .aff-row-list { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.aff .aff-row { padding: 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); }
+.aff .aff-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin-bottom: 12px; }
+.aff .aff-row-no { font-size: 13px; font-weight: 600; line-height: 20px; color: var(--text-main); }
+.aff .aff-row-ctl { display: inline-flex; align-items: center; gap: 4px; }
+.aff .aff-row :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { background: var(--bg-card); }
+.aff .aff-rows-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 16px; border-radius: 12px; background: var(--tint-1); color: var(--text-muted); text-align: center; }
+.aff .aff-rows-empty svg { width: 22px; height: 22px; color: var(--text-light); }
+.aff .aff-rows-empty p { margin: 0; font-size: 13.5px; line-height: 20px; }
+.aff .aff-add { display: flex; align-items: center; justify-content: center; gap: 8px; box-sizing: border-box; width: 100%; height: 44px; border: 1.5px dashed var(--border-control); border-radius: 12px; background: transparent; color: var(--primary); font-size: 13.5px; font-weight: 600; cursor: pointer; transition: border-color .14s, background-color .14s; }
+.aff .aff-add svg { width: 16px; height: 16px; }
+.aff .aff-add:hover:not(:disabled) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+.aff .aff-add:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .14); }
+.aff .aff-add:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ---------- Passport details: expiry status chip (header of section 2) ---------- */
+.aff .aff-status { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 24px; white-space: nowrap; }
+.aff .aff-status svg { width: 13px; height: 13px; }
+.aff .aff-status.is-valid { background: var(--success-fill); color: var(--success-ink); }
+.aff .aff-status.is-expiring_soon { background: var(--warning-fill); color: var(--warning-ink); }
+.aff .aff-status.is-expired { background: var(--error-fill); color: var(--error-ink); }
+
+/* ---------- Tablet: two across ---------- */
+@container aff (max-width: 759px) {
+  .aff .aff-grid > * { grid-column: span var(--span-md, 6); }
+  .aff .aff-grid > .aff-photo { grid-column: 1 / -1; grid-row: auto; flex-direction: row; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .aff .aff-photo-frame { width: 96px; }
+  .aff .aff-photo-btn { width: auto; min-width: 156px; }
+}
+
+/* ---------- Phone: one across, 16px gutters, 16px text so the browser does not zoom ---------- */
+@container aff (max-width: 479px) {
+  .aff .aff-card { padding: 24px 0; }
+  .aff .aff-card:first-child { padding-top: 0; }
+  .aff .aff-card-head { flex-wrap: wrap; align-items: center; }
+  .aff .aff-card-title { flex: 1 1 calc(100% - 44px); }
+  .aff .aff-card-aside { flex: 1 1 100%; justify-content: flex-start; }
+  .aff .aff-card-aside > .aff-note { text-align: left; }
+  .aff .aff-grid > *, .aff .aff-grid > .aff-photo { grid-column: 1 / -1; }
+  .aff :is(input, select, textarea, .ui-input, .custom-select-trigger, .date-picker-trigger) { font-size: 16px; }
+  .aff .ac-phone { grid-template-columns: minmax(88px, 112px) minmax(0, 1fr); }
+}

@@ -122,7 +122,7 @@ export default function ClientDetailPage() {
       <KpiStrip
         items={[
           { label: 'Companies', value: companies.length, detail: `${companies.filter((co) => co.status === 'active').length} active`, icon: Building2 },
-          { label: 'Open orders', value: openOrders.length, detail: `${orders.length} orders in total`, icon: BriefcaseBusiness, tone: 'amber' },
+          { label: 'Open jobs', value: openOrders.length, detail: `${orders.length} jobs in total`, icon: BriefcaseBusiness, tone: 'amber' },
           { label: 'Openings left', value: openSeats, detail: 'Jobs still to fill', icon: Target },
           { label: 'In progress', value: inProcess, detail: 'Candidates in the stages', icon: Users },
           { label: 'Deployed', value: deployed, detail: 'Placed with this client', icon: UserCheck, tone: 'green' },
@@ -173,9 +173,9 @@ export default function ClientDetailPage() {
 
         <section>
           <Panel flush>
-            <PanelHeader title="Companies" meta="Contact, address, agreement and orders"
+            <PanelHeader title="Companies" meta="Contact, address, agreement and jobs"
               action={<Button icon={<Plus className="h-4 w-4" />} disabled={!canWork} onClick={() => setAddingCompany(true)}>Add company</Button>} />
-            {companies.length === 0 && <EmptyState title="Add the first company" description={canWork ? 'Add the company this client hires for. Then create an order with the job title, number of openings and terms.' : 'This client is inactive. Make the client active before adding a company.'} action={canWork ? <Button variant="primary" onClick={() => setAddingCompany(true)}>Add company</Button> : undefined} />}
+            {companies.length === 0 && <EmptyState title="Add the first company" description={canWork ? 'Add the company this client hires for. Then create a job with the job title, number of openings and terms.' : 'This client is inactive. Make the client active before adding a company.'} action={canWork ? <Button variant="primary" onClick={() => setAddingCompany(true)}>Add company</Button> : undefined} />}
             <div className="cd-employers">
               {companies.map((company) => {
                 const own = orders.filter((order) => order.companyId === company.id)
@@ -213,15 +213,15 @@ export default function ClientDetailPage() {
                     {company.notes && <p className="cd-employer-notes">{company.notes}</p>}
                     <footer>
                       <div className="cd-employer-stats">
-                        <span><b className="tnum">{open.length}</b> open {open.length === 1 ? 'order' : 'orders'}{open.length > 0 && <> · <b className="tnum">{placed}</b> of <b className="tnum">{openings}</b> openings deployed</>}</span>
+                        <span><b className="tnum">{open.length}</b> open {open.length === 1 ? 'job' : 'jobs'}{open.length > 0 && <> · <b className="tnum">{placed}</b> of <b className="tnum">{openings}</b> openings deployed</>}</span>
                         {open.length > 0 && <Progress done={placed} total={openings} />}
                       </div>
                       <div className="cd-employer-actions">
                         <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEditingCompany(company)}>Edit</Button>
                         <Button size="sm" icon={<History className="h-3.5 w-3.5" />} onClick={() => setCompanyHistory(company.id)}>History</Button>
-                        <Button size="sm" onClick={() => navigate(`/jobs?view=orders&company=${encodeURIComponent(company.id)}`)}>View orders</Button>
+                        <Button size="sm" onClick={() => navigate(`/jobs?q=${encodeURIComponent(company.name)}`)}>View jobs</Button>
                         {store.can('delete_records') && <Button size="sm" variant="dangerGhost" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setDeletingCompany(company.id)}>Delete</Button>}
-                        <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} disabled={!canWork || company.status !== 'active'} onClick={() => setOrderFor(company.id)}>New order</Button>
+                        <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} disabled={!canWork || company.status !== 'active'} onClick={() => setOrderFor(company.id)}>New job</Button>
                       </div>
                     </footer>
                   </article>
@@ -234,9 +234,9 @@ export default function ClientDetailPage() {
 
       <section aria-labelledby="cd-orders-title">
         <div className="cd-orders-head">
-          <div><h2 id="cd-orders-title">Orders &amp; candidates</h2><p>All orders for this client and the candidates matched to them.</p></div>
+          <div><h2 id="cd-orders-title">Jobs &amp; candidates</h2><p>All jobs for this client and the candidates matched to them.</p></div>
           {companies.length > 1 && (
-            <Select aria-label="Filter orders by company" value={employer} onChange={(event) => setEmployer(event.target.value)}>
+            <Select aria-label="Filter jobs by company" value={employer} onChange={(event) => setEmployer(event.target.value)}>
               <option value="">All companies</option>
               {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
             </Select>
@@ -246,9 +246,9 @@ export default function ClientDetailPage() {
         {shownOrders.length === 0 ? (
           <Panel>
             <EmptyState
-              title={companies.length ? 'No orders for this client yet' : 'Add a company first'}
-              description={companies.length ? 'Create an order for one of the companies: the job title, openings and terms.' : 'Orders are created for a company. Add a company first.'}
-              action={companies.length ? <Button variant="primary" disabled={!canWork} onClick={() => setOrderFor(employer || companies.find((co) => co.status === 'active')?.id || companies[0].id)}>New order</Button> : <Button variant="primary" disabled={!canWork} onClick={() => setAddingCompany(true)}>Add company</Button>}
+              title={companies.length ? 'No jobs for this client yet' : 'Add a company first'}
+              description={companies.length ? 'Create a job for one of the companies: the job title, openings and terms.' : 'Jobs are created for a company. Add a company first.'}
+              action={companies.length ? <Button variant="primary" disabled={!canWork} onClick={() => setOrderFor(employer || companies.find((co) => co.status === 'active')?.id || companies[0].id)}>New job</Button> : <Button variant="primary" disabled={!canWork} onClick={() => setAddingCompany(true)}>Add company</Button>}
             />
           </Panel>
         ) : (
@@ -262,7 +262,7 @@ export default function ClientDetailPage() {
                 <Panel key={order.id} flush>
                   <header className="cd-order-head">
                     <div className="min-w-0">
-                      <h3><button type="button" onClick={() => navigate(`/orders/${order.id}`)}>{designation?.title ?? 'Order'}</button><span>{order.ref}</span></h3>
+                      <h3><button type="button" onClick={() => navigate(`/orders/${order.id}`)}>{designation?.title ?? 'Job'}</button><span>{order.ref}</span></h3>
                       <p className="cd-order-meta">
                         {where && <span>{where.name}</span>}
                         {(order.city || order.country) && <Place country={order.country} city={order.city} />}
@@ -272,7 +272,7 @@ export default function ClientDetailPage() {
                     </div>
                     <div className="cd-order-side">
                       <StatusPill status={order.status} />
-                      <Button size="sm" onClick={() => navigate(`/orders/${order.id}`)}>Open order</Button>
+                      <Button size="sm" onClick={() => navigate(`/orders/${order.id}`)}>Open job</Button>
                     </div>
                   </header>
                   <div className="cd-progress">
@@ -284,7 +284,7 @@ export default function ClientDetailPage() {
                   </div>
                   {apps.length === 0 ? (
                     <div className="cd-no-candidates">
-                      <p>No candidates matched to this order yet.</p>
+                      <p>No candidates matched to this job yet.</p>
                       <Button size="sm" onClick={() => navigate(`/orders/${order.id}`)}>Match candidates</Button>
                     </div>
                   ) : (
@@ -329,7 +329,7 @@ export default function ClientDetailPage() {
       {editing && <ClientDialog client={client} onClose={() => setEditing(false)} />}
       {addingCompany && <CompanyDialog clientId={client.id} onClose={() => setAddingCompany(false)} />}
       {editingCompany && <CompanyDialog company={editingCompany} onClose={() => setEditingCompany(null)} />}
-      {orderFor && <OrderDialog companyId={orderFor} onClose={() => setOrderFor(null)} onSaved={(orderId) => navigate(`/orders/${orderId}`)} />}
+      {orderFor && <OrderDialog companyId={orderFor} onClose={() => setOrderFor(null)} />}
       {history && <RecordAudit kind="client" id={client.id} onClose={() => setHistory(false)} />}
       {companyHistory && <RecordAudit kind="company" id={companyHistory} onClose={() => setCompanyHistory(null)} />}
       <DeleteRecordDialog

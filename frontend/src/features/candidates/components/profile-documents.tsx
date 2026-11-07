@@ -1,16 +1,17 @@
-import type { FileVersion } from '@/shared/model/types'
+import type { DocumentSlot as ServerSlot } from '@/shared/model/types'
 import { DocumentSlotRow } from '@/shared/ui/file-drop'
-import { CertificateSlotRow, MULTI_DOCUMENT_KEYS } from './certificate-slot-row'
+import { profileDocuments, type ProfileDocument } from '../profile-documents-model'
+import { CertificateSlotRow } from './certificate-slot-row'
 
-export interface DocumentSlot { key: string; label: string; versions: FileVersion[] }
+export type DocumentSlot = ProfileDocument
 
 /**
- * Every document slot of a candidate: single-file slots as the shared document row (newest version, history,
- * replace), certificate slots as multi-file lists where each added file is kept. The caller supplies the wrapper (the profile
- * uses `.cp-docs`), so the profile and the stage modal show the same rows.
+ * Every document slot of a candidate in the shared order and with the shared labels: single-file slots as the shared document
+ * row (newest version, history, replace), "Other documents" as a multi-file list where each added file is kept. The caller
+ * supplies the wrapper (the profile uses `.cp-docs`), so the profile and the stage modal show the same rows.
  */
 export function DocumentList({ documents, uploaderName, onUpload, emptyFor }: {
-  documents: DocumentSlot[]
+  documents: ServerSlot[]
   uploaderName: (id: string) => string
   /** Provide to let this viewer upload; `key` and `label` identify the slot. Return nothing for slots that cannot be uploaded to. */
   onUpload?: (slot: DocumentSlot) => ((file: File) => Promise<void>) | undefined
@@ -18,7 +19,7 @@ export function DocumentList({ documents, uploaderName, onUpload, emptyFor }: {
 }) {
   return (
     <>
-      {documents.map((slot) => MULTI_DOCUMENT_KEYS.includes(slot.key)
+      {profileDocuments(documents).map((slot) => slot.multiple
         ? <CertificateSlotRow key={slot.key} label={slot.label} files={slot.versions} uploaderName={uploaderName} onUpload={onUpload?.(slot)} />
         : <DocumentSlotRow key={slot.key} label={slot.label} versions={slot.versions} uploaderName={uploaderName} onUpload={onUpload?.(slot)} emptyLabel={emptyFor?.(slot)} />)}
     </>

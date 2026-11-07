@@ -115,10 +115,10 @@ export function Progress({ done, total, label, className }: { done: number; tota
 
 /** Open-orders cell: the count, the deployed/openings bar and a caption. */
 export function DemandCell({ demand, empty }: { demand?: Demand; empty: ReactNode }) {
-  if (!demand) return <span className="cl-demand is-idle"><span className="cl-quiet">No open orders</span><small>{empty}</small></span>
+  if (!demand) return <span className="cl-demand is-idle"><span className="cl-quiet">No open jobs</span><small>{empty}</small></span>
   return (
     <span className="cl-demand">
-      <b className="tnum">{demand.orders} {demand.orders === 1 ? 'order' : 'orders'}</b>
+      <b className="tnum">{demand.orders} {demand.orders === 1 ? 'job' : 'jobs'}</b>
       <Progress done={demand.deployed} total={demand.openings} />
       <small className="tnum">{demand.deployed} of {demand.openings} deployed</small>
     </span>

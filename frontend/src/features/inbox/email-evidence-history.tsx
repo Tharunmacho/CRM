@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/shared/api/client'
 import { dateTimeLabel } from '@/shared/lib/format'
@@ -14,12 +14,16 @@ export function EmailEvidenceHistory({ candidateId }: { candidateId: string }) {
   const [rows, setRows] = useState<Evidence[]>([])
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
+  // The store hands out a new function whenever any record changes. Reading it through a ref keeps the list from being
+  // asked for again on every refresh, and from being asked for a candidate that has just been deleted (a 404).
+  const isCurrentSession = useRef(store.isCurrentSession)
+  isCurrentSession.current = store.isCurrentSession
   useEffect(() => {
     let live = true
     setRows([]); setError(false)
-    api.get<Evidence[]>(`/inbox/candidates/${candidateId}/evidence`).then((result) => { if (live && store.isCurrentSession()) setRows(result) }).catch(() => { if (live) setError(true) })
+    api.get<Evidence[]>(`/inbox/candidates/${candidateId}/evidence`).then((result) => { if (live && isCurrentSession.current()) setRows(result) }).catch(() => { if (live) setError(true) })
     return () => { live = false }
-  }, [candidateId, retry, store.isCurrentSession])
+  }, [candidateId, retry])
   if (!rows.length && !error) return null
   return <section className="mt-5 border-t border-rule pt-4" aria-label="Emails this candidate came from">
     <h3 className="mb-3 text-sm font-semibold text-ink">Emails this candidate came from</h3>
