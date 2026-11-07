@@ -322,8 +322,8 @@ def passport_fields(p: PassportResponse) -> tuple[OcrFields, list[str]]:
         )
     if not mrz.all_check_digits_valid:
         warnings.append(
-            "The passport's check digits do not add up, so the number or a date may be "
-            "misread. Compare them against the scan."
+            "The passport number or a date may be misread (its check digits do not match). "
+            "Compare them against the scan."
         )
     return fields, warnings
 

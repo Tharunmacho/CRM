@@ -27,6 +27,7 @@ from app.services import form_assignment, form_feedback
 from app.services import form_extraction as fx
 from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_phone, normalized_labels
 from app.services.parallel_reads import parallel_reads
+from app.services.reading_notes import plain_issues, plain_notes
 
 # Document slots of the form, in the order shown (docs/workflows/application-form-v2-contract.md section 2):
 # (slot, label, hint, required from this stage on (None: see `always`), always counted, read by OCR, several files allowed)
@@ -823,7 +824,8 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
                           .options(undefer(Candidate.education), undefer(Candidate.work_history), undefer(Candidate.field_sources), undefer(Candidate.ocr_data))
                           .with_for_update().execution_options(populate_existing=True))
     extractions = (output or {}).get("extractions") or {}
-    warnings = [w for w in (output or {}).get("warnings") or [] if isinstance(w, str)]
+    # Raw warnings stay in the job state (diagnostics); the form shows them in plain words.
+    warnings = plain_notes([w for w in (output or {}).get("warnings") or [] if isinstance(w, str)])
     result = fx.ApplyResult()
     found: list[str] = []
     if candidate is not None:
@@ -864,7 +866,7 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
     form["result"] = {"status": status, "message": message, "kindsFound": found, "filled": result.filled, "kept": result.kept + result.conflicts,
                       "unmapped": coverage.get("unmapped") or [],
                       "coverage": {"summary": coverage.get("summary"), "pages": coverage.get("pages"),
-                                   "issues": coverage.get("issues") or [], "notes": coverage.get("notes") or [],
+                                   "issues": plain_issues(coverage.get("issues") or []), "notes": plain_notes(coverage.get("notes") or []),
                                    "kinds": coverage.get("kinds"), "complete": coverage.get("complete")} if coverage else None}
     job.draft = {**dict(job.draft or {}), "applicationForm": form}
 

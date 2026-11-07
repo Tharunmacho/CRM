@@ -40,6 +40,7 @@ from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 from app.integrations.ocr.client import ScanFailed, ScanTimedOut, scan as veris_scan
 from app.integrations.ocr.inspection import InspectionError, inspect_document
 from app.api.routers.files import MAX_BYTES
+from app.services.reading_notes import plain_notes
 
 router = APIRouter(prefix="/api/ocr", tags=["ocr"])
 
@@ -124,12 +125,12 @@ def scan(
             "Some pages could not be read clearly. Check the listed pages and upload a clearer document, "
             "or enter the details by hand."
         )
-        return _response(report, warnings, "needs_review")
+        return _response(report, warnings, "needs_review", kind=kind)
     if not selected:
         warnings.append(
             f"We could not find any {kind} pages in this document."
         )
-        return _response(report, warnings, "no_resume" if kind == "resume" else "needs_review")
+        return _response(report, warnings, "no_resume" if kind == "resume" else "needs_review", kind=kind)
     if not (settings.veris_ocr_base_url and settings.veris_ocr_api_key):
         raise _inspection_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -193,7 +194,7 @@ def scan(
             "no fields were applied. Try again to check the same job, or enter the details manually."
         )
         report["provider_page_count"] = len(returned)
-        return _response(report, warnings, "needs_review")
+        return _response(report, warnings, "needs_review", kind=kind)
 
     if kind == "resume":
         titles = list(db.scalars(select(Designation.title)))
@@ -207,11 +208,18 @@ def scan(
     # (1..n of the pages sent); `source.selected_pages[page_number - 1]` maps one back
     # to the uploaded file. The recruiter's form sends both back with the save.
     return _response(
-        report, warnings + provider_warnings, "complete",
+        report, warnings + provider_warnings, "complete", kind=kind,
         fields=fields.model_dump(by_alias=True, exclude_none=True, mode="json"),
         raw=payload_out,
         source={"local_inspection": report, "source_sha256": source_hash, "selected_pages": list(selected)},
     )
+
+
+def _plain_inspection(report: dict) -> dict:
+    """The report shown to the person: its page warnings in plain words (the stored copy keeps the raw ones)."""
+    if not isinstance(report, dict) or "warnings" not in report:
+        return report
+    return {**report, "warnings": plain_notes(report.get("warnings") or [])}
 
 
 def _response(
@@ -222,12 +230,13 @@ def _response(
     fields: dict | None = None,
     raw: dict | None = None,
     source: dict | None = None,
+    kind: str | None = None,
 ) -> dict:
     return {
         "fields": fields or {},
-        "warnings": warnings,
+        "warnings": plain_notes(warnings, kind=kind),
         "raw": raw or {},
         "source": source or {},
-        "inspection": inspection,
+        "inspection": _plain_inspection(inspection),
         "extraction_status": extraction_status,
     }

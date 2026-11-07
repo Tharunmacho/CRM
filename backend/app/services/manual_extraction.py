@@ -20,6 +20,7 @@ from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import OcrFields
 from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, provider_codes, request_extraction_retry
 from app.services.document_storage import put_bytes, read_bytes
+from app.services.reading_notes import plain_notes
 from app.services.worker_heartbeat import waiting_reason
 
 log = logging.getLogger(__name__)
@@ -128,7 +129,11 @@ def _with_form_fields(kind, extraction):
 
 
 def _scan_results(output):
+    """What the person sees of a reading. The raw warnings stay in the job's state (diag_extraction reads them);
+    here they are plain, and a warning about one kind appears on that kind's card only."""
     report = output.get("inspection", {})
+    raw_warnings = output.get("warnings", [])
+    shown_report = {**report, "warnings": plain_notes(report.get("warnings") or [])} if "warnings" in report else report
     scans = {}
     for kind in ("resume", "passport", "aadhaar"):
         extraction = output.get("extractions", {}).get(kind)
@@ -139,11 +144,11 @@ def _scan_results(output):
             "fields": OcrFields.model_validate(_with_form_fields(kind, extraction)).model_dump(by_alias=True, exclude_none=True, mode="json") if extraction else {},
             "raw": extraction.get("raw", {}) if extraction else {},
             "source": extraction.get("source", {}) if extraction else {},
-            "inspection": {**report, "selected_pages": selected},
-            "warnings": output.get("warnings", []),
+            "inspection": {**shown_report, "selected_pages": selected},
+            "warnings": plain_notes(raw_warnings, kind=kind),
             "extraction_status": "complete" if extraction else "no_resume" if kind == "resume" and not selected and output["status"] != "needs_review" else "needs_review",
         }
-    return {"scans": scans, "warnings": output.get("warnings", []), "inspection": report, "coverage": output.get("coverage")}
+    return {"scans": scans, "warnings": plain_notes(raw_warnings), "inspection": shown_report, "coverage": output.get("coverage")}
 
 
 def _autocommit(db):
