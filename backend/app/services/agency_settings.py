@@ -133,13 +133,14 @@ def build_payload(agency: dict | None, currencies: list[dict] | None, categories
             "homeCallingCode": agency["home_calling_code"],
             "defaultNationality": agency.get("default_nationality"),
             "acknowledgementText": agency["acknowledgement_text"],
+            "autoAssign": bool(agency.get("auto_assign", False)),
             "updatedAt": agency.get("updated_at"), "updatedBy": agency.get("updated_by"),
         }
     else:
         values = {
             "name": FALLBACK_NAME, "shortName": None, "defaultOrderCurrency": FALLBACK_ORDER_CURRENCY,
             "defaultAdvanceCurrency": FALLBACK_ADVANCE_CURRENCY, "homeCallingCode": FALLBACK_HOME_CALLING_CODE,
-            "defaultNationality": None, "acknowledgementText": FALLBACK_ACKNOWLEDGEMENT, "updatedAt": None, "updatedBy": None,
+            "defaultNationality": None, "acknowledgementText": FALLBACK_ACKNOWLEDGEMENT, "autoAssign": False, "updatedAt": None, "updatedBy": None,
         }
     rows = sorted((currency_out(item) for item in currencies or []), key=lambda item: (item["sortOrder"], item["code"]))
     if not rows:
@@ -175,7 +176,7 @@ def read_payload(db: Session) -> dict:
         "name": agency.name, "short_name": agency.short_name, "default_order_currency": agency.default_order_currency,
         "default_advance_currency": agency.default_advance_currency, "home_calling_code": agency.home_calling_code,
         "default_nationality": agency.default_nationality, "acknowledgement_text": agency.acknowledgement_text,
-        "updated_at": agency.updated_at, "updated_by": agency.updated_by,
+        "auto_assign": agency.auto_assign, "updated_at": agency.updated_at, "updated_by": agency.updated_by,
     }
     note_snapshot(raw)
     return build_payload(raw, [{"code": c.code, "name": c.name, "symbol": c.symbol, "active": c.active,
@@ -204,6 +205,17 @@ def default_advance_currency(db: Session) -> str:
 
 def stage_options(db: Session) -> StageOptions:
     return StageOptions(currencies=active_currency_codes(db), default_currency=default_advance_currency(db))
+
+
+def auto_assign_enabled(db: Session) -> bool:
+    """Whether new candidates are given to the next free recruiter automatically. Off unless an admin switched it on.
+
+    Never raises: a missing table or column (a database not yet migrated to 0030) simply means off."""
+    try:
+        with db.begin_nested():
+            return bool(db.scalar(select(AgencySettings.auto_assign).where(AgencySettings.id == 1)))
+    except Exception:
+        return False
 
 
 def default_acknowledgement(db: Session) -> str:

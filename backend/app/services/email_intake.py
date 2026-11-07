@@ -275,13 +275,18 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
     values = candidate_values(fields, raw)
     review = review or not values.get("name") or not values.get("phone")
     if created:
+        # Nothing is written for a source that gave no real identity (no placeholder rows).
+        from app.services.candidate_review import candidate_refusal
+        refusal = candidate_refusal(values)
+        if refusal:
+            raise IntakeReviewError(refusal)
         # Client staff routing first (designation match); otherwise the ordinary round-robin.
         from app.services import client_routing
         owner = client_routing.route_new_candidate(db, values.get("designations")) or next_owner(db, pointer=pointer)
         # A source-derived reference is stable across retries and cannot collide with
         # the legacy manual count-based CND-1001 references.
         candidate = Candidate(
-            ref=f"CND-E-{job.id.replace('-', '')}", name=values.pop("name", None) or "Name needs review",
+            ref=f"CND-E-{job.id.replace('-', '')}", name=values.pop("name"),
             phone=values.pop("phone", None) or "", source=Source.email,
             source_detail=f"email_message:{message.id}", owner_id=owner.id if owner else None,
             intake_owner_id=owner.id if owner else None,

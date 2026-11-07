@@ -24,7 +24,8 @@ from app.domain.stages import STAGES as WORKFLOW_STAGES
 STAGES = [stage.title for stage in WORKFLOW_STAGES]
 REASONS = {"prescreen_failed": "Failed the first screening", "not_interested": "Not interested",
            "resume_not_received": "Resume not received", "interview_rejected": "Interview rejected",
-           "medical_unfit": "Not medically fit", "unmapped": "Removed from the order"}
+           "medical_unfit": "Not medically fit", "unmapped": "Removed from the order",
+           "changed_job": "Moved to another job"}
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in",
                  "referral": "Referral", "other": "Other"}
 

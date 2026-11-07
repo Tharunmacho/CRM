@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.deps import current_user, require_role
 from app.core.config import get_settings
-from app.services import agency_settings
+from app.services import agency_settings, client_routing
 from app.services.desk_snapshot import read_snapshot
 from app.services.encoded_response import Encoded
 from app.services.intake_attention import unread_counts
@@ -73,16 +73,33 @@ router = APIRouter(prefix="/api", tags=["data"])
 
 DOCUMENT_SLOTS = [
     ("resume", "Resume"),
-    ("passport", "Passport copy"),
+    ("passport", "Passport"),
     ("aadhaar", "Aadhaar copy"),
     ("source_bundle", "Source document evidence"),
-    ("photo", "Photograph"),
+    ("photo", "Photo"),
     ("education", "Education certificates"),
     ("experience", "Experience certificates"),
 ]
+# The candidate profile (GET /api/candidates/{id}) also lists the documents the application form collects (the 14 form slots
+# of services/application_form.SLOT_SPECS; "education"/"experience" above are the older keys and stay readable). The desk
+# snapshot keeps the seven above: it carries every candidate and these eleven are stored only.
+FORM_DOCUMENT_SLOTS = [
+    ("education_certificate", "Education certificate"),
+    ("experience_certificate", "Experience certificate"),
+    ("signed_offer", "Signed offer"),
+    ("medical", "Medical"),
+    ("pcc", "Police clearance certificate (PCC)"),
+    ("visa", "Visa"),
+    ("google_review", "Google review"),
+    ("visa_stamping", "Visa stamping"),
+    ("emigration", "Emigration"),
+    ("air_ticket", "Air ticket"),
+    ("other", "Other documents"),
+]
 
 
-def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: type[CandidateOut] = CandidateOut) -> CandidateOut:
+def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: type[CandidateOut] = CandidateOut,
+                   slots: list[tuple[str, str]] = DOCUMENT_SLOTS) -> CandidateOut:
     documents = [
         {
             "key": key,
@@ -100,7 +117,7 @@ def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: typ
                 for f in files.get((c["id"], key), [])
             ],
         }
-        for key, label in DOCUMENT_SLOTS
+        for key, label in slots
     ]
     outcome = None
     if c["call_interested"]:
@@ -164,6 +181,32 @@ def desk_response(request: Request, db: Session, user: User, compact: bool, head
 
     encoded = cached(("desk", scope_of(db), user.id, compact), DESK_TOPICS, DESK_TTL_SECONDS, build)
     return encoded.response(request, headers)
+
+
+def warm_desk(people: int = 3) -> int:
+    """Build the (compact) desk snapshot ahead of the first request, for the people who signed in most recently.
+
+    The first load after a restart is the slowest one the app ever does (a cold connection pool plus the snapshot's
+    one big statement, JSON encoding and compression). Run once in the background at start-up, it leaves the finished
+    response in the memo, so that person's first page after the restart is served from memory. Returns how many were built.
+    """
+    import os
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return 0
+    from app.db.models import Session as LoginSession
+    from app.db.session import ReadSessionLocal
+    built = 0
+    with ReadSessionLocal() as db:
+        recent = db.execute(select(LoginSession.user_id).where(LoginSession.expires_at > datetime.now(timezone.utc))
+                            .group_by(LoginSession.user_id).order_by(func.max(LoginSession.created_at).desc()).limit(people)).scalars().all()
+        for user_id in recent:
+            user = db.get(User, user_id)
+            if user is None or not user.active:
+                continue
+            cached(("desk", scope_of(db), user.id, True), DESK_TOPICS, DESK_TTL_SECONDS,
+                   lambda user=user: Encoded.of(_bootstrap(db, user, True), json_ready=True))
+            built += 1
+    return built
 
 
 @router.get("/bootstrap")
@@ -650,7 +693,18 @@ def create_order(body: OrderIn, db: Session = Depends(get_db), user: User = Depe
     _order_requirements(db, body)
     number = db.scalar(select(func.nextval("crm_order_reference_seq")))
     row = Order(ref=f"ORD-{datetime.now(timezone.utc).year}-{number:05d}")
-    return _master_save(db, user, row, body, "order", OrderOut, new=True)
+    saved = _master_save(db, user, row, body, "order", OrderOut, new=True, commit=False)
+    # The staff allocated to the client are told in the same transaction, so a notice never exists for a job that failed to save.
+    client_routing.notify_new_job(db, row, actor_id=user.id)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "A related record changed while saving. Refresh and try again.")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(503, "The record could not be saved. Please try again.")
+    return saved
 
 
 @router.put("/orders/{order_id}")

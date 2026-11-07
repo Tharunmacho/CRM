@@ -27,6 +27,10 @@ from app.db.models import (
 from app.integrations.mail.base import InboundAttachment, InboundMessage, MailMessageError
 from app.integrations.mail.imap import MailConfig, MailAdapterError, mailbox_source_id, provider_message_id
 from test_database_naming import _migrate, schema_database
+from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 from test_document_extraction import environment, full_payload, pdf as scan_pdf  # noqa: F401
 from test_ocr_classification import AADHAAR, AADHAAR_BACK, CV, PASSPORT
 

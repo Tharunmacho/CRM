@@ -21,6 +21,10 @@ from app.services import change_feed, client_routing
 from app.services.candidate_review import assign_waiting_candidates
 from app.services.desk_snapshot import read_snapshot
 from test_database_naming import _migrate, schema_database  # noqa: F401  (fixture)
+from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 from test_email_intake import extraction, fake_extraction, intake, receipt, run  # noqa: F401  (fixtures and helpers)
 from test_waiting_candidates import ingest  # noqa: F401
 from test_whatsapp_intake import setup  # noqa: F401  (fixture)
@@ -629,3 +633,26 @@ def test_whatsapp_intake_without_a_match_is_the_ordinary_round_robin(setup):
     allocate_welder_client(sessions, "other")
     candidate = ingest(sessions, settings, designation="Plumber")
     assert candidate.owner_id == "owner"
+
+
+# ------------------------------------------------------------------------------------------------ new job notices
+
+def test_creating_a_job_notifies_the_clients_allocated_staff_but_not_the_creator(env):
+    client = new_client(env, "Notice Client", staff=["s1", "s2"])
+    open_order(env, client, title="Plumber")
+    notices = env.db.scalars(select(m.Notification).where(m.Notification.kind == "job").order_by(m.Notification.user_id)).all()
+    assert [notice.user_id for notice in notices] == ["s1", "s2"]
+    assert notices[0].title == "New job for Notice Client Co" and notices[0].link_to.startswith("/orders/")
+    assert "Plumber" in notices[0].detail and "5 openings" in notices[0].detail
+
+    act_as(env, "s1")  # a creator who is one of the staff is not told about their own job
+    open_order(env, client, title="Plumber")
+    again = env.db.scalars(select(m.Notification).where(m.Notification.kind == "job", m.Notification.user_id == "s1")).all()
+    assert len(again) == 1
+    assert len(env.db.scalars(select(m.Notification).where(m.Notification.kind == "job", m.Notification.user_id == "s2")).all()) == 2
+
+
+def test_a_job_for_a_client_without_staff_sends_no_notice(env):
+    client = new_client(env, "Nobody Client")
+    open_order(env, client, title="Cook")
+    assert env.db.scalars(select(m.Notification).where(m.Notification.kind == "job")).all() == []

@@ -115,6 +115,12 @@ def commit_candidate(db, message, output):
         if fields.get(key): values[key] = parse_loose_date(str(fields[key]))
     if fields.get("designation"): values["designations"] = [fields["designation"]]
     values = normalize_candidate_values(values)
+    if not matches:
+        # Nothing is written for a document that gave no real identity (no placeholder rows).
+        from app.services.candidate_review import candidate_refusal
+        refusal = candidate_refusal(values)
+        if refusal:
+            raise IntakeReviewError(refusal)
     # The sender is a contact/provenance fallback, never a duplicate identity.
     # A document-provided contact and any existing human value take precedence.
     values["whatsapp"] = values.get("whatsapp") or message.sender_number
@@ -126,7 +132,7 @@ def commit_candidate(db, message, output):
         owner = client_routing.route_new_candidate(db, values.get("designations")) or next_owner(db, pointer=pointer)
         candidate = Candidate(ref=f"CND-W-{message.id.replace('-', '')}", source=Source.whatsapp,
             source_detail=f"whatsapp_message:{message.id}", owner_id=owner.id if owner else None, intake_owner_id=owner.id if owner else None,
-            name=values.pop("name", None) or "Name needs review", phone=values.pop("phone", None) or "",
+            name=values.pop("name"), phone=values.pop("phone", None) or "",
             needs_review=review or owner is None, status=CandidateStatus.needs_review if review or owner is None else CandidateStatus.new,
             ocr_data=raw, **values)
         db.add(candidate); db.flush()
@@ -273,7 +279,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                 db.commit()
             return
         if not state.get("documents"):
-            inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds)
+            inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True)
             documents = {}
             for kind, part in output["extractions"].items():
                 if kind not in {"resume", "passport", "aadhaar"} or part["selected_pages"] != getattr(inspected, f"{kind}_pages"):

@@ -145,6 +145,22 @@ def test_a_rolled_back_write_announces_nothing(memo, desk_engine):
     assert memo.cached("c", ("candidates",), 60, lambda: "WRONG") == "before"
 
 
+def test_a_write_that_matched_no_row_leaves_the_memo_alone(memo, desk_engine):
+    """An idle reading worker's claim UPDATE matches nothing. It used to empty the documents / mail entries (the polled
+    pulse among them) every few seconds, so the 10 s memo never served a second poll."""
+    from sqlalchemy import text
+    memo.cached("pulse", ("candidates", "mail", "documents", "whatsapp"), 10, lambda: "before")
+    with Session(desk_engine) as db:
+        db.execute(text("UPDATE document_extraction_jobs SET status = 'processing', claimed_by = 'w1' WHERE id = 'no-such-job'"))
+        db.execute(text("UPDATE email_ingestion_jobs SET status = 'processing' WHERE id = 'no-such-job'"))
+        db.commit()
+    assert memo.cached("pulse", ("candidates", "mail", "documents", "whatsapp"), 10, lambda: "WRONG") == "before"
+    with Session(desk_engine) as db:
+        db.execute(update(Candidate).values(name="Renamed"))  # a write that changes rows still empties it
+        db.commit()
+    assert memo.cached("pulse", ("candidates", "mail", "documents", "whatsapp"), 10, lambda: "after") == "after"
+
+
 # ---------------------------------------------------------------- the desk snapshot
 
 def test_desk_snapshot_is_served_from_memory_until_something_it_holds_changes(memo, desk_engine, desk_client):

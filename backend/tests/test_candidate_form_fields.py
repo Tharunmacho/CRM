@@ -130,6 +130,7 @@ def test_half_filled_intake_with_the_new_fields_survives_autosave_and_recovery(d
             "workHistory": '[{"company":"ACME","designation":"Welder","country":"UAE","period":"2018-2020"}]', "jobPreference": "Welder, Fitter"}
     saved = api.put(f"/api/ocr/jobs/groups/{group}/draft", json={"form": form, "editedFields": ["fatherName", "nativePlace", "education"], "jobIds": [job.id]})
     assert saved.status_code == 200, saved.text
+    db.expire_all()  # the draft is written with SQL now, not through this shared session's loaded objects
     recovered = api.get(f"/api/ocr/jobs/groups/{group}").json()[0]["draft"]
     assert recovered["form"] == form and recovered["editedFields"] == ["fatherName", "nativePlace", "education"]
     assert api.put(f"/api/ocr/jobs/groups/{group}/draft", json={"form": {"bogusKey": "x"}, "jobIds": [job.id]}).status_code == 422
@@ -142,7 +143,8 @@ def test_create_and_correct_carry_the_screening_details_and_the_follow_up_todo(d
     created = api.post("/api/candidates", json={
         "name": "Screened", "phone": "9000000031", "whatsappSameAsPhone": True, "nativePlace": "Thrissur", "familyMemberNumber": "9447000000",
         "jobDurationPreference": "2 years", "countryPreference": "Qatar", "bestTimeToContact": "Evenings", "serviceChargesStatus": "pending",
-        "interestLevel": "somewhat_interested", "nextFollowUpDate": day, "designations": ["Welder"]})
+        "interestLevel": "somewhat_interested", "nextFollowUpDate": day, "designations": ["Welder"],
+        "assign_to": "a"})  # recruiters are assigned by hand now; the to-do goes to the owner
     assert created.status_code == 201, created.text
     db.expire_all()
     c = db.get(m.Candidate, created.json()["id"])

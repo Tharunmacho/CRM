@@ -273,69 +273,105 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
                                   "missing": [f'{item["field"]}: {item["message"]}' for item in errors]}) from exc
 
 
+PAST_PRESCREENING = "This candidate is already past prescreening for the current job. Unmap the candidate first."
+
+
+def perform_map(db: Session, user: User, candidate_id: str, order_id: str, *, replace_application_id: str | None = None) -> dict:
+    """Put a candidate on an order: the one code path behind `POST /api/applications` and the application form's job picker.
+
+    Runs inside the caller's transaction (the caller commits, normally through `_mutation`). With `replace_application_id`
+    the candidate's active application on another job is closed first (reason `changed_job`) and only while it is still on
+    stage 1; past prescreening that is a 409 and nothing changes. Returns the new application, the stage task and the
+    initial-call flags.
+    """
+    # Client staff routing: when the order's client has CRM staff allocated, the candidate may be handed to them below.
+    # That decision takes the assignment-cursor lock like every other owner change, and it is taken before the candidate
+    # and order rows are locked so this path never waits for the cursor while holding them.
+    from app.services import client_routing
+    allocated, client_name = client_routing.allocated_ids_for_order(db, order_id)
+    if allocated:
+        from app.api.routers.candidates import lock_assignment_cursor
+        lock_assignment_cursor(db)
+    candidate = _lock(db, Candidate, candidate_id, "Candidate")
+    order = _lock(db, Order, order_id, "Order")
+    # Putting a candidate on an order starts their stage work, which is the assigned recruiter's.
+    ensure_can_work_candidate(candidate, user, db)
+    at = datetime.now(timezone.utc)
+    if replace_application_id:
+        previous = _lock(db, Application, replace_application_id, "Application")
+        if previous.candidate_id != candidate.id:
+            raise HTTPException(404, "Application not found")
+        if previous.status == ApplicationStatus.active:
+            if previous.current_stage != 1:
+                raise HTTPException(409, PAST_PRESCREENING)
+            previous.status, previous.closure_reason = ApplicationStatus.closed, ClosureReason.changed_job
+            previous.lock_version += 1
+            for task in _open_tasks(db, previous):
+                task.cancelled_at = at
+            _audit(db, user, "Changed the job before prescreening", previous, candidate, at, {"new_order_id": order.id})
+            db.flush()
+    # Only at creation of the application: a later reassignment by an admin is never undone by this.
+    client_routing.reroute_for_order(db, candidate, order, allocated, client_name, actor_id=user.id)
+    owner = _owner(db, candidate)
+    if order.status != OrderStatus.open:
+        raise HTTPException(409, "Open this order before matching candidates.")
+    if candidate.status == CandidateStatus.deployed:
+        raise HTTPException(409, "This candidate already has a deployed placement.")
+    if db.scalar(select(Application.id).where(
+        Application.candidate_id == candidate.id, Application.status == ApplicationStatus.active,
+    )):
+        raise HTTPException(409, "This candidate is already on an order. Unmap them first.")
+    app = Application(candidate_id=candidate.id, order_id=order.id, owner_id=owner.id,
+                      current_stage=1, status=ApplicationStatus.active, lock_version=0, draft={})
+    db.add(app)
+    db.flush()
+    closed_initial_call = False
+    initial_call_recorded = candidate.call_recorded_at is not None
+    for task in db.scalars(select(Task).where(
+        Task.candidate_id == candidate.id, Task.kind == TaskKind.initial_call,
+        Task.completed_at.is_(None), Task.cancelled_at.is_(None),
+    ).with_for_update()):
+        task.cancelled_at = at
+        closed_initial_call = True
+    task = _task(db, app, candidate, at)
+    candidate.status = CandidateStatus.in_process
+    _audit(db, user, "Mapped candidate to order", app, candidate, at, {"order_id": order.id, "owner_id": owner.id})
+    return {"application": app, "candidate": candidate, "order": order, "task": task,
+            "closed_initial_call": closed_initial_call, "initial_call_recorded": initial_call_recorded}
+
+
+def perform_unmap(db: Session, user: User, application_id: str, lock_version: int | None = None) -> Application:
+    """Close an active application as unmapped (the one code path behind `POST /api/applications/{id}/unmap` and the form)."""
+    app, candidate, order = _locked_application(db, application_id)
+    ensure_can_work(db, app, user)
+    _active(app)
+    if lock_version is not None:
+        _check_version(app, lock_version)
+    at = datetime.now(timezone.utc)
+    app.status, app.closure_reason = ApplicationStatus.closed, ClosureReason.unmapped
+    app.lock_version += 1
+    for task in _open_tasks(db, app):
+        task.cancelled_at = at
+    candidate.status = CandidateStatus.needs_review if candidate.needs_review else CandidateStatus.new
+    _audit(db, user, "Unmapped candidate", app, candidate, at)
+    return app
+
+
 @router.post("", response_model=MapOut, status_code=status.HTTP_201_CREATED)
 def map_candidate(body: MapIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     with _mutation(db):
-        # Client staff routing: when the order's client has CRM staff allocated, the candidate may be handed to them below.
-        # That decision takes the assignment-cursor lock like every other owner change, and it is taken before the candidate
-        # and order rows are locked so this path never waits for the cursor while holding them.
-        from app.services import client_routing
-        allocated, client_name = client_routing.allocated_ids_for_order(db, body.order_id)
-        if allocated:
-            from app.api.routers.candidates import lock_assignment_cursor
-            lock_assignment_cursor(db)
-        candidate = _lock(db, Candidate, body.candidate_id, "Candidate")
-        order = _lock(db, Order, body.order_id, "Order")
-        # Putting a candidate on an order starts their stage work, which is the assigned recruiter's.
-        ensure_can_work_candidate(candidate, user, db)
-        # Only at creation of the application: a later reassignment by an admin is never undone by this.
-        client_routing.reroute_for_order(db, candidate, order, allocated, client_name, actor_id=user.id)
-        owner = _owner(db, candidate)
-        if order.status != OrderStatus.open:
-            raise HTTPException(409, "Open this order before matching candidates.")
-        if candidate.status == CandidateStatus.deployed:
-            raise HTTPException(409, "This candidate already has a deployed placement.")
-        if db.scalar(select(Application.id).where(
-            Application.candidate_id == candidate.id, Application.status == ApplicationStatus.active,
-        )):
-            raise HTTPException(409, "This candidate is already on an order. Unmap them first.")
-        at = datetime.now(timezone.utc)
-        app = Application(candidate_id=candidate.id, order_id=order.id, owner_id=owner.id,
-                          current_stage=1, status=ApplicationStatus.active, lock_version=0, draft={})
-        db.add(app)
-        db.flush()
-        closed_initial_call = False
-        initial_call_recorded = candidate.call_recorded_at is not None
-        for task in db.scalars(select(Task).where(
-            Task.candidate_id == candidate.id, Task.kind == TaskKind.initial_call,
-            Task.completed_at.is_(None), Task.cancelled_at.is_(None),
-        ).with_for_update()):
-            task.cancelled_at = at
-            closed_initial_call = True
-        task = _task(db, app, candidate, at)
-        candidate.status = CandidateStatus.in_process
-        _audit(db, user, "Mapped candidate to order", app, candidate, at, {"order_id": order.id, "owner_id": owner.id})
-    return MapOut(id=app.id, candidate_id=candidate.id, order_id=order.id, current_stage=1,
-                  task_id=task.id, closed_initial_call=closed_initial_call,
-                  closed_initial_call_snake=closed_initial_call, initial_call_recorded=initial_call_recorded)
+        mapped = perform_map(db, user, body.candidate_id, body.order_id)
+    app, candidate, task = mapped["application"], mapped["candidate"], mapped["task"]
+    return MapOut(id=app.id, candidate_id=candidate.id, order_id=mapped["order"].id, current_stage=1,
+                  task_id=task.id, closed_initial_call=mapped["closed_initial_call"],
+                  closed_initial_call_snake=mapped["closed_initial_call"], initial_call_recorded=mapped["initial_call_recorded"])
 
 
 @router.post("/{application_id}/unmap")
 def unmap(application_id: str, body: UnmapIn | None = None,
           db: Session = Depends(get_db), user: User = Depends(current_user)):
     with _mutation(db):
-        app, candidate, order = _locked_application(db, application_id)
-        ensure_can_work(db, app, user)
-        _active(app)
-        if body and body.lock_version is not None:
-            _check_version(app, body.lock_version)
-        at = datetime.now(timezone.utc)
-        app.status, app.closure_reason = ApplicationStatus.closed, ClosureReason.unmapped
-        app.lock_version += 1
-        for task in _open_tasks(db, app):
-            task.cancelled_at = at
-        candidate.status = CandidateStatus.needs_review if candidate.needs_review else CandidateStatus.new
-        _audit(db, user, "Unmapped candidate", app, candidate, at)
+        app = perform_unmap(db, user, application_id, body.lock_version if body else None)
     return {"id": app.id, "status": app.status.value, "lockVersion": app.lock_version}
 
 
@@ -410,6 +446,11 @@ def complete_stage(application_id: str, body: CompleteIn,
         if not result.can_complete:
             raise HTTPException(422, {"message": "This stage is not complete.", "missing": result.missing})
         if app.current_stage == TOTAL_STAGES:
+            # Deployment gate (admins included): every document required by the end of the process must be on file.
+            from app.services.application_form import missing_required_documents
+            gaps = missing_required_documents(db, candidate.id)
+            if gaps:
+                raise HTTPException(409, "Upload these documents before deploying: " + ", ".join(g["label"] for g in gaps))
             deployed = db.scalar(select(func.count()).select_from(Application).where(
                 Application.order_id == order.id, Application.status == ApplicationStatus.deployed,
             )) or 0

@@ -203,8 +203,18 @@ def _read_all(db, start, end, first, last, now, staff_id):
         """Lead sheet numbers per person (one aggregate statement), or None when the lead tables are missing."""
         return lead_metrics.weekly_lead_numbers(session, start, end, now, staff_id)
 
-    reads = [users, sessions, presence, moves, snapshot, stuck_totals, stuck_list, daily, events, first_punch, leads]
-    names = ["users", "sessions", "presence", "moves", "snapshot", "stuck_totals", "stuck_list", "daily", "events", "first_punch", "leads"]
+    def feedback(session):
+        """Recruiter notes written on application forms in the period, per author (one statement), or None before migration 0027."""
+        try:
+            F = m.ApplicationFeedback
+            return dict(session.execute(select(F.author_id, func.count()).where(
+                F.created_at >= start, F.created_at < end, _scope(F.author_id, staff_id)).group_by(F.author_id)).all())
+        except (ProgrammingError, AttributeError):
+            session.rollback()
+            return None
+
+    reads = [users, sessions, presence, moves, snapshot, stuck_totals, stuck_list, daily, events, first_punch, leads, feedback]
+    names = ["users", "sessions", "presence", "moves", "snapshot", "stuck_totals", "stuck_list", "daily", "events", "first_punch", "leads", "feedback"]
     return dict(zip(names, parallel_reads(db, *reads)))
 
 
@@ -331,6 +341,9 @@ def build_report(db, from_date: date | None, to_date: date | None, zone: str, *,
             snapshot[person.id], stuck_total.get(person.id), stuck_names.get(person.id, []),
             event_counts[person.id], daily_by_user[person.id] if daily else None, local_day, team_start,
             leads=lead_metrics.person_numbers(data["leads"].get(person.id)) if data["leads"] is not None else lead_metrics.unavailable_numbers()))
+
+    for row in staff_rows:
+        row["feedbackNotes"] = (data["feedback"] or {}).get(row["id"], 0)
 
     funnel = _team_funnel(team_snapshot, data["moves"], people_ids)
     highlights = _highlights(staff_rows)

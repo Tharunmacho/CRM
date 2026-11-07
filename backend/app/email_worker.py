@@ -2,9 +2,10 @@
 import logging
 import signal
 import threading
+import time
 from datetime import timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 
 from app.core.config import get_settings
 from app.db.models import EmailIngestionJob, MailAccount, MailMessage
@@ -21,10 +22,54 @@ STOP = threading.Event()
 LOCK = 724681930117
 
 
-def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
+def extract_bookkeeping(*, sessions=SessionLocal, settings=None) -> list[str]:
+    """What the parallel reading pool needs from the mailboxes, in two autocommit statements and no row locks:
+    the ids of the mailboxes it may read for (storage bound to this volume), and the 'extraction worker seen' stamp.
+
+    The receiving worker owns binding and mismatch flags; the reader only looks. (It used to lock every mailbox row
+    with FOR UPDATE and rewrite it in a transaction on every cycle, from every reading process.)
+    """
+    settings = settings or get_settings()
+    if not settings.email_ingestion_enabled:
+        return []
+    volume_id = storage_identity(settings.storage_dir, settings)
+    with sessions() as db:
+        db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+        rows = db.execute(select(MailAccount.id, MailAccount.sync_state["storage_id"].astext)
+                          .where(MailAccount.disconnected_at.is_(None), MailAccount.provider.in_(sorted(LIVE_PROVIDERS)))).all()
+        eligible = [row[0] for row in rows if row[1] == volume_id]
+        if eligible:
+            db.execute(update(MailAccount).where(MailAccount.id.in_(eligible)).values(extraction_seen_at=now()))
+    return eligible
+
+
+def work_waiting(*, sessions=SessionLocal, settings=None) -> bool:
+    """ONE read-only statement: is there anything for the receiving worker to do (a mailbox due, a requested sync, a
+    first sync or an unfinished history import, an acknowledgement to send)? Lets an idle receiver skip the whole
+    locked cycle."""
+    settings = settings or get_settings()
+    statement = text("""
+        SELECT EXISTS (SELECT 1 FROM email_accounts a
+                        WHERE a.disconnected_at IS NULL AND a.provider = ANY(:providers)
+                          AND (a.sync_requested OR a.last_sync_at IS NULL OR a.last_sync_at <= :due
+                               OR a.sync_state ->> 'storage_id' IS NULL
+                               OR a.sync_state #>> '{history,status}' IN ('queued', 'running')))
+            OR EXISTS (SELECT 1 FROM intake_acknowledgements k
+                        WHERE k.source_kind = 'email' AND k.status IN ('pending', 'sending'))""")
+    with sessions() as db:
+        db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+        return bool(db.execute(statement, {"providers": sorted(LIVE_PROVIDERS),
+                                           "due": now() - timedelta(seconds=settings.email_poll_seconds)}).scalar())
+
+
+def run_cycle(*, sessions=SessionLocal, settings=None, mode="all", process_jobs=True):
+    """``process_jobs=False`` in extract mode only does the mailbox bookkeeping and returns the eligible account ids:
+    the parallel reading pool (email_extraction_worker.py) claims and reads the jobs itself."""
     settings = settings or get_settings()
     if not settings.email_ingestion_enabled:
         return
+    if mode == "extract" and not process_jobs:
+        return extract_bookkeeping(sessions=sessions, settings=settings)
     volume_id = storage_identity(settings.storage_dir, settings)
     with sessions() as db:
         accounts = list(db.scalars(select(MailAccount).where(MailAccount.disconnected_at.is_(None), MailAccount.provider.in_(sorted(LIVE_PROVIDERS))).with_for_update()))
@@ -53,7 +98,9 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
     if not eligible:
         if mode != "extract":
             dispatch_pending_email_acknowledgements(sessions=sessions, settings=settings)
-        return
+        return []
+    if mode == "extract" and not process_jobs:
+        return eligible
     for account_id in due if mode != "extract" else []:
         if STOP.is_set():
             return
@@ -111,28 +158,48 @@ def run_cycle(*, sessions=SessionLocal, settings=None, mode="all"):
         dispatch_pending_email_acknowledgements(sessions=sessions, settings=settings)
 
 
-def main(mode="receive"):
+ACTIVE_POLL_SECONDS = 5     # while a cycle found work (a sync, a history import, an acknowledgement), look again soon
+IDLE_POLL_SECONDS = 15      # nothing due: one read-only statement per look
+SEEN_SECONDS = 300          # the 'receiver seen' stamp and the full locked cycle run at least this often (the screen allows 15 minutes)
+BACKOFF_MAX_SECONDS = 120
+
+
+def main(mode="receive", stop=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = get_settings()
     if not settings.email_ingestion_enabled:
         raise SystemExit("Set EMAIL_INGESTION_ENABLED=true to run the incoming-mail worker.")
-    for name in ("SIGINT", "SIGTERM"):
-        signal.signal(getattr(signal, name), lambda *_: STOP.set())
+    stop = stop or STOP
+    if stop is STOP:
+        for name in ("SIGINT", "SIGTERM"):
+            signal.signal(getattr(signal, name), lambda *_: STOP.set())
     lock_key = LOCK + (1 if mode == "extract" else 0)
     log.info("Email %s worker started; receive cadence %ss. Saved-intake acknowledgements require per-mailbox Admin approval.", mode, settings.email_poll_seconds)
-    while not STOP.is_set():
+    last_cycle = failures = 0
+    wait = ACTIVE_POLL_SECONDS
+    while not stop.is_set():
         try:
-            # A dedicated autocommit connection holds a session lock, not a long
-            # transaction. Another instance can take over immediately after exit.
-            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as lock:
-                if lock.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}):
-                    try:
-                        run_cycle(settings=settings, mode=mode)
-                    finally:
-                        lock.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key})
+            # An idle receiver asks ONE read-only question; the locked cycle (advisory lock, row locks, stamps,
+            # acknowledgement scan: ~7 statements) only runs when something is due or the stamp is getting old.
+            if time.monotonic() - last_cycle >= SEEN_SECONDS or work_waiting(settings=settings):
+                # A dedicated autocommit connection holds a session lock, not a long
+                # transaction. Another instance can take over immediately after exit.
+                with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as lock:
+                    if lock.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}):
+                        try:
+                            run_cycle(settings=settings, mode=mode)
+                        finally:
+                            lock.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key})
+                last_cycle = time.monotonic()
+                wait = ACTIVE_POLL_SECONDS
+            else:
+                wait = IDLE_POLL_SECONDS
+            failures = 0
         except Exception as exc:
-            log.error("Worker cycle failed (%s); queued work is retained.", type(exc).__name__)
-        STOP.wait(5)
+            failures += 1
+            wait = min(BACKOFF_MAX_SECONDS, ACTIVE_POLL_SECONDS * 2 ** min(failures, 5))
+            log.error("Worker cycle failed (%s); queued work is retained. Trying again in %ss.", type(exc).__name__, wait)
+        stop.wait(wait)
     log.info("Email intake worker stopped.")
 
 

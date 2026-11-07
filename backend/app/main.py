@@ -111,6 +111,15 @@ def on_startup() -> None:
 
     threading.Thread(target=warm_pool, name="db-pool-warmup", daemon=True).start()
 
+    def warm_first_page() -> None:
+        try:
+            built = data.warm_desk()
+            if built:
+                log.info("Desk snapshot ready for %s recent user(s).", built)
+        except Exception:
+            log.debug("Desk snapshot warm-up skipped.", exc_info=True)
+    threading.Thread(target=warm_first_page, name="desk-warmup", daemon=True).start()
+
     state = redis_health()
     if state["status"] == "ok":
         log.info("Redis connected.")

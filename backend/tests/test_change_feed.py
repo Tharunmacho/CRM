@@ -225,7 +225,14 @@ def test_core_and_bulk_statements_are_seen_without_orm_events(feed):
     messages = feed.listener.messages()
     assert [m["t"] for m in messages] == [["clients", "reports"]]
     with feed.sessions() as db:
-        db.execute(text("UPDATE crm_client_contacts SET name = 'x'"))  # raw SQL on an empty table still names the topic
+        db.execute(text("UPDATE crm_client_contacts SET name = 'x'"))  # raw SQL that matches no row changed nothing: no news
+        db.commit()
+    assert feed.listener.messages() == []
+    with feed.sessions() as db:
+        db.add(Client(id="c3", name="Three"))
+        db.commit()
+        feed.listener.messages()
+        db.execute(text("UPDATE crm_client_contacts SET name = 'y' WHERE id = 'c3'"))  # raw SQL that changes a row does
         db.commit()
     assert feed.listener.messages()[0]["t"] == ["clients", "reports"]
 

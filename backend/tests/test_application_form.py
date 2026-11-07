@@ -46,7 +46,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     _migrate(engine, "head")
     columns = {c["name"]: c for c in inspect(engine).get_columns("crm_candidates")}
     assert FORM_COLUMNS <= set(columns)
-    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies"}  # 0021 adds no table; 0022 adds the option lists; 0024 the lead sheet; 0026 the client staff links and reference agencies
+    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats"}  # 0021 adds no table; 0022 adds the option lists; 0024 the lead sheet; 0026 the client staff links and reference agencies; 0027 the feedback notes; 0029 the reader heartbeats
     with engine.connect() as connection:
         row = connection.execute(text("SELECT name, total_experience, father_name, experience_india, education, work_history, field_sources "
                                       "FROM crm_candidates WHERE id='old'")).one()
@@ -102,7 +102,7 @@ def desk(schema_database, tmp_path, monkeypatch):
     settings = SimpleNamespace(storage_dir=str(tmp_path), storage_backend="local", tesseract_cmd=None, ocr_languages="eng",
         ocr_max_pages=300, ocr_page_timeout_seconds=20, ocr_document_timeout_seconds=600, agency_timezone="Asia/Kolkata",
         veris_ocr_base_url="https://ocr.invalid", veris_ocr_api_key="synthetic-key")
-    env = SimpleNamespace(sessions=sessions, settings=settings, storage=tmp_path, actor=SimpleNamespace(id="staff", role=Role.staff),
+    env = SimpleNamespace(sessions=sessions, settings=settings, storage=tmp_path, actor=SimpleNamespace(id="staff", name="Staff", role=Role.staff),
                           results={}, statuses={})
 
     class Jobs:
@@ -157,7 +157,7 @@ def form(env, candidate="candidate", **params):
 
 
 def as_user(env, user_id, role):
-    env.actor.id, env.actor.role = user_id, role
+    env.actor.id, env.actor.name, env.actor.role = user_id, user_id.title(), role
 
 
 # ------------------------------------------------------------------ reading the form
@@ -170,7 +170,7 @@ def test_blank_candidate_form_has_every_docx_section_and_lists_what_is_missing(d
     assert set(data["passport"]) == {"passportNumber", "placeOfIssue", "issueDate", "expiryDate", "expiry", "available"}
     assert data["education"] == [] and data["experience"]["history"] == []
     assert set(data["experience"]) == {"totalExperience", "experienceIndia", "experienceAbroad", "history"}
-    assert set(data["documents"]) == {"resume", "passport", "photo"} and not data["documents"]["passport"]["uploaded"]
+    assert list(data["documents"]) == data["documentOrder"] and {"resume", "passport", "photo"} <= set(data["documents"]) and not data["documents"]["passport"]["uploaded"]
     assert data["application"] is None and data["applications"] == []
     assert data["recruitment"]["client"] is None and data["recruitment"]["source"] == "Walk-in"
     assert data["recruitment"]["recruiter"] == {"id": "staff", "name": "Staff"}
@@ -181,8 +181,8 @@ def test_blank_candidate_form_has_every_docx_section_and_lists_what_is_missing(d
     missing = {item["key"]: item for item in data["completeness"]["missing"]}
     assert missing["documents.passport"]["message"] == "Passport not uploaded"
     assert missing["personal.fatherName"]["message"] == "Father's name is missing"
-    assert data["completeness"]["total"] == 19 and "personal.candidateName" not in missing
-    assert data["completeness"]["percent"] == round(100 * data["completeness"]["filled"] / 19)
+    assert data["completeness"]["total"] == 20 and "personal.candidateName" not in missing  # 16 fields + resume, passport, photo, education certificate
+    assert data["completeness"]["percent"] == round(100 * data["completeness"]["filled"] / 20)
     assert data["candidate"]["canEdit"] is True and data["processing"] is False and data["fieldSources"] == {}
 
 
@@ -519,7 +519,7 @@ def test_screening_details_save_with_provenance_and_mirror_the_follow_up_date_to
     assert screening["nextFollowUpDate"] == tomorrow.isoformat() and screening["callOutcome"] is None
     assert {"screening.nativePlace", "screening.interestLevel", "screening.nextFollowUpDate", "screening.jobPreference", "screening.skills"} <= set(data["fieldSources"])
     assert data["completeness"]["optional"]["missing"] == [] and data["completeness"]["optional"]["total"] == 9
-    assert data["completeness"]["total"] == 19  # the counted core did not change
+    assert data["completeness"]["total"] == 20  # 16 fields and the four always-counted documents
     with desk.sessions() as db:
         todo = db.scalar(select(TodoItem))
         assert (todo.owner_id, todo.link_to, todo.link_label, todo.done) == ("staff", "/candidates/candidate", "Follow-up", False)

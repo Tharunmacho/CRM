@@ -1,7 +1,9 @@
 """Local inspection boundaries using synthetic documents only."""
 import io
+import itertools
 import json
 import subprocess
+import time
 import zipfile
 
 import pymupdf as fitz
@@ -25,7 +27,7 @@ def image_bytes(*, frames=1):
     with Image.new("RGB", (600, 800), "gray") as image:
         out = io.BytesIO()
         if frames > 1:
-            image.save(out, format="TIFF", save_all=True, append_images=[image.copy()])
+            image.save(out, format="TIFF", save_all=True, append_images=[image.copy() for _ in range(frames - 1)])
         else:
             image.save(out, format="PNG")
         return out.getvalue()
@@ -101,13 +103,12 @@ def test_aadhaar_front_and_back_keep_original_positions_and_do_not_enter_resume_
         assert "UNIQUE IDENTIFICATION AUTHORITY" in selected[1].get_text()
 
 
-def test_mixed_aadhaar_and_resume_page_is_not_sent_to_either_provider():
+def test_mixed_aadhaar_and_resume_page_is_sent_to_both_providers():
     report = subject.inspect_document(pdf([CV + AADHAAR]))
-    assert not report.complete
-    assert report.unknown_pages == [1]
-    assert report.aadhaar_pages == report.resume_pages == []
-    with pytest.raises(subject.InspectionError, match="read or identified"):
-        report.pdf_for_pages([1])
+    assert report.complete
+    assert report.unknown_pages == []
+    assert report.aadhaar_pages == report.resume_pages == [1]
+    assert report.pdf_for_pages([1])
 
 
 @pytest.mark.parametrize("numbers", [[0], [4], [True], ["2"]])
@@ -161,7 +162,7 @@ def test_page_cap_reports_every_unprocessed_original_page():
 
 
 def test_document_deadline_stops_processing_but_keeps_original_page_count(monkeypatch):
-    clock = iter([0, 2, 2])
+    clock = itertools.chain([0], itertools.repeat(2))
     monkeypatch.setattr(subject.time, "monotonic", lambda: next(clock))
     report = subject.inspect_document(pdf([CV, PASSPORT]), document_timeout=1)
     assert report.page_count == 2
@@ -215,9 +216,20 @@ def test_failed_embedded_scan_cannot_be_hidden_by_readable_header(monkeypatch):
     assert "Attachment cover information" in report.pages[0].text
 
 
-def test_multiframe_tiff_is_rejected_instead_of_silently_reading_first_frame():
+def test_multiframe_tiff_becomes_one_page_per_frame_instead_of_reading_only_the_first(monkeypatch):
+    monkeypatch.setattr(subject, "_ocr_image", lambda *a, **k: subject.OCRRead(CV, 95))
+    report = subject.inspect_document(image_bytes(frames=3))
+    assert report.page_count == 3
+    assert [p.page_number for p in report.pages] == [1, 2, 3]
+    assert report.completeness["pages_read"] + report.completeness["pages_blank"] + report.completeness["pages_unread"] == 3
+
+
+def test_animated_gif_is_still_rejected_instead_of_silently_reading_first_frame():
+    out = io.BytesIO()
+    with Image.new("RGB", (60, 80), "white") as first:
+        first.save(out, format="GIF", save_all=True, append_images=[Image.new("RGB", (60, 80), "black")])
     with pytest.raises(subject.InspectionError, match="every frame"):
-        subject.inspect_document(image_bytes(frames=2))
+        subject.inspect_document(out.getvalue())
 
 
 def test_missing_tesseract_is_actionable_and_never_blank():
@@ -266,18 +278,28 @@ def test_encrypted_pdf_requires_unlock():
         subject.inspect_document(data)
 
 
-def test_rotation_rescue_uses_shared_deadline(monkeypatch):
+def test_sideways_page_is_retried_with_orientation_aware_layout_and_shares_the_page_deadline(monkeypatch):
     calls = []
-    clock = iter([0, 1])
-    monkeypatch.setattr(subject.time, "monotonic", lambda: next(clock))
-    def read(image, command, languages, timeout):
-        calls.append((image.size, timeout))
-        return subject.OCRRead(CV, 90) if len(calls) == 2 else subject.OCRRead("", 0)
+    def read(image, command, languages, timeout, **options):
+        calls.append((options["psm"], timeout))
+        return subject.OCRRead(CV, 90, words=40, good_words=40) if options["psm"] == 1 else subject.OCRRead("x y", 20, words=2)
     monkeypatch.setattr(subject, "_tesseract", read)
-    with Image.new("RGB", (40, 60)) as image:
-        result = subject._ocr_image(image, command="test-tesseract", languages="eng", deadline=3)
+    with Image.new("L", (40, 60)) as image:
+        result = subject._ocr_image(image, command="test-tesseract", languages="eng", deadline=time.monotonic() + 30)
     assert result.text == CV
-    assert calls == [((40, 60), 3), ((60, 40), 2)]
+    assert [psm for psm, _ in calls] == [3, 1]
+    assert all(0 < timeout <= 30 for _, timeout in calls)
+
+
+def test_clean_page_costs_one_tesseract_call(monkeypatch):
+    calls = []
+    def read(image, command, languages, timeout, **options):
+        calls.append(options)
+        return subject.OCRRead(CV, 95, words=60, good_words=60, text_height=30)
+    monkeypatch.setattr(subject, "_tesseract", read)
+    with Image.new("L", (40, 60)) as image:
+        subject._ocr_image(image, command="test-tesseract", languages="eng", deadline=time.monotonic() + 30)
+    assert len(calls) == 1 and calls[0]["psm"] == 3
 
 
 def test_tesseract_timeout_is_bounded_and_does_not_include_document_data(monkeypatch):

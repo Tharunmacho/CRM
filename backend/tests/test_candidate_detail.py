@@ -42,7 +42,14 @@ def test_full_detail_matches_shared_bootstrap_without_private_internal_fields(wo
         # The one profile also carries the application form's two row lists, which the bootstrap leaves out (heavy).
         detail = response.json()
         assert detail.pop("education") == [] and detail.pop("workHistory") == []
-        assert detail == baseline
+        # ...and lists the 11 extra document slots of the application form after the bootstrap's seven (stored only, so empty here).
+        documents = detail.pop("documents")
+        assert documents[:len(baseline["documents"])] == baseline["documents"]
+        assert [d["key"] for d in documents[len(baseline["documents"]):]] == [
+            "education_certificate", "experience_certificate", "signed_offer", "medical", "pcc", "visa", "google_review",
+            "visa_stamping", "emigration", "air_ticket", "other"]
+        assert all(d["versions"] == [] for d in documents[len(baseline["documents"]):])
+        assert detail == {key: value for key, value in baseline.items() if key != "documents"}
         assert measurement["queries"] == 1
         assert response.headers["cache-control"] == "private, no-store"
         assert response.json()["resumeText"] == candidate.resume_text

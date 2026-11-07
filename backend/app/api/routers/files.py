@@ -137,6 +137,8 @@ def upload(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             "Upload a PDF, Word document, or an image.",
         )
+    if entity_type == "candidate" and slot == "photo" and not content_type.startswith("image/"):
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "The photo must be an image (JPG, PNG, WebP or HEIC).")
 
     # Sharded by the first two characters so one directory never holds every file.
     key = f"{uuid.uuid4().hex}-{_safe_name(file.filename or 'file')}"

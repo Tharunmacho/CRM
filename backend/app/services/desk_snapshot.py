@@ -95,7 +95,7 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
     agency_row = select(
         AgencySettings.name, AgencySettings.short_name, AgencySettings.default_order_currency,
         AgencySettings.default_advance_currency, AgencySettings.home_calling_code,
-        AgencySettings.default_nationality, AgencySettings.acknowledgement_text,
+        AgencySettings.default_nationality, AgencySettings.acknowledgement_text, AgencySettings.auto_assign,
         AgencySettings.updated_by, AgencySettings.updated_at,
     ).where(AgencySettings.id == 1).subquery("agency_row")
     settings_columns = [

@@ -20,16 +20,40 @@ from sqlalchemy.orm import Session, undefer
 from app.core.config import get_settings
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, Client, Company,
-    Designation, DocumentExtractionJob, Order, Priority, Role, Source, TodoItem, User,
+    Designation, DocumentExtractionJob, Order, Priority, Role, Source, Task, TodoItem, User,
 )
 from app.domain.stages import stage_by_no
+from app.services import form_assignment, form_feedback
 from app.services import form_extraction as fx
 from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_phone, normalized_labels
 from app.services.parallel_reads import parallel_reads
 
-SLOTS = ("resume", "passport", "photo")
-READ_SLOTS = ("resume", "passport")
-SLOT_LABELS = {"resume": "Resume", "passport": "Passport", "photo": "Passport size photo"}
+# Document slots of the form, in the order shown (docs/workflows/application-form-v2-contract.md section 2):
+# (slot, label, hint, required from this stage on (None: see `always`), always counted, read by OCR, several files allowed)
+SLOT_SPECS = (
+    ("resume", "Resume", "The latest resume. It is read to fill the form.", None, True, True, False),
+    ("passport", "Passport", "The photo page of the passport. It is read to fill the form.", None, True, True, False),
+    ("photo", "Photo", "A recent passport-size photo (an image).", None, True, False, False),
+    ("education_certificate", "Education certificate", "The highest qualification certificate.", None, True, False, False),
+    ("experience_certificate", "Experience certificate", "Optional. Certificates from previous employers.", None, False, False, False),
+    ("signed_offer", "Signed offer", "The offer letter signed by the candidate.", 5, False, False, False),
+    ("medical", "Medical", "The medical fitness report.", 6, False, False, False),
+    ("pcc", "Police clearance certificate (PCC)", "The police clearance certificate.", 7, False, False, False),
+    ("visa", "Visa", "The visa received for the candidate.", 9, False, False, False),
+    ("google_review", "Google review", "Proof of the candidate's Google review.", 9, False, False, False),
+    ("visa_stamping", "Visa stamping", "The passport page with the visa stamp.", 10, False, False, False),
+    ("emigration", "Emigration", "The emigration clearance.", 10, False, False, False),
+    ("air_ticket", "Air ticket", "The air ticket.", 11, False, False, False),
+    ("other", "Other documents", "Optional. Anything else, several files allowed.", None, False, False, True),
+)
+SLOTS = tuple(spec[0] for spec in SLOT_SPECS)
+READ_SLOTS = tuple(spec[0] for spec in SLOT_SPECS if spec[5])
+SLOT_LABELS = {spec[0]: spec[1] for spec in SLOT_SPECS}
+# The slots that are not part of the candidate's older Documents list (data.DOCUMENT_SLOTS): stored only.
+EXTRA_SLOTS = tuple(spec[0] for spec in SLOT_SPECS[3:])
+# Slot keys stored before the form had its own certificate slots; they are folded into the new ones when the payload is built.
+LEGACY_SLOTS = {"education": "education_certificate", "experience": "experience_certificate"}
+STORED_SLOTS = SLOTS + tuple(LEGACY_SLOTS)
 PROCESSING = {"uploaded", "pending", "processing", "retry"}
 EXPIRING_DAYS = 180
 
@@ -65,7 +89,7 @@ FAILED_OUTCOMES = {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 6: {"Un
 CLOSURE_LABELS = {
     "prescreen_failed": "Failed prescreening", "not_interested": "Candidate not interested",
     "resume_not_received": "Resume not received", "interview_rejected": "Rejected at interview",
-    "medical_unfit": "Medically unfit", "unmapped": "Removed from the order",
+    "medical_unfit": "Medically unfit", "unmapped": "Removed from the order", "changed_job": "Moved to another job",
 }
 FOLLOW_UP_LABEL = "Follow-up"
 SAME_AS_PHONE = object()
@@ -167,7 +191,7 @@ def _present(value) -> bool:
 
 
 def completeness_payload(form: dict) -> dict:
-    """The 19 counted items of the form (personal, passport, education, experience, documents)."""
+    """The counted items of the form: 16 fields (personal, passport, education, experience) plus every document that is `required`."""
     personal, passport, experience = form["personal"], form["passport"], form["experience"]
     sources = form["fieldSources"]
     items = [
@@ -192,13 +216,16 @@ def completeness_payload(form: dict) -> dict:
     missing = [{"key": k, "label": label, "section": section, "kind": "field", "message": message}
                for k, label, section, value, message in items if not _present(value)]
     filled = len(items) - len(missing)
-    total = len(items) + len(SLOTS)
-    for slot in SLOTS:
-        if form["documents"][slot]["uploaded"]:
+    counted = [entry for entry in form["documents"].values() if entry["required"]]
+    total = len(items) + len(counted)
+    for entry in counted:
+        if entry["uploaded"]:
             filled += 1
         else:
-            missing.append({"key": f"documents.{slot}", "label": SLOT_LABELS[slot], "section": "documents", "kind": "document",
-                            "message": f"{SLOT_LABELS[slot]} not uploaded"})
+            missing.append({"key": f"documents.{entry['slot']}", "label": entry["label"], "section": "documents", "kind": "document",
+                            "message": f"{entry['label']} not uploaded"})
+    optional_documents = [{"slot": e["slot"], "label": e["label"], "uploaded": e["uploaded"]}
+                          for e in form["documents"].values() if e["optional"]]
     screening = form["screening"]
     optional = [
         ("screening.nativePlace", "Native place", screening["nativePlace"]),
@@ -215,6 +242,7 @@ def completeness_payload(form: dict) -> dict:
     optional_missing = [{"key": k, "label": label, "section": "screening", "kind": "field", "message": f"{label} is not recorded"}
                         for k, label, value in optional if not _present(value)]
     return {"percent": round(100 * filled / total), "filled": filled, "total": total, "missing": missing,
+            "optionalDocuments": optional_documents,
             # Screening details of the telemarketer's form: listed, but not part of the percentage above.
             "optional": {"filled": len(optional) - len(optional_missing), "total": len(optional), "missing": optional_missing}}
 
@@ -224,7 +252,7 @@ _INDIAN_PASSPORT = re.compile(r"^[A-Z][0-9]{7}$")
 
 def warnings_for(form: dict, today: date) -> list[str]:
     out = []
-    personal, passport, experience = form["personal"], form["passport"], form["experience"]
+    personal, passport = form["personal"], form["passport"]
     number = passport["passportNumber"]
     nationality = (personal["nationality"] or "").strip().casefold()
     if number and nationality in ("", "indian", "india") and not _INDIAN_PASSPORT.match(number.upper()):
@@ -236,9 +264,6 @@ def warnings_for(form: dict, today: date) -> list[str]:
     mobile = personal["mobileNumber"]
     if mobile and not normalize_phone(mobile):
         out.append("The mobile number does not look like a valid number.")
-    total, india, abroad = experience["totalExperience"], experience["experienceIndia"], experience["experienceAbroad"]
-    if total and (india or abroad) and abs(total - (india + abroad)) > 1:
-        out.append("Experience in India plus experience abroad does not match the total experience.")
     screening = form["screening"]
     call = screening["callOutcome"]
     if call and call["interested"] == "no" and screening["interestLevel"] in ("more_interested", "interested", "somewhat_interested"):
@@ -262,7 +287,9 @@ def extraction_view(job) -> dict | None:
     form = (job.draft or {}).get("applicationForm") or {}
     saved = form.get("result") or {}
     base = {"jobId": job.id, "updatedAt": _iso(job.updated_at), "kindsFound": saved.get("kindsFound") or [],
-            "filled": saved.get("filled") or [], "kept": saved.get("kept") or []}
+            "filled": saved.get("filled") or [], "kept": saved.get("kept") or [],
+            # Details the document reader returned that have no field on the form (path, values), and what was and was not sent.
+            "unmapped": saved.get("unmapped") or [], "coverage": saved.get("coverage")}
     if job.status in PROCESSING:
         retry_note = job.last_error if job.status == "retry" and job.attempts else None
         return {**base, "status": "processing", "message": retry_note}
@@ -281,18 +308,49 @@ def _document(row, names: dict[str, str]) -> dict:
             "uploadedBy": {"id": row.uploaded_by, "name": names.get(row.uploaded_by, "Former team member")} if row.uploaded_by else None}
 
 
-def document_slots(attachments: list, jobs: list, names: dict[str, str]) -> dict:
+DEPLOY_STAGE = 11  # completing this stage (Air ticket) deploys the candidate
+
+
+def required_for_deployment() -> list[tuple[str, str]]:
+    """(slot, label) of every document that must be on file before deploying, in the form's order (SLOT_SPECS)."""
+    return [(slot, label) for slot, label, _hint, from_stage, always, _read, _multiple in SLOT_SPECS
+            if always or (from_stage is not None and from_stage <= DEPLOY_STAGE)]
+
+
+def deployment_gaps(uploaded: set[str]) -> list[dict]:
+    """The deployment-required documents whose slot is not in `uploaded` (stored slot keys; older keys count for their new slot)."""
+    have = {LEGACY_SLOTS.get(slot, slot) for slot in uploaded}
+    return [{"slot": slot, "label": label} for slot, label in required_for_deployment() if slot not in have]
+
+
+def missing_required_documents(db: Session, candidate_id: str) -> list[dict]:
+    """The one deployment-gate check: [{slot, label}] still to upload before the candidate can be deployed. One statement."""
+    uploaded = set(db.scalars(select(Attachment.slot).where(
+        Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(STORED_SLOTS)).distinct()))
+    return deployment_gaps(uploaded)
+
+
+def document_slots(attachments: list, jobs: list, names: dict[str, str], stage: int | None = None) -> dict:
+    """All document slots in order. `stage` is the shown application's current stage (None: no application, only the always-counted ones are required)."""
     by_slot: dict[str, list] = {slot: [] for slot in SLOTS}
     for row in attachments:
-        if row.slot in by_slot:
-            by_slot[row.slot].append(row)
+        slot = LEGACY_SLOTS.get(row.slot, row.slot)
+        if slot in by_slot:
+            by_slot[slot].append(row)
     slots = {}
-    for slot in SLOTS:
-        rows = sorted(by_slot[slot], key=lambda r: r.version, reverse=True)
+    for slot, label, hint, from_stage, always, readable, multiple in SLOT_SPECS:
+        # Newest first. Versions count per stored slot key, so a folded legacy slot is ordered by upload time instead.
+        rows = sorted(by_slot[slot], key=lambda r: (r.uploaded_at, r.version), reverse=True)
         current = rows[0] if rows else None
-        job = next((j for j in jobs if current is not None and j.attachment_id == current.id), None) if slot in READ_SLOTS else None
-        slots[slot] = {"slot": slot, "label": SLOT_LABELS[slot], "uploaded": current is not None,
+        job = next((j for j in jobs if current is not None and j.attachment_id == current.id), None) if readable else None
+        required = always or (from_stage is not None and stage is not None and stage >= from_stage)
+        slots[slot] = {"slot": slot, "label": label, "hint": hint, "required": required, "requiredFromStage": from_stage,
+                       # optional: never counted as missing (experience certificate, other documents)
+                       "optional": not always and from_stage is None,
+                       "readable": readable, "multiple": multiple, "uploaded": current is not None,
                        "current": _document(current, names) if current else None, "versions": len(rows),
+                       "history": [_document(r, names) for r in rows[1:]],
+                       "files": [_document(r, names) for r in rows] if multiple else [],
                        "extraction": extraction_view(job)}
     return slots
 
@@ -340,7 +398,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         return list(session.execute(
             select(Attachment.id, Attachment.slot, Attachment.version, Attachment.file_name, Attachment.size_kb,
                    Attachment.content_type, Attachment.uploaded_at, Attachment.uploaded_by)
-            .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(SLOTS))).all())
+            .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(STORED_SLOTS))).all())
 
     def read_jobs(session):
         return list(session.execute(
@@ -359,13 +417,26 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         # Who uploaded a file or completed a stage, resolved inside the same round as everything else (a superset of the
         # selected application's people, which is harmless): a second round trip just for names is avoided.
         uploaders = select(Attachment.uploaded_by).where(
-            Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(SLOTS))
+            Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(STORED_SLOTS))
         completers = select(ApplicationStage.completed_by).join(Application, Application.id == ApplicationStage.application_id).where(
             Application.candidate_id == candidate_id)
         return dict(session.execute(select(User.id, User.name).where(or_(User.id.in_(uploaders), User.id.in_(completers)))).all())
 
-    found, application_rows, attachments, jobs, stages, names = parallel_reads(
-        db, read_candidate, read_applications, read_attachments, read_jobs, read_stages, read_names)
+    def read_notes(session):
+        # Recruiter notes, and the open stage tasks whose 48-hour SLA window is the stage clock.
+        tasks = list(session.execute(
+            select(Task.application_id, Task.stage, Task.created_at, Task.sla_started_at, Task.due_at)
+            .where(Task.candidate_id == candidate_id, Task.application_id.is_not(None),
+                   Task.completed_at.is_(None), Task.cancelled_at.is_(None))).all())
+        return form_feedback.read_items(session, candidate_id), tasks
+
+    def read_lists(session):
+        # Reference agencies and recruiters for the assignment pickers.
+        return form_assignment.read_agencies(session), form_assignment.read_recruiters(session)
+
+    found, application_rows, attachments, jobs, stages, names, (feedback_items, tasks), job_rows, (agencies, recruiters) = parallel_reads(
+        db, read_candidate, read_applications, read_attachments, read_jobs, read_stages, read_names, read_notes,
+        lambda session: form_assignment.read_job_options(session, candidate_id), read_lists)
     if found is None:
         raise HTTPException(404, "Candidate not found")
     candidate, owner_name = found
@@ -377,7 +448,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
     today = datetime.now(tz).date()
 
     sources = fx.sources_of(candidate)
-    slots = document_slots(attachments, jobs, names)
+    slots = document_slots(attachments, jobs, names, application.current_stage if application is not None else None)
     listing = _applications(application_rows)
     for item in listing:
         item["selected"] = application is not None and item["id"] == application.id
@@ -446,11 +517,21 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         },
         "tracking": tracking_payload(application, selected_stages, names, tz),
         "fieldSources": fx.public_sources(sources),
+        "documentOrder": list(SLOTS),
+        "deployment": _deployment(slots),
+        "assignment": form_assignment.build_block(user, candidate, owner_name, chosen, job_rows, agencies, recruiters),
+        "feedback": form_feedback.build_block(user, candidate, application, feedback_items, tasks, selected_stages,
+                                              can_edit(user, candidate)),
     }
     form["completeness"] = completeness_payload(form)
     form["warnings"] = warnings_for(form, today)
     form["processing"] = any((slot["extraction"] or {}).get("status") == "processing" for slot in slots.values())
     return form
+
+
+def _deployment(slots: dict) -> dict:
+    missing = deployment_gaps({slot for slot, entry in slots.items() if entry["uploaded"]})
+    return {"ready": not missing, "missing": missing}
 
 
 def _education_out(row: dict) -> dict:
@@ -689,13 +770,19 @@ def refresh_from_stored(db: Session, user: User, candidate_id: str) -> list[str]
 
 def queue_reading(db: Session, user: User, candidate: Candidate, attachment: Attachment, content_type: str) -> DocumentExtractionJob:
     """Queue the stored file for the extraction worker. Same transaction as the attachment row."""
+    from app.core.config import get_settings
+    from app.services.instance_guard import instance_name
     job = DocumentExtractionJob(
+        instance=instance_name(get_settings()),
         id=str(uuid.uuid4()), owner_id=user.id, group_id=str(uuid.uuid4()), kind=attachment.slot, filename=attachment.file_name[:150],
         content_type=content_type, object_key=attachment.object_key, content_hash=attachment.content_hash or "",
         size_kb=attachment.size_kb or 1, status="pending", candidate_id=candidate.id, attachment_id=attachment.id,
         draft={"applicationForm": {"candidateId": candidate.id, "slot": attachment.slot, "attachmentId": attachment.id}},
+        queued_at=datetime.now(timezone.utc),
     )
     db.add(job)
+    from app.services.extraction_queue import notify_work
+    notify_work(db, "manual")  # a sleeping worker starts reading at once (delivered when the caller commits)
     return job
 
 
@@ -714,7 +801,10 @@ def requeue_failed(db: Session, candidate_id: str, attachment_id: str) -> bool:
     job.state, job.result = saved, {}
     job.status, job.attempts, job.last_error = "pending", 0, None
     job.next_attempt_at = datetime.now(timezone.utc)
+    job.queued_at, job.started_at, job.finished_at, job.claimed_by, job.lease_until = job.next_attempt_at, None, None, None, None
     job.updated_at = datetime.now(timezone.utc)
+    from app.services.extraction_queue import notify_work
+    notify_work(db, "manual")
     return True
 
 
@@ -770,7 +860,12 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
         status = "done"
         message = None
     form = dict(meta)
-    form["result"] = {"status": status, "message": message, "kindsFound": found, "filled": result.filled, "kept": result.kept + result.conflicts}
+    coverage = (output or {}).get("coverage") or {}
+    form["result"] = {"status": status, "message": message, "kindsFound": found, "filled": result.filled, "kept": result.kept + result.conflicts,
+                      "unmapped": coverage.get("unmapped") or [],
+                      "coverage": {"summary": coverage.get("summary"), "pages": coverage.get("pages"),
+                                   "issues": coverage.get("issues") or [], "notes": coverage.get("notes") or [],
+                                   "kinds": coverage.get("kinds"), "complete": coverage.get("complete")} if coverage else None}
     job.draft = {**dict(job.draft or {}), "applicationForm": form}
 
 

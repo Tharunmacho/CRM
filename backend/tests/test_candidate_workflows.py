@@ -17,6 +17,10 @@ from app.db import models as m
 from app.services.candidate_identity import normalize_phone, enrich_empty, identity_matches
 from app.services.candidate_search import Search, search_candidates
 from test_database_naming import schema_database, _migrate
+from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 
 
 @pytest.fixture

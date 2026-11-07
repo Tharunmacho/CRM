@@ -14,6 +14,10 @@ from test_database_naming import schema_database
 
 from app.core.security import SESSION_COOKIE, hash_password, verify_password
 from app.db.models import AssignmentPointer, AttendanceHRRequest, AttendanceCalendarDay, AuditEntry, Base, Candidate, CandidateStatus, ClientStaff, Notification, Role, Session as LoginSession, Source, Task, TaskEvent, TaskKind, User, StaffPresenceInterval
+from auto_assign import round_robin_on  # noqa: F401  (fixture: the waiting sweep after an account change is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 
 with patch('app.core.config.get_settings', return_value=SimpleNamespace(database_url='postgresql+psycopg://unused@127.0.0.1:1/user_admin_tests')):
     from app.api.routers import users

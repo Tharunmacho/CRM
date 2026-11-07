@@ -94,7 +94,22 @@ def complete(env, app_id, data):
     return response.json()
 
 
+def attach_required_documents(env, candidate_id):
+    """Put every document that deployment requires on the candidate (stored rows, like uploads), once."""
+    from app.services.application_form import required_for_deployment
+    with env.sessions() as db:
+        have = set(db.scalars(select(Attachment.slot).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id)))
+        for slot, _label in required_for_deployment():
+            if slot not in have:
+                db.add(Attachment(entity_type="candidate", entity_id=candidate_id, slot=slot, version=1, file_name=f"{slot}.pdf",
+                                  content_type="application/pdf", object_key=f"{candidate_id}-{slot}.pdf"))
+        db.commit()
+
+
 def payload(env, app_id, stage):
+    if stage == 11:  # the deployment gate: the documents required by the end of the process must be on file
+        with env.sessions() as db:
+            attach_required_documents(env, db.get(Application, app_id).candidate_id)
     values = {
         1: {"result": "passed"}, 2: {"forwarded": "yes"},
         3: {"scheduled": "yes", "date": "2026-11-02", "time": "09:30", "mode": "online"},

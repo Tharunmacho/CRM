@@ -23,6 +23,7 @@ from test_bootstrap_performance import (
     EMPTY_REVISION, assert_no_private_data, assert_select_budget, recorded_statements,
 )
 from test_database_naming import schema_database
+from auto_assign import round_robin_on  # noqa: F401  (fixture)
 from test_email_intake import (
     ORIGINAL, extraction, fake_extraction, intake, receipt, row_count, run,
 )
@@ -174,6 +175,7 @@ def test_revision_requires_current_active_session_before_reading_completion_meta
     assert not any("email_ingestion_jobs" in statement for statement in statements)
 
 
+@pytest.mark.usefixtures("round_robin_on")  # the new candidate must be handed to a recruiter to show on that desk (automatic assignment is opt-in)
 def test_completed_new_candidate_and_existing_candidate_enrichment_both_advance_revision(
     intake, revision_client, monkeypatch,
 ):

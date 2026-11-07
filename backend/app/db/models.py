@@ -105,6 +105,7 @@ class ClosureReason(str, enum.Enum):
     interview_rejected = "interview_rejected"
     medical_unfit = "medical_unfit"
     unmapped = "unmapped"
+    changed_job = "changed_job"  # moved to another job from the application form before prescreening was passed (migration 0027)
 
 
 class TaskKind(str, enum.Enum):
@@ -907,17 +908,26 @@ class EmailIngestionJob(Base, PkMixin, TimestampMixin):
     # Deferred: mailbox lists must not transfer extracted identity documents.
     state: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True)
     inspection: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # Reading lease: the worker that claimed this job and when its claim lapses (see services/extraction_queue.py).
+    claimed_by: Mapped[str | None] = mapped_column(String(80), comment="Worker holding the reading lease of this job.")
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When the reading lease lapses and another worker may claim the job.")
     __table_args__ = (
         CheckConstraint("status IN ('pending','processing','retry','needs_review','completed','ignored','failed')",
                         name="ck_email_ingestion_jobs_status"),
         Index("ix_email_ingestion_jobs_ready", "next_attempt_at",
               postgresql_where=text("status IN ('pending','processing','retry')")),
+        Index("ix_email_ingestion_jobs_lease", "lease_until", postgresql_where=text("status = 'processing'")),
         {"comment": "Durable email intake queue and per-document OCR checkpoints; links source messages to candidate outcomes."},
     )
 
 
 class DocumentExtractionJob(Base, PkMixin, TimestampMixin):
     __tablename__ = "document_extraction_jobs"
+    # The installation that saved the file (INSTANCE_NAME). Null on rows written before the column existed.
+    instance: Mapped[str | None] = mapped_column(String(80))
+    # When the job is really due, on rows stamped with an instance (next_attempt_at then holds 2100-01-01 so older readers
+    # never see them; a trigger maintains both, see migration 0032). Null on older rows.
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     owner_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id"), nullable=False, index=True)
     group_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -935,10 +945,17 @@ class DocumentExtractionJob(Base, PkMixin, TimestampMixin):
     last_error: Mapped[str | None] = mapped_column(Text)
     candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id"))
     attachment_id: Mapped[str | None] = mapped_column(ForeignKey("document_attachments.id"))
+    # Queue timeline for the progress display, and the reading lease (see services/extraction_queue.py).
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When reading was last requested (entered the queue).")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When a worker last began reading this document.")
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When reading last reached completed, needs_review or failed.")
+    claimed_by: Mapped[str | None] = mapped_column(String(80), comment="Worker holding the reading lease of this job.")
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When the reading lease lapses and another worker may claim the job.")
     __table_args__ = (
         UniqueConstraint("owner_id", "group_id", "kind", "content_hash", name="uq_document_extraction_source"),
         CheckConstraint("status IN ('uploaded','pending','processing','retry','completed','needs_review','failed','attached','dismissed')", name="ck_document_extraction_jobs_status"),
         Index("ix_document_extraction_jobs_ready", "status", "next_attempt_at"),
+        Index("ix_document_extraction_jobs_lease", "lease_until", postgresql_where=text("status = 'processing'")),
         {"comment": "Manual candidate document uploads, durable OCR checkpoints and recruiter form drafts, grouped by one intake session."},
     )
 
@@ -960,6 +977,37 @@ class IngestionFailure(Base, PkMixin):
 
 
 # ----------------------------------------------------------------- plumbing
+
+class ApplicationFeedback(Base, PkMixin):
+    """A note a recruiter writes on a candidate's application form to say why something takes time (migration 0027)."""
+
+    __tablename__ = "crm_application_feedback"
+    __table_args__ = (
+        CheckConstraint("kind in ('update', 'delay', 'issue', 'client', 'candidate')", name="ck_application_feedback_kind"),
+        CheckConstraint("char_length(body) between 1 and 2000", name="ck_application_feedback_body"),
+        Index("ix_crm_application_feedback_candidate_created", "candidate_id", text("created_at DESC")),
+        Index("ix_crm_application_feedback_author_id", "author_id", "created_at"),
+        {"comment": "Notes recruiters write on a candidate's application form to explain progress, delays and problems."},
+    )
+
+    candidate_id: Mapped[str] = mapped_column(
+        ForeignKey("crm_candidates.id", ondelete="CASCADE"), nullable=False,
+        comment="The candidate the note is about; the note is deleted with the candidate.")
+    application_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_applications.id", ondelete="SET NULL"), comment="The application (order) the note was written for, when there was one.")
+    author_id: Mapped[str | None] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), comment="The CRM user who wrote the note; cleared if that account is removed.")
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, comment="update, delay, issue, client or candidate.")
+    reason: Mapped[str | None] = mapped_column(
+        String(30), comment="Optional short reason code: waiting_candidate, waiting_client, waiting_documents, waiting_visa, waiting_payment or other.")
+    body: Mapped[str] = mapped_column(Text, nullable=False, comment="The note, 1 to 2000 characters.")
+    stage: Mapped[int | None] = mapped_column(Integer, comment="The stage number the application was on when the note was written.")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, comment="When the note was written.")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+        comment="When the note was last edited (edits are allowed for 15 minutes).")
+
 
 class Notification(Base, PkMixin):
     __tablename__ = "system_notifications"
@@ -1060,6 +1108,8 @@ class AgencySettings(Base):
     home_calling_code: Mapped[str] = mapped_column(String(5), nullable=False)
     default_nationality: Mapped[str | None] = mapped_column(String(80))
     acknowledgement_text: Mapped[str] = mapped_column(Text, nullable=False)
+    auto_assign: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"),
+                                              comment="New candidates go to the next free recruiter (round-robin) when true; otherwise they wait for a manual assignment.")
     updated_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     __table_args__ = (
@@ -1461,6 +1511,8 @@ class MultiPersonIntake(Base, PkMixin, TimestampMixin):
     pages: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     ignored_pages: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     last_error: Mapped[str | None] = mapped_column(Text)
+    claimed_by: Mapped[str | None] = mapped_column(String(80), comment="Worker preparing the pages of this review.")
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="When the preparation lease lapses and another worker may claim the review.")
     __table_args__ = (
         UniqueConstraint("source_type", "source_id", name="uq_document_person_intake_source"),
         CheckConstraint("source_type IN ('manual','email','whatsapp')", name="ck_document_person_intake_source"),
@@ -1614,3 +1666,21 @@ class LeadActivity(Base, PkMixin):
         CheckConstraint("kind IN ('call','note','status','assign','import','convert','resume','edit')", name="ck_crm_lead_activity_kind"),
         {"comment": "History of calls, notes, status changes, assignments and conversion for each lead."},
     )
+
+
+class WorkerHeartbeat(Base):
+    """One row per running reading worker process, refreshed every few seconds (migration 0029)."""
+
+    __tablename__ = "crm_worker_heartbeats"
+    __table_args__ = (
+        Index("ix_crm_worker_heartbeats_kind_seen", "kind", "seen_at"),
+        {"comment": "Which background reading workers are running right now: each refreshes its own row every few seconds, so screens can tell when no reader is alive."},
+    )
+
+    worker_id: Mapped[str] = mapped_column(Text, primary_key=True, comment="Unique id of one worker process (kind, host, process id and a random suffix).")
+    kind: Mapped[str] = mapped_column(Text, nullable=False, comment="document (uploaded files) or email (mailbox attachments).")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="When this worker process started.")
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, comment="When this worker last reported in; a worker not seen for 30 seconds is treated as not running.")
+    threads: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"), comment="How many documents this worker can read at once.")
+    busy: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"), comment="How many documents it was reading at the last report.")
+    version: Mapped[str | None] = mapped_column(Text, comment="The code version the worker runs, so an old worker can be told from a current one.")

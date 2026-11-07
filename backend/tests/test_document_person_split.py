@@ -20,6 +20,10 @@ from app.integrations.ocr.person_split import page_identity, propose_groups
 from app.services import document_extraction, document_person_split as subject
 from app.services.document_storage import put_bytes, read_bytes
 from test_database_naming import _migrate, schema_database
+from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 
 
 def cv(name, phone):

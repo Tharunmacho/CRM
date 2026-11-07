@@ -22,6 +22,9 @@ def _assign_waiting_after_change(db: Session, actor_id: str, actor_name: str) ->
     Best effort and after the account change is committed: a failure here is rolled back
     on its own and must never fail the administrator's request."""
     try:
+        from app.services.agency_settings import auto_assign_enabled
+        if not auto_assign_enabled(db):  # recruiters are assigned by hand unless the agency switched automatic assignment on
+            return
         from app.services.candidate_review import assign_waiting_candidates
         assign_waiting_candidates(db, actor_id, actor_name)
         db.commit()

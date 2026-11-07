@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 from collections.abc import Generator
@@ -24,8 +25,10 @@ engine = create_engine(
     settings.database_url,
     # parallel_reads fans a request out over up to ~10 connections; connections above pool_size are
     # closed on return and cost ~1 s to reopen against a hosted database, so keep enough resident.
-    pool_size=12,
-    max_overflow=6,
+    # The API keeps 12 (+6); the supervisor starts every worker with a smaller pool (CRM_DB_POOL_SIZE / CRM_DB_MAX_OVERFLOW,
+    # see app/runtime.py) so many processes cannot exhaust the shared database's connection limit.
+    pool_size=int(os.environ.get("CRM_DB_POOL_SIZE", "12")),
+    max_overflow=int(os.environ.get("CRM_DB_MAX_OVERFLOW", "6")),
     # Reuse the most recently returned connection first. With the default first-in-first-out queue
     # a quiet desk rotates through every pooled connection, so each one sits idle past
     # IDLE_VERIFY_SECONDS and every checkout pays the SELECT 1 ping below (one extra round trip per
@@ -39,7 +42,19 @@ engine = create_engine(
 )
 
 CONNECT_ATTEMPTS = 3
-IDLE_VERIFY_SECONDS = 10
+# A pooled connection idle longer than this is pinged by the request that picks it up. The keeper below pings idle
+# connections before they get this old, so in practice requests find a connection already proven alive.
+IDLE_VERIFY_SECONDS = 30
+
+
+def _ping(dbapi_connection) -> None:
+    """``SELECT 1`` in ONE round trip: autocommit means no BEGIN before it and no ROLLBACK after it."""
+    previous = dbapi_connection.autocommit
+    dbapi_connection.autocommit = True
+    try:
+        dbapi_connection.execute("SELECT 1")
+    finally:
+        dbapi_connection.autocommit = previous
 
 
 @event.listens_for(engine, "checkin")
@@ -64,9 +79,7 @@ def _verify_if_idle(dbapi_connection, connection_record, connection_proxy):
     if time.monotonic() - connection_record.info.get("last_used", 0.0) < IDLE_VERIFY_SECONDS:
         return
     try:
-        with dbapi_connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-        dbapi_connection.rollback()
+        _ping(dbapi_connection)
     except Exception:
         raise exc.DisconnectionError() from None  # the pool discards it and opens a fresh connection
 
@@ -100,7 +113,7 @@ def connect_with_retry(attempts: int = CONNECT_ATTEMPTS):
             time.sleep(0.3 * attempt)
 
 
-def warm_pool(count: int = 6) -> None:
+def warm_pool(count: int = 4) -> None:
     """Open `count` connections at once and leave them in the pool, so the first page after a restart
     does not pay for several ~1 s connection set-ups against a hosted database."""
     import os
@@ -120,12 +133,15 @@ def warm_pool(count: int = 6) -> None:
     for connection in opened:
         if connection is not None:
             connection.close()
-    keep_pool_warm(count)
+    keep_pool_warm(count)  # never returns
 
 
-KEEPER_SECONDS = 6      # how often the keeper looks at the pool
-KEEPER_PING_AFTER = 4   # a pooled connection idle this long is pinged by the keeper, not by the next request
-RESIDENT_CONNECTIONS = 6
+# Every ping is a round trip (150-1000 ms against a hosted database) and the keeper runs forever, so it is deliberately
+# slow: each resident connection is pinged about once every 20-30 s, which is also inside the TCP keepalive idle time and
+# well under IDLE_VERIFY_SECONDS, so requests almost never ping on their own path.
+KEEPER_SECONDS = 10      # how often the keeper looks at the pool
+KEEPER_PING_AFTER = 20   # a pooled connection idle this long is pinged by the keeper, not by the next request
+RESIDENT_CONNECTIONS = 4
 
 
 def keep_pool_warm(resident: int = RESIDENT_CONNECTIONS) -> None:
@@ -150,9 +166,7 @@ def keep_pool_round(pool_engine, resident: int = RESIDENT_CONNECTIONS, ping_afte
 
     def ping(connection):
         try:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1")
-            connection.rollback()
+            _ping(connection.dbapi_connection)
             return True
         except Exception:
             connection.invalidate()  # the pool discards it; the next checkout opens a fresh one

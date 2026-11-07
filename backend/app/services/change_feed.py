@@ -55,6 +55,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "document_attachments": ("candidates", "documents"),
     "crm_applications": ("applications",),
     "crm_application_stages": ("applications",),
+    "crm_application_feedback": ("feedback",),  # recruiter notes on the application form
     "workflow_tasks": ("tasks",),
     "workflow_task_remarks": ("tasks",),
     "workflow_task_events": ("tasks",),
@@ -116,13 +117,14 @@ IGNORED_TABLES = frozenset({
     "workflow_daily_goal_progress",  # report snapshot refreshed by reads; screens show computed progress, so it announces nothing
     "staff_presence_clients",     # per-page heartbeat ordering checkpoint
     "email_oauth_states",         # short-lived consent handshakes
+    "crm_worker_heartbeats",      # reading workers report in every few seconds; no screen shows the rows
 })
 
 # Columns that workers rewrite continuously (heartbeats, retry clocks, OCR checkpoints). An UPDATE that sets only
 # these is not news; it would wake every desk every few seconds for nothing.
 NOISE_COLUMNS = frozenset({
     "updated_at", "worker_seen_at", "extraction_seen_at", "last_seen_at", "last_sync_at", "sync_state",
-    "attempts", "next_attempt_at", "state", "last_run_at", "last_daily_check_date", "last_received_at",
+    "attempts", "next_attempt_at", "ready_at", "state", "lease_until", "draft", "last_run_at", "last_daily_check_date", "last_received_at",
 })
 
 # A change to any of these also stales the dashboard and report numbers built from them.
@@ -138,7 +140,7 @@ OWNER_TOPICS = frozenset({"todos", "notifications"})
 CLIENT_TOPICS = frozenset({
     "candidates", "applications", "tasks", "clients", "companies", "orders", "designations", "notifications",
     "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings", "form_options", "leads",
-    "reference_agencies",
+    "reference_agencies", "feedback",
 })
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
 ID_ROLES = frozenset({"admin", "manager"})
@@ -303,14 +305,62 @@ def _postgres(conn) -> bool:
     return conn.dialect.name == "postgresql"
 
 
+_CTE_DML = re.compile(r"(?:^|[\s(,])(INSERT\s+INTO|UPDATE(?:\s+ONLY)?|DELETE\s+FROM)\s", re.I)
+
+
+def classify_statements(statement: str) -> list[tuple[str, str]]:
+    """Every announcing write in a statement. A `WITH ... (UPDATE ...), (DELETE ...)` statement (one round trip for
+    a whole multi-table change) carries several; a plain INSERT/UPDATE/DELETE carries at most one."""
+    text = statement.lstrip()
+    if text[:6].upper() in ("INSERT", "UPDATE", "DELETE"):
+        found = classify_statement(statement)
+        return [found] if found else []
+    if text[:5].upper() != "WITH ":
+        return []
+    writes = []
+    for match in _CTE_DML.finditer(statement):
+        found = classify_statement(statement[match.start(1):])
+        if found:
+            writes.append(found)
+    return writes
+
+
+@lru_cache(maxsize=1024)
+def rowcount_decides(statement: str) -> bool:
+    """True when the statement's own row count says whether it changed anything: a plain write, or a ``WITH ... UPDATE``
+    whose CTEs only read. A data-modifying CTE (``x AS (UPDATE ...)``) can change rows while the final SELECT returns none."""
+    for match in _CTE_DML.finditer(statement):
+        if statement[:match.start(1)].rstrip().endswith("("):
+            return False
+    return True
+
+
 def _statement_hook(conn, cursor, statement, parameters, context, executemany):
-    if statement.lstrip()[:6].upper() not in ("INSERT", "UPDATE", "DELETE"):
+    """Classify the write now; it is announced in ``_result_hook`` once the database says rows actually changed."""
+    head = statement.lstrip()[:6].upper()
+    if head not in ("INSERT", "UPDATE", "DELETE") and head[:5] != "WITH ":
         return
     if not _postgres(conn):
         return
-    found = classify_statement(statement)
+    found = classify_statements(statement)
     if found:
-        _pending(conn.info).note_table(*found)
+        context._crm_writes = found
+
+
+def _result_hook(conn, cursor, statement, parameters, context, executemany):
+    """An UPDATE / DELETE / INSERT that matched no row is not news (an idle worker's empty claim used to wake every
+    open desk several times a second and empty the shared response memo each time). Unknown counts (-1) announce."""
+    found = getattr(context, "_crm_writes", None)
+    if not found:
+        return
+    try:
+        if cursor.rowcount == 0 and rowcount_decides(statement):
+            return
+    except Exception:  # a cursor without a row count: announce, as before
+        pass
+    pending = _pending(conn.info)
+    for item in found:
+        pending.note_table(*item)
 
 
 def _commit_hook(conn):
@@ -377,6 +427,7 @@ def install() -> None:
         return
     _installed = True
     event.listen(Engine, "before_cursor_execute", _statement_hook)
+    event.listen(Engine, "after_cursor_execute", _result_hook)
     event.listen(Engine, "commit", _commit_hook)
     event.listen(Engine, "rollback", _rollback_hook)
     event.listen(Pool, "checkout", _checkout_hook)

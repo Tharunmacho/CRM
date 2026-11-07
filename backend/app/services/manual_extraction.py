@@ -4,21 +4,69 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import logging
+import os
+import socket
+import traceback
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import undefer
 
 from app.db.models import Attachment, AuditEntry, Candidate, Designation, DocumentExtractionJob, Role
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import OcrFields
 from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, request_extraction_retry
 from app.services.document_storage import put_bytes, read_bytes
+from app.services.worker_heartbeat import waiting_reason
 
 log = logging.getLogger(__name__)
+
+
+def _plain(value):
+    """JSON for values the standard encoder refuses (numpy numbers from an image library, sets, dates)."""
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            return value.item()
+        except Exception:
+            pass
+    if isinstance(value, (set, frozenset)):
+        return sorted(value, key=str)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _where(exc: BaseException) -> str:
+    """module:function:line of the innermost frame in this application (never any text from the document)."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    ours = [f for f in frames if "app" + os.sep in f.filename or "app/" in f.filename]
+    frame = (ours or frames or [None])[-1]
+    if frame is None:
+        return "unknown"
+    name = frame.filename.replace(os.sep, "/").rsplit("/app/", 1)[-1].removesuffix(".py").replace("/", ".")
+    return f"{name}:{frame.name}:{frame.lineno}"
+
+
+def failure_record(exc: BaseException, *, attempt: int, worker: str | None) -> dict:
+    """A short, safe account of why an attempt failed, kept in the job's state: no message, no document content."""
+    from app.services.worker_heartbeat import code_version
+    return {"type": type(exc).__name__, "where": _where(exc), "at": now().isoformat(), "attempt": attempt,
+            "worker": worker, "version": code_version()}
 READY = {"pending", "processing", "retry"}
+# Lease renewed by each checkpoint; the worker pool also renews it by heartbeat (settings.extraction_lease_seconds).
+LEASE_SECONDS = 180
 TERMINAL = {"completed", "needs_review", "failed", "attached", "dismissed"}
+# A document is read this many times before it is marked failed.
+MAX_ATTEMPTS = 4
+
+
+def error_hint(message):
+    """The first sentence of a stored error, short and safe for a screen (those messages never carry document content)."""
+    first = " ".join((message or "").split()).split(". ")[0].rstrip(".")
+    return (first[:120] + ".") if first else None
 
 
 def now():
@@ -39,12 +87,27 @@ def owned_job(db, identifier, owner_id, *, lock=False):
     return job
 
 
-def job_out(job, *, detail=False):
+def job_out(job, *, detail=False, queue=None, reader=None):
+    """``queue`` is ``extraction_queue.queue_positions(...)`` for the listed jobs: waiting jobs get their place in line.
+
+    ``reader`` is ``worker_heartbeat.reader_status(db)`` (None when unknown): it is added as ``reader`` and decides
+    ``waitingReason`` (``reader_not_running`` / ``queue`` / null) so the screen never waits silently on a dead reader.
+    """
+    place = (queue or {}).get(job.id) or {}
     result = {"id": job.id, "groupId": job.group_id, "kind": job.kind, "filename": job.filename,
               "sizeKb": job.size_kb, "status": job.status, "attempts": job.attempts,
               "lastError": job.last_error, "candidateId": job.candidate_id, "attachmentId": job.attachment_id,
               "createdAt": job.created_at, "updatedAt": job.updated_at,
-              "originalUrl": "/api/ocr/jobs/" + job.id + "/original"}
+              "queuedAt": job.queued_at or job.created_at, "startedAt": job.started_at, "finishedAt": job.finished_at,
+              "queuePosition": place.get("queuePosition"), "aheadOfYou": place.get("aheadOfYou"),
+              "originalUrl": "/api/ocr/jobs/" + job.id + "/original",
+              "waitingReason": waiting_reason(job, reader),
+              # For the upload screen: the attempt budget, a one-line reason, and when a waiting job is really due
+              # (next_attempt_at holds a far-future value for stamped jobs, see migration 0032).
+              "maxAttempts": MAX_ATTEMPTS, "lastErrorHint": error_hint(job.last_error),
+              "readyAt": job.ready_at or (job.next_attempt_at if job.next_attempt_at and job.next_attempt_at.year < 2100 else None)}
+    if reader is not None:
+        result["reader"] = dict(reader)
     if detail:
         result.update(result=job.result or {}, draft=job.draft or {})
     return result
@@ -80,43 +143,112 @@ def _scan_results(output):
             "warnings": output.get("warnings", []),
             "extraction_status": "complete" if extraction else "no_resume" if kind == "resume" and not selected and output["status"] != "needs_review" else "needs_review",
         }
-    return {"scans": scans, "warnings": output.get("warnings", []), "inspection": report}
+    return {"scans": scans, "warnings": output.get("warnings", []), "inspection": report, "coverage": output.get("coverage")}
 
 
-def process_job(identifier, *, sessions, settings):
+def _autocommit(db):
+    """Run this session's statements outside a transaction: one round trip each, nothing to commit or roll back.
+    Only for reads and for noise-only writes (checkpoints, leases), which announce nothing to the live feed."""
+    db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+
+
+def _lost(job, claimed_by):
+    """True when a job no longer belongs to this claim (finished, released, or leased to another worker)."""
+    return job is None or job.status not in READY or (claimed_by is not None and job.claimed_by != claimed_by)
+
+
+def _hand_back(identifier, claimed_by, sessions, reason, delay=300):
+    """Give a job back without counting an attempt (its file is not in this server's storage): another server takes it, or
+    this one looks again later. It is never marked failed for this."""
+    stamp = now()
     with sessions() as db:
-        job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
-        if job is None or job.status not in READY:
-            return
-        job.status = "processing"
-        job.updated_at = now()
-        state = deepcopy(job.state or {})
-        key, digest = job.object_key, job.content_hash
-        owner, group_id = job.owner_id, job.group_id
-        titles = list(db.scalars(select(Designation.title)))
+        db.execute(text(
+            "UPDATE document_extraction_jobs SET status = 'retry', next_attempt_at = :due, last_error = :reason, updated_at = :stamp, "
+            "claimed_by = NULL, lease_until = NULL WHERE id = :id AND status = 'processing' "
+            "AND (CAST(:fence AS TEXT) IS NULL OR claimed_by = :fence)"),
+            {"due": stamp + timedelta(seconds=delay), "reason": reason, "stamp": stamp, "id": identifier, "fence": claimed_by})
         db.commit()
+    log.warning("Document %s is not in this server's storage; handed back without an attempt.", identifier)
+
+
+def process_job(identifier, *, sessions, settings, claimed_by=None):
+    """Read one document. ``claimed_by`` is the worker that leased it (see services/extraction_queue.py); a lease that
+    has moved to another worker makes this run stop writing. Without it (direct calls) the job is taken here."""
+    titles = None
+    with sessions() as db:
+        if claimed_by is None:
+            job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state))
+                            .where(DocumentExtractionJob.id == identifier).with_for_update())
+            if job is None or job.status not in READY:
+                return
+            job.status = "processing"
+            job.updated_at = job.started_at = now()
+            state = deepcopy(job.state or {})
+            key, digest = job.object_key, job.content_hash
+            owner, group_id, form_candidate = job.owner_id, job.group_id, job.candidate_id
+            if not state.get("output"):
+                titles = list(db.scalars(select(Designation.title)))
+            db.commit()
+        else:
+            # The claim already moved the job to processing: one read gets everything this run needs.
+            _autocommit(db)
+            row = db.execute(select(DocumentExtractionJob.status, DocumentExtractionJob.claimed_by, DocumentExtractionJob.state,
+                DocumentExtractionJob.object_key, DocumentExtractionJob.content_hash, DocumentExtractionJob.owner_id,
+                DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id,
+                select(func.array_agg(Designation.title)).scalar_subquery().label("titles"))
+                .where(DocumentExtractionJob.id == identifier)).one_or_none()
+            if row is None or row.status not in READY or row.claimed_by != claimed_by:
+                return
+            state = deepcopy(row.state or {})
+            key, digest, owner, group_id, form_candidate = row.object_key, row.content_hash, row.owner_id, row.group_id, row.candidate_id
+            titles = list(row.titles or [])
+
+    # Which reader ran this attempt (a job that has no "reader" in its state was handled by older code).
+    from app.services.worker_heartbeat import code_version
+    from app.services.instance_guard import instance_name
+    state["reader"] = {"version": code_version(), "worker": claimed_by, "host": socket.gethostname()[:40], "pid": os.getpid(),
+                       "instance": instance_name(settings)}
+
+    # What the row already holds, key by key: a checkpoint sends only the keys that changed (and nothing when none did),
+    # so a 300-page inspection report is not uploaded again with every small step.
+    saved_keys = {name: json.dumps(item, sort_keys=True, default=_plain) for name, item in state.items()}
+    saved_keys.pop("reader", None)  # always written by the first checkpoint of this attempt
 
     def checkpoint(value):
+        # One statement: merge the changed keys into the saved state and renew the lease (a checkpoint proves the worker is alive).
+        changed = {name: json.dumps(item, sort_keys=True, default=_plain) for name, item in value.items()}
+        changed = {name: text_ for name, text_ in changed.items() if saved_keys.get(name) != text_}
+        if not changed:
+            return
+        stamp = now()
         with sessions() as db:
-            current = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
-            if current is None:
-                raise JobFinished()
-            paused = current.status not in READY
-            # A reviewer can reserve the source while a provider acceptance is
-            # in flight. Keep its returned ID/result, but never reopen the job.
-            current.state = {**deepcopy(current.state or {}), **deepcopy(value)}
-            current.updated_at = now()
-            db.commit()
-            if paused:
-                raise JobFinished()
+            _autocommit(db)
+            row = db.execute(text(
+                "UPDATE document_extraction_jobs SET state = state || CAST(:value AS JSONB), updated_at = :stamp, "
+                "lease_until = CASE WHEN claimed_by IS NOT NULL THEN :lease ELSE lease_until END "
+                "WHERE id = :id AND (CAST(:fence AS TEXT) IS NULL OR claimed_by = :fence) RETURNING status"),
+                {"value": "{" + ",".join(json.dumps(name) + ":" + body for name, body in changed.items()) + "}", "stamp": stamp, "lease": stamp + timedelta(seconds=getattr(settings, "extraction_lease_seconds", LEASE_SECONDS)), "id": identifier, "fence": claimed_by}).first()
+        # A reviewer can reserve the source while a provider acceptance is in flight. The returned ID/result
+        # is kept, but the job is never reopened. A job leased to someone else is not ours to write.
+        if row is None or row.status not in READY:
+            raise JobFinished()
+        saved_keys.update(changed)
 
+    from app.services.instance_guard import NOT_HERE, stored_here
+    if not stored_here(settings, key):
+        _hand_back(identifier, claimed_by, sessions, NOT_HERE)
+        return
     try:
-        data = read_bytes(settings, key)
+        try:
+            data = read_bytes(settings, key)
+        except FileNotFoundError:
+            _hand_back(identifier, claimed_by, sessions, NOT_HERE)
+            return
         if hashlib.sha256(data).hexdigest() != digest:
             raise ExtractionFailure("The saved copy of this document looks damaged. Upload the original again, then try again.")
         output = state.get("output")
         if output is None:
-            output = extract_attachment(data, state=state, save=checkpoint, settings=settings, designations=titles)
+            output = extract_attachment(data, state=state, save=checkpoint, settings=settings, designations=titles or [])
             state["output"] = deepcopy(output)
             checkpoint(state)
         from app.services.document_extraction import checked_person_output
@@ -127,7 +259,7 @@ def process_job(identifier, *, sessions, settings):
         # short transaction and never needs to resubmit paid extraction work.
         documents = state.setdefault("documents", {})
         if output.get("extractions"):
-            inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds)
+            inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True)
             for kind, extraction in output["extractions"].items():
                 if kind in documents:
                     continue
@@ -142,17 +274,17 @@ def process_job(identifier, *, sessions, settings):
         with sessions() as db:
             # A file read for a candidate's application form fills that candidate's form in this same transaction.
             # Candidate before job, the order every other writer uses.
-            form_candidate = db.scalar(select(DocumentExtractionJob.candidate_id).where(DocumentExtractionJob.id == identifier))
             if form_candidate:
                 db.scalar(select(Candidate.id).where(Candidate.id == form_candidate).with_for_update())
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
-            if job is None or job.status not in READY:
+            if _lost(job, claimed_by):
                 return
-            job.state = deepcopy(state)
-            job.result = _scan_results(output)
+            job.state = json.loads(json.dumps(state, default=_plain))
+            job.result = json.loads(json.dumps(_scan_results(output), default=_plain))
             job.status = "completed" if output["status"] == "complete" else "needs_review"
             job.last_error = None if job.status == "completed" else "Review the saved reading report or enter details manually."
-            job.updated_at = now()
+            job.updated_at = job.finished_at = now()
+            job.claimed_by = job.lease_until = None
             if form_candidate:
                 try:
                     from app.services.application_form import apply_job_output
@@ -166,26 +298,36 @@ def process_job(identifier, *, sessions, settings):
     except ExtractionPending:
         with sessions() as db:
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
-            if job is not None and job.status in READY:
+            if not _lost(job, claimed_by):
                 job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=5)
                 job.last_error = "The document is still being read. Its progress is saved."
                 job.updated_at = now()
+                job.claimed_by = job.lease_until = None
                 db.commit()
     except Exception as exc:
         # The traceback stays in the server log (never in the job row or the response) so a file that keeps failing can be diagnosed.
-        log.warning("Manual extraction %s failed (%s); original and checkpoints retained.", identifier, type(exc).__name__, exc_info=True)
+        log.warning("Manual extraction %s failed (%s at %s); original and checkpoints retained.", identifier, type(exc).__name__, _where(exc), exc_info=True)
         with sessions() as db:
-            job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
-            if job is not None and job.status in READY:
+            job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state))
+                            .where(DocumentExtractionJob.id == identifier).with_for_update())
+            if not _lost(job, claimed_by):
                 job.attempts += 1
                 saved = deepcopy(job.state or {})
                 if job.attempts < 4:
                     request_extraction_retry(saved, automatic=True)
+                # Why, for whoever has to look: the exception type and where it was raised, never the document.
+                saved["failure"] = failure_record(exc, attempt=job.attempts, worker=claimed_by)
+                saved["reader"] = state.get("reader")
                 job.state = saved
                 job.status = "failed" if job.attempts >= 4 else "retry"
-                job.last_error = str(exc)[:500] if isinstance(exc, ExtractionFailure) else "We could not finish reading this document. The original file is safe. Try again, and contact your administrator if it keeps happening."
+                job.last_error = str(exc)[:500] if isinstance(exc, ExtractionFailure) else (
+                    f"Reading failed ({type(exc).__name__}). The technical details are in the server log. "
+                    "The original file is safe. Try again, and contact your administrator if it keeps happening.")
                 job.next_attempt_at = now() + timedelta(seconds=30 * 2 ** (job.attempts - 1))
                 job.updated_at = now()
+                job.claimed_by = job.lease_until = None
+                if job.status == "failed":
+                    job.finished_at = job.updated_at
                 db.commit()
 
 

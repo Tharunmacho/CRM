@@ -42,6 +42,8 @@ class SettingsIn(Loose):
     homeCallingCode: str | None = None
     defaultNationality: str | None = None
     acknowledgementText: str | None = None
+    # Optional so an older desk that does not send it leaves the choice as it is.
+    autoAssign: bool | None = None
 
 
 class CurrencyIn(Loose):
@@ -142,10 +144,12 @@ def save_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = 
     row = db.scalar(select(AgencySettings).where(AgencySettings.id == 1).with_for_update())
     new = row is None
     if new:
-        row = AgencySettings(id=1)
+        row = AgencySettings(id=1, auto_assign=False)
     values = {"name": name, "short_name": short, "default_order_currency": chosen["defaultOrderCurrency"],
               "default_advance_currency": chosen["defaultAdvanceCurrency"], "home_calling_code": calling,
               "default_nationality": nationality, "acknowledgement_text": text}
+    if body.autoAssign is not None:
+        values["auto_assign"] = body.autoAssign
     changes = {}
     for key, value in values.items():
         previous = getattr(row, key)

@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 
 from app.core.config import get_settings
 from app.db.schema_readiness import UPDATE_REQUIRED, is_behind, schema_status, upgrade_to_head
@@ -193,26 +194,63 @@ def main(*, host="0.0.0.0", port=None, reload_api=False):
                    "--port", listen_port]
     if reload_api:
         api_command.extend(["--reload", "--reload-dir", "app"])
+    settings = get_settings()
+    # Reading workers run side by side: EXTRACTION_WORKERS processes per queue, each with its own thread pool, all
+    # claiming jobs one by one (no global lock). A crashed one is restarted on its own; the others keep reading.
+    readers = max(1, int(getattr(settings, "extraction_workers", 1)))
     commands = [
         api_command,
         [sys.executable, "-m", "app.workflow_worker"],
         [sys.executable, "-m", "app.presence_worker"],
-        [sys.executable, "-m", "app.document_extraction_worker"],
+        *[[sys.executable, "-m", "app.document_extraction_worker"] for _ in range(readers)],
     ]
-    if get_settings().email_ingestion_enabled:
+    restartable = {"app.document_extraction_worker", "app.email_extraction_worker"}
+    if settings.email_ingestion_enabled:
         commands.append([sys.executable, "-m", "app.email_worker"])
-        commands.append([sys.executable, "-m", "app.email_extraction_worker"])
-    if get_settings().whatsapp_enabled:
+        commands.extend([sys.executable, "-m", "app.email_extraction_worker"] for _ in range(readers))
+    if settings.whatsapp_enabled:
         commands.append([sys.executable, "-m", "app.whatsapp_worker"])
+    # Every process has its own connection pool against the shared hosted database. Workers need a handful of
+    # connections (a reading thread holds one while it works), not the API's 12 + 6, so size them to their job: the
+    # whole stack then stays well under the server's connection limit even with every worker busy.
+    threads = max(1, int(getattr(settings, "extraction_concurrency", 8)))
+    pool_env = {
+        "app.document_extraction_worker": {"CRM_DB_POOL_SIZE": str(threads + 2), "CRM_DB_MAX_OVERFLOW": "4"},
+        "app.email_extraction_worker": {"CRM_DB_POOL_SIZE": str(threads + 2), "CRM_DB_MAX_OVERFLOW": "4"},
+    }
+    small = {"CRM_DB_POOL_SIZE": "3", "CRM_DB_MAX_OVERFLOW": "2"}
+
+    def options_for(command):
+        if command is api_command:
+            return options
+        return {**options, "env": {**options["env"], **pool_env.get(command[2], small)}}
+    # A reading worker finishes its running documents on SIGTERM (up to this long) before it hands its claims back.
+    stop_wait = 15 + int(getattr(settings, "extraction_shutdown_seconds", 0) or 0)
+    restarts = {}  # child index -> (recent restart times, earliest next restart)
     job = _new_process_job()
     try:
         for command in commands:
             service = "API" if command is api_command else command[2]
             target = f" at http://{host}:{listen_port}" if command is api_command else ""
             print(f"[crm] Starting {service}{target}...", flush=True)
-            children.append(_start_child(command, options, job))
+            children.append(_start_child(command, options_for(command), job))
         while not stop.wait(0.5):
             exited = next((child for child in children if child.poll() is not None), None)
+            if exited and commands[children.index(exited)][2] in restartable:
+                index = children.index(exited)
+                recent, earliest = restarts.get(index, ([], 0.0))
+                moment = time.monotonic()
+                recent = [when for when in recent if moment - when < 300]
+                if len(recent) >= 5:
+                    print(f"[crm] {commands[index][2]} keeps stopping (code {exited.returncode}); stopping remaining services.",
+                          file=sys.stderr, flush=True)
+                    raise SystemExit(exited.returncode or 1)
+                if moment >= earliest:
+                    print(f"[crm] {commands[index][2]} exited (code {exited.returncode}); restarting it, the others keep running.",
+                          file=sys.stderr, flush=True)
+                    children[index] = _start_child(commands[index], options_for(commands[index]), job)
+                    restarts[index] = ([*recent, moment], moment + min(30, 2 ** len(recent)))
+                continue
             if exited:
                 command = commands[children.index(exited)]
                 service = "API" if command is api_command else command[2]
@@ -229,7 +267,7 @@ def main(*, host="0.0.0.0", port=None, reload_api=False):
                 child.terminate()
         for child in children:
             try:
-                child.wait(timeout=15)
+                child.wait(timeout=stop_wait)
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.wait()

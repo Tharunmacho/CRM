@@ -128,9 +128,11 @@ def test_aadhaar_mention_or_twelve_digit_number_alone_is_insufficient(text):
     assert classify_page(text).document_type == "unknown"
 
 
-def test_aadhaar_mixed_with_a_resume_requires_review():
-    assert classify_page(CV + AADHAAR).document_type == "unknown"
-    assert classify_pages([CV, CV + AADHAAR])[1].document_type == "unknown"
+def test_aadhaar_mixed_with_a_resume_goes_to_both_kinds():
+    # Nothing is held back for a person to sort out: the sheet is read as a resume and as an Aadhaar card.
+    page = classify_page(CV + AADHAAR)
+    assert page.document_type == "resume" and page.also == ("aadhaar",)
+    assert classify_pages([CV, CV + AADHAAR])[1].also == ("aadhaar",)
 
 
 def test_aadhaar_mixed_with_a_passport_belongs_to_both():

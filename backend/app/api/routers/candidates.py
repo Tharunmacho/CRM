@@ -9,11 +9,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.schemas import CandidateWithFormOut as CandidateDetailOut, Wire
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, literal, or_, select, union, union_all, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from app.services.candidate_search import Pool, Search, search_candidates, expor
 from app.services.candidate_matching import match_candidates
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
+from app.db.models import _uuid
 from app.db.models import (
     Application,
     ApplicationStatus,
@@ -193,7 +194,7 @@ def candidate_detail(candidate_id: str, response: Response,
     already returned by bootstrap, with no application drafts, stages or tasks.
     test_desk_snapshot_scope protects that separate ownership boundary.
     """
-    from app.api.routers.data import _candidate_out
+    from app.api.routers.data import DOCUMENT_SLOTS, FORM_DOCUMENT_SLOTS, _candidate_out
     from app.db.models import Attachment
     from app.services.desk_snapshot import _fields, _rows
 
@@ -211,7 +212,7 @@ def candidate_detail(candidate_id: str, response: Response,
     for attachment in result["files"] or []:
         files.setdefault((candidate_id, attachment["slot"]), []).append(attachment)
     response.headers["Cache-Control"] = "private, no-store"
-    return _candidate_out(result["candidate"][0], files, CandidateDetailOut)
+    return _candidate_out(result["candidate"][0], files, CandidateDetailOut, DOCUMENT_SLOTS + FORM_DOCUMENT_SLOTS)
 
 
 class OcrDataIn(BaseModel):
@@ -468,11 +469,18 @@ def lock_assignment_cursor(db: Session) -> AssignmentPointer:
     return db.scalar(select(AssignmentPointer).where(AssignmentPointer.id == 1).with_for_update())
 
 
-def next_owner(db: Session, *, pointer: AssignmentPointer | None = None) -> User | None:
+def next_owner(db: Session, *, pointer: AssignmentPointer | None = None, force: bool = False) -> User | None:
     """
-    Strict round-robin across eligible staff. The pointer row is taken FOR UPDATE so two
+    Strict round-robin across eligible staff, but only when the agency switched automatic assignment on
+    (Agency settings, `autoAssign`, off by default). Otherwise nobody is picked and the candidate waits for a
+    manual assignment. `force` is for an administrator's explicit "Assign waiting candidates" action.
+     The pointer row is taken FOR UPDATE so two
     candidates arriving in the same moment cannot be handed to the same recruiter.
     """
+    if not force:
+        from app.services.agency_settings import auto_assign_enabled
+        if not auto_assign_enabled(db):
+            return None
     if pointer is None:
         pointer = lock_assignment_cursor(db)
 
@@ -532,6 +540,13 @@ def create_candidate(
              "candidate": duplicate_match(db, existing, fields, user)},
         )
 
+    # A candidate row is written only for a real identity: a name that is not the placeholder, and a phone, email or passport
+    # number. A document that could not be read stays in the saved uploads; the person types the details and saves again.
+    from app.services.candidate_review import candidate_refusal
+    refusal = candidate_refusal({"name": body.name, "phone": body.phone, "email": body.email, "passport_no": body.passport_no})
+    if refusal:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, refusal)
+
     # Who gets the candidate. A staff member who adds a candidate works it: it is assigned to them and the
     # round-robin is left alone. Admin and manager may name a recruiter, or leave it to the next free one.
     requested = getattr(body, "assign_to", None)
@@ -547,12 +562,12 @@ def create_candidate(
         owner = client_routing.route_new_candidate(db, body.designations) or next_owner(db, pointer=pointer)
 
     ocr_data = body.ocr_data.stored() if body.ocr_data else {}
-    # Saved from a document that did not give a name or number: kept, and flagged for a person to complete.
-    incomplete = not (body.name and body.phone)
+    # Saved from a document that gave a name and an email or passport but no phone: kept, and flagged for a person to complete.
+    incomplete = not body.phone
 
     candidate = Candidate(
         ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}",
-        name=body.name or UNNAMED,
+        name=body.name.strip(),
         phone=body.phone,
         dob=body.dob,
         whatsapp=body.whatsapp,
@@ -864,99 +879,136 @@ def correct_candidate(candidate_id: str, body: CandidateCorrection, db: Session 
 # pointer holds a user, not a candidate, so it is untouched.
 
 def _files_still_used(db: Session, keys: set[str]) -> set[str]:
-    """Stored objects that another record (mail, WhatsApp, drafts, other documents) still points at."""
-    used: set[str] = set()
-    for column in (Attachment.object_key, MailAttachment.object_key, WhatsAppMessage.object_key,
-                   WhatsAppSendAttempt.object_key, DocumentExtractionJob.object_key, MailDraftAttachment.object_key):
-        used.update(db.scalars(select(column).where(column.in_(keys))))
-    return used
+    """Stored objects that another record (mail, WhatsApp, drafts, other documents) still points at. One statement."""
+    columns = (Attachment.object_key, MailAttachment.object_key, WhatsAppMessage.object_key,
+               WhatsAppSendAttempt.object_key, DocumentExtractionJob.object_key, MailDraftAttachment.object_key)
+    probe = union_all(*(select(column.label("k")).where(column.in_(keys)) for column in columns)).subquery()
+    return set(db.scalars(select(probe.c.k).distinct()))
 
 
-def _remove_stored_files(db: Session, audit_id: str, keys: set[str]) -> None:
-    """Best effort, after the commit. A storage problem must never undo or fail the delete."""
+def _remove_stored_files(bind, audit_id: str, keys: set[str]) -> None:
+    """
+    Best effort, after the commit and after the response (a background task with its own short session).
+    A storage problem must never undo or fail the delete; what could not be removed is written to the audit entry.
+    """
     leftover: list[str] = []
-    try:
-        shared = _files_still_used(db, keys)
-    except Exception:  # noqa: BLE001
-        logger.exception("Could not check which stored files of a deleted candidate are still in use")
-        db.rollback()
-        shared, leftover, keys = set(), sorted(keys), set()
-    settings = get_settings()
-    for key in sorted(keys - shared):
+    with Session(bind, expire_on_commit=False) as db:
         try:
-            document_storage.delete_bytes(settings, key)
+            shared = _files_still_used(db, keys)
         except Exception:  # noqa: BLE001
-            logger.exception("Could not remove stored file %s of a deleted candidate", key)
-            leftover.append(key)
-    if leftover:
-        try:
-            entry = db.get(AuditEntry, audit_id)
-            entry.meta = {**(entry.meta or {}), "storageLeftover": leftover}
-            db.commit()
-        except Exception:  # noqa: BLE001
-            logger.exception("Could not record the leftover stored files of a deleted candidate")
+            logger.exception("Could not check which stored files of a deleted candidate are still in use")
             db.rollback()
+            shared, leftover, keys = set(), sorted(keys), set()
+        settings = get_settings()
+        for key in sorted(keys - shared):
+            try:
+                document_storage.delete_bytes(settings, key)
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not remove stored file %s of a deleted candidate", key)
+                leftover.append(key)
+        if leftover:
+            try:
+                entry = db.get(AuditEntry, audit_id)
+                entry.meta = {**(entry.meta or {}), "storageLeftover": leftover}
+                db.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not record the leftover stored files of a deleted candidate")
+                db.rollback()
+
+
+def _delete_candidate_rows(db: Session, candidate_id: str, *, audit_id: str, actor_id: str, target: str, ref: str,
+                           applications: int):
+    """
+    Everything that must change for one delete, as ONE statement (data-modifying CTEs; the database checks the
+    foreign keys when the statement ends, so the order of the parts does not matter). Hosted PostgreSQL costs a
+    round trip per statement, so this replaces what used to be about twenty. Returns (documents, tasks, stored keys).
+    """
+    app_ids = select(Application.id).where(Application.candidate_id == candidate_id)
+    docs = select(Attachment.id, Attachment.object_key).where(or_(
+        (Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id),
+        (Attachment.entity_type == "application") & Attachment.entity_id.in_(app_ids),
+    )).cte("doc_rows")
+    tasks = select(Task.id).where(Task.candidate_id == candidate_id).cte("task_rows")
+    jobs = select(DocumentExtractionJob.object_key).where(DocumentExtractionJob.candidate_id == candidate_id).cte("job_rows")
+
+    parts = []
+    # Records that keep existing but must stop pointing at this candidate.
+    for model in (MailMessage, WhatsAppMessage, WhatsAppConversation, EmailIngestionJob):
+        parts.append(update(model).where(model.candidate_id == candidate_id).values(candidate_id=None)
+                     .returning(model.id).cte(f"clear_{model.__tablename__}"))
+    parts.append(update(DocumentPersonGroup).where(DocumentPersonGroup.candidate_id == candidate_id)
+                 .values(candidate_id=None, fields={}).returning(DocumentPersonGroup.id).cte("clear_groups"))
+    link = f"/candidates/{candidate_id}"
+    parts.append(update(TodoItem).where(TodoItem.link_to == link).values(link_to=None, link_label=None)
+                 .returning(TodoItem.id).cte("clear_todos"))
+    parts.append(delete(Notification).where(or_(
+        Notification.link_to == link,
+        Notification.link_to.in_(select(func.concat("/tasks?task=", tasks.c.id))),
+    )).returning(Notification.id).cte("drop_notifications"))
+    # Documents: whatever points at them (other people's extraction jobs), then the jobs of this candidate, then the documents.
+    parts.append(update(DocumentExtractionJob)
+                 .where(DocumentExtractionJob.attachment_id.in_(select(docs.c.id)),
+                        DocumentExtractionJob.candidate_id.is_distinct_from(candidate_id))
+                 .values(attachment_id=None).returning(DocumentExtractionJob.id).cte("clear_job_documents"))
+    parts.append(delete(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == candidate_id)
+                 .returning(DocumentExtractionJob.id).cte("drop_jobs"))
+    parts.append(delete(Attachment).where(Attachment.id.in_(select(docs.c.id)))
+                 .returning(Attachment.id).cte("drop_documents"))
+    # Applications, stages, tasks, remarks and SLA events follow by ON DELETE CASCADE.
+    parts.append(delete(Candidate).where(Candidate.id == candidate_id).returning(Candidate.id).cte("drop_candidate"))
+
+    documents = select(func.count()).select_from(docs).scalar_subquery()
+    task_count = select(func.count()).select_from(tasks).scalar_subquery()
+    audit = insert(AuditEntry).from_select(
+        ["id", "actor_id", "action", "target", "entity_type", "entity_id", "meta"],
+        select(literal(audit_id), literal(actor_id), literal("Deleted candidate"), literal(target), literal("candidate"),
+               literal(candidate_id),
+               func.jsonb_build_object("ref", ref, "documents", documents, "applications", applications, "tasks", task_count)),
+    ).returning(AuditEntry.id).cte("audit_row")
+    parts.append(audit)
+
+    keys = union(select(docs.c.object_key.label("k")), select(jobs.c.object_key.label("k"))).subquery()
+    stored = select(func.array_agg(keys.c.k)).where(keys.c.k.is_not(None)).scalar_subquery()
+    statement = select(documents, task_count, stored).add_cte(*parts)
+    count_documents, count_tasks, stored_keys = db.execute(statement).one()
+    return count_documents, count_tasks, set(stored_keys or ())
 
 
 @router.delete("/{candidate_id}")
-def delete_candidate(candidate_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session = Depends(get_db),
+                     user: User = Depends(require_role(Role.admin))) -> dict:
+    # Three statements and one commit (the hosted database costs a round trip each):
+    #   1. the assignment cursor lock, 2. the candidate (locked) with its placements, 3. the whole delete.
     # Same lock order as a profile correction: assignment cursor, then the candidate.
-    lock_assignment_cursor(db)
-    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
-    if candidate is None:
+    # (The cursor row is nearly always there: lock it with the one SELECT; create it only on a brand new database.)
+    if db.scalar(select(AssignmentPointer.id).where(AssignmentPointer.id == 1).with_for_update()) is None:
+        lock_assignment_cursor(db)
+    rows = db.execute(
+        select(Candidate.name, Candidate.ref, Application.id, Application.status, Order.ref)
+        .select_from(Candidate)
+        .outerjoin(Application, Application.candidate_id == Candidate.id)
+        .outerjoin(Order, Order.id == Application.order_id)
+        .where(Candidate.id == candidate_id)
+        .with_for_update(of=Candidate)
+    ).all()
+    if not rows:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
 
-    placements = db.execute(
-        select(Application.id, Application.status, Order.ref)
-        .join(Order, Order.id == Application.order_id)
-        .where(Application.candidate_id == candidate_id)
-    ).all()
-    if any(state is ApplicationStatus.active for _, state, _ in placements):
+    placements = [(state, order_ref) for _, _, application_id, state, order_ref in rows if application_id is not None]
+    if any(state is ApplicationStatus.active for state, _ in placements):
         raise HTTPException(status.HTTP_409_CONFLICT, "This candidate is still on an order. Remove them from the order first.")
-    deployed = next((order_ref for _, state, order_ref in placements if state is ApplicationStatus.deployed), None)
+    deployed = next((order_ref for state, order_ref in placements if state is ApplicationStatus.deployed), None)
     if deployed:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"This candidate was deployed through {deployed}, and a deployed placement is kept on record. They cannot be deleted.")
 
-    name, ref = candidate.name, candidate.ref
-    application_ids = [row[0] for row in placements]
-    attached = db.execute(select(Attachment.id, Attachment.object_key).where(
-        or_(
-            (Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id),
-            (Attachment.entity_type == "application") & Attachment.entity_id.in_(application_ids or [""]),
-        ))).all()
-    attachment_ids = [row[0] for row in attached]
-    jobs = db.execute(select(DocumentExtractionJob.object_key).where(DocumentExtractionJob.candidate_id == candidate_id)).all()
-    task_ids = list(db.scalars(select(Task.id).where(Task.candidate_id == candidate_id)))
-    stored_keys = {key for _, key in attached if key} | {key for (key,) in jobs if key}
-
-    # Records that keep existing but must stop pointing at this candidate.
-    for model in (MailMessage, WhatsAppMessage, WhatsAppConversation, EmailIngestionJob):
-        db.execute(update(model).where(model.candidate_id == candidate_id).values(candidate_id=None))
-    db.execute(update(DocumentPersonGroup).where(DocumentPersonGroup.candidate_id == candidate_id)
-               .values(candidate_id=None, fields={}))
-    link = f"/candidates/{candidate_id}"
-    db.execute(update(TodoItem).where(TodoItem.link_to == link).values(link_to=None, link_label=None))
-    db.execute(delete(Notification).where(Notification.link_to.in_([link, *[f"/tasks?task={task_id}" for task_id in task_ids]])))
-
-    # Documents: first anything that points at them, then the documents themselves.
-    if attachment_ids:
-        db.execute(update(DocumentExtractionJob).where(DocumentExtractionJob.attachment_id.in_(attachment_ids))
-                   .values(attachment_id=None))
-    db.execute(delete(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == candidate_id))
-    if attachment_ids:
-        db.execute(delete(Attachment).where(Attachment.id.in_(attachment_ids)))
-
-    # Applications, stages, tasks, remarks and SLA events follow by ON DELETE CASCADE.
-    db.execute(delete(Candidate).where(Candidate.id == candidate_id))
-    audit = AuditEntry(actor_id=user.id, action="Deleted candidate", target=f"{name} ({ref})", entity_type="candidate",
-                       entity_id=candidate_id, meta={"ref": ref, "documents": len(attachment_ids),
-                                                     "applications": len(application_ids), "tasks": len(task_ids)})
-    db.add(audit)
-    db.flush()
-    audit_id = audit.id
+    name, ref = rows[0][0], rows[0][1]
+    audit_id = _uuid()
+    documents, tasks, stored_keys = _delete_candidate_rows(
+        db, candidate_id, audit_id=audit_id, actor_id=user.id, target=f"{name} ({ref})", ref=ref, applications=len(placements))
     db.commit()
 
     if stored_keys:
-        _remove_stored_files(db, audit_id, stored_keys)
-    return {"deleted": {"candidates": 1, "documents": len(attachment_ids), "applications": len(application_ids)}}
+        # After the commit and after the response: object storage can be slow, and its failure must not matter here.
+        background.add_task(_remove_stored_files, db.get_bind(), audit_id, stored_keys)
+    return {"deleted": {"candidates": 1, "documents": documents, "applications": len(placements)}}

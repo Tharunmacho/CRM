@@ -25,6 +25,7 @@ from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
 from app.services.intake_attention import attention_list, unread_counts
 from app.services import mail_providers
+from app.services.worker_heartbeat import reader_status
 from app.api.routers.mail_actions import router as actions_router
 from app.api.routers.zoho_mailbox import router as zoho_router
 from app.api.routers.mail_compose import router as compose_router
@@ -246,12 +247,15 @@ def _health(db: Session):
     for name, count in grouped:
         if name in counts:
             counts[name] = count
+    readers = {key: value for key, value in (("reader", reader_status(db)), ("mailReader", reader_status(db, kind="email"))) if value is not None}
     return {
         "accounts": [{
             "id": account.id, "address": account.address, "lastSyncAt": account.last_sync_at,
             "lastError": account.last_error, "autoIngest": account.auto_ingest,
         } for account in accounts],
         "counts": counts,
+        # Are the reading workers alive? (additive; absent when the heartbeat table cannot be read)
+        **readers,
         "worker": {
             "enabled": get_settings().email_ingestion_enabled,
             "lastHeartbeat": max((a.worker_seen_at for a in accounts if a.worker_seen_at), default=None),

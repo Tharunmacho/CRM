@@ -6,6 +6,7 @@ Run inside the container:
     docker exec -it <container> python -m app.cli create-user EMAIL --name NAME --role ROLE
     docker exec -it <container> python -m app.cli set-password EMAIL
     docker exec -it <container> python -m app.cli list-users
+    docker exec -it <container> python -m app.cli placeholder-candidates [--delete]
 
 Accounts are created explicitly. Password prompts require an interactive terminal,
 do not echo input, and ask for confirmation.
@@ -162,6 +163,24 @@ def backfill_lead_matches(dry_run: bool) -> int:
     return 0
 
 
+def placeholder_candidates(delete: bool) -> int:
+    """List (default, a dry run) or remove candidates that were saved from a file whose name was never read.
+
+    A row qualifies only when its name is blank or exactly "Name needs review", it has no phone and no email, and
+    nobody has worked on it (no application, task activity or stored document besides the source file). Only
+    references and ids are printed. Source emails, messages and saved uploads go back to needs-review."""
+    from app.services.placeholder_candidates import delete_placeholder_candidates, placeholder_candidates as find
+    with SessionLocal() as db:
+        rows = find(db)
+        for row in rows:
+            print(f"{row.ref}  {row.id}")
+        if delete and rows:
+            delete_placeholder_candidates(db, rows)
+            db.commit()
+        print(f"{len(rows)} placeholder candidate(s) {'deleted' if delete else 'found (dry run, nothing deleted; use --delete to remove them)'}.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -183,7 +202,12 @@ def main() -> int:
     leads = sub.add_parser("backfill-lead-matches", help="Flag existing leads that are already candidates and create the follow-up to-dos of existing leads")
     leads.add_argument("--dry-run", action="store_true", help="Report the counts; save nothing")
 
+    placeholders = sub.add_parser("placeholder-candidates", help="List (dry run) or delete candidates saved from a file whose name was never read")
+    placeholders.add_argument("--delete", action="store_true", help="Delete the listed candidates (default: only list them)")
+
     args = parser.parse_args()
+    if args.command == "placeholder-candidates":
+        return placeholder_candidates(args.delete)
     if args.command == "backfill-lead-matches":
         return backfill_lead_matches(args.dry_run)
     if args.command == "create-user":

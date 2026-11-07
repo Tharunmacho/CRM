@@ -16,6 +16,9 @@ from app.db.models import AuditEntry, Candidate, CandidateStatus, Notification, 
 
 OCR_FLAG_ACTION = "Flagged for document review"
 UNNAMED = "Name needs review"
+NO_NAME_REASON = "We could not read a name from this file. Open it and enter the details, or upload a clearer copy."
+NO_CONTACT_REASON = ("We could not read a phone number or email from this file. "
+                     "Open it and enter the details, or upload a clearer copy.")
 WAITING_TITLE = "Candidate received — needs assignment"
 
 
@@ -28,6 +31,27 @@ def has_extraction_warnings(results) -> bool:
             if extraction.get("warnings"):
                 return True
     return False
+
+
+def has_real_name(name) -> bool:
+    """A name a person can be called by: not blank and never the old placeholder."""
+    text = (name or "").strip()
+    return bool(text) and text.casefold() != UNNAMED.casefold()
+
+
+def candidate_refusal(values) -> str | None:
+    """Why a candidate row may NOT be written yet, in plain English, or None when it may.
+
+    A candidate exists only once a source has been read and gave a real identity: a name,
+    plus a way to reach the person (phone or email) or, for a passport / Aadhaar-only
+    document, the passport number. A missing phone alone (name and email, or name and
+    passport) is fine: the candidate is created and flagged for review.
+    """
+    if not has_real_name(values.get("name")):
+        return NO_NAME_REASON
+    if not any(str(values.get(key) or "").strip() for key in ("phone", "email", "passport_no")):
+        return NO_CONTACT_REASON
+    return None
 
 
 def profile_gaps(candidate) -> set[str]:
@@ -121,7 +145,7 @@ def assign_waiting_candidates(db, actor_id: str | None, actor_name: str) -> dict
     changes, assigned, cleared, per_owner = [], 0, 0, {}
     for candidate in waiting:
         # Client staff routing first (designation match); otherwise the ordinary round-robin.
-        owner = (client_routing.route_new_candidate(db, candidate.designations) if routed else None) or next_owner(db, pointer=pointer)
+        owner = (client_routing.route_new_candidate(db, candidate.designations) if routed else None) or next_owner(db, pointer=pointer, force=True)
         if owner is None:
             break
         candidate.owner_id = owner.id

@@ -268,6 +268,7 @@ def test_the_category_table_feeds_the_settings_topic():
 
 def test_changing_a_category_announces_the_settings_topic(desk):
     change_feed.install()
+    title(desk, "announce-title", "Aviation")  # a job title already uses the name, so the rename really rewrites it
     url = desk.engine.url.set(drivername="postgresql").render_as_string(hide_password=False)
     with psycopg.connect(url, autocommit=True) as listener:
         listener.execute(f"LISTEN {change_feed.CHANNEL}")

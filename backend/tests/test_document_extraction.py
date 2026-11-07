@@ -179,7 +179,8 @@ def test_all_document_types_select_exact_pages_and_keep_aadhaar_identity_separat
     assert output["status"] == "complete"
     assert output["inspection"]["aadhaar_pages"] == [4, 5]
     assert set(output["extractions"]) == {"resume", "passport", "aadhaar"}
-    assert [entry[0] for entry in environment.submissions] == ["resume", "passport", "aadhaar"]
+    # The kinds are submitted side by side, so their order is not defined.
+    assert sorted(entry[0] for entry in environment.submissions) == ["aadhaar", "passport", "resume"]
     expected = {"resume": [2], "passport": [3], "aadhaar": [4, 5]}
     for kind, extraction in output["extractions"].items():
         assert extraction["selected_pages"] == expected[kind]
@@ -226,15 +227,19 @@ def test_the_stored_document_is_exactly_the_provider_result_for_resume_passport_
         assert environment.saved[-1]["provider_jobs"][kind]["result"] == payload
 
 
-def test_a_page_beyond_the_limit_is_reported_and_blocks_extraction_instead_of_vanishing(environment):
+def test_a_page_beyond_the_limit_is_reported_and_the_pages_that_were_read_are_still_extracted(environment):
     environment.settings.ocr_max_pages = 1
 
     output = environment.extract(pdf(CV, PASSPORT))
 
-    assert output["status"] == "needs_review" and output["extractions"] == {}
+    assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume"}
     assert output["inspection"]["unread_pages"] == [2]
     assert "too many to read" in output["inspection"]["pages"][1]["reason"]
-    assert environment.submissions == []
+    assert [entry[0] for entry in environment.submissions] == ["resume"]
+    assert output["coverage"]["pages"]["not_sent"][0]["page"] == 2 and output["coverage"]["pages"]["not_sent"][0]["blocking"]
+    # An explicit opt-out still holds the whole file back.
+    held = environment.extract(pdf(CV, PASSPORT), partial=False, state={})
+    assert held["status"] == "needs_review" and held["extractions"] == {}
 
 
 def test_pending_job_is_saved_before_poll_and_resumed_after_worker_restart(environment):
@@ -445,14 +450,14 @@ def test_provider_success_with_incomplete_page_coverage_requires_review(environm
 
 
 @pytest.mark.parametrize("unresolved", ["unknown", "page-limit"])
-def test_local_incomplete_inspection_prevents_all_paid_calls(environment, unresolved):
+def test_local_incomplete_inspection_prevents_all_paid_calls_when_partial_extraction_is_off(environment, unresolved):
     if unresolved == "page-limit":
         environment.settings.ocr_max_pages = 1
         data = pdf(CV, CERTIFICATE)
     else:
         data = pdf(CV, "Readable correspondence about unrelated meeting arrangements. " * 4)
 
-    output = environment.extract(data)
+    output = environment.extract(data, partial=False)
 
     assert output["status"] == "needs_review"
     assert output["extractions"] == {}
@@ -544,10 +549,12 @@ def gray_png(width=600, height=800):
         return out.getvalue()
 
 
-def test_unclassified_page_holds_everything_back_unless_partial_extraction_is_requested(environment):
+def test_unclassified_page_no_longer_holds_the_rest_of_the_file_back(environment):
     data = pdf(CV, UNCLASSIFIED)
-    held = environment.extract(data)
-    assert held["status"] == "needs_review" and not held["extractions"] and not environment.submissions
+    output = environment.extract(data)
+    assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume"}
+    held = environment.extract(data, partial=False, state={})
+    assert held["status"] == "needs_review" and not held["extractions"]
 
 
 def test_partial_extraction_sends_the_classified_pages_and_names_the_rest(environment):

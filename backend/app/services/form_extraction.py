@@ -184,7 +184,8 @@ def normalize_marital(value: Any) -> str | None:
     return text.title() if len(text) <= 30 else None
 
 
-def education_rows(raw: dict) -> list[dict]:
+def education_rows(raw: dict, limit: int | None = MAX_EDUCATION) -> list[dict]:
+    """The form's education rows; ``limit=None`` returns every distinct one (used to see what the form's capacity cuts off)."""
     rows: list[dict] = []
     seen: set[tuple] = set()
     for entry in _list(raw.get("education")):
@@ -208,7 +209,7 @@ def education_rows(raw: dict) -> list[dict]:
             continue
         seen.add(fingerprint)
         rows.append({"level": level, "passedYear": passed, "institute": institute})
-        if len(rows) >= MAX_EDUCATION:
+        if limit and len(rows) >= limit:
             break
     if not rows:
         highest = _s(raw.get("highest_qualification"), 200)
@@ -231,7 +232,7 @@ def _period(entry: dict) -> str | None:
     return human[:120] if human and (months or entry.get("duration_months") is None) and human != "0 months" else None
 
 
-def history_rows(raw: dict) -> list[dict]:
+def history_rows(raw: dict, limit: int | None = MAX_HISTORY) -> list[dict]:
     rows: list[dict] = []
     seen: set[tuple] = set()
     for entry in _list(raw.get("experience")):
@@ -252,7 +253,7 @@ def history_rows(raw: dict) -> list[dict]:
             continue
         seen.add(fingerprint)
         rows.append({"company": company, "designation": designation, "country": country, "period": period})
-        if len(rows) >= MAX_HISTORY:
+        if limit and len(rows) >= limit:
             break
     return rows
 

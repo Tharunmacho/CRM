@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from sqlalchemy import distinct, func, select
 
 from app.db.models import (
-    AuditEntry, Candidate, Client, ClientStaff, Company, Designation, Order, OrderStatus, Role, Task, User,
+    AuditEntry, Candidate, Client, ClientStaff, Company, Designation, Notification, Order, OrderStatus, Role, Task, User,
 )
 
 ALLOCATABLE_ROLES = (Role.staff, Role.manager)
@@ -147,3 +147,23 @@ def reassign_candidate(db, candidate: Candidate, target: User, *, actor_id: str 
             task.owner_id = target.id
     notify_assignment_changes(db, [(candidate.id, candidate.name, previous, target.id)], reason=notification_reason)
     return True
+
+
+def notify_new_job(db, order: Order, *, actor_id: str | None) -> int:
+    """Tell the staff allocated to the order's client that a new job exists for them (added to the caller's transaction).
+
+    The person who created the job already knows, so they are not notified. Nothing happens when the client has no
+    allocated staff. Returns how many notices were added.
+    """
+    allocated, client_name = allocated_ids_for_order(db, order.id)
+    recipients = [user_id for user_id in dict.fromkeys(allocated) if user_id != actor_id]
+    if not recipients:
+        return 0
+    title = db.scalar(select(Designation.title).where(Designation.id == order.designation_id)) or "Job"
+    company_name = db.scalar(select(Company.name).where(Company.id == order.company_id)) or client_name
+    active = set(db.scalars(select(User.id).where(User.id.in_(recipients), User.active.is_(True))))
+    for user_id in recipients:
+        if user_id in active:
+            db.add(Notification(user_id=user_id, kind="job", title=f"New job for {company_name or 'your client'}",
+                                detail=f"{title} - {order.openings} {'opening' if order.openings == 1 else 'openings'}", link_to=f"/orders/{order.id}"))
+    return len(active)

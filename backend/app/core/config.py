@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     # out of Settings repr and are never included in the health response.
     redis_url: str | None = Field(default=None, repr=False)
 
+    # Names this installation in the shared queue tables. Blank: the host name plus a hash of the storage location
+    # (services/instance_guard.py). Set it when two installations share one database but keep their files apart.
+    instance_name: str | None = None
+
     # Veris OCR, which reads resumes and passports on the add-candidate form. Left
     # unset, the form is simply filled by hand. Same names the veriis SDK reads.
     veris_ocr_base_url: str | None = None
@@ -79,9 +83,41 @@ class Settings(BaseSettings):
     ocr_max_pages: int = Field(default=300, ge=1, le=1000)
     ocr_page_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
     ocr_document_timeout_seconds: float = Field(default=600.0, ge=10, le=1800)
+    # Pages read at the same time by the local OCR (one Tesseract process per page).
+    ocr_page_workers: int = Field(default_factory=lambda: max(1, min(8, os.cpu_count() or 2)), ge=1, le=32)
     # How long a worker keeps checking an accepted Veris job before it hands the slot back
     # and revisits the job later. Zero keeps the single-poll behaviour.
     ocr_provider_wait_seconds: float = Field(default=20.0, ge=0, le=120)
+    # Veris jobs sent side by side (the kinds of one document, and the chunks of a long one).
+    veris_parallel_jobs: int = Field(default=4, ge=1, le=16)
+    # A document with more pages than this is split into jobs of this many pages ...
+    veris_chunk_pages: int = Field(default=20, ge=2, le=200)
+    # ... and a single resume repeats this many pages between neighbouring chunks, so a job
+    # or an education entry that straddles a boundary is read whole by at least one chunk.
+    veris_chunk_overlap_pages: int = Field(default=1, ge=0, le=3)
+    # Veris fields that have no place on the candidate or the form are always listed for a person
+    # to read (Unmapped). True also sends the extraction to review for them, not only for
+    # pages not sent, chunk conflicts, rows beyond the form's capacity or fields this app has never seen.
+    veris_unmapped_needs_review: bool = False
+    # Send the pages that the quick first look has already settled to Veris while the rest are still being read.
+    veris_early_dispatch: bool = True
+
+    # Reading queue. Every uploaded or emailed document is a durable job; workers claim jobs one by one
+    # (FOR UPDATE SKIP LOCKED plus a lease) and read them side by side.
+    # Threads inside one worker process (default 8). Parallelism comes from threads, not processes: a reading is mostly
+    # waiting on the document reader, and each extra process costs memory plus its own polling against the database.
+    extraction_concurrency: int = Field(default=8, ge=1, le=16)
+    # Worker processes the supervisor starts for the upload queue (and for the e-mail queue). One is enough for the
+    # default 8 side-by-side readings; raise it (up to 4) only when the machine has the memory and cores for it.
+    extraction_workers: int = Field(default=1, ge=1, le=4)
+    # Hard cap on documents read at once by all the worker processes of one queue together
+    # (workers x threads). A larger product is scaled down per process so the machine and the
+    # document reader are never flooded; 12 CPU-bound readings per queue is already a lot.
+    extraction_max_parallel: int = Field(default=16, ge=1, le=32)
+    # A claimed job is re-claimed by another worker when its lease runs out without a heartbeat.
+    extraction_lease_seconds: int = Field(default=180, ge=30, le=3600)
+    # SIGTERM: how long running jobs may finish before their claims are released.
+    extraction_shutdown_seconds: int = Field(default=30, ge=0, le=600)
 
     # Incoming mail only. Credentials remain in the environment, never API output.
     email_ingestion_enabled: bool = False

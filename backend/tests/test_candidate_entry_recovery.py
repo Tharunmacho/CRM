@@ -7,6 +7,10 @@ from app.api.routers import document_jobs
 from app.db import models as m
 from test_candidate_workflows import db, make_client
 from test_database_naming import schema_database
+from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 
 
 def intake(db, owner='admin', *, draft=None):
@@ -74,18 +78,54 @@ def test_draft_accepts_every_field_of_the_add_candidate_form(db):
     assert response.status_code == 200, response.text
 
 
-def test_candidate_from_a_document_needs_no_name_or_phone_and_is_flagged_for_review(db):
+def test_a_file_that_gave_no_name_or_contact_creates_no_candidate_row(db):
     job = intake(db)
     api = client(db)
-    created = api.post('/api/candidates', json={'intake_group_id': job.group_id})
+    refused = api.post('/api/candidates', json={'intake_group_id': job.group_id})
+    assert refused.status_code == 422
+    assert 'could not read a name' in refused.json()['detail']
+    # The old placeholder is never accepted as a name, and a name alone is not an identity.
+    assert api.post('/api/candidates', json={'name': 'Name needs review', 'phone': '9000000020', 'intake_group_id': job.group_id}).status_code == 422
+    assert api.post('/api/candidates', json={'name': 'Only A Name', 'intake_group_id': job.group_id}).status_code == 422
+    db.expire_all()
+    assert db.scalar(select(func.count()).select_from(m.Candidate)) == 0
+    assert db.scalar(select(func.count()).select_from(m.Task)) == 0
+    # The saved upload stays available so a person can type the details.
+    assert db.get(m.DocumentExtractionJob, job.id).status == 'uploaded'
+    assert 'savedCandidateId' not in (db.get(m.DocumentExtractionJob, job.id).draft or {})
+
+
+def test_name_and_email_from_a_document_creates_a_candidate_flagged_for_review(db):
+    job = intake(db)
+    api = client(db)
+    created = api.post('/api/candidates', json={'name': 'Email Only', 'email': 'email.only@example.test', 'intake_group_id': job.group_id})
     assert created.status_code == 201, created.text
     db.expire_all()
     saved = db.get(m.Candidate, created.json()['id'])
-    assert (saved.name, saved.phone) == ('Name needs review', '')
+    assert (saved.name, saved.phone) == ('Email Only', '')
     assert saved.needs_review and saved.status == m.CandidateStatus.needs_review
     # A number that is given must still be a real one.
     other = intake(db)
-    assert api.post('/api/candidates', json={'phone': '12', 'intake_group_id': other.group_id}).status_code == 422
+    assert api.post('/api/candidates', json={'name': 'Bad Number', 'phone': '12', 'intake_group_id': other.group_id}).status_code == 422
+
+
+def test_name_and_phone_from_a_document_creates_a_ready_candidate(db):
+    job = intake(db)
+    created = client(db).post('/api/candidates', json={'name': 'Phone Person', 'phone': '9000000020', 'intake_group_id': job.group_id})
+    assert created.status_code == 201, created.text
+    db.expire_all()
+    assert db.get(m.Candidate, created.json()['id']).name == 'Phone Person'
+
+
+def test_passport_only_document_with_a_name_creates_a_candidate_and_without_a_name_does_not(db):
+    api = client(db)
+    named = intake(db)
+    ok = api.post('/api/candidates', json={'name': 'Passport Holder', 'passport_no': 'Z1234567', 'intake_group_id': named.group_id})
+    assert ok.status_code == 201, ok.text
+    nameless = intake(db)
+    assert api.post('/api/candidates', json={'passport_no': 'Z7654321', 'intake_group_id': nameless.group_id}).status_code == 422
+    db.expire_all()
+    assert db.scalar(select(func.count()).select_from(m.Candidate)) == 1
 
 
 def test_manual_entry_without_a_document_still_needs_name_and_phone(db):

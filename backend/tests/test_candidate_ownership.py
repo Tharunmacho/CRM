@@ -18,6 +18,10 @@ from app.db import models as m
 from app.db.session import get_db
 from app.services import daily_work
 from test_database_naming import _migrate, schema_database
+from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 
 PDF = b"%PDF-1.7 synthetic document"
 

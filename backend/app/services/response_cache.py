@@ -153,10 +153,10 @@ def _drop_expired_locked() -> None:
 
 def topics_for_statement(statement: str) -> tuple[str, ...]:
     """Cache topics a write statement touches (empty for reads and for ignored bookkeeping tables)."""
-    found = change_feed.classify_statement(statement)
+    found = change_feed.classify_statements(statement)
     if not found:
         return ()
-    topics = set(change_feed.TOPIC_TABLES.get(found[1], ()))
+    topics = {topic for _, table in found for topic in change_feed.TOPIC_TABLES.get(table, ())}
     if topics & _REPORT_SOURCES:
         topics.add("reports")
     return tuple(sorted(topics))
@@ -164,12 +164,24 @@ def topics_for_statement(statement: str) -> tuple[str, ...]:
 
 def _note_statement(conn, cursor, statement, parameters, context, executemany):
     head = statement.lstrip()[:8].upper()
-    if head[:6] in ("INSERT", "UPDATE", "DELETE"):
+    if head[:6] in ("INSERT", "UPDATE", "DELETE") or head[:5] == "WITH ":
         topics = topics_for_statement(statement)
         if topics:
-            conn.info.setdefault(_INFO_KEY, set()).update(topics)
+            context._crm_cache_topics = topics  # noted once the statement is known to have changed a row (_note_result)
     elif head[:6] in ("DROP S", "TRUNCA", "DROP T") or head.startswith(("CREATE S", "CREATE T")):
         clear()  # a schema or table reset (tests, restores): nothing built before it can be trusted
+
+
+def _note_result(conn, cursor, statement, parameters, context, executemany):
+    topics = getattr(context, "_crm_cache_topics", None)
+    if not topics:
+        return
+    try:
+        if cursor.rowcount == 0 and change_feed.rowcount_decides(statement):
+            return  # matched nothing (an idle worker's empty claim): the memo stays valid
+    except Exception:
+        pass
+    conn.info.setdefault(_INFO_KEY, set()).update(topics)
 
 
 def _forget_rolled_back(conn):
@@ -197,6 +209,7 @@ def install() -> None:
         return
     _installed = True
     event.listen(Engine, "before_cursor_execute", _note_statement)
+    event.listen(Engine, "after_cursor_execute", _note_result)
     event.listen(Engine, "rollback", _forget_rolled_back)
     event.listen(Pool, "checkout", _clear_on_checkout)
     event.listen(Pool, "checkin", _announce_on_checkin)

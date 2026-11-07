@@ -2,18 +2,18 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.routers import files as files_router
+from app.api.routers import applications as applications_router, files as files_router
 from app.core.deps import current_user
 from app.db.models import Attachment, Candidate, User
 from app.db.session import get_db
-from app.services import application_form as service
+from app.services import application_form as service, form_assignment, form_feedback
 
 router = APIRouter(prefix="/api/candidates/{candidate_id}/application-form", tags=["application-form"])
 
@@ -101,6 +101,28 @@ def _body(model: FormIn) -> dict[str, Any]:
     return out
 
 
+class AssignmentIn(_Section):
+    """Partial: only the keys sent are changed. `orderId: null` unmaps; `agencyId` and `agencyName` both null clear the agency."""
+    orderId: str | None = Field(default=None, max_length=36)
+    source: Literal["whatsapp", "email", "walk_in", "referral", "other"] | None = None
+    agencyId: str | None = Field(default=None, max_length=36)
+    agencyName: str | None = Field(default=None, max_length=255)
+    recruiterId: str | None = Field(default=None, max_length=36)
+
+
+class FeedbackIn(_Section):
+    kind: Literal["update", "delay", "issue", "client", "candidate"]
+    reason: Literal["waiting_candidate", "waiting_client", "waiting_documents", "waiting_visa", "waiting_payment", "other"] | None = None
+    body: str = Field(max_length=5000)
+    applicationId: str | None = Field(default=None, max_length=36)
+
+
+class FeedbackEditIn(_Section):
+    kind: Literal["update", "delay", "issue", "client", "candidate"] | None = None
+    reason: Literal["waiting_candidate", "waiting_client", "waiting_documents", "waiting_visa", "waiting_payment", "other"] | None = None
+    body: str | None = Field(default=None, max_length=5000)
+
+
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
 
@@ -122,6 +144,57 @@ def save_form(candidate_id: str, body: FormIn, response: Response, orderId: str 
     return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
 
 
+@router.put("/assignment")
+def save_assignment(candidate_id: str, body: AssignmentIn, response: Response, orderId: str | None = Query(default=None, max_length=36),
+                    applicationId: str | None = Query(default=None, max_length=36),
+                    db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Change the client's job, the source, the agency or the recruiter of this candidate from the form (see the v2 contract)."""
+    _no_store(response)
+    fields = {key: getattr(body, key) for key in body.model_fields_set}
+    for key in ("source", "recruiterId"):
+        if key in fields and fields[key] is None:
+            raise HTTPException(422, "Choose a source." if key == "source" else "Choose a recruiter.")
+    with applications_router._mutation(db):
+        outcome = form_assignment.apply(db, user, candidate_id, fields)
+    if outcome["applicationId"]:  # a new job was mapped: show its application, not the one it replaced
+        applicationId, orderId = outcome["applicationId"], None
+    return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
+
+
+@router.post("/feedback", status_code=status.HTTP_201_CREATED)
+def add_feedback(candidate_id: str, body: FeedbackIn, response: Response, orderId: str | None = Query(default=None, max_length=36),
+                 applicationId: str | None = Query(default=None, max_length=36),
+                 db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """A recruiter's note on why something takes time. Owner, admin and manager. Answers the whole form."""
+    _no_store(response)
+    shown = body.applicationId or applicationId
+    with applications_router._mutation(db):
+        form_feedback.create(db, user, candidate_id, kind=body.kind, reason=body.reason, body=body.body, application_id=shown)
+    return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
+
+
+@router.put("/feedback/{feedback_id}")
+def edit_feedback(candidate_id: str, feedback_id: str, body: FeedbackEditIn, response: Response,
+                  orderId: str | None = Query(default=None, max_length=36), applicationId: str | None = Query(default=None, max_length=36),
+                  db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Change your own note within 15 minutes of writing it."""
+    _no_store(response)
+    with applications_router._mutation(db):
+        form_feedback.edit(db, user, candidate_id, feedback_id, kind=body.kind, reason=body.reason, body=body.body)
+    return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
+
+
+@router.delete("/feedback/{feedback_id}")
+def delete_feedback(candidate_id: str, feedback_id: str, response: Response, orderId: str | None = Query(default=None, max_length=36),
+                    applicationId: str | None = Query(default=None, max_length=36),
+                    db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Delete a note: an admin any note, anyone else their own within 15 minutes."""
+    _no_store(response)
+    with applications_router._mutation(db):
+        form_feedback.delete(db, user, candidate_id, feedback_id)
+    return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
+
+
 @router.post("/refresh")
 def refresh_form(candidate_id: str, response: Response, orderId: str | None = Query(default=None, max_length=36),
                  applicationId: str | None = Query(default=None, max_length=36),
@@ -135,11 +208,11 @@ def refresh_form(candidate_id: str, response: Response, orderId: str | None = Qu
 def upload_document(candidate_id: str, response: Response, slot: str = Form(...), file: UploadFile = File(...),
                     orderId: str | None = Query(default=None, max_length=36), applicationId: str | None = Query(default=None, max_length=36),
                     db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    """Store a resume / passport / photo exactly like POST /api/files and, for the first two, queue it for reading."""
+    """Store a document of any slot exactly like POST /api/files; resume and passport are queued for reading, the rest are only stored."""
     _no_store(response)
     slot = slot.strip()
     if slot not in service.SLOTS:
-        raise HTTPException(422, "Choose resume, passport or photo.")
+        raise HTTPException(422, "Choose which document this is: " + ", ".join(service.SLOTS) + ".")
     content_type = files_router._content_type(file.content_type, file.filename or "file")
     if slot == "photo" and not content_type.startswith("image/"):
         raise HTTPException(415, "The photo must be an image (JPG, PNG, WebP or HEIC).")
@@ -150,6 +223,10 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
     digest = hashlib.sha256(payload).hexdigest()
     latest = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
                                                 Attachment.slot == slot).order_by(Attachment.version.desc()).limit(1))
+    if slot == "other" and latest is not None and latest.content_hash != digest:
+        # Several files are kept in "other": the same bytes again, whichever version they were, are not stored twice.
+        latest = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
+                                                    Attachment.slot == slot, Attachment.content_hash == digest).limit(1)) or latest
     if latest is not None and latest.content_hash == digest:
         # The same file again: no new version. If reading it had failed, put it back in the queue.
         candidate = db.get(Candidate, candidate_id)

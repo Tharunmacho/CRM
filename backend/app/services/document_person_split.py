@@ -178,6 +178,8 @@ def prepare_bundle(db, source_type, source_id, user):
     db.add(bundle); db.flush()
     db.add(AuditEntry(actor_id=user.id, action="Started checking documents for several people", entity_type="document_person_intake", entity_id=bundle.id,
         meta={"sourceType": source_type, "sourceId": source_id}))
+    from app.services.extraction_queue import notify_work
+    notify_work(db, "bundle")  # a sleeping worker prepares the pages at once
     db.commit()
     return bundle_out(db, bundle)
 
@@ -522,6 +524,11 @@ def commit_review(db, identifier, user, revision, decisions, settings):
         if len(matches) > 1:
             raise HTTPException(409, f"{group.label} matches different existing people through phone, email or passport. Resolve those identity conflicts before confirming.")
         target = matches[0][0] if matches else None
+        if target is None:
+            from app.services.candidate_review import candidate_refusal
+            unreadable = candidate_refusal(values)
+            if unreadable:  # no candidate row without a real name and a way to reach them
+                raise HTTPException(422, f"{group.label}: {unreadable}")
         refusal = candidate_work_refusal(db, target, user) if target else None
         if target and decisions.get(group.id) != target.id:
             duplicates.append({"groupId": group.id, "label": group.label, "candidateId": target.id, "name": target.name, "ref": target.ref,

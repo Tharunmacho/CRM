@@ -20,6 +20,10 @@ from app.services.candidate_review import WAITING_TITLE, assign_waiting_candidat
 from app.services.candidate_search import STATUS_LABELS, Search, pool_counts, search_candidates
 from app.services.whatsapp_intake import process_message, receive_payload
 from test_database_naming import schema_database
+from auto_assign import round_robin_on  # noqa: F401  (fixture: these tests exercise the round-robin, which is opt-in)
+import pytest as _pytest
+
+pytestmark = _pytest.mark.usefixtures("round_robin_on")
 from test_email_intake import ORIGINAL, extraction
 from test_whatsapp_intake import payload, receipt, setup  # noqa: F401  (fixture)
 from test_workflow_scheduler import workspace  # noqa: F401  (fixture)
