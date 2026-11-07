@@ -217,7 +217,10 @@ def _units_of(kind: str, record: dict, source_hash: str) -> list[_Unit]:
 
 
 def _failure_text(unit: _Unit) -> str:
-    return f"We could not read the {_mode(unit.kind)} pages{unit.label}. Try again later, or enter the details by hand."
+    reason = unit.record.get("provider_error") or {}
+    code = f" (reader code: {reason['code']})" if reason.get("code") else ""
+    wait = "Try again in a minute" if reason.get("retryable") else "Try again later"
+    return f"We could not read the {_mode(unit.kind)} pages{unit.label}{code}. {wait}, or enter the details by hand."
 
 
 def _check_cached(kind: str, selected: list[int], record: dict, source_hash: str, generation: int) -> list[_Unit]:
@@ -275,7 +278,7 @@ def _drive(unit: _Unit, settings, events: queue.Queue, abort: threading.Event) -
 def _apply_job(unit: _Unit, job) -> bool:
     """Record what a polled job reported. Returns True when the saved state changed."""
     rec = unit.record
-    before = (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec)
+    before = (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"))
     rec["status"] = job.status
     if job.status in _PENDING:
         unit.outcome = "pending"
@@ -285,6 +288,14 @@ def _apply_job(unit: _Unit, job) -> bool:
             unit.outcome = "timed_out"
     elif job.status == "failed":
         rec["error"] = "The document reader could not read this file."
+        # The reader's own reason (a short code and sentence it wrote, never page content) is kept so a failure can be named.
+        reason = getattr(job, "error", None)
+        if reason is not None:
+            rec["provider_error"] = {
+                "code": str(getattr(reason, "code", ""))[:80],
+                "message": " ".join(str(getattr(reason, "message", "")).split())[:200],
+                "retryable": bool(getattr(reason, "retryable", False)),
+            }
         unit.outcome = "failed"
     elif job.status == "succeeded" and isinstance(job.result, dict):
         rec["result"] = deepcopy(job.result)

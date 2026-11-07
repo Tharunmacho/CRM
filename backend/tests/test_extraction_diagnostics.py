@@ -78,3 +78,21 @@ def test_state_with_numpy_numbers_and_sets_is_saved_as_json(intake, monkeypatch)
         row = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == job["id"]))
         assert row.status in {"completed", "needs_review"}
         assert row.state["output"]["coverage"] == {"score": 1.5, "pages": [1, 2, 3], "count": 4}
+
+
+def test_a_failed_reader_job_keeps_the_readers_own_reason():
+    from types import SimpleNamespace as N
+    from app.services import document_extraction as extraction
+
+    unit = extraction._Unit.__new__(extraction._Unit)
+    unit.record, unit.kind, unit.label, unit.pages, unit.outcome = {}, "passport", "", [8], None
+    failed = N(status="failed", result=None, error=N(code="unreadable_pages", message="Pages could   not\nbe read", retryable=True))
+    assert extraction._apply_job(unit, failed) is True
+    assert unit.record["provider_error"] == {"code": "unreadable_pages", "message": "Pages could not be read", "retryable": True}
+    text = extraction._failure_text(unit)
+    assert "unreadable_pages" in text and "Try again in a minute" in text
+
+    bare = extraction._Unit.__new__(extraction._Unit)
+    bare.record, bare.kind, bare.label, bare.pages, bare.outcome = {}, "passport", "", [8], None
+    extraction._apply_job(bare, N(status="failed", result=None))
+    assert "provider_error" not in bare.record and "reader code" not in extraction._failure_text(bare)

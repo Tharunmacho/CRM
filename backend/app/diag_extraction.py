@@ -27,7 +27,7 @@ def main(sessions=SessionLocal, settings=None) -> None:
         print("== Newest document jobs ==")
         rows = db.execute(text(
             "SELECT filename, kind, status, attempts, queued_at, started_at, finished_at, COALESCE(ready_at, next_attempt_at) AS due_at, next_attempt_at, claimed_by, lease_until, last_error, "
-            "state -> 'failure' AS failure, state -> 'reader' AS reader, instance "
+            "state -> 'failure' AS failure, state -> 'reader' AS reader, state -> 'provider_jobs' AS provider_jobs, instance "
             "FROM document_extraction_jobs ORDER BY created_at DESC LIMIT 8")).all()
         for row in rows:
             print(f"- {row.filename[:40]:40} {row.kind:9} status={row.status:12} attempts={row.attempts} queued={_age(row.queued_at)} "
@@ -47,6 +47,14 @@ def main(sessions=SessionLocal, settings=None) -> None:
                 f = row.failure
                 print(f"    failure: type={f.get('type')} where={f.get('where')} attempt={f.get('attempt')} at={f.get('at')} "
                       f"worker={f.get('worker')} version={f.get('version')}")
+            # What the reading service (Veris) said about each part: status and its own error code, never the document's contents.
+            for kind, record in (row.provider_jobs or {}).items():
+                parts = record.get("chunks") or [record]
+                for number, part in enumerate(parts, 1):
+                    why = part.get("provider_error") or {}
+                    note = f" code={why.get('code')} retryable={why.get('retryable')} says='{why.get('message')}'" if why else ""
+                    print(f"    veris {kind} part {number}/{len(parts)}: status={part.get('status')} attempts={part.get('attempts', '-')} "
+                          f"result={'yes' if 'result' in part else 'no'}{note}")
             # A job a current reader handled carries its "reader"; a failed or finished job without one was handled by older
             # code (an old worker still running, here or on another machine that shares this database).
             if row.reader:
