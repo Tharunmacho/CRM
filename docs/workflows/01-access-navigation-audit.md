@@ -28,7 +28,7 @@ Staff Directory and attendance are later approved additions. Private CRM mail dr
 4. Make an authorized edit. The saved action records the actor, time, target and relevant change details.
 5. Log out. Reopening a protected route requires authentication. Admin force logout or account deactivation also invalidates the old session.
 
-The original sidebar specified Dashboard, Inbox, Clients, Jobs / Positions, Candidate (formerly Add Candidate), Data Bank, Tasks, To-do List, Reports and User Management. Current navigation also includes Companies, WhatsApp, Mapped Candidates, Attendance and Staff Directory. These extensions are documented rather than counted as literal ten-item parity.
+The original sidebar specified Dashboard, Inbox, Clients, Jobs (formerly Jobs / Positions), Candidate (formerly Add Candidate), Data Bank, Tasks, To-do List, Reports and User Management. Current navigation also includes Companies, WhatsApp, Mapped Candidates, Attendance and Staff Directory. These extensions are documented rather than counted as literal ten-item parity.
 
 ## Screen and backend contract
 

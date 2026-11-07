@@ -33,11 +33,11 @@ A wrong upload can be undone by an admin from the upload history, as long as nob
 
 ## Work the leads
 
-1. Open **Lead sheet**. The table shows name, phone, position, state, campaign, status, owner, last call and follow-up. Type in the search box (comma-separated words must all match, e.g. `kerala, chef, asha`) or use the filters
-   (status, campaign, position, country, owner, date, has resume, already a candidate, follow-up due).
+1. Open **Lead sheet**. The table shows name, phone, job, state, campaign, status, owner, last call and follow-up. Type in the search box (comma-separated words must all match, e.g. `kerala, chef, asha`) or use the filters
+   (status, campaign, job, country, owner, date, has resume, already a candidate, follow-up due).
 2. Open a lead and call. Record the outcome: answered, interested, not interested, no answer or wrong number, add remarks and optionally the next follow-up. The status, call count and history update.
 3. Ask an interested lead for an updated resume. Set **Resume requested**. When the person sends it, upload it to the lead; the status becomes **Resume received**.
-4. **Convert to candidate** creates the Data Bank candidate from the lead (name, phone, e-mail, birth date, position, country interest, campaign as the source) and attaches the resume, which is then read like any other resume and fills the application form.
+4. **Convert to candidate** creates the Data Bank candidate from the lead (name, phone, e-mail, birth date, job, country interest, campaign as the source) and attaches the resume, which is then read like any other resume and fills the application form.
    If the phone or e-mail already belongs to a candidate, the CRM shows that candidate instead of creating a second one; **Link** connects the lead to it.
 5. Leads that do not go anywhere are set to **Not interested**, **Invalid** or **Wrong number**; nothing is deleted.
 
@@ -78,7 +78,7 @@ New, Contacted, Interested, Resume requested, Resume received, Converted, Not in
 ## Campaigns tab, follow-up reminders, "In Data Bank" found later, WhatsApp messages
 
 * **Campaigns tab** (next to Leads and Uploads): one row per ad campaign with its leads, new today and in 7 days, how many are assigned and contacted, interested, resumes in,
-  converted with a small bar for the conversion rate, the last upload, the Facebook / Instagram split, the top positions and the countries people want. The last row totals them.
+  converted with a small bar for the conversion rate, the last upload, the Facebook / Instagram split, the top jobs and the countries people want. The last row totals them.
   Click a heading to sort; click a row to see that campaign's leads on the Leads tab; the arrow shows the campaign's forms. On a narrow screen the rows become cards. Managers and admins see
   everything, staff see only the leads assigned to them.
 * **Follow-up reminders**: when you set a follow-up date on a lead (in the lead, or when logging a call), the owner gets a to-do "Follow up lead: <name>" at 09:00 that day (a reminder in the notification bell when it is due; the **To-do** page itself is open to admins and managers),
@@ -86,7 +86,7 @@ New, Contacted, Interested, Resume requested, Resume received, Converted, Not in
   (the to-do goes to the new owner) is followed too. The **Follow-ups due** card counts your own leads whose follow-up is today or overdue (click it to list them); overdue dates are red in the table.
 * **Already in the Data Bank, found later**: if a candidate with the same phone or e-mail is added after the lead was uploaded, the lead gets the "In Data Bank" flag at once, and the
   candidate's profile shows "From lead sheet: <campaign>" linking back to the lead.
-* **WhatsApp message**: the green WhatsApp button opens a small box with three messages (First contact, Request resume, Follow-up) already filled with the person's name, position and the agency name.
+* **WhatsApp message**: the green WhatsApp button opens a small box with three messages (First contact, Request resume, Follow-up) already filled with the person's name, job and the agency name.
   Change the wording for this message if you like, then **Open WhatsApp**; the chosen message is noted in the lead's history ("WhatsApp message opened"). An administrator changes the three
   standard messages under **Users > Agency settings > Lead sheet WhatsApp templates**.
 * **Loading**: while the leads are being fetched (first visit, or after a filter change that takes a moment) grey placeholder rows and "Loading leads…" are shown, the count says "Loading…", and

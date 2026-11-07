@@ -12,7 +12,7 @@ The owner or a supervisor can record the call. The candidate must exist and have
 2. Call the candidate. In the call dialog, record **Called: Yes/No**, **Interested: Yes/No/Not reachable**, and meaningful remarks.
 3. If no call occurred or the candidate could not be reached, save the appropriate unreachable state. Keep the task visible for further action and continue daily remarks.
 4. If the candidate is not interested, record the outcome. The initial-call task closes and the profile enters the Not interested pool; the candidate is retained for other relevant orders.
-5. If interested, record the confirmation and review/correct the profile as authorized. Use Jobs / Positions to select a suitable order and match the candidate.
+5. If interested, record the confirmation and review/correct the profile as authorized. Use Jobs to select a suitable order and match the candidate.
 6. Reopen the profile and task list to confirm that the saved outcome, task state and next action agree.
 
 ## Screen and backend contract

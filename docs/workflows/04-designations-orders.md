@@ -8,7 +8,7 @@ All three roles can create designations and orders. Prepare an active employer a
 
 ## User journey
 
-1. Open **Jobs / Positions** and create a designation, such as Welder. Enter title, category, description, required skills and minimum experience.
+1. Open **Jobs** and create a designation, such as Welder. Enter title, category, description, required skills and minimum experience.
 2. Save and reopen the designation to check that duplicate case/spacing variants of a skill have been normalized without losing distinct skills.
 3. Create an order for the designation. Select the employer and record openings, work country/city, salary and currency, benefits, contract period, interview date and deadline.
 4. Saving a new order opens its detail. Confirm the employer, designation, terms and counts before matching anyone. **Candidate requirements** shows the saved skills and minimum experience alongside the commercial terms; the back link returns to that employer's hiring workspace.

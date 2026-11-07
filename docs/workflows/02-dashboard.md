@@ -33,7 +33,7 @@ Four pressed-state cards sit under Today's work. They use the same server scope 
 - **Overall departure**: value = active candidates waiting at stage 11 (ticket); detail = candidates departed (deployed placements).
 - **Overall idle stage**: active placements with no stage completed for 7 or more days (`STUCK_DAYS` in `staff_weekly.py`, the same rule as the weekly staff report; never-progressed placements count from when they were mapped). Detail shows the longest wait.
 
-Reopened stage records never count. Pressing a card lists the people (name, position and order, client, country, stage, recruiter for the team view, days waiting, Open and Application form). The counts are also in Export. Implementation: `pipeline_overview` in [reporting service](../../backend/app/services/reporting.py), [overview helpers](../../frontend/src/features/dashboard/overview.ts), [panel](../../frontend/src/features/dashboard/components/overview-panel.tsx).
+Reopened stage records never count. Pressing a card lists the people (name, job and order, client, country, stage, recruiter for the team view, days waiting, Open and Application form). The counts are also in Export. Implementation: `pipeline_overview` in [reporting service](../../backend/app/services/reporting.py), [overview helpers](../../frontend/src/features/dashboard/overview.ts), [panel](../../frontend/src/features/dashboard/components/overview-panel.tsx).
 
 ## Recovery and handoffs
 
@@ -69,7 +69,7 @@ Under the Pipeline overview the dashboard shows a **Lead sheet** section (same c
 | Converted to candidates | leads converted in the period chosen above (7, 30, 90 days, this year, all time); the line shows the conversion rate = converted leads / assigned leads |
 | Unassigned leads (admin and manager only) | open leads nobody owns; always the whole pool, whichever person is chosen |
 
-Press a card to see the first 8 leads behind it (name, position and country, status, who it is assigned to in the team view, the relevant date, calls); a lead's name opens it on the Lead sheet (`/leads?lead=<id>`) and **Open Lead sheet** goes to the full sheet. A staff member who has not finished today's daily tasks sees "Finish today's tasks first" on the cards that are work (Not contacted, Follow-ups due, Resumes received); the numbers and lists stay readable. The cards are in **Export** as `Lead sheet: ...` rows.
+Press a card to see the first 8 leads behind it (name, job and country, status, who it is assigned to in the team view, the relevant date, calls); a lead's name opens it on the Lead sheet (`/leads?lead=<id>`) and **Open Lead sheet** goes to the full sheet. A staff member who has not finished today's daily tasks sees "Finish today's tasks first" on the cards that are work (Not contacted, Follow-ups due, Resumes received); the numbers and lists stay readable. The cards are in **Export** as `Lead sheet: ...` rows.
 
 The numbers are the additive `leads` key of `GET /api/dashboard`, read with one aggregate statement beside the pipeline read and cached with the `reports` and `leads` topics per person (so a call or assignment changes them at once, and the dashboard refetches on the live `leads` event). The list behind a card is `GET /api/dashboard/leads?card=...&period=...&staff_id=...`, same scope rules, cached 10 s per person and card. Older servers send no `leads` key and the section is simply not shown.
 
