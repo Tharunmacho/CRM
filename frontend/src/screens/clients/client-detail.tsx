@@ -1,16 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
-import {
-  ArrowLeft, BriefcaseBusiness, Building2, History, Mail, MapPin, MessageCircle,
-  Pencil, Phone, Plus, Target, Trash2, UserCheck, UserRound, Users,
-} from 'lucide-react'
+import { ArrowLeft, History, Pencil, Trash2, UserRound } from 'lucide-react'
 import { ago, dateLabel, money } from '@/shared/lib/format'
 import { useStore } from '@/shared/state/crm-store'
-import { EmptyState, Panel, PanelHeader, StatusPill } from '@/shared/ui/display'
-import { KpiStrip } from '@/shared/ui/workspace'
+import { EmptyState, Panel, StatusPill } from '@/shared/ui/display'
 import { Button, Select } from '@/shared/ui/primitives'
-import { FileLink } from '@/shared/ui/file-drop'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
@@ -20,17 +15,8 @@ import { OrderDialog } from '@/features/jobs/components/job-dialogs'
 import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { orderCounts } from '@/features/jobs/order-counts'
-import { AgreementPill, Avatar, CopyButton, Flag, Place, Progress, StageMini, WebsiteLink } from '@/features/clients/components/parts'
-import type { Company } from '@/shared/model/types'
+import { AgreementPill, Avatar, Flag, Place, Progress, StageMini } from '@/features/clients/components/parts'
 import '@/styles/clients.css'
-
-const digits = (value: string) => value.replace(/[^\d]/g, '')
-
-function Detail({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
-  return <div className={className ? `cd-detail ${className}` : 'cd-detail'}><dt>{label}</dt><dd>{children}</dd></div>
-}
-
-const empty = <span className="cd-none">Not added</span>
 
 export default function ClientDetailPage() {
   const { id } = useParams()
@@ -43,14 +29,10 @@ export default function ClientDetailPage() {
   const [editing, setEditing] = useState(false)
   const [history, setHistory] = useState(false)
   const [addingCompany, setAddingCompany] = useState(false)
-  const [editingCompany, setEditingCompany] = useState<Company | null>(null)
-  const [companyHistory, setCompanyHistory] = useState<string | null>(null)
-  const [deletingCompany, setDeletingCompany] = useState<string | null>(null)
   const [orderFor, setOrderFor] = useState<string | null>(null)
   const [employer, setEmployer] = useState('')
 
   const companies = useMemo(() => store.companies.filter((co) => co.clientId === id), [store.companies, id])
-  const assignedStaff = (client?.staffIds ?? []).map((id) => store.user(id)).filter((user): user is NonNullable<typeof user> => !!user)
   const orders = useMemo(() => {
     const ids = new Set(companies.map((co) => co.id))
     const rank = (status: string) => (status === 'open' ? 0 : status === 'on_hold' ? 1 : 2)
@@ -78,12 +60,6 @@ export default function ClientDetailPage() {
     )
   }
 
-  const placedOn = (orderId: string) => orderCounts(appsByOrder.get(orderId) ?? []).deployed
-  const openOrders = orders.filter((order) => order.status === 'open')
-  const openSeats = openOrders.reduce((total, order) => total + Math.max(order.openings - placedOn(order.id), 0), 0)
-  const allApps = orders.flatMap((order) => appsByOrder.get(order.id) ?? [])
-  const inProcess = orderCounts(allApps).matched
-  const deployed = orderCounts(allApps).deployed
   const shownOrders = employer ? orders.filter((order) => order.companyId === employer) : orders
   const primary = companies[0]
   const title = primary ? (companies.length > 1 ? `${primary.name} +${companies.length - 1}` : primary.name) : client.name
@@ -118,119 +94,6 @@ export default function ClientDetailPage() {
           )}
         </div>
       </header>
-
-      <KpiStrip
-        items={[
-          { label: 'Companies', value: companies.length, detail: `${companies.filter((co) => co.status === 'active').length} active`, icon: Building2 },
-          { label: 'Open jobs', value: openOrders.length, detail: `${orders.length} jobs in total`, icon: BriefcaseBusiness, tone: 'amber' },
-          { label: 'Openings left', value: openSeats, detail: 'Jobs still to fill', icon: Target },
-          { label: 'In progress', value: inProcess, detail: 'Candidates in the stages', icon: Users },
-          { label: 'Deployed', value: deployed, detail: 'Placed with this client', icon: UserCheck, tone: 'green' },
-        ]}
-      />
-
-      <div className="cd-layout">
-        <aside>
-          <Panel>
-            <div className="cd-person">
-              <Avatar name={client.name} size="lg" />
-              <div><p className="cd-person-name">{client.name}</p><p className="cd-person-role">{client.designation ? <>{client.designation} · Contact person</> : 'Contact person'}</p></div>
-            </div>
-            <ul className="cd-contact">
-              <li><Mail size={16} aria-hidden="true" />{client.email ? <><a href={`mailto:${client.email}`}>{client.email}</a><CopyButton value={client.email} label="Copy email address" /></> : empty}</li>
-              <li><Phone size={16} aria-hidden="true" />{client.phone ? <><a href={`tel:${client.phone}`} className="ident">{client.phone}</a><CopyButton value={client.phone} label="Copy phone number" /></> : empty}</li>
-              <li><MessageCircle size={16} aria-hidden="true" />{client.whatsapp ? <a href={`https://wa.me/${digits(client.whatsapp)}`} target="_blank" rel="noreferrer" className="ident" title="Open WhatsApp">{client.whatsapp}</a> : empty}</li>
-              <li><MapPin size={16} aria-hidden="true" />{location ? <Place country={client.country} city={client.city} /> : empty}</li>
-            </ul>
-            <div className="cd-block">
-              <h3>Assigned staff</h3>
-              {assignedStaff.length > 0
-                ? <ul className="cd-staff">{assignedStaff.map((user) => <li key={user.id}><Avatar name={user.name} size="sm" /><span><b>{user.name}</b><small>{user.role === 'manager' ? 'Manager' : 'Recruiter'}</small></span></li>)}</ul>
-                : <p className="cd-none">No staff assigned yet. Edit the client to choose who looks after it.</p>}
-            </div>
-            {(client.staffContacts?.length ?? 0) > 0 && <div className="cd-block">
-              <h3>Staff details</h3>
-              <ul className="cd-staff">{client.staffContacts!.map((person, index) => <li key={`${person.name}:${index}`}><Avatar name={person.name} size="sm" /><span><b>{person.name}</b><small>{[person.designation, person.phone, person.email].filter(Boolean).join(' · ') || 'No contact details'}</small></span></li>)}</ul>
-            </div>}
-            {companies.length > 0 && (
-              <div className="cd-block">
-                <h3>Agreements</h3>
-                <ul className="cd-agreements">
-                  {companies.map((company) => (
-                    <li key={company.id}>
-                      <b>{company.name}</b>
-                      {company.agreement
-                        ? <FileLink url={company.agreement.url} className="cd-file">{company.agreement.name}</FileLink>
-                        : <button type="button" className="cd-link" onClick={() => setEditingCompany(company)}>No agreement yet · Upload</button>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {client.notes && <div className="cd-block"><h3>Notes</h3><p className="cd-notes">{client.notes}</p></div>}
-          </Panel>
-        </aside>
-
-        <section>
-          <Panel flush>
-            <PanelHeader title="Companies" meta="Contact, address, agreement and jobs"
-              action={<Button icon={<Plus className="h-4 w-4" />} disabled={!canWork} onClick={() => setAddingCompany(true)}>Add company</Button>} />
-            {companies.length === 0 && <EmptyState title="Add the first company" description={canWork ? 'Add the company this client hires for. Then create a job with the job title, number of openings and terms.' : 'This client is inactive. Make the client active before adding a company.'} action={canWork ? <Button variant="primary" onClick={() => setAddingCompany(true)}>Add company</Button> : undefined} />}
-            <div className="cd-employers">
-              {companies.map((company) => {
-                const own = orders.filter((order) => order.companyId === company.id)
-                const open = own.filter((order) => order.status === 'open')
-                const openings = open.reduce((total, order) => total + order.openings, 0)
-                const placed = open.reduce((total, order) => total + Math.min(placedOn(order.id), order.openings), 0)
-                return (
-                  <article key={company.id} className="cd-employer">
-                    <header>
-                      <div className="cd-employer-title">
-                        <h3>{company.name}</h3>
-                        <p>
-                          {company.industry && <span>{company.industry}</span>}
-                          {(company.city || company.country) ? <Place country={company.country} city={company.city} /> : !company.industry && <span>Industry and place not added</span>}
-                        </p>
-                      </div>
-                      <div className="cd-employer-badges">
-                        <AgreementPill filed={company.agreement ? 1 : 0} total={1} short />
-                        <StatusPill status={company.status} />
-                      </div>
-                    </header>
-                    <dl className="cd-details">
-                      <Detail label="Contact person">{company.contactPerson || empty}</Detail>
-                      <Detail label="Contact email">{company.contactEmail ? <a href={`mailto:${company.contactEmail}`}>{company.contactEmail}</a> : empty}</Detail>
-                      <Detail label="Phone">{company.phone ? <a href={`tel:${company.phone}`} className="ident">{company.phone}</a> : empty}</Detail>
-                      <Detail label="WhatsApp">{company.whatsapp ? <a href={`https://wa.me/${digits(company.whatsapp)}`} target="_blank" rel="noreferrer" className="ident">{company.whatsapp}</a> : empty}</Detail>
-                      <Detail label="Website" className="cd-span2">{company.website ? <WebsiteLink value={company.website} /> : empty}</Detail>
-                      <Detail label="Agreement" className="cd-span2">
-                        {company.agreement
-                          ? <FileLink url={company.agreement.url} className="cd-file">{company.agreement.name}</FileLink>
-                          : <button type="button" className="cd-link" onClick={() => setEditingCompany(company)}>No agreement yet · Upload</button>}
-                      </Detail>
-                      <Detail label="Address" className="cd-wide">{company.address || empty}</Detail>
-                    </dl>
-                    {company.notes && <p className="cd-employer-notes">{company.notes}</p>}
-                    <footer>
-                      <div className="cd-employer-stats">
-                        <span><b className="tnum">{open.length}</b> open {open.length === 1 ? 'job' : 'jobs'}{open.length > 0 && <> · <b className="tnum">{placed}</b> of <b className="tnum">{openings}</b> openings deployed</>}</span>
-                        {open.length > 0 && <Progress done={placed} total={openings} />}
-                      </div>
-                      <div className="cd-employer-actions">
-                        <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEditingCompany(company)}>Edit</Button>
-                        <Button size="sm" icon={<History className="h-3.5 w-3.5" />} onClick={() => setCompanyHistory(company.id)}>History</Button>
-                        <Button size="sm" onClick={() => navigate(`/jobs?q=${encodeURIComponent(company.name)}`)}>View jobs</Button>
-                        {store.can('delete_records') && <Button size="sm" variant="dangerGhost" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setDeletingCompany(company.id)}>Delete</Button>}
-                        <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} disabled={!canWork || company.status !== 'active'} onClick={() => setOrderFor(company.id)}>New job</Button>
-                      </div>
-                    </footer>
-                  </article>
-                )
-              })}
-            </div>
-          </Panel>
-        </section>
-      </div>
 
       <section aria-labelledby="cd-orders-title">
         <div className="cd-orders-head">
@@ -328,17 +191,8 @@ export default function ClientDetailPage() {
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
       {editing && <ClientDialog client={client} onClose={() => setEditing(false)} />}
       {addingCompany && <CompanyDialog clientId={client.id} onClose={() => setAddingCompany(false)} />}
-      {editingCompany && <CompanyDialog company={editingCompany} onClose={() => setEditingCompany(null)} />}
       {orderFor && <OrderDialog companyId={orderFor} onClose={() => setOrderFor(null)} />}
       {history && <RecordAudit kind="client" id={client.id} onClose={() => setHistory(false)} />}
-      {companyHistory && <RecordAudit kind="company" id={companyHistory} onClose={() => setCompanyHistory(null)} />}
-      <DeleteRecordDialog
-        kind="company"
-        id={deletingCompany ?? ''}
-        open={!!deletingCompany}
-        onClose={() => setDeletingCompany(null)}
-        onEdit={() => setEditingCompany(store.company(deletingCompany ?? '') ?? null)}
-      />
       <DeleteRecordDialog
         kind="client"
         id={client.id}

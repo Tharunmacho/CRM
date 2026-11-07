@@ -10,7 +10,8 @@ async function load(relative) {
 }
 
 const form = await load('../src/features/clients/client-form.ts')
-const { cleanStaffRows, validateParty, buildAgencyPayload, fieldErrorsFromApi, firstName, staffRowsOf, emptyStaffRow, emptyParty, isEmptyStaffRow } = form
+const { cleanStaffRows, validateParty, buildAgencyPayload, fieldErrorsFromApi, firstName, staffRowsOf, emptyStaffRow, emptyParty, isEmptyStaffRow,
+  toggleSpecialisation, togglePreferredCountry, focusOf, SPECIALISATIONS, PREFERRED_COUNTRIES } = form
 
 const party = { name: ' Khalid Rahman ', agencyName: ' Gulf Build ', phone: '+91 98765 43210', email: 'khalid@example.com', address: ' 12 Marina Road ', state: 'Kerala' }
 
@@ -66,7 +67,7 @@ test('the agency body trims values, leaves blanks out and carries the cleaned st
   const body = buildAgencyPayload({ ...party, phone: '', state: ' ' }, [{ name: 'Ravi', designation: '', phone: '', email: '' }, emptyStaffRow()])
   assert.deepEqual(body, {
     name: 'Khalid Rahman', agencyName: 'Gulf Build', phone: undefined, email: 'khalid@example.com', address: '12 Marina Road', state: undefined,
-    staffContacts: [{ name: 'Ravi' }],
+    staffContacts: [{ name: 'Ravi' }], specialisations: [], preferredCountries: [],
   })
 })
 
@@ -95,3 +96,42 @@ test('first names for the small staff chips', () => {
   assert.equal(firstName(undefined), '')
 })
 
+
+test('the sector and country choices are the fixed lists of the requirement', () => {
+  assert.deepEqual([...SPECIALISATIONS], ['Oil and gas', 'Hospitality', 'Construction', 'General worker', 'Medical', 'All sectors'])
+  assert.deepEqual([...PREFERRED_COUNTRIES], ['Singapore', 'Malaysia', 'Europe', 'Gulf', 'Others'])
+})
+
+test('All sectors clears the single sectors and a single sector clears All sectors', () => {
+  let chosen = toggleSpecialisation([], 'Medical')
+  chosen = toggleSpecialisation(chosen, 'Oil and gas')
+  assert.deepEqual(chosen, ['Oil and gas', 'Medical'])  // listed in the form's order
+  chosen = toggleSpecialisation(chosen, 'All sectors')
+  assert.deepEqual(chosen, ['All sectors'])
+  chosen = toggleSpecialisation(chosen, 'Hospitality')
+  assert.deepEqual(chosen, ['Hospitality'])
+  assert.deepEqual(toggleSpecialisation(chosen, 'Hospitality'), [])  // pressing again turns it off
+  assert.deepEqual(toggleSpecialisation(['All sectors'], 'All sectors'), [])
+})
+
+test('preferred countries toggle independently and keep the form order', () => {
+  let chosen = togglePreferredCountry([], 'Gulf')
+  chosen = togglePreferredCountry(chosen, 'Singapore')
+  assert.deepEqual(chosen, ['Singapore', 'Gulf'])
+  assert.deepEqual(togglePreferredCountry(chosen, 'Gulf'), ['Singapore'])
+})
+
+test('saved selections load cleanly (older servers send none) and go into the agency body', () => {
+  assert.deepEqual(focusOf(undefined), { specialisations: [], preferredCountries: [] })
+  assert.deepEqual(focusOf({ specialisations: ['Medical', 'Banking'], preferredCountries: ['Gulf', 'Mars'] }), { specialisations: ['Medical'], preferredCountries: ['Gulf'] })
+  assert.deepEqual(focusOf({ specialisations: ['Medical', 'All sectors'] }).specialisations, ['All sectors'])
+  const body = buildAgencyPayload(party, [], { specialisations: ['Medical', 'Construction'], preferredCountries: ['Others', 'Europe'] })
+  assert.deepEqual(body.specialisations, ['Construction', 'Medical'])
+  assert.deepEqual(body.preferredCountries, ['Europe', 'Others'])
+})
+
+test('a 422 on the new lists lands on their buttons', () => {
+  const { fields } = fieldErrorsFromApi([{ loc: ['body', 'specialisations', 0], msg: 'Input should be a listed sector' }, { loc: ['body', 'preferredCountries'], msg: 'Too many' }])
+  assert.equal(fields.specialisations, 'Input should be a listed sector.')
+  assert.equal(fields.preferredCountries, 'Too many.')
+})

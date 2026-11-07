@@ -44,6 +44,8 @@ class FakeVeris:
         self.script: dict = {}            # (mode, chunk number) -> status the job reports ("failed", "running", ...)
         self.build = None                 # (mode, index, texts) -> extra keys merged into the default result
         self.submit_faults: list[Exception] = []
+        self.errors: dict = {}            # (mode, chunk number) -> the reader's own reason for a failed job
+        self.duplicates: set = set()      # (mode, chunk number) of submissions the reader reports as duplicates (same key seen before)
 
     def submit(self, document, *, mode, idempotency_key):
         with self.lock:
@@ -62,7 +64,7 @@ class FakeVeris:
                 job_id = f"job-{mode}-{len(self.submissions)}"
                 self.submissions.append({"mode": mode, "key": idempotency_key, "texts": texts, "job_id": job_id, "number": number})
                 self.jobs[job_id] = {"mode": mode, "number": number, "texts": texts, "polls": 0}
-            return SimpleNamespace(job_id=job_id, status="queued")
+            return SimpleNamespace(job_id=job_id, status="queued", duplicate=(mode, number) in self.duplicates)
         finally:
             with self.lock:
                 self.active -= 1
@@ -76,7 +78,7 @@ class FakeVeris:
         if callable(status):
             status = status(job["polls"])
         if status != "succeeded":
-            return SimpleNamespace(status=status, result=None)
+            return SimpleNamespace(status=status, result=None, error=self.errors.get((job["mode"], job["number"])))
         payload = result(job["mode"], len(job["texts"]))
         for page, text in zip(payload["pages"], job["texts"]):
             page["text"] = text or "blank"
@@ -767,3 +769,119 @@ def test_the_synchronous_scan_reads_a_long_pdf_as_merged_chunks(monkeypatch):
     assert {s["key"] for s in veris.submissions} == {"crm-base:chunk0", "crm-base:chunk1", "crm-base:chunk2"}
     assert [p["page_number"] for p in merged["pages"]] == list(range(1, 46))
     ResumeResponse.model_validate(merged)
+
+
+# ------------------------------------------------------------------------------ one kind at a time, degrading
+
+
+def unreadable(retryable: bool):
+    return SimpleNamespace(code="document_unreadable", message="Synthetic reason", retryable=retryable)
+
+
+COMBINED = (CV, PASSPORT, AADHAAR, AADHAAR_BACK)
+
+
+def test_kinds_are_sent_one_at_a_time_in_order_and_each_step_is_logged(world, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger=subject.log.name)
+    world.settings.veris_parallel_jobs = 1
+    world.settings.veris_early_dispatch = False  # (early dispatch sends what the first look settled, in that order)
+    world.veris.delay = 0.05
+
+    output = world.extract(pdf(*COMBINED))
+
+    assert output["status"] == "complete"
+    assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport", "aadhaar"]
+    assert world.veris.peak == 1
+    text = " | ".join(record.getMessage() for record in caplog.records)
+    for line in ("Veris resume: sending pages 1", "Veris resume: job accepted job-resu", "Veris resume: succeeded in",
+                 "Veris passport: sending pages", "Veris aadhaar: succeeded in"):
+        assert line in text, line
+    assert text.index("Veris resume: succeeded") < text.index("Veris passport: sending")
+    assert text.index("Veris passport: succeeded") < text.index("Veris aadhaar: sending")
+
+
+def test_a_running_kind_holds_the_later_kinds_back_and_a_failed_kind_does_not(world):
+    world.settings.veris_parallel_jobs = 1
+    world.settings.veris_early_dispatch = False
+    world.veris.script[("passport", 0)] = "running"
+    with pytest.raises(subject.ExtractionPending):
+        world.extract(pdf(*COMBINED))
+    assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport"]  # aadhaar waits for the passport
+
+    world.veris.script[("passport", 0)] = "failed"
+    world.veris.errors[("passport", 0)] = unreadable(False)
+    output = world.extract(pdf(*COMBINED), state=deepcopy(world.saved[-1]))
+    assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport", "aadhaar"]  # sent although passport failed
+    assert set(output["extractions"]) == {"resume", "aadhaar"}
+
+
+def test_a_terminally_failed_kind_degrades_the_file_and_explicit_retry_reads_only_it(world, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger=subject.log.name)
+    world.settings.veris_early_dispatch = False
+    world.veris.script[("passport", 0)] = "failed"
+    world.veris.errors[("passport", 0)] = unreadable(False)
+
+    output = world.extract(pdf(*COMBINED))
+
+    assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume", "aadhaar"}
+    notice = "The passport pages could not be read. Enter the passport details by hand"
+    assert any(w.startswith(notice) for w in output["warnings"])
+    assert notice in " ".join(output["coverage"]["issues"]) and output["coverage"]["complete"] is False
+    assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport", "aadhaar"]  # one failure, no repeats
+    line = next(r.getMessage() for r in caplog.records if "Veris passport: failed" in r.getMessage())
+    assert "code=document_unreadable retryable=False" in line and "Synthetic reason" not in line
+    saved = world.saved[-1]["provider_jobs"]
+    assert saved["passport"]["status"] == "failed" and saved["resume"]["status"] == "succeeded"
+    assert subject.provider_codes(world.saved[-1]) == "passport=document_unreadable"
+
+    # Another visit with the same state does not fail or pay again; it gives the same degraded answer.
+    again = world.extract(pdf(*COMBINED), state=deepcopy(world.saved[-1]))
+    assert again["status"] == "needs_review" and len(world.veris.submissions) == 3
+
+    # The explicit retry restarts the passport alone.
+    state = deepcopy(world.saved[-1])
+    assert subject.request_extraction_retry(state) == ["passport"]
+    world.veris.script.clear()
+    fixed = world.extract(pdf(*COMBINED), state=state)
+    assert fixed["status"] == "complete" and set(fixed["extractions"]) == {"resume", "passport", "aadhaar"}
+    assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport", "aadhaar", "passport"]
+
+
+def test_a_retryable_failure_raises_for_the_automatic_retry_and_degrades_on_the_last_attempt(world):
+    world.settings.veris_early_dispatch = False
+    world.veris.script[("passport", 0)] = "failed"
+    world.veris.errors[("passport", 0)] = unreadable(True)
+    state: dict = {}
+
+    with pytest.raises(subject.ExtractionFailure, match="passport"):
+        world.extract(pdf(*COMBINED), state=state)
+    assert "result" in state["provider_jobs"]["resume"] and "result" in state["provider_jobs"]["aadhaar"]  # paid work kept
+    assert subject.request_extraction_retry(state, automatic=True) == ["passport"]
+
+    world.veris.script[("passport", 1)] = "failed"
+    world.veris.errors[("passport", 1)] = unreadable(True)
+    output = world.extract(pdf(*COMBINED), state=state, final_attempt=True)
+    assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume", "aadhaar"}
+    assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport", "aadhaar", "passport"]
+
+
+def test_nothing_usable_still_fails_and_a_failure_without_a_reason_is_retried(world):
+    world.veris.script[("passport", 0)] = "failed"
+    world.veris.errors[("passport", 0)] = unreadable(False)
+    with pytest.raises(subject.ExtractionFailure, match="passport"):
+        world.extract(pdf(PASSPORT), final_attempt=True)
+
+    world.veris.script[("resume", 0)] = "failed"  # no reason given: unknown, so not terminal before the last attempt
+    with pytest.raises(subject.ExtractionFailure, match="resume"):
+        world.extract(pdf(CV, PASSPORT), state={})
+    assert subject.provider_codes({"provider_jobs": {"resume": {"status": "failed"}}}) == "none"
+
+
+def test_the_defaults_wait_a_minute_per_visit_and_prepare_the_payload():
+    from app.core.config import Settings
+
+    settings = Settings(_env_file=None)
+    assert settings.ocr_provider_wait_seconds == 60.0  # a job of 20-45 s is polled to completion in the same visit
+    assert settings.veris_passport_one_page is True and settings.veris_job_max_bytes >= 1_000_000

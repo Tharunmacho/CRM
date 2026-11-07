@@ -82,3 +82,10 @@ test('a phone highlight covers the matching digits and the punctuation between t
   assert.deepEqual(highlightPhone('+91 98765-43210', 'gulf'), [{ text: '+91 98765-43210', hit: false }])
   assert.deepEqual(highlightPhone('', '123'), [{ text: '', hit: false }])
 })
+
+test('an agency is found by its specialisation or preferred country tags', () => {
+  const agency = { name: 'Priya', agencyName: 'Blue Ocean', tags: ['Oil and gas', 'Gulf'] }
+  assert.equal(matchesSearch(agency, 'oil gas'), true)
+  assert.equal(matchesSearch(agency, 'gulf blue'), true)
+  assert.equal(matchesSearch(agency, 'singapore'), false)
+})

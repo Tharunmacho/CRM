@@ -39,7 +39,7 @@ def intake(schema_database, tmp_path, monkeypatch):
         ocr_languages="eng", ocr_max_pages=300, ocr_page_timeout_seconds=20, ocr_document_timeout_seconds=600,
         veris_ocr_base_url="https://ocr.invalid", veris_ocr_api_key="synthetic-key")
     env = SimpleNamespace(sessions=sessions, settings=settings, actor=SimpleNamespace(id="owner", role=Role.staff),
-                          submissions=[], polls=[], statuses={}, results={})
+                          submissions=[], polls=[], statuses={}, results={}, errors={})
     class Jobs:
         def submit(self, document, *, mode, idempotency_key):
             with sessions() as db:
@@ -55,7 +55,7 @@ def intake(schema_database, tmp_path, monkeypatch):
                 state = db.scalar(select(DocumentExtractionJob.state))
                 assert state["provider_jobs"][mode]["job_id"] == job_id
             env.polls.append(job_id)
-            return SimpleNamespace(status=env.statuses.get(mode, "succeeded"), result=deepcopy(env.results[mode]))
+            return SimpleNamespace(status=env.statuses.get(mode, "succeeded"), result=deepcopy(env.results[mode]), error=env.errors.get(mode))
     class Provider:
         def __init__(self, **options): self.jobs = Jobs()
         def __enter__(self): return self
@@ -217,6 +217,40 @@ def test_failure_budget_retains_original_and_retry_does_not_discard_checkpoint(i
     assert detail["status"] == "pending" and detail["attempts"] == 0
 
 
+def test_a_failed_passport_still_delivers_the_resume_with_a_notice_and_retry_reads_only_the_passport(intake, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger=document_extraction.log.name)
+    job = upload(intake, pdf(CV, PASSPORT))
+    start(intake, job["id"])
+    intake.statuses["passport"] = "failed"
+    intake.errors["passport"] = SimpleNamespace(code="document_unreadable", message="Synthetic", retryable=False)
+    process(intake, job["id"])
+    detail = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
+    assert detail["status"] == "needs_review" and detail["attempts"] == 0
+    scans = detail["result"]["scans"]
+    assert scans["resume"]["fields"] and scans["resume"]["extraction_status"] == "complete"
+    assert scans["passport"]["fields"] == {} and scans["passport"]["extraction_status"] == "needs_review"
+    assert any(w.startswith("The passport pages could not be read. Enter the passport details by hand") for w in detail["result"]["warnings"])
+    assert [mode for mode, _ in intake.submissions] == ["resume", "passport"]
+    assert detail["lastError"].startswith("The passport pages could not be read. Enter the passport details by hand")  # what the row shows
+    start(intake, job["id"])  # the explicit Retry
+    intake.statuses.clear()
+    process(intake, job["id"])
+    detail = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
+    assert detail["status"] == "completed" and detail["result"]["scans"]["passport"]["fields"]
+    assert [mode for mode, _ in intake.submissions] == ["resume", "passport", "passport"]  # the resume was not paid for again
+
+
+def test_the_server_log_names_the_readers_failure_code_when_an_attempt_fails(intake, caplog):
+    job = upload(intake, pdf(CV, PASSPORT))
+    start(intake, job["id"])
+    intake.statuses["resume"] = intake.statuses["passport"] = "failed"  # nothing usable: the whole attempt fails
+    intake.errors["resume"] = intake.errors["passport"] = SimpleNamespace(code="document_unreadable", message="Synthetic", retryable=True)
+    process(intake, job["id"])
+    assert any("reader codes: " in r.getMessage() and "=document_unreadable" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
+    assert intake.client.get("/api/ocr/jobs/" + job["id"]).json()["status"] == "retry"
+
+
 def test_dismiss_prevents_worker_processing_but_keeps_owner_original(intake):
     job = upload(intake)
     assert intake.client.post("/api/ocr/jobs/" + job["id"] + "/dismiss").status_code == 200
@@ -296,3 +330,69 @@ def test_dismiss_retry_and_draft_save_are_audited_with_user_and_time(intake):
     assert actions == ["Asked for an uploaded document to be read again", "Removed an uploaded intake file",
         "Saved candidate details from an uploaded intake"]
     assert all(row.actor_id == "owner" and row.at is not None and row.target == "synthetic.pdf" for row in rows)
+
+
+# A passport plan sends only the passport pages that carry details of their own: fewer than the pages the local check found.
+def _passport_bundle():
+    from test_passport_pages import NEIGHBOUR, data_page
+    import ocr_hard_cases as hard
+    return pdf(NEIGHBOUR, data_page(1), NEIGHBOUR), hard.valid_mrz(1)[2]
+
+
+def _agreeing_passport_result(env, number):
+    reading = result("passport", 1)
+    reading["mrz"] = {"given_names": "TESTER", "surname": "SAMPLE1", "passport_number": number, "all_check_digits_valid": True}
+    env.results["passport"] = reading
+
+
+def _passport_pages_the_local_check_found(env, identifier):
+    with env.sessions() as db:
+        state = db.get(DocumentExtractionJob, identifier).state
+    return state["inspection"]["passport_pages"], state["provider_jobs"]["passport"]["selected_pages"]
+
+
+def test_a_passport_plan_that_sends_fewer_pages_than_were_checked_still_completes_with_only_those_pages_saved(intake):
+    data, number = _passport_bundle()
+    _agreeing_passport_result(intake, number)
+    job = upload(intake, data)
+    start(intake, job["id"]); process(intake, job["id"])
+
+    inspected, sent = _passport_pages_the_local_check_found(intake, job["id"])
+    assert inspected == [1, 2, 3] and sent == [2]  # the neighbours took the passport kind but only page 2 was sent
+    detail = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
+    assert detail["status"] in ("completed", "needs_review"), detail
+    assert "no longer match" not in (detail["lastError"] or "")
+    assert detail["result"]["scans"]["passport"]["source"]["selected_pages"] == [2]
+    assert detail["result"]["scans"]["passport"]["fields"]  # the passport scan reached the form
+    with intake.sessions() as db:
+        saved = db.get(DocumentExtractionJob, job["id"])
+        assert saved.status in ("completed", "needs_review") and saved.attempts == 0
+        with fitz.open(stream=read_bytes(intake.settings, saved.state["documents"]["passport"]["object_key"]), filetype="pdf") as doc:
+            assert doc.page_count == 1  # exactly the sent page, not the three inspected ones
+            assert number in doc[0].get_text().replace(" ", "")
+    attached = intake.client.post("/api/ocr/jobs/" + job["id"] + "/attach", json={"candidateId": "candidate"})
+    assert attached.status_code == 200, attached.text
+    with intake.sessions() as db:
+        row = db.scalar(select(Attachment).where(Attachment.entity_id == "candidate", Attachment.slot == "passport"))
+        with fitz.open(stream=read_bytes(intake.settings, row.object_key), filetype="pdf") as doc:
+            assert doc.page_count == 1
+
+
+@pytest.mark.parametrize("tampered", [[2, 99], [99], []])
+def test_a_selected_page_that_was_not_checked_still_fails_the_job_with_the_pages_message(intake, monkeypatch, tampered):
+    data, number = _passport_bundle()
+    _agreeing_passport_result(intake, number)
+    job = upload(intake, data)
+    start(intake, job["id"])
+    real = document_extraction.extract_attachment
+    def outside_the_checked_pages(*args, **kwargs):
+        output = real(*args, **kwargs)
+        output["extractions"]["passport"]["selected_pages"] = list(tampered)
+        return output
+    monkeypatch.setattr(manual_extraction, "extract_attachment", outside_the_checked_pages)
+    process(intake, job["id"])
+    detail = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
+    assert detail["status"] != "completed" and detail["status"] != "needs_review"
+    assert "The selected pages no longer match what was checked earlier" in detail["lastError"]
+    with intake.sessions() as db:
+        assert "passport" not in (db.get(DocumentExtractionJob, job["id"]).state.get("documents") or {})

@@ -274,3 +274,23 @@ def test_a_failing_heartbeat_slows_down_instead_of_hammering():
     beat.halt = Halt()
     beat._run()
     assert waits == [30.0, 60.0, 120.0, 120.0, 120.0]
+
+
+def test_a_document_handed_back_is_picked_up_again_within_seconds_not_after_the_idle_poll():
+    """A finished job (a document handed back because the reader is still busy is due again in ~2 s) keeps the loop looking
+    every second for a few seconds; without that the next look was the 15 s idle poll."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    clock = VirtualTime()
+    dispatcher = Dispatcher([], concurrency=1, busy_poll=0.5, idle_poll=15.0, clock=clock)
+    assert dispatcher.poll_seconds(started=0, full=False) == 15.0  # idle: the safety-net poll
+    queue = SimpleNamespace(runner=lambda identifier, worker: None)
+    with ThreadPoolExecutor(1) as pool:
+        dispatcher._submit(pool, queue, "job")
+        deadline = time.time() + 5
+        while dispatcher.wake.is_set() is False and time.time() < deadline:
+            time.sleep(0.01)
+    assert dispatcher.poll_seconds(started=0, full=False) == Dispatcher.REVISIT_POLL  # just ended: look again soon
+    clock.now += Dispatcher.REVISIT_SECONDS + 0.1
+    assert dispatcher.poll_seconds(started=0, full=False) == 15.0  # and back to the quiet poll
+    assert Dispatcher.REVISIT_SECONDS > 2.0  # longer than the 2 s retry delay of a handed-back document

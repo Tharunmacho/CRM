@@ -1,12 +1,26 @@
 """Resumable document extraction with caller-owned durable checkpoints.
 
-A provider job is polled for at most ocr_provider_wait_seconds per invocation. A worker can
+A provider job is polled for at most ocr_provider_wait_seconds (60 s) per invocation. A worker can
 release its slot on ExtractionPending and revisit the same provider job later.
 
-Speed: the kinds of one document (résumé, passport, Aadhaar) are sent to Veris side by side, a long document is cut
-into chunks of veris_chunk_pages pages that are read side by side too (at most veris_parallel_jobs at a time), and
-the state is saved at checkpoints only: the keys before any paid work, the job ids once all are accepted, and the
-results once all have settled. Nothing is saved on a poll.
+Order: the kinds of one document go to Veris one at a time (résumé, then passport, then Aadhaar; the late part of a
+kind right after it; the chunks of a long document one after another) because veris_parallel_jobs defaults to 1;
+a higher value sends that many side by side. A job that is still running holds the later ones back, and a job that
+failed does not: the later kinds are still sent. Every step is logged (kind, pages, size, job id, outcome, time; never
+page text). The state is saved at checkpoints only: the keys before any paid work, the job ids once accepted, and the
+results as they settle. Nothing is saved on a poll.
+
+Payload: before a job is sent its file is prepared locally (integrations/ocr/payload.py: rebuilt minimal, upright, bounded
+pictures; blank and exactly repeated pages are left out and named in the coverage), and one logged line says what was sent. A
+passport of several pages goes one page per job, the strongest first; once a page gave the number, birth date and name, a
+further scan of the data page is not paid for. A job of several pages that is above the byte limit is split before it is sent,
+and one the reader refuses as too heavy (a resource, limit or size code that cannot be retried) is sent again page by page
+in the same pass; a job of one page that fails like that is terminal.
+
+Degrading: when some kinds were read and another kind ended in a terminal failure (the reader said it cannot be
+retried, the last automatic attempt was used, or its answer was unusable), the result carries what was read, is marked
+needs_review and says which kind could not be read; the failed kind stays in the saved state so an explicit retry
+reads only that kind again. When nothing usable was read the failure is raised as before.
 
 Completeness: every chunk result is kept under its own idempotency key until all chunks are in, so one failed
 chunk is retried alone; chunk results are merged without dropping or overwriting anything (integrations/ocr/merge.py);
@@ -22,7 +36,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
 import json
+import logging
 import queue
+import re
 import threading
 import time
 
@@ -32,14 +48,16 @@ from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 
 from app.integrations.ocr import client as ocr_client
 from app.integrations.ocr.field_coverage import field_report, row_report
-from app.integrations.ocr.classification import identity_hint
+from app.integrations.ocr.classification import identity_hint, passport_plan
 from app.integrations.ocr.inspection import InspectionError, inspect_document, restore_inspection
 from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields
 from app.integrations.ocr.merge import merge_results
+from app.integrations.ocr.payload import prepare_job, rotations_from, unsendable
 from app.integrations.ocr.person_split import page_identity, incompatible
 
 
-PIPELINE_VERSION = "local-pages-v1"
+log = logging.getLogger(__name__)
+PIPELINE_VERSION = "local-pages-v2"  # v2: jobs are sent as prepared files, so v1 keys (other bytes) must not be reused
 _MODELS = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}
 _PENDING = {"queued", "running"}
 # The wall clock a job's age is measured with (stored, so it survives a worker restart); replaceable in tests.
@@ -113,6 +131,8 @@ def request_extraction_retry(state: dict, *, automatic: bool = False) -> list[st
     """
     restarted = []
     for kind, record in list(state.get("provider_jobs", {}).items()):
+        if kind not in state["provider_jobs"]:
+            continue  # its late part was cleared together with the kind
         if record.get("chunks"):
             if _restart_chunks(state, kind, record, automatic):
                 restarted.append(kind)
@@ -127,8 +147,252 @@ def request_extraction_retry(state: dict, *, automatic: bool = False) -> list[st
         generations = state.setdefault("provider_generations", {})
         generations[kind] = generations.get(kind, 0) + 1
         del state["provider_jobs"][kind]
+        late = state["provider_jobs"].pop(kind + "+", None) if not kind.endswith("+") else None
+        if late is not None:
+            # The page plan of this kind is about to change, so its late part would be left behind with nothing to merge into.
+            state["provider_job_history"].setdefault(kind + "+", []).append(deepcopy(late))
+        if kind == "passport" and record.get("status") == "failed":
+            # Which pages the reader failed on (numbers only): the next attempt reads fewer of them (see _narrowed).
+            tried = sorted({*record["selected_pages"], *((late or {}).get("selected_pages") or [])})
+            state.setdefault("passport_plan", {}).setdefault("tried", []).append(tried)
         restarted.append(kind)
     return restarted
+
+
+def _narrowed(plan: dict) -> list[int] | None:
+    """The single passport page the next attempt is narrowed to after failed ones: the strongest page not yet read alone
+    (valid machine-readable zone first, then the best remaining candidate, a duplicate scan last). None when nothing
+    failed, or no page is left to narrow to (the whole selection is then sent again under a new key)."""
+    ranked = plan.get("ranked") or []
+    tried = plan.get("tried") or []
+    if not tried or len(ranked) < 2:
+        return None
+    alone = {pages[0] for pages in tried if len(pages) == 1}
+    return next(([page] for page in ranked if page not in alone), None)
+
+
+def _plan_passport(state: dict, inspected, fresh: bool) -> tuple[list[int], bool]:
+    """(pages of the passport job, narrowed after a failure). Empty pages: no page has passport evidence of its own, so
+    the caller keeps every passport page. The plan is saved in the state (page numbers only) so that a restored
+    inspection, which holds no text, and the failed attempts stay the same on every visit."""
+    stored = state.get("passport_plan") or {}
+    if fresh or "ranked" not in stored:
+        numbers = set(inspected.passport_pages)
+        rows = [(p.page_number, p.text, p.inherited, p.confidence) for p in inspected.pages if p.page_number in numbers]
+        found = passport_plan(rows)
+        gone = {item["page"] for item in state.get("passport_skipped") or []}  # pages already found not needed stay out
+        stored = {"pages": [page for page in found.pages if page not in gone] if found else [],
+                  "ranked": found.ranked if found else [],
+                  "duplicates": found.duplicates if found else [], "tried": list(stored.get("tried") or []),
+                  # The pages that are a data page (a second scan of one need not be paid for once the first was read).
+                  "data_pages": [number for number, text, _inherited, _confidence in rows if _is_data_page(text)]}
+        state["passport_plan"] = stored
+    narrowed = _narrowed(stored)
+    return (narrowed or list(stored["pages"])), narrowed is not None
+
+
+def _is_data_page(text: str | None) -> bool:
+    """Whether a passport page is the personal-details page (machine-readable zone, or the printed surname and date of
+    birth), as opposed to the address or observations page. Evidence only; the text itself is never kept."""
+    if not text:
+        return False
+    try:
+        from app.integrations.ocr import validators
+        if validators.find_mrz(text):
+            return True
+    except Exception:
+        pass
+    low = text.lower()
+    return "date of birth" in low and ("surname" in low or "given name" in low)
+
+
+def _passport_data_pages(state: dict, inspected) -> set[int]:
+    plan = state.get("passport_plan") or {}
+    if "data_pages" in plan:
+        return set(plan["data_pages"])
+    pages = getattr(_for("passport", inspected), "pages", None) or []  # a restored or chosen inspection holds no text
+    return {page.page_number for page in pages if _is_data_page(getattr(page, "text", ""))}
+
+
+def _usable_passport(payload) -> bool:
+    """A passport result that already holds the number, the birth date and a name."""
+    mrz = payload.get("mrz") if isinstance(payload, dict) and isinstance(payload.get("mrz"), dict) else {}
+    return bool(mrz.get("passport_number") and mrz.get("date_of_birth") and (mrz.get("surname") or mrz.get("given_names")))
+
+
+def _usable_passport_page(state: dict) -> int | None:
+    """The page whose job already gave the number, birth date and name (the first such page), if any."""
+    for kind, record in (state.get("provider_jobs") or {}).items():
+        if _mode(kind) != "passport":
+            continue
+        first = lambda rec: (rec.get("selected_pages") or [0])[0]
+        found = [(first(rec), rec.get("result")) for rec in record.get("chunks") or []]
+        if "result" in record:  # the chunks were merged: the first page of the part stands for them
+            found.append((first(record), record["result"]))
+        for page, payload in found:
+            if payload is not None and _usable_passport(payload):
+                return page
+    return None
+
+
+def _skip_passport_page(state: dict, unit: _Unit, inspected) -> bool:
+    """Do not pay for a further scan of the passport data page once another page gave the number, birth date and name.
+    Only a page not yet sent is dropped: it leaves its job (and the kind's pages) and is recorded as not needed."""
+    if _mode(unit.kind) != "passport" or len(unit.pages) != 1 or unit.record.get("job_id"):
+        return False
+    record = state["provider_jobs"].get(unit.kind) or {}
+    chunks = record.get("chunks") or []
+    page = unit.pages[0]
+    if len(chunks) < 2 or not any(chunk is unit.record for chunk in chunks) or page not in _passport_data_pages(state, inspected):
+        return False
+    source = _usable_passport_page(state)
+    if source is None or source == page:
+        return False
+    chunks[:] = [chunk for chunk in chunks if chunk is not unit.record]
+    record["selected_pages"] = sorted(number for chunk in chunks for number in chunk["selected_pages"])
+    place = {number: index for index, number in enumerate(record["selected_pages"], 1)}
+    for index, chunk in enumerate(chunks):
+        chunk["index"], chunk["positions"] = index, [place[number] for number in chunk["selected_pages"]]
+    state.setdefault("passport_skipped", []).append({"page": page, "of": source})
+    plan = state.get("passport_plan")
+    if plan:
+        plan["pages"] = [number for number in plan.get("pages") or [] if number != page]
+    log.info("%s: page %d not needed, the details were already read from page %d", _step(unit), page, source)
+    return True
+
+
+def _without_skipped(state: dict, *selections: dict) -> None:
+    """Take the passport pages found not needed out of the page lists (kind -> pages) that were planned before."""
+    gone = {item["page"] for item in state.get("passport_skipped") or []}
+    if not gone:
+        return
+    for selection in selections:
+        for kind in list(selection):
+            if _mode(kind) == "passport":
+                selection[kind] = [page for page in selection[kind] if page not in gone]
+
+
+def _resource_limited(rec: dict) -> bool:
+    """The reader refused the job as too heavy (a resource or size limit) and said that trying it again cannot help."""
+    reason = rec.get("provider_error") or {}
+    code = str(reason.get("code") or "").lower()
+    return reason.get("retryable", True) is False and any(word in code for word in ("resource", "limit", "too_large"))
+
+
+def _split_unit(state: dict, unit: _Unit, source_hash) -> None:
+    """Replace a job of several pages by one job per page (each page its own key; the results merge per kind as the chunks of
+    a long document do, and a page already read is kept)."""
+    record = state["provider_jobs"][unit.kind]
+    digest = _for(_mode(unit.kind), source_hash)
+    state.setdefault("provider_job_history", {}).setdefault(unit.kind, []).append(deepcopy(unit.record))
+    positions = unit.record.get("positions") or list(range(1, len(unit.pages) + 1))
+    singles = [{
+        "index": 0, "selected_pages": [page], "positions": [position],
+        "idempotency_key": _request_key(digest, unit.kind, [page], 0), "retry_generation": 0, "status": "submitting",
+    } for page, position in zip(unit.pages, positions)]
+    if record is unit.record:
+        keep = {name: record[name] for name in ("idempotency_key", "selected_pages", "retry_generation") if name in record}
+        record.clear()
+        record.update(keep, status="submitting", chunks=singles)
+    else:  # one chunk of a long document
+        chunks = record["chunks"]
+        where = next(index for index, chunk in enumerate(chunks) if chunk is unit.record)
+        chunks[where:where + 1] = singles
+        for name in ("result", "merge", "coverage_status", "validation_status", "error"):
+            record.pop(name, None)
+        record["status"] = "submitting"
+    for index, chunk in enumerate(record["chunks"]):
+        chunk["index"] = index
+
+
+def _split_heavy(state: dict, units: list[_Unit], source_hash) -> bool:
+    """A job of several pages that the reader refused as too heavy is sent again page by page. A job of one page cannot be
+    made smaller: its failure stays terminal. Called once per pass; a split job cannot split again."""
+    redone = False
+    for unit in units:
+        if not (unit.outcome == "failed" and len(unit.pages) > 1 and _resource_limited(unit.record)):
+            continue
+        log.warning("%s: the reader refused %d pages as too heavy (code=%s); sending them one page at a time",
+                    _step(unit), len(unit.pages), _short((unit.record.get("provider_error") or {}).get("code")) or "none")
+        _split_unit(state, unit, source_hash)
+        redone = True
+    return redone
+
+
+def _split_oversize(state: dict, units: list[_Unit], source_hash, cap: int) -> bool:
+    """Preflight: a prepared job of several pages above the byte limit is split BEFORE it is sent, not after a failure."""
+    redone = False
+    for unit in units:
+        if unit.document is not None and len(unit.pages) > 1 and unit.size > cap:
+            log.warning("%s: %d pages are %d KB, above the %d KB limit of one job; sending them one page at a time",
+                        _step(unit), len(unit.pages), unit.size // 1024, cap // 1024)
+            _split_unit(state, unit, source_hash)
+            redone = True
+    return redone
+
+
+def _prepared_job(unit: _Unit, content: bytes, rotations: dict, *, settings) -> bytes:
+    """The file of one job as sent (see integrations/ocr/payload.py), with the one log line of safe numbers."""
+    pages = sorted(set(unit.pages))
+    turns = [int(rotations.get(str(page), rotations.get(page, 0)) or 0) for page in pages]
+    prepared = prepare_job(content, turns, max_bytes=int(_setting(settings, "veris_prepare_target_bytes", 3_000_000)))
+    if prepared.fallback:
+        return content
+    log.info("%s: prepared %d page%s, %d KB (was %d KB), rotation fixed on %d page%s",
+             _step(unit), prepared.pages, "" if prepared.pages == 1 else "s", max(1, (len(prepared.content) + 1023) // 1024),
+             max(1, (prepared.original_bytes + 1023) // 1024), prepared.rotated, "" if prepared.rotated == 1 else "s")
+    return prepared.content
+
+
+def _payload_drops(state: dict, inspected, selected_by_kind: dict, fresh: bool) -> dict[int, str]:
+    """Pages that carry nothing to send (blank) or repeat an earlier page exactly: decided once from the original (and
+    kept in the state so every visit plans the same pages), left out of the page lists, and named in the coverage."""
+    stored = state.get("payload_drops")
+    if stored is None or fresh:
+        roles: dict[int, list[str]] = {}
+        for kind, pages in selected_by_kind.items():
+            for page in pages:
+                roles.setdefault(page, []).append(kind)
+        source = getattr(inspected, "_pdf", None)
+        pages = getattr(inspected, "pages", None)
+        found: dict[int, str] = {}
+        if source and pages and roles:
+            unread = {page.page_number for page in pages if page.status == "unread" and page.page_number in roles}
+            found = unsendable(source, {page: tuple(kinds) for page, kinds in roles.items()}, unread, getattr(inspected, "_lock", None))
+        stored = {str(page): reason for page, reason in found.items()}
+        state["payload_drops"] = stored
+    drops = {int(page): reason for page, reason in stored.items()}
+    for kind in list(selected_by_kind):
+        selected_by_kind[kind] = [page for page in selected_by_kind[kind] if page not in drops]
+    return drops
+
+
+def _resubmit_duplicates(state: dict, units: list[_Unit]) -> bool:
+    """A job the reader reported as a duplicate of an earlier one (same key) that is already failed would only fail the
+    same way again: restart it under a new key (next retry generation). Called once per pass, so it never loops."""
+    redone = False
+    for unit in units:
+        if not ((unit.outcome == "failed" and unit.record.get("duplicate"))
+                or (unit.outcome == "error" and unit.record.get("key_conflict"))):
+            continue
+        record = state["provider_jobs"][unit.kind]
+        state.setdefault("provider_job_history", {}).setdefault(unit.kind, []).append(deepcopy(unit.record))
+        log.warning("%s: the reader already had this key (%s); sending it again under a new key", _step(unit),
+                    "the job had failed" if unit.outcome == "failed" else "with other file contents")
+        if record is unit.record:
+            generations = state.setdefault("provider_generations", {})
+            generations[unit.kind] = generations.get(unit.kind, 0) + 1
+            del state["provider_jobs"][unit.kind]
+        else:  # one chunk of a long document
+            keep = {name: unit.record[name] for name in ("index", "selected_pages", "positions") if name in unit.record}
+            generation = unit.record.get("retry_generation", 0) + 1
+            unit.record.clear()
+            unit.record.update(keep, retry_generation=generation, status="submitting")
+            for name in ("result", "merge", "coverage_status", "validation_status", "error"):
+                record.pop(name, None)
+            record["status"] = "submitting"
+        redone = True
+    return redone
 
 
 def _chunk_bad(chunk: dict, automatic: bool) -> bool:
@@ -174,10 +438,18 @@ def _setting(settings, name: str, default):
     return default if value is None else value
 
 
-def _new_record(kind: str, selected: list[int], source_hash: str, generation: int, settings) -> dict:
-    """The durable intent for one kind: one provider job, or one per chunk of a long document."""
+def _new_record(kind: str, selected: list[int], source_hash: str, generation: int, settings,
+                order: list[int] | None = None) -> dict:
+    """The durable intent for one kind: one provider job, or one per chunk of a long document.
+
+    A passport of several pages is one job per page, the strongest page first (``order``: the plan's ranking), because
+    the reader's passport mode fails on heavy multi-page PDFs and because a second scan of the data page may not be needed."""
     overlap = _setting(settings, "veris_chunk_overlap_pages", 1) if _mode(kind) == "resume" else 0
-    plan = ocr_client.plan_chunks(selected, _setting(settings, "veris_chunk_pages", 20), overlap)
+    if _mode(kind) == "passport" and len(selected) > 1 and _setting(settings, "veris_passport_one_page", True):
+        ranked = [page for page in order or [] if page in selected]
+        plan = [[page] for page in [*ranked, *(page for page in selected if page not in ranked)]]
+    else:
+        plan = ocr_client.plan_chunks(selected, _setting(settings, "veris_chunk_pages", 20), overlap)
     record = {
         "idempotency_key": _request_key(source_hash, kind, selected, generation), "selected_pages": list(selected),
         "status": "submitting", "retry_generation": generation,
@@ -201,6 +473,7 @@ class _Unit:
     document: FileDescriptor | None = None
     outcome: str = ""      # "", "ok", "pending", "failed", "timed_out", "unusable", "error"
     label: str = ""
+    size: int = 0          # bytes of the document sent (for the log)
 
 
 def _units_of(kind: str, record: dict, source_hash: str) -> list[_Unit]:
@@ -223,22 +496,69 @@ def _failure_text(unit: _Unit) -> str:
     return f"We could not read the {_mode(unit.kind)} pages{unit.label}{code}. {wait}, or enter the details by hand."
 
 
-def _check_cached(kind: str, selected: list[int], record: dict, source_hash: str, generation: int) -> list[_Unit]:
-    """The units of a kind that already has a record; raises for a record that cannot be continued."""
+_ORDER = ("resume", "passport", "aadhaar")
+
+
+def _order(kind: str) -> tuple[int, bool]:
+    """Send order: résumé, passport, Aadhaar; a kind's late part ("passport+") right after it."""
+    mode = _mode(kind)
+    return (_ORDER.index(mode) if mode in _ORDER else len(_ORDER), kind.endswith("+"))
+
+
+def _step(unit: _Unit) -> str:
+    return f"Veris {_mode(unit.kind)}{' (later pages)' if unit.kind.endswith('+') else ''}{unit.label}"
+
+
+def _short(value) -> str:
+    return re.sub(r"[^A-Za-z0-9_.:-]", "", str(value or ""))[:40]
+
+
+def provider_codes(state: dict) -> str:
+    """The reader's own short failure codes in a saved state ("passport=code"), for a log line. Never any message or text."""
+    found = []
+    for kind, record in (state.get("provider_jobs") or {}).items():
+        for rec in record.get("chunks") or [record]:
+            code = _short((rec.get("provider_error") or {}).get("code"))
+            if code and rec.get("status") == "failed":
+                found.append(f"{kind}={code}")
+    return ", ".join(found) or "none"
+
+
+def _terminal(rec: dict, status: str, final: bool) -> bool:
+    """A failure that trying the same job again will not fix: the reader said it cannot be retried, or the last
+    automatic attempt has been used."""
+    return final or (status == "failed" and (rec.get("provider_error") or {}).get("retryable", True) is False)
+
+
+def _failed_notice(kind: str) -> str:
+    name = _KIND_NAMES.get(_mode(kind), _mode(kind))
+    return f"The {name} pages could not be read. Enter the {name} details by hand, or ask for the document to be read again."
+
+
+def _check_cached(kind: str, selected: list[int], record: dict, source_hash: str, generation: int,
+                  failures: dict | None = None, final: bool = False) -> list[_Unit]:
+    """The units of a kind that already has a record; raises for a record that cannot be continued
+    (with ``failures``, a terminal failure is recorded there instead and the kind has no work)."""
     if record.get("selected_pages") != selected:
         raise ExtractionFailure("The pages chosen for this document have changed. Check the saved results before trying again.")
-    if not record.get("chunks") and record.get("idempotency_key") != _request_key(source_hash, kind, selected, generation):
-        raise ExtractionFailure("The pages chosen for this document have changed. Check the saved results before trying again.")
+    expected = _request_key(source_hash, kind, selected, generation)
+    if not record.get("chunks") and record.get("idempotency_key") != expected:
+        if record.get("job_id") or "result" in record:
+            raise ExtractionFailure("The pages chosen for this document have changed. Check the saved results before trying again.")
+        record["idempotency_key"] = expected  # never accepted by the reader (an older key format): nothing to conflict with
+        record.pop("key_conflict", None)
     units = _units_of(kind, record, source_hash)
     if "result" in record:
         return []  # the whole kind (merged, for chunks) is already paid for
     for unit in units:
         rec = unit.record
-        if rec.get("status") == "failed":
-            raise ExtractionFailure(_failure_text(unit))
-        if rec.get("status") == "timed_out":
-            raise ExtractionFailure(
+        if rec.get("status") in {"failed", "timed_out"}:
+            message = _failure_text(unit) if rec["status"] == "failed" else (
                 f"Reading the {_mode(unit.kind)} pages{unit.label} took too long. It can be tried again.")
+            if failures is not None and _terminal(rec, rec["status"], final):
+                failures[kind] = message
+                return []
+            raise ExtractionFailure(message)
         if rec.get("status") == "succeeded" and "result" not in rec:
             raise ExtractionFailure("The saved result for this document has gone missing. Check the document, then try again.")
     return [unit for unit in units if "result" not in unit.record]
@@ -269,8 +589,8 @@ def _drive(unit: _Unit, settings, events: queue.Queue, abort: threading.Event) -
                 budget=max(0.0, _setting(settings, "ocr_provider_wait_seconds", 0.0)),
             )
         events.put(("job", unit, job, None))
-    except (VerisOCRError, ValidationError):
-        events.put(("error", unit, None, None))
+    except (VerisOCRError, ValidationError) as exc:
+        events.put(("error", unit, exc, None))
     except BaseException as exc:  # an unexpected fault must reach the caller, not die in a thread
         events.put(("crash", unit, exc, None))
 
@@ -304,36 +624,73 @@ def _apply_job(unit: _Unit, job) -> bool:
         if job.status == "succeeded":
             rec["validation_status"] = "failed"
         unit.outcome = "unusable"
-    return before != (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec)
+    return before != (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"))
 
 
-def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=None) -> bool:
+def _log_outcome(unit: _Unit) -> None:
+    rec, name = unit.record, _step(unit)
+    took = max(0.0, _wall() - rec.get("submitted_at", _wall()))
+    if unit.outcome == "ok":
+        log.info("%s: succeeded in %.1fs", name, took)
+    elif unit.outcome == "failed":
+        reason = rec.get("provider_error") or {}
+        log.warning("%s: failed in %.1fs code=%s retryable=%s", name, took, _short(reason.get("code")) or "none", bool(reason.get("retryable")))
+    elif unit.outcome == "pending":
+        log.info("%s: still running after %.1fs; it is checked again later", name, took)
+    elif unit.outcome == "timed_out":
+        log.warning("%s: did not finish in time (%.1fs)", name, took)
+    else:
+        log.warning("%s: the answer could not be used", name)
+
+
+def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=None, skip=None) -> bool:
     """Drive every unit that still needs the provider, at most veris_parallel_jobs at once. The job ids are saved once
     all submissions in flight are accepted; the caller saves the results (the returned flag says they changed).
     ``on_kind_done(kind)`` is called as soon as every job of a kind has its result, while other kinds are still being
     read; when it reports a change and other jobs are still running, that kind's result is saved at once, so a
-    partial result is visible as each kind completes."""
+    partial result is visible as each kind completes.
+    ``skip(unit)`` may call a job off before it is sent (a passport page that is not needed any more). The pages of a
+    passport go one at a time even when several jobs run side by side, so that a page can be found not needed."""
     if not units:
         return False
     left: dict[str, int] = {}
     for unit in units:
         left[unit.kind] = left.get(unit.kind, 0) + 1
-    parallel = max(1, int(_setting(settings, "veris_parallel_jobs", 4)))
+    parallel = max(1, int(_setting(settings, "veris_parallel_jobs", 1)))
     events: queue.Queue = queue.Queue()
     abort = threading.Event()
     waiting: list[threading.Event] = []
     presubmit: set[int] = set()
-    queued, active = deque(units), set()
+    queued, active = deque(units), {}
     crash: BaseException | None = None
     dirty = False
     finished: list[str] = []
+    # One at a time, a job still running holds the later ones back (they follow when it is done); a failed one does not.
+    held = False
+    held_passport = False  # a passport page is still running: the later pages wait for it
+
+    def may_start(unit: _Unit) -> bool:
+        return not (_mode(unit.kind) == "passport" and (held_passport or any(_mode(a.kind) == "passport" for a in active.values())))
 
     def start() -> None:
-        while queued and len(active) < parallel:
-            unit = queued.popleft()
-            active.add(id(unit))
+        nonlocal dirty
+        while queued and not held and len(active) < parallel:
+            unit = next((item for item in queued if may_start(item)), None)
+            if unit is None:
+                break
+            queued.remove(unit)
+            if skip is not None and skip(unit):
+                unit.outcome, dirty = "skipped", True
+                left[unit.kind] -= 1
+                if left[unit.kind] == 0:
+                    finished.append(unit.kind)
+                continue
+            active[id(unit)] = unit
             if not unit.record.get("job_id"):
                 presubmit.add(id(unit))
+                log.info("%s: sending pages %s (%d KB)", _step(unit), _ranges(unit.pages), max(1, (unit.size + 1023) // 1024))
+            else:
+                log.info("%s: checking saved job %s", _step(unit), _short(unit.record["job_id"])[:8])
             threading.Thread(target=_drive, args=(unit, settings, events, abort), daemon=True).start()
 
     try:
@@ -348,20 +705,30 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
             for name, unit, payload, ack in batch:
                 if name == "submitted":
                     presubmit.discard(id(unit))
-                    unit.record.update(job_id=payload.job_id, status=payload.status, submitted_at=_wall())
+                    duplicate = bool(getattr(payload, "duplicate", False))  # the reader already had a job under this key
+                    unit.record.update(job_id=payload.job_id, status=payload.status, submitted_at=_wall(), duplicate=duplicate)
+                    log.info("%s: job accepted %s duplicate=%s", _step(unit), _short(payload.job_id)[:8], duplicate)
                     waiting.append(ack)
                     dirty = True
                     continue
                 presubmit.discard(id(unit))
-                active.discard(id(unit))
+                active.pop(id(unit), None)
                 if name == "job":
                     dirty = _apply_job(unit, payload) or dirty
+                    _log_outcome(unit)
+                    held = held or (unit.outcome == "pending" and parallel == 1)
+                    held_passport = held_passport or (unit.outcome == "pending" and _mode(unit.kind) == "passport")
                     if unit.outcome == "ok":
                         left[unit.kind] -= 1
                         if left[unit.kind] == 0:
                             finished.append(unit.kind)
                 elif name == "error":
                     unit.outcome = "error"
+                    status = getattr(payload, "status", None)
+                    if status == 409:  # the same upload key was used before with other file contents
+                        unit.record["key_conflict"] = True
+                    log.warning("%s: the reader could not be reached or sent an answer we could not use (http=%s code=%s)",
+                                _step(unit), status, str(getattr(payload, "code", None) or "")[:60] or "-")
                 else:
                     unit.outcome, crash = "error", crash or payload
             if waiting and not presubmit:
@@ -383,6 +750,8 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
         for ack in waiting:
             ack.set()
         raise
+    for unit in queued:
+        log.info("%s: not sent yet, waiting for the earlier reading to finish", _step(unit))
     if crash is not None:
         raise crash
     return dirty
@@ -440,12 +809,16 @@ _UNSET = object()
 
 def _fetch_all(
     selected_by_kind: dict[str, list[int]], inspected, *, state: dict, save, settings, source_hash,
-    unsaved: bool = False, ready=None,
+    unsaved: bool = False, ready=None, failures: dict | None = None, final: bool = False,
 ) -> dict[str, dict | None]:
     """Provider result of every kind, with the kinds (and the chunks of a long document) sent side by side.
 
     ``inspected``/``source_hash`` may be per kind (``_Each``). A kind whose chunks did not cover their pages comes back
-    as None. Raises ExtractionFailure for a failed job and ExtractionPending when a job is still running."""
+    as None. Raises ExtractionFailure for a failed job and ExtractionPending when a job is still running.
+
+    With ``failures`` (a dict the caller owns) a kind whose job ended in a terminal failure (see _terminal; ``final`` is
+    the last automatic attempt) is left out of the result and named there with its message instead of raising; a
+    failure that a new attempt may still fix raises as before."""
     saved = not unsaved
 
     def checkpoint() -> None:
@@ -455,7 +828,7 @@ def _fetch_all(
 
     try:
         return _fetch(selected_by_kind, inspected, state=state, save=save, settings=settings,
-                      source_hash=source_hash, checkpoint=checkpoint, ready=ready)
+                      source_hash=source_hash, checkpoint=checkpoint, ready=ready, failures=failures, final=final)
     finally:
         if not saved:
             try:
@@ -464,10 +837,11 @@ def _fetch_all(
                 pass
 
 
-def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, checkpoint, ready=None) -> dict:
+def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, checkpoint, ready=None,
+           failures: dict | None = None, final: bool = False, resubmitted: bool = False) -> dict:
     jobs = state.setdefault("provider_jobs", {})
     generations = state.get("provider_generations", {})
-    kinds = [kind for kind, selected in selected_by_kind.items() if selected]
+    kinds = sorted((kind for kind, selected in selected_by_kind.items() if selected), key=_order)
     units: dict[str, list[_Unit]] = {}
     work: list[_Unit] = []
     fresh: dict[str, dict] = {}
@@ -475,12 +849,14 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
         selected, digest = selected_by_kind[kind], _for(_mode(kind), source_hash)
         generation = generations.get(kind, 0)
         if kind in jobs:
-            work.extend(_check_cached(kind, selected, jobs[kind], digest, generation))
+            work.extend(_check_cached(kind, selected, jobs[kind], digest, generation, failures, final))
         else:
-            fresh[kind] = _new_record(kind, selected, digest, generation, settings)
+            fresh[kind] = _new_record(kind, selected, digest, generation, settings,
+                                      order=(state.get("passport_plan") or {}).get("ranked"))
             work.extend(_units_of(kind, fresh[kind], digest))
     if work and not (settings.veris_ocr_base_url and settings.veris_ocr_api_key):
         raise ExtractionFailure("Document reading is not set up on this server yet. Ask your system administrator to finish the setup.")
+    kinds = [kind for kind in kinds if kind not in (failures or {})]  # an earlier terminal failure is not read again here
     if fresh:
         # Persist the keys before any paid work. Lost acceptance responses can
         # safely retry the same payload/key rather than create another job.
@@ -490,12 +866,18 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
         digest = _for(_mode(kind), source_hash)
         units[kind] = _units_of(kind, jobs[kind], digest)
     work = [unit for kind in kinds for unit in units[kind] if "result" not in unit.record and "result" not in jobs[kind]]
+    rotations = state.get("page_rotations") or {}
     for unit in work:
         if not unit.record.get("job_id"):
-            unit.document = FileDescriptor(
-                _for(_mode(unit.kind), inspected).pdf_for_pages(unit.pages, allow_unresolved=True),
-                filename=f"{_mode(unit.kind)}.pdf", content_type="application/pdf",
-            )
+            content = _for(_mode(unit.kind), inspected).pdf_for_pages(unit.pages, allow_unresolved=True)
+            content = _prepared_job(unit, content, rotations, settings=settings)
+            unit.document = FileDescriptor(content, filename=f"{_mode(unit.kind)}.pdf", content_type="application/pdf")
+            unit.size = len(content)
+    if _split_oversize(state, work, source_hash, int(_setting(settings, "veris_job_max_bytes", 8_000_000))):
+        checkpoint()
+        return _fetch(selected_by_kind, inspected, state=state, save=save, settings=settings, source_hash=source_hash,
+                      checkpoint=checkpoint, ready=ready, failures=failures, final=final,
+                      resubmitted=resubmitted)
     def kind_done(kind: str) -> bool:
         record = jobs[kind]
         if ready is None:
@@ -514,20 +896,34 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
     # A kind whose jobs were all finished on an earlier pass (or earlier in this one) is shown at once too.
     in_work = {unit.kind for unit in work}
     early_done = [kind for kind in kinds if kind not in in_work and kind_done(kind)]
-    dirty = _run_jobs(work, state=state, save=save, settings=settings, on_kind_done=kind_done) or bool(early_done)
+    dirty = _run_jobs(work, state=state, save=save, settings=settings, on_kind_done=kind_done,
+                      skip=lambda unit: _skip_passport_page(state, unit, inspected)) or bool(early_done)
+    if _split_heavy(state, work, source_hash):
+        # A job of several pages was refused as too heavy: its pages go again one by one in this same pass, before any
+        # degrading. The paid results of this pass are kept; a page that fails alone is terminal as before.
+        checkpoint()
+        return _fetch(selected_by_kind, inspected, state=state, save=save, settings=settings, source_hash=source_hash,
+                      checkpoint=checkpoint, ready=ready, failures=failures, final=final, resubmitted=resubmitted)
+    if not resubmitted and _resubmit_duplicates(state, work):
+        checkpoint()  # the paid results of this pass are kept; the restarted jobs are met again with their new keys
+        return _fetch(selected_by_kind, inspected, state=state, save=save, settings=settings, source_hash=source_hash,
+                      checkpoint=checkpoint, ready=ready, failures=failures, final=final, resubmitted=True)
 
     failure: str | None = None
     pending: tuple[str, str] | None = None
     for kind in kinds:
         for unit in units[kind]:
-            if unit.outcome in {"failed", "timed_out", "error"} and failure is None:
-                failure = {
-                    "failed": _failure_text(unit),
-                    "timed_out": f"Reading the {_mode(unit.kind)} pages{unit.label} took too long. It can be tried again.",
-                    "error": "The document reader sent back an answer we could not use. Try again.",
-                }[unit.outcome]
-            elif unit.outcome == "unusable" and failure is None:
-                failure = "The document reader did not find anything we could use. Check the document, then try again."
+            message = {
+                "failed": lambda: _failure_text(unit),
+                "timed_out": lambda: f"Reading the {_mode(unit.kind)} pages{unit.label} took too long. It can be tried again.",
+                "error": lambda: "The document reader sent back an answer we could not use. Try again.",
+                "unusable": lambda: "The document reader did not find anything we could use. Check the document, then try again.",
+            }.get(unit.outcome)
+            if message is not None:
+                if failures is not None and (unit.outcome == "unusable" or _terminal(unit.record, unit.outcome, final)):
+                    failures.setdefault(kind, message())
+                elif failure is None:
+                    failure = message()
             elif unit.outcome == "pending" and pending is None:
                 pending = (unit.record["job_id"], kind)
     if failure or pending:
@@ -536,6 +932,8 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
         raise ExtractionFailure(failure) if failure else ExtractionPending(*pending)
     results: dict[str, dict | None] = {}
     for kind in kinds:
+        if kind in (failures or {}):
+            continue
         record = jobs[kind]
         if record.get("chunks") and "result" not in record:
             results[kind] = _merge_kind(kind, record, state, save)
@@ -567,15 +965,18 @@ def _provider_result(
 # ---------------------------------------------------------------------------- coverage
 
 
-def _page_notes(report: dict, sent: set[int]) -> list[dict]:
-    """The pages of the file that no job was sent, with the reason."""
+def _page_notes(report: dict, sent: set[int], reasons: dict[int, str] | None = None) -> list[dict]:
+    """The pages of the file that no job was sent, with the reason (``reasons``: a given reason for a page that was
+    identified as a document page but deliberately held back)."""
     out = []
     for page in report.get("pages") or []:
         number = page.get("page_number")
         if number in sent:
             continue
         status, kind = page.get("status"), page.get("document_type")
-        if status == "unread":
+        if (reasons or {}).get(number):
+            reason, blocking = reasons[number], False  # deliberately held back (not needed, blank, duplicate)
+        elif status == "unread":
             reason, blocking = page.get("reason") or "The page could not be read.", True
         elif status == "read" and kind == "unknown":
             reason, blocking = "The page was read but could not be identified as a résumé, passport or Aadhaar page.", True
@@ -630,11 +1031,12 @@ def _cross_check(kind: str, patterns: dict, payload: dict) -> dict:
 
 
 def _coverage(report: dict, selected_by_kind: dict, extractions: dict, *, settings, chosen: bool = False,
-              probes: dict | None = None) -> tuple[dict, list[str], list[str]]:
+              probes: dict | None = None, review: list[str] | None = None,
+              page_reasons: dict[int, str] | None = None) -> tuple[dict, list[str], list[str]]:
     """The account of what was sent and what became of every Veris field, and the reasons (if any) to review."""
     sent = sorted({page for pages in selected_by_kind.values() for page in pages})
-    not_sent = [] if chosen else _page_notes(report, set(sent))
-    issues: list[str] = []
+    not_sent = [] if chosen else _page_notes(report, set(sent), page_reasons)
+    issues: list[str] = list(review or [])  # a kind that could not be read is a reason to review
     notes: list[str] = []  # recorded with the coverage; they do not hold the extraction back
     shown: list[str] = []  # the notes worth a line in the result's warnings
     unmapped: list[dict] = []
@@ -688,7 +1090,7 @@ def _coverage(report: dict, selected_by_kind: dict, extractions: dict, *, settin
                   "ignored": ignored, "unresolved": unresolved,
                   # Pages the local check could not identify, sent to a mode as candidates; the reader decides.
                   "probed": probed},
-        "kinds": kinds, "unmapped": unmapped, "issues": issues, "notes": notes,
+        "kinds": kinds, "unmapped": unmapped, "issues": issues, "notes": notes, "failed": list(review or []),
         "complete": not issues and not any(p["blocking"] for p in not_sent),
     }
     return record, issues, shown
@@ -718,9 +1120,14 @@ def _finish(state: dict, save: Callable[[dict], None], report: dict, extractions
 
 
 def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save, settings, designations,
-               unsaved: bool = False, finalize: bool = True, classified: dict | None = None):
+               unsaved: bool = False, finalize: bool = True, classified: dict | None = None,
+               degrade: bool = False, final_attempt: bool = False):
     """Send each kind's pages to Veris (resuming checkpointed jobs), validate coverage and map
     the fields. Returns (extractions, warnings, every_kind_covered, reasons_to_review).
+
+    With ``degrade``, a kind that ended in a terminal provider failure does not fail the file while another kind was
+    read: it is named in the reasons to review (and the warnings) and the others are mapped. Nothing read at all
+    still raises. ``final_attempt`` says no automatic attempt is left, so any failure is terminal.
 
     With ``finalize`` the state is saved once at the end; a caller that saves right after (``_finish``) passes False."""
     extractions: dict = {}
@@ -729,6 +1136,7 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
     covered = True
     # Pages found after a kind was first sent (the reading went on while its first pages were already with Veris) are
     # sent as a late part ("resume+") and merged with the first part; pages already sent stay sent.
+    _without_skipped(state, selected_by_kind, classified or {})
     parts, final = _split_parts(selected_by_kind, state)
     selected_by_kind.update(final)
     kinds = [kind for kind, selected in final.items() if selected]
@@ -753,13 +1161,26 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         }
         return True
 
+    failures: dict[str, str] | None = {} if degrade else None
     payloads = _fetch_all(
         parts, inspected, state=state, save=save, settings=settings,
-        source_hash=source_hash, unsaved=unsaved, ready=ready,
+        source_hash=source_hash, unsaved=unsaved, ready=ready, failures=failures, final=final_attempt,
     )
+    # A passport page found not needed during this pass (see _skip_passport_page) is no longer a page of the kind.
+    _without_skipped(state, selected_by_kind, final, parts, classified or {})
+    lost = {_mode(key) for key in failures or {}}
+    if lost:
+        if not any(payload is not None for key, payload in payloads.items() if _mode(key) not in lost):
+            raise ExtractionFailure(next(iter(failures.values())))  # nothing usable was read: the failure is not hidden
+        for kind in sorted(lost, key=_order):
+            review.append(_failed_notice(kind))
+        warnings.extend(review)
+        covered = False
+        log.warning("Reading finished without: %s (reader codes: %s); the rest is kept for review.",
+                    ", ".join(sorted(lost, key=_order)), provider_codes(state))
     late_merge: dict[str, dict] = {}
     for kind in kinds:
-        if kind + "+" not in parts:
+        if kind + "+" not in parts or kind in lost:
             continue
         first, late = payloads.get(kind), payloads.get(kind + "+")
         if first is None or late is None:
@@ -772,6 +1193,8 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         late_merge[kind] = {"conflicts": conflicts, "notes": notes, "pages": parts[kind + "+"],
                             "request_ids": [p.get("request_id") for p in (first, late) if p.get("request_id")]}
     for kind in kinds:
+        if kind in lost:
+            continue
         selected = selected_by_kind[kind]
         record = state["provider_jobs"][kind]
         payload = payloads[kind]
@@ -921,15 +1344,23 @@ def extract_selected_pages(
 _PROBE_LIMIT = 40
 
 
-def _early_selection(partial, provisional, again: list[int]) -> dict[str, list[int]]:
+def _early_selection(partial, provisional, again: list[int], plans: dict | None = None) -> dict[str, list[int]]:
     """After the first quick look: the pages already settled for each kind (not waiting for a second look)."""
     waiting = set(again)
     out: dict[str, list[int]] = {}
     for kind in ("resume", "passport", "aadhaar"):
-        pages = [
-            page.page_number for page, verdict in zip(partial.pages, provisional)
+        rows = [
+            (page, verdict) for page, verdict in zip(partial.pages, provisional)
             if page.status == "read" and page.page_number not in waiting and (verdict.document_type == kind or kind in verdict.also)
         ]
+        pages = [page.page_number for page, _ in rows]
+        if kind == "passport" and pages:
+            # The same rule as the final plan (see _plan_passport): neighbours with no passport details of their own are not sent.
+            plan = passport_plan([(page.page_number, page.text, verdict.inherited, page.confidence) for page, verdict in rows])
+            pages = plan.pages if plan else pages
+            if plan and plans is not None:  # the ranking and data pages, so that the strongest page is sent first
+                plans["passport"] = {"pages": list(plan.pages), "ranked": list(plan.ranked), "duplicates": list(plan.duplicates),
+                                     "data_pages": [page.page_number for page, _ in rows if _is_data_page(page.text)]}
         if pages:
             out[kind] = pages
     return out
@@ -945,7 +1376,8 @@ def _inspect_and_send_early(data: bytes, options: dict, *, state: dict, save, se
     events: queue.Queue = queue.Queue()
 
     def first_pass(partial, provisional, again) -> None:
-        events.put(("early", (partial, _early_selection(partial, provisional, again))))
+        plans: dict = {}
+        events.put(("early", (partial, _early_selection(partial, provisional, again, plans), plans)))
 
     def work() -> None:
         try:
@@ -957,7 +1389,11 @@ def _inspect_and_send_early(data: bytes, options: dict, *, state: dict, save, se
     while True:
         name, payload = events.get()
         if name == "early":
-            partial, selection = payload
+            partial, selection, plans = payload
+            if (state.get("passport_plan") or {}).get("tried"):
+                selection.pop("passport", None)  # the passport reading failed before: the normal pass narrows it
+            elif "passport" in selection and "ranked" not in (state.get("passport_plan") or {}) and plans.get("passport"):
+                state["passport_plan"] = {**plans["passport"], "tried": []}  # replaced by the final plan after the full read
             if any(selection.values()):
                 try:
                     _fetch_all(selection, partial, state=state, save=save, settings=settings, source_hash=source_hash)
@@ -967,6 +1403,25 @@ def _inspect_and_send_early(data: bytes, options: dict, *, state: dict, save, se
             return payload
         else:
             raise payload
+
+
+def _passport_reasons(state: dict, inspected, sent: set[int]) -> dict[int, str]:
+    """Why a page taken for a passport was not sent (shown in the coverage)."""
+    plan = state.get("passport_plan") or {}
+    reasons = {}
+    skipped = {item["page"]: item["of"] for item in state.get("passport_skipped") or []}
+    for page in inspected.passport_pages:
+        if page in sent:
+            continue
+        if page in skipped:
+            reasons[page] = f"Not needed: details already read from page {skipped[page]}."
+            continue
+        twin = next((d["of"] for d in plan.get("duplicates") or [] if d["page"] == page), None)
+        reasons[page] = (
+            f"Duplicate of page {twin}; the copy with the better reading was sent." if twin else
+            "Held back after the reader failed on these pages; the strongest page is read alone first." if page in (plan.get("pages") or []) else
+            "Next to a passport page but with no passport details of its own; not sent.")
+    return reasons
 
 
 def _probe_pages(inspected) -> dict[str, list[int]]:
@@ -1045,6 +1500,7 @@ def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict,
 def extract_attachment(
     data: bytes, *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
+    final_attempt: bool = False,
 ) -> dict:
     """Inspect every page and resume recorded résumé/passport/Aadhaar jobs.
 
@@ -1053,6 +1509,9 @@ def extract_attachment(
     pages of a file that also has unread or unclassified ones (reported as needs_review, never dropped); with
     ``partial=False`` any such page holds the whole file back. ``ignore_decorative`` sets aside a single
     picture holding no document text (a logo or photo) instead of asking for review.
+
+    A kind the reader terminally failed on does not fail the file while another kind was read: the result is
+    needs_review with a notice naming the kind (``final_attempt``: the caller has no automatic attempt left).
     """
     source_hash = hashlib.sha256(data).hexdigest()
     if state.get("source_sha256") not in {None, source_hash}:
@@ -1118,6 +1577,8 @@ def extract_attachment(
             if pages
         }
         state["local_patterns"] = {kind: value for kind, value in patterns.items() if value}
+        # Pages the local reading could only read once turned: sent upright (see integrations/ocr/payload.py).
+        state["page_rotations"] = {str(page): angle for page, angle in rotations_from(inspected.completeness).items()}
     if state.get("splitSuggested"):
         warnings.append("This document contains different candidate identities. Open Review people and pages before saving any candidate.")
         return _finish(state, save, report, {}, "needs_review", warnings)
@@ -1136,7 +1597,15 @@ def extract_attachment(
         state["probe_plan"] = probes  # a restored inspection holds no text, so the plan is kept to stay the same on every visit
     else:
         probes = {kind: list(pages) for kind, pages in state["probe_plan"].items()}
+    passport_pages, narrowed = _plan_passport(state, inspected, fresh_inspection)
+    if passport_pages:
+        classified["passport"] = passport_pages
+    if narrowed:
+        probes = {kind: pages for kind, pages in probes.items() if kind != "passport"}  # nothing is added to a narrowed attempt
     selected_by_kind = {kind: sorted({*pages, *probes.get(kind, [])}) for kind, pages in classified.items()}
+    payload_drops = _payload_drops(state, inspected, selected_by_kind, fresh_inspection)
+    for kind in classified:
+        classified[kind] = [page for page in classified[kind] if page not in payload_drops]
     if not any(selected_by_kind.values()):
         warnings.append("No résumé, passport or Aadhaar pages were identified.")
         return _finish(state, save, report, {}, "ignored", warnings)
@@ -1151,9 +1620,10 @@ def extract_attachment(
             )
         status = "needs_review"
     # The first save of this run (the keys, before any paid work) also carries the inspection.
-    extractions, notices, covered, _review = _run_kinds(
+    extractions, notices, covered, review = _run_kinds(
         selected_by_kind, inspected, report, source_hash, state=state, save=save,
         settings=settings, designations=designations, unsaved=fresh_inspection, finalize=False, classified=classified,
+        degrade=True, final_attempt=final_attempt,
     )
     warnings.extend(notices)
     if not covered:
@@ -1169,7 +1639,10 @@ def extract_attachment(
         state["inspection"] = {**report, "unsent_page_text": held} if held else report
         for kind in promoted:
             extractions[kind]["source"]["local_inspection"] = {**report, "selected_pages": list(selected_by_kind[kind])}
-    coverage, issues, shown = _coverage(report, selected_by_kind, extractions, settings=settings, probes=probes)
+    page_reasons = {page: f"Not sent: {reason}." for page, reason in payload_drops.items()}
+    page_reasons.update(_passport_reasons(state, inspected, set(selected_by_kind["passport"])))
+    coverage, issues, shown = _coverage(report, selected_by_kind, extractions, settings=settings, probes=probes, review=review,
+                                        page_reasons=page_reasons)
     warnings.extend([*issues, *shown])
     if issues:
         status = "needs_review"

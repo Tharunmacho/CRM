@@ -283,3 +283,14 @@ test('fileRows passes the clock to every row and keeps their order', () => {
   const rows = fileRows([queued({ aheadOfYou: 1, reader: dead }), queued({ aheadOfYou: 0, reader: alive })], { now: T0 })
   assert.deepEqual(rows.map((row) => row.stalled), ['reader', null])
 })
+
+test('polling waits for the previous answer, then READ_POLL_MS, and sends nothing while the tab is hidden', async () => {
+  const hook = await readFile(new URL('../src/features/candidates/use-document-intake.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(hook, /setInterval\([^)]*groups/)
+  const loop = hook.slice(hook.indexOf('const read = async'), hook.indexOf('const refresh = async'))
+  // One awaited request per round, then the pause, then (only while visible) the next round.
+  assert.ok(loop.indexOf("await api.get<IntakeJob[]>('/ocr/jobs/groups/'") < loop.indexOf('await pause(signal)'))
+  assert.ok(loop.indexOf('await pause(signal)') < loop.indexOf('await whenVisible(signal)'))
+  assert.match(hook, /document\.visibilityState !== 'hidden'/)
+  assert.match(hook, /addEventListener\('visibilitychange', changed\)/)
+})

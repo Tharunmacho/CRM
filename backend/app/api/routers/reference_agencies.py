@@ -1,5 +1,6 @@
 """Reference agencies: agencies that refer candidates. Same card as a client (contact person, agency name, phone, email,
-address, state) plus an optional list of people on the agency's own team.
+address, state) plus an optional list of people on the agency's own team, the sectors it specialises in and its preferred countries
+(fixed sets, stored as lists; migration 0033).
 
 Any signed-in user may add, change or remove one, exactly as any signed-in user may create a client; nothing else
 points at an agency, so removing one cannot orphan a record. Every change is written to the audit trail
@@ -8,8 +9,10 @@ points at an agency, so removing one cannot orphan a record. Every change is wri
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, status
-from pydantic import Field
+from pydantic import Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,6 +25,13 @@ from app.db.session import get_db
 router = APIRouter(prefix="/api/reference-agencies", tags=["reference agencies"])
 
 
+ALL_SECTORS = "All sectors"
+SPECIALISATIONS = ("Oil and gas", "Hospitality", "Construction", "General worker", "Medical", ALL_SECTORS)
+PREFERRED_COUNTRIES = ("Singapore", "Malaysia", "Europe", "Gulf", "Others")
+Specialisation = Literal["Oil and gas", "Hospitality", "Construction", "General worker", "Medical", "All sectors"]
+PreferredCountry = Literal["Singapore", "Malaysia", "Europe", "Gulf", "Others"]
+
+
 class ReferenceAgencyIn(MasterInput):
     # The contact person.
     name: str = Field(min_length=1, max_length=200)
@@ -32,6 +42,21 @@ class ReferenceAgencyIn(MasterInput):
     state: str | None = Field(default=None, max_length=100)
     notes: str | None = Field(default=None, max_length=20000)
     staffContacts: list[StaffContactIn] = Field(default_factory=list, max_length=MAX_STAFF_CONTACTS)
+    specialisations: list[Specialisation] = Field(default_factory=list, max_length=len(SPECIALISATIONS) * 2)
+    preferredCountries: list[PreferredCountry] = Field(default_factory=list, max_length=len(PREFERRED_COUNTRIES) * 2)
+
+    @field_validator("specialisations")
+    @classmethod
+    def sectors_in_order(cls, values):
+        """Distinct, in the order the form lists them. "All sectors" means every sector, so it stands alone."""
+        if ALL_SECTORS in values:
+            return [ALL_SECTORS]
+        return [name for name in SPECIALISATIONS if name in values]
+
+    @field_validator("preferredCountries")
+    @classmethod
+    def countries_in_order(cls, values):
+        return [name for name in PREFERRED_COUNTRIES if name in values]
 
 
 @router.get("")

@@ -160,48 +160,7 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 .cd-sub > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .cd-head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-.cd-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); align-items: start; gap: 20px; margin-bottom: 32px; }
-.cd-layout > :is(aside, section) { display: flex; flex-direction: column; min-width: 0; }
-.cd-layout > :is(aside, section) > .ui-panel { flex: none; }
-.cd-person { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
-.cd-person-name { font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--text-main); overflow-wrap: anywhere; }
-.cd-person-role { font-size: 13px; color: var(--text-muted); }
-.cd-contact { display: grid; gap: 4px; margin-top: 12px; }
-.cd-contact li { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 36px; font-size: 14px; color: var(--text-main); }
-.cd-contact li > svg { flex: none; color: var(--text-light); }
-.cd-contact li > span { min-width: 0; overflow-wrap: anywhere; }
-.cd-contact a, .cd-detail a { color: var(--text-main); overflow-wrap: anywhere; }
-.cd-contact a:hover, .cd-detail a:hover { color: var(--primary); text-decoration: underline; }
-.cd-none { color: var(--text-light); }
-.cd-block { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-faint); }
-.cd-block > h3 { margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
-.cd-notes { font-size: 13.5px; line-height: 1.6; color: var(--text-main); overflow-wrap: anywhere; white-space: pre-wrap; }
-.cd-agreements { display: grid; gap: 10px; }
-.cd-agreements li { display: grid; gap: 4px; min-width: 0; font-size: 13px; }
-.cd-agreements li > b { overflow-wrap: anywhere; font-weight: 500; color: var(--text-main); }
 
-.cd-employers { display: grid; }
-.cd-employer { padding: 20px; border-bottom: 1px solid var(--border-faint); }
-.cd-employer:last-child { border-bottom: 0; }
-.cd-employer > header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
-.cd-employer-title { flex: 1; min-width: 0; }
-.cd-employer-title h3 { font-size: 16px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; color: var(--text-main); overflow-wrap: anywhere; }
-.cd-employer-title p { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 2px; font-size: 13px; color: var(--text-muted); }
-.cd-employer-badges { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.cd-details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 24px; }
-.cd-detail { min-width: 0; }
-.cd-detail.cd-wide { grid-column: 1 / -1; }
-.cd-detail.cd-span2 { grid-column: span 2; }
-.cd-detail dt { font-size: 12.5px; color: var(--text-muted); }
-.cd-detail dd { margin-top: 2px; font-size: 14px; line-height: 1.5; color: var(--text-main); overflow-wrap: anywhere; white-space: pre-line; }
-.cd-file { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; color: var(--primary) !important; }
-.cd-link { color: var(--primary); font-size: 14px; text-align: left; }
-.cd-link:hover { text-decoration: underline; }
-.cd-employer-notes { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: var(--tint-1); font-size: 13.5px; color: var(--text-main); white-space: pre-wrap; overflow-wrap: anywhere; }
-.cd-employer > footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-faint); }
-.cd-employer-stats { display: grid; gap: 4px; min-width: 180px; max-width: 280px; flex: 1 1 200px; font-size: 13px; color: var(--text-muted); }
-.cd-employer-stats b { font-weight: 600; color: var(--text-main); }
-.cd-employer-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .cd-orders-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .cd-orders-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -.02em; color: var(--text-main); }
@@ -245,22 +204,6 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 .cd-profile:hover { border-color: var(--primary); color: var(--primary); }
 .cd-profile:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
-/* Company details sheet (opened from the Companies list) */
-.cd-sheet { padding: 20px 20px 20px; border-bottom: 1px solid var(--border-faint); }
-.cd-sheet:last-child { border-bottom: 0; }
-.cd-sheet .cd-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.cd-sheet-orders { padding: 20px; }
-.cd-sheet-orders > h3 { margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
-.cd-sheet-orders .cd-employer-stats { max-width: none; margin-bottom: 12px; }
-.cd-sheet-list { display: grid; gap: 8px; }
-.cd-sheet-list a { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 10px 14px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); transition: border-color .12s; }
-.cd-sheet-list a:hover { border-color: var(--primary); }
-.cd-sheet-list a > .ui-badge, .cd-sheet .cd-employer-badges > * { flex: none; white-space: nowrap; }
-.cd-sheet > header { flex-wrap: wrap; }
-.cd-sheet-list a { text-decoration: none; }
-.cd-sheet-list .cd-sheet-main { display: grid; min-width: 0; line-height: 1.35; }
-.cd-sheet-list b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; color: var(--text-main); }
-.cd-sheet-list small { font-size: 12.5px; color: var(--text-muted); }
 
 /* ----------------------------------------------------------- dialogs */
 .client-form { display: grid; gap: 22px; }
@@ -292,11 +235,8 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 
 /* ------------------------------------------------------------ responsive */
 @media (max-width: 1279px) {
-  .cd-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cd-detail.cd-span2 { grid-column: 1 / -1; }
 }
 @media (max-width: 1100px) {
-  .cd-layout { grid-template-columns: minmax(0, 1fr); }
   .cl-toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cl-toolbar > .ui-search { grid-column: 1 / -1; }
   .cl-toolbar.is-companies { grid-template-columns: minmax(0, 1fr); }
@@ -324,12 +264,6 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
   .cd-head h1 { font-size: 23px; }
   .cd-head-actions, .cd-head-actions > .ui-button { width: 100%; }
   .cd-head-actions > .ui-button { flex: 1 1 auto; }
-  .cd-details, .cd-sheet .cd-details { grid-template-columns: minmax(0, 1fr); }
-  .cd-employer { padding: 16px; }
-  .cd-employer > header { flex-wrap: wrap; }
-  .cd-employer-badges { justify-content: flex-start; }
-  .cd-employer-actions, .cd-employer-actions > .ui-button { width: 100%; }
-  .cd-employer-actions > .ui-button { flex: 1 1 auto; }
   .cd-orders-head .custom-select { width: 100%; }
   .cd-order-head { padding: 14px 16px 12px; }
   .cd-progress { margin: 0 16px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -368,7 +302,6 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
   .cl-facts dd:not(:has(a, .cl-place, .cl-pill, .cl-demand)) { display: flex; align-items: center; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
   .cl-facts dd > a:not(.cl-copy), .cl-facts dd .cl-link, .cl-facts dd a.cl-tel { display: inline-flex; align-items: center; min-height: 40px; }
   .cl-copy { width: 40px; height: 40px; margin: 0; border-radius: 8px; }
-  .cd-contact .cl-copy { margin-left: 8px; }
   .cl-card > footer { flex-wrap: wrap; justify-content: stretch; gap: 8px; padding: 12px 16px 16px; }
   .cl-card > footer > .ui-button { flex: 1 1 0; justify-content: center; }
   .cl-menu-btn { width: 40px; height: 40px; border: 1px solid var(--border-control); }
@@ -377,12 +310,7 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 
   /* Client detail */
   .cd-back { display: inline-flex; align-items: center; min-height: 40px; margin-bottom: 8px; }
-  .cd-contact li { min-height: 44px; }
-  .cd-contact a, .cd-agreements .cd-file, .cd-agreements .cd-link { display: inline-flex; align-items: center; min-height: 40px; }
   /* Every value row is 40px high, so links and buttons are real 40px targets and values line up. */
-  .cd-detail dd { display: flex; align-items: center; min-height: 40px; }
-  .cd-detail a, .cd-detail .cd-link, .cd-detail .cd-file { display: inline-flex; align-items: center; min-height: 40px; }
-  .cd-details { gap: 10px 24px; }
   .cd-order-head h3 button { display: inline-flex; align-items: center; min-height: 40px; }
   .cd-cand { min-height: 44px; }
   .cd-profile { min-height: 40px; padding: 0 14px; }
@@ -424,11 +352,6 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
   .cd-head-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; width: 100%; }
   .cd-head-actions > .ui-button { width: 100%; }
   .cd-head-actions svg { display: none; }
-  .cd-layout { gap: 16px; margin-bottom: 24px; }
-  .cd-employer-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .cd-employer-actions > .ui-button { width: 100%; }
-  .cd-employer-actions > .ui-button:last-child { grid-column: 1 / -1; }
-  .cd-employer-stats { max-width: none; min-width: 0; flex-basis: 100%; }
   .cd-order-side { width: 100%; justify-content: space-between; }
   .cd-no-candidates > .ui-button { width: 100%; }
   .cd-cands tbody tr { padding: 14px 16px; }
@@ -463,8 +386,3 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 @media (max-width: 720px) { .cd-cands td.c-profile { width: auto; } }
 
 /* Who looks after this client (CRM staff) and the client's own staff details. */
-.cd-staff { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.cd-staff li { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.cd-staff span { display: grid; min-width: 0; line-height: 1.3; }
-.cd-staff b { font-size: 13.5px; font-weight: 600; color: var(--text-main); overflow-wrap: anywhere; }
-.cd-staff small { font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }

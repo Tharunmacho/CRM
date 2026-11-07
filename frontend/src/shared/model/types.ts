@@ -174,6 +174,10 @@ export interface ReferenceAgency {
   address?: string
   state?: string
   staffContacts?: StaffContact[]
+  /** Sectors the agency specialises in; `All sectors` stands alone. Absent on a server that predates migration 0033. */
+  specialisations?: string[]
+  /** Countries or regions the agency prefers. */
+  preferredCountries?: string[]
   createdAt?: string
 }
 

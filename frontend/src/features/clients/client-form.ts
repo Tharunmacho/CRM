@@ -24,6 +24,43 @@ export const MAX_STAFF_ROWS = 50
 
 export const emptyStaffRow = (): StaffRow => ({ name: '', designation: '', phone: '', email: '' })
 
+/** The fixed choices of the agency dialog; the server accepts exactly these (reference_agencies.py). */
+export const ALL_SECTORS = 'All sectors'
+export const SPECIALISATIONS: readonly string[] = ['Oil and gas', 'Hospitality', 'Construction', 'General worker', 'Medical', ALL_SECTORS]
+export const PREFERRED_COUNTRIES: readonly string[] = ['Singapore', 'Malaysia', 'Europe', 'Gulf', 'Others']
+
+/** What the two button groups hold while editing. */
+export interface AgencyFocus { specialisations: string[]; preferredCountries: string[] }
+
+export const emptyFocus = (): AgencyFocus => ({ specialisations: [], preferredCountries: [] })
+
+/** "All sectors" means every sector, so when it is present it stands alone; otherwise the known sectors in the form's order. */
+export function normaliseSpecialisations(values: readonly string[]): string[] {
+  if (values.includes(ALL_SECTORS)) return [ALL_SECTORS]
+  return SPECIALISATIONS.filter((name) => values.includes(name))
+}
+
+/** The saved selections, keeping only values the form knows and listing them in the form's order. */
+export function focusOf(agency?: { specialisations?: string[] | null; preferredCountries?: string[] | null } | null): AgencyFocus {
+  return {
+    specialisations: normaliseSpecialisations(agency?.specialisations ?? []),
+    preferredCountries: PREFERRED_COUNTRIES.filter((name) => agency?.preferredCountries?.includes(name)),
+  }
+}
+
+/** Presses one sector button: choosing All sectors clears the others, choosing a single sector clears All sectors. */
+export function toggleSpecialisation(current: readonly string[], name: string): string[] {
+  if (current.includes(name)) return normaliseSpecialisations(current.filter((item) => item !== name))
+  if (name === ALL_SECTORS) return [ALL_SECTORS]
+  return normaliseSpecialisations([...current.filter((item) => item !== ALL_SECTORS), name])
+}
+
+/** Presses one country button. */
+export function togglePreferredCountry(current: readonly string[], name: string): string[] {
+  const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name]
+  return PREFERRED_COUNTRIES.filter((item) => next.includes(item))
+}
+
 export const emptyParty = (): PartyFields => ({ name: '', agencyName: '', phone: '', email: '', address: '', state: '' })
 
 
@@ -90,7 +127,7 @@ export function validateParty(fields: PartyFields, rows: StaffRow[]): FieldError
 const optional = (value: string) => trim(value) || undefined
 
 /** Body for POST /reference-agencies and PUT /reference-agencies/:id. */
-export function buildAgencyPayload(fields: PartyFields, rows: StaffRow[]) {
+export function buildAgencyPayload(fields: PartyFields, rows: StaffRow[], focus: AgencyFocus = emptyFocus()) {
   return {
     name: trim(fields.name),
     agencyName: trim(fields.agencyName),
@@ -99,15 +136,17 @@ export function buildAgencyPayload(fields: PartyFields, rows: StaffRow[]) {
     address: optional(fields.address),
     state: optional(fields.state),
     staffContacts: cleanStaffRows(rows),
+    specialisations: normaliseSpecialisations(focus.specialisations),
+    preferredCountries: PREFERRED_COUNTRIES.filter((name) => focus.preferredCountries.includes(name)),
   }
 }
 
 /** The names the form uses for the server's field names (`agency_name`, `contactEmail` ...). */
 const FIELD_ALIASES: Record<string, string> = {
   agency_name: 'agencyName', agencyname: 'agencyName', contactemail: 'email', contact_email: 'email', contactperson: 'name', contact_person: 'name',
-  staff_contacts: 'staff', staffcontacts: 'staff',
+  staff_contacts: 'staff', staffcontacts: 'staff', preferred_countries: 'preferredCountries', preferredcountries: 'preferredCountries',
 }
-const FORM_FIELDS = new Set(['name', 'agencyName', 'phone', 'email', 'address', 'state', 'staff', 'staffIds'])
+const FORM_FIELDS = new Set(['name', 'agencyName', 'phone', 'email', 'address', 'state', 'staff', 'staffIds', 'specialisations', 'preferredCountries'])
 
 /**
  * Turns a 422 body (`[{loc: ['body', 'staffContacts', 0, 'email'], msg}]`) into field errors, so each message shows under

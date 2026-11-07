@@ -472,7 +472,8 @@ def _master_values(body: MasterInput):
                "requiredSkills": "required_skills", "minExperience": "min_experience",
                "companyId": "company_id", "designationId": "designation_id",
                "contractPeriod": "contract_period", "interviewDate": "interview_date",
-               "staffContacts": "staff_contacts", "agencyName": "agency_name"}
+               "staffContacts": "staff_contacts", "agencyName": "agency_name",
+               "preferredCountries": "preferred_countries"}
     return {aliases.get(key, key): value for key, value in body.model_dump(exclude={"company", "staffIds"}).items()}
 
 
@@ -487,6 +488,9 @@ def _master_save(db, user, row, body, kind, schema, *, new=False, commit=True, e
     values = _master_values(body)
     if not new and "staffContacts" not in body.model_fields_set:
         values.pop("staff_contacts", None)  # a PUT that does not mention the team keeps it
+    for wire, column in (("specialisations", "specialisations"), ("preferredCountries", "preferred_countries")):
+        if not new and wire not in body.model_fields_set:
+            values.pop(column, None)  # nor does it clear a selection it never mentioned
     for key, value in values.items():
         previous = getattr(row, key)
         if previous != value:

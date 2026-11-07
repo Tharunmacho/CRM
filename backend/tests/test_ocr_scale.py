@@ -73,8 +73,12 @@ def test_tesseract_processes_never_exceed_the_shared_budget_across_documents(fak
     assert subject._PROCESSES.peak <= 3 and subject._PROCESSES.running == 0
 
 
-def test_the_default_budget_is_about_twice_the_cpu_count():
-    assert subject._default_process_limit() == max(2, 2 * (os.cpu_count() or 2)) or os.environ.get("OCR_MAX_TESSERACT_PROCESSES")
+def test_the_default_budget_is_one_process_per_usable_cpu(monkeypatch):
+    monkeypatch.delenv("OCR_MAX_TESSERACT_PROCESSES", raising=False)
+    from app.core.cpus import available_cpus
+
+    assert subject._default_process_limit() == max(2, available_cpus())
+    assert available_cpus() <= (os.cpu_count() or 4)
 
 
 def test_a_caller_that_cannot_get_a_slot_in_time_gets_a_retryable_time_limit(monkeypatch):

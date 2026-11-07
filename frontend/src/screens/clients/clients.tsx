@@ -109,6 +109,12 @@ function StaffStack({ staff, query }: { staff: { id: string; name: string }[]; q
 const staffCount = (agency: ReferenceAgency) => agency.staffContacts?.length ?? 0
 const staffLabel = (agency: ReferenceAgency) => (agency.staffContacts ?? []).map((person) => person.name).join(', ')
 
+/** Compact chips for a saved selection (specialisations, preferred countries); a quiet note when nothing is chosen. */
+function ChipList({ values, label }: { values?: string[]; label: string }) {
+  if (!values?.length) return <Quiet>Not added</Quiet>
+  return <ul className="cs-tags" aria-label={label}>{values.map((value) => <li key={value} className="cs-tag">{value}</li>)}</ul>
+}
+
 /** One card: avatar, agency, contact person, a short fact list, then (clients) the allocated staff and the actions. */
 function RecordCard({ title, contact, facts, staff, actions }: { title: string; contact: string; facts: { label: string; value: ReactNode }[]; staff?: ReactNode; actions: ReactNode }) {
   return <article className="cs-card">
@@ -151,6 +157,8 @@ function AgencyCards({ rows, query, onEdit, onDelete }: { rows: AgencyRow[]; que
       { label: 'Email', value: mail(agency.email ?? '', agency.name, query) },
       { label: 'Address', value: place(agency.address ?? '', query) },
       { label: 'State', value: <Location primary={agency.state ?? ''} query={query} /> },
+      { label: 'Specialisation', value: <ChipList values={agency.specialisations} label="Specialisation" /> },
+      { label: 'Preferred country', value: <ChipList values={agency.preferredCountries} label="Preferred country" /> },
       { label: 'Staff', value: staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
     ]}
     actions={<>
@@ -182,6 +190,8 @@ function AgencyTable({ rows, query, loading, onEdit, onDelete }: { rows: AgencyR
     { key: 'agency', header: 'Agency', width: '24%', minWidth: '12rem', render: ({ agency }) => <Identity name={agency.agencyName} query={query} /> },
     { key: 'contact', header: 'Contact person', width: '25%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
     { key: 'location', header: 'Location', width: '27%', align: 'left', render: ({ agency }) => <Location primary={agency.state ?? ''} secondary={agency.address} query={query} /> },
+    { key: 'focus', header: 'Specialisation and country', width: '22%', minWidth: '12rem', align: 'left', render: ({ agency }) => (agency.specialisations?.length || agency.preferredCountries?.length)
+      ? <span className="cs-tagstack"><ChipList values={agency.specialisations} label="Specialisation" /><ChipList values={agency.preferredCountries} label="Preferred country" /></span> : <Quiet>Not added</Quiet> },
     { key: 'staff', header: 'Staff details', width: '10%', align: 'left', render: ({ agency }) => staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
     {
       key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
@@ -279,7 +289,8 @@ export default function ClientsPage() {
 
   const agencyRows = useMemo<AgencyRow[]>(() => (agencies.items ?? []).map((agency) => ({
     agency,
-    search: { name: agency.name, agencyName: agency.agencyName, email: agency.email, address: agency.address, state: agency.state, phone: agency.phone, staffContacts: agency.staffContacts },
+    search: { name: agency.name, agencyName: agency.agencyName, email: agency.email, address: agency.address, state: agency.state, phone: agency.phone, staffContacts: agency.staffContacts,
+      tags: [...(agency.specialisations ?? []), ...(agency.preferredCountries ?? [])] },
   })), [agencies.items])
 
   const searching = query.trim().length > 0

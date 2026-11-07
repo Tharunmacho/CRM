@@ -96,3 +96,26 @@ def test_a_failed_reader_job_keeps_the_readers_own_reason():
     bare.record, bare.kind, bare.label, bare.pages, bare.outcome = {}, "passport", "", [8], None
     extraction._apply_job(bare, N(status="failed", result=None))
     assert "provider_error" not in bare.record and "reader code" not in extraction._failure_text(bare)
+
+
+def test_the_diagnostic_lists_pages_sent_duplicate_flag_reason_and_the_narrowing(intake):
+    job = upload(intake, pdf(CV))
+    with intake.sessions() as db:
+        row = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == job["id"]))
+        row.state = {
+            "provider_jobs": {"passport": {"status": "failed", "selected_pages": [11], "duplicate": True, "attempts": 1,
+                                           "provider_error": {"code": "synthetic_code", "message": "Synthetic", "retryable": False}}},
+            "passport_plan": {"pages": [8, 11], "ranked": [11, 8], "duplicates": [{"page": 9, "of": 11}], "tried": [[8, 11]]},
+            "provider_job_history": {"passport": [{"status": "failed", "selected_pages": [8, 11], "duplicate": False,
+                                                    "provider_error": {"code": "earlier_code", "retryable": True}}]},
+        }
+        db.commit()
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        diag_extraction.main(sessions=intake.sessions)
+
+    text = out.getvalue()
+    assert "veris passport part 1/1: status=failed" in text and "pages=[11] duplicate=True code=synthetic_code retryable=False" in text
+    assert "passport pages: plan=[8, 11] duplicates=[{'of': 11, 'page': 9}] failed attempts (pages)=[[8, 11]]" in text
+    assert "veris passport earlier attempt: status=failed pages=[8, 11] duplicate=False code=earlier_code retryable=True" in text

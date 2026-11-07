@@ -63,3 +63,15 @@ Shared by the backend and the two frontend screens. Keep this file in step with 
   then the orders and the candidates matched to them. No KPI cards, no agreement/status badges.
 - Dialogs: `ClientDialog` (keep its props) and a new `AgencyDialog`. Fields in a clean two-column grid; "Staff details" is a repeatable
   row group; "Allocate staff" is a multi-select dropdown of CRM users.
+
+## Reference agency: specialisation and preferred country (migration `0033_agency_focus`)
+
+Two multi-select button groups in the agency dialog, after the details and before Staff details. Nothing else was added.
+- **Specialisation**: Oil and gas, Hospitality, Construction, General worker, Medical, All sectors. **All sectors** means every sector, so it stands alone:
+  choosing it clears the single sectors and choosing a single sector clears it (the form does this; the server also reduces any list containing it to `["All sectors"]`).
+- **Preferred country**: Singapore, Malaysia, Europe, Gulf, Others.
+- Wire: `specialisations` and `preferredCountries`, lists of those exact strings (anything else is a 422), distinct and in the order above; default `[]`.
+  A PUT that does not mention a list keeps it; an explicit `[]` clears it.
+- Storage: `crm_reference_agencies.specialisations` and `.preferred_countries`, JSONB NOT NULL DEFAULT `'[]'`. Additive and idempotent; an older server sharing the
+  database ignores the columns and its INSERTs (which do not name them) still work. Older rows read as empty lists. Downgrade drops both columns.
+- The agency list shows the choices as compact chips (table column and card rows) and the search box matches them.

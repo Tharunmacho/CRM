@@ -5,6 +5,8 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.cpus import available_cpus
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -84,12 +86,21 @@ class Settings(BaseSettings):
     ocr_page_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
     ocr_document_timeout_seconds: float = Field(default=600.0, ge=10, le=1800)
     # Pages read at the same time by the local OCR (one Tesseract process per page).
-    ocr_page_workers: int = Field(default_factory=lambda: max(1, min(8, os.cpu_count() or 2)), ge=1, le=32)
+    ocr_page_workers: int = Field(default_factory=lambda: max(1, min(8, available_cpus())), ge=1, le=32)
     # How long a worker keeps checking an accepted Veris job before it hands the slot back
-    # and revisits the job later. Zero keeps the single-poll behaviour.
-    ocr_provider_wait_seconds: float = Field(default=20.0, ge=0, le=120)
-    # Veris jobs sent side by side (the kinds of one document, and the chunks of a long one).
-    veris_parallel_jobs: int = Field(default=4, ge=1, le=16)
+    # and revisits the job later (a hand-back costs a release, a retry delay and a re-claim, each a database round
+    # trip). 60 s lets a job of 20-45 s finish within the same visit. Zero keeps the single-poll behaviour.
+    ocr_provider_wait_seconds: float = Field(default=60.0, ge=0, le=120)
+    # Veris jobs in flight at once. 1 (the default) sends one kind at a time (resume, then passport, then Aadhaar; the
+    # chunks of one long kind one after another) and logs each step; more sends them side by side.
+    veris_parallel_jobs: int = Field(default=1, ge=1, le=16)
+    # A passport of several pages is sent one page per job (the reader fails on heavy multi-page passport PDFs), the
+    # strongest page first; once a page gave the number, birth date and name, a further scan of the data page is skipped.
+    veris_passport_one_page: bool = True
+    # A job file (after the local preparation, see integrations/ocr/payload.py) above this many bytes is split page by page
+    # before it is sent. Pictures are re-encoded when a file is above veris_prepare_target_bytes.
+    veris_job_max_bytes: int = Field(default=8_000_000, ge=100_000)
+    veris_prepare_target_bytes: int = Field(default=3_000_000, ge=100_000)
     # A document with more pages than this is split into jobs of this many pages ...
     veris_chunk_pages: int = Field(default=20, ge=2, le=200)
     # ... and a single resume repeats this many pages between neighbouring chunks, so a job

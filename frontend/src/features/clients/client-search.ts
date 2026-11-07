@@ -17,6 +17,8 @@ export interface Searchable {
   staffNames?: string[]
   /** The record's own staff details (name, designation, phone, email). */
   staffContacts?: { name?: string | null; phone?: string | null }[]
+  /** Short labels shown as chips on the record (an agency's specialisations and preferred countries). */
+  tags?: string[]
 }
 
 /** Lower case with accents removed: "Zoë" and "ZOE" fold to the same text. */
@@ -56,6 +58,7 @@ function textFields(record: Searchable): string[] {
     record.name, record.agencyName, record.email, record.address, record.state,
     ...(record.staffNames ?? []),
     ...(record.staffContacts ?? []).map((contact) => contact.name),
+    ...(record.tags ?? []),
   ].map(foldText).filter(Boolean)
 }
 

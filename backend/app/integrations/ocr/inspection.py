@@ -5,6 +5,7 @@ import contextlib
 import csv
 import dataclasses
 import io
+import logging
 import math
 import os
 import re
@@ -21,6 +22,8 @@ from pathlib import Path
 
 import pymupdf as fitz
 from PIL import Image, ImageOps, ImageStat
+
+from app.core.cpus import available_cpus
 
 from . import page_enhance as enhance
 from . import second_opinion
@@ -191,11 +194,12 @@ class OCRRead:
 OCR_BASE_DPI = 200
 # Second look at small print or a first pass with low confidence.
 OCR_HIGH_DPI = 300
+log = logging.getLogger(__name__)
 _ACCEPT_CONFIDENCE = 72.0
 _SMALL_TEXT_PX = 20
 _MAX_RENDER_PIXELS = 40_000_000
 _MAX_IMAGE_FRAMES = 500
-_DEFAULT_PAGE_WORKERS = max(1, min(8, os.cpu_count() or 2))
+_DEFAULT_PAGE_WORKERS = max(1, min(8, available_cpus()))
 _LANGUAGE = re.compile(r"[A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)*")
 
 try:  # HEIC/HEIF photos are read when the optional decoder is installed.
@@ -410,7 +414,8 @@ def _default_process_limit() -> int:
         configured = int(os.environ.get("OCR_MAX_TESSERACT_PROCESSES", "0"))
     except ValueError:
         configured = 0
-    return configured if configured > 0 else max(2, 2 * (os.cpu_count() or 2))
+    # One Tesseract process per usable CPU: more only makes pages contend and miss their time limit together.
+    return configured if configured > 0 else max(2, available_cpus())
 
 
 _PROCESSES = _ProcessBudget(_default_process_limit())
@@ -1228,6 +1233,7 @@ def inspect_document(
         two = two_pass and limit > 1 and need_more is not None
         reader.fast = two
         pages = read_all(list(range(limit)))
+        first_look = time.monotonic() - started  # the quick look at every page (the whole read when not two-pass)
         if two:
             reader.fast = False
             provisional = classify_pages([p.text if p.status == "read" else "" for p in pages])
@@ -1303,6 +1309,8 @@ def inspect_document(
         patterns = None
     if patterns is not None:
         completeness["patterns"] = patterns.flags()
+    # Counts and seconds only: never any page text.
+    log.info("Local reading: %d pages in %.1fs (workers %d, first look %.1fs)", count, time.monotonic() - started, workers, first_look)
     # Every original page is accounted for exactly once: read, blank or unread.
     if len(pages) != count or [p.page_number for p in pages] != list(range(1, count + 1)) \
             or completeness["pages_read"] + blank + len(unread) != count:

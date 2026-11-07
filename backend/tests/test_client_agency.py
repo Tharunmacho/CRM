@@ -1,7 +1,7 @@
 """Clients with their own team and allocated CRM staff, reference agencies, and the routing rules that follow from them.
 
 Synthetic data only; runs on the isolated crm_schema_test* PostgreSQL database (see test_database_naming).
-Covers: migration 0026, the client and company API (staffContacts, staffIds, state), reference-agency CRUD, the desk snapshot
+Covers: migrations 0026 and 0033, the client and company API (staffContacts, staffIds, state), reference-agency CRUD, the desk snapshot
 shape, the live-change topics, rule 1 (mapping a candidate to an order of a client with staff) and rule 2 (intake by designation:
 manual entry, e-mail, WhatsApp, the waiting-list sweep).
 """
@@ -335,6 +335,77 @@ def test_reference_agency_crud_audit_and_order(env):
 def test_reference_agency_validation(env, bad):
     assert env.client.post("/api/reference-agencies", json=bad).status_code == 422
     assert env.db.scalar(select(func.count()).select_from(m.ReferenceAgency)) == 0
+
+
+def test_reference_agency_specialisations_and_preferred_countries_round_trip(env):
+    plain = post(env, "reference-agencies", {"name": "N", "agencyName": "Plain"})
+    assert plain["specialisations"] == [] and plain["preferredCountries"] == []  # both default to empty lists
+    created = post(env, "reference-agencies", {
+        "name": "N", "agencyName": "Focus", "specialisations": ["Medical", "Oil and gas", "Medical"],
+        "preferredCountries": ["Gulf", "Singapore", "Gulf"]})
+    assert created["specialisations"] == ["Oil and gas", "Medical"]  # distinct, in the order the form lists them
+    assert created["preferredCountries"] == ["Singapore", "Gulf"]
+    row = env.db.get(m.ReferenceAgency, created["id"])
+    assert row.specialisations == ["Oil and gas", "Medical"] and row.preferred_countries == ["Singapore", "Gulf"]
+    url = "/api/reference-agencies/" + created["id"]
+    # "All sectors" means every sector, so it stands alone.
+    all_sectors = env.client.put(url, json={"name": "N", "agencyName": "Focus", "specialisations": ["Medical", "All sectors", "Hospitality"],
+                                           "preferredCountries": ["Others"]})
+    assert all_sectors.status_code == 200 and all_sectors.json()["specialisations"] == ["All sectors"]
+    assert all_sectors.json()["preferredCountries"] == ["Others"]
+    # A PUT that does not mention them keeps them; an explicit empty list clears them.
+    kept = env.client.put(url, json={"name": "N2", "agencyName": "Focus"})
+    assert kept.json()["specialisations"] == ["All sectors"] and kept.json()["preferredCountries"] == ["Others"]
+    cleared = env.client.put(url, json={"name": "N2", "agencyName": "Focus", "specialisations": [], "preferredCountries": []})
+    assert cleared.json()["specialisations"] == [] and cleared.json()["preferredCountries"] == []
+    listed = {i["id"]: i for i in env.client.get("/api/reference-agencies").json()["items"]}
+    assert listed[created["id"]]["specialisations"] == [] and listed[plain["id"]]["preferredCountries"] == []
+    history = env.client.get("/api/master-data/reference_agency/" + created["id"] + "/audit").json()
+    assert history[0]["meta"]["changes"]["specialisations"] == {"from": ["All sectors"], "to": []}
+    assert history[-1]["meta"]["changes"]["preferred_countries"]["to"] == ["Singapore", "Gulf"]
+
+
+@pytest.mark.parametrize("bad", [
+    {"specialisations": ["Banking"]}, {"specialisations": "Medical"}, {"specialisations": [None]}, {"specialisations": ["medical"]},
+    {"specialisations": ["Medical"] * 13}, {"preferredCountries": ["Mars"]}, {"preferredCountries": "Gulf"},
+    {"preferredCountries": ["Gulf"] * 11},
+])
+def test_reference_agency_focus_lists_reject_unknown_values(env, bad):
+    assert env.client.post("/api/reference-agencies", json={"name": "N", "agencyName": "A", **bad}).status_code == 422
+    assert env.db.scalar(select(func.count()).select_from(m.ReferenceAgency)) == 0
+
+
+def test_migration_0033_adds_agency_focus_lists_additively_and_reversibly(schema_database):
+    engine = schema_database
+    _migrate(engine, "0032_job_ready_at")
+    before = {c["name"] for c in inspect(engine).get_columns("crm_reference_agencies")}
+    assert {"specialisations", "preferred_countries"}.isdisjoint(before)
+    with engine.begin() as c:
+        c.execute(text("INSERT INTO crm_reference_agencies (id, name, agency_name) VALUES ('a1', 'Old contact', 'Old agency')"))
+    _migrate(engine, "head")
+    columns = {c["name"]: c for c in inspect(engine).get_columns("crm_reference_agencies")}
+    assert before <= set(columns)  # nothing renamed or dropped
+    for name in ("specialisations", "preferred_countries"):
+        assert columns[name]["nullable"] is False and columns[name]["default"] and columns[name]["comment"]
+    with engine.begin() as c:
+        # An older writer does not name the new columns: its INSERT still works and the lists are empty.
+        c.execute(text("INSERT INTO crm_reference_agencies (id, name, agency_name, staff_contacts) VALUES ('a2', 'Older writer', 'Agency', '[]')"))
+        c.execute(text("UPDATE crm_reference_agencies SET specialisations = '[\"Medical\"]' WHERE id = 'a1'"))
+    with engine.connect() as c:
+        assert c.execute(text("SELECT name, specialisations, preferred_countries FROM crm_reference_agencies WHERE id = 'a2'")).one() == ("Older writer", [], [])
+        assert c.scalar(text("SELECT specialisations FROM crm_reference_agencies WHERE id = 'a1'")) == ["Medical"]
+    with Session(engine) as db:  # the ORM reads old rows as empty lists
+        assert db.get(m.ReferenceAgency, "a2").preferred_countries == []
+    with engine.begin() as c:
+        c.execute(text("UPDATE alembic_version SET version_num = '0032_job_ready_at'"))
+    _migrate(engine, "head")  # running it again is a no-op and keeps what was entered
+    with engine.connect() as c:
+        assert c.scalar(text("SELECT specialisations FROM crm_reference_agencies WHERE id = 'a1'")) == ["Medical"]
+    _migrate(engine, "0032_job_ready_at", downgrade=True)
+    assert {"specialisations", "preferred_countries"}.isdisjoint({c["name"] for c in inspect(engine).get_columns("crm_reference_agencies")})
+    with engine.connect() as c:
+        assert c.scalar(text("SELECT count(*) FROM crm_reference_agencies")) == 2
+    _migrate(engine, "head")
 
 
 def test_reference_agencies_need_a_signed_in_user(schema_database):

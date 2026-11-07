@@ -1,9 +1,9 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Check, ChevronDown, Plus, Search, Trash2, UserRound, Users, X } from 'lucide-react'
+import { Check, ChevronDown, Plus, Search, Tags, Trash2, UserRound, Users, X } from 'lucide-react'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Textarea } from '@/shared/ui/primitives'
 import { Avatar } from '@/features/clients/components/parts'
-import { emptyStaffRow, firstName, MAX_STAFF_ROWS, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
+import { emptyStaffRow, firstName, MAX_STAFF_ROWS, PREFERRED_COUNTRIES, SPECIALISATIONS, toggleSpecialisation, togglePreferredCountry, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
 import { foldText } from '@/features/clients/client-search'
 import '@/styles/clients-simple.css'
 
@@ -43,6 +43,29 @@ export function PartyFieldsSection({ values, onChange, errors, title = 'Details'
         <Input maxLength={100} value={values.state} onChange={(e) => onChange('state', e.target.value)} placeholder="Kerala" autoComplete="off" />
       </Field>
     </div>
+  </Section>
+}
+
+/** One group of toggle buttons: any number can be on, each is a pill that reports its state with aria-pressed. */
+function PillGroup({ label, options, value, onToggle, error }: { label: string; options: readonly string[]; value: readonly string[]; onToggle: (name: string) => void; error?: string }) {
+  const labelId = useId()
+  return <div className="cs-pillgroup">
+    <span className="cs-pillgroup-label" id={labelId}>{label}</span>
+    <div className="cs-pills" role="group" aria-labelledby={labelId}>
+      {options.map((name) => <button key={name} type="button" className="cs-pill" aria-pressed={value.includes(name)} onClick={() => onToggle(name)}>{name}</button>)}
+    </div>
+    {error && <span className="ui-field-error" role="alert">{error}</span>}
+  </div>
+}
+
+/** The agency's specialisation and preferred country: two groups of toggle buttons. */
+export function AgencyFocusSection({ value, onChange, errors }: { value: AgencyFocus; onChange: (next: AgencyFocus) => void; errors: FieldErrors }) {
+  const chosen = value.specialisations.length + value.preferredCountries.length
+  return <Section icon={<Tags size={17} />} title="Specialisation and preferred country" count={chosen ? `${chosen} selected` : 'Optional'}>
+    <PillGroup label="Specialisation" options={SPECIALISATIONS} value={value.specialisations} error={errors.specialisations}
+      onToggle={(name) => onChange({ ...value, specialisations: toggleSpecialisation(value.specialisations, name) })} />
+    <PillGroup label="Preferred country" options={PREFERRED_COUNTRIES} value={value.preferredCountries} error={errors.preferredCountries}
+      onToggle={(name) => onChange({ ...value, preferredCountries: togglePreferredCountry(value.preferredCountries, name) })} />
   </Section>
 }
 

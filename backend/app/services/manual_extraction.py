@@ -18,7 +18,7 @@ from sqlalchemy.orm import undefer
 from app.db.models import Attachment, AuditEntry, Candidate, Designation, DocumentExtractionJob, Role
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import OcrFields
-from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, request_extraction_retry
+from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, provider_codes, request_extraction_retry
 from app.services.document_storage import put_bytes, read_bytes
 from app.services.worker_heartbeat import waiting_reason
 
@@ -186,6 +186,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             state = deepcopy(job.state or {})
             key, digest = job.object_key, job.content_hash
             owner, group_id, form_candidate = job.owner_id, job.group_id, job.candidate_id
+            attempts = job.attempts
             if not state.get("output"):
                 titles = list(db.scalars(select(Designation.title)))
             db.commit()
@@ -194,13 +195,14 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             _autocommit(db)
             row = db.execute(select(DocumentExtractionJob.status, DocumentExtractionJob.claimed_by, DocumentExtractionJob.state,
                 DocumentExtractionJob.object_key, DocumentExtractionJob.content_hash, DocumentExtractionJob.owner_id,
-                DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id,
+                DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id, DocumentExtractionJob.attempts,
                 select(func.array_agg(Designation.title)).scalar_subquery().label("titles"))
                 .where(DocumentExtractionJob.id == identifier)).one_or_none()
             if row is None or row.status not in READY or row.claimed_by != claimed_by:
                 return
             state = deepcopy(row.state or {})
             key, digest, owner, group_id, form_candidate = row.object_key, row.content_hash, row.owner_id, row.group_id, row.candidate_id
+            attempts = row.attempts
             titles = list(row.titles or [])
 
     # Which reader ran this attempt (a job that has no "reader" in its state was handled by older code).
@@ -248,7 +250,8 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             raise ExtractionFailure("The saved copy of this document looks damaged. Upload the original again, then try again.")
         output = state.get("output")
         if output is None:
-            output = extract_attachment(data, state=state, save=checkpoint, settings=settings, designations=titles or [])
+            output = extract_attachment(data, state=state, save=checkpoint, settings=settings, designations=titles or [],
+                                        final_attempt=attempts + 1 >= MAX_ATTEMPTS)
             state["output"] = deepcopy(output)
             checkpoint(state)
         from app.services.document_extraction import checked_person_output
@@ -264,7 +267,8 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 if kind in documents:
                     continue
                 selected = extraction["selected_pages"]
-                if selected != getattr(inspected, kind + "_pages"):
+                # The pages sent are the checked pages or fewer: a passport plan sends only the pages with passport details of their own.
+                if not selected or not set(selected) <= set(getattr(inspected, kind + "_pages")):
                     raise ExtractionFailure("The selected pages no longer match what was checked earlier. Check the pages and try again.")
                 content = inspected.pdf_for_pages(selected)
                 document_key = put_bytes(settings, "manual/" + owner + "/" + identifier + "/" + kind + ".pdf", content, "application/pdf")
@@ -282,7 +286,10 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             job.state = json.loads(json.dumps(state, default=_plain))
             job.result = json.loads(json.dumps(_scan_results(output), default=_plain))
             job.status = "completed" if output["status"] == "complete" else "needs_review"
-            job.last_error = None if job.status == "completed" else "Review the saved reading report or enter details manually."
+            # A kind the reader could not read is named for the person (the upload row shows this line).
+            unread = (output.get("coverage") or {}).get("failed") or []
+            job.last_error = None if job.status == "completed" else (
+                " ".join(unread)[:500] if unread else "Review the saved reading report or enter details manually.")
             job.updated_at = job.finished_at = now()
             job.claimed_by = job.lease_until = None
             if form_candidate:
@@ -299,14 +306,15 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         with sessions() as db:
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
             if not _lost(job, claimed_by):
-                job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=5)
+                job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=2)
                 job.last_error = "The document is still being read. Its progress is saved."
                 job.updated_at = now()
                 job.claimed_by = job.lease_until = None
                 db.commit()
     except Exception as exc:
         # The traceback stays in the server log (never in the job row or the response) so a file that keeps failing can be diagnosed.
-        log.warning("Manual extraction %s failed (%s at %s); original and checkpoints retained.", identifier, type(exc).__name__, _where(exc), exc_info=True)
+        log.warning("Manual extraction %s failed (%s at %s; reader codes: %s); original and checkpoints retained.",
+                    identifier, type(exc).__name__, _where(exc), provider_codes(state), exc_info=True)
         with sessions() as db:
             job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state))
                             .where(DocumentExtractionJob.id == identifier).with_for_update())

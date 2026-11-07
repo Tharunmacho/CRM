@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, Plus, RefreshCw, UserCheck, Users } from 'lucide-react'
+import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, UserCheck, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { useReportData } from '@/features/reports/report-api'
 import type { LeadSummaryResponse } from '@/features/leads/lead-api'
@@ -50,10 +50,6 @@ export default function DashboardPage() {
   return <div className="dashref dashsimple">
     <header className="ds-head">
       <h1>Dashboard</h1>
-      <div className="ds-actions">
-        <button type="button" className="ds-btn ds-icon-only" aria-label="Refresh dashboard" title="Refresh" disabled={leads.refreshing || mail.refreshing} onClick={() => { leads.refresh(); mail.refresh() }}><RefreshCw size={15} className={leads.refreshing || mail.refreshing ? 'is-spinning' : ''} /></button>
-        <button type="button" className="ds-btn is-primary" onClick={() => navigate('/add-candidate')}><Plus size={15} />Add candidate</button>
-      </div>
     </header>
     {leads.error && <div role="alert" className="ds-error">{leads.error}<button type="button" onClick={leads.refresh}>Try again</button></div>}
     <div className="ds-grid">{cards.map(card => <button key={card.key} type="button" className={`ds-card ds-${card.tone}`} onClick={() => navigate(card.to)}>

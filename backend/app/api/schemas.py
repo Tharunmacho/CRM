@@ -76,6 +76,8 @@ class ReferenceAgencyOut(Wire):
     state: str | None = None
     staff_contacts: list[StaffContactOut] = []
     notes: str | None = None
+    specialisations: list[str] = []
+    preferred_countries: list[str] = []
     created_at: datetime | None = None
 
 

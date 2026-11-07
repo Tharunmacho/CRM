@@ -3,7 +3,7 @@ import { Building2, UserCheck, UserRound } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import type { Client, Company } from '@/shared/model/types'
 import { useStore } from '@/shared/state/crm-store'
-import { Button, Field, Input, Textarea } from '@/shared/ui/primitives'
+import { Button, Field, Input } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
@@ -40,19 +40,21 @@ export function CountryInput({ value, onChange, options }: { value: string; onCh
 }
 
 /**
- * A client is the contact person plus the company that gives the orders. Creating saves both together (contact person, then
- * company name, website, country, city and address) and the CRM staff who look after the client. Editing changes the contact
- * person, the place and the staff; the company keeps its own details on its record (client page).
+ * A client is the contact person plus the company that gives the orders. Creating saves both together (company name, country and
+ * website, then the contact person) and the CRM recruiters who look after the client. Editing changes the same things, and
+ * the company's name, website and country are saved on its record too (all its other details are sent back unchanged).
  */
 export function ClientDialog({ client, onClose }: { client?: Client; onClose: () => void }) {
   const store = useStore()
   const countries = useCountryOptions()
   const [form, setForm] = useState({
     name: client?.name ?? '', designation: client?.designation ?? '', email: client?.email ?? '', phone: client?.phone ?? '',
-    country: client?.country ?? '', city: client?.city ?? '',
+    country: client?.country ?? '',
   })
-  // Company-only fields, used when a client is created.
-  const [employer, setEmployer] = useState({ name: '', website: '', address: '', state: '' })
+  // Company fields typed when a client is created.
+  // The company already on file for the client being edited: its name, website and country are changed here too.
+  const company = client ? store.companies.find((item) => item.clientId === client.id) : undefined
+  const [employer, setEmployer] = useState({ name: company?.name ?? '', website: company?.website ?? '' })
   // CRM staff who look after this client. Only people who can still be allocated are kept: the server refuses inactive users and admins.
   const staffUsers = useMemo(() => allocatableUsers(store.users), [store.users])
   const [staffIds, setStaffIds] = useState<string[]>(() => (client?.staffIds ?? []).filter((id) => staffUsers.some((user) => user.id === id)))
@@ -65,17 +67,25 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
 
   const save = async () => {
     if (saving) return
-    const web = creating ? checkWebsite(employer.website) : { value: '', error: '' }
+    const web = creating || company ? checkWebsite(employer.website) : { value: '', error: '' }
     if (web.error) { setError('Website: ' + web.error); return }
     setSaving(true); setError('')
     try {
       if (client) {
         // The API replaces the whole record, so what this form no longer shows is sent back as it was saved.
         await api.put('/clients/' + client.id, {
-          ...form, whatsapp: client.whatsapp ?? '', status: client.status, notes: client.notes ?? '', staffContacts: client.staffContacts ?? [], staffIds,
+          ...form, city: client.city ?? '', whatsapp: client.whatsapp ?? '', status: client.status, notes: client.notes ?? '', staffContacts: client.staffContacts ?? [], staffIds,
         })
+        // The company keeps every other detail (agreement, address, notes ...) exactly as saved.
+        if (company) {
+          await api.put('/companies/' + company.id, {
+            clientId: company.clientId, name: employer.name.trim() || company.name, country: form.country, city: company.city ?? '', industry: company.industry ?? '',
+            contactPerson: company.contactPerson ?? '', contactEmail: company.contactEmail ?? '', website: web.value, phone: company.phone ?? '', whatsapp: company.whatsapp ?? '',
+            address: company.address ?? '', notes: company.notes ?? '', status: company.status ?? 'active',
+          })
+        }
       } else {
-        await api.post<Client & { company: Company }>('/clients', { ...form, staffIds, company: { name: employer.name, website: web.value, address: employer.address, state: employer.state, country: form.country, city: form.city } })
+        await api.post<Client & { company: Company }>('/clients', { ...form, staffIds, company: { name: employer.name, website: web.value, address: '', state: '', country: form.country, city: '' } })
       }
       await refreshMasterData(store, 'Client saved')
       onClose()
@@ -86,32 +96,27 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
   return <Dialog open onClose={close} width="lg" scroll="inside"
     title={creating ? 'New client' : 'Edit client'}
     icon={<span className="cs-dlg-chip"><Building2 size={22} strokeWidth={1.9} /></span>}
-    footer={<><Button variant="ghost" disabled={saving} onClick={close}>Cancel</Button><Button variant="primary" type="submit" form="client-form" disabled={saving}>{saving ? 'Saving…' : 'Save client'}</Button></>}>
+    footer={<><Button variant="ghost" disabled={saving} onClick={close}>Cancel</Button><Button variant="primary" type="submit" form="client-form" disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button></>}>
     <DialogMark />
     {error && <p role="alert" className="client-form-error">{error}</p>}
     <form id="client-form" className="client-form clients-simple" onSubmit={(event) => { event.preventDefault(); void save() }}>
       <fieldset disabled={saving} className="client-form-fields cs-sections">
+        <Section icon={<Building2 size={17} />} title="Company">
+          <div className="cs-grid6">
+            {(creating || company) && <Field label="Company name" required className="span-6"><Input required maxLength={200} value={employer.name} onChange={(e) => setCompany('name', e.target.value)} placeholder="Gulf Build Contracting LLC" autoComplete="off" /></Field>}
+            <Field label="Country" className="span-3"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>
+            {(creating || company) && <Field label="Website" className="span-3"><Input type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={WEBSITE_MAX} value={employer.website} onChange={(e) => setCompany('website', e.target.value)} placeholder="www.gulfbuild.com" /></Field>}
+          </div>
+        </Section>
         <Section icon={<UserRound size={17} />} title="Contact person">
           <div className="cs-grid6">
-            <Field label={creating ? 'Contact person' : 'Full name'} required className="span-3"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Khalid Rahman" autoComplete="off" /></Field>
+            <Field label="Contact person" required className="span-3"><Input required maxLength={200} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Khalid Rahman" autoComplete="off" /></Field>
             <Field label="Designation" className="span-3"><Input maxLength={120} value={form.designation} onChange={(e) => set('designation', e.target.value)} placeholder="HR Manager" autoComplete="off" /></Field>
             <Field label="Email" className="span-3"><Input type="email" maxLength={255} value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@company.com" autoComplete="off" /></Field>
             <Field label="Phone" className="span-3"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+971 50 123 4567" autoComplete="off" /></Field>
-            {!creating && <Field label="Country" className="span-3"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>}
-            {!creating && <Field label="City" className="span-3"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" autoComplete="off" /></Field>}
           </div>
         </Section>
-        {creating && <Section icon={<Building2 size={17} />} title="Company">
-          <div className="cs-grid6">
-            <Field label="Company name" required className="span-4"><Input required maxLength={200} value={employer.name} onChange={(e) => setCompany('name', e.target.value)} placeholder="Gulf Build Contracting LLC" autoComplete="off" /></Field>
-            <Field label="Website" className="span-2"><Input type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={WEBSITE_MAX} value={employer.website} onChange={(e) => setCompany('website', e.target.value)} placeholder="www.gulfbuild.com" /></Field>
-            <Field label="Country" className="span-2"><CountryInput value={form.country} onChange={(value) => set('country', value)} options={countries} /></Field>
-            <Field label="State" className="span-2"><Input maxLength={100} value={employer.state} onChange={(e) => setCompany('state', e.target.value)} placeholder="Dubai" autoComplete="off" /></Field>
-            <Field label="City" className="span-2"><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" autoComplete="off" /></Field>
-            <Field label="Address" className="span-6"><Textarea rows={2} maxLength={2000} value={employer.address} onChange={(e) => setCompany('address', e.target.value)} placeholder="Building, street, area" /></Field>
-          </div>
-        </Section>}
-        <Section icon={<UserCheck size={17} />} title="Allocate staff">
+        <Section icon={<UserCheck size={17} />} title="Assign recruiter">
           <StaffPicker users={staffUsers} value={staffIds} onChange={setStaffIds} disabled={saving} />
         </Section>
       </fieldset>

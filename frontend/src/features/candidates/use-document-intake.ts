@@ -39,6 +39,16 @@ const pause = (signal: AbortSignal, delay = READ_POLL_MS) => new Promise<void>((
   signal.addEventListener('abort', cancel, { once: true })
   if (signal.aborted) cancel()
 })
+/** Resolves at once while the tab is visible; while it is hidden, waits for it to come back (so a hidden tab sends no requests at all). */
+const whenVisible = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (typeof document === 'undefined' || document.visibilityState !== 'hidden') { resolve(); return }
+  const done = () => { document.removeEventListener('visibilitychange', changed); signal.removeEventListener('abort', cancel) }
+  const changed = () => { if (document.visibilityState !== 'hidden') { done(); resolve() } }
+  const cancel = () => { done(); reject(new DOMException('Stopped waiting', 'AbortError')) }
+  document.addEventListener('visibilitychange', changed)
+  signal.addEventListener('abort', cancel, { once: true })
+  if (signal.aborted) cancel()
+})
 export function scansFromJobs(jobs: IntakeJob[]): DocumentScans {
   const scans: DocumentScans = {}
   for (const job of jobs) for (const [kind, scan] of Object.entries(job.result?.scans ?? {})) {
@@ -155,12 +165,12 @@ export function useDocumentIntake(ownerId: string) {
     return saved
   }
   /**
-   * Waits for every readable file, polling about once a second while any is queued or being read. Files added while it waits are queued
+   * Waits for every readable file, polling once a second after each answer (never two requests at once, none while the tab is hidden) while any is queued or being read. Files added while it waits are queued
    * and followed too. `retryFailed` (the Read again button) also re-queues files that failed or needed a look; an automatic round does not.
    */
   const read = async (signal: AbortSignal, options: { retryFailed?: boolean; onProgress?: (jobs: IntakeJob[]) => void } = {}) => {
     const { retryFailed = true, onProgress } = options
-    const stopAt = Date.now() + 20 * 60000
+    let stopAt = Date.now() + 20 * 60000
     let first = true
     // A file the server refuses to queue (for example one that holds several people) must not stop the others: it shows as Failed with the reason.
     const refused = new Map<string, string>()
@@ -180,7 +190,12 @@ export function useDocumentIntake(ownerId: string) {
       onProgress?.(values)
       if (!values.some((job) => active.has(job.status) || (isReadable(job) && job.status === 'uploaded'))) return values
       if (Date.now() > stopAt) throw new Error('We are still reading. Your files are saved. Come back to this upload later.')
+      // The next request is sent only after the previous answer (this loop never overlaps itself), READ_POLL_MS after it, and not at
+      // all while the tab is hidden: it is sent the moment the tab is shown again. Time spent hidden does not count towards stopAt.
       await pause(signal)
+      const hiddenAt = Date.now()
+      await whenVisible(signal)
+      stopAt += Date.now() - hiddenAt
     }
     throw new DOMException('Stopped waiting', 'AbortError')
   }

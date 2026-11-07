@@ -249,6 +249,9 @@ class ReferenceAgency(Base, PkMixin, TimestampMixin):
     state: Mapped[str | None] = mapped_column(String(100))
     staff_contacts: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     notes: Mapped[str | None] = mapped_column(Text)
+    # Migration 0033: fixed-set selections, validated by the API. Older rows and older writers leave them as [].
+    specialisations: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    preferred_countries: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
 
 
 class Company(Base, PkMixin, TimestampMixin):

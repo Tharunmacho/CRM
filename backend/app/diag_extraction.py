@@ -27,7 +27,7 @@ def main(sessions=SessionLocal, settings=None) -> None:
         print("== Newest document jobs ==")
         rows = db.execute(text(
             "SELECT filename, kind, status, attempts, queued_at, started_at, finished_at, COALESCE(ready_at, next_attempt_at) AS due_at, next_attempt_at, claimed_by, lease_until, last_error, "
-            "state -> 'failure' AS failure, state -> 'reader' AS reader, state -> 'provider_jobs' AS provider_jobs, instance "
+            "state -> 'failure' AS failure, state -> 'reader' AS reader, state -> 'provider_jobs' AS provider_jobs, state -> 'passport_plan' AS passport_plan, state -> 'provider_job_history' AS history, instance "
             "FROM document_extraction_jobs ORDER BY created_at DESC LIMIT 8")).all()
         for row in rows:
             print(f"- {row.filename[:40]:40} {row.kind:9} status={row.status:12} attempts={row.attempts} queued={_age(row.queued_at)} "
@@ -54,7 +54,16 @@ def main(sessions=SessionLocal, settings=None) -> None:
                     why = part.get("provider_error") or {}
                     note = f" code={why.get('code')} retryable={why.get('retryable')} says='{why.get('message')}'" if why else ""
                     print(f"    veris {kind} part {number}/{len(parts)}: status={part.get('status')} attempts={part.get('attempts', '-')} "
-                          f"result={'yes' if 'result' in part else 'no'}{note}")
+                          f"result={'yes' if 'result' in part else 'no'} pages={part.get('selected_pages')} duplicate={part.get('duplicate', '-')}{note}")
+            # Which passport pages were sent and how the reading was narrowed after failures (page numbers only).
+            plan = row.passport_plan or {}
+            if plan:
+                print(f"    passport pages: plan={plan.get('pages')} duplicates={plan.get('duplicates')} failed attempts (pages)={plan.get('tried')}")
+            for kind, earlier in (row.history or {}).items():
+                for record in earlier:
+                    why = record.get("provider_error") or {}
+                    print(f"    veris {kind} earlier attempt: status={record.get('status')} pages={record.get('selected_pages')} "
+                          f"duplicate={record.get('duplicate', '-')} code={why.get('code')} retryable={why.get('retryable')}")
             # A job a current reader handled carries its "reader"; a failed or finished job without one was handled by older
             # code (an old worker still running, here or on another machine that shares this database).
             if row.reader:

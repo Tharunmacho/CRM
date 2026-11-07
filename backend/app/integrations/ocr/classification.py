@@ -541,3 +541,44 @@ def classify_pages(texts: Sequence[str]) -> list[PageClassification]:
             "resume", 0.55, "Assigned to the preceding resume; no content of its own identified it.", inherited=True,
         )
     return result
+
+
+@dataclass
+class PassportPlan:
+    """Which of a document's passport pages are worth sending to the reader."""
+    pages: list[int]       # the pages to send, in page order
+    ranked: list[int]      # every page with passport evidence of its own, strongest first (duplicates last)
+    duplicates: list[dict]  # [{"page": 8, "of": 11}]: a scan of the same data page, held back
+
+
+def passport_plan(pages: Sequence[tuple[int, str, bool, float]]) -> PassportPlan | None:
+    """The passport pages to send, from ``(page number, text, inherited, confidence)`` of every page taken for a passport.
+
+    A page that only took the passport kind from its neighbour (``inherited``) carries nothing the reader needs and is
+    not sent; a page with a passport caption of its own is (a lone caption still counts: it is the back or address
+    page). Of several pages with the same machine-readable document number only the best is sent (valid check digits,
+    then confidence). ``None`` when no page has evidence of its own: the caller then keeps every passport page."""
+    own = [(number, text or "", confidence) for number, text, inherited, confidence in pages
+           if not inherited or _lone_marker("passport", text or "")]
+    if not own:
+        return None
+    from . import validators
+    rows = []
+    for number, text, confidence in own:
+        try:
+            mrz = validators.find_mrz(text) if text else None
+        except Exception:  # an aid; never a reason to lose a page
+            mrz = None
+        rows.append({"page": number, "id": (mrz.document_number or "").strip("<") if mrz else "",
+                     "score": (bool(mrz and mrz.valid), mrz is not None, float(confidence or 0.0))})
+    best: dict[str, dict] = {}
+    for row in rows:
+        if row["id"] and (row["id"] not in best or row["score"] > best[row["id"]]["score"]):
+            best[row["id"]] = row
+    dropped = [row for row in rows if row["id"] and best[row["id"]] is not row]
+    kept = [row for row in rows if row not in dropped]
+    by_strength = lambda group: [row["page"] for row in sorted(group, key=lambda row: row["score"], reverse=True)]
+    return PassportPlan(
+        pages=sorted(row["page"] for row in kept), ranked=by_strength(kept) + by_strength(dropped),
+        duplicates=sorted(({"page": row["page"], "of": best[row["id"]]["page"]} for row in dropped), key=lambda d: d["page"]),
+    )

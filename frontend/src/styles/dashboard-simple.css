@@ -24,15 +24,6 @@
 
 .ds-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
 .ds-head h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.035em; }
-.ds-actions { display: flex; align-items: center; gap: 8px; }
-.ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; padding: 0 16px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, border-color .14s; }
-.ds-btn:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
-.ds-btn:disabled { opacity: .55; cursor: not-allowed; }
-.ds-btn.is-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
-.ds-btn.is-primary:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); }
-.ds-icon-only { width: 40px; padding: 0; }
-.is-spinning { animation: ds-spin 1s linear infinite; }
-@keyframes ds-spin { to { transform: rotate(360deg); } }
 .ds-error { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--error-edge); border-radius: 10px; background: var(--error-fill); color: var(--error-ink); font-size: 13px; }
 .ds-error button { margin-left: auto; border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font-size: 12px; cursor: pointer; }
 
@@ -117,4 +108,4 @@
   .sg-bar-top .sg-seg { width: 100%; overflow-x: auto; }
   .sg-seg button { flex: 1 0 auto; padding: 0 12px; }
 }
-@media (prefers-reduced-motion: reduce) { .ds-card, .ds-btn, .ds-go, .sg-arc, .sg-bar s, .sg-open, .sg-row, .sg-seg button { transition: none; animation: none; } .ds-card:hover { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ds-card, .ds-go, .sg-arc, .sg-bar s, .sg-open, .sg-row, .sg-seg button { transition: none; animation: none; } .ds-card:hover { transform: none; } }

@@ -6,9 +6,9 @@ import { useStore } from '@/shared/state/crm-store'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
-import { PartyFieldsSection, StaffDetailsSection } from '@/features/clients/components/party-fields'
+import { AgencyFocusSection, PartyFieldsSection, StaffDetailsSection } from '@/features/clients/components/party-fields'
 import { agencyApi } from '@/features/clients/agency-api'
-import { buildAgencyPayload, emptyParty, fieldErrorsFromApi, staffRowsOf, validateParty, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
+import { buildAgencyPayload, emptyParty, fieldErrorsFromApi, focusOf, staffRowsOf, validateParty, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
 import '@/styles/clients-simple.css'
 
 /** Add or edit a reference agency: the same details and staff details as a client, without allocated CRM staff. */
@@ -19,6 +19,7 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
     ? { name: agency.name, agencyName: agency.agencyName, phone: agency.phone ?? '', email: agency.email ?? '', address: agency.address ?? '', state: agency.state ?? '' }
     : emptyParty())
   const [rows, setRows] = useState<StaffRow[]>(() => staffRowsOf(agency?.staffContacts))
+  const [focus, setFocus] = useState<AgencyFocus>(() => focusOf(agency))
   const [errors, setErrors] = useState<FieldErrors>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -32,7 +33,7 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
     if (Object.keys(problems).length) { setError('Please fix the highlighted fields.'); return }
     setSaving(true); setError('')
     try {
-      const payload = buildAgencyPayload(values, rows)
+      const payload = buildAgencyPayload(values, rows, focus)
       if (agency) await agencyApi.update(agency.id, payload)
       else await agencyApi.create(payload)
       store.notify('Agency saved')
@@ -57,6 +58,7 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
     <form id="agency-form" noValidate className="client-form clients-simple" onSubmit={(event) => { event.preventDefault(); void save() }}>
       <fieldset disabled={saving} className="client-form-fields">
         <PartyFieldsSection values={values} onChange={set} errors={errors} />
+        <AgencyFocusSection value={focus} onChange={setFocus} errors={errors} />
         <StaffDetailsSection rows={rows} onChange={setRows} errors={errors} />
       </fieldset>
     </form>

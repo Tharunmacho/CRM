@@ -210,6 +210,9 @@ class Dispatcher:
     """Keeps ``concurrency`` claimed jobs running and refills a slot the moment one frees."""
 
     ACTIVE_SECONDS = 2.0        # how long after finding work the loop keeps polling at ``busy_poll``
+    REVISIT_SECONDS = 5.0       # after a job ends the loop looks every REVISIT_POLL seconds for this long: a document handed back
+    REVISIT_POLL = 1.0          # because the reader is still busy is due again in about two seconds; waiting for the idle poll
+                                # (15 s) instead left it sitting there. One cheap read-only peek per second, five times per job.
     BACKOFF_BASE = 2.0          # first wait after the database could not be reached; doubles up to BACKOFF_MAX
     BACKOFF_MAX = 60.0
 
@@ -235,6 +238,7 @@ class Dispatcher:
         self.clock = clock
         self.inflight: dict = {}
         self._busy_until = 0.0
+        self._revisit_until = 0.0
         self._started_last = False  # the previous round started jobs, so more may be waiting: claim without peeking
         self.abandoned = 0
         self.idle_rounds = 0  # consecutive claim rounds that found nothing
@@ -269,7 +273,10 @@ class Dispatcher:
     def _submit(self, pool, queue: LeasedQueue, identifier: str) -> None:
         future = pool.submit(self._run_one, queue, identifier)
         self.inflight[future] = (queue, identifier)
-        future.add_done_callback(lambda _: self.wake.set())
+        def ended(_):
+            self._revisit_until = max(self._revisit_until, self.clock() + self.REVISIT_SECONDS)
+            self.wake.set()
+        future.add_done_callback(ended)
 
     def peek(self, *, now: datetime | None = None) -> list[LeasedQueue]:
         """The queues that have a ready job, from ONE read-only statement over all of them (autocommit: one round trip)."""
@@ -353,6 +360,8 @@ class Dispatcher:
             return fallback  # every slot is taken: nothing can be claimed until a job ends (its callback wakes us)
         if started or self.clock() < self._busy_until:
             return self.busy_poll
+        if self.clock() < self._revisit_until:
+            return min(self.REVISIT_POLL, fallback)
         return fallback
 
     def backoff_seconds(self) -> float:
@@ -389,7 +398,7 @@ class Dispatcher:
                 self._started_last = bool(started)
                 self.idle_rounds = 0 if started else self.idle_rounds + 1
                 if started:
-                    self._busy_until = self.clock() + self.ACTIVE_SECONDS
+                    self._busy_until = max(self._busy_until, self.clock() + self.ACTIVE_SECONDS)
                 full = len(self.inflight) >= self.concurrency
                 self.wake.wait(self.poll_seconds(started=started, full=full))
         finally:
