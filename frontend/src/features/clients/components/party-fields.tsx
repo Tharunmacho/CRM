@@ -1,9 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Check, ChevronDown, Plus, Search, Tags, Trash2, UserRound, Users, X } from 'lucide-react'
+import { useId, useMemo, useState, type ReactNode } from 'react'
+import { Globe, Plus, Search, Tags, Trash2, UserRound, Users } from 'lucide-react'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Textarea } from '@/shared/ui/primitives'
 import { Avatar } from '@/features/clients/components/parts'
-import { emptyStaffRow, firstName, MAX_STAFF_ROWS, PREFERRED_COUNTRIES, SPECIALISATIONS, toggleSpecialisation, togglePreferredCountry, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
+import { emptyStaffRow, MAX_STAFF_ROWS, PREFERRED_COUNTRIES, SPECIALISATIONS, toggleSpecialisation, togglePreferredCountry, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
 import { foldText } from '@/features/clients/client-search'
 import '@/styles/clients-simple.css'
 
@@ -46,34 +46,37 @@ export function PartyFieldsSection({ values, onChange, errors, title = 'Details'
   </Section>
 }
 
-/** One group of toggle buttons: any number can be on, each is a pill that reports its state with aria-pressed. */
+/** One group of toggle buttons: any number can be on, each is a pill that reports its state with aria-pressed. The card's title names the group. */
 function PillGroup({ label, options, value, onToggle, error }: { label: string; options: readonly string[]; value: readonly string[]; onToggle: (name: string) => void; error?: string }) {
-  const labelId = useId()
   return <div className="cs-pillgroup">
-    <span className="cs-pillgroup-label" id={labelId}>{label}</span>
-    <div className="cs-pills" role="group" aria-labelledby={labelId}>
+    <div className="cs-pills" role="group" aria-label={label}>
       {options.map((name) => <button key={name} type="button" className="cs-pill" aria-pressed={value.includes(name)} onClick={() => onToggle(name)}>{name}</button>)}
     </div>
     {error && <span className="ui-field-error" role="alert">{error}</span>}
   </div>
 }
 
-/** The agency's specialisation and preferred country: two groups of toggle buttons. */
+const selectedCount = (n: number) => (n ? `${n} selected` : undefined)
+
+/** The agency's specialisation and its preferred countries: two separate cards, each a group of toggle buttons. */
 export function AgencyFocusSection({ value, onChange, errors }: { value: AgencyFocus; onChange: (next: AgencyFocus) => void; errors: FieldErrors }) {
-  const chosen = value.specialisations.length + value.preferredCountries.length
-  return <Section icon={<Tags size={17} />} title="Specialisation and preferred country" count={chosen ? `${chosen} selected` : 'Optional'}>
-    <PillGroup label="Specialisation" options={SPECIALISATIONS} value={value.specialisations} error={errors.specialisations}
-      onToggle={(name) => onChange({ ...value, specialisations: toggleSpecialisation(value.specialisations, name) })} />
-    <PillGroup label="Preferred country" options={PREFERRED_COUNTRIES} value={value.preferredCountries} error={errors.preferredCountries}
-      onToggle={(name) => onChange({ ...value, preferredCountries: togglePreferredCountry(value.preferredCountries, name) })} />
-  </Section>
+  return <>
+    <Section icon={<Tags size={17} />} title="Specialisation" count={selectedCount(value.specialisations.length)}>
+      <PillGroup label="Specialisation" options={SPECIALISATIONS} value={value.specialisations} error={errors.specialisations}
+        onToggle={(name) => onChange({ ...value, specialisations: toggleSpecialisation(value.specialisations, name) })} />
+    </Section>
+    <Section icon={<Globe size={17} />} title="Preferred country" count={selectedCount(value.preferredCountries.length)}>
+      <PillGroup label="Preferred country" options={PREFERRED_COUNTRIES} value={value.preferredCountries} error={errors.preferredCountries}
+        onToggle={(name) => onChange({ ...value, preferredCountries: togglePreferredCountry(value.preferredCountries, name) })} />
+    </Section>
+  </>
 }
 
 /** The agency's own people: a mini-card per person with four boxes and a round remove button, and a dashed "Add staff" pill. */
 export function StaffDetailsSection({ rows, onChange, errors }: { rows: StaffRow[]; onChange: (rows: StaffRow[]) => void; errors: FieldErrors }) {
   const change = (index: number, key: keyof StaffRow, value: string) => onChange(rows.map((row, i) => i === index ? { ...row, [key]: value } : row))
   const filled = rows.filter((row) => row.name.trim() || row.designation.trim() || row.phone.trim() || row.email.trim()).length
-  return <Section icon={<Users size={17} />} title="Staff details" count={filled ? `${filled} added` : 'Optional'}>
+  return <Section icon={<Users size={17} />} title="Staff details" count={filled ? `${filled} added` : undefined}>
     {rows.map((row, index) => {
       const at = (key: string) => errors[`staff.${index}.${key}`]
       return <fieldset key={index} className="cs-staff-row">
@@ -92,80 +95,44 @@ export function StaffDetailsSection({ rows, onChange, errors }: { rows: StaffRow
   </Section>
 }
 
-/** CRM users who can be given a client: active staff and managers (admins are not allocated to clients). */
+/** CRM users who can be given a client: active recruiters and managers (admins are not allocated to clients). */
 export function allocatableUsers(users: User[]): User[] {
   return users.filter((user) => user.active && (user.role === 'staff' || user.role === 'manager')).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-const ROLE_LABEL: Record<string, string> = { staff: 'Staff', manager: 'Manager', admin: 'Admin' }
+const ROLE_LABEL: Record<string, string> = { staff: 'Recruiter', manager: 'Manager', admin: 'Admin' }
 
 /**
- * A multi-select dropdown of CRM users. Selected people appear as removable chips. The list opens in the page flow (not
- * floating), so the dialog's own scrolling never clips it. Type to search; arrow keys move, Enter or Space toggles, Escape closes.
+ * The CRM recruiters who can look after a client, shown as a plain checklist: no dropdown to open and nothing to scroll to.
+ * Tick or untick a name. A search box only appears when the list is long.
  */
-export function StaffPicker({ users, value, onChange, error, disabled }: { users: User[]; value: string[]; onChange: (ids: string[]) => void; error?: string; disabled?: boolean }) {
-  const [open, setOpen] = useState(false)
+export function RecruiterPicker({ users, value, onChange, error, disabled }: { users: User[]; value: string[]; onChange: (ids: string[]) => void; error?: string; disabled?: boolean }) {
   const [query, setQuery] = useState('')
-  const [cursor, setCursor] = useState(0)
-  const listId = useId()
-  const box = useRef<HTMLDivElement>(null)
-  const search = useRef<HTMLInputElement>(null)
   const selected = useMemo(() => new Set(value), [value])
+  const searchable = users.length > 6
   const shown = useMemo(() => {
     const needle = foldText(query).trim()
-    return needle ? users.filter((user) => foldText(user.name).includes(needle) || foldText(ROLE_LABEL[user.role]).includes(needle)) : users
+    return needle ? users.filter((user) => foldText(user.name).includes(needle)) : users
   }, [users, query])
   const toggle = (id: string) => onChange(selected.has(id) ? value.filter((item) => item !== id) : [...value, id])
-  useEffect(() => { setCursor(0) }, [query, open])
-  useEffect(() => {
-    if (!open) return undefined
-    const away = (event: PointerEvent) => { if (box.current && !box.current.contains(event.target as Node)) setOpen(false) }
-    document.addEventListener('pointerdown', away)
-    return () => document.removeEventListener('pointerdown', away)
-  }, [open])
 
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape' && open) {
-      // Closes only the list; the dialog's own Escape handler listens on the document and must not also fire.
-      event.preventDefault(); event.nativeEvent.stopPropagation(); setOpen(false); return
-    }
-    if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); setCursor((n) => Math.min(shown.length - 1, n + 1)) }
-    else if (event.key === 'ArrowUp') { event.preventDefault(); setCursor((n) => Math.max(0, n - 1)) }
-    else if (event.key === 'Enter' && open) { event.preventDefault(); const user = shown[cursor]; if (user) toggle(user.id) }
-  }
-
-  return <div className="cs-picker" ref={box}>
-    {value.length > 0 && <ul className="cs-chips" aria-label="Allocated staff">{value.map((id) => {
-      const user = users.find((item) => item.id === id)
-      const name = user?.name ?? 'Unknown user'
-      return <li key={id} className="cs-chip">
-        <Avatar name={name} size="sm" /><span>{name}</span>
-        <button type="button" aria-label={`Remove ${name}`} disabled={disabled} onClick={() => toggle(id)}><X size={13} /></button>
-      </li>
-    })}</ul>}
-    <button type="button" className="cs-picker-trigger" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} disabled={disabled}
-      onClick={() => { setOpen((v) => !v); if (!open) window.setTimeout(() => search.current?.focus(), 0) }}
-      aria-invalid={!!error}>
-      <span>{value.length ? `${value.length} selected. Add or remove staff` : 'Choose CRM staff'}</span><ChevronDown size={16} aria-hidden="true" />
-    </button>
-    {open && <div className="cs-picker-panel" onKeyDown={onKey}>
-      <label className="cs-picker-search"><Search size={14} aria-hidden="true" />
-        <input ref={search} type="text" role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={shown[cursor] ? `${listId}-${shown[cursor].id}` : undefined}
-          value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name" aria-label="Search CRM staff" autoComplete="off" />
-      </label>
-      <ul id={listId} role="listbox" aria-multiselectable="true" aria-label="CRM staff">
-        {shown.length === 0 && <li className="cs-picker-none" role="presentation">{users.length === 0 ? 'No staff or managers are set up yet. Add them in User Management.' : 'No one matches that name.'}</li>}
-        {shown.map((user, index) => {
-          const on = selected.has(user.id)
-          return <li key={user.id} id={`${listId}-${user.id}`} role="option" aria-selected={on} className={`${on ? 'is-on' : ''}${index === cursor ? ' is-cursor' : ''}`}
-            onMouseEnter={() => setCursor(index)} onClick={() => toggle(user.id)}>
+  return <div className="cs-picker">
+    {searchable && <label className="cs-picker-search"><Search size={14} aria-hidden="true" />
+      <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search recruiters" aria-label="Search recruiters" autoComplete="off" disabled={disabled} />
+    </label>}
+    <ul className="cs-rec-list" aria-label="Recruiters" aria-invalid={!!error}>
+      {shown.length === 0 && <li className="cs-picker-none">{users.length === 0 ? 'No recruiters are set up yet. Add them in User Management.' : 'No one matches that name.'}</li>}
+      {shown.map((user) => {
+        const on = selected.has(user.id)
+        return <li key={user.id}>
+          <label className={on ? 'cs-rec is-on' : 'cs-rec'}>
+            <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(user.id)} />
             <Avatar name={user.name} size="sm" /><span className="cs-opt-name">{user.name}</span><span className="cs-opt-role">{ROLE_LABEL[user.role]}</span>
-            <Check size={15} className="cs-opt-check" aria-hidden="true" />
-          </li>
-        })}
-      </ul>
-      <div className="cs-picker-foot"><span>{value.length ? `${value.length} selected` : 'None selected'}{value.length > 0 && <> · {value.map((id) => firstName(users.find((u) => u.id === id)?.name)).filter(Boolean).join(', ')}</>}</span><button type="button" onClick={() => setOpen(false)}>Done</button></div>
-    </div>}
+          </label>
+        </li>
+      })}
+    </ul>
+    {users.length > 0 && <p className="cs-rec-foot">{value.length ? `${value.length} selected` : 'Tick one or more recruiters'}</p>}
     {error && <span className="ui-field-error" role="alert">{error}</span>}
   </div>
 }

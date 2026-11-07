@@ -126,7 +126,6 @@
 .clients-simple .cs-add:disabled { opacity: .55; cursor: not-allowed; }
 
 .clients-simple .cs-pillgroup { display: grid; gap: 8px; min-width: 0; }
-.clients-simple .cs-pillgroup-label { font-size: 13px; font-weight: 500; color: var(--text-main); }
 .clients-simple .cs-pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .clients-simple .cs-pill { height: 36px; padding: 0 16px; border: 1px solid var(--border-control); border-radius: 999px; background: var(--bg-card); color: var(--text-muted); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: border-color .14s, color .14s, background-color .14s; }
 .clients-simple .cs-pill:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
@@ -137,31 +136,19 @@
 .clients-simple .cs-tag { padding: 1px 8px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11.5px; font-weight: 500; line-height: 1.5; white-space: nowrap; }
 .clients-simple .cs-tagstack { display: grid; gap: 4px; min-width: 0; }
 .clients-simple .cs-picker { display: grid; gap: 10px; min-width: 0; }
-.clients-simple .cs-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.clients-simple .cs-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 8px 3px 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 12.5px; font-weight: 500; }
-.clients-simple .cs-chip > span:not(.record-avatar) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.clients-simple .cs-chip button { display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); cursor: pointer; }
-.clients-simple .cs-chip button:hover:not(:disabled) { background: var(--tint-2); color: var(--text-main); }
-.clients-simple .cs-picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 44px; padding: 0 14px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-muted); font-size: 14px; text-align: left; cursor: pointer; transition: border-color .14s; }
-.clients-simple .cs-picker-trigger:hover:not(:disabled) { border-color: var(--border-hover); }
-.clients-simple .cs-picker-trigger[aria-expanded='true'] { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); }
-.clients-simple .cs-picker-trigger[aria-invalid='true'] { border-color: var(--error-ink); }
-.clients-simple .cs-picker-panel { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
 .clients-simple .cs-picker-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-light); }
 .clients-simple .cs-picker-search input { flex: 1; min-width: 0; height: 38px; border: 0; background: transparent; color: var(--text-main); font-size: 14px; outline: none; }
 .clients-simple .cs-picker-search:focus-within { border-color: var(--primary); }
-.clients-simple .cs-picker-panel ul[role='listbox'] { max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
-.clients-simple .cs-picker-panel li[role='option'] { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
-.clients-simple .cs-picker-panel li[role='option'].is-cursor { background: var(--tint-2); }
-.clients-simple .cs-picker-panel li[role='option'].is-on { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
 .clients-simple .cs-opt-name { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .clients-simple .cs-opt-role { font-size: 12px; color: var(--text-muted); }
-.clients-simple .cs-opt-check { flex: none; color: var(--primary); opacity: 0; }
-.clients-simple .cs-picker-panel li.is-on .cs-opt-check { opacity: 1; }
 .clients-simple .cs-picker-none { padding: 12px 10px; font-size: 13px; color: var(--text-muted); }
-.clients-simple .cs-picker-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 4px 0; font-size: 12.5px; color: var(--text-muted); }
-.clients-simple .cs-picker-foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.clients-simple .cs-picker-foot button { border: 0; background: none; color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; }
+.clients-simple .cs-rec-list { display: grid; gap: 4px; max-height: 232px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.clients-simple .cs-rec { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 12px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); cursor: pointer; transition: background .12s, border-color .12s; }
+.clients-simple .cs-rec:hover { background: var(--tint-2); }
+.clients-simple .cs-rec.is-on { border-color: color-mix(in srgb, var(--primary) 45%, var(--border-main)); background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+.clients-simple .cs-rec input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--primary); cursor: pointer; }
+.clients-simple .cs-rec:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); }
+.clients-simple .cs-rec-foot { margin: 0; font-size: 12.5px; color: var(--text-muted); }
 
 /* ---------- Phone ---------- */
 @media (max-width: 760px) {

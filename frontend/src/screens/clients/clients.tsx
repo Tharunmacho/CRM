@@ -93,12 +93,12 @@ const clientPlace = (row: { country: string; city: string }) => ({ primary: row.
 
 /** Overlapping small avatars with the first names beside them, or a muted line when nobody is allocated. */
 function StaffStack({ staff, query }: { staff: { id: string; name: string }[]; query: string }) {
-  if (staff.length === 0) return <Quiet>No staff allocated</Quiet>
+  if (staff.length === 0) return <Quiet>No recruiter assigned</Quiet>
   const shown = staff.slice(0, 4)
   const more = staff.length - shown.length
   const label = staff.map((person) => person.name).join(', ')
   return <span className="cs-stack" title={label}>
-    <span className="cs-stack-avs" role="img" aria-label={`Allocated staff: ${label}`}>
+    <span className="cs-stack-avs" role="img" aria-label={`Assigned recruiter: ${label}`}>
       {shown.map((person) => <Avatar key={person.id} name={person.name} size="sm" />)}
       {more > 0 && <span className="cs-more" aria-hidden="true">+{more}</span>}
     </span>
@@ -123,7 +123,7 @@ function RecordCard({ title, contact, facts, staff, actions }: { title: string; 
       <div className="cs-title"><h3 title={title}>{title}</h3><p title={contact}>{contact}</p></div>
     </header>
     <dl className="cs-facts">{facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
-    {staff && <div className="cs-staff"><span className="cs-staff-label">Allocated staff</span>{staff}</div>}
+    {staff && <div className="cs-staff"><span className="cs-staff-label">Recruiter</span>{staff}</div>}
     <footer>{actions}</footer>
   </article>
 }
@@ -173,7 +173,7 @@ function ClientTable({ rows, query, loading, onOpen, onEdit }: { rows: ClientRow
     { key: 'agency', header: 'Company', width: '24%', minWidth: '12rem', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
     { key: 'contact', header: 'Contact person', width: '25%', align: 'left', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
     { key: 'location', header: 'Location', width: '17%', align: 'left', render: (row) => <Location {...clientPlace(row)} query={query} /> },
-    { key: 'staff', header: 'Staff', width: '18%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
+    { key: 'staff', header: 'Recruiter', width: '18%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
     {
       key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
       render: (row) => <span className="cs-row-actions">
@@ -384,7 +384,7 @@ export default function ClientsPage() {
         <label className="cs-search">
           <Search size={18} aria-hidden="true" />
           <input ref={searchBox} autoFocus type="search" value={text} onChange={(event) => setText(event.target.value)} maxLength={120} autoComplete="off" spellCheck={false} aria-keyshortcuts="/"
-            placeholder={side === 'clients' ? 'Search by name, company, phone, email or staff' : 'Search by name, agency, phone, email, state or staff'} aria-label={`Search ${nouns}`} />
+            placeholder={side === 'clients' ? 'Search by name, company, phone, email or recruiter' : 'Search by name, agency, phone, email, state or staff'} aria-label={`Search ${nouns}`} />
           {text && <button type="button" className="cs-search-clear" aria-label="Clear search" onClick={clear}><X size={15} /></button>}
         </label>
         <div className="cs-layout" role="group" aria-label="View as">

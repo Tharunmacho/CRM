@@ -9,7 +9,7 @@ import { SuggestInput } from '@/shared/ui/suggest-input'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { Flag } from '@/features/clients/components/parts'
-import { Section, StaffPicker, allocatableUsers } from '@/features/clients/components/party-fields'
+import { Section, RecruiterPicker, allocatableUsers } from '@/features/clients/components/party-fields'
 import '@/styles/clients-simple.css'
 import { frequentValues } from '@/shared/lib/suggestions'
 import { COUNTRY_NAMES } from '@/shared/lib/country-flag'
@@ -55,7 +55,7 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
   // The company already on file for the client being edited: its name, website and country are changed here too.
   const company = client ? store.companies.find((item) => item.clientId === client.id) : undefined
   const [employer, setEmployer] = useState({ name: company?.name ?? '', website: company?.website ?? '' })
-  // CRM staff who look after this client. Only people who can still be allocated are kept: the server refuses inactive users and admins.
+  // CRM recruiters who look after this client. Only people who can still be allocated are kept: the server refuses inactive users and admins.
   const staffUsers = useMemo(() => allocatableUsers(store.users), [store.users])
   const [staffIds, setStaffIds] = useState<string[]>(() => (client?.staffIds ?? []).filter((id) => staffUsers.some((user) => user.id === id)))
   const [saving, setSaving] = useState(false)
@@ -117,7 +117,7 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
           </div>
         </Section>
         <Section icon={<UserCheck size={17} />} title="Assign recruiter">
-          <StaffPicker users={staffUsers} value={staffIds} onChange={setStaffIds} disabled={saving} />
+          <RecruiterPicker users={staffUsers} value={staffIds} onChange={setStaffIds} disabled={saving} />
         </Section>
       </fieldset>
     </form>
