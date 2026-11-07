@@ -31,14 +31,17 @@ def now():
     return datetime.now(timezone.utc)
 
 
-def ensure_single_person_source(db, source_type, source_id, *, check_evidence=True):
+def ensure_single_person_source(db, source_type, source_id, *, check_evidence=True, jobs=None):
+    """`jobs`: the group's rows when the caller already holds them (manual uploads), so their reading notes are not fetched again."""
     bundle = db.scalar(select(MultiPersonIntake.id).where(MultiPersonIntake.source_type == source_type,
                                                          MultiPersonIntake.source_id == str(source_id)))
     if bundle:
         raise HTTPException(409, {"message": "This file is being split person by person. Open its saved review instead of attaching the whole file.", "bundleId": bundle})
     if not check_evidence:
         return
-    if source_type == "manual":
+    if source_type == "manual" and jobs is not None:
+        states = [job.state for job in jobs if job.status != "dismissed"]
+    elif source_type == "manual":
         states = list(db.scalars(select(DocumentExtractionJob.state).where(DocumentExtractionJob.group_id == str(source_id), DocumentExtractionJob.status != "dismissed")))
     elif source_type == "email":
         state = db.scalar(select(EmailIngestionJob.state).where(EmailIngestionJob.message_id == str(source_id))) or {}

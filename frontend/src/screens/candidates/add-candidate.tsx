@@ -32,6 +32,7 @@ import { frequentValues } from '@/shared/lib/suggestions'
 import { MultiFileSlot } from '@/features/candidates/components/multi-file-slot'
 import { EntryAvatar } from '@/features/candidates/components/entry-avatar'
 import { DuplicateDialog } from '@/features/candidates/components/entry-dialogs'
+import { duplicateFromSaveError, finishSavedCandidate, freshWorkspace } from '@/features/candidates/save-flow'
 import { fieldSources, liveDuplicateQuery, SCAN_KIND_LABEL, type DuplicateMatch } from '@/features/candidates/entry-signals'
 import { candidateEntryErrors, draftSnapshot, EMPTY_CANDIDATE_FORM as EMPTY } from '@/features/candidates/entry-model'
 import { EntryFormPreview } from '@/features/application-form/components/entry-form-preview'
@@ -293,24 +294,18 @@ export default function AddCandidatePage() {
       else await doSave()
     } catch (error) {
       if (error instanceof ApiError && error.status === 409 && typeof error.detail === 'object' && error.detail && (error.detail as { splitSuggested?: boolean }).splitSuggested) setSplitSuggested(true)
-      if (error instanceof ApiError && error.status === 409 && typeof error.detail === 'object' && error.detail && 'candidate' in error.detail) {
-        const candidate = (error.detail as { candidate: DuplicateMatch }).candidate
-        setDuplicate({ candidate, matchedOn: candidate.matchedOn })
-      }
-      if (store.isCurrentSession()) setSaveError(error instanceof Error ? error.message : 'We could not save this candidate. Please try again.')
+      // The server refuses a duplicate before it writes anything and names the match: the decision dialog opens, with no error banner.
+      const match = duplicateFromSaveError<DuplicateMatch>(error)
+      if (match) setDuplicate({ candidate: match, matchedOn: match.matchedOn })
+      else if (store.isCurrentSession()) setSaveError(error instanceof Error ? error.message : 'We could not save this candidate. Please try again.')
     } finally {
       setSaving(false)
     }
   }
 
-  const doSave = async () => {
-    const result = await api.post<{ duplicate: boolean; candidate?: DuplicateMatch }>('/candidates/check-duplicate', payload())
-    if (result.duplicate && result.candidate) {
-      setDuplicate({ candidate: result.candidate, matchedOn: result.candidate.matchedOn })
-      return
-    }
-    await commit()
-  }
+  // No separate duplicate check in front of the save: creating the candidate applies the same rule on the server (409 with the
+  // match, nothing written), which saves a whole request. The live check beside the form still warns while typing.
+  const doSave = async () => { await commit() }
 
   /** From the live match card: the same decision dialog, but only once the required details are valid (a combine sends the whole form). */
   const reviewMatch = () => {
@@ -361,7 +356,8 @@ export default function AddCandidatePage() {
     const created = mergeId
       ? await api.post<{ id: string; ref?: string; name?: string; ownerName?: string | null }>(`/candidates/${mergeId}/merge`, payload())
       // An admin or manager may name the recruiter right here; a staff member's own entry is assigned to that staff member (the server decides).
-      : await store.addCandidate({ ...payload(), ...(picksRecruiter && form.assignTo ? { assign_to: form.assignTo } : {}) }) as { id: string; ref?: string; name?: string; ownerName?: string | null } | null
+      // The workspace refresh is started after the documents are attached (uploadDocuments), not waited for here.
+      : await store.addCandidate({ ...payload(), ...(picksRecruiter && form.assignTo ? { assign_to: form.assignTo } : {}) }, { deferRefresh: true }) as { id: string; ref?: string; name?: string; ownerName?: string | null } | null
     if (!created) return
     const ownerName = created.ownerName ?? null
     if (mergeId) store.notify(`Combined with ${created.ref ?? 'the existing candidate'}${ownerName ? `. This candidate stays with ${ownerName}` : ''}. Empty fields were filled in. No new task was created.`)
@@ -369,23 +365,30 @@ export default function AddCandidatePage() {
     setSavedResult({ ref: created.ref, name: created.name, ownerName, merged: Boolean(mergeId), at: Date.now() })
     setSavedCandidateId(created.id)
     setDuplicate(null)
-    await intake.saveDraft(snapshotDraft(created.id)).catch(() => {})
     await uploadDocuments(created.id)
   }
 
+  /** The workspace refresh that follows the last save: the profile waits for this one instead of starting another. */
+  const workspaceRefresh = useRef<Promise<boolean> | null>(null)
   const uploadDocuments = async (candidateId: string) => {
-    await intake.saveDraft(snapshotDraft(candidateId)).catch(() => {})
-    const failed: Record<string, string> = await intake.attach(candidateId)
+    // The draft and the attachments run together; the workspace refresh starts when they are done and is not waited for.
+    const { failed, refreshed } = await finishSavedCandidate({
+      saveDraft: () => intake.saveDraft(snapshotDraft(candidateId)),
+      attach: () => intake.attach(candidateId),
+      refresh: () => store.refresh({ keepCurrent: true }),
+    })
+    workspaceRefresh.current = refreshed
+    void refreshed.then((worked) => { if (!worked && store.isCurrentSession()) store.notify('Candidate saved. The directory could not refresh; reopen it to try again.', 'warn') })
     if (!store.isCurrentSession()) return
     setUploadErrors(failed)
     // Stay on the saved result and offer the application form straight away (and the profile beside it).
-    if (!Object.keys(failed).length) { await store.refresh({ keepCurrent: true }).catch(() => {}); setAttached(true) }
+    if (!Object.keys(failed).length) setAttached(true)
   }
 
   const openSavedProfile = async (candidateId: string) => {
-    // Read after uploads so the profile contains the newly saved original files.
+    // The profile must contain the newly saved original files: the refresh that started after the uploads is reused when it worked.
     // A failed read leaves this recovery screen mounted with the saved record ID.
-    await store.refresh({ keepCurrent: true })
+    await freshWorkspace(workspaceRefresh.current, () => store.refresh({ keepCurrent: true }))
     if (store.isCurrentSession()) navigate(`/candidates/${candidateId}`)
   }
 

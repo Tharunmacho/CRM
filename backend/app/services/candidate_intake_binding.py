@@ -3,6 +3,7 @@ from copy import deepcopy
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.orm import undefer
 
 from app.db.models import Candidate, DocumentExtractionJob, Role
 
@@ -12,11 +13,12 @@ def lock_intake_group(db, group_id, user_id):
         return []
     jobs = list(db.scalars(select(DocumentExtractionJob).where(
         DocumentExtractionJob.group_id == str(group_id), DocumentExtractionJob.owner_id == user_id,
-    ).order_by(DocumentExtractionJob.id).with_for_update()))
+    ).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft)).order_by(DocumentExtractionJob.id).with_for_update().execution_options(populate_existing=True)))
     if not jobs:
         raise HTTPException(404, "We could not find the saved upload. Open it again before you save.")
     from app.services.document_person_split import ensure_single_person_source
-    ensure_single_person_source(db, "manual", group_id)
+    # The reading notes ride along with the locked rows, so the check does not read them a second time.
+    ensure_single_person_source(db, "manual", group_id, jobs=jobs)
     return jobs
 
 

@@ -19,6 +19,8 @@ from sqlalchemy import event, inspect, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import get_history
 
+from app.services.savepoint_once import guarded
+
 WATCHED = ("phone", "whatsapp", "email")
 
 # Candidate-side keys, spelled exactly as lead_import._find_candidates computes them.
@@ -94,7 +96,9 @@ def _after_flush(session: Session, _context) -> None:
     if connection.dialect.name != "postgresql":
         return
     try:
-        with connection.begin_nested():  # a missing table (database not migrated to the lead sheet yet) must never break a candidate save
+        # A missing table (database not migrated to the lead sheet yet) must never break a candidate save, so the first run is
+        # inside a savepoint; once it has worked the table is there and the statement runs without the two extra round trips.
+        with guarded(connection, "lead_matching.match"):
             match_candidates(connection, ids)
     except Exception:  # noqa: BLE001 - late matching is a convenience, the candidate write comes first
         pass

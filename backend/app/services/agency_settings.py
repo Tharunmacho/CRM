@@ -211,8 +211,9 @@ def auto_assign_enabled(db: Session) -> bool:
     """Whether new candidates are given to the next free recruiter automatically. Off unless an admin switched it on.
 
     Never raises: a missing table or column (a database not yet migrated to 0030) simply means off."""
+    from app.services.savepoint_once import guarded
     try:
-        with db.begin_nested():
+        with guarded(db, "agency_settings.auto_assign"):
             return bool(db.scalar(select(AgencySettings.auto_assign).where(AgencySettings.id == 1)))
     except Exception:
         return False

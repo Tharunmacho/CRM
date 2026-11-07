@@ -14,6 +14,18 @@ export async function refreshMasterData(store: ReturnType<typeof useStore>, mess
   catch { store.notify(message + '. Your changes were saved. Reload the page to see the latest records.', 'warn') }
 }
 
+/**
+ * Same outcome as `refreshMasterData`, without keeping the dialog open for the whole workspace download: the success message shows
+ * at once (the save already succeeded) and the lists catch up when the refresh lands. A failed refresh replaces the message with the warning.
+ */
+export function refreshMasterDataInBackground(store: ReturnType<typeof useStore>, message: string) {
+  if (!store.isCurrentSession()) return
+  store.notify(message)
+  store.refresh({ keepCurrent: true }).catch(() => {
+    if (store.isCurrentSession()) store.notify(message + '. Your changes were saved. Reload the page to see the latest records.', 'warn')
+  })
+}
+
 type Audit = { id: string; action: string; actorId: string; at: string; meta?: { changes?: Record<string, { from: unknown; to: unknown }> } }
 const readable = (value: unknown): string => value === null || value === undefined || value === '' ? 'Not set' : Array.isArray(value) ? value.join(', ') || 'None' : String(value)
 

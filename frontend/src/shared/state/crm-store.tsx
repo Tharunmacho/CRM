@@ -170,7 +170,7 @@ interface StoreValue extends Data {
   addRemark: (taskId: string, body: string) => Promise<void>
   recordCall: (candidateId: string, interested: string, remarks: string, called?: boolean) => Promise<void>
   markNotificationRead: (id?: string) => Promise<void>
-  addCandidate: (payload: Record<string, unknown>) => Promise<{ id: string; ownerName?: string | null } | null>
+  addCandidate: (payload: Record<string, unknown>, options?: { deferRefresh?: boolean }) => Promise<{ id: string; ownerName?: string | null } | null>
   addClient: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
   addCompany: (payload: Record<string, unknown>) => Promise<{ id: string } | null>
   /** Throw when the server refuses (a candidate still active or deployed below). */
@@ -665,12 +665,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         await api.post(id ? `/notifications/${id}/read` : '/notifications/read-all')
         if (isCurrentSession()) setData((current) => ({ ...current, notifications: current.notifications.map((n) => !id || n.id === id ? { ...n, read: true } : n) }))
       },
-      addCandidate: async (payload) => {
+      addCandidate: async (payload, options) => {
         const created = await api.post<{ id: string; ownerName?: string | null }>('/candidates', payload)
         if (!isCurrentSession()) return null
         // A refresh failure must not discard the saved ID and create a duplicate on retry.
-        try { await refresh({ keepCurrent: true }) }
-        catch { if (isCurrentSession()) notify('Candidate saved. The directory could not refresh; reopen it to try again.', 'warn') }
+        // `deferRefresh`: the caller starts its own refresh once it has finished its follow-up writes (see Add candidate), so the
+        // person is not kept waiting for a whole workspace download here and the workspace is not downloaded twice.
+        if (!options?.deferRefresh) {
+          try { await refresh({ keepCurrent: true }) }
+          catch { if (isCurrentSession()) notify('Candidate saved. The directory could not refresh; reopen it to try again.', 'warn') }
+        }
         return isCurrentSession() ? created : null
       },
       addClient: (payload) => run(() => api.post<{ id: string }>('/clients', payload), 'Client saved'),

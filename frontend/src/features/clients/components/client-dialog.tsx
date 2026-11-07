@@ -6,7 +6,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { Button, Field, Input } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { SuggestInput } from '@/shared/ui/suggest-input'
-import { refreshMasterData } from '@/features/master-data/components/record-audit'
+import { refreshMasterDataInBackground } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { Flag } from '@/features/clients/components/parts'
 import { Section, RecruiterPicker, allocatableUsers } from '@/features/clients/components/party-fields'
@@ -87,7 +87,8 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
       } else {
         await api.post<Client & { company: Company }>('/clients', { ...form, staffIds, company: { name: employer.name, website: web.value, address: '', state: '', country: form.country, city: '' } })
       }
-      await refreshMasterData(store, 'Client saved')
+      // The save is done: close now and let the list catch up in the background.
+      refreshMasterDataInBackground(store, 'Client saved')
       onClose()
     } catch (err) { setError(err instanceof Error ? err.message : 'We could not save the client. Please try again.') }
     finally { setSaving(false) }

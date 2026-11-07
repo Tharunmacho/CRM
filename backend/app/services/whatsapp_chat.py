@@ -152,8 +152,9 @@ def link_conversations_for_candidate(db, candidate):
     """Best effort: attach unlinked conversations whose peer number is this candidate's
     phone or WhatsApp number, so the owner can message a candidate who arrived by another
     route. Never raises into the caller's transaction."""
+    from app.services.savepoint_once import guarded
     try:
-        with db.begin_nested():
+        with guarded(db, "whatsapp_chat.link_conversations"):
             wanted = {normalize_phone(candidate.phone), normalize_phone(candidate.whatsapp)} - {""}
             for number in wanted:
                 rows = db.scalars(select(WhatsAppConversation).where(WhatsAppConversation.candidate_id.is_(None),

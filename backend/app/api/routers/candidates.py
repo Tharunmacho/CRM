@@ -444,8 +444,8 @@ def ensure_assignable(db: Session, user_id: str | None) -> User:
     return target
 
 
-def find_duplicate(db: Session, phone: str, dob: date | None, passport_no: str | None, email: str | None = None):
-    matches = identity_matches(db, {"phone": phone, "email": email, "passport_no": passport_no})
+def find_duplicate(db: Session, phone: str, dob: date | None, passport_no: str | None, email: str | None = None, *, lock: bool = True):
+    matches = identity_matches(db, {"phone": phone, "email": email, "passport_no": passport_no}, lock=lock)
     if len(matches) > 1:
         raise HTTPException(409, "The phone, email or passport belong to different candidates. Sort out the duplicate before you merge.")
     return matches[0] if matches else None
@@ -465,8 +465,14 @@ def _check_form_choices(db: Session, body: "CandidateIn", current=None) -> None:
 
 def lock_assignment_cursor(db: Session) -> AssignmentPointer:
     """Serialize candidate identity, reference and assignment decisions together."""
-    db.execute(insert(AssignmentPointer).values(id=1).on_conflict_do_nothing(index_elements=["id"]))
-    return db.scalar(select(AssignmentPointer).where(AssignmentPointer.id == 1).with_for_update())
+    # The row exists on every installation after the first save, so the normal case is ONE locking read (each statement is a
+    # network round trip on the hosted database); only a brand-new database pays for the insert and the second read.
+    locked = select(AssignmentPointer).where(AssignmentPointer.id == 1).with_for_update()
+    pointer = db.scalar(locked)
+    if pointer is None:
+        db.execute(insert(AssignmentPointer).values(id=1).on_conflict_do_nothing(index_elements=["id"]))
+        pointer = db.scalar(locked)
+    return pointer
 
 
 def next_owner(db: Session, *, pointer: AssignmentPointer | None = None, force: bool = False) -> User | None:
@@ -757,8 +763,8 @@ def check_duplicate(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Same rule as the save, so the form can warn before the user finishes typing."""
-    match = find_duplicate(db, body.phone, body.dob, body.passport_no, body.email)
+    """Same rule as the save, so the form can warn before the user finishes typing. A read only: it takes no row locks."""
+    match = find_duplicate(db, body.phone, body.dob, body.passport_no, body.email, lock=False)
     if match is None:
         return {"duplicate": False}
     existing, fields = match
