@@ -11,7 +11,7 @@ async function loadSource(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 }
 
-const { mergeOcrForm, hasOcrExtraction, inspectedPageCount, scanWarnings, ocrSavePayload } = await loadSource('../src/features/candidates/ocr-form.ts')
+const { mergeOcrForm, hasOcrExtraction, ocrSavePayload } = await loadSource('../src/features/candidates/ocr-form.ts')
 const { api, ApiError } = await loadSource('../src/shared/api/client.ts')
 const defaults = { name: '', phone: '', dob: '', nationality: '', skills: '', totalExperience: '' }
 const scan = (fields, extra = {}) => ({
@@ -112,30 +112,6 @@ test('the save payload carries each scanned kind verbatim raw plus _sources, and
   assert.equal(ocrSavePayload({}), undefined)
   // Round trip through JSON keeps the Veris page numbers exactly.
   assert.deepEqual(JSON.parse(JSON.stringify(payload)).passport.pages[0].page_number, 1)
-})
-
-test('warnings remain available when inspection prevents extraction, without duplicate messages', () => {
-  const result = scan({}, {
-    raw: {},
-    extraction_status: 'needs_review',
-    warnings: ['Page 2 is unread.', 'Nothing was sent for extraction.'],
-    inspection: { warnings: ['Page 2 is unread.', 'Page 3 has uncertain type.'] },
-  })
-  assert.deepEqual(scanWarnings(result), [
-    'Page 2 is unread.', 'Nothing was sent for extraction.', 'Page 3 has uncertain type.',
-  ])
-})
-
-test('pages skipped after an inspection deadline or limit are not counted as inspected', () => {
-  assert.equal(inspectedPageCount({
-    page_count: 4,
-    pages: [
-      { page_number: 1, status: 'read', method: 'native_text' },
-      { page_number: 2, status: 'unread', method: 'failed' },
-      { page_number: 3, status: 'blank', method: 'rendered_blank' },
-      { page_number: 4, status: 'unread', method: 'not_processed' },
-    ],
-  }), 3)
 })
 
 const realFetch = globalThis.fetch

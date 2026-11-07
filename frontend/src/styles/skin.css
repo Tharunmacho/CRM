@@ -89,7 +89,7 @@
 /* ============================================================ 2. Surfaces */
 :root:root :is(
   .ui-panel, .dr-card, .dr-metric, .dr-stat, .db .db-panel, .db-kpi, .rv-card, .rv-mini, .cp-card, .cp-head, .cl-card,
-  .tk-panel, .tk-meter, .tk-automation, .ac .ac-card, .ac .ac-report, .att-clock, .att-card, .mb-card, .uv-card,
+  .tk-panel, .tk-meter, .tk-automation, .ac .ac-card, .att-clock, .att-card, .mb-card, .uv-card,
   .wa-workspace, .summary-card, .ui-stat-tile, .jv-order, .todo-progress-panel
 ) { border-radius: var(--radius-panel); border-color: var(--border-card); box-shadow: var(--shadow-card); }
 :root:root :is(.dr-mcard, .db-mini, .jv-mcard, .td-card, .td-block, .att-req, .mb-acct, .mb-acct-card, .staff-card, .cp-app) { border-radius: var(--radius-block); }

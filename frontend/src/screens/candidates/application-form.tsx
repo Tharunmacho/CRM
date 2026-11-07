@@ -11,7 +11,7 @@ import { StageModal } from '@/features/workflow/components/stage-modal'
 import { useApplicationForm, type AssignmentCompleter } from '@/features/application-form/use-application-form'
 import { completeAssignment } from '@/features/application-form/assignment-fallback'
 import { useReferenceAgencies } from '@/features/clients/agency-api'
-import { applicationFormHref } from '@/features/application-form/form-model'
+import { applicationFormHref, visibleWarnings } from '@/features/application-form/form-model'
 import { documentSlot } from '@/shared/model/document-slots'
 import { documentRowStates, documentRowsProgress } from '@/features/application-form/document-rows'
 import { candidateSubtitle, candidateTitle, completeText, sectionTargetId, visibleMissing } from '@/features/application-form/paper-model'
@@ -192,6 +192,7 @@ export default function ApplicationFormPage() {
   const feedback = form?.feedback
   // Only what the official form asks for: a server that still lists a removed extra does not put it in the checklist.
   const missing = visibleMissing(completeness.missing)
+  const shownWarnings = visibleWarnings(form?.warnings ?? [])
   const documentProgress = form ? documentRowsProgress(documentRowStates(form, canWork).map((row) => row.state)) : { uploaded: 0, total: 0, percent: 0 }
 
   const sheet = form && ctx ? <FormSheet ctx={ctx.paper} missing={missing} canOpenStage={canWork && Boolean(application)} onOpenStage={openTracking} /> : null
@@ -232,7 +233,7 @@ export default function ApplicationFormPage() {
             <SidePanel percent={completeness.percent} missing={missing} documents={documentProgress} canEdit={canWork} onUpload={uploadNow} onFill={fillIn} onJump={jump} notes={feedback?.supported || canWork ? { count: feedback?.items.length ?? 0, overdue: Boolean(feedback?.stageClock?.needsReason), onOpen: openNotes } : undefined} />
             <div className="af-main">
               {saveError && <p className="af-banner is-error" role="alert"><span>{saveError}</span></p>}
-              {form.warnings.length > 0 && <ul className="af-banner is-warn" role="status">{form.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+              {shownWarnings.length > 0 && <ul className="af-banner is-warn" role="status">{shownWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
               {feedback && <StageClockBar feedback={feedback} actions={feedbackActions} canWrite={feedback.canWrite} />}
               {/* The assignment is a card of its own at the very top; it scrolls away with the page. */}
               <div className="af-card af-assign-card" id="af-assignment">

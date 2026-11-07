@@ -1,12 +1,8 @@
-import type { OcrInspection, OcrScan } from '@/shared/api/client'
+import type { OcrScan } from '@/shared/api/client'
 
 export type ScanKind = 'resume' | 'passport' | 'aadhaar'
 export type DocumentScans = Partial<Record<ScanKind, OcrScan>>
 const SCAN_KINDS: ScanKind[] = ['resume', 'passport', 'aadhaar']
-
-export function inspectedPageCount(inspection: OcrInspection): number {
-  return inspection.pages.filter((page) => page.method !== 'not_processed').length
-}
 
 /** Provenance keys older responses mixed into `raw`; they are not Veris output. */
 const LEGACY_PROVENANCE_KEYS = new Set(['local_inspection', 'source_sha256', 'source_file', 'provider_page_number'])
@@ -69,9 +65,4 @@ export function mergeOcrForm<T extends Record<string, string>>(
     if (!edited.has(key)) next[key] = (extracted[key as string] ?? defaults[key]) as T[keyof T]
   }
   return next
-}
-
-/** Preserve each warning once, including when extraction was deliberately skipped. */
-export function scanWarnings(scan: OcrScan): string[] {
-  return [...new Set([...(scan.warnings ?? []), ...(scan.inspection?.warnings ?? [])])]
 }

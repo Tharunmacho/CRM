@@ -10,7 +10,7 @@ async function loadSource(path) {
 }
 
 const upload = await loadSource('../src/features/candidates/entry-upload.ts')
-const { fileRow, fileRows, foundChips, readProgress, queueText, pagesText, sizeText, findingsText, documentPresence, severalPeopleFound, jobFindings, isDocumentJob,
+const { fileRow, fileRows, foundChips, readProgress, queueText, pagesText, sizeText, findingsNames, documentPresence, severalPeopleFound, jobFindings, isDocumentJob,
   trackNextInLine, NEXT_IN_LINE_MS, NO_READER_INFO_MS, READER_DOWN, STILL_WAITING, safeHint } = upload
 
 // Synthetic jobs only: no real names, numbers or documents.
@@ -121,7 +121,7 @@ test('page, size and file texts', () => {
   assert.equal(sizeText(245), '245 KB')
   assert.equal(sizeText(1536), '1.5 MB')
   assert.equal(sizeText(2048), '2 MB')
-  assert.equal(findingsText([{ kind: 'resume', pages: [], read: true }, { kind: 'passport', pages: [4], read: true }]), 'Resume · Passport: page 4')
+  assert.equal(findingsNames([{ kind: 'resume', pages: [], read: true }, { kind: 'passport', pages: [4], read: true }]), 'Resume · Passport')
 })
 
 test('the progress strip counts a kind once found, or while a file of that kind is still unread', () => {

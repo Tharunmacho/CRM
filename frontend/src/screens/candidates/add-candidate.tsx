@@ -12,7 +12,7 @@ import { documentFileError } from '@/shared/lib/document-files'
 import { documentLabel } from '@/shared/model/document-slots'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { hasOcrExtraction, mergeOcrForm, ocrSavePayload, type DocumentScans, type ScanKind } from '@/features/candidates/ocr-form'
+import { hasOcrExtraction, mergeOcrForm, ocrSavePayload, type DocumentScans } from '@/features/candidates/ocr-form'
 import { normalizedSkills } from '@/features/candidates/candidate-skills'
 import { passportExpiryNotice } from '@/features/candidates/passport-expiry'
 import { IDLE_POLL_MS, scansFromJobs, useDocumentIntake, useQueueClock, MAX_FILES_PER_KIND, type IntakeJob } from '@/features/candidates/use-document-intake'
@@ -20,7 +20,6 @@ import { documentPresence, fileRows, foundChips, isDocumentJob, isWorking, MAX_D
 import { jobReports } from '@/features/candidates/read-report'
 import { EntryUploadZone } from '@/features/candidates/components/entry-upload-zone'
 import { DocumentBundleReview } from '@/features/candidates/components/document-bundle-review'
-import { DocumentReadReport } from '@/features/candidates/components/document-read-report'
 import { EntrySection, TagField } from '@/features/candidates/components/entry-section'
 import { EntryField, FormSection, InterestCards, PhoneField, ReadBadge, SameAs } from '@/features/candidates/components/entry-fields'
 import { EntryRowsEditor } from '@/features/candidates/components/entry-rows-editor'
@@ -33,7 +32,7 @@ import { frequentValues } from '@/shared/lib/suggestions'
 import { MultiFileSlot } from '@/features/candidates/components/multi-file-slot'
 import { EntryAvatar } from '@/features/candidates/components/entry-avatar'
 import { DuplicateDialog } from '@/features/candidates/components/entry-dialogs'
-import { appliedFieldLabels, fieldSources, liveDuplicateQuery, SCAN_KIND_LABEL, type DuplicateMatch } from '@/features/candidates/entry-signals'
+import { fieldSources, liveDuplicateQuery, SCAN_KIND_LABEL, type DuplicateMatch } from '@/features/candidates/entry-signals'
 import { candidateEntryErrors, draftSnapshot, EMPTY_CANDIDATE_FORM as EMPTY } from '@/features/candidates/entry-model'
 import { EntryFormPreview } from '@/features/application-form/components/entry-form-preview'
 import { educationPayload, historyPayload, previewFormFromEntry } from '@/features/application-form/entry-bridge'
@@ -47,7 +46,6 @@ import '@/styles/application-entry.css'
 type FormKey = keyof typeof EMPTY
 type SavedResult = { ref?: string; name?: string; ownerName: string | null; merged: boolean; at: number }
 type LiveCheck = { status: 'idle' | 'checking' | 'none' | 'found' | 'conflict' | 'unavailable'; match?: DuplicateMatch; message?: string }
-const SCAN_KINDS: ScanKind[] = ['resume', 'passport', 'aadhaar']
 const SLA_MS = 48 * 3600 * 1000
 const IMAGE_FILE = /.(jpe?g|png|webp|heic|heif|tiff?)$/i
 type Pill = { tone: 'good' | 'warn' | 'bad' | 'busy' | 'muted'; label: string }
@@ -575,12 +573,7 @@ export default function AddCandidatePage() {
                       </Button>}
                     </div>
                   </div>
-                  {(readMessage || SCAN_KINDS.some((kind) => scans[kind])) && <div aria-live="polite" aria-atomic="false" className="ac-reports">
-                    {readMessage && <p className="ac-muted ac-small ac-read-message">{readMessage}</p>}
-                    <div className="ac-report-grid">
-                      {SCAN_KINDS.map((kind) => scans[kind] ? <DocumentReadReport key={kind} kind={kind} scan={scans[kind]!} applied={appliedFieldLabels(scans[kind]!, edited.current)} /> : null)}
-                    </div>
-                  </div>}
+                  {readMessage && <p aria-live="polite" className="ac-muted ac-small ac-read-message">{readMessage}</p>}
 
                   <p className="ac-subhead ac-more-head">More documents (optional)</p>
                   <div className="ac-slots">

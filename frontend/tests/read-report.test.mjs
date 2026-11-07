@@ -9,7 +9,7 @@ async function loadSource(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 }
 
-const { buildReadReport, pageNumbersText, pagesLabel, fieldWords, conflictText, unmappedViews, unmappedCountText, jobReports, formReports } = await loadSource('../src/features/candidates/read-report.ts')
+const { buildReadReport, fieldWords, conflictText, unmappedViews, jobReports, formReports } = await loadSource('../src/features/candidates/read-report.ts')
 
 // Synthetic records only: no real names, numbers or documents.
 const coverage = (over = {}) => ({
@@ -23,55 +23,43 @@ const coverage = (over = {}) => ({
   unmapped: [], issues: [], notes: [], complete: true, ...over,
 })
 
-test('page numbers read as plain words', () => {
-  assert.equal(pageNumbersText([1, 2, 3, 4, 5]), '1 to 5')
-  assert.equal(pageNumbersText([13, 14]), '13 and 14')
-  assert.equal(pageNumbersText([6]), '6')
-  assert.equal(pageNumbersText([1, 2, 3, 7]), '1 to 3 and 7')
-  assert.equal(pageNumbersText([9, 2, 2, 4]), '2, 4 and 9')
-  assert.equal(pagesLabel([6]), 'page 6')
-  assert.equal(pagesLabel([13, 14]), 'pages 13 and 14')
-  assert.equal(pagesLabel([]), '')
-  assert.equal(pagesLabel(['x', null, -1, 0]), '')
-})
-
-test('the headline is the server summary and the chips follow the fixed order with their pages', () => {
+test('the headline names the documents and the chips follow the fixed order, with no page numbers', () => {
   const report = buildReadReport(coverage())
-  assert.equal(report.headline, 'Read: resume pages 1-5, passport page 6, Aadhaar pages 13-14; 2 pages ignored (7, 15).')
-  assert.deepEqual(report.chips.map((chip) => chip.label), ['Resume pages 1 to 5', 'Passport page 6', 'Aadhaar pages 13 and 14'])
+  assert.equal(report.headline, 'Resume, Passport and Aadhaar read.')
+  assert.deepEqual(report.chips.map((chip) => chip.label), ['Resume', 'Passport', 'Aadhaar'])
   assert.deepEqual(report.chips.map((chip) => chip.state), ['read', 'verified', 'read'])
   assert.equal(report.chips[1].title, 'Cross-checked: passport number and date of birth')
+  assert.equal(buildReadReport(coverage({ kinds: { passport: { pages_sent: [6] } } })).headline, 'Passport read.')
+  assert.doesNotMatch(JSON.stringify(report.chips) + report.headline, /page/i)
 })
 
-test('a cross-check conflict turns the chip amber and names the fields in plain words', () => {
+test('a cross-check conflict turns the chip amber and says what to check in plain words', () => {
   const data = coverage()
-  data.kinds.passport.crossCheck = { verified: ['surname'], conflicts: ['passport_number'] }
+  data.kinds.passport.crossCheck = { verified: ['surname'], conflicts: ['doe'] }
   const report = buildReadReport(data)
   assert.equal(report.chips[1].state, 'check')
   const note = report.notes.find((item) => item.key === 'check:passport')
   assert.equal(note.tone, 'warn')
-  assert.equal(note.text, 'Passport number differs between the scan and the reader: please check.')
-  assert.equal(conflictText(['date of birth', 'passport number']), 'Date of birth and passport number differ between the scan and the reader: please check.')
+  assert.equal(note.text, 'Passport: date of expiry — please check it against the passport.')
+  data.kinds.passport.crossCheck = { verified: [], conflicts: ['passport_number'] }
+  assert.equal(buildReadReport(data).notes.find((item) => item.key === 'check:passport').text, 'Passport number — please check it against the passport.')
+  assert.equal(conflictText('passport', ['date of issue', 'date of expiry']), 'Passport: date of issue and date of expiry — please check them against the passport.')
   data.kinds.aadhaar.crossCheck = { verified: [], conflicts: [{ field: 'dob' }] }
-  assert.equal(buildReadReport(data).notes.find((item) => item.key === 'check:aadhaar').text, 'Aadhaar: Date of birth differs between the scan and the reader: please check.')
+  assert.equal(buildReadReport(data).notes.find((item) => item.key === 'check:aadhaar').text, 'Aadhaar: date of birth — please check it against the aadhaar.')
   assert.equal(fieldWords('passport_number'), 'passport number')
   assert.equal(fieldWords('dateOfBirth'), 'date of birth')
 })
 
-test('ignored and unresolved pages are listed, the unresolved one offers Read again', () => {
+test('unresolved pages give one plain note with Read again; ignored pages are not mentioned', () => {
   const data = coverage({ pages: { total: 16, sent: [1], not_sent: [{ page: 16, reason: 'x', blocking: true }], ignored: [7, 15], unresolved: [16], probed: [] } })
   const report = buildReadReport(data)
   const unresolved = report.notes.find((note) => note.key === 'unresolved')
-  assert.equal(unresolved.text, 'Unresolved page 16: could not be read.')
+  assert.equal(unresolved.text, 'Some pages could not be read.')
   assert.equal(unresolved.retry, true)
   assert.equal(unresolved.tone, 'warn')
-  const ignored = report.notes.find((note) => note.key === 'ignored')
-  assert.equal(ignored.text, '2 pages ignored (7, 15)')
-  assert.equal(ignored.tone, 'muted')
-  assert.equal(report.notes.at(-1).key, 'ignored', 'muted notes come last')
-  assert.equal(buildReadReport(coverage({ pages: { ignored: [4] } })).notes[0].text, '1 page ignored (4)')
-  assert.equal(buildReadReport(coverage({ pages: { unresolved: [3, 4] } })).notes[0].text, 'Unresolved pages 3 and 4: could not be read.')
-  assert.equal(buildReadReport(coverage({ pages: { ignored: Array.from({ length: 14 }, (_, i) => i + 1) } })).notes[0].text, '14 pages ignored (1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 4 more)')
+  assert.equal(report.notes.some((note) => note.key === 'ignored'), false)
+  assert.deepEqual(buildReadReport(coverage({ pages: { ignored: [4] } })).notes, [])
+  assert.equal(buildReadReport(coverage({ pages: { unresolved: [3, 4] } })).notes[0].text, 'Some pages could not be read.')
 })
 
 test('rows left out and differing parts are called out', () => {
@@ -107,19 +95,16 @@ test('sensitive groups never show values, only how many were found', () => {
     { kind: 'aadhaar', path: 'aadhaar.address_line', count: 1, values: ['Synthetic street'] },
   ])
   for (const view of views.slice(0, 5)) { assert.equal(view.hidden, true, view.group); assert.deepEqual(view.samples, []) }
-  assert.equal(unmappedCountText(views[1]), '2 found, hidden')
   assert.equal(views[5].hidden, false)
   assert.deepEqual(views[5].samples, ['Synthetic street'])
-  assert.equal(unmappedCountText(views[5]), '1')
   assert.equal(views[0].group, 'Mobile number')
 })
 
-test('a report carries the unplaced total, from the coverage or from beside it', () => {
-  const inside = buildReadReport(coverage({ unmapped: [{ kind: 'resume', path: 'a', count: 2, values: ['x'] }, { kind: 'passport', path: 'b', count: 1, values: [] }] }))
-  assert.equal(inside.unmappedCount, 3)
-  const beside = buildReadReport(coverage(), [{ kind: 'resume', path: 'a', count: 4, values: ['x'] }])
-  assert.equal(beside.unmappedCount, 4)
-  assert.equal(buildReadReport(null, [{ kind: 'resume', path: 'a', count: 1, values: ['x'] }]).headline, 'Some details were not placed on the form.')
+test('details with no place on the form are kept out of the report text and never carry sensitive values', () => {
+  const report = buildReadReport(coverage(), [{ kind: 'aadhaar', path: 'aadhaar.vid', count: 1, samples: ['1111 2222 3333 4444'] }])
+  assert.deepEqual(report.unmapped[0].samples, [])
+  assert.doesNotMatch(JSON.stringify({ headline: report.headline, chips: report.chips, notes: report.notes }), /1111/)
+  assert.equal(buildReadReport(null, [{ kind: 'resume', path: 'a', count: 1, values: ['x'] }]), null)
 })
 
 test('missing or odd keys never break and an older server gives no report', () => {
@@ -129,10 +114,10 @@ test('missing or odd keys never break and an older server gives no report', () =
   assert.equal(buildReadReport('nope'), null)
   assert.equal(buildReadReport([]), null)
   assert.equal(buildReadReport({}, []), null)
-  const bare = buildReadReport({ summary: 'Read: nothing.' })
-  assert.deepEqual({ ...bare }, { headline: 'Read: nothing.', chips: [], notes: [], unmapped: [], unmappedCount: 0 })
+  assert.equal(buildReadReport({ summary: 'Read: nothing.' }), null)
   const odd = buildReadReport({ summary: 5, pages: 'x', kinds: { resume: null, passport: { pages_sent: 'x', crossCheck: { verified: 'a', conflicts: [null, 3] } } }, unmapped: [null, 4, {}] })
   assert.deepEqual(odd.chips.map((chip) => chip.label), ['Resume', 'Passport'])
+  assert.equal(odd.headline, 'Resume and Passport read.')
   assert.deepEqual(odd.unmapped, [])
   assert.equal(unmappedViews('x').length, 0)
   // The older shape named in the brief works too.
@@ -158,7 +143,7 @@ test('application form: one report per reading, newest first, none without data'
     { slot: 'passport', label: 'Passport', extraction: { jobId: 'j1', updatedAt: '2026-01-02T00:00:00Z', coverage: coverage() } },
     { slot: 'photo', label: 'Photo', extraction: null },
     { slot: 'visa', label: 'Visa' },
-    { slot: 'medical', label: 'Medical', extraction: { jobId: 'j2', updatedAt: '2026-01-03T00:00:00Z', unmapped: [{ kind: 'resume', path: 'a', count: 1, values: ['x'] }] } },
+    { slot: 'medical', label: 'Medical', extraction: { jobId: 'j2', updatedAt: '2026-01-03T00:00:00Z', coverage: coverage() } },
     { slot: 'other', label: 'Other', extraction: { jobId: 'j3', updatedAt: '2026-01-04T00:00:00Z' } },
   ]
   const reports = formReports(slots)

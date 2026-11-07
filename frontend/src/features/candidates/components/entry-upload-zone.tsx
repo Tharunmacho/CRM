@@ -3,9 +3,9 @@ import { AlertTriangle, Check, CloudUpload, FileText, Image as ImageIcon, Loader
 import { cn } from '@/shared/lib/cn'
 import { DOCUMENT_ACCEPT, DOCUMENT_HELP } from '@/shared/lib/document-files'
 import { FileLink } from '@/shared/ui/file-drop'
-import { findingsText, sizeText, type FileRow, type FoundChip, type ReadProgress } from '../entry-upload'
+import { findingsNames, sizeText, type FileRow, type FoundChip, type ReadProgress } from '../entry-upload'
 import type { JobReport } from '../read-report'
-import { ReadReport } from './read-report'
+import { LogToggle, ReadNotes } from './read-report'
 
 const isImage = (name: string) => /\.(jpe?g|png|webp|heic|heif|tiff?)$/i.test(name)
 
@@ -35,6 +35,7 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
   const [dragging, setDragging] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
+  const [logOpen, setLogOpen] = useState<string | null>(null)
   const full = rows.length >= max
   const locked = disabled || full
 
@@ -86,36 +87,50 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
         <ul className={cn('uz-list', rows.length > 6 && 'is-long')} aria-label="Files added">
           {rows.map((row) => {
             const Icon = isImage(row.name) ? ImageIcon : FileText
-            const found = findingsText(row.findings)
+            const found = findingsNames(row.findings)
+            const notes = reports.find((item) => item.id === row.id)?.report.notes ?? []
+            const lines = [row.note, row.hint].filter(Boolean)
+            const logCount = lines.length + notes.length
+            const open = logOpen === row.id
+            const logId = `uz-log-${row.id}`
             return (
               <li key={row.id} className={cn('uz-row', `is-${row.state}`, row.stalled && 'is-stalled')}>
-                <span className="uz-ico" aria-hidden><Icon size={18} /></span>
-                <div className="uz-main">
-                  <p className="uz-name">{row.url ? <FileLink url={row.url} className="hover:text-navy-700">{row.name}</FileLink> : row.name}</p>
-                  <p className="uz-meta tnum">{sizeText(row.sizeKb)}{found && <span className="uz-found"> · {found}</span>}</p>
-                  {row.note && <p className="uz-note" role={row.stalled ? 'alert' : undefined}>{row.note}</p>}
-                  {row.hint && <p className="uz-note">{row.hint}</p>}
-                  {(row.canCheckAgain && onCheckAgain || row.retryLabel || row.canEnterManually && onManual) && (
-                    <div className="uz-actions">
-                      {row.canCheckAgain && onCheckAgain && (
-                        <button type="button" className="uz-check" disabled={checking} onClick={() => void checkAgain()}>
-                          {checking ? <LoaderCircle size={14} className="ac-spin" aria-hidden /> : <RotateCw size={14} aria-hidden />}Check again
-                        </button>
-                      )}
-                      {row.retryLabel && (
-                        <button type="button" className="uz-check" disabled={disabled} onClick={() => void onRetry(row.id)}>
-                          <RotateCw size={14} aria-hidden />{row.retryLabel}
-                        </button>
-                      )}
-                      {row.canEnterManually && onManual && <button type="button" className="uz-check" disabled={disabled} onClick={onManual}>Enter details manually</button>}
-                    </div>
-                  )}
+                <div className="uz-line">
+                  <span className="uz-ico" aria-hidden><Icon size={18} /></span>
+                  <div className="uz-main">
+                    <p className="uz-name">{row.url ? <FileLink url={row.url} className="hover:text-navy-700">{row.name}</FileLink> : row.name}</p>
+                    <p className="uz-meta tnum">{sizeText(row.sizeKb)}{found && <span className="uz-found"> · {found}</span>}</p>
+                  </div>
+                  <div className="uz-tools">
+                    <span className={`ac-pill is-${row.tone}`} role="status"><i aria-hidden />{row.label}</span>
+                    {logCount > 0 && <LogToggle open={open} count={logCount} controls={logId} onToggle={() => setLogOpen(open ? null : row.id)} />}
+                    {row.canRetry && !row.retryLabel && <button type="button" className="uz-icon-btn" disabled={disabled} onClick={() => void onRetry(row.id)} aria-label={`Read ${row.name} again`} title="Read again"><RotateCw size={16} aria-hidden /></button>}
+                    <button type="button" className="uz-icon-btn is-remove" disabled={disabled || removing === row.id} onClick={() => void remove(row.id)} aria-label={`Remove ${row.name}`} title="Remove">
+                      {removing === row.id ? <LoaderCircle size={16} className="ac-spin" aria-hidden /> : <X size={16} aria-hidden />}
+                    </button>
+                  </div>
                 </div>
-                <span className={`ac-pill is-${row.tone}`} role="status"><i aria-hidden />{row.label}</span>
-                {row.canRetry && !row.retryLabel && <button type="button" className="uz-icon-btn" disabled={disabled} onClick={() => void onRetry(row.id)} aria-label={`Read ${row.name} again`} title="Read again"><RotateCw size={16} aria-hidden /></button>}
-                <button type="button" className="uz-icon-btn is-remove" disabled={disabled || removing === row.id} onClick={() => void remove(row.id)} aria-label={`Remove ${row.name}`} title="Remove">
-                  {removing === row.id ? <LoaderCircle size={16} className="ac-spin" aria-hidden /> : <X size={16} aria-hidden />}
-                </button>
+                {(row.canCheckAgain && onCheckAgain || row.retryLabel || row.canEnterManually && onManual) && (
+                  <div className="uz-actions">
+                    {row.canCheckAgain && onCheckAgain && (
+                      <button type="button" className="uz-check" disabled={checking} onClick={() => void checkAgain()}>
+                        {checking ? <LoaderCircle size={14} className="ac-spin" aria-hidden /> : <RotateCw size={14} aria-hidden />}Check again
+                      </button>
+                    )}
+                    {row.retryLabel && (
+                      <button type="button" className="uz-check" disabled={disabled} onClick={() => void onRetry(row.id)}>
+                        <RotateCw size={14} aria-hidden />{row.retryLabel}
+                      </button>
+                    )}
+                    {row.canEnterManually && onManual && <button type="button" className="uz-check" disabled={disabled} onClick={onManual}>Enter details manually</button>}
+                  </div>
+                )}
+                {open && (
+                  <div id={logId} className="rr-panel uz-log">
+                    {lines.length > 0 && <ul className="rr-notes">{lines.map((line) => <li key={line}><AlertTriangle size={14} aria-hidden /><span>{line}</span></li>)}</ul>}
+                    {notes.length > 0 && <ReadNotes notes={notes} busy={disabled} onRetry={() => void onRetry(row.id)} />}
+                  </div>
+                )}
               </li>
             )
           })}
@@ -127,15 +142,10 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
           <li key={chip.kind} className={`uz-chip is-${chip.state}`}>
             {chip.state === 'done' ? <Check size={14} strokeWidth={3} aria-hidden /> : chip.state === 'reading' ? <LoaderCircle size={14} className="ac-spin" aria-hidden /> : chip.state === 'review' ? <AlertTriangle size={14} aria-hidden /> : <i aria-hidden />}
             <span>{chip.label}</span>
-            {chip.detail && <small>{chip.detail}</small>}
+            {chip.files > 1 && <small>{chip.detail}</small>}
           </li>
         ))}
       </ul>
-
-      {reports.map((item) => (
-        <ReadReport key={item.id} report={item.report} caption={reports.length > 1 ? item.filename : undefined} busy={disabled}
-          onRetry={rows.some((row) => row.id === item.id) ? () => void onRetry(item.id) : undefined} />
-      ))}
     </div>
   )
 }

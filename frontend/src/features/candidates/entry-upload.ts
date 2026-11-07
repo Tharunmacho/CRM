@@ -144,9 +144,9 @@ export function sizeText(sizeKb: number): string {
   return sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1).replace(/\.0$/, '')} MB` : `${Math.max(1, Math.round(sizeKb))} KB`
 }
 
-/** "Resume · Passport: page 4": what one file turned out to hold. */
-export function findingsText(findings: Finding[]): string {
-  return findings.map((item) => item.pages.length ? `${KIND_NAME[item.kind]}: ${pagesText(item.pages)}` : KIND_NAME[item.kind]).join(' · ')
+/** "Resume · Passport": which documents one file turned out to hold, without page numbers. */
+export function findingsNames(findings: Finding[]): string {
+  return findings.map((item) => KIND_NAME[item.kind]).join(' · ')
 }
 
 const NEEDS_LOOK = 'We could not find anything we can read here. Check the file, or type the details yourself.'

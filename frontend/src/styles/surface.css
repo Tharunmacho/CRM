@@ -2,7 +2,7 @@
    card reads as its own shape. Coloured top accent bars and tinted borders are switched off everywhere. */
 html body :is(
   .ui-panel, .summary-card, .dr-metric, .dr-stat, .dr-card, .dr-mcard, .db-kpi, .db .db-panel, .db-mini, .rv-card, .rv-mini,
-  .cp-card, .cp-head, .cp-app, .cl-card, .jv-order, .jv-mcard, .tk-panel, .td-card, .td-block, .ac .ac-card, .ac .ac-report,
+  .cp-card, .cp-head, .cp-app, .cl-card, .jv-order, .jv-mcard, .tk-panel, .td-card, .td-block, .ac .ac-card,
   .staff-card, .att-clock, .att-req, .att-card, .mb-card, .mb-acct, .mb-acct-card, .wa-workspace, .uv-card, .tk-meter, .tk-automation
 ) {
   border-color: var(--border-card);

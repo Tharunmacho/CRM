@@ -1,4 +1,3 @@
-import type { OcrScan } from '@/shared/api/client'
 import { hasOcrExtraction, type DocumentScans, type ScanKind } from './ocr-form'
 import type { CandidateEntryField, CandidateEntryForm } from './entry-model'
 
@@ -13,15 +12,6 @@ export const ENTRY_FIELD_LABELS: Partial<Record<CandidateEntryField, string>> = 
 export const SCAN_KIND_LABEL: Record<ScanKind, string> = { resume: 'resume', passport: 'passport', aadhaar: 'Aadhaar' }
 
 const scanText = (value: unknown) => Array.isArray(value) ? (value.length ? value.map((item) => (item && typeof item === 'object' ? JSON.stringify(item) : String(item))).join('') : '') : value == null ? '' : String(value)
-
-/** Names of the fields one document filled in that the recruiter has not changed. */
-export function appliedFieldLabels(scan: OcrScan, edited: ReadonlySet<CandidateEntryField>): string[] {
-  if (!hasOcrExtraction(scan)) return []
-  return Object.entries(scan.fields).flatMap(([key, value]) => {
-    const label = ENTRY_FIELD_LABELS[key as CandidateEntryField]
-    return label && scanText(value).trim() && !edited.has(key as CandidateEntryField) ? [label] : []
-  })
-}
 
 /**
  * Which document supplied each untouched field. The order matches mergeOcrForm (passport wins over Aadhaar over resume),

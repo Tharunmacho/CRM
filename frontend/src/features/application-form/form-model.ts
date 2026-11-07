@@ -865,6 +865,14 @@ export function rebaseDraft(oldBase: FormDraft, draft: FormDraft, newBase: FormD
 
 /* ------------------------------------------------------------------ Links */
 
+const TECHNICAL_WARNING = /MRZ|LLM|vision|check digit|crop|reader disagree|mrz\.|structured|persistence|not seen before|adjoining document/i
+const MAX_SHOWN_WARNINGS = 3
+
+/** A safety net for the form's warning banner: each plain warning once, none that talk about how the reading worked, at most three. */
+export function visibleWarnings(warnings: readonly string[]): string[] {
+  return [...new Set(warnings.map((text) => text.trim()).filter((text) => text && !TECHNICAL_WARNING.test(text)))].slice(0, MAX_SHOWN_WARNINGS)
+}
+
 /** The linkable address of a candidate's form, for one order (or application) when it is known. */
 export function applicationFormHref(candidateId: string, orderId?: string | null, applicationId?: string | null): string {
   const query = applicationId ? `?application=${encodeURIComponent(applicationId)}` : orderId ? `?order=${encodeURIComponent(orderId)}` : ''

@@ -328,3 +328,15 @@ test('the form shows only the last four digits of an Aadhaar number, whatever th
   assert.equal(model.normalizeForm(server()).aadhaarMasked, '')
   assert.equal(model.maskedAadhaar('12'), '')
 })
+
+test('the warning banner shows at most three plain warnings, once each, and hides technical ones', () => {
+  const { visibleWarnings } = model
+  assert.deepEqual(visibleWarnings([]), [])
+  assert.deepEqual(visibleWarnings(['Passport expires soon.', 'Passport expires soon.', '  ', 'Date of birth is missing.']), ['Passport expires soon.', 'Date of birth is missing.'])
+  assert.deepEqual(visibleWarnings([
+    'MRZ region could not be located.', 'LLM structured complete', 'Passport check digits failed.', 'Enlarged local crop was used.',
+    'Pages 2,3,4 assigned to adjoining document.', 'Reader disagree on name.', 'mrz.surname not seen before', 'Vision persistence failed.',
+  ]), [])
+  assert.deepEqual(visibleWarnings(['One.', 'Two.', 'Three.', 'Four.', 'Five.']), ['One.', 'Two.', 'Three.'])
+  assert.deepEqual(visibleWarnings(['Crop it.', 'Photo is missing.']), ['Photo is missing.'])
+})

@@ -1,12 +1,43 @@
-import { AlertTriangle, Check, ChevronDown, FileSearch, RotateCw } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, ChevronDown, RotateCw, ScrollText } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
-import { unmappedCountText, type ReadReportView } from '../read-report'
+import type { ReadReportView } from '../read-report'
 import '@/styles/add-candidate-v2.css'
 
+type Notes = ReadReportView['notes']
+
+/** The plain notes of one reading, one per line. A note about unreadable pages carries a Read again button when the host can offer it. */
+export function ReadNotes({ notes, onRetry, busy = false }: { notes: Notes; onRetry?: () => void; busy?: boolean }) {
+  return (
+    <ul className="rr-notes">
+      {notes.map((note) => (
+        <li key={note.key}>
+          <AlertTriangle size={14} aria-hidden />
+          <span>{note.text}</span>
+          {note.retry && onRetry && (
+            <button type="button" className="rr-retry" disabled={busy} onClick={onRetry}><RotateCw size={13} aria-hidden />Read again</button>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** The "Log" button: closed by default, so nothing about the reading shows unless the recruiter asks. */
+export function LogToggle({ open, count, onToggle, controls }: { open: boolean; count?: number; onToggle: () => void; controls: string }) {
+  return (
+    <button type="button" className={cn('rr-log-btn', open && 'is-open')} aria-expanded={open} aria-controls={controls} onClick={onToggle}>
+      <ScrollText size={15} aria-hidden />Log
+      {count ? <span className="rr-log-count tnum">{count}</span> : null}
+      <ChevronDown size={14} className="rr-log-chev" aria-hidden />
+    </button>
+  )
+}
+
 /**
- * "What we read": the server's one-line summary, a chip per kind (green when the scan and the reader agree, amber when they differ),
- * notes for anything that needs a look, and the details that have no place on the form. Pure display: the host passes the built
- * report and, when it can read a file again, `onRetry` (the button shows only then).
+ * The reading log of one file (Documents block of the application form): nothing but a Log button until it is opened, and no
+ * button at all when there is nothing to look at. Pure display: the host passes the built report and, when it can read a file
+ * again, `onRetry`.
  */
 export function ReadReport({ report, caption, onRetry, busy = false }: {
   report: ReadReportView
@@ -15,62 +46,16 @@ export function ReadReport({ report, caption, onRetry, busy = false }: {
   onRetry?: () => void
   busy?: boolean
 }) {
-  const { headline, chips, notes, unmapped, unmappedCount } = report
+  const [open, setOpen] = useState(false)
+  const id = `rr-log-${report.notes[0]?.key ?? 'none'}-${caption ?? ''}`.replace(/\W+/g, '-')
+  if (report.notes.length === 0) return null
   return (
-    <section className="rr" aria-label="What we read">
-      <header className="rr-head">
-        <span className="rr-ico" aria-hidden><FileSearch size={16} /></span>
-        <div className="rr-title">
-          <b>What we read{caption ? <span className="rr-caption"> · {caption}</span> : null}</b>
-          {headline && <p>{headline}</p>}
-        </div>
-      </header>
-
-      {chips.length > 0 && (
-        <ul className="rr-chips" aria-label="Documents read">
-          {chips.map((chip) => (
-            <li key={chip.kind} className={cn('rr-chip', `is-${chip.state}`)} title={chip.title || undefined}>
-              {chip.state === 'verified' ? <Check size={14} strokeWidth={3} aria-hidden /> : chip.state === 'check' ? <AlertTriangle size={14} aria-hidden /> : <i aria-hidden />}
-              <span>{chip.label}</span>
-              {chip.state === 'verified' && <small>checked</small>}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {notes.length > 0 && (
-        <ul className="rr-notes">
-          {notes.map((note) => (
-            <li key={note.key} className={`is-${note.tone}`}>
-              {note.tone === 'warn' && <AlertTriangle size={14} aria-hidden />}
-              <span>{note.text}</span>
-              {note.retry && onRetry && (
-                <button type="button" className="rr-retry" disabled={busy} onClick={onRetry}><RotateCw size={13} aria-hidden />Read again</button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {unmapped.length > 0 && (
-        <details className="rr-more">
-          <summary>
-            <ChevronDown size={14} aria-hidden />
-            <span>Not placed on the form</span>
-            <small className="tnum">{unmappedCount} {unmappedCount === 1 ? 'detail' : 'details'}</small>
-          </summary>
-          <ul className="rr-list">
-            {unmapped.map((item) => (
-              <li key={item.key}>
-                <p><b>{item.kindName}</b> · {item.group} <span className="tnum rr-count">{unmappedCountText(item)}</span></p>
-                {item.samples.length > 0 && (
-                  <ul className="rr-samples">{item.samples.map((sample, index) => <li key={index}>{sample}</li>)}</ul>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+    <section className="rr" aria-label="Reading log">
+      <div className="rr-bar">
+        <span className="rr-bar-title">{caption ? `Reading log · ${caption}` : 'Reading log'}</span>
+        <LogToggle open={open} count={report.notes.length} onToggle={() => setOpen((v) => !v)} controls={id} />
+      </div>
+      {open && <div id={id} className="rr-panel"><ReadNotes notes={report.notes} onRetry={onRetry} busy={busy} /></div>}
     </section>
   )
 }

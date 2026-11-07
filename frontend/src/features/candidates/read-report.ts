@@ -1,15 +1,14 @@
 /**
- * The "What we read" report: what the document reader was given, what it made of it and what it could not place on the form.
- * Plain data in, plain data out (no React, no network). The server's `coverage` record and `unmapped` list are additive, so every
- * key is optional here: an older server sends neither and `buildReadReport` returns null. Sensitive details (Aadhaar number, VID,
- * enrollment id, mobile number) are never shown; the server already leaves their values out and this file hides them as well.
+ * The read report: one plain headline, a chip per document and only the notes a recruiter can act on. No page numbers and no
+ * reading internals. Plain data in, plain data out (no React, no network). The server's `coverage` record is additive, so every
+ * key is optional here: an older server sends none and `buildReadReport` returns null. Sensitive details (Aadhaar number, VID,
+ * enrollment id, mobile number) are never carried: the server already leaves their values out and `unmappedViews` hides them as well.
  */
 export type ReportKind = 'resume' | 'passport' | 'aadhaar'
 export const REPORT_KINDS: readonly ReportKind[] = ['resume', 'passport', 'aadhaar']
 const KIND_NAME: Record<string, string> = { resume: 'Resume', passport: 'Passport', aadhaar: 'Aadhaar' }
 const MAX_SAMPLES = 5
 const MAX_SAMPLE_LENGTH = 80
-const MAX_LISTED_PAGES = 10
 
 export type ReportChip = {
   kind: string
@@ -21,7 +20,7 @@ export type ReportChip = {
 }
 export type ReportNote = {
   key: string
-  tone: 'warn' | 'muted'
+  tone: 'warn'
   text: string
   /** The note is about pages that could not be read: the host may offer Read again. */
   retry?: boolean
@@ -41,7 +40,6 @@ export type ReadReportView = {
   chips: ReportChip[]
   notes: ReportNote[]
   unmapped: UnmappedView[]
-  unmappedCount: number
 }
 
 const rec = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {})
@@ -53,25 +51,6 @@ const plural = (count: number, one: string, many = one + 's') => (count === 1 ? 
 const sentence = (value: string) => (value ? value.charAt(0).toUpperCase() + value.slice(1) : value)
 const joinWords = (items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`)
 
-/** [1, 2, 3, 4, 5] -> "1 to 5"; [13, 14] -> "13 and 14"; [1, 2, 3, 7] -> "1 to 3 and 7". */
-export function pageNumbersText(pages: number[]): string {
-  const sorted = numbers(pages)
-  const parts: string[] = []
-  for (let index = 0; index < sorted.length;) {
-    let end = index
-    while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end += 1
-    if (end - index >= 2) parts.push(`${sorted[index]} to ${sorted[end]}`)
-    else for (let at = index; at <= end; at += 1) parts.push(String(sorted[at]))
-    index = end + 1
-  }
-  return joinWords(parts)
-}
-/** "page 6" or "pages 13 and 14". */
-export function pagesLabel(pages: number[]): string {
-  const sorted = numbers(pages)
-  return sorted.length ? `${plural(sorted.length, 'page')} ${pageNumbersText(sorted)}` : ''
-}
-
 /** A field name in words: "passport_number" -> "Passport number", "dob" -> "Date of birth". */
 const FIELD_WORDS: Record<string, string> = { dob: 'date of birth', doe: 'date of expiry', doi: 'date of issue', mrz: 'machine-readable lines' }
 export function fieldWords(name: unknown): string {
@@ -80,10 +59,12 @@ export function fieldWords(name: unknown): string {
 }
 const fieldNames = (value: unknown): string[] => [...new Set(arr(value).map((item) => fieldWords(typeof item === 'string' ? item : rec(item).field ?? rec(item).name)).filter(Boolean))]
 
-/** "Passport number differs between the scan and the reader: please check." */
-export function conflictText(fields: string[]): string {
-  const names = joinWords(fields.map((name, index) => (index === 0 ? sentence(name) : name)))
-  return `${names} ${fields.length === 1 ? 'differs' : 'differ'} between the scan and the reader: please check.`
+/** "Passport: date of expiry — please check it against the passport." (the kind is left out when a field already names it). */
+export function conflictText(kind: string, fields: string[]): string {
+  const name = KIND_NAME[kind] ?? sentence(kind)
+  const named = fields.some((field) => field.startsWith(kind))
+  const list = joinWords(named ? fields.map((field, index) => (index === 0 ? sentence(field) : field)) : fields)
+  return `${named ? '' : `${name}: `}${list} — please check ${fields.length === 1 ? 'it' : 'them'} against the ${name.toLowerCase()}.`
 }
 
 // ------------------------------------------------------------------ not placed on the form
@@ -115,28 +96,17 @@ export function unmappedViews(list: unknown): UnmappedView[] {
   const order = (kind: string) => { const at = REPORT_KINDS.indexOf(kind as ReportKind); return at < 0 ? REPORT_KINDS.length : at }
   return views.map((view, index) => ({ view, index })).sort((a, b) => order(a.view.kind) - order(b.view.kind) || a.index - b.index).map(({ view }) => view)
 }
-/** "3 found, hidden" for a sensitive group; "3" otherwise. */
-export const unmappedCountText = (view: Pick<UnmappedView, 'count' | 'hidden'>) => (view.hidden ? `${view.count} found, hidden` : String(view.count))
-
 // ------------------------------------------------------------------ the report
 
 function chipFor(kind: string, part: Record<string, unknown>): ReportChip {
   const check = rec(part.crossCheck)
   const verified = fieldNames(check.verified)
   const conflicts = fieldNames(check.conflicts)
-  const pages = pagesLabel(numbers(part.pages_sent ?? part.pagesSent ?? part.pages))
-  const name = KIND_NAME[kind] ?? sentence(kind)
   return {
-    kind, label: pages ? `${name} ${pages}` : name,
+    kind, label: KIND_NAME[kind] ?? sentence(kind),
     state: conflicts.length ? 'check' : verified.length ? 'verified' : 'read',
     title: conflicts.length ? `Differs: ${joinWords(conflicts)}` : verified.length ? `Cross-checked: ${joinWords(verified)}` : '',
   }
-}
-
-function ignoredText(pages: number[]): string {
-  const shown = pages.slice(0, MAX_LISTED_PAGES).join(', ')
-  const more = pages.length > MAX_LISTED_PAGES ? ` and ${pages.length - MAX_LISTED_PAGES} more` : ''
-  return `${pages.length} ${plural(pages.length, 'page')} ignored (${shown}${more})`
 }
 
 /** What the reader left out of each kind: rows past the form's room, and parts that disagreed. */
@@ -155,38 +125,30 @@ function leftOutNotes(kind: string, part: Record<string, unknown>): ReportNote[]
   return notes
 }
 
+/** "Resume, Passport and Aadhaar read." */
+const headlineFor = (chips: ReportChip[]) => (chips.length ? `${joinWords(chips.map((chip) => chip.label))} read.` : '')
+
 /**
- * The report for one reading, or null when the server sent no coverage and nothing unplaced (an older server).
- * `unmapped` may come beside the coverage (the application form) or inside it (the upload job).
+ * The report for one reading, or null when the server sent no coverage or there is nothing to say (an older server).
+ * `unmapped` may come beside the coverage (the application form) or inside it (the upload job); it is kept in the view with the
+ * sensitive groups already hidden, but the screens do not show it.
  */
 export function buildReadReport(coverage: unknown, unmapped?: unknown): ReadReportView | null {
   const data = rec(coverage)
-  const hasCoverage = Object.keys(data).length > 0
-  const own = unmappedViews(arr(unmapped).length ? unmapped : data.unmapped)
-  if (!hasCoverage && !own.length) return null
-
   const kinds = rec(data.kinds)
   const kindOrder = [...REPORT_KINDS.filter((kind) => kind in kinds), ...Object.keys(kinds).filter((kind) => !REPORT_KINDS.includes(kind as ReportKind))]
   const chips = kindOrder.map((kind) => chipFor(kind, rec(kinds[kind])))
 
   const conflictNotes = kindOrder.flatMap((kind): ReportNote[] => {
     const fields = fieldNames(rec(rec(kinds[kind]).crossCheck).conflicts)
-    // The kind is named only when no field already says it ("Passport number" needs no "Passport:" in front).
-    const named = fields.some((field) => field.startsWith(kind))
-    return fields.length ? [{ key: `check:${kind}`, tone: 'warn', text: `${named ? '' : `${KIND_NAME[kind] ?? sentence(kind)}: `}${conflictText(fields)}` }] : []
+    return fields.length ? [{ key: `check:${kind}`, tone: 'warn', text: conflictText(kind, fields) }] : []
   })
   const rowNotes = kindOrder.flatMap((kind) => leftOutNotes(kind, rec(kinds[kind])))
-
-  const pages = rec(data.pages)
-  const unresolved = numbers(pages.unresolved)
-  const ignored = numbers(pages.ignored)
   const notes: ReportNote[] = [...conflictNotes, ...rowNotes]
-  if (unresolved.length) notes.push({ key: 'unresolved', tone: 'warn', retry: true, text: `Unresolved ${pagesLabel(unresolved)}: could not be read.` })
-  if (ignored.length) notes.push({ key: 'ignored', tone: 'muted', text: ignoredText(ignored) })
+  if (numbers(rec(data.pages).unresolved).length) notes.push({ key: 'unresolved', tone: 'warn', retry: true, text: 'Some pages could not be read.' })
+  if (!chips.length && !notes.length) return null
 
-  const total = own.reduce((sum, view) => sum + view.count, 0)
-  const headline = text(data.summary) || (chips.length ? `Read: ${chips.map((chip) => chip.label).join(', ')}.` : own.length ? 'Some details were not placed on the form.' : '')
-  return { headline, chips, notes, unmapped: own, unmappedCount: total }
+  return { headline: headlineFor(chips), chips, notes, unmapped: unmappedViews(arr(unmapped).length ? unmapped : data.unmapped) }
 }
 
 // ------------------------------------------------------------------ where the data sits
