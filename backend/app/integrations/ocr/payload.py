@@ -28,7 +28,7 @@ import re
 import pymupdf as fitz
 from PIL import Image
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("crm.reading")
 
 MAX_SIDE = 2000          # px on the long side of a page picture
 MAX_SIDE_CAP = 3200      # ... raised for a big paper size so that a page keeps at least MIN_DPI, never beyond this
@@ -205,7 +205,7 @@ def prepare_job(content: bytes, rotations: list[int] | None = None, *, max_side:
             raise ValueError("page count changed")
         return Prepared(data, count, len(content), stats["rotated"], stats["recompressed"], stats["images"])
     except Exception as exc:  # never a reason to lose a page: the file goes as it was
-        log.warning("The job file could not be prepared locally (%s); it is sent as it is.", type(exc).__name__)
+        log.warning("Reading: could not tidy the pages before sending (%s); sending them as they are", type(exc).__name__)
         try:
             with fitz.open(stream=content, filetype="pdf") as src:
                 count = src.page_count
@@ -247,6 +247,6 @@ def unsendable(source: bytes, candidates: dict[int, tuple], unread: set[int] | N
                         else:
                             seen[key] = number
     except Exception as exc:
-        log.warning("Blank and duplicate pages could not be checked locally (%s); every page is sent.", type(exc).__name__)
+        log.warning("Reading: could not check for blank or repeated pages (%s); sending every page", type(exc).__name__)
         return {}
     return dropped

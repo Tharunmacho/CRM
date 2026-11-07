@@ -4,6 +4,8 @@ Everything here is synthetic and runs against a fake Veris (no network, no API k
 """
 
 from copy import deepcopy
+import hashlib
+import logging
 import threading
 import time
 from types import SimpleNamespace
@@ -787,18 +789,23 @@ def test_kinds_are_sent_one_at_a_time_in_order_and_each_step_is_logged(world, ca
     world.settings.veris_parallel_jobs = 1
     world.settings.veris_early_dispatch = False  # (early dispatch sends what the first look settled, in that order)
     world.veris.delay = 0.05
+    data = pdf(*COMBINED)
 
-    output = world.extract(pdf(*COMBINED))
+    output = world.extract(data)
 
     assert output["status"] == "complete"
     assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport", "aadhaar"]
     assert world.veris.peak == 1
     text = " | ".join(record.getMessage() for record in caplog.records)
-    for line in ("Veris resume: sending pages 1", "Veris resume: job accepted job-resu", "Veris resume: succeeded in",
-                 "Veris passport: sending pages", "Veris aadhaar: succeeded in"):
+    tag = f"Reading [file {hashlib.sha256(data).hexdigest()[:8]}]"
+    for line in (f"{tag}: local check of 4 pages done in", f"{tag} resume: sent pages 1", f"{tag} resume: done in",
+                 f"{tag} passport: sent pages", f"{tag} aadhaar: done in", f"{tag}: finished in", "resume ok, passport ok, aadhaar ok"):
         assert line in text, line
-    assert text.index("Veris resume: succeeded") < text.index("Veris passport: sending")
-    assert text.index("Veris passport: succeeded") < text.index("Veris aadhaar: sending")
+    assert "(job resume" in text  # the short job id, without the "job-" prefix
+    assert text.index("resume: done") < text.index("passport: sent")
+    assert text.index("passport: done") < text.index("aadhaar: sent")
+    assert {record.name for record in caplog.records} == {"crm.reading"}
+    assert not any(record.levelno > logging.INFO for record in caplog.records)
 
 
 def test_a_running_kind_holds_the_later_kinds_back_and_a_failed_kind_does_not(world):
@@ -830,8 +837,10 @@ def test_a_terminally_failed_kind_degrades_the_file_and_explicit_retry_reads_onl
     assert any(w.startswith(notice) for w in output["warnings"])
     assert notice in " ".join(output["coverage"]["issues"]) and output["coverage"]["complete"] is False
     assert [s["mode"] for s in world.veris.submissions] == ["resume", "passport", "aadhaar"]  # one failure, no repeats
-    line = next(r.getMessage() for r in caplog.records if "Veris passport: failed" in r.getMessage())
-    assert "code=document_unreadable retryable=False" in line and "Synthetic reason" not in line
+    line = next(r.getMessage() for r in caplog.records if "passport: failed after" in r.getMessage())
+    assert "the reader said 'document_unreadable'" in line and "will not be retried" in line and "Synthetic reason" not in line
+    summary = next(r.getMessage() for r in caplog.records if ": finished in" in r.getMessage())
+    assert "resume ok, passport failed, aadhaar ok" in summary and "(needs review)" in summary
     saved = world.saved[-1]["provider_jobs"]
     assert saved["passport"]["status"] == "failed" and saved["resume"]["status"] == "succeeded"
     assert subject.provider_codes(world.saved[-1]) == "passport=document_unreadable"
@@ -885,3 +894,91 @@ def test_the_defaults_wait_a_minute_per_visit_and_prepare_the_payload():
     settings = Settings(_env_file=None)
     assert settings.ocr_provider_wait_seconds == 60.0  # a job of 20-45 s is polled to completion in the same visit
     assert settings.veris_passport_one_page is True and settings.veris_job_max_bytes >= 1_000_000
+
+
+# ------------------------------------------------------------------------------ speed: the jobs of one file overlap
+
+
+def test_the_default_sends_every_kind_of_a_file_at_once():
+    from app.core.config import Settings
+
+    settings = Settings(_env_file=None)
+    assert settings.veris_parallel_jobs == 4  # was 1: a file took the sum of its jobs instead of the longest
+    assert settings.veris_passport_pages_parallel is False  # a second scan of the passport data page is still found not needed
+
+
+@pytest.mark.parametrize("early", [True, False])
+def test_resume_passport_and_aadhaar_are_all_in_flight_together_when_nothing_is_configured(world, early):
+    del world.settings.veris_parallel_jobs  # the built-in default
+    world.settings.veris_early_dispatch = early
+    gate = threading.Barrier(3, timeout=5)  # a submit only returns once all three are being sent: one at a time would break it
+    real_submit = world.veris.submit
+
+    def submit(document, *, mode, idempotency_key):
+        gate.wait()
+        return real_submit(document, mode=mode, idempotency_key=idempotency_key)
+
+    world.veris.submit = submit
+    started = time.monotonic()
+
+    output = world.extract(pdf(*COMBINED))
+
+    assert output["status"] == "complete" and set(output["extractions"]) == {"resume", "passport", "aadhaar"}
+    assert not gate.broken and time.monotonic() - started < 5
+    assert {s["mode"] for s in world.veris.submissions} == {"resume", "passport", "aadhaar"}
+
+
+def _unit(kind: str, pages: list[int], *, record: dict | None = None):
+    from veriis import FileDescriptor
+
+    record = record if record is not None else {"selected_pages": pages, "status": "submitting"}
+    return subject._Unit(kind, record, pages, f"key-{kind}-{pages}",
+                         document=FileDescriptor(pdf(*[f"page {n}" for n in pages]), filename="x.pdf", content_type="application/pdf"))
+
+
+def test_the_late_pages_of_a_passport_are_sent_beside_the_first_ones_but_two_scans_of_one_page_are_not(world):
+    world.veris.delay = 0.2
+    settings = SimpleNamespace(veris_ocr_base_url="https://ocr.invalid", veris_ocr_api_key="k", ocr_provider_wait_seconds=0.0,
+                               veris_parallel_jobs=4)
+    state: dict = {}
+
+    first, late = _unit("passport", [8]), _unit("passport+", [11])
+    subject._run_jobs([first, late], state=state, save=lambda s: None, settings=settings)
+    assert world.veris.peak == 2 and first.outcome == late.outcome == "ok"  # "later pages" no longer wait for the first job
+
+    # The chunks (pages) of one passport still go one at a time, so that a repeated scan can be called off.
+    world.veris.peak = 0
+    chunks = [{"index": i, "selected_pages": [n], "status": "submitting"} for i, n in enumerate((8, 9))]
+    units = [_unit("passport", [c["selected_pages"][0]], record=c) for c in chunks]
+    subject._run_jobs(units, state=state, save=lambda s: None, settings=settings)
+    assert world.veris.peak == 1 and [u.outcome for u in units] == ["ok", "ok"]
+
+    world.veris.peak = 0
+    settings.veris_passport_pages_parallel = True
+    units = [_unit("passport", [n], record={"index": i, "selected_pages": [n], "status": "submitting"}) for i, n in enumerate((8, 9))]
+    subject._run_jobs(units, state=state, save=lambda s: None, settings=settings)
+    assert world.veris.peak == 2
+
+
+def test_a_slow_job_does_not_delay_the_others_and_the_file_takes_about_the_slowest_job(world):
+    """Jobs of 0.3 s (sending) side by side: the whole file is about one job long, not three."""
+    del world.settings.veris_parallel_jobs
+    world.veris.delay = 0.3
+    started = time.monotonic()
+    output = world.extract(pdf(*COMBINED))
+    assert output["status"] == "complete" and world.veris.peak == 3
+    assert time.monotonic() - started < 0.75
+
+
+def test_a_busy_reader_is_retried_and_the_log_says_when(world, caplog):
+    caplog.set_level(logging.INFO, logger=subject.log.name)
+    world.veris.submit_faults = [VerisOCRRateLimitError("slow down", status=429, retry_after=2.0)]
+    output = world.extract(pdf(CV))
+    assert output["status"] == "complete"
+    text = " | ".join(r.getMessage() for r in caplog.records)
+    assert "the reader asked us to slow down; will retry in 2s" in text
+    assert text.count("resume: sent pages") == 1 and text.count("resume: done in") == 1  # one start line, one done line
+
+
+def test_httpx_request_lines_are_not_logged_at_info():
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING

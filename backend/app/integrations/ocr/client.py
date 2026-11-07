@@ -16,9 +16,16 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Protocol
 
+import logging
+
 from veriis import FileDescriptor, VerisOCR
 from veriis.errors import VerisOCRConnectionError, VerisOCRRateLimitError, VerisOCRServerError, VerisOCRTimeoutError
 from veriis.models import AadhaarResponse, JobResponse, PassportResponse, ResumeResponse
+
+# The HTTP library logs every request at INFO ("HTTP Request: GET .../v1/jobs/... 200 OK"), which is a dozen identical
+# lines per job while it is polled. Its warnings and errors are kept; the reading log (crm.reading) says what matters.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 DEADLINE_SECONDS = 150.0
 POLL_SECONDS = 1.5
@@ -64,8 +71,10 @@ def provider_deadline(pages: int) -> float:
     return min(DEADLINE_CAP_SECONDS, DEADLINE_BASE_SECONDS + DEADLINE_PER_PAGE_SECONDS * max(0, pages))
 
 
-def retrying(call: Callable[[], object], *, attempts: int = RETRY_ATTEMPTS, extra: tuple[type[Exception], ...] = ()):
-    """``call()``, tried again with a growing pause after a 429 or 5xx (``extra`` adds error types, for harmless reads)."""
+def retrying(call: Callable[[], object], *, attempts: int = RETRY_ATTEMPTS, extra: tuple[type[Exception], ...] = (),
+             on_retry: Callable[[Exception, float], None] | None = None):
+    """``call()``, tried again with a growing pause after a 429 or 5xx (``extra`` adds error types, for harmless reads).
+    ``on_retry(error, pause)`` is told before each pause, so a caller can say "will retry in 4s"."""
     transient = (VerisOCRRateLimitError, VerisOCRServerError, *extra)
     for attempt in range(1, attempts + 1):
         try:
@@ -75,7 +84,10 @@ def retrying(call: Callable[[], object], *, attempts: int = RETRY_ATTEMPTS, extr
                 raise
             hinted = getattr(exc, "retry_after", None)
             pause = hinted if isinstance(hinted, (int, float)) and hinted >= 0 else RETRY_BASE_SECONDS * 2 ** (attempt - 1)
-            _sleep(min(pause, RETRY_CAP_SECONDS))
+            pause = min(pause, RETRY_CAP_SECONDS)
+            if on_retry is not None:
+                on_retry(exc, pause)
+            _sleep(pause)
     raise AssertionError("unreachable")
 
 

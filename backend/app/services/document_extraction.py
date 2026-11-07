@@ -3,12 +3,16 @@
 A provider job is polled for at most ocr_provider_wait_seconds (60 s) per invocation. A worker can
 release its slot on ExtractionPending and revisit the same provider job later.
 
-Order: the kinds of one document go to Veris one at a time (résumé, then passport, then Aadhaar; the late part of a
-kind right after it; the chunks of a long document one after another) because veris_parallel_jobs defaults to 1;
-a higher value sends that many side by side. A job that is still running holds the later ones back, and a job that
-failed does not: the later kinds are still sent. Every step is logged (kind, pages, size, job id, outcome, time; never
-page text). The state is saved at checkpoints only: the keys before any paid work, the job ids once accepted, and the
-results as they settle. Nothing is saved on a poll.
+Order: the kinds of one document (résumé, passport, Aadhaar, the late part of a kind, the chunks of a long document) are
+sent to Veris side by side, at most veris_parallel_jobs (default 4) at once, so a file takes about as long as its slowest
+job. Only the pages of one passport go one after the other (veris_passport_pages_parallel), so that a second scan of the
+data page can be found not needed. With veris_parallel_jobs = 1 a job that is still running holds the later ones back,
+and a job that failed does not: the later kinds are still sent.
+
+Logging: one logger, "crm.reading", one format. ``Reading [file abc12345] resume: sent pages 1-5 (502 KB)``, then one done
+or failed line for that kind, then one summary line for the file. Never page text. Technical detail (the notes, the
+prepared-file sizes, job acceptance) is at DEBUG. The state is saved at checkpoints only: the keys before any paid work,
+the job ids once accepted, and the results as they settle. Nothing is saved on a poll.
 
 Payload: before a job is sent its file is prepared locally (integrations/ocr/payload.py: rebuilt minimal, upright, bounded
 pictures; blank and exactly repeated pages are left out and named in the coverage), and one logged line says what was sent. A
@@ -32,6 +36,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable
+import contextvars
 from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
@@ -49,14 +54,16 @@ from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 from app.integrations.ocr import client as ocr_client
 from app.integrations.ocr.field_coverage import field_report, row_report
 from app.integrations.ocr.classification import identity_hint, passport_plan
-from app.integrations.ocr.inspection import InspectionError, inspect_document, restore_inspection
+from app.integrations.ocr.inspection import READING_FILE, InspectionError, inspect_document, restore_inspection
 from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields
 from app.integrations.ocr.merge import merge_results
 from app.integrations.ocr.payload import prepare_job, rotations_from, unsendable
 from app.integrations.ocr.person_split import page_identity, incompatible
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("crm.reading")
+# The short id of the file being read (first characters of its hash), for the log lines of this reading.
+_FILE = READING_FILE
 PIPELINE_VERSION = "local-pages-v2"  # v2: jobs are sent as prepared files, so v1 keys (other bytes) must not be reused
 _MODELS = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}
 _PENDING = {"queued", "running"}
@@ -324,7 +331,7 @@ def _split_oversize(state: dict, units: list[_Unit], source_hash, cap: int) -> b
     redone = False
     for unit in units:
         if unit.document is not None and len(unit.pages) > 1 and unit.size > cap:
-            log.warning("%s: %d pages are %d KB, above the %d KB limit of one job; sending them one page at a time",
+            log.info("%s: %d pages are %d KB, above the %d KB limit of one job; sending them one page at a time",
                         _step(unit), len(unit.pages), unit.size // 1024, cap // 1024)
             _split_unit(state, unit, source_hash)
             redone = True
@@ -338,7 +345,7 @@ def _prepared_job(unit: _Unit, content: bytes, rotations: dict, *, settings) -> 
     prepared = prepare_job(content, turns, max_bytes=int(_setting(settings, "veris_prepare_target_bytes", 3_000_000)))
     if prepared.fallback:
         return content
-    log.info("%s: prepared %d page%s, %d KB (was %d KB), rotation fixed on %d page%s",
+    log.debug("%s: prepared %d page%s, %d KB (was %d KB), rotation fixed on %d page%s",
              _step(unit), prepared.pages, "" if prepared.pages == 1 else "s", max(1, (len(prepared.content) + 1023) // 1024),
              max(1, (prepared.original_bytes + 1023) // 1024), prepared.rotated, "" if prepared.rotated == 1 else "s")
     return prepared.content
@@ -377,8 +384,8 @@ def _resubmit_duplicates(state: dict, units: list[_Unit]) -> bool:
             continue
         record = state["provider_jobs"][unit.kind]
         state.setdefault("provider_job_history", {}).setdefault(unit.kind, []).append(deepcopy(unit.record))
-        log.warning("%s: the reader already had this key (%s); sending it again under a new key", _step(unit),
-                    "the job had failed" if unit.outcome == "failed" else "with other file contents")
+        log.info("%s: the reader already had this upload key (%s); sending it again under a new key", _step(unit),
+                 "that job had failed" if unit.outcome == "failed" else "it was used for other file contents")
         if record is unit.record:
             generations = state.setdefault("provider_generations", {})
             generations[unit.kind] = generations.get(unit.kind, 0) + 1
@@ -474,6 +481,7 @@ class _Unit:
     outcome: str = ""      # "", "ok", "pending", "failed", "timed_out", "unusable", "error"
     label: str = ""
     size: int = 0          # bytes of the document sent (for the log)
+    tag: str = field(default_factory=_FILE.get)  # the file's short id, for the log lines (also read in pool threads)
 
 
 def _units_of(kind: str, record: dict, source_hash: str) -> list[_Unit]:
@@ -505,12 +513,32 @@ def _order(kind: str) -> tuple[int, bool]:
     return (_ORDER.index(mode) if mode in _ORDER else len(_ORDER), kind.endswith("+"))
 
 
+def _who(tag: str | None = None) -> str:
+    """The start of every reading log line: "Reading [file abc12345]"."""
+    tag = _FILE.get() if tag is None else tag
+    return f"Reading [file {tag}]" if tag else "Reading"
+
+
 def _step(unit: _Unit) -> str:
-    return f"Veris {_mode(unit.kind)}{' (later pages)' if unit.kind.endswith('+') else ''}{unit.label}"
+    """The line prefix of one job: "Reading [file abc12345] passport (later pages)"."""
+    return f"{_who(unit.tag)} {_mode(unit.kind)}{' (later pages)' if unit.kind.endswith('+') else ''}{unit.label}"
+
+
+def _retry_note(unit: _Unit) -> Callable[[Exception, float], None]:
+    def note(exc: Exception, pause: float) -> None:
+        why = {"VerisOCRRateLimitError": "the reader asked us to slow down", "VerisOCRServerError": "the reader had a temporary fault",
+               "VerisOCRConnectionError": "the connection dropped", "VerisOCRTimeoutError": "the reader was slow to answer"}
+        log.info("%s: %s; will retry in %.0fs", _step(unit), why.get(type(exc).__name__, "a temporary problem"), pause)
+    return note
 
 
 def _short(value) -> str:
     return re.sub(r"[^A-Za-z0-9_.:-]", "", str(value or ""))[:40]
+
+
+def _job_label(job_id) -> str:
+    """The short form of a job id for a log line ("job_01HZX4K9..." -> "01HZX4K9")."""
+    return re.sub(r"^job[_-]", "", _short(job_id))[:8]
 
 
 def provider_codes(state: dict) -> str:
@@ -575,7 +603,7 @@ def _drive(unit: _Unit, settings, events: queue.Queue, abort: threading.Event) -
             job_id = unit.record.get("job_id")
             if not job_id:
                 accepted = ocr_client.retrying(lambda: provider.jobs.submit(
-                    unit.document, mode=_mode(unit.kind), idempotency_key=unit.key))
+                    unit.document, mode=_mode(unit.kind), idempotency_key=unit.key), on_retry=_retry_note(unit))
                 ack = threading.Event()
                 events.put(("submitted", unit, accepted, ack))
                 ack.wait()
@@ -585,7 +613,8 @@ def _drive(unit: _Unit, settings, events: queue.Queue, abort: threading.Event) -
             # Most files finish within seconds. Waiting here avoids a full release, a retry delay
             # and a worker wake-up for every status check; a slower job is still handed back.
             job = ocr_client.settle(
-                lambda: ocr_client.retrying(lambda: provider.jobs.get(job_id), extra=ocr_client.READ_ERRORS),
+                lambda: ocr_client.retrying(lambda: provider.jobs.get(job_id), extra=ocr_client.READ_ERRORS,
+                                            on_retry=_retry_note(unit)),
                 budget=max(0.0, _setting(settings, "ocr_provider_wait_seconds", 0.0)),
             )
         events.put(("job", unit, job, None))
@@ -628,19 +657,24 @@ def _apply_job(unit: _Unit, job) -> bool:
 
 
 def _log_outcome(unit: _Unit) -> None:
+    """The one done / failed line of a job (a job still running says so once per visit; the next visit says done)."""
     rec, name = unit.record, _step(unit)
     took = max(0.0, _wall() - rec.get("submitted_at", _wall()))
+    job = _job_label(rec.get("job_id"))
+    where = f" (job {job}{', the reader already had it' if rec.get('duplicate') else ''})" if job else ""
     if unit.outcome == "ok":
-        log.info("%s: succeeded in %.1fs", name, took)
+        log.info("%s: done in %.1fs%s", name, took, where)
     elif unit.outcome == "failed":
         reason = rec.get("provider_error") or {}
-        log.warning("%s: failed in %.1fs code=%s retryable=%s", name, took, _short(reason.get("code")) or "none", bool(reason.get("retryable")))
+        code = _short(reason.get("code"))
+        retry = "it can be tried again" if reason.get("retryable") else "it will not be retried automatically"
+        log.warning("%s: failed after %.1fs%s: the reader said %s; %s", name, took, where, f"'{code}'" if code else "it could not read the file", retry)
     elif unit.outcome == "pending":
-        log.info("%s: still running after %.1fs; it is checked again later", name, took)
+        log.info("%s: still running after %.1fs%s; will check again shortly", name, took, where)
     elif unit.outcome == "timed_out":
-        log.warning("%s: did not finish in time (%.1fs)", name, took)
+        log.warning("%s: no answer after %.1fs%s; gave up waiting, it can be tried again", name, took, where)
     else:
-        log.warning("%s: the answer could not be used", name)
+        log.warning("%s: the reader's answer could not be used; check the document and try again", name)
 
 
 def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=None, skip=None) -> bool:
@@ -649,14 +683,17 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
     ``on_kind_done(kind)`` is called as soon as every job of a kind has its result, while other kinds are still being
     read; when it reports a change and other jobs are still running, that kind's result is saved at once, so a
     partial result is visible as each kind completes.
-    ``skip(unit)`` may call a job off before it is sent (a passport page that is not needed any more). The pages of a
-    passport go one at a time even when several jobs run side by side, so that a page can be found not needed."""
+    ``skip(unit)`` may call a job off before it is sent (a passport page that is not needed any more). The pages of one
+    passport go one at a time even when several jobs run side by side, so that a page can be found not needed
+    (veris_passport_pages_parallel sends them together); a passport page does not hold back the other kinds, nor the
+    late part of the passport (pages found after the first dispatch)."""
     if not units:
         return False
     left: dict[str, int] = {}
     for unit in units:
         left[unit.kind] = left.get(unit.kind, 0) + 1
-    parallel = max(1, int(_setting(settings, "veris_parallel_jobs", 1)))
+    parallel = max(1, int(_setting(settings, "veris_parallel_jobs", 4)))
+    passport_together = bool(_setting(settings, "veris_passport_pages_parallel", False))
     events: queue.Queue = queue.Queue()
     abort = threading.Event()
     waiting: list[threading.Event] = []
@@ -667,10 +704,12 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
     finished: list[str] = []
     # One at a time, a job still running holds the later ones back (they follow when it is done); a failed one does not.
     held = False
-    held_passport = False  # a passport page is still running: the later pages wait for it
+    held_passport: set[str] = set()  # kinds whose passport page is still running: that kind's later pages wait for it
 
     def may_start(unit: _Unit) -> bool:
-        return not (_mode(unit.kind) == "passport" and (held_passport or any(_mode(a.kind) == "passport" for a in active.values())))
+        if _mode(unit.kind) != "passport" or passport_together:
+            return True
+        return unit.kind not in held_passport and not any(a.kind == unit.kind for a in active.values())
 
     def start() -> None:
         nonlocal dirty
@@ -688,9 +727,9 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
             active[id(unit)] = unit
             if not unit.record.get("job_id"):
                 presubmit.add(id(unit))
-                log.info("%s: sending pages %s (%d KB)", _step(unit), _ranges(unit.pages), max(1, (unit.size + 1023) // 1024))
+                log.info("%s: sent pages %s (%d KB)", _step(unit), _ranges(unit.pages), max(1, (unit.size + 1023) // 1024))
             else:
-                log.info("%s: checking saved job %s", _step(unit), _short(unit.record["job_id"])[:8])
+                log.info("%s: checking the job sent earlier (%s)", _step(unit), _job_label(unit.record["job_id"]))
             threading.Thread(target=_drive, args=(unit, settings, events, abort), daemon=True).start()
 
     try:
@@ -707,7 +746,7 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                     presubmit.discard(id(unit))
                     duplicate = bool(getattr(payload, "duplicate", False))  # the reader already had a job under this key
                     unit.record.update(job_id=payload.job_id, status=payload.status, submitted_at=_wall(), duplicate=duplicate)
-                    log.info("%s: job accepted %s duplicate=%s", _step(unit), _short(payload.job_id)[:8], duplicate)
+                    log.debug("%s: job accepted %s duplicate=%s", _step(unit), _job_label(payload.job_id), duplicate)
                     waiting.append(ack)
                     dirty = True
                     continue
@@ -717,7 +756,8 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                     dirty = _apply_job(unit, payload) or dirty
                     _log_outcome(unit)
                     held = held or (unit.outcome == "pending" and parallel == 1)
-                    held_passport = held_passport or (unit.outcome == "pending" and _mode(unit.kind) == "passport")
+                    if unit.outcome == "pending" and _mode(unit.kind) == "passport":
+                        held_passport.add(unit.kind)
                     if unit.outcome == "ok":
                         left[unit.kind] -= 1
                         if left[unit.kind] == 0:
@@ -727,8 +767,12 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                     status = getattr(payload, "status", None)
                     if status == 409:  # the same upload key was used before with other file contents
                         unit.record["key_conflict"] = True
-                    log.warning("%s: the reader could not be reached or sent an answer we could not use (http=%s code=%s)",
-                                _step(unit), status, str(getattr(payload, "code", None) or "")[:60] or "-")
+                    if status == 409:
+                        log.info("%s: the reader already had this upload key with other contents; will send it again under a new key", _step(unit))
+                    else:
+                        log.warning("%s: the reader could not be reached or sent an answer we could not use (%s%s); will retry later",
+                                    _step(unit), f"http {status}" if status else type(payload).__name__,
+                                    f", code {str(getattr(payload, 'code', None))[:60]}" if getattr(payload, "code", None) else "")
                 else:
                     unit.outcome, crash = "error", crash or payload
             if waiting and not presubmit:
@@ -739,7 +783,8 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                     ack.set()
                 waiting.clear()
             while finished:
-                if on_kind_done is not None and on_kind_done(finished.pop(0)):
+                done = finished.pop(0)
+                if on_kind_done is not None and on_kind_done(done):
                     dirty = True
                     if active or queued:
                         _persist(state, save)
@@ -751,7 +796,7 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
             ack.set()
         raise
     for unit in queued:
-        log.info("%s: not sent yet, waiting for the earlier reading to finish", _step(unit))
+        log.info("%s: not sent yet; it follows when the earlier job is done", _step(unit))
     if crash is not None:
         raise crash
     return dirty
@@ -1176,8 +1221,8 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
             review.append(_failed_notice(kind))
         warnings.extend(review)
         covered = False
-        log.warning("Reading finished without: %s (reader codes: %s); the rest is kept for review.",
-                    ", ".join(sorted(lost, key=_order)), provider_codes(state))
+        log.warning("%s: could not read the %s (reader codes: %s); what was read is kept and the file goes to review",
+                    _who(), ", ".join(sorted(lost, key=_order)), provider_codes(state))
     late_merge: dict[str, dict] = {}
     for kind in kinds:
         if kind + "+" not in parts or kind in lost:
@@ -1306,6 +1351,34 @@ class _Chosen:
                 return part.tobytes(garbage=4, deflate=True, no_new_id=True)
 
 
+def _reading_scope(identity: str):
+    """Names the file in every log line of the reading that follows (and ends it): see ``_who``."""
+    token = _FILE.set(identity[:8])
+    return lambda: _FILE.reset(token)
+
+
+def _summary(state: dict, result: dict, started: float) -> None:
+    """The one summary line of a file, e.g. ``Reading [file abc12345]: finished in 29s - resume ok, passport ok, 2 notes``.
+    The notes themselves (MRZ, check-digit and page remarks) are at DEBUG."""
+    jobs = state.get("provider_jobs") or {}
+    extractions = result.get("extractions") or {}
+    parts = []
+    for mode in _ORDER:
+        records = [rec for kind, rec in jobs.items() if _mode(kind) == mode]
+        if not records:
+            continue
+        failed = any(rec.get("status") in {"failed", "timed_out"} for rec in records)
+        parts.append(f"{mode} {'ok' if mode in extractions else 'failed' if failed else 'not read'}")
+    notes = len(result.get("warnings") or [])
+    status = result.get("status")
+    text = ", ".join(parts) or "nothing to send to the reader"
+    text += f", {notes} note{'' if notes == 1 else 's'}" if notes else ""
+    text += "" if status in {"complete", None} else f" ({str(status).replace('_', ' ')})"
+    log.info("%s: finished in %.0fs - %s", _who(), time.monotonic() - started, text)
+    if notes:
+        log.debug("%s: notes: %s", _who(), " | ".join(result["warnings"]))
+
+
 def extract_selected_pages(
     page_pdfs: dict[str, bytes], *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None,
@@ -1314,6 +1387,32 @@ def extract_selected_pages(
     same provider jobs, idempotency keys, checkpoints and field mapping as a whole file.
     The kinds are sent side by side.
     """
+    started = time.monotonic()
+    end = _reading_scope(hashlib.sha256(b"".join(page_pdfs[kind] for kind in sorted(page_pdfs))).hexdigest())
+    try:
+        result = _extract_selected_pages(page_pdfs, state=state, save=save, settings=settings, designations=designations)
+        _summary(state, result, started)
+        return result
+    except (ExtractionPending, ExtractionFailure) as exc:
+        _stopped(exc, started)
+        raise
+    finally:
+        end()
+
+
+def _stopped(exc: Exception, started: float) -> None:
+    """One line when a reading ends without an answer: why, and what happens next."""
+    took = time.monotonic() - started
+    if isinstance(exc, ExtractionPending):
+        log.info("%s: paused after %.0fs, the %s job is still running; it is checked again later", _who(), took, _mode(exc.kind))
+    else:
+        log.warning("%s: stopped after %.0fs - %s", _who(), took, exc)
+
+
+def _extract_selected_pages(
+    page_pdfs: dict[str, bytes], *, state: dict, save: Callable[[dict], None], settings,
+    designations: list[str] | None = None,
+) -> dict:
     import pymupdf as fitz
 
     selected_by_kind: dict[str, list[int]] = {}
@@ -1385,7 +1484,8 @@ def _inspect_and_send_early(data: bytes, options: dict, *, state: dict, save, se
         except BaseException as exc:
             events.put(("error", exc))
 
-    threading.Thread(target=work, daemon=True).start()
+    # The thread runs in a copy of this context, so its log lines carry the same file id.
+    threading.Thread(target=contextvars.copy_context().run, args=(work,), daemon=True).start()
     while True:
         name, payload = events.get()
         if name == "early":
@@ -1498,6 +1598,27 @@ def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict,
 
 
 def extract_attachment(
+    data: bytes, *, state: dict, save: Callable[[dict], None], settings,
+    designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
+    final_attempt: bool = False,
+) -> dict:
+    """Inspect every page and read the kinds found (see ``_extract_attachment``), logging one summary line for the file."""
+    started = time.monotonic()
+    end = _reading_scope(hashlib.sha256(data).hexdigest())
+    try:
+        result = _extract_attachment(
+            data, state=state, save=save, settings=settings, designations=designations, partial=partial,
+            ignore_decorative=ignore_decorative, final_attempt=final_attempt)
+        _summary(state, result, started)
+        return result
+    except (ExtractionPending, ExtractionFailure) as exc:
+        _stopped(exc, started)
+        raise
+    finally:
+        end()
+
+
+def _extract_attachment(
     data: bytes, *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
     final_attempt: bool = False,

@@ -209,7 +209,7 @@ def test_a_blank_unread_page_and_an_exact_duplicate_are_found_and_a_read_page_is
 
 
 def test_the_reader_receives_the_prepared_single_page_passport_job(world, caplog):
-    caplog.set_level(logging.INFO, logger=subject.log.name)
+    caplog.set_level(logging.DEBUG, logger=subject.log.name)
     sent = []
     real = subject.prepare_job
 
@@ -242,5 +242,5 @@ def test_the_reader_receives_the_prepared_single_page_passport_job(world, caplog
         with fitz.open(stream=data, filetype="pdf") as doc:
             assert doc.page_count == 1 and len(doc[0].get_images()) == 0
     text = " | ".join(r.getMessage() for r in caplog.records)
-    assert "Veris passport (part 1 of 2): prepared 1 page, " in text and "rotation fixed on 0 pages" in text
-    assert "Veris resume: prepared 1 page, " in text
+    assert "passport (part 1 of 2): prepared 1 page, " in text and "rotation fixed on 0 pages" in text
+    assert "resume: prepared 1 page, " in text

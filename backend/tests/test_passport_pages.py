@@ -326,7 +326,8 @@ def test_the_duplicate_flag_is_kept_on_the_job_and_logged(world, caplog):
     world.extract(pdf(CV, data_page(1)), state=state)
     assert state["provider_jobs"]["passport"]["duplicate"] is True and state["provider_jobs"]["resume"]["duplicate"] is False
     text = " | ".join(r.getMessage() for r in caplog.records)
-    assert "Veris passport: job accepted job-pass" in text and "duplicate=True" in text and "duplicate=False" in text
+    assert "passport: done in" in text and "(job pass" in text and "the reader already had it" in text
+    assert text.count("the reader already had it") == 1  # only the passport job was a duplicate
     assert len(world.veris.submissions) == 2  # a duplicate that worked is simply used
 
 

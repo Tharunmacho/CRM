@@ -91,9 +91,16 @@ class Settings(BaseSettings):
     # and revisits the job later (a hand-back costs a release, a retry delay and a re-claim, each a database round
     # trip). 60 s lets a job of 20-45 s finish within the same visit. Zero keeps the single-poll behaviour.
     ocr_provider_wait_seconds: float = Field(default=60.0, ge=0, le=120)
-    # Veris jobs in flight at once. 1 (the default) sends one kind at a time (resume, then passport, then Aadhaar; the
-    # chunks of one long kind one after another) and logs each step; more sends them side by side.
-    veris_parallel_jobs: int = Field(default=1, ge=1, le=16)
+    # Veris jobs in flight at once for ONE document (its résumé, passport, Aadhaar and the chunks of a long file are
+    # all sent side by side, so a file takes about as long as its slowest job). The reading queue runs several
+    # documents at once as well, so the most Veris sees from one worker is this value x EXTRACTION_CONCURRENCY. Lower it
+    # (1 sends one kind at a time, in the order résumé, passport, Aadhaar) if the Veris account has a concurrent-job
+    # or per-minute request limit; a 429 is retried with the same key, never lost.
+    veris_parallel_jobs: int = Field(default=4, ge=1, le=16)
+    # The pages of one passport are sent one page per job, strongest first, one after the other, so a further scan of
+    # the data page is not paid for once the first gave the details. True sends them all at once (faster, may pay for a scan
+    # that was not needed).
+    veris_passport_pages_parallel: bool = False
     # A passport of several pages is sent one page per job (the reader fails on heavy multi-page passport PDFs), the
     # strongest page first; once a page gave the number, birth date and name, a further scan of the data page is skipped.
     veris_passport_one_page: bool = True

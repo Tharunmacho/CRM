@@ -5,6 +5,7 @@ import contextlib
 import csv
 import dataclasses
 import io
+import contextvars
 import logging
 import math
 import os
@@ -194,7 +195,10 @@ class OCRRead:
 OCR_BASE_DPI = 200
 # Second look at small print or a first pass with low confidence.
 OCR_HIGH_DPI = 300
-log = logging.getLogger(__name__)
+# The reading pipeline has one log, "crm.reading" (see services/document_extraction.py); READING_FILE is the short id of
+# the file being read, set by the caller, so a line says which file it is about.
+log = logging.getLogger("crm.reading")
+READING_FILE: contextvars.ContextVar[str] = contextvars.ContextVar("reading_file", default="")
 _ACCEPT_CONFIDENCE = 72.0
 _SMALL_TEXT_PX = 20
 _MAX_RENDER_PIXELS = 40_000_000
@@ -1310,7 +1314,11 @@ def inspect_document(
     if patterns is not None:
         completeness["patterns"] = patterns.flags()
     # Counts and seconds only: never any page text.
-    log.info("Local reading: %d pages in %.1fs (workers %d, first look %.1fs)", count, time.monotonic() - started, workers, first_look)
+    tag = READING_FILE.get()
+    log.info("Reading%s: local check of %d page%s done in %.1fs (first look %.1fs)", f" [file {tag}]" if tag else "", count,
+             "" if count == 1 else "s", time.monotonic() - started, first_look)
+    log.debug("Reading%s: local check used %d page worker%s; %d read, %d blank, %d unread", f" [file {tag}]" if tag else "", workers,
+              "" if workers == 1 else "s", native + ocr, blank, len(unread))
     # Every original page is accounted for exactly once: read, blank or unread.
     if len(pages) != count or [p.page_number for p in pages] != list(range(1, count + 1)) \
             or completeness["pages_read"] + blank + len(unread) != count:
