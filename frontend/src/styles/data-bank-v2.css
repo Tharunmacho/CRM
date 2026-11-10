@@ -463,3 +463,5 @@
 .db-mini-meta .db-cpills { justify-content: flex-start; }
 .db-mini .db-act.is-label span { white-space: nowrap; }
 .db-mini .db-mini-foot .db-act.is-label { flex: 1 1 auto; min-width: max-content; }
+
+.db-act.is-danger:hover:not(:disabled) { color: var(--error-ink); border-color: var(--error-edge); background: var(--error-fill); }

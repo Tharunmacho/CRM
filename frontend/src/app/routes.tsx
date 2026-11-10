@@ -83,6 +83,7 @@ const JobsPage = lazy(loaders['jobs/jobs'])
 const OrderDetailPage = lazy(loaders['jobs/order-detail'])
 const AddCandidatePage = lazy(loaders['candidates/add-candidate'])
 const DataBankPage = lazy(loaders['candidates/data-bank'])
+const ImportCandidatesPage = lazy(() => import('@/screens/candidates/import-candidates'))
 const LeadsPage = lazy(loaders['leads/leads'])
 const MappedCandidatesPage = lazy(() => import('@/screens/workflow/mapped-candidates'))
 const CandidateProfilePage = lazy(loaders['candidates/candidate-profile'])
@@ -160,6 +161,7 @@ export default function AppRoutes() {
             <Route path="jobs" element={<JobsPage />} />
             <Route path="orders/:id" element={<OrderDetailPage />} />
             <Route path="add-candidate" element={<AddCandidatePage />} />
+            <Route path="import-candidates" element={<ImportCandidatesPage />} />
             <Route path="leads" element={<LeadsPage />} />
             <Route path="leads/import" element={<LeadsPage />} />
             <Route path="data-bank" element={<DataBankPage />} />

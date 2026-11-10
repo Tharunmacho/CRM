@@ -16,6 +16,7 @@ from sqlalchemy.exc import DBAPIError
 from app.api.routers import applications, auth, candidates, data, files, ocr, inbox, users, reports, workflow, whatsapp, document_jobs, attendance, staff_directory
 from app.api.routers import leads as leads_router, lead_campaigns as lead_campaigns_router
 from app.api.routers import lead_bulk as lead_bulk_router
+from app.api.routers import candidate_import as candidate_import_router
 from app.api.routers import application_form, form_options, daily_work as daily_work_router, document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
 from app.api.routers import reference_agencies as reference_agencies_router
 from app.core.config import get_settings
@@ -137,6 +138,7 @@ def on_startup() -> None:
 app.include_router(auth.router)
 app.include_router(applications.router)
 app.include_router(candidates.router)
+app.include_router(candidate_import_router.router)
 app.include_router(application_form.router)
 app.include_router(form_options.router)
 app.include_router(data.router)

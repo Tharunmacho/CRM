@@ -241,6 +241,19 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             raise JobFinished()
         saved_keys.update(changed)
 
+    def save_and_fill(value):
+        """A checkpoint; and the first time the local reading has verified something, the form is filled from it at once."""
+        checkpoint(value)
+        if form_candidate and value.get("local_patterns") and not value.get("local_filled"):
+            value["local_filled"] = True
+            try:
+                from app.services.application_form import apply_local_patterns
+                with sessions() as fill_db:
+                    apply_local_patterns(fill_db, form_candidate, value["local_patterns"])
+            except Exception:
+                log.warning("Filling the form from the local reading of job %s failed; the reading goes on.", identifier, exc_info=True)
+            checkpoint(value)
+
     from app.services.instance_guard import NOT_HERE, stored_here
     if not stored_here(settings, key):
         _hand_back(identifier, claimed_by, sessions, NOT_HERE)
@@ -255,7 +268,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             raise ExtractionFailure("The saved copy of this document looks damaged. Upload the original again, then try again.")
         output = state.get("output")
         if output is None:
-            output = extract_attachment(data, state=state, save=checkpoint, settings=settings, designations=titles or [],
+            output = extract_attachment(data, state=state, save=save_and_fill, settings=settings, designations=titles or [],
                                         final_attempt=attempts + 1 >= MAX_ATTEMPTS)
             state["output"] = deepcopy(output)
             checkpoint(state)

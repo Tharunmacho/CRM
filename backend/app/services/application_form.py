@@ -871,6 +871,45 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
     job.draft = {**dict(job.draft or {}), "applicationForm": form}
 
 
+def apply_local_patterns(db: Session, candidate_id: str, patterns: dict) -> list[str]:
+    """Fill the form at once from what the LOCAL reading of the pages verified, before (or without) the online reader.
+
+    Only values with their own check digit are used: the passport number, date of birth and expiry from the machine-readable
+    zone (plus the names and nationality when the whole zone checks out), and the email and mobile number printed on a
+    resume. They are stamped "extracted", so the online reader's answer, when it arrives, replaces them under the same fill
+    rule, and anything a person typed is never touched. Returns the form fields that were filled.
+    """
+    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id)
+                          .options(undefer(Candidate.education), undefer(Candidate.work_history), undefer(Candidate.field_sources))
+                          .with_for_update().execution_options(populate_existing=True))
+    if candidate is None:
+        return []
+    filled: list[str] = []
+    passport = patterns.get("passport") or {}
+    mrz: dict = {}
+    if passport.get("number_ok"):
+        mrz["passport_number"] = passport.get("passport_number")
+    if passport.get("birth_ok"):
+        mrz["date_of_birth"] = passport.get("date_of_birth")
+    if passport.get("expiry_ok"):
+        mrz["expiry_date"] = passport.get("date_of_expiry")
+    if passport.get("mrz_checksums_valid"):
+        mrz.update(given_names=passport.get("given_names"), surname=passport.get("surname"), nationality=passport.get("nationality"))
+    if mrz:
+        filled += fx.apply_values(candidate, "passport", fx.passport_values({"mrz": mrz}), db).filled
+    resume = patterns.get("resume") or {}
+    printed = {column: resume[key] for column, key in (("email", "email"), ("phone", "mobile")) if resume.get(key)}
+    if printed:
+        filled += fx.apply_values(candidate, "resume", printed, db).filled
+    if filled:
+        from app.services.candidate_review import profile_gaps, release_ownership_review
+        release_ownership_review(candidate, profile_gaps(candidate))   # a phone found lifts "needs review" when that was the only gap
+        db.add(AuditEntry(actor_id=None, action="Filled application form from the local reading", target=candidate.name,
+                          entity_type="candidate", entity_id=candidate.id, meta={"filled_fields": filled}))
+    db.commit()
+    return filled
+
+
 # ------------------------------------------------------------------ backfill
 
 def backfill(db: Session, *, candidate_id: str | None = None, dry_run: bool = False, batch: int = 100) -> dict:

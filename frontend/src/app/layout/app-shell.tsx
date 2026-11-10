@@ -66,6 +66,7 @@ const NAV: NavItem[] = [
   { to: '/clients', label: 'Clients', icon: Building2, group: 'Recruitment' },
   { to: '/jobs', label: 'Jobs', icon: Briefcase, group: 'Recruitment' },
   { to: '/add-candidate', label: 'Candidate', icon: UserPlus, group: 'Recruitment' },
+  { to: '/import-candidates', label: 'Import candidates', icon: UserPlus, group: 'Recruitment', extension: true },
   { to: '/leads', label: 'Lead sheet', icon: ClipboardList, group: 'Recruitment' },
   { to: '/data-bank', label: 'Data Bank', icon: Database, group: 'Recruitment' },
   { to: '/mapped', label: 'Matched Candidates', icon: GitBranch, group: 'Recruitment', extension: true },

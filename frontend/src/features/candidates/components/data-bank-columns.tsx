@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { ClipboardList, FileSearch, Footprints, Link2, Mail, MessageCircle, Pencil, UserCheck, UserPlus, type LucideIcon } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { ClipboardList, FileSearch, Footprints, Link2, Mail, MessageCircle, Pencil, Trash2, UserCheck, UserPlus, type LucideIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { countryCode } from '@/shared/lib/country-flag'
@@ -10,6 +10,8 @@ import type { Candidate } from '@/shared/model/types'
 import { ownerLabel } from '@/features/candidates/data-bank-pools'
 import { Avatar, RowMenu, StageTracker, StatusDot, type DotTone, type RowMenuItem } from '@/features/candidates/components/db-parts'
 import type { DbColumn } from '@/features/candidates/components/db-table'
+import { canDeleteCandidate } from '@/features/candidates/profile-actions'
+import { DeleteCandidateDialog } from '@/features/candidates/components/delete-candidate-dialog'
 import type { useStore } from '@/shared/state/crm-store'
 import { workRefusal } from '@/features/candidates/candidate-access'
 import { BANK_FIELD_DEFS, DEFAULT_COLUMN_FIELDS, FIELD_PREFIX, type BankContext, type BankFieldDef } from '@/features/candidates/data-bank-fields'
@@ -146,6 +148,7 @@ export function CandidateActions({ candidate, store, onOpen, onReassign, onEdit 
 /** Table and job-group rows: an "open profile" icon button and one "..." menu holding Application form, Assign and Edit. */
 export function RowActions({ candidate, store, onOpen, onReassign, onEdit }: Handlers & { candidate: Candidate; store: Store }) {
   const navigate = useNavigate()
+  const [deleting, setDeleting] = useState(false)
   const refusal = workRefusal(store.me, candidate, store.user(candidate.ownerId)?.name)
   const items: RowMenuItem[] = [
     { label: 'Open profile', icon: FileSearch, onSelect: () => navigate(`/candidates/${candidate.id}`) },
@@ -155,7 +158,11 @@ export function RowActions({ candidate, store, onOpen, onReassign, onEdit }: Han
   return (
     <div className="db-acts is-grid" onClick={(event) => event.stopPropagation()}>
       <button type="button" className="db-act" title={`Open ${candidate.name}'s application form`} aria-label={`Open application form for ${candidate.name}`} onClick={() => onOpen(candidate)}><ClipboardList size={15} aria-hidden="true" /></button>
+      {canDeleteCandidate(store.me.role) && (
+        <button type="button" className="db-act is-danger" title={`Delete ${candidate.name}`} aria-label={`Delete ${candidate.name}`} onClick={() => setDeleting(true)}><Trash2 size={15} aria-hidden="true" /></button>
+      )}
       <RowMenu label={`More actions for ${candidate.name}`} items={items} />
+      {deleting && <DeleteCandidateDialog open candidateId={candidate.id} name={candidate.name} onClose={() => setDeleting(false)} onDeleted={() => setDeleting(false)} />}
     </div>
   )
 }

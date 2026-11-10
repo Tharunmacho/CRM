@@ -492,7 +492,7 @@ export default function AddCandidatePage() {
       <PageHeader
         title="Candidate"
         description="Add a candidate. Upload the documents first and we fill in the application form. Check it, complete what is missing, then save."
-        actions={<Button icon={<ClipboardList />} onClick={() => (savedCandidateId ? openApplicationForm() : setPreviewing(true))}>{savedCandidateId ? 'Open application form' : 'Application form'}</Button>}
+        actions={<><Button icon={<FolderOpen />} onClick={() => navigate('/import-candidates')}>Import many candidates</Button><Button icon={<ClipboardList />} onClick={() => (savedCandidateId ? openApplicationForm() : setPreviewing(true))}>{savedCandidateId ? 'Open application form' : 'Application form'}</Button></>}
       />
 
       <div

@@ -25,7 +25,9 @@ export function DeleteCandidateDialog({
   const [error, setError] = useState('')
   useEffect(() => { setError('') }, [candidateId, open])
 
-  const blocker = deleteCandidateBlocker(
+  // A candidate from a bulk import can always be taken back out, with its job and stage history.
+  const imported = store.candidate(candidateId)?.sourceDetail === 'Bulk import'
+  const blocker = imported ? null : deleteCandidateBlocker(
     store.applications
       .filter((application) => application.candidateId === candidateId)
       .map((application) => ({ status: application.status, orderRef: store.order(application.orderId)?.ref })),
@@ -68,6 +70,7 @@ export function DeleteCandidateDialog({
       ) : (
         <div className="space-y-3 text-sm text-ink-700">
           <p>Deleting {name} also deletes their documents and their history.</p>
+          {imported && <p>{name} came from a bulk import: the job they are on and their recorded stages are removed too, and the job's openings are freed.</p>}
           <p className="text-xs text-ink-500">Emails and WhatsApp messages stay in the inbox, and the delete is recorded in the audit log.</p>
         </div>
       )}

@@ -990,7 +990,7 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session
     if db.scalar(select(AssignmentPointer.id).where(AssignmentPointer.id == 1).with_for_update()) is None:
         lock_assignment_cursor(db)
     rows = db.execute(
-        select(Candidate.name, Candidate.ref, Application.id, Application.status, Order.ref)
+        select(Candidate.name, Candidate.ref, Application.id, Application.status, Order.ref, Candidate.source_detail, Order.id)
         .select_from(Candidate)
         .outerjoin(Application, Application.candidate_id == Candidate.id)
         .outerjoin(Order, Order.id == Application.order_id)
@@ -1000,18 +1000,28 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session
     if not rows:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
 
-    placements = [(state, order_ref) for _, _, application_id, state, order_ref in rows if application_id is not None]
-    if any(state is ApplicationStatus.active for state, _ in placements):
-        raise HTTPException(status.HTTP_409_CONFLICT, "This candidate is still on an order. Remove them from the order first.")
-    deployed = next((order_ref for state, order_ref in placements if state is ApplicationStatus.deployed), None)
-    if deployed:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            f"This candidate was deployed through {deployed}, and a deployed placement is kept on record. They cannot be deleted.")
+    placements = [(state, order_ref) for _, _, application_id, state, order_ref, _, _ in rows if application_id is not None]
+    # A candidate that came from a bulk import can always be taken back out (an import is a load of history that may need
+    # redoing); anyone else on an order, or deployed, is kept on record.
+    imported = rows[0][5] == "Bulk import"
+    if not imported:
+        if any(state is ApplicationStatus.active for state, _ in placements):
+            raise HTTPException(status.HTTP_409_CONFLICT, "This candidate is still on an order. Remove them from the order first.")
+        deployed = next((order_ref for state, order_ref in placements if state is ApplicationStatus.deployed), None)
+        if deployed:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"This candidate was deployed through {deployed}, and a deployed placement is kept on record. They cannot be deleted.")
+    order_ids = {order_id for _, _, application_id, _, _, _, order_id in rows if application_id is not None and order_id}
 
     name, ref = rows[0][0], rows[0][1]
     audit_id = _uuid()
     documents, tasks, stored_keys = _delete_candidate_rows(
         db, candidate_id, audit_id=audit_id, actor_id=user.id, target=f"{name} ({ref})", ref=ref, applications=len(placements))
+    if imported and order_ids:
+        # A placement that is gone no longer fills an opening: an order that was Filled by it opens again.
+        from app.api.routers.applications import _sync_order
+        for order in db.scalars(select(Order).where(Order.id.in_(order_ids)).with_for_update()):
+            _sync_order(db, order)
     db.commit()
 
     if stored_keys:
