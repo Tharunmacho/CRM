@@ -19,7 +19,7 @@ function write(key: string, value: string) {
 function currentTheme(): Theme {
   const stored = read(THEME_KEY)
   if (stored === 'light' || stored === 'dark') return stored
-  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  return 'light'
 }
 
 function apply(theme: Theme) {

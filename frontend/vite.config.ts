@@ -10,6 +10,8 @@ const SCREENS: Record<string, string> = {
   '/jobs': 'src/screens/jobs/jobs.tsx',
   '/add-candidate': 'src/screens/candidates/add-candidate.tsx',
   '/data-bank': 'src/screens/candidates/data-bank.tsx',
+  '/leads': 'src/screens/leads/leads.tsx',
+  '/leads/import': 'src/screens/leads/leads.tsx',
   '/tasks': 'src/screens/tasks/tasks.tsx',
 }
 const SHELL = 'src/app/layout/app-shell.tsx'

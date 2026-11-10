@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light" data-palette="white">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/brand/care-india-favicon-16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/brand/care-india-favicon-180.png" />
     <title>CRM</title>
-    <script>(function(){try{var d=document.documentElement,t=localStorage.getItem('crm-theme');if(t!=='light'&&t!=='dark')t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';d.dataset.theme=t;d.dataset.palette='white'}catch(e){}})()</script>
+    <script>(function(){var d=document.documentElement,t='light';try{var saved=localStorage.getItem('crm-theme');if(saved==='light'||saved==='dark')t=saved}catch(e){}d.dataset.theme=t;d.dataset.palette='white'})()</script>
     <script>
       /* Start the first requests now, before the JavaScript bundle has even downloaded: the server begins working on
          the session + workspace while the browser fetches the app. The app takes these over
