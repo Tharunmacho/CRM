@@ -32,7 +32,6 @@ export function PageHeader({ title, description, route, actions, back, children,
         <div className="v2-page-header-copy">
           {route != null && (typeof route === 'string' ? <p className="v2-route-chip"><i aria-hidden="true" />{route}</p> : <div className="v2-page-header-route">{route}</div>)}
           <h1 className="v2-page-title">{title}</h1>
-          {description && <p className="v2-page-desc">{description}</p>}
         </div>
         {actions && <div className="v2-page-actions">{actions}</div>}
       </div>

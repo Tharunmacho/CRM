@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { choosesRecruiter } from '@/features/candidates/candidate-access'
-import { followUpHint, NOT_ASSIGNED_YET, RECRUITER_FIELD_HINT, recruiterChoices, saveButtonLabel, savebarStatus, savedNotice, savedOwnerNote, saveStep } from '@/features/candidates/assignment-labels'
+import { followUpHint, NOT_ASSIGNED_YET, RECRUITER_FIELD_HINT, recruiterChoices, saveButtonLabel, savebarStatus, savedNotice, savedOwnerNote } from '@/features/candidates/assignment-labels'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ClipboardList, Briefcase, BriefcaseBusiness, Camera, Check, CheckCircle2, CalendarClock, FileText, Gauge, Image as ImageIcon, PhoneCall, FolderOpen, GraduationCap, IdCard, LoaderCircle, Share2, Sparkles, Target, UserRound, Contact, Trash2 } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
@@ -409,13 +409,6 @@ export default function AddCandidatePage() {
   const unfilled = [!form.name.trim() && 'full name', !form.phone.trim() && 'phone'].filter(Boolean) as string[]
   // With a document nothing is required: whatever it did not give stays blank and the candidate is flagged for review.
   const missing = hasDocuments ? [] : unfilled
-  const steps = [
-    { label: 'Upload documents', detail: 'Resume, passport or Aadhaar, in one file or several.', done: chosen.length > 0 },
-    { label: 'Check the details', detail: hasDocuments ? 'Nothing is required while a document is attached.' : 'Name and mobile number are required.', done: unfilled.length === 0 },
-    { ...saveStep(picksRecruiter, chosenRecruiterName), done: Boolean(savedCandidateId) },
-  ]
-  // The step the recruiter is on: documents first, then the details, then save.
-  const currentStep = savedCandidateId || missing.length === 0 ? 2 : chosen.length > 0 || form.name.trim() || form.phone.trim() ? 1 : 0
   const sourceHint = form.source === 'referral' ? 'Referred by' : form.source === 'other' ? 'Tell us where from' : 'More about the source (optional)'
   // Reference agency names are offered as suggestions for a referral; what is typed stays free text.
   const agencyNames = useReferenceAgencies(form.source === 'referral').items?.map((agency) => agency.agencyName) ?? []
@@ -491,7 +484,6 @@ export default function AddCandidatePage() {
     <>
       <PageHeader
         title="Candidate"
-        description="Add a candidate. Upload the documents first and we fill in the application form. Check it, complete what is missing, then save."
         actions={<><Button icon={<FolderOpen />} onClick={() => navigate('/import-candidates')}>Import many candidates</Button><Button icon={<ClipboardList />} onClick={() => (savedCandidateId ? openApplicationForm() : setPreviewing(true))}>{savedCandidateId ? 'Open application form' : 'Application form'}</Button></>}
       />
 
@@ -501,15 +493,6 @@ export default function AddCandidatePage() {
           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !savedCandidateId && !event.defaultPrevented) { event.preventDefault(); void save() }
         }}
       >
-        <ol className="ac-steps" aria-label="Steps to add a candidate">
-          {steps.map((step, index) => (
-            <li key={step.label} className={`${step.done ? 'is-done' : ''} ${index === currentStep ? 'is-current' : ''}`} aria-current={index === currentStep ? 'step' : undefined}>
-              <span aria-hidden>{step.done ? <Check size={14} strokeWidth={2.75} /> : index + 1}</span>
-              <div><strong>{step.label}</strong><small>{step.detail}</small></div>
-            </li>
-          ))}
-        </ol>
-
         <div className="ac-stack">
           {bundleSource && <DocumentBundleReview sourceType="manual" sourceId={bundleSource} onClose={() => setBundleSource(null)} onCommitted={async result => { setSplitSuggested(false); intake.reset(); setForm(blank); edited.current = new Set(); scansRef.current = {}; setScans({}); setSavedCandidateId(null); setSavedResult(null); setErrors({}); setAddProblems([]); setUploadErrors({}); setSaveError(''); setReadMessage(`${result.candidateIds.length} candidate profiles saved from the reviewed document pages. This form is ready for a new candidate.`); await store.refresh({ keepCurrent: true }).catch(() => {}) }} />}
           {intake.draftError && <div role="alert" className="ac-inline-alert"><p>{intake.draftError}</p><Button size="sm" disabled={busyAny} onClick={() => void intake.saveDraft(snapshotDraft()).catch(() => {})}>Try saving the form again</Button></div>}

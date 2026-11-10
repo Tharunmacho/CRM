@@ -53,9 +53,10 @@ export function PanelHeader({
   )
 }
 
+/** The screen title with its actions. The `description` some screens still pass is not shown: titles stand alone. */
 export function PageHeader({
   title,
-  description,
+  description: _description,
   actions,
   children,
   eyebrow,
@@ -72,7 +73,6 @@ export function PageHeader({
         <div className="workspace-heading-copy min-w-0">
           {eyebrow && <p className="workspace-eyebrow">{eyebrow}</p>}
           <h1 className="text-h1 font-semibold text-ink">{title}</h1>
-          {description && <p className="mt-1 max-w-[62ch] text-sm text-ink-500">{description}</p>}
         </div>
         {actions && <div className="workspace-header-actions flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
