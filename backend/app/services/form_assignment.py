@@ -75,8 +75,11 @@ def build_block(user: User, candidate, owner_name: str | None, chosen, job_rows:
     on_job = application is not None and application.status in (ApplicationStatus.active, ApplicationStatus.deployed)
     detail = (candidate.source_detail or "").strip()
     agency = None
-    if detail and not MACHINE_SOURCE_DETAIL.match(detail):
-        matches = [row for row in agencies if _agency_name(row).casefold() == detail.casefold()]
+    matches = [row for row in agencies if _agency_name(row).casefold() == detail.casefold()] if detail else []
+    # Bulk imports without an agency retain this provenance label in source_detail.
+    # An explicit referral or registered agency with that name still takes precedence.
+    import_marker = candidate.source != Source.referral and not matches and " ".join(detail.split()).casefold() == "bulk import"
+    if detail and not MACHINE_SOURCE_DETAIL.match(detail) and not import_marker:
         agency = {"id": matches[0].id if len(matches) == 1 else None, "name": detail}
     options: dict[str, Any] = {"clients": [], "agencies": [], "recruiters": []}
     if can["job"]:

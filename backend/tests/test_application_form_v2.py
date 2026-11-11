@@ -435,11 +435,35 @@ def test_source_and_agency_save_by_reference_id_or_free_text(desk):
     assert {"Application form: source changed", "Application form: agency changed"} <= actions
 
 
-def test_an_automatic_intake_pointer_is_not_shown_as_an_agency(desk):
+@pytest.mark.parametrize("detail", ["email_message:abc123", "whatsapp_message:abc123", "person_review:abc123", "Bulk import", "  bulk   IMPORT  "])
+def test_an_automatic_intake_pointer_is_not_shown_as_an_agency(desk, detail):
     with desk.sessions() as db:
-        db.execute(update(Candidate).where(Candidate.id == "candidate").values(source_detail="email_message:abc123"))
+        db.execute(update(Candidate).where(Candidate.id == "candidate").values(source=Source.other, source_detail=detail))
         db.commit()
+        audit_count = db.scalar(select(func.count()).select_from(AuditEntry))
     assert assignment(desk)["agency"] is None
+    with desk.sessions() as db:
+        assert db.get(Candidate, "candidate").source_detail == detail
+        assert db.scalar(select(func.count()).select_from(AuditEntry)) == audit_count
+
+
+@pytest.mark.parametrize("source", [Source.referral, Source.whatsapp, Source.other])
+def test_actual_agency_names_are_preserved_for_every_intake_source(desk, source):
+    with desk.sessions() as db:
+        db.execute(update(Candidate).where(Candidate.id == "candidate").values(source=source, source_detail="Bulk Import Recruitment Agency"))
+        db.commit()
+    assert assignment(desk)["agency"] == {"id": None, "name": "Bulk Import Recruitment Agency"}
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_explicit_agency_takes_precedence_over_an_import_label(desk, registered):
+    with desk.sessions() as db:
+        if registered:
+            db.add(ReferenceAgency(id="agency", name="Contact", agency_name="Bulk import"))
+        db.execute(update(Candidate).where(Candidate.id == "candidate").values(
+            source=Source.other if registered else Source.referral, source_detail="Bulk import"))
+        db.commit()
+    assert assignment(desk)["agency"] == {"id": "agency" if registered else None, "name": "Bulk import"}
 
 
 def test_recruiter_changes_are_for_admins_and_managers_only(desk):
