@@ -2,7 +2,9 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+import psycopg
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app import runtime
 from app.db import schema_readiness
@@ -99,3 +101,23 @@ def test_upgrade_helper_targets_head(monkeypatch):
     monkeypatch.setattr(schema_readiness.command, "upgrade", lambda config, target: calls.append(target))
     schema_readiness.upgrade_to_head()
     assert calls == ["head"]
+
+
+def test_connection_timeout_explains_recovery_without_leaking_connection_details(monkeypatch):
+    details = "postgresql://private-user:secret-password@private-host/private-database"
+
+    def timeout():
+        raise OperationalError(None, None, psycopg.errors.ConnectionTimeout(f"connection timeout expired: {details}"))
+
+    monkeypatch.setattr("app.db.session.connect_with_retry", timeout)
+    monkeypatch.setattr(runtime, "schema_status", lambda _: pytest.fail("An unreachable database cannot be inspected"))
+    monkeypatch.setattr(runtime, "upgrade_to_head", lambda: pytest.fail("A connection error must never trigger migration"))
+    with pytest.raises(SystemExit) as stopped:
+        runtime.require_current_schema()
+    message = str(stopped.value)
+    assert "ConnectionTimeout" in message and "npm run db:check" in message
+    assert "DATABASE_URL" in message and "backend/.env" in message and "CRM_ENV_FILE" in message
+    assert "firewall" in message and "VPN" in message and "localhost:5433" in message
+    assert "docker compose up -d db" in message and "port 8000" in message
+    for secret in ("private-user", "secret-password", "private-host", "private-database"):
+        assert secret not in message

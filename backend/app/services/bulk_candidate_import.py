@@ -65,7 +65,8 @@ _RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     ("emigration", ("emigra", "protector"), ("ecr", "ecnr", "pge")),
     ("pcc", ("police", "clearance"), ("pcc", "pvc")),
     ("medical", ("medical", "gamca", "health"), ("fit", "hc")),
-    ("visa", ("visa", "workpermit"), ()),
+    # "visa" only as a whole word: a candidate called Visakh must not turn every one of his files into a visa.
+    ("visa", ("workpermit", "visaletter", "visacopy", "visascan", "visaapproval", "visamedical"), ("visa", "visas", "evisa", "workvisa")),
     ("education_certificate", ("education", "qualification", "degree", "diploma", "marksheet", "marklist"), ("sslc", "hsc", "iti", "ssc")),
     ("experience_certificate", ("experience",), ("exp",)),
     ("passport", ("passport",), ("ppt", "pp")),
@@ -221,6 +222,8 @@ COLUMNS: tuple[Column, ...] = (
     Column("passport_no", "Passport number", "Optional. Also read from the passport scan.", aliases=("passport", "passportno", "passportnumber")),
     Column("order", "Order", "Order reference, e.g. ORD-1001. Leave empty to use the order chosen on the screen.", aliases=("orderref", "orderno", "ordernumber", "orderid", "jobref")),
     Column("recruiter", "Recruiter", "Recruiter's email or full name. Leave empty to use the recruiter chosen on the screen.", aliases=("owner", "assignedto", "staff", "recruiteremail")),
+    Column("agency", "Referral agency", "The agency that sent the candidate. Optional; shown in the travelled report.",
+           aliases=("referralagency", "agencyname", "referredby", "referenceagency")),
     Column("prescreen_remarks", "Prescreen remarks", "Stage 1. Optional.", aliases=("prescreening",)),
     Column("forwarded_date", "Forwarded to client on", "Stage 2 date. Optional.", aliases=("forwarded", "dateforwarded", "cvforwarded")),
     Column("interview_date", "Interview date", "Stage 3. Needed to record the interview.", True, ("interview", "interviewon")),
@@ -373,6 +376,12 @@ class Context:
     only: User | None = None                 # a staff member's own import: every candidate is theirs, whatever the sheet says
     me: User | None = None                   # whoever is importing: the recruiter when nobody else is named
     planned: dict[str, int] = field(default_factory=dict)  # order id -> placements this batch has already claimed
+    # Candidates who have already travelled: what the folder cannot hold (the advance receipt, a copy of the offer, the stamped
+    # visa) does not stop the placement being recorded, and the documents still missing are listed instead of blocking it.
+    historical: bool = False
+    # The office says this person has travelled although the folder holds no ticket (so no travel date). The ticket file is then not
+    # asked for; the placement is recorded as travelled with the date left blank, to be filled in on the stage screen later.
+    travel_confirmed: bool = False
 
     def recruiter(self, text: str | None) -> User | None:
         if self.only is not None:
@@ -481,25 +490,41 @@ def stage_inputs(row: dict, files: dict[str, dict], options: StageOptions) -> tu
     return stages, problems
 
 
-def for_rules(number: int, data: dict) -> dict:
+HISTORY_FILE = {"id": "history"}  # stands in for a file only while the rules are asked; it is never stored
+
+
+def for_rules(number: int, data: dict, historical: bool = False, travel_confirmed: bool = False) -> dict:
     """What the stage rules are asked about an imported stage.
 
     Two things a folder of documents cannot say are allowed to stay blank for imported history: the interview date and the
     advance amount (the receipt is the evidence). The stored record keeps them blank; only the check is satisfied.
+
+    For someone who has already travelled (`historical`), the later stages prove the earlier ones happened, so the files
+    those earlier stages would normally need (offer copy, advance receipt and amount, stamped visa) may be missing too. The
+    ticket (stage 11) is never waived: it is the proof of travel.
     """
     if number == 3 and data.get("scheduled") and not data.get("date"):
         return {**data, "date": "2000-01-01"}
     if number == 8 and data.get("collected") and not data.get("amount") and data.get("receipt"):
         return {**data, "amount": "1"}
+    if historical:
+        if number == 5 and data.get("obtained") and not data.get("file"):
+            return {**data, "file": HISTORY_FILE}
+        if number == 8 and data.get("collected"):
+            return {**data, "amount": data.get("amount") or "1", "receipt": data.get("receipt") or HISTORY_FILE}
+        if number == 10 and data.get("done") and not data.get("file"):
+            return {**data, "file": HISTORY_FILE}
+        if number == 11 and travel_confirmed and not data.get("file"):
+            return {**data, "file": HISTORY_FILE}
     return data
 
 
-def evaluate_stages(stages: dict[int, dict], options: StageOptions) -> list[dict]:
+def evaluate_stages(stages: dict[int, dict], options: StageOptions, historical: bool = False, travel_confirmed: bool = False) -> list[dict]:
     """[{stage, title, ok, missing}] - the same completion rules the stage screens apply."""
     report = []
     for number in range(1, 12):
         definition = stage_by_no(number)
-        result = definition.evaluate(for_rules(number, stages[number]), options if number == 8 else None)
+        result = definition.evaluate(for_rules(number, stages[number], historical, travel_confirmed), options if number == 8 else None)
         report.append({"stage": number, "title": definition.title, "ok": bool(result.can_complete and not result.closes and not result.repeats),
                        "missing": result.missing})
     return report
@@ -597,11 +622,11 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
 
     kinds = set(by_kind)
     refs = {kind: {"id": "pending", "name": entries[-1]["path"].rsplit("/", 1)[-1]} for kind, entries in by_kind.items()}
-    level = evidence_level(row, kinds)
+    level = 11 if ctx.travel_confirmed else evidence_level(row, kinds)
     built, problems = stage_inputs(row, refs, ctx.options)
     issues.extend(problems)
     shown = {number: (built[number] if number <= level else {}) for number in range(1, 12)}
-    report = evaluate_stages(shown, ctx.options)
+    report = evaluate_stages(shown, ctx.options, ctx.historical, ctx.travel_confirmed)
     completed = 0
     for item in report:
         if not item["ok"]:
@@ -623,7 +648,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
             if used >= order.openings:
                 completed = 10
                 notes.append(f"{order.ref} has no free opening, so the last stage is left for you to finish after raising the openings.")
-            elif gaps:
+            elif gaps and not ctx.historical:
                 completed = 10
                 notes.append("The last stage is left open: these documents are still needed before deploying: " + ", ".join(g["label"] for g in gaps) + ".")
             else:
@@ -753,7 +778,8 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
         father_name=None, marital_status=None, current_address=None, education=[], work_history=[], experience_india=0,
         native_place=None, family_member_number=None, job_duration_preference=None, country_preference=None,
         best_time_to_contact=None, service_charges_status="not_discussed", interest_level=None, next_follow_up_date=None,
-        source=Source.other, source_detail="Bulk import",
+        source=Source.referral if (row or {}).get("agency") else Source.other,
+        source_detail=" ".join(str(row["agency"]).split())[:255] if (row or {}).get("agency") else "Bulk import",
         status=(CandidateStatus.deployed if plan["action"] == "deploy" else CandidateStatus.in_process if order
                 else CandidateStatus.new if phone else CandidateStatus.needs_review),
         # No phone yet: the reading of the resume and passport fills it in and lifts the flag by itself.
@@ -772,7 +798,8 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     # kind becomes the next version. The stage 8 receipt is not a candidate document, only stage evidence.
     stored: dict[str, Attachment] = {}
     receipt: Attachment | None = None
-    for upload in sorted(uploads, key=lambda item: item.path.lower()):
+    # A scan that holds several documents goes first, so a dedicated file of the same kind ends up as the current version.
+    for upload in sorted(uploads, key=lambda item: (len(item.kinds) == 1, item.path.lower())):
         file_name = _safe_name(upload.path.rsplit("/", 1)[-1])
         object_key, digest = _store_bytes(settings, upload.data, file_name, upload.content_type, written)   # once, whatever it counts as
         common = dict(file_name=file_name, size_kb=max(1, round(len(upload.data) / 1024)), content_type=upload.content_type,
@@ -834,7 +861,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     when = stage_dates({n: built[n] for n in range(1, 12)}, now, agency_zone())
     for number in range(1, (11 if deploy else completed) + 1):
         data = validate_payload(number, built[number], ctx.options if number == 8 else None)
-        outcome = stage_by_no(number).evaluate(for_rules(number, data), ctx.options if number == 8 else None).outcome
+        outcome = stage_by_no(number).evaluate(for_rules(number, data, ctx.historical, ctx.travel_confirmed), ctx.options if number == 8 else None).outcome
         db.add(ApplicationStage(
             application_id=application.id, stage=number, attempt=1, data=data, outcome=outcome, completed_by=user.id,
             owner_id=owner.id, completed_at=when[number],

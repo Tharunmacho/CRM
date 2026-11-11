@@ -16,6 +16,7 @@ from veriis import (
     VerisOCRRateLimitError, VerisOCRTimeoutError, VerisOCRValidationError,
 )
 from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
+from veriis.errors import VerisOCRServerError
 
 from app.integrations.ocr.client import ScanFailed, ScanTimedOut
 
@@ -466,6 +467,34 @@ def test_invalid_provider_model_does_not_expose_its_input(ocr_environment, monke
     assert response.json()["detail"]["inspection"]["selected_pages"] == [1]
     assert "PRIVATE" not in response.text
     assert "PRIVATE" not in caplog.text
+
+
+@pytest.mark.parametrize("error, status_code, delay", [
+    (VerisOCRServerError("PRIVATE account capacity", status=503, code="job_queue_full", retry_after=45.2), 503, "46"),
+    (VerisOCRRateLimitError("PRIVATE provider detail", status=429, retry_after=12), 429, "12"),
+    (VerisOCRServerError("PRIVATE deployment capacity", status=503, code="job_queue_full"), 503, "30"),
+])
+def test_provider_capacity_is_reported_with_retry_after_without_claiming_queued(
+    ocr_environment, monkeypatch, caplog, error, status_code, delay,
+):
+    calls = []
+
+    def provider(*args, **kwargs):
+        calls.append(kwargs["idempotency_key"])
+        raise error
+
+    monkeypatch.setattr(ocr_environment.ocr, "veris_scan", provider)
+    response = post_scan(ocr_environment, native_pdf(RESUME))
+
+    assert response.status_code == status_code
+    assert response.headers["retry-after"] == delay
+    detail = response.json()["detail"]
+    assert "busy" in detail["message"] and delay in detail["message"]
+    assert detail["inspection"]["selected_pages"] == [1]
+    assert detail["extraction_status"] != "queued"
+    assert "fields" not in detail and "raw" not in detail
+    assert len(calls) == 1
+    assert "PRIVATE" not in response.text and "PRIVATE" not in caplog.text
 
 
 def test_candidate_ocr_input_accepts_aadhaar_as_separate_evidence(ocr_environment):

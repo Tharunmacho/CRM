@@ -55,7 +55,7 @@ export function SnapshotState({ error, onRetry, retryLabel = 'Try again', varian
   )
 }
 
-export function PageLoading({ fullScreen = false, onRetry }: { fullScreen?: boolean; onRetry?: () => void }) {
+export function PageLoading({ fullScreen = false, onRetry, retryLabel = 'Retry connection' }: { fullScreen?: boolean; onRetry?: () => void; retryLabel?: string }) {
   const [slow, setSlow] = useState(false)
   const agency = useAgency()
   useEffect(() => {
@@ -63,7 +63,7 @@ export function PageLoading({ fullScreen = false, onRetry }: { fullScreen?: bool
     return () => window.clearTimeout(timer)
   }, [])
   if (!fullScreen) return slow && onRetry
-    ? <SnapshotState error="This is taking longer than usual. Your saved work is safe." onRetry={onRetry} retryLabel="Retry connection" />
+    ? <SnapshotState error="This is taking longer than usual. Your saved work is safe." onRetry={onRetry} retryLabel={retryLabel} />
     : <PageSkeleton />
   return (
     <div role="status" aria-label="Opening your workspace" className="workspace-loading is-fullscreen">
@@ -74,7 +74,7 @@ export function PageLoading({ fullScreen = false, onRetry }: { fullScreen?: bool
         </span>
         <div className="splash-track" aria-hidden="true"><span /></div>
         <p className={`splash-note ${slow ? 'is-visible' : ''}`}>{slow ? 'This is taking longer than usual. Your saved work is safe.' : ' '}</p>
-        {slow && onRetry && <button type="button" className="workspace-loading-retry" onClick={onRetry}>Retry connection</button>}
+        {slow && onRetry && <button type="button" className="workspace-loading-retry" onClick={onRetry}>{retryLabel}</button>}
       </div>
     </div>
   )

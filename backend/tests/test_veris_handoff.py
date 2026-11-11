@@ -516,14 +516,23 @@ def test_a_malformed_payload_is_unusable_but_never_lost_and_stays_retryable(worl
     assert len(world.veris.submissions) == 4
 
 
-def test_rate_limits_and_server_errors_are_retried_with_the_same_key(world):
+def test_rate_limits_defer_and_server_errors_retry_with_the_same_key(world, monkeypatch):
     world.veris.submit_faults = [VerisOCRRateLimitError("slow down", status=429, retry_after=1.0),
                                  VerisOCRServerError("down", status=503)]
 
-    output = world.extract(pdf(CV))
+    data = pdf(CV)
+    with pytest.raises(subject.ExtractionDeferred):
+        world.extract(data)
+    assert not world.veris.submissions and not world.sleeps
+    state = deepcopy(world.saved[-1])
+    key = state["provider_jobs"]["resume"]["idempotency_key"]
+    later = subject._wall() + 5
+    monkeypatch.setattr(subject, "_wall", lambda: later)
+    output = world.extract(data, state=state)
 
     assert output["status"] == "complete" and len(world.veris.submissions) == 1
-    assert world.sleeps == [1.0, 1.0]  # the first honours Retry-After; the second backs off (0.5 s, doubling per attempt)
+    assert world.veris.submissions[0]["key"] == key
+    assert world.sleeps == [0.5]  # Capacity releases the worker; an ordinary server error has a short inline retry.
 
 
 def test_backoff_grows_and_gives_up_after_the_attempts(monkeypatch):
@@ -970,14 +979,19 @@ def test_a_slow_job_does_not_delay_the_others_and_the_file_takes_about_the_slowe
     assert time.monotonic() - started < 0.75
 
 
-def test_a_busy_reader_is_retried_and_the_log_says_when(world, caplog):
+def test_a_busy_reader_is_deferred_and_the_log_says_when(world, caplog, monkeypatch):
     caplog.set_level(logging.INFO, logger=subject.log.name)
     world.veris.submit_faults = [VerisOCRRateLimitError("slow down", status=429, retry_after=2.0)]
-    output = world.extract(pdf(CV))
+    data = pdf(CV)
+    with pytest.raises(subject.ExtractionDeferred):
+        world.extract(data)
+    later = subject._wall() + 3
+    monkeypatch.setattr(subject, "_wall", lambda: later)
+    output = world.extract(data, state=deepcopy(world.saved[-1]))
     assert output["status"] == "complete"
     text = " | ".join(r.getMessage() for r in caplog.records)
-    assert "the reader asked us to slow down; will retry in 2s" in text
-    assert text.count("resume: sent pages") == 1 and text.count("resume: done in") == 1  # one start line, one done line
+    assert "reader capacity is full; saved work will resume in 2s" in text
+    assert text.count("resume: sent pages") == 2 and text.count("resume: done in") == 1
 
 
 def test_httpx_request_lines_are_not_logged_at_info():

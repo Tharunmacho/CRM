@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import time
 from typing import Literal
 
@@ -37,7 +38,7 @@ from app.core.deps import current_user
 from app.db.models import Designation, User
 from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields
 from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
-from app.integrations.ocr.client import ScanFailed, ScanTimedOut, scan as veris_scan
+from app.integrations.ocr.client import ScanFailed, ScanTimedOut, capacity_retry_after, scan as veris_scan
 from app.integrations.ocr.inspection import InspectionError, inspect_document
 from app.api.routers.files import MAX_BYTES
 from app.services.reading_notes import plain_notes
@@ -49,20 +50,28 @@ settings = get_settings()
 _MODELS = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}
 
 
-def _inspection_error(code: int, message: str, report: dict) -> HTTPException:
+def _inspection_error(code: int, message: str, report: dict, *, headers: dict[str, str] | None = None) -> HTTPException:
     return HTTPException(code, {
         "message": message, "inspection": report, "extraction_status": "needs_review",
-    })
+    }, headers=headers)
 
 
 def _http_error(exc: VerisOCRError) -> HTTPException:
+    capacity_delay = capacity_retry_after(exc)
+    if capacity_delay is not None:
+        seconds = math.ceil(capacity_delay)
+        code = status.HTTP_429_TOO_MANY_REQUESTS if (
+            isinstance(exc, VerisOCRRateLimitError) or getattr(exc, "status", None) == 429
+        ) else status.HTTP_503_SERVICE_UNAVAILABLE
+        return HTTPException(
+            code, f"The document reader is busy. Try this file again after {seconds} seconds.",
+            headers={"Retry-After": str(seconds)},
+        )
     if isinstance(exc, (VerisOCRBadRequestError, VerisOCRValidationError)):
         return HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "We could not read this file. Check the selected pages, or enter the details by hand.",
         )
-    if isinstance(exc, VerisOCRRateLimitError):
-        return HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "The document reader is busy. Try this file again in a minute.")
     if isinstance(exc, VerisOCRTimeoutError):
         return HTTPException(
             status.HTTP_504_GATEWAY_TIMEOUT,
@@ -175,7 +184,7 @@ def scan(
     except VerisOCRError as exc:
         log.warning("Veris %s extraction failed (%s)", kind, type(exc).__name__)
         error = _http_error(exc)
-        raise _inspection_error(error.status_code, str(error.detail), report) from None
+        raise _inspection_error(error.status_code, str(error.detail), report, headers=error.headers) from None
 
     log.info(
         "Veris extraction: mode=%s selected_pages=%d elapsed=%.2fs",

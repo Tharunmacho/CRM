@@ -11,11 +11,38 @@ async function loadSource(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 }
 
-const { mergeOcrForm, hasOcrExtraction, ocrSavePayload } = await loadSource('../src/features/candidates/ocr-form.ts')
+const { mergeOcrForm, hasOcrExtraction, ocrSavePayload, scansFromJobs } = await loadSource('../src/features/candidates/ocr-form.ts')
 const { api, ApiError } = await loadSource('../src/shared/api/client.ts')
 const defaults = { name: '', phone: '', dob: '', nationality: '', skills: '', totalExperience: '' }
 const scan = (fields, extra = {}) => ({
   fields, warnings: [], raw: { text: 'Synthetic document' }, extraction_status: 'complete', ...extra,
+})
+
+test('another file awaiting review cannot erase completed resume or passport autofill', () => {
+  const resume = scan({ name: 'Alice Example', skills: ['Welding'] })
+  const passport = scan({ dob: '1990-01-01' })
+  const unfinished = scan({ name: 'Unverified name' }, { extraction_status: 'needs_review' })
+  const scans = scansFromJobs([
+    { result: { scans: { resume, passport } } },
+    { result: { scans: { resume: unfinished, passport: unfinished } } },
+  ])
+  assert.equal(scans.resume, resume)
+  assert.equal(scans.passport, passport)
+  assert.equal(mergeOcrForm(defaults, defaults, scans, new Set()).name, 'Alice Example')
+  assert.equal(mergeOcrForm(defaults, defaults, scans, new Set()).dob, '1990-01-01')
+})
+
+test('a newly completed file replaces an older scan while pending files leave its provenance intact', () => {
+  const old = scan({ name: 'Old read' })
+  const updated = scan({ name: 'Updated read' }, { source: { selected_pages: [2], source_sha256: 'new-source' } })
+  const pending = { fields: {}, warnings: [], raw: {}, extraction_status: 'needs_review' }
+  const scans = scansFromJobs([
+    { result: { scans: { resume: old } } },
+    { result: { scans: { resume: updated } } },
+    { result: { scans: { resume: pending } } },
+  ])
+  assert.equal(scans.resume, updated)
+  assert.deepEqual(ocrSavePayload(scans)._sources.resume, updated.source)
 })
 
 test('a late scan keeps human edits, including intentionally cleared fields', async () => {

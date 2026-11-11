@@ -111,6 +111,50 @@ def stored(env, model, *where):
         return list(db.scalars(select(model).where(*where)))
 
 
+def _historical_import(env, folder, files, row, *, travel_confirmed=False):
+    """What the travelled-candidates script does: the service in 'already travelled' mode, one candidate per transaction."""
+    uploads = [bulk.Upload(path=f"{folder}/{name}", kinds=kinds, data=PDF + name.encode(), content_type="application/pdf") for name, kinds in files]
+    with env.sessions() as db:
+        admin = db.get(User, "admin")
+        ctx = bulk.load_context(db, default_order=None, default_recruiter="admin", wanted_orders={row.get("order", "")}, me=admin)
+        ctx.historical, ctx.travel_confirmed = True, travel_confirmed
+        written: list[str] = []
+        result = bulk.import_candidate(db, admin, ctx, folder=folder, row=row, uploads=uploads, written=written)
+        db.commit()
+    return result
+
+
+def _stage_rows(env, candidate_id):
+    with env.sessions() as db:
+        application = db.scalar(select(Application).where(Application.candidate_id == candidate_id))
+        stages = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == application.id).order_by(ApplicationStage.stage)))
+        return application, stages
+
+
+def test_someone_who_has_flown_is_recorded_as_travelled_even_without_the_offer_copy_receipt_and_stamped_visa(env):
+    files = [("Resume.pdf", ["resume"]), ("Passport.pdf", ["passport"]), ("Medical.pdf", ["medical"]), ("Visa.pdf", ["visa"]),
+             ("Air ticket.pdf", ["air_ticket"])]
+    result = _historical_import(env, "Ravi", files, {"order": "ORD-2", "travel_date": "09/05/2026", "airline": "Air Arabia G9472", "pnr": "6ZA8JH"})
+    assert (result["action"], result["completedThrough"]) == ("deploy", 11)
+    application, stages = _stage_rows(env, result["candidateId"])
+    assert application.status == ApplicationStatus.deployed and [s.stage for s in stages] == list(range(1, 12))
+    assert stages[10].data["travelDate"] == "2026-05-09" and stages[10].data["pnr"] == "6ZA8JH"
+    assert "file" not in stages[4].data and "receipt" not in stages[7].data and "file" not in stages[9].data   # nothing invented for the missing papers
+    assert "amount" not in stages[7].data
+    assert '"id": "history"' not in json.dumps([s.data for s in stages])                                       # the stand-in is never stored
+
+
+def test_someone_the_office_says_has_flown_but_has_no_ticket_is_travelled_with_the_date_left_blank(env):
+    files = [("Resume.pdf", ["resume"]), ("Passport.pdf", ["passport"]), ("Medical.pdf", ["medical"]), ("Visa stamping.pdf", ["visa_stamping"])]
+    ordinary = _historical_import(env, "Sita", files, {"order": "ORD-1"})
+    assert ordinary["action"] == "in_progress" and ordinary["currentStage"] == 11     # without the office's word, no ticket means not yet flown
+    flown = _historical_import(env, "Gopal", files, {"order": "ORD-2"}, travel_confirmed=True)
+    assert (flown["action"], flown["completedThrough"]) == ("deploy", 11)
+    application, stages = _stage_rows(env, flown["candidateId"])
+    assert application.status == ApplicationStatus.deployed
+    assert "travelDate" not in stages[10].data and "file" not in stages[10].data and '"id": "history"' not in json.dumps([s.data for s in stages])
+
+
 def test_a_complete_folder_becomes_a_deployed_candidate_with_all_eleven_stages(env):
     result = send(env, "Rahul Kumar", ALL_DOCUMENTS, FULL_ROW)
     assert result["action"] == "deploy" and result["completedThrough"] == 11
@@ -406,6 +450,16 @@ def test_an_imported_candidate_can_be_deleted_even_when_on_a_job_and_frees_the_o
         assert db.scalar(select(func.count()).select_from(Candidate)) == 0
         assert db.scalar(select(func.count()).select_from(Application)) == 0
         assert db.scalar(select(func.count()).select_from(Attachment)) == 0
+
+
+def test_an_import_with_a_referral_agency_is_stored_as_a_referral_and_can_still_be_deleted(env):
+    done = send(env, "Hari", ALL_DOCUMENTS, {**FULL_ROW, "phone": "9876500050", "order": "ORD-2", "agency": "  Star   Agency "})
+    assert done["action"] == "deploy"
+    with env.sessions() as db:
+        candidate = db.get(Candidate, done["candidateId"])
+        assert (candidate.source, candidate.source_detail) == (Source.referral, "Star Agency")   # what the Travelled report reads as the agency
+    response = env.client.delete(f"/api/candidates/{done['candidateId']}")      # "Bulk import" is gone from source_detail, the audit trail says it was imported
+    assert response.status_code == 200, response.text
 
 
 def test_a_candidate_added_by_hand_on_a_job_still_cannot_be_deleted(env):

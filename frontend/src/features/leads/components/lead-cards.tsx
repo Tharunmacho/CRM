@@ -4,7 +4,8 @@ import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
 import { RowMenu } from '@/features/candidates/components/db-parts'
 import { cleanPhone, createdParts, followUpLabel, followUpState, type Lead } from '../lead-model'
-import { CopyButton, LeadWhatsApp, OwnerCell, PositionPill, StatusText, leadMenuItems, workBlock, type LeadColumnContext } from './lead-columns'
+import { CopyButton, LeadWhatsApp, OwnerCell, PositionPill, StatusText } from './lead-columns'
+import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
 
 /** Stacked cards for narrow screens: the same lead facts and actions as the table row. */
 export function LeadCards({ rows, context, onOpen, selectable, selected, onSelect, freshBatch }: {

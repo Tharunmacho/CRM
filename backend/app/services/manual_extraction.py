@@ -245,11 +245,11 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         """A checkpoint; and the first time the local reading has verified something, the form is filled from it at once."""
         checkpoint(value)
         if form_candidate and value.get("local_patterns") and not value.get("local_filled"):
-            value["local_filled"] = True
             try:
                 from app.services.application_form import apply_local_patterns
                 with sessions() as fill_db:
                     apply_local_patterns(fill_db, form_candidate, value["local_patterns"])
+                value["local_filled"] = True
             except Exception:
                 log.warning("Filling the form from the local reading of job %s failed; the reading goes on.", identifier, exc_info=True)
             checkpoint(value)
@@ -268,7 +268,8 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             raise ExtractionFailure("The saved copy of this document looks damaged. Upload the original again, then try again.")
         output = state.get("output")
         if output is None:
-            output = extract_attachment(data, state=state, save=save_and_fill, settings=settings, designations=titles or [],
+            from app.services.extraction_scheduling import handoff_settings
+            output = extract_attachment(data, state=state, save=save_and_fill, settings=handoff_settings(settings), designations=titles or [],
                                         final_attempt=attempts + 1 >= MAX_ATTEMPTS)
             state["output"] = deepcopy(output)
             checkpoint(state)
@@ -316,16 +317,17 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                     with db.begin_nested():
                         apply_job_output(db, job, output)
                 except Exception:
-                    log.warning("Filling the application form from job %s failed; the reading itself is saved.", identifier, exc_info=True)
+                    log.warning("Filling the application form from job %s failed; its saved result will be retried.", identifier, exc_info=True)
+                    raise ExtractionFailure("The document was read, but its details could not be saved. The saved result will be tried again.") from None
             db.commit()
     except JobFinished:
         return
-    except ExtractionPending:
+    except ExtractionPending as exc:
         with sessions() as db:
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
             if not _lost(job, claimed_by):
-                job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=2)
-                job.last_error = "The document is still being read. Its progress is saved."
+                job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=getattr(exc, "retry_seconds", 2))
+                job.last_error = str(exc) if hasattr(exc, "retry_seconds") else "The document is still being read. Its progress is saved."
                 job.updated_at = now()
                 job.claimed_by = job.lease_until = None
                 db.commit()

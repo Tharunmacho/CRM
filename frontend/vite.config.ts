@@ -100,9 +100,11 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
-      // Prepare the small login entry during startup instead of on its first visit.
+      // Transform the shell and Candidate form before first navigation as well as
+      // login. Only these entry graphs are warmed; optional dialogs remain lazy.
       warmup: {
-        clientFiles: ['./index.html', './src/main.tsx', './src/screens/auth/login.tsx'],
+        clientFiles: ['./index.html', './src/main.tsx', './src/screens/auth/login.tsx',
+          './src/app/layout/app-shell.tsx', './src/screens/candidates/add-candidate.tsx'],
       },
       proxy: {
         '/api': {

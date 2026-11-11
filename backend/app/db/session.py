@@ -3,6 +3,7 @@ import os
 import threading
 import time
 from collections.abc import Generator
+from contextvars import ContextVar
 
 from fastapi import Request
 from sqlalchemy import create_engine, event, exc
@@ -42,6 +43,9 @@ engine = create_engine(
 )
 
 CONNECT_ATTEMPTS = 3
+# Startup retries include SQLAlchemy's initial handshake. Let that outer loop own
+# the budget so the do_connect hook does not multiply three attempts into nine.
+_managed_connect_retry = ContextVar("managed_connect_retry", default=False)
 # A pooled connection idle longer than this is pinged by the request that picks it up. The keeper below pings idle
 # connections before they get this old, so in practice requests find a connection already proven alive.
 IDLE_VERIFY_SECONDS = 30
@@ -87,11 +91,12 @@ def _verify_if_idle(dbapi_connection, connection_record, connection_proxy):
 @event.listens_for(engine, "do_connect")
 def _connect_with_retry(dialect, connection_record, cargs, cparams):
     """A remote server can refuse or drop one brand-new connection; the next one succeeds."""
-    for attempt in range(1, CONNECT_ATTEMPTS + 1):
+    attempts = 1 if _managed_connect_retry.get() else CONNECT_ATTEMPTS
+    for attempt in range(1, attempts + 1):
         try:
             return dialect.dbapi.connect(*cargs, **cparams)
         except Exception as exc:
-            if attempt == CONNECT_ATTEMPTS or not _transient(exc):
+            if attempt == attempts or not _transient(exc):
                 raise
             log.warning("Database connection attempt %s failed (%s); retrying.", attempt, type(exc).__name__)
             time.sleep(0.3 * attempt)
@@ -104,13 +109,20 @@ def _transient(exc: Exception) -> bool:
 
 def connect_with_retry(attempts: int = CONNECT_ATTEMPTS):
     """Open (and initialise) the first connection, tolerating a transient drop."""
-    for attempt in range(1, attempts + 1):
-        try:
-            return engine.connect()
-        except OperationalError:
-            if attempt == attempts:
-                raise
-            time.sleep(0.3 * attempt)
+    if attempts < 1:
+        raise ValueError("Connection attempts must be at least one.")
+    token = _managed_connect_retry.set(True)
+    try:
+        for attempt in range(1, attempts + 1):
+            try:
+                return engine.connect()
+            except OperationalError as error:
+                if attempt == attempts or not _transient(error.orig):
+                    raise
+                log.warning("Database connection attempt %s failed (%s); retrying.", attempt, type(error.orig).__name__)
+                time.sleep(0.3 * attempt)
+    finally:
+        _managed_connect_retry.reset(token)
 
 
 def warm_pool(count: int = 4) -> None:

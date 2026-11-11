@@ -2,6 +2,7 @@
 import logging
 import signal
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy import select, text, update
 
@@ -11,6 +12,22 @@ from app.db.session import SessionLocal, engine
 from app.integrations.whatsapp import missing_settings
 from app.services.whatsapp_intake import process_message, utcnow
 from app.services.whatsapp_chat import dispatch_queued
+from app.services.extraction_queue import threads_per_worker
+
+
+def process_batch(identifiers, *, sessions, settings, stop, process=process_message):
+    """Read a bounded batch while the caller holds the cross-process queue lock."""
+    if not identifiers or stop.is_set():
+        return
+    def read(identifier):
+        if not stop.is_set():
+            try:
+                process(identifier, sessions=sessions, settings=settings)
+            except Exception as exc:
+                logging.error("WhatsApp document processing stopped (%s); receipt retained.", type(exc).__name__)
+    with ThreadPoolExecutor(max_workers=min(len(identifiers), threads_per_worker(settings)),
+                            thread_name_prefix="whatsapp-read") as pool:
+        list(pool.map(read, identifiers))
 
 
 def outbound_loop(stop, settings):
@@ -44,11 +61,9 @@ def main():
                             db.execute(update(WhatsAppChannel).where(WhatsAppChannel.phone_number_id == settings.whatsapp_phone_number_id, WhatsAppChannel.enabled.is_(True)).values(worker_seen_at=utcnow()))
                             ids = list(db.scalars(select(WhatsAppMessage.id).join(WhatsAppChannel).where(WhatsAppChannel.enabled.is_(True),
                                 WhatsAppChannel.phone_number_id == settings.whatsapp_phone_number_id,
-                                WhatsAppMessage.status.in_(["pending", "processing", "retry"]), WhatsAppMessage.next_attempt_at <= utcnow()).order_by(WhatsAppMessage.next_attempt_at).limit(5)))
+                                WhatsAppMessage.status.in_(["pending", "processing", "retry"]), WhatsAppMessage.next_attempt_at <= utcnow()).order_by(WhatsAppMessage.next_attempt_at).limit(threads_per_worker(settings))))
                             db.commit()
-                        for message_id in ids:
-                            if stop.is_set(): break
-                            process_message(message_id, sessions=SessionLocal, settings=settings)
+                        process_batch(ids, sessions=SessionLocal, settings=settings, stop=stop)
                     finally: lock.execute(text("SELECT pg_advisory_unlock(724681930120)"))
         except Exception as exc:
             logging.error("WhatsApp worker cycle failed (%s); receipts retained.", type(exc).__name__)

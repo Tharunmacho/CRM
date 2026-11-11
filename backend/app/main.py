@@ -19,6 +19,7 @@ from app.api.routers import lead_bulk as lead_bulk_router
 from app.api.routers import candidate_import as candidate_import_router
 from app.api.routers import application_form, form_options, daily_work as daily_work_router, document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
 from app.api.routers import reference_agencies as reference_agencies_router
+from app.api.routers import travelled as travelled_router
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
 from app.db.models import User
@@ -151,6 +152,7 @@ app.include_router(users.router)
 app.include_router(staff_directory.router)
 app.include_router(reports.router)
 app.include_router(reports.dashboard_router)
+app.include_router(travelled_router.router)
 app.include_router(workflow.router)
 app.include_router(daily_work_router.router)
 app.include_router(whatsapp.router)

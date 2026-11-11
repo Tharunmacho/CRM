@@ -65,6 +65,7 @@ log = logging.getLogger("crm.reading")
 # The short id of the file being read (first characters of its hash), for the log lines of this reading.
 _FILE = READING_FILE
 PIPELINE_VERSION = "local-pages-v2"  # v2: jobs are sent as prepared files, so v1 keys (other bytes) must not be reused
+INSPECTION_VERSION = "2026.11.11-application-forms"
 _MODELS = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}
 _PENDING = {"queued", "running"}
 # The wall clock a job's age is measured with (stored, so it survives a worker restart); replaceable in tests.
@@ -78,6 +79,15 @@ class ExtractionPending(Exception):
         self.job_id = job_id
         self.kind = kind
         super().__init__(f"The {kind} extraction is still processing.")
+
+
+class ExtractionDeferred(ExtractionPending):
+    """Provider capacity is temporarily full; this is not a document failure."""
+
+    def __init__(self, kind: str, retry_seconds: float, job_id: str | None = None):
+        super().__init__(job_id or "", kind)
+        self.retry_seconds = max(2.0, min(3600.0, retry_seconds))
+        self.args = ("The document reader is busy. Your file is saved and will be tried automatically when capacity is available.",)
 
 
 class ExtractionFailure(Exception):
@@ -603,7 +613,7 @@ def _drive(unit: _Unit, settings, events: queue.Queue, abort: threading.Event) -
             job_id = unit.record.get("job_id")
             if not job_id:
                 accepted = ocr_client.retrying(lambda: provider.jobs.submit(
-                    unit.document, mode=_mode(unit.kind), idempotency_key=unit.key), on_retry=_retry_note(unit))
+                    unit.document, mode=_mode(unit.kind), idempotency_key=unit.key), on_retry=_retry_note(unit), defer_capacity=True)
                 ack = threading.Event()
                 events.put(("submitted", unit, accepted, ack))
                 ack.wait()
@@ -614,7 +624,7 @@ def _drive(unit: _Unit, settings, events: queue.Queue, abort: threading.Event) -
             # and a worker wake-up for every status check; a slower job is still handed back.
             job = ocr_client.settle(
                 lambda: ocr_client.retrying(lambda: provider.jobs.get(job_id), extra=ocr_client.READ_ERRORS,
-                                            on_retry=_retry_note(unit)),
+                                            on_retry=_retry_note(unit), defer_capacity=True),
                 budget=max(0.0, _setting(settings, "ocr_provider_wait_seconds", 0.0)),
             )
         events.put(("job", unit, job, None))
@@ -628,6 +638,9 @@ def _apply_job(unit: _Unit, job) -> bool:
     """Record what a polled job reported. Returns True when the saved state changed."""
     rec = unit.record
     before = (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"))
+    rec.pop("capacity_retry_at", None)
+    if any((rec.get("provider_error") or {}).get(flag) for flag in ("capacity", "transport")):
+        rec.pop("provider_error", None)
     rec["status"] = job.status
     if job.status in _PENDING:
         unit.outcome = "pending"
@@ -712,12 +725,17 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
         return unit.kind not in held_passport and not any(a.kind == unit.kind for a in active.values())
 
     def start() -> None:
-        nonlocal dirty
+        nonlocal dirty, held
         while queued and not held and len(active) < parallel:
             unit = next((item for item in queued if may_start(item)), None)
             if unit is None:
                 break
             queued.remove(unit)
+            if unit.record.get("capacity_retry_at", 0) > _wall():
+                # Early dispatch and the final page pass may revisit the same
+                # record during one invocation. Respect the saved provider wait.
+                unit.outcome, held = "deferred", True
+                continue
             if skip is not None and skip(unit):
                 unit.outcome, dirty = "skipped", True
                 left[unit.kind] -= 1
@@ -746,6 +764,9 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                     presubmit.discard(id(unit))
                     duplicate = bool(getattr(payload, "duplicate", False))  # the reader already had a job under this key
                     unit.record.update(job_id=payload.job_id, status=payload.status, submitted_at=_wall(), duplicate=duplicate)
+                    unit.record.pop("capacity_retry_at", None)
+                    if any((unit.record.get("provider_error") or {}).get(flag) for flag in ("capacity", "transport")):
+                        unit.record.pop("provider_error", None)
                     log.debug("%s: job accepted %s duplicate=%s", _step(unit), _job_label(payload.job_id), duplicate)
                     waiting.append(ack)
                     dirty = True
@@ -765,6 +786,23 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                 elif name == "error":
                     unit.outcome = "error"
                     status = getattr(payload, "status", None)
+                    delay = ocr_client.capacity_retry_after(payload)
+                    if delay is not None:
+                        unit.outcome = "deferred"
+                        unit.record["capacity_retry_at"] = _wall() + delay
+                        unit.record["provider_error"] = {
+                            "code": str(getattr(payload, "code", None) or "provider_busy")[:80],
+                            "http_status": status, "retryable": True, "capacity": True,
+                        }
+                        dirty, held = True, True
+                        log.info("%s: reader capacity is full; saved work will resume in %.0fs", _step(unit), delay)
+                        continue
+                    unit.record["provider_error"] = {
+                        "code": _short(getattr(payload, "code", None) or type(payload).__name__),
+                        "http_status": status, "transport": True,
+                        "retryable": isinstance(payload, VerisOCRError) and (status is None or status >= 500),
+                    }
+                    dirty = True
                     if status == 409:  # the same upload key was used before with other file contents
                         unit.record["key_conflict"] = True
                     if status == 409:
@@ -956,6 +994,7 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
 
     failure: str | None = None
     pending: tuple[str, str] | None = None
+    deferred: ExtractionDeferred | None = None
     for kind in kinds:
         for unit in units[kind]:
             message = {
@@ -971,10 +1010,14 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
                     failure = message()
             elif unit.outcome == "pending" and pending is None:
                 pending = (unit.record["job_id"], kind)
-    if failure or pending:
+            elif unit.outcome == "deferred":
+                delay = max(2.0, unit.record.get("capacity_retry_at", _wall() + 30) - _wall())
+                if deferred is None or delay > deferred.retry_seconds:
+                    deferred = ExtractionDeferred(kind, delay, unit.record.get("job_id"))
+    if failure or pending or deferred:
         if dirty:
             checkpoint()  # the paid responses of the jobs that did finish are kept
-        raise ExtractionFailure(failure) if failure else ExtractionPending(*pending)
+        raise ExtractionFailure(failure) if failure else deferred or ExtractionPending(*pending)
     results: dict[str, dict | None] = {}
     for kind in kinds:
         if kind in (failures or {}):
@@ -1639,6 +1682,23 @@ def _extract_attachment(
         raise ExtractionFailure("The attachment changed. Start a separate intake for the replacement document.")
     same_source = state.get("source_sha256") == source_hash
     state["source_sha256"] = source_hash
+    # A failed submission has not paid for a provider job. Recheck its pages when
+    # local classification improves, instead of indefinitely restoring an old
+    # misclassification. Accepted jobs retain their original page plan and keys.
+    def accepted(record):
+        return bool(record.get("job_id") or "result" in record or any(accepted(chunk) for chunk in record.get("chunks") or []))
+    paid = any(accepted(record) for record in (state.get("provider_jobs") or {}).values()) or bool(
+        (state.get("output") or {}).get("extractions") or state.get("extractions") or state.get("partial_extractions"))
+    if state.get("inspection_version") != INSPECTION_VERSION and not paid:
+        jobs = state.get("provider_jobs") or {}
+        state["provider_jobs"] = {}
+        for kind, record in jobs.items():
+            state.setdefault("provider_job_history", {}).setdefault(kind, []).append(deepcopy(record))
+        # Checkpoints merge JSON keys in the database, so reset explicit values
+        # instead of removing keys (otherwise old plans could reappear on retry).
+        state.update(inspection_signature="", person_detection_version=0, passport_plan={}, passport_skipped=[],
+                     local_patterns={}, local_filled=False, page_rotations={}, payload_drops={}, probe_plan={},
+                     partial_extractions={}, extractions={}, coverage={}, warnings=[], output=None, documents={})
     options = {
         "tesseract_cmd": settings.tesseract_cmd, "languages": settings.ocr_languages,
         "max_pages": settings.ocr_max_pages, "page_timeout": settings.ocr_page_timeout_seconds,
@@ -1668,6 +1728,7 @@ def _extract_attachment(
                 data, options, state=state, save=save, settings=settings, source_hash=source_hash, early=partial)
             evidence = [page_identity(page.text) for page in inspected.pages if page.status == "read"]
             state["person_detection_version"] = 1
+            state["inspection_version"] = INSPECTION_VERSION
             state["person_identities"] = evidence
             state["splitSuggested"] = any(item["mixed"] for item in evidence) or any(
                 incompatible(left, right) for index, left in enumerate(evidence) for right in evidence[index + 1:])

@@ -292,7 +292,7 @@ def extraction_view(job) -> dict | None:
             # Details the document reader returned that have no field on the form (path, values), and what was and was not sent.
             "unmapped": saved.get("unmapped") or [], "coverage": saved.get("coverage")}
     if job.status in PROCESSING:
-        retry_note = job.last_error if job.status == "retry" and job.attempts else None
+        retry_note = job.last_error if job.status == "retry" else None
         return {**base, "status": "processing", "message": retry_note}
     if job.status == "failed":
         return {**base, "status": "failed", "message": job.last_error or "We could not read this file. Try again, or enter the details by hand."}
@@ -343,7 +343,10 @@ def document_slots(attachments: list, jobs: list, names: dict[str, str], stage: 
         # Newest first. Versions count per stored slot key, so a folded legacy slot is ordered by upload time instead.
         rows = sorted(by_slot[slot], key=lambda r: (r.uploaded_at, r.version), reverse=True)
         current = rows[0] if rows else None
-        job = next((j for j in jobs if current is not None and j.attachment_id == current.id), None) if readable else None
+        job = next((j for j in jobs if current is not None and (
+            j.attachment_id == current.id or current.id in
+            (((j.draft or {}).get("applicationForm") or {}).get("attachedDocuments") or {}).values()
+        )), None) if readable else None
         required = always or (from_stage is not None and stage is not None and stage >= from_stage)
         slots[slot] = {"slot": slot, "label": label, "hint": hint, "required": required, "requiredFromStage": from_stage,
                        # optional: never counted as missing (experience certificate, other documents)
@@ -809,6 +812,56 @@ def requeue_failed(db: Session, candidate_id: str, attachment_id: str) -> bool:
     return True
 
 
+def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict, meta: dict) -> dict[str, str]:
+    """Link the checked PDFs from a combined upload to their actual document slots.
+
+    The original remains in version history. A newer upload in another slot wins
+    over an older queued scan, and a retry reuses the same derived attachments.
+    The caller already holds the candidate lock used by ordinary uploads.
+    """
+    source = db.get(Attachment, meta.get("attachmentId") or job.attachment_id)
+    if source is None or source.entity_type != "candidate" or source.entity_id != job.candidate_id:
+        return {}
+    inspection = output.get("inspection") or {}
+    mixed = sum(bool(inspection.get(kind + "_pages")) for kind in fx.SLOT_KINDS) > 1
+    documents = (job.state or {}).get("documents") or {}
+    attached = dict(meta.get("attachedDocuments") or {})
+    for kind in output.get("extractions") or {}:
+        document = documents.get(kind)
+        if kind not in fx.SLOT_KINDS or not document or (not mixed and kind == source.slot):
+            continue
+        previous = db.scalar(select(Attachment).where(
+            Attachment.entity_type == "candidate", Attachment.entity_id == job.candidate_id, Attachment.slot == kind)
+            .order_by(Attachment.uploaded_at.desc(), Attachment.version.desc()).limit(1))
+        if previous and previous.content_hash == document["content_hash"]:
+            attached[kind] = previous.id
+            continue
+        # In a bulk folder a later dedicated passport should remain current even
+        # if the older combined resume finishes reading after it.
+        if previous and previous.object_key != source.object_key and previous.uploaded_at >= source.uploaded_at:
+            continue
+        row = Attachment(id=str(uuid.uuid4()), entity_type="candidate", entity_id=job.candidate_id,
+            slot=kind, version=(previous.version if previous else 0) + 1,
+            object_key=document["object_key"], content_hash=document["content_hash"],
+            file_name=document["file_name"], content_type=document["content_type"], size_kb=document["size_kb"],
+            uploaded_by=job.owner_id, uploaded_at=source.uploaded_at)
+        db.add(row)
+        attached[kind] = row.id
+        db.add(AuditEntry(actor_id=job.owner_id, action="Separated a document from a combined upload",
+            target=row.file_name, entity_type="candidate", entity_id=job.candidate_id,
+            meta={"attachment_id": row.id, "source_attachment_id": source.id, "document_job_id": job.id, "slot": kind}))
+    recognized = any(kind in fx.SLOT_KINDS and kind in documents for kind in output.get("extractions") or {})
+    if recognized and source.slot in fx.SLOT_KINDS and source.slot not in (output.get("extractions") or {}) \
+            and not inspection.get(source.slot + "_pages"):
+        # A passport uploaded in the resume control must not count as an uploaded
+        # resume. Retain the original by the same ID as a source bundle instead.
+        previous_bundle = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate",
+            Attachment.entity_id == job.candidate_id, Attachment.slot == "source_bundle")
+            .order_by(Attachment.version.desc()).limit(1))
+        source.slot, source.version = "source_bundle", (previous_bundle.version if previous_bundle else 0) + 1
+    return attached
+
+
 def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> None:
     """Called by the extraction worker in the transaction that completes a form-uploaded job.
 
@@ -862,6 +915,8 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
         status = "done"
         message = None
     form = dict(meta)
+    if candidate is not None:
+        form["attachedDocuments"] = _attach_read_documents(db, job, output, meta)
     coverage = (output or {}).get("coverage") or {}
     form["result"] = {"status": status, "message": message, "kindsFound": found, "filled": result.filled, "kept": result.kept + result.conflicts,
                       "unmapped": coverage.get("unmapped") or [],

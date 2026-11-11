@@ -28,6 +28,7 @@ const code = {
   attendance: () => import('@/screens/attendance/attendance'),
   todo: () => import('@/screens/todos/todo'),
   reports: () => import('@/screens/reports/reports'),
+  travelled: () => import('@/screens/travelled/travelled'),
   users: () => import('@/screens/users/users'),
   staffDirectory: () => import('@/screens/staff/staff-directory'),
 }
@@ -53,6 +54,7 @@ const ROUTES: [RegExp, Warm[]][] = [
   [/^\/attendance\/?$/, [code.attendance]],
   [/^\/todo\/?$/, [code.todo]],
   [/^\/(reports|staff-report)\/?$/, [code.reports]],
+  [/^\/travelled\/?$/, [code.travelled]],
   [/^\/users\/?$/, [code.users]],
   [/^\/staff-directory\/?$/, [code.staffDirectory]],
 ]

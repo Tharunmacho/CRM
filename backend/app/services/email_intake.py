@@ -170,7 +170,8 @@ def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
     identity = {}
     for result in results:
         # A file that was set aside (a logo, a vCard) is not a reason to doubt the candidate.
-        needs_review = needs_review or (bool(result.get("warnings")) and result.get("status") != "ignored")
+        needs_review = needs_review or result.get("status") == "needs_review" or (
+            bool(result.get("warnings")) and result.get("status") != "ignored")
         for kind, extraction in result.get("extractions", {}).items():
             current = extraction["fields"]
             if current.get("name"):
@@ -447,7 +448,9 @@ def _save_selected_documents(settings, account_id, attachment, data, result):
         if kind not in {"resume", "passport", "aadhaar"}:
             raise IntakeReviewError("We could not tell what kind of document this is. Please check it.")
         selected = extraction["selected_pages"]
-        if selected != getattr(inspected, f"{kind}_pages"):
+        # Payload preparation may omit duplicate passport pages or narrow to the
+        # verified data page. It must stay within the locally checked kind.
+        if not selected or not set(selected) <= set(getattr(inspected, f"{kind}_pages")):
             raise IntakeReviewError("The pages we read do not match the saved check. Please check the document.")
         content = inspected.pdf_for_pages(selected)
         key = store_original(
@@ -490,6 +493,9 @@ def process_job(job_id, *, sessions, settings):
 
     try:
         results = []
+        pending = None
+        from app.services.extraction_scheduling import handoff_settings
+        extraction_settings = handoff_settings(settings)
         for attachment in attachments:
             document_state = state.get(attachment.id, {})
             result = document_state.get("output")
@@ -533,9 +539,17 @@ def process_job(job_id, *, sessions, settings):
                         result = extract_attachment(
                             data, state=document_state,
                             save=lambda value, aid=attachment.id: checkpoint(aid, value),
-                            settings=settings, designations=titles,
+                            settings=extraction_settings, designations=titles,
                             partial=True, ignore_decorative=True,
                         )
+                    except ExtractionPending as exc:
+                        # Its provider ID is checkpointed; start reading the next
+                        # attachment while this one runs remotely. Revisit all
+                        # unfinished attachments before committing the candidate.
+                        pending = exc
+                        if hasattr(exc, "retry_seconds"):
+                            break  # Capacity is shared; do not flood it with later attachments.
+                        continue
                     except UnreadableDocument as exc:
                         # A damaged or protected document: report this attachment for review
                         # and carry on with the others instead of failing the whole receipt.
@@ -566,6 +580,8 @@ def process_job(job_id, *, sessions, settings):
                 "channel": "email", "message_id": attachment.message_id,
                 "attachment_id": attachment.id, "file_name": attachment.file_name,
             }})
+        if pending is not None:
+            raise pending
         with sessions() as db:
             lock_assignment_cursor(db)
             job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
@@ -588,13 +604,14 @@ def process_job(job_id, *, sessions, settings):
             else:
                 job.status, job.last_error = "ignored", "No resume, passport or Aadhaar pages identified."
             db.commit()
-    except ExtractionPending:
+    except ExtractionPending as exc:
         with sessions() as db:
             job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
             if not job or job.status not in {"pending", "processing", "retry"}:
                 return
-            job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=30)
-            job.last_error = "Waiting for the document reader to finish."
+            from app.services.extraction_scheduling import PENDING_RECHECK_SECONDS
+            job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=getattr(exc, "retry_seconds", PENDING_RECHECK_SECONDS))
+            job.last_error = str(exc) if hasattr(exc, "retry_seconds") else "Waiting for the document reader to finish."
             db.commit()
     except ValueError as exc:
         with sessions() as db:

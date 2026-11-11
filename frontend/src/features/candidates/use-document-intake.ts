@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, ApiError, fileHref, type OcrInspection, type OcrScan } from '@/shared/api/client'
+import { api, ApiError, fileHref, type OcrInspection } from '@/shared/api/client'
 import type { DocumentScans, ScanKind } from './ocr-form'
 import { MAX_DOCUMENT_FILES, isQueued, trackNextInLine, type QueueClock } from './entry-upload'
 import { createDraftSaver } from './draft-saver'
+export { scansFromJobs } from './ocr-form'
 
 export type IntakeDraft = { form: Record<string, string>; editedFields: string[]; jobIds?: string[]; savedCandidateId?: string | null; splitCandidateIds?: string[] }
 export type IntakeKind = ScanKind | 'photo' | 'education' | 'experience'
@@ -49,15 +50,6 @@ const whenVisible = (signal: AbortSignal) => new Promise<void>((resolve, reject)
   signal.addEventListener('abort', cancel, { once: true })
   if (signal.aborted) cancel()
 })
-export function scansFromJobs(jobs: IntakeJob[]): DocumentScans {
-  const scans: DocumentScans = {}
-  for (const job of jobs) for (const [kind, scan] of Object.entries(job.result?.scans ?? {})) {
-    const key = kind as ScanKind
-    if (!scans[key] || Object.keys(scan.raw ?? {}).length > 0) scans[key] = scan as OcrScan
-  }
-  return scans
-}
-
 /** A clock for the queued rows: ticks every second while any file waits (and not at all otherwise), and remembers since when each file has been "next in line". */
 export function useQueueClock(jobs: IntakeJob[]): QueueClock {
   const waiting = jobs.some((job) => isQueued(job))

@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.schemas import CandidateWithFormOut as CandidateDetailOut, Wire
-from sqlalchemy import delete, func, literal, or_, select, union, union_all, update
+from sqlalchemy import and_, case, delete, exists, func, literal, or_, select, union, union_all, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -990,7 +990,13 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session
     if db.scalar(select(AssignmentPointer.id).where(AssignmentPointer.id == 1).with_for_update()) is None:
         lock_assignment_cursor(db)
     rows = db.execute(
-        select(Candidate.name, Candidate.ref, Application.id, Application.status, Order.ref, Candidate.source_detail, Order.id)
+        # source_detail reads "Bulk import" for an import, also when a referral agency has since replaced that text: the audit trail
+        # (same statement, no extra round trip) says it was imported.
+        select(Candidate.name, Candidate.ref, Application.id, Application.status, Order.ref,
+               case((exists().where(AuditEntry.action.like("Imported candidate with documents%"),
+                                    or_(and_(AuditEntry.entity_type == "candidate", AuditEntry.entity_id == Candidate.id),
+                                        and_(AuditEntry.entity_type == "application", AuditEntry.entity_id == Application.id))), "Bulk import"),
+                    else_=Candidate.source_detail), Order.id)
         .select_from(Candidate)
         .outerjoin(Application, Application.candidate_id == Candidate.id)
         .outerjoin(Order, Order.id == Application.order_id)

@@ -109,15 +109,23 @@ The audit inventories attachment rows, draft attachment files, immutable send sn
 python -m app.storage_admin migrate-s3 --apply --writers-stopped --output storage-migration-result.json
 ```
 
-The offline command takes a defensive database write lock, rechecks audited sources, copies immutable objects and reads them back for checksum verification. Only after every copy succeeds does it update direct keys, nested checkpoints and mailbox storage identity in one transaction. It retains all local originals. On failure, database references remain unchanged; already copied immutable objects can be reused on a retry. Existing S3 references outside the target namespace are rejected rather than silently remapped. Endpoint-to-endpoint S3 migration needs a separate reviewed procedure.
+The offline command takes a defensive database write lock, rechecks audited sources, copies immutable objects and reads them back for checksum verification. Only after every copy succeeds does it update direct keys, nested checkpoints and mailbox storage identity in one transaction. Owned legacy application-stage file keys are normalized to attachment IDs; ambiguous matches block the migration. It retains all local originals. On failure, database references remain unchanged; already copied immutable objects can be reused on a retry. Existing S3 references outside the target namespace are rejected rather than silently remapped. Endpoint-to-endpoint S3 migration needs a separate reviewed procedure.
 
-After success, set `STORAGE_BACKEND=s3`, restart all services, audit again and preview a historical and a new document from the application. Keep the local backup until the recovery policy permits removal. No live S3 migration was run during this implementation.
+For a shared database, first collect the verified union of documents from every installation's source volume. Identical keys must have identical bytes; never overwrite a conflict. Use the same endpoint, bucket and prefix on all installations. Record the actual worker `INSTANCE_NAME` before cutover and explicitly preserve it, or separately plan reassignment of queued jobs. The migration reports existing bindings but does not move jobs between workers automatically.
+
+If older originals are already missing and their absence has been explicitly reviewed, `--allow-missing-manifest path.json` accepts an exact manifest: `{"version":1,"objects":[{"key":"exact/local/key","expectedHashes":["known-sha256"]}]}`. Generate it from the current audit and compare it with the accepted historical report. It permits only matching missing local files; corrupt files, access failures, remote errors, unknown keys and stale hashes still block migration. Approved missing references remain unchanged and the result says `complete: false` with `retainedMissingObjects`. This is not a way to declare unavailable documents successfully copied.
+
+After success, set `STORAGE_BACKEND=s3`, restart all services, audit again and preview historical and new documents from the application. Keep the source volumes until the recovery policy permits removal. Restoring `STORAGE_BACKEND=local` alone does not undo committed S3 references; rollback requires the matching database snapshot and source files, or a reviewed reverse migration.
+
+The November 2026 deployment verified private S3 access from the workstation and hosted CRM, conditional writes, concurrent immutable uploads, authenticated document responses, and restoration of object versions. Credentials, source inventories, checksums and deployment evidence remain in ignored, access-restricted operational artifacts.
 
 ## Backup and restore verification
 
 Back up PostgreSQL, document bytes/object versions, local volume marker where applicable, and the encrypted-token key as a coordinated recovery set. A database backup without its referenced files is incomplete. Restore into an isolated database/storage namespace, keep provider workers disabled, run the document audit, check user login/roles and representative old/new candidate/application documents, then rehearse manual job and task recovery. Enable external delivery only after connecting the restored environment intentionally.
 
 Use retention/versioning appropriate to the agency's document policy. This release does not delete old versions or run automatic orphan cleanup. Failed uploads with uncertain database commit outcomes retain bytes for reconciliation.
+
+For a self-hosted bucket, export all object versions and deletion markers with a separate read-only backup credential, and verify every archived object's checksum. Back up the bucket's private configuration alongside the database. A live volume tar or a current-object mirror alone is not a version-complete object backup. A backup retained on the same VPS does not protect against loss of that VPS; an offsite copy needs its own configured destination and verification.
 
 ## Verification artifacts
 

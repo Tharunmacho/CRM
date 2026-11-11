@@ -142,8 +142,16 @@ def require_current_schema():
             state = schema_status(connection)
     except Exception as error:
         # Only the error type is shown: its message can contain the host or user name.
-        reason = type(error.__cause__ or error).__name__
-        raise SystemExit(f"Cannot check the CRM database ({reason}). Check the server database configuration.") from None
+        reason = type(getattr(error, "orig", None) or error.__cause__ or error).__name__
+        raise SystemExit(
+            f"Cannot check the CRM database ({reason}). "
+            "Run 'npm run db:check' from the project root for connection diagnostics. "
+            "Check DATABASE_URL in backend/.env (or CRM_ENV_FILE / the process environment). "
+            "For a connection timeout or refusal, confirm PostgreSQL is running and its host/port is reachable; "
+            "check the server firewall, published database port and any required VPN. "
+            "For the local Compose database, run 'docker compose up -d db' from the project root "
+            "and use localhost:5433. The API has not started, so Vite's /api proxy cannot connect to port 8000."
+        ) from None
     if state["status"] == "ok":
         return
     current, required = ", ".join(state["current"]) or "unversioned", ", ".join(state["expected"])

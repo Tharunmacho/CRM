@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { choosesRecruiter } from '@/features/candidates/candidate-access'
 import { followUpHint, NOT_ASSIGNED_YET, RECRUITER_FIELD_HINT, recruiterChoices, saveButtonLabel, savebarStatus, savedNotice, savedOwnerNote } from '@/features/candidates/assignment-labels'
 import { useNavigate } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { api, ApiError, type OcrScan } from '@/shared/api/client'
 import { PageHeader } from '@/shared/ui/display'
 import { Button, Input, Select, Textarea } from '@/shared/ui/primitives'
+import { Dialog } from '@/shared/ui/overlay'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { documentFileError } from '@/shared/lib/document-files'
 import { documentLabel } from '@/shared/model/document-slots'
@@ -35,7 +36,6 @@ import { DuplicateDialog } from '@/features/candidates/components/entry-dialogs'
 import { duplicateFromSaveError, finishSavedCandidate, freshWorkspace } from '@/features/candidates/save-flow'
 import { fieldSources, liveDuplicateQuery, SCAN_KIND_LABEL, type DuplicateMatch } from '@/features/candidates/entry-signals'
 import { candidateEntryErrors, draftSnapshot, EMPTY_CANDIDATE_FORM as EMPTY } from '@/features/candidates/entry-model'
-import { EntryFormPreview } from '@/features/application-form/components/entry-form-preview'
 import { educationPayload, historyPayload, previewFormFromEntry } from '@/features/application-form/entry-bridge'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { fileHref } from '@/shared/api/client'
@@ -43,6 +43,11 @@ import { useReferenceAgencies } from '@/features/clients/agency-api'
 import '@/styles/application-form.css'
 import '@/styles/add-candidate-v2.css'
 import '@/styles/application-entry.css'
+
+// The printable form brings its own sections and layout. Download it when requested,
+// so opening Candidate never waits for a preview that is still closed.
+const EntryFormPreview = lazy(() => import('@/features/application-form/components/entry-form-preview')
+  .then((module) => ({ default: module.EntryFormPreview })))
 
 type FormKey = keyof typeof EMPTY
 type SavedResult = { ref?: string; name?: string; ownerName: string | null; merged: boolean; at: number }
@@ -757,8 +762,12 @@ export default function AddCandidatePage() {
         </div>
       </div>
 
-      <EntryFormPreview open={previewing} onClose={() => setPreviewing(false)} form={previewForm} savedCandidateId={savedCandidateId}
-        onOpenSaved={() => { setPreviewing(false); openApplicationForm() }} />
+      {previewing && <Suspense fallback={<Dialog open onClose={() => setPreviewing(false)} title="Application form preview">
+        <p role="status" className="text-sm text-ink-500">Opening preview…</p>
+      </Dialog>}>
+        <EntryFormPreview open onClose={() => setPreviewing(false)} form={previewForm} savedCandidateId={savedCandidateId}
+          onOpenSaved={() => { setPreviewing(false); openApplicationForm() }} />
+      </Suspense>}
       <DuplicateDialog duplicate={duplicate} form={form} saving={saving} error={duplicate ? saveError : ''}
         onCancel={() => setDuplicate(null)} onOpen={(id) => { setDuplicate(null); navigate(`/candidates/${id}`) }} onMerge={(id) => void combine(id)} />
     </>

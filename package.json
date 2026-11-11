@@ -17,6 +17,8 @@
     "preview": "npm run preview --workspace @care-india/frontend",
     "test:backend": "node scripts/backend.mjs test",
     "db:migrate": "node scripts/backend.mjs migrate",
+    "db:check": "node scripts/backend.mjs db:check",
+    "db:tunnel": "node scripts/backend.mjs db:tunnel",
     "check": "npm run typecheck && npm run test:backend"
   }
 }

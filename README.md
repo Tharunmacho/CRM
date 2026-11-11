@@ -102,6 +102,44 @@ Only one backend should use port 8000 at a time.
 
 Open `http://localhost:5173`. Vite forwards `/api` requests and session cookies to `http://127.0.0.1:8000`; no separate API origin is needed. API documentation is at `http://127.0.0.1:8000/api/docs`.
 
+If startup reports `ConnectionTimeout` and Vite reports `ECONNREFUSED 127.0.0.1:8000`,
+run `npm.cmd run db:check` from the repository root or `backend/`. It displays the
+configured database host/port and checks connectivity and schema without applying
+migrations or starting workers. Credentials are omitted from the output.
+
+A timeout means the configured PostgreSQL endpoint did not answer. Verify that
+`backend/.env` uses the current database endpoint and credentials, especially after
+a hosting migration; process environment variables override that file. A private
+hosted database needs its configured SSH tunnel or VPN. For the local Compose
+database, start `docker compose up -d db` and use `localhost:5433` as described above.
+Keep the API terminal running after the database check succeeds. Vite's Fast Refresh
+export warnings are separate from database connectivity failures.
+
+For a private hosted database, the optional, ignored `backend/.db-tunnel.json`
+configures local SSH access using `ssh_host`, `ssh_user`, `identity_file`,
+`known_hosts_file`, `service_name` and `local_port` (`remote_port` defaults to
+5432). Relative key and host-file paths are resolved from `backend/`. The server's
+host key must already be verified in the supplied known-hosts file. Point
+`backend/.env`'s `DATABASE_URL` at `127.0.0.1` and the configured local port, using
+the current hosted database credentials.
+
+With that file present, `npm run dev:backend`, backend `npm start` and
+`npm run db:check` automatically prepare the tunnel. A process-level `DATABASE_URL`
+or `CRM_ENV_FILE` override bypasses this workstation's tunnel setup. For pgAdmin
+without starting the backend, run `npm.cmd run db:tunnel` from the project root
+or `backend/`, then use the same loopback address and port in pgAdmin. The tunnel
+runs in the background and is reused on later commands; run the command again
+after restarting the computer. Its database address is refreshed after a server
+redeployment. SSH binds only to this computer and checks the pinned host key.
+
+When local development shares the live database, keep `CRM_AUTO_MIGRATE=false`
+and `EMAIL_INGESTION_ENABLED=false` locally; the hosted email workers own their
+mailbox receipt work. Configure the same private S3 endpoint, bucket and prefix
+for every API and worker that must access the shared documents. Without shared
+storage, local uploads remain on that computer; the database tunnel does not
+copy their bytes. See [storage operations](docs/operations.md#local-or-s3-document-storage)
+before migrating existing files or changing worker instance names.
+
 To enable local Redis, set a generated `REDIS_PASSWORD` in the root `.env`
 and leave `REDIS_PORT=6380`. Set `REDIS_URL` in `backend/.env` to
 `redis://:<URL-encoded-password>@127.0.0.1:6380/0`, then run:
@@ -313,6 +351,6 @@ worker uses its own PostgreSQL-backed queue; task escalation, daily-update monit
 
 The CRM now includes candidate create/edit/review and duplicate handling; server-side Data Bank search and skill matching; master-data editing and agreements; all placement stages, reopening and repeat medical attempts; durable document uploads/OCR; persisted task monitoring and notifications; private to-dos; scoped database reports with XLSX/PDF export; and Admin user lifecycle/audit history. Screens share responsive Poppins styling and a redesigned login.
 
-Zoho mailbox operations, WhatsApp Business intake and local/S3 document storage are implemented behind server configuration. Provider calls are covered with controlled adapters and database tests; live Zoho connection, inbound delivery, outbound send and S3 acceptance still need configured test services. No production migration or live communication is implied by local verification.
+Zoho mailbox operations, WhatsApp Business intake and local/S3 document storage are implemented behind server configuration. Provider calls are covered with controlled adapters and database tests. Live S3 acceptance and the shared-document migration are recorded in [operations](docs/operations.md); live Zoho/WhatsApp delivery acceptance still needs the configured channel and explicit messaging authorization. Local verification does not imply that external messages were sent.
 
 Read [the requirement matrix](docs/requirements-matrix.md) and [integration audit](docs/integration-audit.md) for detailed evidence and remaining product differences. Use [the database dictionary](docs/database-design.md), [release/storage operations](docs/operations.md) and [email connection setup](docs/email-connections.md) to maintain and deploy the project.

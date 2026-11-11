@@ -18,6 +18,20 @@ export function hasOcrExtraction(scan: OcrScan | undefined): scan is OcrScan {
     && Object.keys(scan.raw).some((key) => !LEGACY_PROVENANCE_KEYS.has(key))
 }
 
+/** A later file still being read, or requiring review, must not erase a finished file's suggestions. */
+export function scansFromJobs(jobs: { result?: { scans?: DocumentScans } }[]): DocumentScans {
+  const scans: DocumentScans = {}
+  for (const job of jobs) {
+    for (const kind of SCAN_KINDS) {
+      const scan = job.result?.scans?.[kind]
+      if (!scan) continue
+      const previous = scans[kind]
+      if (!previous || hasOcrExtraction(scan) || !hasOcrExtraction(previous)) scans[kind] = scan
+    }
+  }
+  return scans
+}
+
 /**
  * The `ocr_data` sent with a save: each scanned kind's verbatim Veris result, plus its provenance
  * under `_sources` (omitted for older responses that carry the provenance inside `raw`).

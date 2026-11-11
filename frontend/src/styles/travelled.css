@@ -1,0 +1,103 @@
+/*
+ * Travelled: the same flat cards as Reports (12px radius, 1px hairline, no shadows), one filter card, a row of
+ * clickable breakdowns and the list. Colours are the palette's tokens, so light and dark both follow the theme.
+ * Below 720px the table turns into one card per candidate (each cell carries its own label).
+ */
+.tv { min-width: 0; font-family: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.tv :is(button, input, select) { font-family: inherit; }
+.tv > * { min-width: 0; }
+.tv-card { min-width: 0; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); box-shadow: none; }
+.tv-body { display: grid; gap: 16px; min-width: 0; transition: opacity .15s; }
+.tv-body.is-stale { opacity: .6; }
+.tv > .tv-card, .tv > .tv-alert { margin-bottom: 16px; }
+
+/* Filters */
+.tv-quick { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 24px 0; }
+.tv-quick-btn, .tv-toggle { min-height: 32px; padding: 0 14px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); color: var(--text-main); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background .12s, border-color .12s; }
+.tv-quick-btn:hover, .tv-toggle:hover { background: var(--tint-2); }
+.tv-quick-btn.is-on, .tv-toggle.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); font-weight: 600; }
+.tv-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 16px; padding: 16px 24px 18px; }
+.tv-filter-grid label { display: grid; gap: 6px; min-width: 0; font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.tv-search-row { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 12px; min-width: 0; }
+.tv-search-row .tv-search { flex: 1; }
+.tv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 24px 16px; border-top: 1px solid var(--border-main); }
+.tv-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; max-width: 100%; padding: 0 10px; border: 1px solid var(--border-main); border-radius: 999px; background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); color: var(--text-main); font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-chip:hover { background: color-mix(in srgb, var(--primary) 16%, var(--bg-card)); }
+.tv-clear { min-height: 30px; padding: 0 8px; font-size: 13px; font-weight: 500; color: var(--primary); }
+.tv-clear:hover { text-decoration: underline; }
+.tv :is(.tv-chip, .tv-clear, .tv-more, .tv-crumbs button, .tv-bars button, .tv-quick-btn, .tv-toggle):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.tv-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 16px; border: 1px solid color-mix(in srgb, var(--error-ink) 35%, var(--border-main)); border-radius: 12px; background: color-mix(in srgb, var(--error-ink) 7%, var(--bg-card)); color: var(--error-ink); font-size: 14px; }
+.tv-alert > span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.tv-alert button { font-weight: 600; text-decoration: underline; }
+
+/* Breakdowns */
+.tv-breakdown-panel > summary { padding: 6px 2px; color: var(--primary); font-size: 13px; font-weight: 500; cursor: pointer; }
+.tv-breakdown-panel[open] > summary { margin-bottom: 10px; }
+.tv-breakdowns { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 16px; align-items: start; }
+.tv-break { padding: 16px 18px 14px; }
+.tv-break > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 10px; }
+.tv-break h2 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--text-main); }
+.tv-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 12.5px; color: var(--text-muted); }
+.tv-crumbs button, .tv-crumbs .is-here { padding: 2px 4px; border-radius: 6px; font-weight: 500; }
+.tv-crumbs button:hover { background: var(--tint-2); color: var(--text-main); }
+.tv-crumbs .is-here { color: var(--text-main); font-weight: 600; }
+.tv-none { padding: 10px 0 6px; font-size: 13px; color: var(--text-muted); }
+.tv-bars { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.tv-bars button { display: grid; grid-template-columns: minmax(64px, 38%) minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 3px 8px; border-radius: 8px; text-align: left; font-size: 13px; color: var(--text-main); transition: background .12s; }
+.tv-bars button:hover { background: var(--tint-2); }
+.tv-bars button.is-chosen { background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); font-weight: 600; }
+.tv-bar-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-bar-track { display: block; height: 8px; border-radius: 999px; background: var(--tint-2); overflow: hidden; }
+.tv-bar-track i { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+.tv-bar-count { min-width: 1.5em; text-align: right; font-weight: 600; }
+.tv-bars.is-days { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
+.tv-bars.is-days button { grid-template-columns: 52px minmax(0, 1fr) auto; }
+.tv-more { margin-top: 8px; padding: 2px 8px; font-size: 13px; font-weight: 500; color: var(--primary); }
+.tv-more:hover { text-decoration: underline; }
+
+/* The list */
+.tv-table-wrap { overflow-x: auto; }
+.tv-table { width: 100%; min-width: 960px; border-collapse: collapse; font-size: 13.5px; }
+.tv-table th { padding: 12px 14px; border-bottom: 1px solid var(--border-main); background: var(--tint-2); text-align: left; font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
+.tv-table td { padding: 12px 14px; border-bottom: 1px solid var(--border-main); vertical-align: top; color: var(--text-main); }
+.tv-table tbody tr:last-child td { border-bottom: 0; }
+.tv-table tbody tr:hover { background: color-mix(in srgb, var(--tint-2) 55%, var(--bg-card)); }
+.tv-table td small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-muted); }
+.tv-table a { color: var(--primary); font-weight: 500; }
+.tv-table a:hover { text-decoration: underline; }
+.tv-who a { font-weight: 600; }
+.tv-muted { color: var(--text-muted); }
+.tv-docs { display: inline-flex; flex-direction: column; font-variant-numeric: tabular-nums; font-weight: 600; cursor: default; }
+.tv-docs small { margin-top: 1px; font-size: 11.5px; font-weight: 500; }
+.tv-docs.is-short, .tv-docs.is-short small { color: var(--warning-ink, #9a5b00); }
+.tv-doc-details > summary { cursor: pointer; }
+.tv-doc-details ul { min-width: 170px; margin: 8px 0; padding-left: 16px; font-size: 12px; line-height: 1.6; }
+.tv-doc-details > a { font-size: 12px; }
+.tv-doc-details > summary:focus-visible, .tv-breakdown-panel > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.tv-hint { margin-left: 8px; font-size: 12px; font-weight: 400; opacity: .8; }
+.tv-foot { padding: 12px 16px; border-top: 1px solid var(--border-main); font-size: 13px; color: var(--text-muted); }
+
+@media (max-width: 1100px) {
+  .tv-breakdowns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tv-date { grid-column: 1 / -1; }
+  .tv-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .tv-quick { padding: 14px 16px 0; }
+  .tv-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px 16px; gap: 12px; }
+  .tv-search-row { flex-wrap: wrap; align-items: stretch; }
+  .tv-search-row .tv-search { flex-basis: 100%; }
+  .tv-chips { padding: 10px 16px 14px; }
+  .tv-breakdowns { grid-template-columns: minmax(0, 1fr); }
+  .tv-table { min-width: 0; }
+  .tv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .tv-table, .tv-table tbody, .tv-table tr, .tv-table td { display: block; }
+  .tv-table tr { padding: 10px 14px; border-bottom: 1px solid var(--border-main); }
+  .tv-table tbody tr:last-child { border-bottom: 0; }
+  .tv-table td { padding: 5px 0; border: 0; }
+  .tv-table td::before { content: attr(data-label); display: block; margin-bottom: 1px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+}
+@media (max-width: 420px) {
+  .tv-filter-grid { grid-template-columns: minmax(0, 1fr); }
+}

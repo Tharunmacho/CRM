@@ -463,3 +463,27 @@ due times) on mixed seeded data; two simultaneous first calls (and four overlapp
 - A time-based or change-feed-invalidated "pool empty" cache: `pool_waiting` is read in the same round trip, so it saves the same
   work without a staleness window.
 - The first request on a cold connection pool still pays the connection handshakes (not specific to this endpoint).
+
+## November 11 local loading verification
+
+The Candidate screen's generic skeleton is the route-code download fallback. Its
+closed application-form preview previously imported the full printable form before
+Candidate could render. That preview now loads only when opened, removing seven
+application modules (42,320 source bytes) from Candidate's initial static import
+graph. Vite warms the shell and Candidate entry during development startup; it
+does not warm every feature. A route download that takes over six seconds offers
+a manual reload instead of leaving an unexplained skeleton indefinitely.
+
+Read-only checks through the restored Hostinger SSH tunnel returned HTTP 200 for
+twelve handlers: compact bootstrap, candidate list/counts/groups/facets, form
+options/suggestions, dashboard, reports, inbox attention/health and settings.
+First calls took 110–1,063 ms; repeated cached calls took 4–17 ms. A separate cold
+database connection plus `SELECT 1` took 2,070 ms, versus 112–119 ms on a reused
+connection. These are individual local samples, not latency guarantees.
+
+The HTTP harness supplied an existing admin dependency, enforced database
+read-only mode and skipped startup hooks. It measures handler/query behavior,
+not browser rendering or sign-in latency. Aggregate evidence is in the ignored
+`artifacts/performance-20261111-read.json`; no record contents or credentials are
+included. Thirty bootstrap, dashboard, connection-pool and response-cache tests
+passed against a separate local `crm_schema_test_performance` database.

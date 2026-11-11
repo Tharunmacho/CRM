@@ -21,6 +21,7 @@ const loaders = {
   'candidates/candidate-profile': () => import('@/screens/candidates/candidate-profile'),
   'tasks/tasks': () => import('@/screens/tasks/tasks'),
   'dashboard/dashboard': () => import('@/screens/dashboard/dashboard'),
+  'travelled/travelled': () => import('@/screens/travelled/travelled'),
 }
 
 const loadShell = () => import('@/app/layout/app-shell').then((module) => ({ default: module.AppShell }))
@@ -38,6 +39,7 @@ const FIRST_SCREEN: [RegExp, keyof typeof loaders][] = [
   [/^\/leads(\/import)?\/?$/, 'leads/leads'],
   [/^\/candidates\/[^/]+\/?$/, 'candidates/candidate-profile'],
   [/^\/tasks\/?$/, 'tasks/tasks'],
+  [/^\/travelled\/?$/, 'travelled/travelled'],
 ]
 
 // Start downloading the shell and the screen for the URL being opened right now, in parallel with the
@@ -92,6 +94,7 @@ const TasksPage = lazy(loaders['tasks/tasks'])
 const AttendancePage = lazy(() => import('@/screens/attendance/attendance'))
 const TodoPage = lazy(() => import('@/screens/todos/todo'))
 const ReportsPage = lazy(() => import('@/screens/reports/reports'))
+const TravelledPage = lazy(loaders['travelled/travelled'])
 const UsersPage = lazy(() => import('@/screens/users/users'))
 const StaffDirectoryPage = lazy(() => import('@/screens/staff/staff-directory'))
 const StaffDetailPage = lazy(() => import('@/screens/staff/staff-detail'))
@@ -180,6 +183,7 @@ export default function AppRoutes() {
                 </Require>
               }
             />
+            <Route path="travelled" element={<TravelledPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="staff-report" element={<StaffReportRedirect />} />
             <Route

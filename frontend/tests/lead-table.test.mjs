@@ -144,7 +144,7 @@ test('fields: one registry drives labels, groups, values and the opened row', ()
 })
 
 test('consistency: the table headings come from the one config and nothing else', async () => {
-  const columns = await readFile(new URL('../src/features/leads/components/lead-columns.tsx', import.meta.url), 'utf8')
+  const columns = await readFile(new URL('../src/features/leads/components/lead-column-definitions.tsx', import.meta.url), 'utf8')
   const start = columns.indexOf('export function leadColumns')
   const body = columns.slice(start)
   const headers = [...body.matchAll(/header: ([^,]+),/g)].map((match) => match[1].trim())

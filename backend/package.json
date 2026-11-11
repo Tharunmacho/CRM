@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node ../scripts/backend.mjs dev",
     "start": "node ../scripts/backend.mjs start",
-    "worker": "node ../scripts/backend.mjs worker"
+    "worker": "node ../scripts/backend.mjs worker",
+    "db:check": "node ../scripts/backend.mjs db:check",
+    "db:tunnel": "node ../scripts/backend.mjs db:tunnel"
   }
 }

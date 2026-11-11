@@ -1,45 +1,19 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, PhoneCall, UserCheck, UserPlus, UserRoundX, MessageCircle, FileSearch, Globe, Link2, ListChecks, Trash2, BellRing } from 'lucide-react'
+import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, UserCheck, Globe, Link2, BellRing } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
 import { countryTone, whatsappHref } from '@/features/candidates/data-bank-view'
 import { CountryPills } from '@/features/candidates/components/data-bank-columns'
-import { WhatsAppTemplateButton, openWhatsApp } from './wa-template'
-import { Avatar, RowMenu, type RowMenuItem } from '@/features/candidates/components/db-parts'
-import type { DbColumn } from '@/features/candidates/components/db-table'
-import type { User } from '@/shared/model/types'
+import { WhatsAppTemplateButton } from './wa-template'
+import { Avatar, RowMenu } from '@/features/candidates/components/db-parts'
 import {
-  EXTRA_PREFIX, LEAD_HEADINGS, cleanPhone, createdParts, dobLabel, experienceLines, extraAnswer, followUpLabel, followUpState, isClosed, leadRefusal, leadStatus,
-  platformKind, PLATFORM_LABEL, type ExtraColumn, type Lead, type LeadActor,
+  cleanPhone, createdParts, dobLabel, experienceLines, extraAnswer, followUpLabel, followUpState, isClosed, leadStatus,
+  platformKind, PLATFORM_LABEL, type ExtraColumn, type Lead,
 } from '../lead-model'
-import { GATE_REASON, type GateState, gateBlocks } from '../lead-gate'
-import { DEFAULT_COLUMN_FIELDS, EMPTY_VALUE, FIELD_PREFIX, LEAD_FIELD_DEFS, leadFieldRows, type LeadFieldDef } from '../lead-fields'
+import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
+import { EMPTY_VALUE, leadFieldRows, type LeadFieldDef } from '../lead-fields'
 
 const Dash = () => <span className="db-muted" aria-label="None">–</span>
-
-export interface LeadColumnContext {
-  me: LeadActor
-  gate: GateState
-  userById: (id: string | null | undefined) => User | undefined
-  canAssign: boolean
-  onOpen: (lead: Lead) => void
-  onLogCall: (lead: Lead) => void
-  onConvert: (lead: Lead) => void
-  onUploadResume: (lead: Lead, file: File) => void
-  onAssign: (lead: Lead) => void
-  onNotInterested: (lead: Lead) => void
-  /** Row menu "Change status" (opens the status dialog; an undo toast follows). */
-  onChangeStatus?: (lead: Lead) => void
-  /** Admin only: delete one lead (row menu and drawer). */
-  canDelete?: boolean
-  onDelete?: (lead: Lead) => void
-}
-
-/** The reason a work action on this lead is unavailable: the daily-work gate first, then ownership. */
-export function workBlock(context: Pick<LeadColumnContext, 'me' | 'gate' | 'userById'>, lead: Lead): string | null {
-  if (gateBlocks(context.gate)) return GATE_REASON
-  return leadRefusal(context.me, lead, context.userById(lead.ownerId)?.name)
-}
 
 export function CreatedCell({ lead }: { lead: Lead }) {
   const parts = createdParts(lead.createdTime)
@@ -225,24 +199,6 @@ export function ResumeCell({ lead, block, onUpload, onConvert }: { lead: Lead; b
   )
 }
 
-export function leadMenuItems(context: LeadColumnContext, lead: Lead): RowMenuItem[] {
-  const block = workBlock(context, lead)
-  const convert = lead.candidateId ? 'This lead is already a candidate.' : block ?? undefined
-  const wa = whatsappHref(lead.phone)
-  const items: RowMenuItem[] = [
-    { label: 'Open lead', icon: FileSearch, onSelect: () => context.onOpen(lead) },
-    { label: 'Log a call', icon: PhoneCall, onSelect: () => context.onLogCall(lead), disabledReason: block ?? undefined },
-    { label: 'Convert to candidate', icon: UserPlus, onSelect: () => context.onConvert(lead), disabledReason: convert },
-  ]
-  if (context.canAssign) items.push({ label: 'Assign', icon: UserCheck, onSelect: () => context.onAssign(lead) })
-  items.push({ label: 'WhatsApp message…', icon: MessageCircle, onSelect: () => { if (wa) openWhatsApp(lead) }, disabledReason: wa ? undefined : 'No valid phone number' })
-  const converted = lead.candidateId || lead.status === 'converted' ? 'This lead is already a candidate.' : undefined
-  if (context.onChangeStatus) items.push({ label: 'Change status', icon: ListChecks, onSelect: () => context.onChangeStatus?.(lead), disabledReason: block ?? converted })
-  items.push({ label: 'Not interested', icon: UserRoundX, onSelect: () => context.onNotInterested(lead), disabledReason: block ?? converted })
-  if (context.canDelete && context.onDelete) items.push({ label: 'Delete lead', icon: Trash2, onSelect: () => context.onDelete?.(lead), disabledReason: lead.candidateId ? 'This lead was converted to a candidate, so it cannot be deleted.' : undefined })
-  return items
-}
-
 export function LeadActions({ lead, context }: { lead: Lead; context: LeadColumnContext }) {
   return (
     <div className="db-acts is-grid ld-acts" onClick={(event) => event.stopPropagation()}>
@@ -295,38 +251,4 @@ export function LeadExpanded({ lead, extras, context }: { lead: Lead; extras: Ex
       </div>
     </div>
   )
-}
-
-/**
- * The Lead sheet table: one table that always fits its box (DbTable `fit`). Widths are the least a column needs to show its
- * content in full; the table shares what is left over. Several sheet fields share one cell (name over date of birth and gender,
- * phone with WhatsApp over e-mail, city over state, restaurant over total years, campaign over form, status over assignee).
- * When the minimums do not add up the table first tightens its spacing, then hides the columns with the highest `optional`
- * number; the Columns menu, the expandable row, the drawer and the cards still show every field. The rest of the sheet's
- * fields (see lead-fields.ts) and its custom questions (`extras`) are columns that start switched off.
- */
-export function leadColumns(context: LeadColumnContext, extras: ExtraColumn[] = []): DbColumn<Lead>[] {
-  const h = LEAD_HEADINGS
-  const core: DbColumn<Lead>[] = [
-    { key: 'actions', header: h.actions, width: 104, sticky: 'start', render: (l) => <LeadActions lead={l} context={context} /> },
-    { key: 'created', header: h.created, sortKey: 'created', width: 92, optional: 3, group: 'Workflow', sticky: 'start', render: (l) => <CreatedCell lead={l} /> },
-    { key: 'name', header: h.name, sortKey: 'name', width: 164, group: 'Person', sticky: 'start', render: (l) => <NameCell lead={l} /> },
-    { key: 'contact', header: h.contact, width: 214, group: 'Contact', render: (l) => <ContactCell lead={l} /> },
-    { key: 'position', header: h.position, sortKey: 'position', width: 140, group: 'Job answers', render: (l) => <PositionCountryCell lead={l} /> },
-    { key: 'experience', header: h.experience, width: 90, optional: 2, group: 'Job answers', render: (l) => <ExperienceCell lead={l} /> },
-    { key: 'location', header: h.location, width: 116, optional: 1, group: 'Contact', render: (l) => <LocationCell lead={l} /> },
-    { key: 'campaign', header: h.campaign, sortKey: 'campaign', width: 164, optional: 4, group: 'Campaign & ad', render: (l) => <CampaignCell lead={l} /> },
-    { key: 'status', header: h.status, sortKey: 'status', width: 110, group: 'Workflow', render: (l) => <StatusOwnerCell lead={l} userById={context.userById} /> },
-    { key: 'resume', header: h.resume, width: 92, group: 'Workflow', render: (l) => <ResumeCell lead={l} block={workBlock(context, l)} onUpload={context.onUploadResume} onConvert={context.onConvert} /> },
-    { key: 'profile', header: 'Education / Marital status', width: 130, optional: 7, off: true, group: 'Person', render: (l) => <ProfileCell lead={l} /> },
-  ]
-  const fields: DbColumn<Lead>[] = LEAD_FIELD_DEFS.filter((field) => !DEFAULT_COLUMN_FIELDS.has(field.id)).map((field, index) => ({
-    key: `${FIELD_PREFIX}${field.id}`, header: field.label, width: field.width, optional: 20 + index, off: true, group: field.group,
-    render: (l: Lead) => <FieldCell lead={l} field={field} />,
-  }))
-  const questions: DbColumn<Lead>[] = extras.map((column, index) => ({
-    key: `${EXTRA_PREFIX}${column.key}`, header: column.label, width: 140, optional: 60 + index, off: true, group: 'Job answers',
-    render: (l) => <ExtraAnswerCell lead={l} answerKey={column.key} />,
-  }))
-  return [...core, ...fields, ...questions]
 }

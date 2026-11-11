@@ -12,6 +12,7 @@ side, and the results are put back together by ``merge.merge_results``.
 from __future__ import annotations
 
 import time
+import math
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, Protocol
@@ -39,6 +40,8 @@ DEADLINE_CAP_SECONDS = 600.0
 RETRY_ATTEMPTS = 4
 RETRY_BASE_SECONDS = 0.5
 RETRY_CAP_SECONDS = 8.0
+CAPACITY_RETRY_SECONDS = 30.0
+CAPACITY_RETRY_CAP_SECONDS = 3600.0
 
 # A status request is harmless to repeat, so a dropped connection or a slow answer is also tried again.
 READ_ERRORS = (VerisOCRConnectionError, VerisOCRTimeoutError)
@@ -71,15 +74,36 @@ def provider_deadline(pages: int) -> float:
     return min(DEADLINE_CAP_SECONDS, DEADLINE_BASE_SECONDS + DEADLINE_PER_PAGE_SECONDS * max(0, pages))
 
 
+def capacity_retry_after(error: Exception) -> float | None:
+    """A provider capacity response is waiting work, not a document failure.
+
+    Only documented rate limits and the observed queue-full response qualify;
+    ordinary server/protocol errors still follow their normal failure handling.
+    The durable caller owns the delayed retry and keeps its idempotency key.
+    """
+    rate_limited = isinstance(error, VerisOCRRateLimitError) or getattr(error, "status", None) == 429
+    queue_full = getattr(error, "status", None) == 503 and getattr(error, "code", None) == "job_queue_full"
+    if not (rate_limited or queue_full):
+        return None
+    hinted = getattr(error, "retry_after", None)
+    if not isinstance(hinted, (int, float)) or isinstance(hinted, bool) or not math.isfinite(hinted) or hinted < 0:
+        return CAPACITY_RETRY_SECONDS
+    return min(CAPACITY_RETRY_CAP_SECONDS, max(1.0, float(hinted)))
+
+
 def retrying(call: Callable[[], object], *, attempts: int = RETRY_ATTEMPTS, extra: tuple[type[Exception], ...] = (),
-             on_retry: Callable[[Exception, float], None] | None = None):
+             on_retry: Callable[[Exception, float], None] | None = None, defer_capacity: bool = False):
     """``call()``, tried again with a growing pause after a 429 or 5xx (``extra`` adds error types, for harmless reads).
-    ``on_retry(error, pause)`` is told before each pause, so a caller can say "will retry in 4s"."""
+    ``on_retry(error, pause)`` is told before each pause, so a caller can say "will retry in 4s".
+    Durable workers pass ``defer_capacity`` to release their slot immediately when
+    the provider is full, then schedule the original request for later."""
     transient = (VerisOCRRateLimitError, VerisOCRServerError, *extra)
     for attempt in range(1, attempts + 1):
         try:
             return call()
         except transient as exc:
+            if defer_capacity and capacity_retry_after(exc) is not None:
+                raise
             if attempt == attempts:
                 raise
             hinted = getattr(exc, "retry_after", None)
@@ -184,7 +208,7 @@ def _one_job(kind, doc, *, base_url, api_key, idempotency_key) -> dict:
     # The SDK otherwise permits 120 seconds per request plus automatic retries,
     # which could exceed the polling budget by several minutes.
     with VerisOCR(base_url=base_url, api_key=api_key, timeout=30.0, max_retries=0) as client:
-        accepted = retrying(lambda: client.jobs.submit(doc, mode=kind, idempotency_key=idempotency_key))
+        accepted = retrying(lambda: client.jobs.submit(doc, mode=kind, idempotency_key=idempotency_key), defer_capacity=True)
         job = wait_for_job(client.jobs, accepted.job_id)
     return job.result or {}
 

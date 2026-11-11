@@ -1,7 +1,8 @@
 import hashlib
 import pytest
 from app.core.config import Settings
-from app.db.models import (Attachment, DocumentExtractionJob, MailAccount,
+from app.db.models import (Application, ApplicationStage, Attachment, Client, Company, Designation,
+                           DocumentExtractionJob, MailAccount, Order,
                            MailDraft, MailDraftAttachment, MailSendAttempt, MultiPersonIntake,
                            WhatsAppChannel, WhatsAppConversation, WhatsAppSendAttempt)
 from app import storage_admin
@@ -110,6 +111,171 @@ def test_draft_and_sent_snapshot_files_are_audited_and_migrated(workspace, tmp_p
         assert saved["attachments"][0] == {**snapshot["attachments"][0], "object_key": "s3://synthetic/crm/" + sent_key}
         assert remote["s3://synthetic/crm/" + sent_key] == read_bytes(settings, sent_key) == b"sent-file"
         assert storage_admin.audit(db, settings)["ok"]
+
+
+def add_application(db, *, stage=5, draft=None):
+    db.add_all([Client(id="storage-client", name="Storage client"),
+                Designation(id="storage-designation", title="Storage role")])
+    db.flush()
+    db.add(Company(id="storage-company", client_id="storage-client", name="Storage employer"))
+    db.flush()
+    db.add(Order(id="storage-order", ref="STORAGE-ORDER", company_id="storage-company", designation_id="storage-designation"))
+    db.flush()
+    row = Application(id="storage-application", candidate_id="candidate", order_id="storage-order",
+                      current_stage=stage, draft=draft or {})
+    db.add(row)
+    db.flush()
+    return row
+
+
+def mock_bucket(monkeypatch):
+    remote = {}
+    monkeypatch.setattr(storage_admin, "read_bytes", lambda config, key:
+                        remote[key] if key.startswith("s3://") else read_bytes(config, key))
+    monkeypatch.setattr(storage_admin, "put_bytes", lambda config, key, data: remote.setdefault(key, data))
+    return remote
+
+
+def test_legacy_stage_keys_follow_verified_migration_without_rewriting_ids_urls_or_other_strings(workspace, tmp_path, monkeypatch):
+    settings = Settings(_env_file=None, storage_dir=str(tmp_path), storage_backend="local", s3_bucket="synthetic", s3_prefix="crm")
+    remote = mock_bucket(monkeypatch)
+    with workspace() as db:
+        key = seed(db, settings)
+        application = add_application(db, draft={"file": key, "notes": key, "nested": {"object_key": key}})
+        db.add(Attachment(id="legacy-offer", entity_type="application", entity_id=application.id,
+                          slot="file", file_name="offer.pdf", object_key=key))
+        db.add(Attachment(id="candidate-passport", entity_type="candidate", entity_id="candidate",
+                          slot="passport", file_name="passport.pdf", object_key=key))
+        modern = {"id": "legacy-offer", "url": "/api/files/legacy-offer", "name": "offer.pdf"}
+        stages = [(5, 1, {"file": key, "notes": key}), (7, 1, {"copy": key, "heldBy": "owner"}),
+                  (8, 1, {"receipt": key}), (9, 1, {"file": modern}),
+                  (10, 1, {"file": "/api/files/legacy-offer"}), (11, 1, {"file": "legacy-offer"}),
+                  (6, 1, {"file": key}), (5, 2, {"file": "other/not-owned.pdf"})]
+        db.add(Attachment(id="receipt", entity_type="application", entity_id=application.id,
+                          slot="stage_8_receipt", file_name="receipt.pdf", object_key=key))
+        foreign_key = put_bytes(settings, "other/not-owned.pdf", b"other-owner")
+        db.add(Attachment(id="foreign", entity_type="application", entity_id="another-application",
+                          slot="stage_5_file", file_name="other.pdf", object_key=foreign_key))
+        for stage, attempt, data in stages:
+            db.add(ApplicationStage(id=f"stage-{stage}-{attempt}", application_id=application.id,
+                                    stage=stage, attempt=attempt, data=data))
+        db.commit()
+        preview = storage_admin.migrate_s3(db, settings)
+        assert preview["legacyApplicationReferences"] == 4
+        assert application.draft["file"] == key and not remote
+        storage_admin.migrate_s3(db, settings, apply=True, writers_stopped=True)
+        destination = "s3://synthetic/crm/" + key
+        normalized = {"id": "legacy-offer", "url": "/api/files/legacy-offer", "name": "offer.pdf", "sizeKb": None, "version": 1}
+        assert application.draft == {"file": normalized, "notes": key, "nested": {"object_key": key}}
+        assert db.get(ApplicationStage, "stage-5-1").data == {"file": normalized, "notes": key}
+        assert db.get(ApplicationStage, "stage-7-1").data["copy"]["id"] == "candidate-passport"
+        assert db.get(ApplicationStage, "stage-8-1").data["receipt"]["id"] == "receipt"
+        for stage, attempt, data in stages[3:]:
+            assert db.get(ApplicationStage, f"stage-{stage}-{attempt}").data == data
+        assert db.get(Attachment, "legacy-offer").object_key == destination
+        # The migrated legacy generic-slot reference still resolves in the stage API.
+        from app.api.routers.applications import _normalized_data
+        assert _normalized_data(db, application, {"file": application.draft["file"]})["file"]["id"] == "legacy-offer"
+        assert storage_admin.audit(db, settings)["ok"]
+
+
+def test_ambiguous_owned_legacy_reference_blocks_migration_before_copy(workspace, tmp_path, monkeypatch):
+    settings = Settings(_env_file=None, storage_dir=str(tmp_path), storage_backend="local", s3_bucket="synthetic")
+    remote = mock_bucket(monkeypatch)
+    with workspace() as db:
+        key = seed(db, settings)
+        application = add_application(db, draft={"file": key})
+        for identifier, slot in (("old", "file"), ("new", "stage_5_file")):
+            db.add(Attachment(id=identifier, entity_type="application", entity_id=application.id,
+                              slot=slot, file_name="offer.pdf", object_key=key))
+        db.commit()
+        with pytest.raises(ValueError, match="Ambiguous legacy application"):
+            storage_admin.migrate_s3(db, settings, apply=True, writers_stopped=True)
+        db.rollback()
+        assert not remote
+        assert db.get(Attachment, "stored").object_key == key
+        assert application.draft["file"] == key
+
+
+def test_missing_manifest_retains_exact_missing_references_and_reports_incomplete(workspace, tmp_path, monkeypatch):
+    settings = Settings(_env_file=None, storage_dir=str(tmp_path), storage_backend="local", s3_bucket="synthetic", s3_prefix="crm")
+    remote = mock_bucket(monkeypatch)
+    with workspace() as db:
+        available = seed(db, settings)
+        missing = "old/missing.pdf"
+        digest = hashlib.sha256(b"known-missing-original").hexdigest()
+        application = add_application(db, draft={"file": missing})
+        db.add(Attachment(id="missing-file", entity_type="application", entity_id=application.id,
+                          slot="stage_5_file", file_name="missing.pdf", object_key=missing, content_hash=digest))
+        job = db.get(DocumentExtractionJob, "job")
+        job.state = {**job.state, "previous": {"object_key": missing, "content_hash": digest}}
+        db.commit()
+        with pytest.raises(ValueError, match="Source audit failed"):
+            storage_admin.migrate_s3(db, settings, apply=True, writers_stopped=True)
+        db.rollback()
+        assert not remote
+        manifest = {"version": 1, "objects": [{"key": missing, "expectedHashes": [digest]}]}
+        preview = storage_admin.migrate_s3(db, settings, missing_manifest=manifest)
+        assert preview["complete"] is False and [item["key"] for item in preview["retainedMissingObjects"]] == [missing]
+        assert [item["from"] for item in preview["copies"]] == [available]
+        assert db.get(Attachment, "stored").object_key == available and not remote
+        result = storage_admin.migrate_s3(db, settings, apply=True, writers_stopped=True, missing_manifest=manifest)
+        assert result["complete"] is False
+        assert db.get(Attachment, "stored").object_key.startswith("s3://")
+        assert db.get(Attachment, "missing-file").object_key == missing
+        assert job.state["previous"]["object_key"] == missing
+        assert application.draft["file"] == missing
+        report = storage_admin.audit(db, settings)
+        assert report["ok"] is False
+        failure = next(item for item in report["objects"] if item["key"] == missing)
+        assert failure["missing"] and failure["expectedHashes"] == [digest]
+        assert read_bytes(settings, available) == b"original"
+
+
+@pytest.mark.parametrize("change", ["unknown", "hash", "recovered", "corrupt", "permission", "remote", "duplicate"])
+def test_missing_manifest_cannot_hide_stale_entries_or_other_storage_failures(change):
+    digest = "a" * 64
+    item = {"key": "missing.pdf", "status": "unavailable", "missing": True, "expectedHashes": [digest]}
+    manifest = {"version": 1, "objects": [{"key": item["key"], "expectedHashes": [digest]}]}
+    if change == "unknown":
+        manifest["objects"][0]["key"] = "unreviewed.pdf"
+    elif change == "hash":
+        manifest["objects"][0]["expectedHashes"] = ["b" * 64]
+    elif change == "recovered":
+        item["status"] = "ok"
+    elif change == "corrupt":
+        item["status"] = "checksum_mismatch"
+    elif change == "permission":
+        item["missing"] = False
+    elif change == "remote":
+        item["key"] = manifest["objects"][0]["key"] = "s3://other/missing.pdf"
+    elif change == "duplicate":
+        manifest["objects"].append(dict(manifest["objects"][0]))
+    with pytest.raises(ValueError, match="manifest"):
+        storage_admin.approved_missing({"objects": [item]}, manifest)
+
+
+def test_storage_migration_preserves_all_worker_bindings_and_reports_transition(workspace, tmp_path, monkeypatch):
+    settings = Settings(_env_file=None, storage_dir=str(tmp_path), storage_backend="local", s3_bucket="synthetic", instance_name=None)
+    mock_bucket(monkeypatch)
+    with workspace() as db:
+        key = seed(db, settings)
+        db.get(DocumentExtractionJob, "job").instance = "explicit-local-owner"
+        db.add(DocumentExtractionJob(id="other-job", owner_id="other", group_id="other-group", kind="resume",
+                                    filename="source.pdf", content_type="application/pdf", object_key=key,
+                                    content_hash=hashlib.sha256(b"original").hexdigest(), size_kb=1,
+                                    instance="hosted-owner", status="retry"))
+        db.commit()
+        result = storage_admin.migrate_s3(db, settings, apply=True, writers_stopped=True)
+        assert db.get(DocumentExtractionJob, "job").instance == "explicit-local-owner"
+        assert db.get(DocumentExtractionJob, "other-job").instance == "hosted-owner"
+        bindings = result["workerInstances"]
+        assert bindings["bindingsPreserved"] is True
+        assert bindings["sourceInstance"] != bindings["targetInstance"]
+        assert bindings["queuedJobs"] == [{"instance": "explicit-local-owner", "count": 1}, {"instance": "hosted-owner", "count": 1}]
+        fixed = settings.model_copy(update={"instance_name": "explicit-local-owner"})
+        followup = storage_admin.migrate_s3(db, fixed)
+        assert followup["workerInstances"]["sourceInstance"] == followup["workerInstances"]["targetInstance"] == "explicit-local-owner"
 
 
 def test_whatsapp_outbox_and_split_source_bytes_survive_verified_storage_migration(workspace, tmp_path, monkeypatch):

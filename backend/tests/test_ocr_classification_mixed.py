@@ -10,6 +10,80 @@ from test_ocr_classification import AADHAAR, CV, PASSPORT
 FILLER = "Stamp seal ref 12 34 56 78 90 blotted ink unreadable corner"
 GULF_DETAILS = "\nPersonal details\nDriving licence: Yes (UAE)\nEmirates ID: held\nNationality: Example\n"
 
+RECRUITMENT_FORM = """Example Recruitment Agency
+Post Applied for: Steel fixer
+Interview Date:
+Applicant's Name:
+Father's Name:
+Age & Date of Birth:
+Educational Qualification:
+Additional Qualification:
+Languages Known:
+Contact No:
+Passport No:
+Date of Expiry:
+NAME OF EMPLOYER | COUNTRY | JOB TITLE | SERVICE PERIOD FROM TO
+SALARY EXPECTED | SALARY OFFERED
+Signature of the Applicant
+"""
+
+
+def test_handwritten_recruitment_form_is_sent_as_resume_content():
+    # The local reader may only recover printed labels. Veris still needs the
+    # original page to read the handwritten identity and employment details.
+    page = classify_page(RECRUITMENT_FORM)
+    assert page.document_type == "resume"
+    assert page.also == ()
+
+
+def test_recruitment_form_and_cv_are_kept_together_in_a_mixed_bundle():
+    result = classify_pages([RECRUITMENT_FORM, CV, PASSPORT, AADHAAR])
+    assert [page.document_type for page in result] == ["resume", "resume", "passport", "aadhaar"]
+
+
+def test_recruitment_form_with_identity_number_is_not_an_aadhaar_copy(monkeypatch):
+    from app.integrations.ocr import classification
+    monkeypatch.setattr(classification, "_evidence", lambda _: {"passport": False, "aadhaar": True})
+    page = classify_page(RECRUITMENT_FORM + "\nIdentification number: 1234 5678 9012")
+    assert page.document_type == "resume" and page.also == ()
+
+
+def test_identity_application_shared_labels_do_not_make_it_a_recruitment_form():
+    text = """Passport application
+Applicant's Name:
+Father's Name:
+Date of Birth:
+Educational Qualification:
+Languages Known:
+Signature of the Applicant
+"""
+    assert classify_page(text).document_type != "resume"
+
+
+SITE_BADGE = """Example Construction
+Name: Test Person
+Position/Trade: Steel Fixer
+Project ID: TEST-001
+File Num: 0000
+Iqama Num: 0000000000
+Issuing Auth:
+Issue Date: 01-01-2025
+Validity: 01-01-2026
+Blood Group:
+Emergency Contact Numbers
+"""
+
+
+def test_employer_site_badge_is_supporting_evidence_not_an_unknown_resume_page():
+    assert classify_page(SITE_BADGE).document_type == "other"
+    result = classify_pages([RECRUITMENT_FORM, CV, SITE_BADGE, PASSPORT])
+    assert [page.document_type for page in result] == ["resume", "resume", "other", "passport"]
+
+
+def test_cv_listing_a_project_and_iqama_number_is_not_treated_as_a_site_badge():
+    page = classify_page(CV + "\nProject ID: TEST-001\nIqama Num: 0000000000\n")
+    assert page.document_type == "resume"
+
 
 # ---- licence / identity-card words are weak on a page that is a resume ----------------
 
@@ -126,7 +200,10 @@ def test_month_year_ranges_alone_make_a_headed_page_a_continuation():
     assert classify_pages([CV, page.replace("03/2018 - till date", "Various years")])[1].document_type == "unknown"
 
 
-@pytest.mark.parametrize("role", ["helper", "painter", "cook", "cleaner", "security guard", "steward", "nurse"])
+@pytest.mark.parametrize("role", [
+    "helper", "painter", "cook", "cleaner", "security guard", "steward", "nurse",
+    "steel fixer", "steel-fixer", "bar bender", "reinforcement fixer",
+])
 def test_trade_and_service_job_titles_count_as_career_evidence(role):
     page = f"EXPERIENCE\nWorked as {role} at Example Company for several years on site.\n"
     assert classify_pages([CV, page])[1].document_type == "resume"

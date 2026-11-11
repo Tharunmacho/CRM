@@ -17,11 +17,23 @@ htmlcov/
 .env.*
 !.env.example
 *.local
+backend/.db-tunnel*
 
 # Runtime data and generated verification output.
 backend/data/
 backend/static/
 artifacts/
+
+# Private recruitment source documents and hosting exports in this workspace.
+/candidates/
+/candidates_organized/
+/*.pdf
+/*.docx
+/*.jpg
+/*.jpeg
+/*.png
+/*.sql.gz
+/site-files.tar.gz
 
 # Operating system and editor files.
 .DS_Store

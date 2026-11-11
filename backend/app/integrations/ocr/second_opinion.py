@@ -23,9 +23,14 @@ from dataclasses import dataclass, field
 from .read_merge import Line
 
 _STATE_LOCK = threading.Lock()
+_ENGINE_LOCK = threading.Lock()
 _STATE: dict = {"checked": False, "ok": False}
 _POOL: ThreadPoolExecutor | None = None
 _POOL_SIZE = 0
+_ADMISSION: threading.BoundedSemaphore | None = None
+# A running timeout keeps its reservation until its thread actually finishes.
+# Never queue another image behind it without a bound.
+ADMISSION_WAIT_SECONDS = 0.5
 # Seconds a single run is expected to need at most on a normal page; a run is not started with less left.
 MIN_SECONDS_LEFT = 2.0
 # The most one page waits for this engine (a normal page needs 3-8 s, a busy machine more).
@@ -39,6 +44,7 @@ class SecondRead:
     words: int = 0
     seconds: float = 0.0
     error: str = ""
+    deferred: bool = False
 
 
 def _enabled() -> bool:
@@ -63,7 +69,7 @@ def available() -> bool:
 
 def _pool() -> ThreadPoolExecutor:
     """The worker threads that run the engine; their number is the limit of simultaneous runs."""
-    global _POOL, _POOL_SIZE
+    global _POOL, _POOL_SIZE, _ADMISSION
     with _STATE_LOCK:
         if _POOL is None:
             try:
@@ -72,15 +78,20 @@ def _pool() -> ThreadPoolExecutor:
                 limit = 0
             _POOL_SIZE = limit if limit > 0 else max(1, (os.cpu_count() or 2) // 2)
             _POOL = ThreadPoolExecutor(max_workers=_POOL_SIZE, thread_name_prefix="crm-ocr2")
+            _ADMISSION = threading.BoundedSemaphore(_POOL_SIZE)
         return _POOL
 
 
 def set_slots(limit: int) -> None:
     """Replace the run limit (tests and deployments with other needs)."""
-    global _POOL, _POOL_SIZE
+    global _POOL, _POOL_SIZE, _ADMISSION
     with _STATE_LOCK:
+        previous = _POOL
         _POOL_SIZE = max(1, limit)
         _POOL = ThreadPoolExecutor(max_workers=_POOL_SIZE, thread_name_prefix="crm-ocr2")
+        _ADMISSION = threading.BoundedSemaphore(_POOL_SIZE)
+    if previous is not None:
+        previous.shutdown(wait=False, cancel_futures=True)
 
 
 def slot_count() -> int:
@@ -95,7 +106,9 @@ def _engine():
     """One engine for the process: the ONNX sessions are safe to call from several threads and the
     wrapper holds no per-call state, so sharing it costs one copy of the models, not one per thread."""
     global _ENGINE
-    with _STATE_LOCK:
+    # Loading ONNX models can take seconds. Do not hold the admission/pool lock
+    # during that work: another caller must still observe its own deadline.
+    with _ENGINE_LOCK:
         if _ENGINE is None:
             from rapidocr_onnxruntime import RapidOCR
 
@@ -122,16 +135,40 @@ def read_image(image, *, deadline: float, frame: str = "page") -> SecondRead:
     if left < MIN_SECONDS_LEFT:
         return SecondRead(error="Not enough time left for the second reading engine.")
     started = time.monotonic()
+    future = None
+    reserved = False
+    admission = None
     try:
+        _pool()
+        with _STATE_LOCK:
+            pool, admission = _POOL, _ADMISSION
+        # Reserve before copying pixels: both running work and retained images
+        # stay bounded even if many callers hit their deadlines simultaneously.
+        wait = min(ADMISSION_WAIT_SECONDS, max(0.0, deadline - time.monotonic() - MIN_SECONDS_LEFT))
+        reserved = admission.acquire(timeout=wait)
+        if not reserved:
+            return SecondRead(error="The second reading engine is busy; its additional check was skipped.",
+                              seconds=time.monotonic() - started, deferred=True)
+        if deadline - time.monotonic() < MIN_SECONDS_LEFT:
+            admission.release()
+            reserved = False
+            return SecondRead(error="Not enough time left for the second reading engine.",
+                              seconds=time.monotonic() - started)
         import numpy as np
 
         width, height = image.size
         rgb = np.asarray(image.convert("RGB"))
-        future = _pool().submit(_run, rgb[:, :, ::-1].copy())
-        result = future.result(timeout=left)
+        future = pool.submit(_run, rgb[:, :, ::-1].copy())
+        future.add_done_callback(lambda _: admission.release())
+        reserved = False  # completion/cancellation now owns the reservation
+        result = future.result(timeout=max(0.0, deadline - time.monotonic()))
     except FutureTimeout:
+        if future is not None:
+            future.cancel()  # queued work is dropped; running work retains its slot until it exits
         return SecondRead(error="The second reading engine ran out of time.", seconds=time.monotonic() - started)
     except Exception as exc:  # a failing second opinion must never fail the page
+        if reserved and admission is not None:
+            admission.release()
         return SecondRead(error=f"The second reading engine failed ({type(exc).__name__}).")
     lines: list[Line] = []
     scores: list[float] = []

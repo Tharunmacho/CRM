@@ -260,14 +260,17 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             def save_extraction(value):
                 state["extraction"] = deepcopy(value)
                 checkpoint(state)
-            output = extract(data, state=extraction_state, save=save_extraction, settings=settings, designations=titles)
+            from app.services.extraction_scheduling import handoff_settings
+            output = extract(data, state=extraction_state, save=save_extraction, settings=handoff_settings(settings), designations=titles)
             state["output"] = output
             checkpoint(state)
         from app.services.document_extraction import checked_person_output
         output = checked_person_output(data, output, state.setdefault("extraction", {}), settings)
         state["output"] = output
         checkpoint(state)
-        if output.get("status") == "needs_review":
+        # Keep usable fields/documents from a partial single-person reading just
+        # as email/manual intake do. Mixed identities still require a human split.
+        if output.get("splitSuggested") or (output.get("status") == "needs_review" and not output.get("extractions")):
             raise WhatsAppReviewError("Some pages need a check. Open the original file before you finish this message.")
         if not output.get("extractions"):
             with sessions() as db:
@@ -282,7 +285,8 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True)
             documents = {}
             for kind, part in output["extractions"].items():
-                if kind not in {"resume", "passport", "aadhaar"} or part["selected_pages"] != getattr(inspected, f"{kind}_pages"):
+                selected = part["selected_pages"]
+                if kind not in {"resume", "passport", "aadhaar"} or not selected or not set(selected) <= set(getattr(inspected, f"{kind}_pages")):
                     raise WhatsAppReviewError("The pages chosen need a check")
                 content = inspected.pdf_for_pages(part["selected_pages"])
                 digest = hashlib.sha256(content).hexdigest()
@@ -312,12 +316,14 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             row.status, row.next_attempt_at = "retry", utcnow()
             row.last_error = "This WhatsApp number is disconnected. Work will carry on once it is connected again."
             db.commit()
-    except ExtractionPending:
+    except ExtractionPending as exc:
         with sessions() as db:
             row = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.id == message_id).with_for_update())
             if not row or row.status not in {"pending", "processing", "retry"}:
                 return
-            row.status, row.next_attempt_at, row.last_error = "retry", utcnow() + timedelta(seconds=30), "Waiting for the document reader to finish."
+            from app.services.extraction_scheduling import PENDING_RECHECK_SECONDS
+            row.status, row.next_attempt_at = "retry", utcnow() + timedelta(seconds=getattr(exc, "retry_seconds", PENDING_RECHECK_SECONDS))
+            row.last_error = str(exc) if hasattr(exc, "retry_seconds") else "Waiting for the document reader to finish."
             db.commit()
     except Exception as exc:
         from app.services.email_intake import IntakeReviewError

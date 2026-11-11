@@ -22,7 +22,7 @@ const labelOf = (key: string) => PRD_COLUMNS.find((column) => column.key === key
 
 /** The filters that live behind "More filters": the pool list, source, passport, text matches, exact years, order reference, date and skills. */
 const HIDDEN_KEYS = ['source', 'passport', 'name', 'phone', 'designation', 'experience', 'experience_min', 'experience_max', 'order', 'added', 'added_from', 'added_to']
-export const hasMoreFilters = (filters: Record<string, string>, skills: string[], skillStatus: string, pool: DataBankPool = 'all') =>
+const hasMoreFilters = (filters: Record<string, string>, skills: string[], skillStatus: string, pool: DataBankPool = 'all') =>
   HIDDEN_KEYS.some((key) => (filters[key] ?? '').trim()) || skills.length > 0 || skillStatus !== 'all' || pool !== 'all'
 
 interface Props {

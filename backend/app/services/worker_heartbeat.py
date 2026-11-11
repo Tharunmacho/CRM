@@ -26,7 +26,7 @@ log = logging.getLogger("worker_heartbeat")
 
 # Bumped by hand whenever the reading code changes in a way an old running worker must not be trusted with.
 # A deploy that sets CRM_CODE_VERSION (or GIT_COMMIT / SOURCE_COMMIT / COMMIT_SHA) uses that instead.
-READER_VERSION = "2026.11.06-reader-1"
+READER_VERSION = "2026.11.11-reader-2"
 VERSION_ENV = ("CRM_CODE_VERSION", "GIT_COMMIT", "SOURCE_COMMIT", "COMMIT_SHA", "GIT_SHA")
 
 # Against a hosted database every statement is a round trip, so a reader reports in every 30 s and counts as alive for

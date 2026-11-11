@@ -40,7 +40,8 @@ _ROLE = re.compile(
     r"\b(?:engineer|developer|manager|supervisor|technician|operator|welder|"
     r"fitter|driver|electrician|plumber|carpenter|nurse|accountant|teacher|"
     r"chef|assistant|foreman|mechanic|mason|rigger|scaffolder|labou?rer|helper|painter|cook|cleaner|"
-    r"security\s+guard|steward|storekeeper|inspector|fabricator|machinist)s?\b", re.I,
+    r"security\s+guard|steward|storekeeper|inspector|fabricator|machinist|"
+    r"steel[\s-]+fixer|bar[\s-]+bender|reinforcement[\s-]+fixer)s?\b", re.I,
 )
 _WORK = re.compile(r"\b(?:managed|installed|maintained|operated|developed|supervised|"
                    r"responsible|inspected|repaired|fabricated|coordinated|welding)\b", re.I)
@@ -64,6 +65,29 @@ _BULLET_PREFIX = re.compile(r"^[\s•●▪·*\-–—>]+|^\d{1,2}[.)]\s+")
 _SPACED_LETTERS = re.compile(r"^(?:[A-Za-z]\s+){3,}[A-Za-z](?=\s*:|\s*$)")
 _HEADING_SET = frozenset(_HEADINGS)
 _HEADING_SQUASHED = {h.replace(" ", ""): h for h in _HEADINGS}
+
+# A handwritten recruitment application is often the only page with the
+# candidate's contact details and work history. Its printed field labels survive
+# OCR even when the handwritten values do not. Treat that form as resume content
+# so it reaches the extractor alongside the CV; identity applications must not
+# qualify on shared labels such as name, date of birth and passport number.
+_RECRUITMENT_FORM_FIELDS = (
+    re.compile(r"\bpost\s+applied(?:\s+for)?\b", re.I),
+    re.compile(r"\binterview\s+date\b", re.I),
+    re.compile(r"\beducational\s+qualifications?\b", re.I),
+    re.compile(r"\blanguages\s+known\b", re.I),
+    re.compile(r"\bsalary\s+(?:expected|offered)\b", re.I),
+    re.compile(r"\bname\s+of\s+employers?\b", re.I),
+    re.compile(r"\bapplicant['’]?s?\s+name\b", re.I),
+    re.compile(r"\bsignature\s+of\s+(?:the\s+)?applicant\b", re.I),
+)
+
+
+def _recruitment_form(text: str) -> bool:
+    matches = [bool(pattern.search(text)) for pattern in _RECRUITMENT_FORM_FIELDS]
+    # Require several labels, including two specifically about recruitment or
+    # employment. Neither a passport application nor an ID card meets this rule.
+    return sum(matches) >= 4 and sum(matches[index] for index in (0, 1, 4, 5)) >= 2
 
 
 def _headings_in(text: str) -> set[str]:
@@ -113,6 +137,14 @@ _OTHER = re.compile(
 # page that has no resume structure of its own (see _supporting_marker).
 _OTHER_ID = re.compile(
     r"\b(?:identity\s+card|emirates\s+id|resident\s+identity|driving\s+licen[cs]e)\b", re.I,
+)
+_SITE_BADGE_ROLE = re.compile(r"\bproject\s*(?:id|no)\b|\bposition\s*/\s*trade\b", re.I)
+_SITE_BADGE_FIELDS = (
+    re.compile(r"\bfile\s*(?:num|no|number)\b", re.I),
+    re.compile(r"\biqama\s*(?:num|no|number)\b", re.I),
+    re.compile(r"\bblood\s+group\b", re.I),
+    re.compile(r"\bissuing\s+auth(?:ority)?\b", re.I),
+    re.compile(r"\bvalidity\b", re.I),
 )
 
 # ---- Passport -------------------------------------------------------------------
@@ -302,7 +334,7 @@ def _signals(text: str) -> tuple[bool, bool, bool, int]:
     career = bool(_DATES.search(text) or _ROLE.search(text))
     lines = sum(1 for line in text.splitlines() if line.strip())
     seed = len(text.strip()) >= 40 and (
-        titled or (contact and len(headings) >= 2)
+        titled or _recruitment_form(text) or (contact and len(headings) >= 2)
         or (len(headings) >= 3 and career)
         # A long page with career, education or skills sections and contact details is a résumé even when the title is lost.
         or (lines >= 12 and len(headings) >= 2 and (contact or career))
@@ -320,6 +352,7 @@ def _structure_strength(text: str) -> int:
     """How much of a resume's structure is on the page: a title, section headings, contact details, a date range,
     a job title. Counts kinds of evidence, not quantity."""
     strength = 2 if _TITLE.search(text) else 0
+    strength += 3 if _recruitment_form(text) else 0
     strength += min(len(_headings_in(text)), 3)
     strength += bool(_EMAIL.search(text)) + bool(_PHONE.search(text))
     strength += bool(_DATES.search(text)) + bool(_ROLE.search(text))
@@ -330,7 +363,9 @@ def _supporting_marker(text: str) -> bool:
     """Wording of a certificate, invoice or identity document. A licence or ID-card word is only weak evidence: a
     resume's personal-details block states one. It counts against a page with little resume structure, and against
     a structured page only when several of those words crowd it."""
-    if _OTHER.search(text):
+    if _OTHER.search(text) or (
+        _SITE_BADGE_ROLE.search(text) and sum(bool(pattern.search(text)) for pattern in _SITE_BADGE_FIELDS) >= 3
+    ):
         return True
     weak = {re.sub(r"\s+", " ", m.group(0).lower()) for m in _OTHER_ID.finditer(text)}
     if not weak:

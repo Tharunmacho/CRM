@@ -733,6 +733,8 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                     opinion.confidence, opinion.words, "\n".join(l.text for l in opinion.lines))))
             elif opinion.error:
                 notes["second_engine"] = opinion.error[:80]
+                if opinion.deferred:
+                    notes["second_engine_deferred"] = True
         ladder_start = time.monotonic()
 
         if small and render is not None and can():
@@ -759,6 +761,9 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                 if second_opinion.available() and not timed_out:
                     opinion = second_opinion.read_image(crop, deadline=_second_deadline(deadline), frame="card")
                     deadline = min(hard_deadline or float("inf"), deadline + opinion.seconds)
+                    if opinion.deferred:
+                        notes["second_engine"] = opinion.error[:80]
+                        notes["second_engine_deferred"] = True
                     if opinion.lines:
                         tried.append("card-crop rapidocr")
                         candidates.append(merge.Candidate("card-crop rapidocr", opinion.lines, merge.read_score(
@@ -840,6 +845,9 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                             continue
                         opinion = second_opinion.read_image(crop, deadline=_second_deadline(deadline), frame="mrz")
                         deadline = min(hard_deadline or float("inf"), deadline + opinion.seconds)
+                        if opinion.deferred:
+                            notes["second_engine"] = opinion.error[:80]
+                            notes["second_engine_deferred"] = True
                         tried.append("mrz rapidocr")
                         zone_lines = opinion.lines
                     else:
@@ -1284,6 +1292,12 @@ def inspect_document(
         warnings.append(f"Pages {_numbers(unread)} could not be read. Review them in the stored original.")
     if unknown:
         warnings.append(f"We could not tell what kind of pages {_numbers(unknown)} are. Check them in the saved original.")
+    deferred_checks = [number for number, detail in reader.details.items() if detail.get("second_engine_deferred")]
+    if deferred_checks:
+        warnings.append(
+            f"The additional OCR check was busy on pages {_numbers(sorted(deferred_checks))}. "
+            "The available reading was kept; compare those pages with the original."
+        )
     if inherited:
         warnings.append(
             f"Pages {_numbers(inherited)} have no identifying content and were assigned to the adjoining "
