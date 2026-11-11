@@ -13,7 +13,8 @@ from sqlalchemy import func, select
 
 from app.db.models import Attachment, Candidate, DocumentExtractionJob, EmailIngestionJob, MailAttachment, WhatsAppMessage
 from app.services import application_form, document_extraction, email_intake, manual_extraction
-from app.services.document_extraction import ExtractionDeferred, ExtractionPending
+from app.services.document_extraction import ExtractionDeferred, ExtractionOverdue, ExtractionPending
+from app.services.extraction_scheduling import PENDING_RECHECK_SECONDS
 from app.services.document_storage import read_bytes
 from app.services.whatsapp_intake import process_message
 from test_application_form import desk, form, process_pending, upload
@@ -74,7 +75,8 @@ def test_whatsapp_keeps_readable_resume_and_flags_partial_file_for_review(setup)
         assert "resume" in candidate.ocr_data
 
 
-def test_email_dispatches_next_attachment_while_first_is_with_provider(intake, monkeypatch):
+@pytest.mark.parametrize("overdue", [False, True])
+def test_email_dispatches_next_attachment_while_first_is_with_provider(intake, monkeypatch, overdue):
     identifier, first = receipt(intake)
     second_bytes = ORIGINAL + b"\nsecond attachment"
     key = email_intake.store_original(intake.settings, "account-a", "second", 0, second_bytes)
@@ -93,7 +95,8 @@ def test_email_dispatches_next_attachment_while_first_is_with_provider(intake, m
         if data == ORIGINAL and waiting:
             state["provider_jobs"] = {"resume": {"job_id": "already-accepted", "status": "queued"}}
             save(state)
-            raise ExtractionPending("already-accepted", "resume")
+            waiting_error = ExtractionOverdue if overdue else ExtractionPending
+            raise waiting_error("already-accepted", "resume")
         return extraction()
 
     monkeypatch.setattr(email_intake, "extract_attachment", extract)
@@ -104,6 +107,9 @@ def test_email_dispatches_next_attachment_while_first_is_with_provider(intake, m
         assert job.status == "retry" and job.attempts == 0
         assert job.state[first]["provider_jobs"]["resume"]["job_id"] == "already-accepted"
         assert job.state["zz-second"]["output"]["status"] == "complete"
+        delay = (job.next_attempt_at - datetime.now(timezone.utc)).total_seconds()
+        expected_delay = 30 if overdue else PENDING_RECHECK_SECONDS
+        assert expected_delay - 5 < delay <= expected_delay
         assert db.scalar(select(func.count()).select_from(Candidate)) == 0
     waiting = False
     run(intake, identifier)
@@ -111,6 +117,56 @@ def test_email_dispatches_next_attachment_while_first_is_with_provider(intake, m
     with intake.sessions() as db:
         assert db.get(EmailIngestionJob, identifier).status == "completed"
         assert db.scalar(select(func.count()).select_from(Candidate)) == 1
+
+
+@pytest.mark.parametrize("waits,expected_delay,visited_count", [
+    (("fresh", "overdue"), 2, 3),
+    (("overdue", "fresh"), 2, 3),
+    (("overdue", "capacity"), 45, 2),
+])
+def test_email_waits_keep_shortest_poll_unless_provider_capacity_blocks_admission(
+    intake, monkeypatch, waits, expected_delay, visited_count,
+):
+    identifier, first = receipt(intake)
+    contents = [ORIGINAL, ORIGINAL + b"\nsecond", ORIGINAL + b"\nthird"]
+    ids = [first, "zz-second", "zzz-third"]
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, identifier)
+        for ordinal in (1, 2):
+            key = email_intake.store_original(intake.settings, "account-a", ids[ordinal], 0, contents[ordinal])
+            db.add(MailAttachment(
+                id=ids[ordinal], message_id=job.message_id, file_name=f"part-{ordinal}.pdf",
+                content_hash=hashlib.sha256(contents[ordinal]).hexdigest(), object_key=key, size_kb=1,
+            ))
+        db.commit()
+    visited = []
+
+    def extract(data, *, state, save, **_):
+        ordinal = contents.index(data)
+        visited.append(ordinal)
+        if ordinal == 2:
+            return extraction()
+        mode = waits[ordinal]
+        if mode == "capacity":
+            raise ExtractionDeferred("resume", 45)
+        accepted_id = f"accepted-{ordinal}"
+        state["provider_jobs"] = {"resume": {"job_id": accepted_id, "status": "queued"}}
+        save(state)
+        raise (ExtractionOverdue if mode == "overdue" else ExtractionPending)(accepted_id, "resume")
+
+    monkeypatch.setattr(email_intake, "extract_attachment", extract)
+    run(intake, identifier)
+    assert visited == list(range(visited_count))
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, identifier)
+        assert job.status == "retry" and job.attempts == 0
+        delay = (job.next_attempt_at - datetime.now(timezone.utc)).total_seconds()
+        assert expected_delay - 5 < delay <= expected_delay
+        for ordinal, mode in enumerate(waits):
+            if mode != "capacity":
+                assert job.state[ids[ordinal]]["provider_jobs"]["resume"]["job_id"] == f"accepted-{ordinal}"
+        if visited_count == 3:
+            assert job.state[ids[2]]["output"]["status"] == "complete"
 
 
 def test_combined_form_upload_populates_each_document_slot_and_preserves_original(desk):
@@ -174,43 +230,48 @@ def test_older_misfiled_passport_does_not_replace_newer_passport_or_count_as_res
     assert data["documents"]["passport"]["current"]["attachmentId"] == new_id
 
 
-def test_provider_capacity_does_not_exhaust_manual_document_attempts(desk, monkeypatch):
+@pytest.fixture(params=["capacity", "overdue"])
+def provider_wait(request):
+    return ExtractionDeferred("resume", 45) if request.param == "capacity" else ExtractionOverdue("accepted-job", "resume")
+
+
+def test_provider_wait_does_not_exhaust_manual_document_attempts(desk, monkeypatch, provider_wait):
     upload(desk, "resume", pdf(CV))
     def busy(*args, **kwargs):
-        raise ExtractionDeferred("resume", 45)
+        raise provider_wait
     monkeypatch.setattr(manual_extraction, "extract_attachment", busy)
     for _ in range(5):
         process_pending(desk)
     with desk.sessions() as db:
         job = db.scalar(select(DocumentExtractionJob))
         assert job.status == "retry" and job.attempts == 0
-        assert "busy" in job.last_error
-        assert (job.ready_at - datetime.now(timezone.utc)).total_seconds() > 40
+        assert job.last_error == str(provider_wait)
+        assert (job.ready_at - datetime.now(timezone.utc)).total_seconds() > provider_wait.retry_seconds - 5
 
 
-def test_provider_capacity_does_not_exhaust_email_attempts(intake, monkeypatch):
+def test_provider_wait_does_not_exhaust_email_attempts(intake, monkeypatch, provider_wait):
     identifier, _ = receipt(intake)
     def busy(*args, **kwargs):
-        raise ExtractionDeferred("resume", 45)
+        raise provider_wait
     monkeypatch.setattr(email_intake, "extract_attachment", busy)
     for _ in range(5):
         run(intake, identifier)
     with intake.sessions() as db:
         job = db.get(EmailIngestionJob, identifier)
-        assert job.status == "retry" and job.attempts == 0 and "busy" in job.last_error
+        assert job.status == "retry" and job.attempts == 0 and job.last_error == str(provider_wait)
 
 
-def test_provider_capacity_does_not_exhaust_whatsapp_attempts(setup):
+def test_provider_wait_does_not_exhaust_whatsapp_attempts(setup, provider_wait):
     sessions, settings = setup
     identifier = whatsapp_receipt(sessions, settings)
     def busy(*args, **kwargs):
-        raise ExtractionDeferred("resume", 45)
+        raise provider_wait
     for _ in range(5):
         process_message(identifier, sessions=sessions, settings=settings,
                         fetch_media=lambda *_: (ORIGINAL, "application/pdf"), extract=busy)
     with sessions() as db:
         job = db.get(WhatsAppMessage, identifier)
-        assert job.status == "retry" and job.attempts == 0 and "busy" in job.last_error
+        assert job.status == "retry" and job.attempts == 0 and job.last_error == str(provider_wait)
 
 
 def test_old_failed_classification_is_refreshed_before_any_paid_job(environment, monkeypatch):

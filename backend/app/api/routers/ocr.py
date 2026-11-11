@@ -40,6 +40,7 @@ from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume
 from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 from app.integrations.ocr.client import ScanFailed, ScanTimedOut, capacity_retry_after, scan as veris_scan
 from app.integrations.ocr.inspection import InspectionError, inspect_document
+from app.integrations.ocr.page_coverage import source_page_positions
 from app.api.routers.files import MAX_BYTES
 from app.services.reading_notes import plain_notes
 
@@ -190,14 +191,11 @@ def scan(
         "Veris extraction: mode=%s selected_pages=%d elapsed=%.2fs",
         kind, len(selected), time.monotonic() - provider_started,
     )
-    # A provider success flag alone does not establish page coverage. Require
-    # exactly one nonempty result for each submitted page before applying fields.
+    # A provider success flag alone does not establish page coverage. A passport
+    # sheet may explicitly be split into two logical views of the same page.
     returned = list(result.pages)
-    if (
-        len(returned) != len(selected)
-        or {p.page_number for p in returned} != set(range(1, len(selected) + 1))
-        or any(not p.text.strip() for p in returned)
-    ):
+    provider_positions = source_page_positions(kind, result, len(selected))
+    if provider_positions is None:
         warnings.append(
             "Veris did not return readable text for every selected page. Extraction needs review; "
             "no fields were applied. Try again to check the same job, or enter the details manually."
@@ -214,13 +212,13 @@ def scan(
         fields, provider_warnings = aadhaar_fields(result)
 
     # `payload_out` is the Veris result verbatim. Page numbers stay the provider's
-    # (1..n of the pages sent); `source.selected_pages[page_number - 1]` maps one back
-    # to the uploaded file. The recruiter's form sends both back with the save.
+    # provider_page_sources binds each logical view to the uploaded physical page.
     return _response(
         report, warnings + provider_warnings, "complete", kind=kind,
         fields=fields.model_dump(by_alias=True, exclude_none=True, mode="json"),
         raw=payload_out,
-        source={"local_inspection": report, "source_sha256": source_hash, "selected_pages": list(selected)},
+        source={"local_inspection": report, "source_sha256": source_hash, "selected_pages": list(selected),
+                "provider_page_sources": [selected[position - 1] for position in provider_positions]},
     )
 
 

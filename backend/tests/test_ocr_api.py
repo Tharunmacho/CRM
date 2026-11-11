@@ -192,6 +192,24 @@ def post_scan(environment, payload, *, kind="resume", filename="document.pdf", m
     )
 
 
+@pytest.mark.parametrize("announced", [True, False])
+def test_single_passport_sheet_accepts_only_explicit_provider_side_split(ocr_environment, monkeypatch, announced):
+    payload = provider_response("passport", [provider_page(1), provider_page(2)])
+    payload["warnings"] = (["Dual-page scan detected — split 1 input page(s) into 2 halves for per-side rotation correction"]
+                           if announced else [])
+    monkeypatch.setattr(ocr_environment.ocr, "veris_scan", lambda *_args, **_kwargs: payload)
+    response = post_scan(ocr_environment, native_pdf(CERTIFICATE, PASSPORT), kind="passport")
+    assert response.status_code == 200
+    body = response.json()
+    if announced:
+        assert body["extraction_status"] == "complete" and body["fields"]["name"] == "Alice Example"
+        assert body["raw"] == payload
+        assert body["source"]["selected_pages"] == [2]
+        assert body["source"]["provider_page_sources"] == [2, 2]
+    else:
+        assert body["extraction_status"] == "needs_review" and not body.get("fields")
+
+
 @pytest.mark.parametrize(
     ("kind", "selected", "marker"),
     [

@@ -251,9 +251,10 @@ def test_the_deadline_grows_with_the_page_count_and_is_capped():
     assert ocr_client.provider_deadline(5000) == 600
 
 
-def test_a_job_still_running_past_its_deadline_is_timed_out_and_stays_retryable(world):
+@pytest.mark.parametrize("provider_status", ["queued", "running"])
+def test_accepted_job_past_local_deadline_is_polled_until_late_success_without_resubmit(world, provider_status):
     data = pdf(CV)
-    world.veris.script[("resume", 0)] = "running"
+    world.veris.script[("resume", 0)] = provider_status
     clock = {"now": 1_000_000.0}
     world.monkeypatch.setattr(subject, "_wall", lambda: clock["now"])
     with pytest.raises(subject.ExtractionPending):
@@ -264,17 +265,46 @@ def test_a_job_still_running_past_its_deadline_is_timed_out_and_stays_retryable(
         world.extract(data, state=deepcopy(world.saved[-1]))
     clock["now"] += 5
     restarted = deepcopy(world.saved[-1])
-    with pytest.raises(subject.ExtractionFailure, match="took too long"):
+    with pytest.raises(subject.ExtractionOverdue) as waiting:
         world.extract(data, state=restarted)
-
-    timed_out = world.saved[-1]["provider_jobs"]["resume"]
-    assert timed_out["status"] == "timed_out" and timed_out["job_id"]  # the job is remembered, not forgotten
+    assert waiting.value.retry_seconds == 30
+    accepted = deepcopy(world.saved[-1]["provider_jobs"]["resume"])
+    assert accepted["status"] == provider_status and accepted["job_id"] and accepted["overdue_since"]
     saved = deepcopy(world.saved[-1])
-    assert subject.request_extraction_retry(saved, automatic=True) == ["resume"]
+    assert subject.request_extraction_retry(saved, automatic=True) == []
     world.veris.script.clear()
     assert world.extract(data, state=saved)["status"] == "complete"
-    assert len(world.veris.submissions) == 2
-    assert world.veris.submissions[0]["key"] != world.veris.submissions[1]["key"]
+    assert len(world.veris.submissions) == 1
+    assert saved["provider_jobs"]["resume"]["job_id"] == accepted["job_id"]
+    assert saved["provider_jobs"]["resume"]["idempotency_key"] == accepted["idempotency_key"]
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_legacy_local_timeout_rechecks_accepted_ids_without_reuploading(world, chunked):
+    data = long_resume(45) if chunked else pdf(CV)
+    world.veris.script[("resume", 0)] = "queued"
+    with pytest.raises(subject.ExtractionPending):world.extract(data)
+    saved = deepcopy(world.saved[-1])
+    record = saved["provider_jobs"]["resume"]
+    pending = record["chunks"][0] if chunked else record
+    accepted_id,key = pending["job_id"],pending["idempotency_key"]
+    pending.update(status="timed_out",error="The document reader did not finish in time.")
+    assert subject.request_extraction_retry(saved,automatic=True)==["resume"]
+    assert pending["job_id"]==accepted_id and pending["idempotency_key"]==key
+    world.veris.script.clear()
+    submissions=len(world.veris.submissions)
+    assert world.extract(data,state=saved)["status"]=="complete"
+    assert len(world.veris.submissions)==submissions
+
+
+@pytest.mark.parametrize("provider_status", ["failed", "cancelled"])
+def test_terminal_provider_outcome_is_never_reclassified_as_overdue(provider_status):
+    record={"job_id":"accepted-terminal","submitted_at":1}
+    unit=SimpleNamespace(record=record,pages=[1],outcome="")
+    job=SimpleNamespace(status=provider_status,result=None,error=None)
+    assert subject._apply_job(unit,job)
+    assert record["status"]==provider_status and record["job_id"]=="accepted-terminal"
+    assert "overdue_since" not in record and unit.outcome in ("failed","unusable")
 
 
 # ------------------------------------------------------------------------------ long documents

@@ -26,7 +26,7 @@ from app.integrations.ocr.mapping import parse_loose_date
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.mail.mime import document_mime
 from app.services.document_extraction import (
-    extract_attachment, ExtractionPending, request_extraction_retry, UnreadableDocument,
+    extract_attachment, ExtractionDeferred, ExtractionPending, request_extraction_retry, UnreadableDocument,
 )
 from app.services.mail_config import configured_mailboxes
 from app.services.mail_providers import account_config
@@ -494,7 +494,7 @@ def process_job(job_id, *, sessions, settings):
     try:
         results = []
         pending = None
-        from app.services.extraction_scheduling import handoff_settings
+        from app.services.extraction_scheduling import handoff_settings, PENDING_RECHECK_SECONDS
         extraction_settings = handoff_settings(settings)
         for attachment in attachments:
             document_state = state.get(attachment.id, {})
@@ -546,9 +546,12 @@ def process_job(job_id, *, sessions, settings):
                         # Its provider ID is checkpointed; start reading the next
                         # attachment while this one runs remotely. Revisit all
                         # unfinished attachments before committing the candidate.
-                        pending = exc
-                        if hasattr(exc, "retry_seconds"):
+                        if isinstance(exc, ExtractionDeferred):
+                            pending = exc
                             break  # Capacity is shared; do not flood it with later attachments.
+                        delay = getattr(exc, "retry_seconds", PENDING_RECHECK_SECONDS)
+                        if pending is None or delay < getattr(pending, "retry_seconds", PENDING_RECHECK_SECONDS):
+                            pending = exc
                         continue
                     except UnreadableDocument as exc:
                         # A damaged or protected document: report this attachment for review
@@ -609,7 +612,6 @@ def process_job(job_id, *, sessions, settings):
             job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
             if not job or job.status not in {"pending", "processing", "retry"}:
                 return
-            from app.services.extraction_scheduling import PENDING_RECHECK_SECONDS
             job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=getattr(exc, "retry_seconds", PENDING_RECHECK_SECONDS))
             job.last_error = str(exc) if hasattr(exc, "retry_seconds") else "Waiting for the document reader to finish."
             db.commit()

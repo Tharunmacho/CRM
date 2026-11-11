@@ -59,6 +59,7 @@ from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume
 from app.integrations.ocr.merge import merge_results
 from app.integrations.ocr.payload import prepare_job, rotations_from, unsendable
 from app.integrations.ocr.person_split import page_identity, incompatible
+from app.integrations.ocr.page_coverage import physical_passport_payload, source_page_positions
 
 
 log = logging.getLogger("crm.reading")
@@ -88,6 +89,15 @@ class ExtractionDeferred(ExtractionPending):
         super().__init__(job_id or "", kind)
         self.retry_seconds = max(2.0, min(3600.0, retry_seconds))
         self.args = ("The document reader is busy. Your file is saved and will be tried automatically when capacity is available.",)
+
+
+class ExtractionOverdue(ExtractionPending):
+    """An accepted provider job is slow, so poll it later without a new upload."""
+
+    def __init__(self, job_id: str, kind: str):
+        super().__init__(job_id, kind)
+        self.retry_seconds = 30.0
+        self.args = ("The document reader is taking longer than usual. Its accepted job is saved and will be checked again.",)
 
 
 class ExtractionFailure(Exception):
@@ -143,7 +153,8 @@ def request_extraction_retry(state: dict, *, automatic: bool = False) -> list[st
     The worker may call with ``automatic=True`` only when its durable retry
     budget has attempts remaining. A paid but incomplete/invalid result needs
     an explicit operator retry; pending or unknown jobs always retain their ID.
-    A job that outlived its deadline (``timed_out``) is retried like a failed one.
+    A local deadline cannot establish that an accepted job failed: legacy
+    ``timed_out`` records with an ID resume polling that same job.
     A document read as several chunks restarts only the chunks that failed: the others keep their paid results.
     """
     restarted = []
@@ -153,6 +164,9 @@ def request_extraction_retry(state: dict, *, automatic: bool = False) -> list[st
         if record.get("chunks"):
             if _restart_chunks(state, kind, record, automatic):
                 restarted.append(kind)
+            continue
+        if _resume_accepted_timeout(record):
+            restarted.append(kind)
             continue
         failed = record.get("status") in {"failed", "timed_out"}
         invalid = record.get("status") == "succeeded" and (
@@ -418,8 +432,19 @@ def _chunk_bad(chunk: dict, automatic: bool) -> bool:
     return not automatic and (chunk.get("coverage_status") == "needs_review" or chunk.get("validation_status") == "failed")
 
 
+def _resume_accepted_timeout(record: dict) -> bool:
+    if record.get("status") != "timed_out" or not record.get("job_id") or "result" in record:
+        return False
+    record["status"] = record.get("last_provider_status") if record.get("last_provider_status") in _PENDING else "queued"
+    record.setdefault("overdue_since", _wall())
+    record["timeout_recovery_pending"] = True
+    record.pop("error", None)
+    return True
+
+
 def _restart_chunks(state: dict, kind: str, record: dict, automatic: bool) -> bool:
     chunks = record["chunks"]
+    resumed = [_resume_accepted_timeout(chunk) for chunk in chunks]
     bad = [chunk for chunk in chunks if _chunk_bad(chunk, automatic)]
     merged_invalid = (
         record.get("status") == "succeeded" and not automatic
@@ -428,7 +453,7 @@ def _restart_chunks(state: dict, kind: str, record: dict, automatic: bool) -> bo
     if not bad and merged_invalid:
         bad = list(chunks)  # a merged result that cannot be used: every part is read again
     if not bad:
-        return False
+        return any(resumed)
     history = state.setdefault("provider_job_history", {}).setdefault(kind, [])
     for chunk in bad:
         history.append(deepcopy(chunk))
@@ -590,6 +615,7 @@ def _check_cached(kind: str, selected: list[int], record: dict, source_hash: str
         return []  # the whole kind (merged, for chunks) is already paid for
     for unit in units:
         rec = unit.record
+        _resume_accepted_timeout(rec)
         if rec.get("status") in {"failed", "timed_out"}:
             message = _failure_text(unit) if rec["status"] == "failed" else (
                 f"Reading the {_mode(unit.kind)} pages{unit.label} took too long. It can be tried again.")
@@ -637,17 +663,20 @@ def _drive(unit: _Unit, settings, events: queue.Queue, abort: threading.Event) -
 def _apply_job(unit: _Unit, job) -> bool:
     """Record what a polled job reported. Returns True when the saved state changed."""
     rec = unit.record
-    before = (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"))
+    recovered_timeout = rec.pop("timeout_recovery_pending", False)
+    before = (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"), rec.get("overdue_since"))
     rec.pop("capacity_retry_at", None)
     if any((rec.get("provider_error") or {}).get(flag) for flag in ("capacity", "transport")):
         rec.pop("provider_error", None)
     rec["status"] = job.status
     if job.status in _PENDING:
         unit.outcome = "pending"
+        rec["last_provider_status"] = job.status
         age = _wall() - rec.setdefault("submitted_at", _wall())
         if age > ocr_client.provider_deadline(len(unit.pages)):
-            rec["status"], rec["error"] = "timed_out", "The document reader did not finish in time."
-            unit.outcome = "timed_out"
+            # This is a local waiting budget, not a terminal provider outcome.
+            # Losing the accepted ID here would duplicate paid work on retry.
+            rec.setdefault("overdue_since", _wall())
     elif job.status == "failed":
         rec["error"] = "The document reader could not read this file."
         # The reader's own reason (a short code and sentence it wrote, never page content) is kept so a failure can be named.
@@ -666,7 +695,7 @@ def _apply_job(unit: _Unit, job) -> bool:
         if job.status == "succeeded":
             rec["validation_status"] = "failed"
         unit.outcome = "unusable"
-    return before != (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"))
+    return recovered_timeout or before != (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"), rec.get("overdue_since"))
 
 
 def _log_outcome(unit: _Unit) -> None:
@@ -841,12 +870,8 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
 
 
 def _chunk_covered(response, expected: int) -> bool:
-    pages = response.pages
-    return not (
-        len(pages) != expected
-        or {page.page_number for page in pages} != set(range(1, expected + 1))
-        or any(not page.text.strip() for page in pages)
-    )
+    kind = "passport" if isinstance(response, PassportResponse) else "other"
+    return source_page_positions(kind, response, expected) is not None
 
 
 def _merge_kind(kind: str, record: dict, state: dict, save) -> dict | None:
@@ -870,7 +895,13 @@ def _merge_kind(kind: str, record: dict, state: dict, save) -> dict | None:
         else:
             chunk["coverage_status"] = "needs_review"
             covered = False
-        parts.append((chunk["positions"], payload))
+        # A passport provider can split one physical sheet into two logical
+        # views. Group those views only for the cross-chunk page numbering;
+        # the accepted job's exact raw payload remains in its checkpoint.
+        merge_payload = physical_passport_payload(payload, response, len(chunk["selected_pages"])) if _mode(kind) == "passport" else payload
+        if merge_payload is not payload:
+            chunk["provider_page_sources"] = [chunk["selected_pages"][0]] * len(response.pages)
+        parts.append((chunk["positions"], merge_payload))
     record["status"] = "succeeded"
     if not covered:
         record["coverage_status"] = "needs_review"
@@ -883,7 +914,8 @@ def _merge_kind(kind: str, record: dict, state: dict, save) -> dict | None:
         "conflicts": conflicts, "notes": notes,
     }
     for chunk in chunks:
-        chunk.pop("result", None)  # the merged result holds it all; the chunk keeps only its job details
+        if not chunk.get("provider_page_sources"):
+            chunk.pop("result", None)  # split-view chunks retain their exact provider payload as well
     return merged
 
 
@@ -993,7 +1025,7 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
                       checkpoint=checkpoint, ready=ready, failures=failures, final=final, resubmitted=True)
 
     failure: str | None = None
-    pending: tuple[str, str] | None = None
+    pending: ExtractionPending | None = None
     deferred: ExtractionDeferred | None = None
     for kind in kinds:
         for unit in units[kind]:
@@ -1008,8 +1040,11 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
                     failures.setdefault(kind, message())
                 elif failure is None:
                     failure = message()
-            elif unit.outcome == "pending" and pending is None:
-                pending = (unit.record["job_id"], kind)
+            elif unit.outcome == "pending":
+                waiting = (ExtractionOverdue(unit.record["job_id"], kind) if unit.record.get("overdue_since")
+                           else ExtractionPending(unit.record["job_id"], kind))
+                if pending is None or getattr(waiting, "retry_seconds", 2) < getattr(pending, "retry_seconds", 2):
+                    pending = waiting
             elif unit.outcome == "deferred":
                 delay = max(2.0, unit.record.get("capacity_retry_at", _wall() + 30) - _wall())
                 if deferred is None or delay > deferred.retry_seconds:
@@ -1017,7 +1052,7 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
     if failure or pending or deferred:
         if dirty:
             checkpoint()  # the paid responses of the jobs that did finish are kept
-        raise ExtractionFailure(failure) if failure else deferred or ExtractionPending(*pending)
+        raise ExtractionFailure(failure) if failure else deferred or pending
     results: dict[str, dict | None] = {}
     for kind in kinds:
         if kind in (failures or {}):
@@ -1274,6 +1309,9 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         if first is None or late is None:
             payloads[kind] = None
             continue
+        if kind == "passport":
+            first = physical_passport_payload(first, PassportResponse.model_validate(first), len(parts[kind]))
+            late = physical_passport_payload(late, PassportResponse.model_validate(late), len(parts[kind + "+"]))
         place = {page: index for index, page in enumerate(final[kind], 1)}
         merged, conflicts, notes = merge_results(kind, [
             ([place[p] for p in parts[kind]], first), ([place[p] for p in parts[kind + "+"]], late)])
@@ -1327,6 +1365,7 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
             "source": {
                 "local_inspection": {**source_report, "selected_pages": list(selected)},
                 "source_sha256": _for(kind, source_hash), "selected_pages": list(selected),
+                "provider_page_sources": [selected[position - 1] for position in source_page_positions(kind, response, len(selected))],
             },
             # The pages the local check identified; ``source`` names every page sent (candidates included).
             "selected_pages": list((classified or {}).get(kind, selected)),

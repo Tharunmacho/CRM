@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import func, inspect, select, text, update
 
 from app.db.models import (
-    Application, ApplicationFeedback, ApplicationStatus, Attachment, AuditEntry, Candidate, ClientStaff, ClosureReason,
+    Application, ApplicationFeedback, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, Client, ClientStaff, ClosureReason,
     DocumentExtractionJob, Notification, Order, OrderStatus, ReferenceAgency, Role, Source, Task, User,
 )
 from app.services import form_assignment, form_feedback, staff_weekly
@@ -366,6 +366,40 @@ def test_jobs_that_are_not_open_are_refused_and_nothing_changes(desk, status):
         assert db.scalar(select(func.count()).select_from(Application)) == 1
     assert "other-order" not in {j["orderId"] for c in assignment(desk)["options"]["clients"] for j in c["jobs"]}
     assert put_assignment(desk, {"orderId": "missing"}).status_code == 404
+
+
+@pytest.mark.parametrize("client_status", ["active", "inactive"])
+def test_deployed_job_remains_selected_when_order_is_filled_without_changing_history(desk, client_status):
+    app_id = mapped(desk)
+    with desk.sessions() as db:
+        db.execute(update(Application).where(Application.id == app_id).values(status=ApplicationStatus.deployed, current_stage=11))
+        db.execute(update(Order).values(status=OrderStatus.filled))
+        db.execute(update(Client).where(Client.id == "client").values(status=client_status))
+        db.commit()
+        before = (
+            db.scalar(select(func.count()).select_from(Application)),
+            db.scalar(select(func.count()).select_from(ApplicationStage)),
+            db.scalar(select(func.count()).select_from(AuditEntry)),
+        )
+
+    for params in ({}, {"applicationId": app_id}):
+        data = form(desk, **params)
+        block = data["assignment"]
+        assert data["application"]["id"] == app_id
+        assert data["application"]["status"] == "deployed"
+        assert block["job"]["orderId"] == "order" and block["job"]["stage"] == 11
+        (client,) = block["options"]["clients"]
+        assert client["id"] == block["client"]["id"] == "client"
+        assert [(job["orderId"], job["status"]) for job in client["jobs"]] == [("order", "filled")]
+
+    with desk.sessions() as db:
+        application = db.get(Application, app_id)
+        assert (application.status, application.current_stage, application.order_id) == (ApplicationStatus.deployed, 11, "order")
+        assert (
+            db.scalar(select(func.count()).select_from(Application)),
+            db.scalar(select(func.count()).select_from(ApplicationStage)),
+            db.scalar(select(func.count()).select_from(AuditEntry)),
+        ) == before
 
 
 def test_source_and_agency_save_by_reference_id_or_free_text(desk):

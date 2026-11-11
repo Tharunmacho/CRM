@@ -38,7 +38,10 @@ def can_change(user: User, candidate) -> dict:
 
 def read_job_options(session: Session, candidate_id: str) -> list:
     """Every open job of an active client, plus the job the candidate is on now, in one statement."""
-    current = select(Application.order_id).where(Application.candidate_id == candidate_id, Application.status == ApplicationStatus.active)
+    current = select(Application.order_id).where(
+        Application.candidate_id == candidate_id,
+        Application.status.in_((ApplicationStatus.active, ApplicationStatus.deployed)),
+    )
     return list(session.execute(
         select(Client.id.label("client_id"), Client.name.label("client_name"), Company.id.label("company_id"), Company.name.label("company_name"),
                Order.id.label("order_id"), Order.ref, Designation.title, Order.openings, Order.status)
