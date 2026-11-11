@@ -3,8 +3,8 @@
  * breakdown changes it, and the words shown for it. No React and no imports, so it can be tested on its own.
  *
  * The date filters are a chain (year, then month, then day): a month without a year or a day without a month means
- * nothing, so they are dropped on the way in and cleared when the part before them changes. The screen offers the chain as ONE
- * "Travel month" choice (the months somebody actually travelled in) and four quick ranges (this month, last month...).
+ * nothing, so they are dropped on the way in and cleared when the part before them changes. A complete travel date can also
+ * set all three parts at once. Calendar quick choices fill those same controls; multi-month ranges use From / To.
  */
 
 export interface TravelledRow {
@@ -155,6 +155,20 @@ export function drillTo(filters: TravelledFilters, value: string): TravelledFilt
   return filtersFromParams(new URLSearchParams(queryFor({ ...filters, year, month, day, from: '', to: '', undated: '' })))
 }
 
+/** Pick a complete date directly; clearing it widens the selected month by removing only its day. */
+export function chooseTravelDate(filters: TravelledFilters, value: string): TravelledFilters {
+  if (!value) return filters.day ? { ...filters, day: '' } : filters
+  const date = validIsoDate(value)
+  return date ? drillTo(filters, date) : filters
+}
+
+/** Unknown travel dates are a separate view, mutually exclusive with every calendar filter. */
+export function toggleUndated(filters: TravelledFilters): TravelledFilters {
+  return filters.undated
+    ? { ...filters, undated: '' }
+    : { ...filters, year: '', month: '', day: '', from: '', to: '', undated: 'true' }
+}
+
 /** Click a client, agency or country in a breakdown: choose it, or clear it when it is already the chosen one. */
 export function toggleFilter(filters: TravelledFilters, key: 'client' | 'agency' | 'country', value: string): TravelledFilters {
   return setFilter(filters, key, filters[key] === value ? '' : value)
@@ -206,40 +220,6 @@ export function dateSummary(filters: TravelledFilters): string {
   return ''
 }
 
-// ------------------------------------------------------------------ the "Travel month" choice and the quick ranges
-
-/** The Travel month select's value for "date not recorded". */
-export const UNDATED = 'undated'
-
-/** The value the Travel month select shows: "2026-10" for a month, "2026" when only a year is chosen, '' for every month. */
-export function monthChoice(filters: TravelledFilters): string {
-  if (filters.undated) return UNDATED
-  if (filters.year && filters.month) return `${filters.year}-${filters.month}`
-  return filters.year
-}
-
-/** "October 2026" for "2026-10". */
-export function monthTitle(month: string): string {
-  const [year = '', number = ''] = month.split('-')
-  return `${monthName(number)} ${year}`
-}
-
-export interface MonthChoice { value: string; label: string }
-
-/**
- * What the Travel month select lists: every month somebody travelled in, newest first, with how many ("October 2026 · 3").
- * A chosen month (or a year typed into the address) that the server's list does not hold is still listed, so the select never lies.
- */
-export function monthChoices(months: readonly { month: string; count: number }[], filters: TravelledFilters, undated = 0): MonthChoice[] {
-  const list: MonthChoice[] = months.map(item => ({ value: item.month, label: `${monthTitle(item.month)} · ${item.count.toLocaleString()}` }))
-  const chosen = monthChoice(filters)
-  if (filters.year && !filters.month) list.unshift({ value: filters.year, label: `All of ${filters.year}` })
-  else if (chosen && chosen !== UNDATED && !list.some(item => item.value === chosen)) list.unshift({ value: chosen, label: monthTitle(chosen) })
-  // Last entry: the travelled people with no travel date on file, so every one of them can be found.
-  if (undated > 0 || filters.undated) list.push({ value: UNDATED, label: `Date not recorded${undated > 0 ? ` · ${undated.toLocaleString()}` : ''}` })
-  return list
-}
-
 export type QuickKey = 'this-month' | 'last-month' | 'last-3-months' | 'this-year'
 export interface QuickRange { key: QuickKey; label: string; from: string; to: string }
 
@@ -266,23 +246,28 @@ export function quickRanges(today: string): QuickRange[] {
   ]
 }
 
-/** The quick range the filters are exactly on (no year, month or day chosen), else ''. */
+/** Recognize calendar selections and previously bookmarked equivalent From / To quick ranges. */
 export function activeQuick(filters: TravelledFilters, today: string): QuickKey | '' {
-  if (filters.year || filters.month || filters.day || !filters.from || !filters.to) return ''
-  return quickRanges(today).find(range => range.from === filters.from && range.to === filters.to)?.key ?? ''
-}
-
-/** The Travel month select was changed: a month ("2026-10"), a year ("2026"), "date not recorded", or '' for every month. */
-export function chooseMonth(filters: TravelledFilters, value: string): TravelledFilters {
-  if (value === UNDATED) return filtersFromParams(new URLSearchParams(queryFor({ ...filters, year: '', month: '', day: '', from: '', to: '', undated: 'true' })))
-  return drillTo(filters, value)
+  if (filters.undated || filters.day) return ''
+  const ranges = quickRanges(today)
+  if (filters.from || filters.to) {
+    if (filters.year || filters.month) return ''
+    return ranges.find(range => range.from === filters.from && range.to === filters.to)?.key ?? ''
+  }
+  if (!filters.year) return ''
+  if (!filters.month) return filters.year === today.slice(0, 4) ? 'this-year' : ''
+  return ranges.find(range => (range.key === 'this-month' || range.key === 'last-month')
+    && range.from.slice(0, 7) === `${filters.year}-${filters.month}`)?.key ?? ''
 }
 
 /** Choose a quick range, or clear it when it is the one already chosen. Any year / month / day is replaced by it. */
 export function toggleQuick(filters: TravelledFilters, key: QuickKey, today: string): TravelledFilters {
-  if (activeQuick(filters, today) === key) return { ...filters, from: '', to: '' }
+  if (activeQuick(filters, today) === key) return drillTo(filters, '')
   const range = quickRanges(today).find(item => item.key === key)
-  return range ? { ...filters, year: '', month: '', day: '', from: range.from, to: range.to, undated: '' } : filters
+  if (!range) return filters
+  if (key === 'this-year') return drillTo(filters, range.from.slice(0, 4))
+  if (key === 'this-month' || key === 'last-month') return drillTo(filters, range.from.slice(0, 7))
+  return { ...filters, year: '', month: '', day: '', from: range.from, to: range.to, undated: '' }
 }
 
 /** "Missing documents only": on or off. */

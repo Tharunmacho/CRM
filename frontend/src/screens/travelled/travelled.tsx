@@ -8,9 +8,9 @@ import { SnapshotState } from '@/shared/ui/page-loading'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { downloadTravelled, useTravelled } from '@/features/travelled/travelled-api'
 import {
-  EMPTY_FILTERS, activeChips, activeQuick, agencyToday, barPercent, chooseMonth, clearChip, dateBarLabel, dateLevel, dateSummary, daysInMonth, documentsLabel,
-  documentsTitle, drillTo, filtersFromParams, formatTravelDay, monthChoice, monthChoices, monthName, queryFor, quickRanges, setFilter,
-  toggleFilter, toggleIncomplete, toggleQuick, withChosen,
+  EMPTY_FILTERS, MONTH_NAMES, activeChips, activeQuick, agencyToday, barPercent, chooseTravelDate, clearChip, dateBarLabel, dateLevel, dateSummary, documentsLabel,
+  documentsTitle, drillTo, filtersFromParams, formatTravelDay, monthName, queryFor, quickRanges, setFilter,
+  toggleFilter, toggleIncomplete, toggleQuick, toggleUndated, withChosen,
   type TravelledFilterKey, type TravelledFilters, type TravelledResult, type TravelledRow,
 } from '@/features/travelled/travelled-model'
 import '@/styles/travelled.css'
@@ -64,12 +64,12 @@ export default function TravelledPage() {
 
   const chips = activeChips(filters)
   const set = (key: TravelledFilterKey, value: string) => apply(setFilter(filters, key, value))
-  const months = monthChoices((options.months ?? []).filter(item => !filters.year || item.month.startsWith(`${filters.year}-`)), filters, options.undated ?? 0)
-  const years = withChosen(options.years.map(String), filters.year)
   const orders = (options.orders ?? []).filter(order => !filters.client || order.client === filters.client || order.id === filters.order)
   const today = agencyToday()
+  const years = withChosen([...new Set([today.slice(0, 4), ...options.years.map(String)])].sort().reverse(), filters.year)
+  const otherYears = Array.from({ length: 111 }, (_, index) => String(2100 - index)).filter(year => !years.includes(year))
   const quick = activeQuick(filters, today)
-  const days = filters.year && filters.month ? Array.from({ length: daysInMonth(Number(filters.year), Number(filters.month)) }, (_, index) => String(index + 1).padStart(2, '0')) : []
+  const travelDate = filters.year && filters.month && filters.day ? `${filters.year}-${filters.month}-${filters.day}` : ''
   const busy = refreshing || (stale && !error)
 
   return <div className="tv" aria-busy={busy}>
@@ -81,13 +81,15 @@ export default function TravelledPage() {
 
     <section className="tv-card tv-filters" aria-label="Filters">
       <div className="tv-quick" role="group" aria-label="Quick dates">
+        <button type="button" className={!dateSummary(filters) ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!dateSummary(filters)} onClick={() => apply(drillTo(filters, ''))}>All dates</button>
         {quickRanges(today).map(range => <button key={range.key} type="button" className={quick === range.key ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={quick === range.key}
           title={`${formatTravelDay(range.from)} to ${formatTravelDay(range.to)}`} onClick={() => apply(toggleQuick(filters, range.key, today))}>{range.label}</button>)}
+        <button type="button" className={filters.undated ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!!filters.undated} onClick={() => apply(toggleUndated(filters))}>Date not recorded{options.undated ? ` (${options.undated})` : ''}</button>
       </div>
       <div className="tv-filter-grid">
-        <label>Year<Select aria-label="Year" value={filters.year} onChange={e => set('year', e.target.value)}><option value="">All years</option>{years.map(year => <option key={year} value={year}>{year}</option>)}</Select></label>
-        <label>Travel month<Select aria-label="Travel month" value={monthChoice(filters)} onChange={e => apply(chooseMonth(filters, e.target.value))}><option value="">All dates</option>{months.map(month => <option key={month.value} value={month.value}>{month.label}</option>)}</Select></label>
-        <label>Day<Select aria-label="Day" value={filters.day} disabled={!filters.month} onChange={e => set('day', e.target.value)}><option value="">{filters.month ? 'All days' : 'Pick a month first'}</option>{days.map(day => <option key={day} value={day}>{Number(day)}</option>)}</Select></label>
+        <label>Year<Select aria-label="Year" searchable value={filters.year} onChange={e => set('year', e.target.value)}><option value="">All years</option><optgroup label="Current and recorded years">{years.map(year => <option key={year} value={year}>{year}</option>)}</optgroup><optgroup label="Other years">{otherYears.map(year => <option key={year} value={year}>{year}</option>)}</optgroup></Select></label>
+        <label>Month<Select aria-label="Travel month" value={filters.month} disabled={!filters.year} onChange={e => set('month', e.target.value)}><option value="">{filters.year ? 'All months' : 'Choose a year'}</option>{MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</Select></label>
+        <label>Travel date<Input type="date" aria-label="Travel date" min="1990-01-01" max="2100-12-31" value={travelDate} onChange={e => apply(chooseTravelDate(filters, e.target.value))} /></label>
         <label>Client<Select aria-label="Client" value={filters.client} onChange={e => set('client', e.target.value)}><option value="">All clients</option>{withChosen(options.clients, filters.client).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
         <label>Job / order<Select aria-label="Job or order" value={filters.order} onChange={e => set('order', e.target.value)}><option value="">All jobs / orders</option>{filters.order && !orders.some(order => order.id === filters.order) && <option value={filters.order}>Selected order</option>}{orders.map(order => <option key={order.id} value={order.id}>{order.job || 'Job'} · {order.ref || order.client}{!filters.client ? ` · ${order.client}` : ''}</option>)}</Select></label>
         <label>Agency<Select aria-label="Agency" value={filters.agency} onChange={e => set('agency', e.target.value)}><option value="">All agencies</option>{withChosen(options.agencies, filters.agency).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
@@ -97,6 +99,7 @@ export default function TravelledPage() {
           <button type="button" className={filters.incomplete ? 'tv-toggle is-on' : 'tv-toggle'} aria-pressed={!!filters.incomplete} onClick={() => apply(toggleIncomplete(filters))}>Missing documents only</button>
         </div>
       </div>
+      {data && <p className="tv-filter-note">Travelled shows deployed placements; Data Bank also includes candidates who have not travelled. {!!options.undated && <>{options.undated} travelled {options.undated === 1 ? 'record has' : 'records have'} no saved travel date. Choose All dates or Date not recorded to include them.</>}</p>}
       {chips.length > 0 && <div className="tv-chips" role="group" aria-label="Filters in use">
         {chips.map(chip => <button key={chip.key} type="button" className="tv-chip" onClick={() => apply(clearChip(filters, chip.key))} aria-label={`Remove ${chip.label}`}>{chip.label}<X size={12} aria-hidden="true" /></button>)}
         <button type="button" className="tv-clear" onClick={() => apply(EMPTY_FILTERS)}>Clear all</button>

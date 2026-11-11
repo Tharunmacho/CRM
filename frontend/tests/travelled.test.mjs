@@ -11,9 +11,9 @@ async function load(relative) {
 
 const model = await load('../src/features/travelled/travelled-model.ts')
 const {
-  EMPTY_FILTERS, UNDATED, activeChips, activeQuick, agencyToday, barPercent, chooseMonth, clearChip, dateBarLabel, dateLevel, dateSummary,
-  daysInMonth, documentsLabel, documentsTitle, drillTo, exportName, filtersFromParams, formatTravelDay, monthChoice, monthChoices,
-  queryFor, quickRanges, setFilter, toggleFilter, toggleIncomplete, toggleQuick, validIsoDate, withChosen,
+  EMPTY_FILTERS, activeChips, activeQuick, agencyToday, barPercent, chooseTravelDate, clearChip, dateBarLabel, dateLevel, dateSummary,
+  daysInMonth, documentsLabel, documentsTitle, drillTo, exportName, filtersFromParams, formatTravelDay,
+  queryFor, quickRanges, setFilter, toggleFilter, toggleIncomplete, toggleQuick, toggleUndated, validIsoDate, withChosen,
 } = model
 
 const parse = (query) => filtersFromParams(new URLSearchParams(query))
@@ -137,32 +137,42 @@ test('bar widths, picker lists and file names', () => {
   assert.equal(exportName(parse(''), 'csv'), 'travelled-all.csv')
 })
 
-const MONTHS = [{ month: '2026-10', count: 3 }, { month: '2026-05', count: 4 }]
-
-test('the Travel month select lists the months somebody travelled in, newest first, then "date not recorded"', () => {
-  assert.deepEqual(monthChoices(MONTHS, parse(''), 2).map((m) => [m.value, m.label]), [
-    ['2026-10', 'October 2026 · 3'], ['2026-05', 'May 2026 · 4'], [UNDATED, 'Date not recorded · 2']])
-  assert.deepEqual(monthChoices(MONTHS, parse(''), 0).map((m) => m.value), ['2026-10', '2026-05'])     // no entry when nobody is undated
-  assert.equal(monthChoice(parse('year=2026&month=10')), '2026-10')
-  assert.equal(monthChoice(parse('year=2026')), '2026')
-  assert.equal(monthChoice(parse('')), '')
-  assert.equal(monthChoice(parse('undated=true')), UNDATED)
+test('a full travel date works without selecting a year or month first and keeps unrelated filters', () => {
+  const start = parse('client=A&order=42&country=UAE&agency=Agency&q=alex&incomplete=true')
+  const selected = chooseTravelDate(start, '2026-06-01')
+  assert.equal(queryFor(selected), 'year=2026&month=06&day=01&client=A&order=42&agency=Agency&country=UAE&q=alex&incomplete=true')
+  assert.equal(queryFor(chooseTravelDate(EMPTY_FILTERS, '1990-01-01')), 'year=1990&month=01&day=01')
+  assert.equal(queryFor(chooseTravelDate(EMPTY_FILTERS, '2100-12-31')), 'year=2100&month=12&day=31')
+  assert.equal(queryFor(chooseTravelDate(parse('from=2026-05-01&to=2026-05-31&client=A'), '2026-06-01')), 'year=2026&month=06&day=01&client=A')
+  assert.equal(queryFor(chooseTravelDate(parse('undated=true&client=A'), '2026-06-01')), 'year=2026&month=06&day=01&client=A')
 })
 
-test('the select never lies: a chosen month or year the server does not list is still shown', () => {
-  assert.deepEqual(monthChoices(MONTHS, parse('year=2025&month=12')).map((m) => m.label), ['December 2025', 'October 2026 · 3', 'May 2026 · 4'])
-  assert.equal(monthChoices(MONTHS, parse('year=2026'))[0].label, 'All of 2026')
-  assert.equal(monthChoices([], parse('undated=true'))[0].label, 'Date not recorded')
+test('clearing a travel date retains its month and year; clearing the month retains its year', () => {
+  const selected = chooseTravelDate(parse('client=A'), '2026-06-01')
+  const month = chooseTravelDate(selected, '')
+  assert.equal(queryFor(month), 'year=2026&month=06&client=A')
+  assert.equal(queryFor(setFilter(month, 'month', '')), 'year=2026&client=A')
+  assert.equal(queryFor(setFilter(selected, 'month', '')), 'year=2026&client=A')
+  assert.equal(queryFor(setFilter(selected, 'year', '2025')), 'year=2025&client=A')
+  const range = parse('from=2026-09-01&to=2026-11-30&client=A')
+  assert.deepEqual(chooseTravelDate(range, ''), range)
+  assert.deepEqual(chooseTravelDate(EMPTY_FILTERS, ''), EMPTY_FILTERS)
 })
 
-test('choosing a travel month sets year and month in one go, and clears the days, ranges and "date not recorded"', () => {
-  const start = parse('year=2026&month=05&day=09&client=A')
-  assert.equal(queryFor(chooseMonth(start, '2026-10')), 'year=2026&month=10&client=A')
-  assert.equal(queryFor(chooseMonth(start, '2026')), 'year=2026&client=A')
-  assert.equal(queryFor(chooseMonth(start, '')), 'client=A')
-  assert.equal(queryFor(chooseMonth(parse('from=2026-05-01&to=2026-05-31'), '2026-10')), 'year=2026&month=10')
-  assert.equal(queryFor(chooseMonth(parse('undated=true&client=A'), '2026-10')), 'year=2026&month=10&client=A')
-  assert.equal(queryFor(chooseMonth(start, UNDATED)), 'client=A&undated=true')
+test('invalid direct travel dates preserve the current view and leap dates are accepted only in leap years', () => {
+  const selected = parse('year=2026&month=05&client=A')
+  for (const date of ['2026-02-29', '2024-02-30', '2026-13-01', '1989-12-31', '2101-01-01', '2026-6-1', 'bad']) {
+    assert.deepEqual(chooseTravelDate(selected, date), selected, date)
+  }
+  assert.equal(queryFor(chooseTravelDate(selected, '2024-02-29')), 'year=2024&month=02&day=29&client=A')
+})
+
+test('date not recorded toggles independently and replaces all date filters while preserving other filters', () => {
+  const selected = parse('year=2026&month=05&day=09&client=A&order=42&incomplete=true')
+  const undated = toggleUndated(selected)
+  assert.equal(queryFor(undated), 'client=A&order=42&incomplete=true&undated=true')
+  assert.equal(queryFor(toggleUndated(undated)), 'client=A&order=42&incomplete=true')
+  assert.equal(queryFor(toggleUndated(parse('from=2026-09-01&to=2026-11-30&country=UAE'))), 'country=UAE&undated=true')
 })
 
 test('"date not recorded" and a date are opposites; a date in the address wins', () => {
@@ -200,18 +210,49 @@ test('"today" is the agency\'s day (Asia/Kolkata), whatever the browser time zon
   assert.equal(agencyToday(new Date('2026-11-11T18:30:00Z')), '2026-11-12')   // midnight in India
 })
 
-test('a quick range sets From / To, shows as active, replaces other dates and clears when clicked again', () => {
+test('calendar quick choices populate year and month, replace other dates and clear when clicked again', () => {
   const today = '2026-11-11'
   const on = toggleQuick(parse('year=2026&month=05&client=A'), 'last-month', today)
-  assert.equal(queryFor(on), 'from=2026-10-01&to=2026-10-31&client=A')
+  assert.equal(queryFor(on), 'year=2026&month=10&client=A')
   assert.equal(activeQuick(on, today), 'last-month')
-  assert.equal(activeQuick(parse('from=2026-10-01&to=2026-10-30'), today), '')        // not exactly a quick range
-  assert.equal(activeQuick(parse('year=2026&from=2026-10-01&to=2026-10-31'), today), '')
   assert.equal(queryFor(toggleQuick(on, 'last-month', today)), 'client=A')
-  assert.equal(queryFor(toggleQuick(on, 'this-year', today)), 'from=2026-01-01&to=2026-12-31&client=A')
-  assert.equal(queryFor(toggleQuick(parse('undated=true'), 'this-month', today)), 'from=2026-11-01&to=2026-11-30')
-  assert.equal(queryFor(setFilter(on, 'month', '')), 'client=A')   // another date filter takes the range away (month needs a year: dropped)
+  const year = toggleQuick(on, 'this-year', today)
+  assert.equal(queryFor(year), 'year=2026&client=A')
+  assert.equal(activeQuick(year, today), 'this-year')
+  assert.equal(queryFor(toggleQuick(year, 'this-year', today)), 'client=A')
+  const month = toggleQuick(parse('undated=true'), 'this-month', today)
+  assert.equal(queryFor(month), 'year=2026&month=11')
+  assert.equal(activeQuick(month, today), 'this-month')
+  assert.equal(queryFor(setFilter(on, 'month', '')), 'year=2026&client=A')
   assert.equal(queryFor(setFilter(on, 'year', '2026')), 'year=2026&client=A')
+  assert.equal(queryFor(toggleQuick(EMPTY_FILTERS, 'last-month', '2026-01-15')), 'year=2025&month=12')
+})
+
+test('quick choices, month selection and exact travel dates remain in sync', () => {
+  const today = '2026-11-11'
+  const year = toggleQuick(parse('client=A'), 'this-year', today)
+  const month = setFilter(year, 'month', '11')
+  assert.equal(activeQuick(month, today), 'this-month')
+  const date = chooseTravelDate(month, '2026-11-09')
+  assert.equal(queryFor(date), 'year=2026&month=11&day=09&client=A')
+  assert.equal(activeQuick(date, today), '')
+  assert.equal(activeQuick(chooseTravelDate(date, ''), today), 'this-month')
+  assert.equal(queryFor(toggleQuick(date, 'last-month', today)), 'year=2026&month=10&client=A')
+})
+
+test('last three months remains a range and old quick-range bookmarks still activate and clear', () => {
+  const today = '2026-11-11'
+  const range = toggleQuick(parse('year=2026&month=05&day=09&client=A'), 'last-3-months', today)
+  assert.equal(queryFor(range), 'from=2026-09-01&to=2026-11-30&client=A')
+  assert.equal(activeQuick(range, today), 'last-3-months')
+  assert.equal(queryFor(toggleQuick(range, 'last-3-months', today)), 'client=A')
+  for (const quick of quickRanges(today)) {
+    const legacy = parse(`from=${quick.from}&to=${quick.to}&client=A`)
+    assert.equal(activeQuick(legacy, today), quick.key)
+    assert.equal(queryFor(toggleQuick(legacy, quick.key, today)), 'client=A')
+  }
+  assert.equal(activeQuick(parse('from=2026-10-01&to=2026-10-30'), today), '')
+  assert.equal(activeQuick(parse('year=2026&from=2026-10-01&to=2026-10-31'), today), '')
 })
 
 test('"missing documents only" is in the address and shown as a chip', () => {

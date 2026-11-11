@@ -18,6 +18,7 @@
 .tv-quick-btn.is-on, .tv-toggle.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary); font-weight: 600; }
 .tv-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 16px; padding: 16px 24px 18px; }
 .tv-filter-grid label { display: grid; gap: 6px; min-width: 0; font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.tv-filter-note { margin: 0; padding: 0 24px 16px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 .tv-search-row { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 12px; min-width: 0; }
 .tv-search-row .tv-search { flex: 1; }
 .tv-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 24px 16px; border-top: 1px solid var(--border-main); }
@@ -86,6 +87,7 @@
 @media (max-width: 720px) {
   .tv-quick { padding: 14px 16px 0; }
   .tv-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px 16px; gap: 12px; }
+  .tv-filter-note { padding: 0 16px 14px; }
   .tv-search-row { flex-wrap: wrap; align-items: stretch; }
   .tv-search-row .tv-search { flex-basis: 100%; }
   .tv-chips { padding: 10px 16px 14px; }
