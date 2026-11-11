@@ -1,7 +1,9 @@
 """Content routing contracts; no provider, database or file names are involved."""
 import pytest
 
+from ocr_hard_cases import valid_aadhaar
 from app.integrations.ocr.classification import classify_page, classify_pages
+from app.integrations.ocr.validators import identity_evidence
 
 
 CV = """CURRICULUM VITAE
@@ -180,6 +182,33 @@ Download Date: 01/01/2026
 @pytest.mark.parametrize("text", [GARBLED_MRZ, INDIA_PASSPORT_DATA, PASSPORT_ADDRESS])
 def test_passport_detection_tolerates_garbled_chevrons_republic_of_india_and_address_pages(text):
     assert classify_page(text).document_type == "passport"
+
+
+@pytest.mark.parametrize("passport", [PASSPORT, INDIA_PASSPORT_DATA, PASSPORT_ADDRESS, GARBLED_MRZ])
+@pytest.mark.parametrize("grouped", [False, True])
+def test_passport_incidental_checksum_valid_number_is_not_an_aadhaar_copy(passport, grouped):
+    number = valid_aadhaar(73)  # Synthetic checksum-valid noise, unrelated to any actual identity.
+    printed = " ".join(number[index:index + 4] for index in range(0, 12, 4)) if grouped else number
+    text = passport + "\nPrinted reference: " + printed
+    assert identity_evidence(text)["aadhaar"] is True
+    page = classify_page(text)
+    assert page.document_type == "passport" and page.also == ()
+
+
+@pytest.mark.parametrize("passport", ["", PASSPORT])
+def test_checksum_valid_aadhaar_structure_survives_on_its_own_and_on_a_mixed_passport_page(passport):
+    number = valid_aadhaar(73)
+    card = AADHAAR.replace("0000 0000 0000", " ".join(number[index:index + 4] for index in range(0, 12, 4)))
+    assert identity_evidence(card)["aadhaar"] is True
+    page = classify_page(passport + card)
+    assert page.document_type == ("passport" if passport else "aadhaar")
+    assert page.also == (("aadhaar",) if passport else ())
+
+
+def test_checksum_number_fallback_remains_available_without_another_document_structure():
+    text = "Alex Example\nDate of birth: 01 January 1990\nMale\n" + valid_aadhaar(73)
+    page = classify_page(text)
+    assert page.document_type == "aadhaar" and page.also == ()
 
 
 def test_visa_page_is_supporting_not_unknown_but_a_resume_listing_visa_stays_resume():

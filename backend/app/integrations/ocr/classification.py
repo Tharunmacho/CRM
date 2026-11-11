@@ -439,9 +439,9 @@ def classify_page(text: str) -> PageClassification:
     evidence = _evidence(text)
     passport = _is_passport(text) or evidence["passport"] or (not seed and _passport_loose(text))
     aadhaar = _is_aadhaar(text)
-    # A valid Aadhaar number alone is not card evidence on a résumé (a candidate lists their own number) or on a
-    # certificate or invoice (any long number passes a check digit one time in ten); elsewhere it is.
-    if not aadhaar and evidence["aadhaar"] and not seed and not _supporting_marker(text):
+    # A valid Aadhaar number alone is not card evidence on a résumé, passport, certificate or invoice:
+    # unrelated long numbers can pass the checksum. Genuine Aadhaar structure still allows a mixed page above.
+    if not aadhaar and evidence["aadhaar"] and not seed and not passport and not _supporting_marker(text):
         aadhaar = True
     # A visa page is a supporting document; a résumé that merely lists visa details is not.
     supporting = _supporting_marker(text) or (_is_visa(text) and not seed)

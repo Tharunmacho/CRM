@@ -32,7 +32,8 @@ DEADLINE_SECONDS = 150.0
 POLL_SECONDS = 1.5
 # Fast jobs finish in a second or two: look early, then back off to the steady rate.
 POLL_SCHEDULE = (0.3, 0.6, 1.0, POLL_SECONDS)
-# A job is given 60 s plus 3 s a page before it is called timed out (never more than ten minutes).
+# Durable jobs switch to slower polling after 60 s plus 3 s a page (at most ten minutes).
+# This waiting budget does not establish that an accepted provider job failed.
 DEADLINE_BASE_SECONDS = 60.0
 DEADLINE_PER_PAGE_SECONDS = 3.0
 DEADLINE_CAP_SECONDS = 600.0
@@ -70,7 +71,7 @@ def poll_intervals(schedule: tuple[float, ...] = POLL_SCHEDULE) -> Iterator[floa
 
 
 def provider_deadline(pages: int) -> float:
-    """Seconds a job of this many pages may stay queued or running before it counts as timed out."""
+    """Waiting budget before a durable accepted job is considered overdue."""
     return min(DEADLINE_CAP_SECONDS, DEADLINE_BASE_SECONDS + DEADLINE_PER_PAGE_SECONDS * max(0, pages))
 
 
