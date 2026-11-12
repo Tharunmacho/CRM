@@ -38,9 +38,9 @@ const STATUS_VIEW: Record<string, { label: string; tone: DotTone }> = {
 
 type Store = ReturnType<typeof useStore>
 
-/** The status a recruiter reads: a flagged profile reads as needing review whatever its pipeline status is. */
+/** Pipeline status stays visible even when profile details need a separate review. */
 export function candidateStatus(candidate: Candidate): { label: string; tone: DotTone } {
-  const key = candidate.needsReview && candidate.status !== 'needs_review' ? 'needs_review' : candidate.status
+  const key = candidate.status
   return STATUS_VIEW[key] ?? { label: key, tone: 'quiet' }
 }
 
@@ -67,7 +67,15 @@ export function SourceIcon({ source }: { source: string }) {
 
 export function StatusText({ candidate }: { candidate: Candidate }) {
   const status = candidateStatus(candidate)
-  return <StatusDot tone={status.tone} title={status.label}>{status.label}</StatusDot>
+  const reviewTitle = candidate.phone?.trim()
+    ? 'Check the profile details against the original documents.'
+    : 'Phone number is missing. Review the profile details.'
+  const primary = <StatusDot tone={status.tone} title={candidate.status === 'needs_review' ? reviewTitle : status.label}>{status.label}</StatusDot>
+  if (!candidate.needsReview || candidate.status === 'needs_review') return primary
+  return <span className="inline-flex max-w-full flex-none flex-col items-start gap-1">
+    {primary}
+    <StatusDot tone="warn" title={reviewTitle}>Needs review</StatusDot>
+  </span>
 }
 
 export function OwnerText({ candidate, store }: { candidate: Candidate; store: Store }) {

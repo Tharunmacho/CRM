@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
 
 async function load(path) {
@@ -10,6 +12,50 @@ async function load(path) {
 }
 
 const pools = await load('../src/features/candidates/data-bank-pools.ts')
+
+// Exercise the real status renderer without loading the unrelated store, router and dialogs in this column module.
+const columnSource = await readFile(new URL('../src/features/candidates/components/data-bank-columns.tsx', import.meta.url), 'utf8')
+const columnTree = ts.createSourceFile('data-bank-columns.tsx', columnSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const statusSource = columnTree.statements.filter(statement =>
+  ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => declaration.name.getText(columnTree) === 'STATUS_VIEW')
+  || ts.isFunctionDeclaration(statement) && ['candidateStatus', 'StatusText'].includes(statement.name?.text),
+).map(statement => statement.getText(columnTree)).join('\n')
+const statusJs = ts.transpileModule(statusSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
+}).outputText
+const status = {}
+new Function('exports', 'React', 'StatusDot', statusJs)(status, React,
+  ({ tone, title, children }) => React.createElement('span', { 'data-tone': tone, title }, children))
+const renderStatus = candidate => renderToStaticMarkup(React.createElement(status.StatusText, { candidate }))
+
+test('a deployed candidate stays Deployed while a separate profile review explains the missing phone', () => {
+  const candidate = { status: 'deployed', needsReview: true, phone: '  ' }
+  assert.deepEqual(status.candidateStatus(candidate), { label: 'Deployed', tone: 'ok' })
+  const html = renderStatus(candidate)
+  assert.match(html, /data-tone="ok"[^>]*>Deployed<\/span>/)
+  assert.match(html, /data-tone="warn"[^>]*>Needs review<\/span>/)
+  assert.match(html, /title="Phone number is missing\. Review the profile details\."/)
+})
+
+test('a review flag does not replace another pipeline status or claim a saved phone is missing', () => {
+  const candidate = { status: 'in_process', needsReview: true, phone: '9999999999' }
+  assert.deepEqual(status.candidateStatus(candidate), { label: 'In process', tone: 'info' })
+  const html = renderStatus(candidate)
+  assert.match(html, />In process<\/span>/)
+  assert.match(html, />Needs review<\/span>/)
+  assert.match(html, /Check the profile details against the original documents\./)
+  assert.doesNotMatch(html, /Phone number is missing/)
+})
+
+test('a primary Needs review status appears once and unflagged candidates keep a single status', () => {
+  for (const needsReview of [true, false]) {
+    const html = renderStatus({ status: 'needs_review', needsReview, phone: '' })
+    assert.equal((html.match(/>Needs review<\/span>/g) ?? []).length, 1)
+  }
+  const html = renderStatus({ status: 'deployed', needsReview: false, phone: '' })
+  assert.match(html, />Deployed<\/span>/)
+  assert.doesNotMatch(html, /Needs review|Phone number is missing/)
+})
 
 test('the Data Bank lists the eleven PRD columns in the specified order', () => {
   assert.deepEqual(pools.PRD_COLUMNS.map((column) => column.label), [
