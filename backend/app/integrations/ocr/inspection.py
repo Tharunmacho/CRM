@@ -608,7 +608,9 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
         if not read.text.strip() and read.reason:
             problem = problem or read
             timed_out = timed_out or read.retryable and "time limit" in read.reason
-        if _better(read, best):
+        identified = need_more is not None and classify_page(read.text).document_type != "unknown"
+        best_identified = need_more is not None and classify_page(best.text).document_type != "unknown"
+        if (identified and not best_identified) or (identified == best_identified and _better(read, best)):
             best, best_name = read, name
         lines = merge.regroup_words(read.items, frame) if sparse and read.items else \
             [dataclasses.replace(l, frame=frame) for l in read.lines]
@@ -632,17 +634,20 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
         except Exception:  # a measure only; never a reason to fail the page
             coverage = None
         covered = coverage is None or coverage >= _MIN_COVERAGE
+    needs_classification = need_more is not None
     if first and need_more is not None and first.text.strip() and not timed_out:
         try:
-            decided = len(first.text.strip()) >= 40 and not need_more(first.text)
+            decided = (len(first.text.strip()) >= 40 and not need_more(first.text)
+                       and (_accepted(first) or classify_page(first.text).document_type != "unknown"))
         except Exception:
             decided = False
+        needs_classification = not decided
         if decided and not (_accepted(first) and not small and covered):
             # Classified (or full of readable, plainly ordinary text) already: no other settings are tried.
             first.setting, first.variants, first.raw_confidence = tried[0], list(tried), first.confidence
             first.notes = {"engine": "tesseract", "stopped": "classified"}
             return first
-    if first and _accepted(first) and not small and covered:
+    if first and _accepted(first) and not small and covered and not needs_classification:
         first.setting, first.variants, first.raw_confidence = tried[0], list(tried), first.confidence
         first.notes = {"engine": "tesseract"}
         return first
@@ -670,13 +675,20 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
             return False
         text_so_far = current()[2] if candidates else best.text
         try:
-            return len(text_so_far.strip()) >= 40 and not need_more(text_so_far)
+            # Combining differently oriented text can bury a clear identity read under noise.
+            if len(best.text.strip()) >= 40 and classify_page(best.text).document_type != "unknown" and not need_more(best.text):
+                return True
+            confidence = current()[3] if candidates else best.confidence
+            return (len(text_so_far.strip()) >= 40 and not need_more(text_so_far)
+                    and (confidence >= _ACCEPT_CONFIDENCE or classify_page(text_so_far).document_type != "unknown"))
         except Exception:
             return False
 
     def settled() -> bool:
         if classified():
             return True
+        if need_more is not None:
+            return False
         if not candidates:
             return _accepted(best)
         lines, _, _, confidence, words, _ = current()
@@ -720,6 +732,25 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
 
         if first is not None and (first.confidence < 45 or first.words < 3) and not photo_like and can():
             attempt("orientation psm1", image, 1, dpi)
+
+        # Check orientation before expensive enhancements consume the page window. Sideways text can
+        # produce zero words or several confident fragments; neither is evidence that it is upright.
+        # Each attempt shares the original page deadline, and a classified/clear read stops the turns.
+        if not photo_like and not settled() and not timed_out:
+            for angle in (90, 270, 180):
+                if timed_out or deadline - time.monotonic() <= 0.3:
+                    break
+                turned = image.rotate(angle, expand=True, fillcolor=255)
+                try:
+                    rotated = attempt(f"rotate{angle} psm3", turned, 3, dpi, frame=f"rot{angle}")
+                    # A sheet can hold several cards facing different directions. A block read can find
+                    # the upright card even when automatic page layout follows the other card's text.
+                    if need_more is not None and not classified() and not timed_out and deadline - time.monotonic() > 0.3:
+                        rotated = attempt(f"rotate{angle} psm6", turned, 6, dpi, frame=f"rot{angle}")
+                finally:
+                    turned.close()
+                if classified() or (need_more is None and rotated is not None and _accepted(rotated) and rotated.words >= 8):
+                    break
 
         # The second local engine reads what Tesseract could not (photos of cards, textured backgrounds).
         if not timed_out and not settled() and second_opinion.available():
@@ -797,24 +828,6 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                 level = base.rotate(skew, resample=Image.BICUBIC, expand=True, fillcolor=255)
                 opened.append(level)
                 attempt("deskew psm3", level, 3, hi_dpi, frame="deskew")
-
-        # Sideways or upside-down text that never read well: turn the page and look again.
-        _, _, text, confidence, _, confident_words = current()
-        # Upright text always yields some confident words; only a page that yields none is worth turning.
-        if not photo_like and not settled() and confident_words < 6 and (confidence < 45 or len(text.strip()) < 60) and not timed_out \
-                and best.words >= 3 and time.monotonic() - ladder_start < LADDER_SECONDS + 3:
-            base = get_hi() or image
-            for angle in (90, 270, 180):
-                if timed_out or deadline - time.monotonic() <= 0.3:
-                    break
-                turned = base.rotate(angle, expand=True, fillcolor=255)
-                try:
-                    attempt(f"rotate{angle} psm3", turned, 3, hi_dpi, frame=f"rot{angle}")
-                finally:
-                    turned.close()
-                _, _, _, c2, w2, _ = current()
-                if c2 >= _ACCEPT_CONFIDENCE and w2 >= 8:
-                    break
 
         # Targeted passes: a passport's machine-readable zone, and an Aadhaar number.
         special_start = time.monotonic()
@@ -902,6 +915,8 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
 
     # The merged read replaces the single best read unless it lost real text.
     use_merged = bool(lines) and len(text.strip()) >= min(40, len(best.text.strip()))
+    if need_more is not None and classify_page(best.text).document_type != "unknown" and classify_page(text).document_type == "unknown":
+        use_merged = False
     if use_merged:
         result = OCRRead(text, confidence, words=words, good_words=good, text_height=best.text_height, lines=lines)
     else:
@@ -909,6 +924,9 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
     result.setting = best_name if not use_merged or len(candidates) <= 1 else "merged"
     result.variants = list(tried)
     result.raw_confidence = best.confidence
+    orientation = re.match(r"rotate(90|180|270)\b", best_name)
+    if orientation:
+        notes["rotation"] = int(orientation.group(1))
     result.notes = notes
     length = len(result.text.strip())
     if timed_out and not (length >= 40 and (result.confidence >= 45 or (length >= 150 and result.confidence >= 25))):

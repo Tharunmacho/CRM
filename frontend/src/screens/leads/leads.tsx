@@ -26,6 +26,7 @@ import { WaComposerHost } from '@/features/leads/components/wa-template'
 import { SKELETON_GRACE_MS, countText, listView, skeletonRows } from '@/features/leads/leads-view-model'
 import { CallDialog } from '@/features/leads/components/call-dialog'
 import { ConvertDialog } from '@/features/leads/components/convert-dialog'
+import { UnconvertDialog } from '@/features/leads/components/unconvert-dialog'
 import { AssignLeadsDialog } from '@/features/leads/components/assign-dialog'
 import { useLeadBulk } from '@/features/leads/use-lead-bulk'
 import { downloadLeadExport, gateFromRefusal, leadApi, uploadLeadResume } from '@/features/leads/lead-api'
@@ -67,6 +68,7 @@ export default function LeadsPage() {
   const [open, setOpen] = useState<Lead | null>(null)
   const [calling, setCalling] = useState<Lead | null>(null)
   const [converting, setConverting] = useState<Lead | null>(null)
+  const [unconverting, setUnconverting] = useState<Lead | null>(null)
   const [assigning, setAssigning] = useState<string[] | null>(null)
   const [forcedGate, setForcedGate] = useState<LeadGate | null>(null)
   const [fresh, setFresh] = useState('')
@@ -169,6 +171,7 @@ export default function LeadsPage() {
     onChangeStatus: bulk.openStatus,
     canDelete: me.role === 'admin',
     onDelete: bulk.openDelete,
+    onUnconvert: setUnconverting,
   }
   const allColumns = useMemo(() => leadColumns(context, extras), [me.id, me.role, gateMode, supervisor, store.users, extras]) // eslint-disable-line react-hooks/exhaustive-deps
   const fit = useMemo(() => fitColumns(allColumns, boxWidth, choices), [allColumns, boxWidth, choices])
@@ -310,7 +313,7 @@ export default function LeadsPage() {
         onClose={() => setOpen(null)} onChanged={() => data.refresh()}
         onLogCall={setCalling} onConvert={setConverting} onAssign={(lead) => setAssigning([lead.id])}
         onUploadResume={uploadResume} onGateRefusal={onGateRefusal}
-        canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onStatusChange={bulk.offerUndo}
+        canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo}
       />
       </SafeBoundary>
       {bulk.overlays}
@@ -318,6 +321,11 @@ export default function LeadsPage() {
       <CallDialog lead={calling} onClose={() => setCalling(null)} blockedReason={calling ? workBlock(context, calling) : null} onGateRefusal={onGateRefusal}
         onSaved={() => { setCalling(null); flash('Call saved.'); data.refresh() }} />
       <ConvertDialog lead={converting} onClose={() => setConverting(null)} blockedReason={converting ? workBlock(context, converting) : null} onGateRefusal={onGateRefusal} onChanged={() => data.refresh()} />
+      {me.role === 'admin' && <UnconvertDialog lead={unconverting} onClose={() => setUnconverting(null)} onSaved={(result) => {
+        setUnconverting(null); setOpen((current) => current?.id === result.lead.id ? result.lead : current)
+        bulk.clear(); data.refresh(); flash(`${result.lead.name} moved back to Lead.`)
+        void store.refresh({ keepCurrent: true }).catch(() => store.notify('Moved back to Lead. Reload the workspace to see the latest candidate list.', 'warn'))
+      }} />}
       <AssignLeadsDialog ids={assigning} users={store.users} onClose={() => setAssigning(null)}
         onSaved={(assigned, skipped) => { setAssigning(null); bulk.clear(); flash(`${assigned} ${assigned === 1 ? 'lead' : 'leads'} assigned${skipped ? `, ${skipped} skipped` : ''}.`); data.refresh() }} />
     </div>

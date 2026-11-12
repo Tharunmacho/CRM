@@ -119,7 +119,7 @@ def mapped_candidates(env, count, *, owner="asha", start=0):
 def finish_stage_one(env, app_id):
     """The real stage workflow: save the Prescreen result and complete it."""
     version = env.client.get(f"/api/applications/{app_id}/draft").json()["lockVersion"]
-    saved = env.client.put(f"/api/applications/{app_id}/draft", json={"data": {"result": "passed"}, "lock_version": version})
+    saved = env.client.put(f"/api/applications/{app_id}/draft", json={"data": {"result": "passed", "feedback": "Prescreen approved."}, "lock_version": version})
     assert saved.status_code == 200, saved.text
     done = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": saved.json()["lockVersion"]})
     assert done.status_code == 200, done.text
@@ -396,6 +396,7 @@ def finish(env, app_id, stage):
     """Complete any of the first three stages through the real endpoints."""
     values = {1: {"result": "passed"}, 2: {"forwarded": "yes"},
               3: {"scheduled": "yes", "date": "2026-11-10", "time": "10:00", "mode": "online"}}[stage]
+    values["feedback"] = f"Stage {stage} reviewed with candidate."
     version = env.client.get(f"/api/applications/{app_id}/draft").json()["lockVersion"]
     saved = env.client.put(f"/api/applications/{app_id}/draft", json={"data": values, "lock_version": version})
     assert saved.status_code == 200, saved.text
@@ -422,7 +423,7 @@ def test_every_moment_of_an_item_is_stored_for_reports(desk):
     # Saving a draft starts the work; finishing the stage completes the item in the same transaction.
     desk.clock["now"] = ist(date(2026, 11, 3), 10, 15)
     version = desk.client.get(f"/api/applications/{apps['c0']}/draft").json()["lockVersion"]
-    assert desk.client.put(f"/api/applications/{apps['c0']}/draft", json={"data": {"result": "passed"}, "lock_version": version}).status_code == 200
+    assert desk.client.put(f"/api/applications/{apps['c0']}/draft", json={"data": {"result": "passed", "feedback": "Prescreen approved."}, "lock_version": version}).status_code == 200
     assert item_rows(desk)["c0"].started_at == ist(date(2026, 11, 3), 10, 15)
     desk.clock["now"] = ist(date(2026, 11, 3), 10, 40)
     version = desk.client.get(f"/api/applications/{apps['c0']}/draft").json()["lockVersion"]

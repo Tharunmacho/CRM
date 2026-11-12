@@ -8,23 +8,25 @@ Authenticated users can view permitted originals. Candidate uploads require the 
 
 ## User journey
 
-1. Upload the original PDF, DOC, DOCX, JPG or PNG through the appropriate candidate/source field. Wait for storage confirmation before treating it as preserved.
-2. For resume/passport/Aadhaar extraction, inspect the reading status: queued, processing, ready, needs review or failed. Supporting photo/education/experience files can be retained without unnecessary identity OCR.
-3. Review detected document type and suggestions. Mixed-document handling should select the relevant pages, not send unrelated pages as the requested document.
-4. Apply and correct suggestions, retaining the original extraction evidence. Passport suggestions can take precedence for unedited identity fields; manual corrections remain authoritative.
+1. Upload the original PDF, DOC, DOCX, JPG or PNG through the appropriate candidate/source field. Wait for storage confirmation before treating it as preserved. Passport and Aadhaar accept several files, including front and back pages, together or one at a time. Each file has its own upload result; retrying failed uploads does not resend successful ones.
+2. In candidate entry, the application form and the profile, add all readable files/pages first, then press **Extract details** (or the entry screen's reading action). Saving these uploads does not start extraction automatically. Upload and reading statuses are separate: a stored file can be Uploaded while it is waiting to be read. Adding another page remains available while an earlier file is being read.
+3. Review each file's reading result and page coverage. Every page must be accounted for; continuation pages, including later resume employers and passport/Aadhaar back pages, must not disappear from the reading. Unresolved pages remain visible with their page numbers. Partial experience totals are labelled as incomplete, not presented as the whole resume.
+4. Correct permitted suggestions while retaining the original extraction evidence. A wrong-person document fills no fields, stays available for inspection and shows **Wrong document** with an action to upload the correct file. It does not satisfy the accepted-document checklist and cannot be manually marked accepted or sent through Extract details again. Manual field corrections remain authoritative when a correct file is read later.
 5. Save or finish the candidate intake. Open the profile's documents and download the original to confirm it is the uploaded file.
-6. Replace a file when a corrected resume or new passport arrives. Inspect version history rather than expecting the old bytes to be overwritten.
-7. In a stage, upload through that stage's file field and wait for its genuine saved attachment before completing the stage.
+6. Replace a resume when a corrected version arrives, or add the next passport/Aadhaar file. Inspect retained files and version history rather than expecting old bytes to be overwritten. View and Download appear only for actual saved files.
+7. Stages move manually after saved feedback and confirmation; documents are not mandatory stage gates. A pending checklist item can be marked uploaded manually with an optional note and attribution, then returned to pending when no file is attached. A manual mark creates no file, extraction or invoice; automatic invoicing still requires an actual ticket file.
 
 ## Screen and backend contract
 
 Original storage records provenance, checksum and immutable versions. Duplicate content can reuse verified processing where allowed, but every source receipt keeps its own provenance. Storage supports the configured local/S3 adapter. Checksums guard reuse of missing or altered cached evidence.
 
-Durable document jobs keep checkpoints so browser reload or worker restart does not discard the original or redo a committed save. The backend validates actual attachment ownership/association; a fabricated file-shaped object or another stage's attachment cannot satisfy a required upload. Every published replacement retains actor/time/version history.
+Durable document jobs keep checkpoints so browser reload or worker restart does not discard the original or redo a committed save. Candidate form/profile uploads send `defer_extraction=true`; the form exposes `capabilities.deferredDocumentReading`. `POST /api/candidates/{id}/application-form/extract` with `attachmentIds` queues the selected owned files together and safely reuses existing jobs on repeated requests. Automated intake keeps its own ingestion rules; lead conversion uses the separate **Check resume** gate described in [Lead sheet](23-lead-sheet.md).
+
+The backend validates actual attachment ownership/association; a fabricated file-shaped object or another stage's attachment is rejected if supplied. Every published replacement retains actor/time/version history. Application-form upload evidence and Aadhaar are optional; the empty Application form row does not create a pending item or reduce completeness.
 
 ## Recovery and handoffs
 
-A reading failure must leave the original available and offer the permitted retry/manual-entry path. Do not require OCR success to save valid manually entered details. If a candidate saved before an upload failed, retry against that candidate. If upload succeeded but stage completion failed, retain the attachment and correct the completion error. Do not manufacture a new version merely to retry an uncertain completion.
+A reading failure leaves the original available and offers the permitted explicit retry/manual-entry path; a known wrong-person file requires a correct replacement instead. OCR success is not required to save valid manually entered candidate details, while an attached lead resume must pass its identity check before conversion. If a candidate saved before an upload failed, retry against that candidate. If upload succeeded but stage completion failed, retain the attachment and correct the completion error. Do not manufacture a new version merely to retry an uncertain completion.
 
 ## Acceptance checklist
 
@@ -32,6 +34,8 @@ A reading failure must leave the original available and offer the permitted retr
 
 - [ ] Upload each supported source format and inspect its original download.
 - [ ] Exercise a mixed resume/passport document and an unsupported/corrupt file.
+- [ ] Add front and back files one at a time: no reading starts until Extract details; every retained file and unresolved page remains visible.
+- [ ] A rejected identity fills no fields, remains viewable, cannot be retried or manually accepted, and does not count as an accepted document.
 - [ ] Reload during processing and resume the same durable job.
 - [ ] Replace a document twice; all original versions remain available.
 - [ ] Attempt to complete a stage with a foreign or fabricated attachment; it is rejected.

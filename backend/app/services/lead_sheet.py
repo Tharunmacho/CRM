@@ -316,7 +316,7 @@ def get_lead_detail(db: Session, user: User, lead_id: str) -> dict:
 def load_lead(db: Session, lead_id: str, *, lock: bool = False) -> Lead:
     statement = select(Lead).where(Lead.id == lead_id)
     if lock:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     lead = db.scalar(statement)
     if lead is None:
         raise fail(404, "not_found", "This lead was not found.")
@@ -585,13 +585,16 @@ def candidate_body(lead: Lead, overrides: dict, user: User, assign_to: str | Non
     return body
 
 
-def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume: UploadFile | None) -> dict:
+def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume: UploadFile | None, *, resume_check_id: str | None = None) -> dict:
     from pydantic import ValidationError
-    from app.api.routers import candidates as cand_router, files as files_router
+    from app.api.routers import candidates as cand_router
+    cand_router.lock_assignment_cursor(db)
     lead = load_lead(db, lead_id, lock=True)
     ensure_can_work_lead(db, lead, user)
     if lead.status == "converted":
         raise fail(409, "already_converted", "This lead is already converted to a candidate.")
+    from app.services import lead_resume_check
+    verified_job_id = lead_resume_check.require_verified(db, user, lead, resume, resume_check_id, overrides)
     assign_to = None
     if user.role in (Role.admin, Role.manager):
         wanted = overrides.get("assignTo") or lead.owner_id
@@ -607,9 +610,8 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
     except ValidationError as exc:
         first = exc.errors()[0]
         raise fail(422, "invalid_request", str(first.get("msg", "Check the lead's details")).replace("Value error, ", "")) from None
-    db.rollback()  # release the row lock; create_candidate takes its own locks and commits
     try:
-        created = cand_router.create_candidate(body, db, user)
+        created = cand_router.create_candidate_record(body, db, user, commit=False)
     except HTTPException as exc:
         detail = exc.detail
         if exc.status_code == 409 and isinstance(detail, dict) and "candidate" in detail:
@@ -619,29 +621,13 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
         raise
     candidate = db.get(Candidate, created.id)
     resume_attached, resume_error = False, None
-    try:
-        if resume is not None and resume.filename:
-            files_router.upload(entity_type="candidate", entity_id=candidate.id, slot="resume", file=resume, db=db, user=user)
+    if verified_job_id:
+        try:
+            lead_resume_check.attach_verified(db, user, candidate, verified_job_id, lead)
             resume_attached = True
-        else:
-            existing = db.scalar(select(Attachment).where(Attachment.entity_type == "lead", Attachment.entity_id == lead_id_, Attachment.slot == "resume")
-                                 .order_by(Attachment.version.desc()).limit(1))
-            if existing is not None:
-                from app.services.application_form import queue_reading
-                copy = Attachment(id=str(uuid.uuid4()), entity_type="candidate", entity_id=candidate.id, slot="resume", version=1,
-                                  file_name=existing.file_name, size_kb=existing.size_kb, content_type=existing.content_type,
-                                  object_key=existing.object_key, content_hash=existing.content_hash, uploaded_by=user.id)
-                db.add(copy)
-                db.flush()
-                queue_reading(db, user, candidate, copy, existing.content_type or "application/octet-stream")
-                db.commit()
-                resume_attached = True
-    except HTTPException as exc:
-        db.rollback()
-        resume_error = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-    except Exception:
-        db.rollback()
-        resume_error = "The resume could not be attached. Upload it from the candidate's page."
+        except Exception:
+            db.rollback()
+            raise fail(409, "resume_verification_required", "The checked resume could not be attached. No candidate was created. Check it again and retry.") from None
     lead = load_lead(db, lead_id_, lock=True)
     lead.status, lead.candidate_id = "converted", candidate.id
     lead.updated_at = datetime.now(timezone.utc)
@@ -649,7 +635,7 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
                   "formName": lead.form_name, "platform": lead.platform}
     log_activity(db, lead.id, user.id, "convert", f"Converted to candidate {candidate.ref}",
                  {**provenance, "candidateId": candidate.id, "candidateRef": candidate.ref,
-                  "from": lead_status_before, "resumeAttached": resume_attached})
+                  "from": lead_status_before, "resumeAttached": resume_attached, "initialTaskId": created.task_id})
     db.add(AuditEntry(actor_id=user.id, action="Converted lead to candidate", target=candidate.name,
                       entity_type="candidate", entity_id=candidate.id, meta=provenance))
     lead_matching.clear_self_match(lead)

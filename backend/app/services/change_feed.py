@@ -56,6 +56,9 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "crm_applications": ("applications",),
     "crm_application_stages": ("applications",),
     "crm_application_feedback": ("feedback",),  # recruiter notes on the application form
+    "crm_invoice_settings": ("candidates", "reports"),
+    "crm_candidate_invoices": ("candidates", "documents", "reports"),
+    "crm_invoice_payments": ("candidates", "reports"),
     "workflow_tasks": ("tasks",),
     "workflow_task_remarks": ("tasks",),
     "workflow_task_events": ("tasks",),
@@ -145,7 +148,10 @@ CLIENT_TOPICS = frozenset({
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
 ID_ROLES = frozenset({"admin", "manager"})
 # Candidate ids touched through related tables, so an open profile knows its candidate moved.
-_CANDIDATE_LINKS = {"crm_applications": "candidate_id", "workflow_tasks": "candidate_id"}
+_CANDIDATE_LINKS = {"crm_applications": "candidate_id", "workflow_tasks": "candidate_id", "crm_candidate_invoices": "candidate_id"}
+# These records invalidate screens but their own ids are neither candidate nor document ids.
+# Invoice rows still contribute their actual candidate_id through _CANDIDATE_LINKS.
+_TOPIC_ONLY_IDS = frozenset({"crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments"})
 
 
 def enabled() -> bool:
@@ -208,7 +214,7 @@ class Pending:
     def note_object(self, table: str, row_id: str | None, owner: str | None, candidate_id: str | None) -> None:
         topics = TOPIC_TABLES.get(table, ())
         for topic in topics:
-            if row_id:
+            if row_id and table not in _TOPIC_ONLY_IDS:
                 self.ids.setdefault(topic, set()).add(row_id)
         scoped = OWNER_COLUMN.get(table)
         if scoped:
@@ -249,6 +255,18 @@ def _pending(info: dict) -> Pending:
     if pending is None:
         pending = info[_KEY] = Pending()
     return pending
+
+
+def announce_document_status(db, candidate_id):
+    """A checklist confirmation is stored in audit history but changes the document views."""
+    connection = db.connection()
+    from app.services.response_cache import note_transaction_topics
+    note_transaction_topics(connection, ("candidates", "documents", "reports"))
+    if not enabled() or not _postgres(connection):
+        return
+    pending = _pending(connection.info)
+    pending.topics.update(("candidates", "documents", "reports"))
+    pending.note_object("crm_candidates", candidate_id, None, candidate_id)
 
 
 # ------------------------------------------------------------------ what a given user may be told

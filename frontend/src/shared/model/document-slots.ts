@@ -8,9 +8,9 @@ export interface DocumentSlot {
   slot: string
   label: string
   hint: string
-  /** Only the resume and the passport are read by the document reader. */
+  /** Resume, passport and Aadhaar files can be read after staff start extraction. */
   readable: boolean
-  /** More than one file may be kept (Other documents). */
+  /** More than one file may be kept (Passport, Aadhaar and Other documents). */
   multiple: boolean
   /** Always counted towards the form's completeness. */
   always: boolean
@@ -20,9 +20,10 @@ export interface DocumentSlot {
 }
 
 export const DOCUMENT_SLOTS: DocumentSlot[] = [
-  { slot: 'application_form', label: 'Application form', hint: 'The completed candidate application form.', readable: false, multiple: false, always: true, fromStage: null },
+  { slot: 'application_form', label: 'Application form', hint: 'Optional. A previously uploaded candidate application form.', readable: false, multiple: false, always: false, fromStage: null },
   { slot: 'resume', label: 'Resume', hint: 'Name, contact, education and experience are read from it.', readable: true, multiple: false, always: true, fromStage: null },
-  { slot: 'passport', label: 'Passport', hint: 'Number, dates, place of issue and father\'s name are read from it.', readable: true, multiple: false, always: true, fromStage: null },
+  { slot: 'passport', label: 'Passport', hint: 'Add the photo page, address page and other passport pages. Every file is kept.', readable: true, multiple: true, always: true, fromStage: null },
+  { slot: 'aadhaar', label: 'Aadhaar copy', hint: 'Optional. Add the front and back pages, then extract the details.', readable: true, multiple: true, always: false, fromStage: null },
   { slot: 'medical', label: 'Medical', hint: 'The medical report.', readable: false, multiple: false, always: false, fromStage: 6 },
   { slot: 'signed_offer', label: 'Signed offer', hint: 'The offer letter signed by the candidate.', readable: false, multiple: false, always: false, fromStage: 5 },
   { slot: 'pcc', label: 'Police clearance certificate (PCC)', hint: 'Needed once the passport stage starts.', readable: false, multiple: false, always: false, fromStage: 7 },

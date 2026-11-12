@@ -44,7 +44,7 @@ export function CountryInput({ value, onChange, options }: { value: string; onCh
  * website, then the contact person) and the CRM recruiters who look after the client. Editing changes the same things, and
  * the company's name, website and country are saved on its record too (all its other details are sent back unchanged).
  */
-export function ClientDialog({ client, onClose }: { client?: Client; onClose: () => void }) {
+export function ClientDialog({ client, onClose, onSaved }: { client?: Client; onClose: () => void; onSaved?: (record: Client & { company: Company }) => void }) {
   const store = useStore()
   const countries = useCountryOptions()
   const [form, setForm] = useState({
@@ -85,7 +85,8 @@ export function ClientDialog({ client, onClose }: { client?: Client; onClose: ()
           })
         }
       } else {
-        await api.post<Client & { company: Company }>('/clients', { ...form, staffIds, company: { name: employer.name, website: web.value, address: '', state: '', country: form.country, city: '' } })
+        const record = await api.post<Client & { company: Company }>('/clients', { ...form, staffIds, company: { name: employer.name, website: web.value, address: '', state: '', country: form.country, city: '' } })
+        onSaved?.(record)
       }
       // The save is done: close now and let the list catch up in the background.
       refreshMasterDataInBackground(store, 'Client saved')

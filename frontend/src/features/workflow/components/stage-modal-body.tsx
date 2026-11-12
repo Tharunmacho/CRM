@@ -62,25 +62,34 @@ import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
 
 /**
- * One scrolling application: completed sections are collapsed, the current stage
- * is editable, and later stages stay hidden until the workflow advances.
+ * One scrolling application: completed sections keep their saved feedback,
+ * the current stage is editable, and all later stages remain visible for reference.
  */
 export function StageModal({
   applicationId,
   open,
   onClose,
   focusStage,
+  embedded = false,
+  onDirtyChange: reportDirty,
+  onBusyChange: reportBusy,
+  onStageChanged,
 }: {
   applicationId: string | null
   open: boolean
   onClose: () => void
   /** Open this stage's section (expanded) and scroll to it, e.g. when a task for that stage was clicked. */
   focusStage?: number
+  /** Show only the selected stage inside the candidate's recruitment card. */
+  embedded?: boolean
+  onDirtyChange?: (dirty: boolean) => void
+  onBusyChange?: (busy: boolean) => void
+  onStageChanged?: () => void
 }) {
   const store = useStore()
   const snapshot = useWorkspaceReady(open && applicationId ? `stage:${applicationId}` : null)
   useEffect(() => {
-    if (!open || !focusStage || !snapshot.ready) return
+    if (embedded || !open || !focusStage || !snapshot.ready) return
     const timer = window.setTimeout(() => {
       const section = document.querySelector<HTMLElement>(`[data-sm-stage="${focusStage}"]`)
       if (!section) return
@@ -88,17 +97,17 @@ export function StageModal({
       section.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }, 80)
     return () => window.clearTimeout(timer)
-  }, [open, focusStage, snapshot.ready, applicationId])
+  }, [open, focusStage, snapshot.ready, applicationId, embedded])
   // Open on the stage that needs work: finished stages stay collapsed above, so the current one is the first thing you edit.
   useEffect(() => {
-    if (!open || !snapshot.ready || focusStage) return
+    if (embedded || !open || !snapshot.ready || focusStage) return
     const timer = window.setTimeout(() => {
       const steps = document.querySelectorAll<HTMLElement>('.sm-timeline > .sm-step')
       const target = document.querySelector<HTMLElement>('.sm-timeline > .sm-step.is-current') ?? steps[steps.length - 1]
       target?.scrollIntoView({ block: 'start' })
     }, 120)
     return () => window.clearTimeout(timer)
-  }, [open, snapshot.ready, applicationId])
+  }, [open, snapshot.ready, applicationId, embedded])
   const app = store.applications.find((a) => a.id === applicationId)
   // Who reopened an earlier try, and when. A failed read is not an error: the reason is still shown.
   const [reopenings, setReopenings] = useState<Reopening[]>([])
@@ -118,6 +127,9 @@ export function StageModal({
   const [pending, setPending] = useState(false)
   const [reopening, setReopening] = useState(false)
 
+  useEffect(() => { reportDirty?.(dirty); return () => reportDirty?.(false) }, [dirty, reportDirty])
+  useEffect(() => { reportBusy?.(pending || reopening); return () => reportBusy?.(false) }, [pending, reopening, reportBusy])
+
   useEffect(() => {
     if (!open || !applicationId) return
     let live = true
@@ -135,7 +147,10 @@ export function StageModal({
   const order = app ? store.order(app.orderId) : undefined
   const client = order ? store.company(order.companyId) : undefined
   const designation = order ? store.designation(order.designationId) : undefined
-  if (!snapshot.ready || !app || !cand || !order || !client || !designation) return <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}><div className="sm sm-state"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the stages…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" variant="primary" onClick={snapshot.retry}>Refresh</Button>}</div></Dialog>
+  if (!snapshot.ready || !app || !cand || !order || !client || !designation) {
+    const state = <div className="sm sm-state"><p role={snapshot.error ? 'alert' : 'status'} className="text-sm text-ink-600">{snapshot.error || (!snapshot.ready ? 'Loading the stages…' : 'We could not find this order for the candidate any more. Refresh and try again.')}</p>{(snapshot.error || snapshot.ready) && <Button className="mt-4" variant="primary" onClick={snapshot.retry}>Refresh</Button>}</div>
+    return embedded ? state : <Dialog open={open} onClose={onClose} title={cand?.name ?? 'Stages for this order'} description={cand ? 'Stages for this order' : undefined}>{state}</Dialog>
+  }
   const owner = store.user(cand.ownerId)
 
   const canWork = canWorkCandidate(store.me, cand)
@@ -145,6 +160,27 @@ export function StageModal({
   const live = app.status === 'active' ? app.currentStage : null
   const doneStages = STAGES.filter((definition) => effective.some((record) => record.stage === definition.no) && definition.no !== live)
   const recorded = new Set(effective.map((record) => record.stage)).size
+
+  if (embedded) {
+    if (!open) return null
+    const selectedStage = stageByNo(focusStage ?? app.currentStage) ?? stageByNo(app.currentStage)
+    const selectedRecords = app.stages.filter((record) => record.stage === selectedStage.no).sort((a, b) => b.attempt - a.attempt)
+    const activeRecords = selectedRecords.filter((record) => !record.reopenedReason)
+    const current = live === selectedStage.no
+    return <div className="sm sm-embedded" data-sm-stage={selectedStage.no}>
+      {!canWork && <p className="sm-note"><Lock className="h-4 w-4" aria-hidden="true" />{readOnlyReason}</p>}
+      {!owner?.active && <p className="sm-note">Assign an active recruiter before moving or reopening a stage. You can still save a draft.</p>}
+      {fileError && <p className="sm-alert" role="alert">We could not load the documents. Feedback is still available. <button type="button" className="underline" onClick={() => setFileRetry((value) => value + 1)}>Retry documents</button></p>}
+      {current ? <CurrentStage key={`${app.id}-${app.currentStage}-${app.stages.length}`} app={app} canWork={canWork && !reopening} onDirtyChange={setDirty} onBusyChange={setPending} files={files} onUploaded={(file) => setFiles((items) => [...items.filter((item) => item.id !== file.id), file])} onStageChanged={onStageChanged} compact />
+        : <section className="sm-card sm-inline-history">
+          <header className="sm-inline-title"><div><small>Stage {selectedStage.no} of {STAGES.length}</small><h3>{selectedStage.title}</h3></div><Badge tone={activeRecords.length ? 'green' : 'neutral'} variant="dot">{activeRecords.length ? 'Saved history' : 'Not started'}</Badge></header>
+          {selectedRecords.length === 0 && <p className="sm-hint">No feedback has been saved for this stage yet. {app.status === 'active' ? `Complete stage ${app.currentStage} to continue in order.` : 'Reopen the application to continue working on its stages.'}</p>}
+          {selectedRecords.map((record) => <div className="sm-inline-attempt" key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}
+          {activeRecords.length > 0 && <ReopenStage app={app} stage={selectedStage.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Discard unsaved feedback and reopen this stage?')} onStageChanged={onStageChanged} />}
+        </section>}
+      {current && selectedRecords.length > 0 && <details className="sm-extra"><summary>Earlier feedback and attempts ({selectedRecords.length})</summary><div className="mt-4 space-y-6">{selectedRecords.map((record) => <div key={`${record.stage}-${record.attempt}`}>{record.reopenedReason && <ReopenedNote record={record} reopenings={reopenings} />}<CompletedStage record={record} files={files} app={app} /></div>)}</div></details>}
+    </div>
+  }
 
   return (
     <Dialog
@@ -166,7 +202,7 @@ export function StageModal({
             </p>
           )}
 
-          <ol className="sm-timeline" aria-label="Stages so far">
+          <ol className="sm-timeline" aria-label="All recruitment stages">
             {fileError && <li className="sm-alert" role="alert">We could not load the files. <button type="button" className="underline" onClick={() => setFileRetry((v) => v + 1)}>Try again</button></li>}
             {doneStages.map((definition) => {
               const records = effective.filter((record) => record.stage === definition.no)
@@ -181,7 +217,7 @@ export function StageModal({
                     <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
                   </summary>
                   <div className="sm-done-body">{records.map((record) => <CompletedStage key={`${record.stage}-${record.attempt}`} record={record} files={files} app={app} />)}
-                    <ReopenStage app={app} stage={definition.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Reopening replaces the stage you are on and throws away changes you have not saved. Continue?')} />
+                    <ReopenStage app={app} stage={definition.no} disabled={pending || reopening || !owner?.active} onBusyChange={setReopening} beforeReopen={() => !dirty || window.confirm('Reopening replaces the stage you are on and throws away changes you have not saved. Continue?')} onStageChanged={onStageChanged} />
                   </div>
                 </details>
               </li>
@@ -208,6 +244,7 @@ export function StageModal({
                   onBusyChange={setPending}
                   files={files}
                   onUploaded={(file) => setFiles((current) => [...current.filter((item) => item.id !== file.id), file])}
+                  onStageChanged={onStageChanged}
                 />
               </li>
             ) : app.status === 'deployed' ? (
@@ -215,6 +252,18 @@ export function StageModal({
             ) : (
               <li className="sm-step is-closed"><span className="sm-node" aria-hidden="true"><CircleSlash className="h-4 w-4" /></span><ClosedRow app={app} /></li>
             )}
+            {STAGES.filter((definition) => definition.no > app.currentStage && !effective.some((record) => record.stage === definition.no)).map((definition) => (
+              <li key={definition.no} className="sm-step is-upcoming" data-sm-stage={definition.no}>
+                <span className="sm-node" aria-hidden="true">{definition.no}</span>
+                <details className="sm-card">
+                  <summary className="sm-summary">
+                    <span className="sm-summary-copy"><b>{definition.no}. {definition.title}</b><span>Not started</span></span>
+                    <ChevronDown className="sm-chev h-4 w-4" aria-hidden="true" />
+                  </summary>
+                  <div className="sm-done-body"><p className="sm-hint">{definition.summary}</p><p className="sm-hint">No feedback has been saved for this stage. {app.status === 'active' ? 'Save feedback and complete the current stage to continue in order.' : 'The application must be reopened before work can continue.'}</p></div>
+                </details>
+              </li>
+            ))}
           </ol>
 
           {superseded.length > 0 && <details className="sm-extra">
@@ -296,7 +345,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
   const statusTone = app.status === 'closed' ? 'stamp' : app.status === 'deployed' ? 'green' : 'navy'
   const statusLabel = app.status === 'active' ? 'Active' : app.status === 'deployed' ? 'Deployed' : 'Closed'
   const progressLead = app.status === 'active' ? `Stage ${app.currentStage} of ${STAGES.length} · ${stageByNo(app.currentStage).title}` : app.status === 'deployed' ? 'Deployed' : `Closed at stage ${app.currentStage}${app.closureReason ? ` · ${closureLabels[app.closureReason]}` : ''}`
-  const progressText = app.status === 'active' ? 'Finish it below to open the next stage.' : app.status === 'deployed' ? 'All 11 stages are done.' : 'This order is closed for this candidate. Saved results and documents are below.'
+  const progressText = app.status === 'active' ? 'Write feedback and choose Save and move to advance manually. Documents are optional for stage movement.' : app.status === 'deployed' ? 'All 11 stages are done. Open any stage to read its saved feedback.' : 'This order is closed for this candidate. Saved feedback, results and documents are below.'
   return (
     <>
       <header className="sm-head">
@@ -469,12 +518,14 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
           ))}
       </dl>
 
+      {!record.data.feedback && <p className="sm-hint">No stage feedback was recorded for this earlier attempt.</p>}
+
       <p className="sm-hint">Saved attempts cannot be changed. If an admin reopens the stage, these details and files stay on record.</p>
     </section>
   )
 }
 
-function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen }: { app: Application; stage: number; disabled: boolean; onBusyChange: (busy: boolean) => void; beforeReopen: () => boolean }) {
+function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen, onStageChanged }: { app: Application; stage: number; disabled: boolean; onBusyChange: (busy: boolean) => void; beforeReopen: () => boolean; onStageChanged?: () => void }) {
   const store = useStore()
   const [editing, setEditing] = useState(false)
   const [reason, setReason] = useState('')
@@ -491,7 +542,7 @@ function ReopenStage({ app, stage, disabled, onBusyChange, beforeReopen }: { app
       if (!store.isCurrentSession()) return
       setSaved(true)
       store.notify(`Stage ${stage} reopened. Earlier tries stay on record.`)
-      try { await store.refresh({ keepCurrent: true }) }
+      try { await store.refresh({ keepCurrent: true }); onStageChanged?.() }
       catch { setError('Reopened. Refresh to see the current stage.') }
     } catch (cause) {
       if (store.isCurrentSession()) setError(cause instanceof Error ? cause.message : 'We could not reopen the stage. Please try again.')
@@ -532,6 +583,8 @@ function CurrentStage({
   onBusyChange,
   files,
   onUploaded,
+  compact = false,
+  onStageChanged,
 }: {
   app: Application
   canWork: boolean
@@ -539,6 +592,8 @@ function CurrentStage({
   onBusyChange: (busy: boolean) => void
   files: ApplicationFile[]
   onUploaded: (file: ApplicationFile) => void
+  compact?: boolean
+  onStageChanged?: () => void
 }) {
   const store = useStore()
   const { addRemark } = store
@@ -597,7 +652,7 @@ function CurrentStage({
   }
 
   const refreshAfterWrite = async () => {
-    try { await store.refresh({ keepCurrent: true }); setRefreshRequired(false); setError('') }
+    try { await store.refresh({ keepCurrent: true }); setRefreshRequired(false); setError(''); onStageChanged?.() }
     catch { if (store.isCurrentSession()) { setRefreshRequired(true); setError('Your change is saved. Refresh to see the latest.') } }
   }
 
@@ -621,11 +676,16 @@ function CurrentStage({
     if (uploading || busy || completed || !ownerActive) return
     setAttempted(true)
     if (!result.canComplete) return
+    const destination = result.repeats ? 'save this medical attempt and plan another medical'
+      : result.closes ? `close this order for the candidate: ${result.closes.label}`
+      : def.no < STAGES.length ? `move to stage ${def.no + 1}: ${stageByNo(def.no + 1).title}`
+      : 'mark this candidate as Deployed'
+    if (!window.confirm(`Save your feedback for ${def.title} and ${destination}?`)) return
     setBusy(true)
     setError(''); setConflict(null)
     try {
       // The server validates and records exactly these values in one transaction.
-      await api.post(`/applications/${app.id}/complete`, { data, lock_version: lockVersion })
+      await api.post(`/applications/${app.id}/complete`, { data: { ...data, feedback: String(data.feedback).trim() }, lock_version: lockVersion })
       if (!store.isCurrentSession()) return
       setDirty(false)
       setCompleted(true)
@@ -637,7 +697,7 @@ function CurrentStage({
   }
 
   // Short fields (Yes/No, date, time, choices) sit side by side on a 12-column grid; long ones take the whole row.
-  const visibleFields = def.fields.filter((f) => fieldVisible(f, data))
+  const visibleFields = def.fields.filter((f) => f.name !== 'feedback' && fieldVisible(f, data))
   const fieldSpan = fieldSpans(visibleFields)
   const ready = result.canComplete && !result.closes && !result.repeats
   const checkState = result.canComplete ? (result.closes ? 'is-closes' : 'is-ready') : ''
@@ -659,26 +719,33 @@ function CurrentStage({
           <div className="min-w-0">
             <p className="sm-current-label"><CircleDot className="h-3.5 w-3.5" aria-hidden="true" />Current stage · {def.no} of {STAGES.length}</p>
             <h3>{def.title}</h3>
-            <p>{def.summary}</p>
+            {!compact && <p>{def.summary}</p>}
           </div>
-          {task && (
+          {task && !compact && (
             <div className="sm-sla">
               <SlaMeter startedAt={taskClockStart(task)} title={task.title} due={dateTimeLabel(task.dueAt)} />
             </div>
           )}
         </header>
 
-        <div className={cn('sm-check', checkState)} aria-live="polite">
+        {(!compact || attempted) && <div className={cn('sm-check', checkState)} aria-live="polite">
           <span className="sm-check-icon" aria-hidden="true">{result.closes ? <AlertTriangle className="h-4 w-4" /> : ready || result.repeats ? <CheckCircle2 className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}</span>
           <div className="min-w-0">
-            <b>{result.canComplete ? 'Ready to save the result' : 'Before you can finish this stage'}</b>
+            <b>{result.canComplete ? 'Ready to save feedback and move' : 'Write feedback before moving this stage'}</b>
             {result.missing.length > 0
               ? <ul>{result.missing.map(item => <li key={item}>{item}</li>)}</ul>
               : <p>{result.repeats ? 'This saves the medical result and sets up the next medical task.' : result.closes ? `This closes the order for this candidate: ${result.closes.label}. Work done so far stays on record.` : def.no < STAGES.length ? `Next: stage ${def.no + 1}, ${stageByNo(def.no + 1).title}. A new task is created when you finish this stage.` : 'This finishes the deployment and adds one to the order’s filled openings.'}</p>}
           </div>
+        </div>}
+
+        <div className="sm-feedback">
+          <StageFieldInput field={def.fields.find((field) => field.name === 'feedback')!} value={data.feedback} onChange={(value) => set('feedback', value)} disabled={!canWork || busy || completed} applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
+          {!compact && <p className="sm-hint">Only you move the stage. Missing documents will stay pending in the document checklist.</p>}
         </div>
 
-        <div className="sm-form">
+        <details className="sm-stage-details">
+          <summary>Outcome and additional details <span>Optional</span></summary>
+          <div className="sm-form">
           {visibleFields.map((f, index) => (
             <div key={f.name} className={`sm-c${fieldSpan[index]}`}>
               <StageFieldInput
@@ -694,9 +761,10 @@ function CurrentStage({
               />
             </div>
           ))}
-        </div>
+          </div>
+        </details>
 
-        {def.closer && (
+        {def.closer && (!compact || result.closes) && (
           <p className="sm-form-note">
             <AlertTriangle className="h-4 w-4" aria-hidden="true" />
             <span>If this stage ends with a closing result, the order closes for the candidate. They go back to the Data Bank and can be matched to another order.</span>
@@ -711,8 +779,7 @@ function CurrentStage({
 
         <footer className="sm-foot">
           <span className="sm-foot-meta">
-            Save draft keeps what you typed. {result.closes ? 'The last button saves the result and closes the order.' : 'Complete stage saves the result and moves on.'}
-            {def.repeatable && ' This stage can be done again.'}
+            {compact ? 'Feedback stays in this stage’s history.' : <>Save draft keeps your feedback here. {result.closes ? 'Save and close records your feedback and closes the order.' : 'Save and move records your feedback and advances only after you confirm.'}{def.repeatable && ' This stage can be done again.'}</>}
           </span>
           <div className="sm-foot-actions">
             {uploading ? <span role="status" className="sm-unsaved">Uploading files…</span> : dirty && <span className="sm-unsaved">Changes not saved</span>}
@@ -725,14 +792,14 @@ function CurrentStage({
               disabled={!canWork || busy || uploading || completed || refreshRequired || !ownerActive}
               icon={result.closes ? <CircleSlash className="h-4 w-4" /> : <Check className="h-4 w-4" />}
             >
-              {result.repeats ? 'Save result and plan another medical' : result.closes ? `Finish and close: ${result.closes.label}` : 'Complete stage'}
+              {busy ? 'Saving…' : result.repeats ? 'Save feedback and plan another medical' : result.closes ? 'Save and close order' : def.no === STAGES.length ? 'Save and mark Deployed' : 'Save and move'}
             </Button>
           </div>
         </footer>
       </section>
 
       {/* Daily remarks live beside the stage, because that is where staff are working. */}
-      {task && (
+      {task && !compact && (
         <section className="sm-card sm-remarks" aria-label="Daily updates">
           <header>
             <h4>Daily updates</h4>
@@ -874,6 +941,8 @@ function StageFieldInput({
             value={(value as string) ?? ''}
             placeholder={field.placeholder}
             onChange={(e) => onChange(e.target.value)}
+            maxLength={field.name === 'feedback' ? 10000 : undefined}
+            aria-required={field.required || undefined}
             disabled={disabled}
           />
         </Field>

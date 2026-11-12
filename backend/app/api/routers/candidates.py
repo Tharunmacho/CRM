@@ -32,6 +32,8 @@ from app.services.candidate_matching import match_candidates
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
 from app.db.models import _uuid
+from app.services.document_reading import pending_expression
+from app.services.document_identity import rejected_expression
 from app.db.models import (
     Application,
     ApplicationStatus,
@@ -40,6 +42,8 @@ from app.db.models import (
     AuditEntry,
     Candidate,
     CandidateStatus,
+    CandidateInvoice,
+    InvoicePayment,
     DocumentExtractionJob,
     DocumentPersonGroup,
     EmailIngestionJob,
@@ -65,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 def candidate_filters(q: str = Query(default="", max_length=500), pool: Pool = "all",
                       skills: list[str] = Query(default=[]), skill_mode: Literal["all", "any"] = "all", missing_skills: bool = False,
-                      column_filters: str = Query(default="{}", max_length=5000), sort: str = "added", direction: Literal["asc", "desc"] = "desc",
+                      column_filters: str = Query(default="{}", max_length=5000), sort: str = "new_first", direction: Literal["asc", "desc"] = "desc",
                       staff: str | None = Query(default=None, max_length=36), position_id: str = Query(default="", max_length=36)):
     if len(skills) > 50 or any(len(skill) > 200 for skill in skills):
         raise HTTPException(422, "Select at most 50 skills of at most 200 characters each.")
@@ -197,13 +201,15 @@ def candidate_detail(candidate_id: str, response: Response,
     from app.api.routers.data import DOCUMENT_SLOTS, FORM_DOCUMENT_SLOTS, _candidate_out
     from app.db.models import Attachment
     from app.services.desk_snapshot import _fields, _rows
+    from app.services.document_status import latest_statement, statuses_by_candidate
 
     statement = select(
         _rows("candidate", _fields(Candidate, CandidateDetailOut, "created_at", "call_called",
             "call_interested", "call_remarks", "call_recorded_at").where(Candidate.id == candidate_id)),
         _rows("files", select(Attachment.id, Attachment.entity_id, Attachment.slot, Attachment.version,
-            Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at)
+            Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at, pending_expression(), rejected_expression())
             .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id), ("version", False)),
+        _rows("manual_documents", latest_statement([candidate_id])),
     )
     result = db.execute(statement).mappings().one()
     if not result["candidate"]:
@@ -212,7 +218,8 @@ def candidate_detail(candidate_id: str, response: Response,
     for attachment in result["files"] or []:
         files.setdefault((candidate_id, attachment["slot"]), []).append(attachment)
     response.headers["Cache-Control"] = "private, no-store"
-    return _candidate_out(result["candidate"][0], files, CandidateDetailOut, DOCUMENT_SLOTS + FORM_DOCUMENT_SLOTS)
+    manual_records = statuses_by_candidate(result["manual_documents"]).get(candidate_id, {})
+    return _candidate_out(result["candidate"][0], files, CandidateDetailOut, DOCUMENT_SLOTS + FORM_DOCUMENT_SLOTS, manual_records)
 
 
 class OcrDataIn(BaseModel):
@@ -528,6 +535,11 @@ def create_candidate(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> CandidateOut:
+    return create_candidate_record(body, db, user)
+
+
+def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, commit: bool = True) -> CandidateOut:
+    """Shared transactional creation; lead conversion commits its verified source and link together."""
     pointer = lock_assignment_cursor(db)
     _check_form_choices(db, body)
     intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
@@ -654,7 +666,10 @@ def create_candidate(
             entity_id=candidate.id,
         )
     )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return CandidateOut(
         id=candidate.id,
@@ -983,8 +998,8 @@ def _delete_candidate_rows(db: Session, candidate_id: str, *, audit_id: str, act
 @router.delete("/{candidate_id}")
 def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session = Depends(get_db),
                      user: User = Depends(require_role(Role.admin))) -> dict:
-    # Three statements and one commit (the hosted database costs a round trip each):
-    #   1. the assignment cursor lock, 2. the candidate (locked) with its placements, 3. the whole delete.
+    # Four statements and one commit (the hosted database costs a round trip each):
+    # cursor lock, candidate/placements lock, financial retention check, then the whole delete.
     # Same lock order as a profile correction: assignment cursor, then the candidate.
     # (The cursor row is nearly always there: lock it with the one SELECT; create it only on a brand new database.)
     if db.scalar(select(AssignmentPointer.id).where(AssignmentPointer.id == 1).with_for_update()) is None:
@@ -1007,7 +1022,7 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
 
     placements = [(state, order_ref) for _, _, application_id, state, order_ref, _, _ in rows if application_id is not None]
-    # A candidate that came from a bulk import can always be taken back out (an import is a load of history that may need
+    # An imported candidate without financial history can be taken back out (an import may need
     # redoing); anyone else on an order, or deployed, is kept on record.
     imported = rows[0][5] == "Bulk import"
     if not imported:
@@ -1017,6 +1032,15 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session
         if deployed:
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 f"This candidate was deployed through {deployed}, and a deployed placement is kept on record. They cannot be deleted.")
+    # A fresh statement after acquiring the candidate lock sees any invoice/receipt committed while
+    # the lock was being awaited. Invoice and receipt writes take this same candidate lock first.
+    financial_history = db.scalar(select(exists().where(
+        CandidateInvoice.candidate_id == candidate_id,
+        or_(CandidateInvoice.number.is_not(None), exists().where(InvoicePayment.invoice_id == CandidateInvoice.id)),
+    )))
+    if financial_history:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "This candidate has a reserved or issued invoice, or recorded payments. Keep the candidate and financial history on record.")
     order_ids = {order_id for _, _, application_id, _, _, _, order_id in rows if application_id is not None and order_id}
 
     name, ref = rows[0][0], rows[0][1]

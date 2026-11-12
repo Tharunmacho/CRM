@@ -34,7 +34,7 @@ test('a queued file says how many are ahead of it, then Reading, then Done', () 
   // Without word from the reader, being first in line is just "Queued" (an older server cannot promise anything).
   assert.equal(fileRow(job({ status: 'retry', aheadOfYou: 0 }), early).label, 'Queued')
   assert.equal(fileRow(job({ status: 'pending' }), early).label, 'Queued')
-  assert.equal(fileRow(job({ status: 'uploaded' }), early).label, 'Queued')
+  assert.equal(fileRow(job({ status: 'uploaded' }), early).label, 'Ready to extract')
   assert.equal(queueText({ queuePosition: 5 }), 'Waiting, 4 ahead of you')
   assert.equal(queueText({ aheadOfYou: null, queuePosition: null }), 'Queued')
   const reading = fileRow(job({ status: 'processing' }))
@@ -144,7 +144,7 @@ test('Check people in documents shows only when the server finds more than one p
 test('the page sends every file as kind resume without replacing the others, and uses the one-second poll', async () => {
   const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
   assert.match(page, /intake\.upload\('resume', file, \{ many: true \}\)/)
-  assert.match(page, /title="Upload documents" subtitle="Resume, passport or Aadhaar, in one file or several\. We find each one\."/)
+  assert.match(page, /title="Upload documents" subtitle="Add every resume, passport and Aadhaar page, then choose Extract details/)
   assert.match(page, /More documents \(optional\)/)
   assert.doesNotMatch(page, /Kept on the profile when you save/)
   assert.doesNotMatch(page, /Aadhaar copy'/)
@@ -276,7 +276,7 @@ test('files that are being read, finished or failed never carry the reader warni
     const row = fileRow(job({ status, reader: dead, waitingReason: 'reader_not_running' }), { now: T0 })
     assert.deepEqual([row.stalled, row.canCheckAgain], [null, false], status)
   }
-  assert.equal(fileRow(job({ status: 'uploaded', reader: dead }), { now: T0 }).label, 'Queued')   // not queued for reading yet
+  assert.equal(fileRow(job({ status: 'uploaded', reader: dead }), { now: T0 }).label, 'Ready to extract') // not queued for reading yet
 })
 
 test('fileRows passes the clock to every row and keeps their order', () => {

@@ -8,6 +8,8 @@ import { countryTone, dobParts, splitCountries, whatsappHref } from '@/features/
 import { stageByNo } from '@/shared/workflow/stages'
 import type { Candidate } from '@/shared/model/types'
 import { ownerLabel } from '@/features/candidates/data-bank-pools'
+import { candidateReviewIssues } from '@/features/candidates/candidate-review'
+import { CandidateReviewPopover } from '@/features/candidates/components/candidate-review-popover'
 import { Avatar, RowMenu, StageTracker, StatusDot, type DotTone, type RowMenuItem } from '@/features/candidates/components/db-parts'
 import type { DbColumn } from '@/features/candidates/components/db-table'
 import { canDeleteCandidate } from '@/features/candidates/profile-actions'
@@ -78,14 +80,12 @@ export function SourceIcon({ source }: { source: string }) {
 
 export function StatusText({ candidate }: { candidate: Candidate }) {
   const status = candidateStatus(candidate)
-  const reviewTitle = candidate.phone?.trim()
-    ? 'Check the profile details against the original documents.'
-    : 'Phone number is missing. Review the profile details.'
-  const primary = <StatusDot tone={status.tone} title={candidate.status === 'needs_review' ? reviewTitle : status.label}>{status.label}</StatusDot>
-  if (!candidate.needsReview || candidate.status === 'needs_review') return primary
-  return <span className="inline-flex max-w-full flex-none flex-col items-start gap-1">
-    {primary}
-    <StatusDot tone="warn" title={reviewTitle}>Needs review</StatusDot>
+  const issues = candidateReviewIssues(candidate)
+  const primary = <StatusDot tone={status.tone} title={status.label}>{status.label}</StatusDot>
+  if (!issues.length) return primary
+  return <span className="db-status-summary">
+    {candidate.status !== 'needs_review' && primary}
+    <CandidateReviewPopover candidateId={candidate.id} name={candidate.name} issues={issues} />
   </span>
 }
 
@@ -119,7 +119,8 @@ export function bankContext(store: Store, options: FormOptions = {}): BankContex
   return {
     ownerName: (id) => (id ? store.user(id)?.name ?? '' : ''),
     agent: (candidate) => agentLabel(candidate.sourceDetail, candidate.source),
-    statusLabel: (candidate) => candidateStatus(candidate).label,
+    statusLabel: (candidate) => [candidate.status === 'needs_review' ? '' : candidateStatus(candidate).label,
+      ...candidateReviewIssues(candidate).map(issue => issue.label)].filter(Boolean).join(' · '),
     sourceLabel: (source, detail) => [SOURCE_LABEL[source] ?? source, sourceProvenance(source, detail)].filter(Boolean).join(' · '),
     optionLabel: (category, value) => { const label = labelFor(options, category, value); return label === value ? humanize(value) : label },
     application: (candidateId) => {
@@ -203,7 +204,7 @@ export function CandidateCell({ candidate, mark = plain }: CellProps) {
     <span className="dbt-stack" title={`${unread ? PLACEHOLDER_NAME : candidate.name}${dob ? ` · born ${dob.label} (${dob.age} years)` : ''} · ${candidate.ref}`}>
       <span className="dbt-line">
         {unread
-          ? <><em className="dbt-main is-unread">{PLACEHOLDER_NAME}</em><span className="dbt-flag">Needs review</span></>
+          ? <em className="dbt-main is-unread">Name missing or unreadable</em>
           : <strong className="dbt-main">{mark(candidate.name)}</strong>}
       </span>
       {sub && <small className="dbt-sub">{sub}</small>}
@@ -227,7 +228,7 @@ export function ContactLines({ candidate, mark = plain }: CellProps) {
 /** The agent or agency that sent the profile; a muted dash when none was recorded (internal pointers are never shown). */
 export function AgentLine({ candidate, mark = plain }: CellProps) {
   const agent = agentLabel(candidate.sourceDetail, candidate.source)
-  return agent ? <span className="dbt-main dbt-agent" title={`Agent / referred by: ${agent}`}>{mark(agent)}</span> : <span className="db-muted" title="No agent recorded">–</span>
+  return agent ? <span className="dbt-main dbt-agent" title={`Agency: ${agent}`}>{mark(agent)}</span> : <span className="db-muted" title="No agency recorded">–</span>
 }
 
 /** The compact 11-stage indicator; with `onOpenStage` it opens the stage modal. A dash while the candidate has no order. */

@@ -80,7 +80,7 @@ function GroupResumes({ scope, groupId, terms, store, version, onOpen, onReassig
           <span role="cell" data-col="candidate" data-label="Candidate"><CandidateCell candidate={candidate} mark={mark} /></span>
           <span role="cell" data-col="contact" data-label="Contact"><ContactLines candidate={candidate} mark={mark} /></span>
           <span role="cell" data-col="source" data-label="Source"><SourceLine candidate={candidate} /></span>
-          <span role="cell" data-col="agent" data-label="Agent"><AgentLine candidate={candidate} mark={mark} /></span>
+          <span role="cell" data-col="agent" data-label="Agency"><AgentLine candidate={candidate} mark={mark} /></span>
           <span role="cell" data-col="owner" data-label="Recruiter"><OwnerText candidate={candidate} store={store} /></span>
           <span role="cell" data-col="status" data-label="Status"><StatusText candidate={candidate} /></span>
           <span role="cell" data-col="actions"><RowActions candidate={candidate} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /></span>

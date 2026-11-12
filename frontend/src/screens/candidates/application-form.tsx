@@ -15,13 +15,14 @@ import { applicationFormHref, visibleWarnings } from '@/features/application-for
 import { documentSlot } from '@/shared/model/document-slots'
 import { documentRowStates, documentRowsProgress } from '@/features/application-form/document-rows'
 import { candidateSubtitle, candidateTitle, completeText, sectionTargetId, visibleMissing } from '@/features/application-form/paper-model'
-import { ProcessSection } from '@/features/application-form/components/process-section'
+import { RecruitmentStages, StageControl } from '@/features/application-form/components/recruitment-stages'
 import type { DocumentKind, FeedbackData, FormDraft, MissingItem, TrackingRow } from '@/features/application-form/types'
 import { FormErrorCard, FormSkeleton } from '@/features/application-form/components/form-states'
 import { SectionHeader } from '@/features/application-form/components/section-header'
 import { AssignmentBar } from '@/features/application-form/components/assignment-bar'
 import { DocumentsSection } from '@/features/application-form/components/documents-section'
 import { RecordDownloads } from '@/features/application-form/components/record-downloads'
+import { InvoiceCard } from '@/features/application-form/components/invoice-card'
 import { FillView } from '@/features/application-form/fill/fill-view'
 import { NotesPanel, StageClockBar, type FeedbackActions } from '@/features/application-form/components/feedback-panel'
 import { FormSheet } from '@/features/application-form/components/form-sheet'
@@ -30,6 +31,7 @@ import type { FormContext } from '@/features/application-form/components/section
 import '@/styles/application-form.css'
 import '@/styles/application-form-v2.css'
 import '@/styles/candidate-records.css'
+import '@/styles/application-stages.css'
 
 /** Stands in for the notes of a server that has none yet: the panel still opens its composer for people who can work the candidate. */
 const EMPTY_FEEDBACK: FeedbackData = { supported: false, items: [], canWrite: false, stageClock: null }
@@ -47,6 +49,9 @@ export default function ApplicationFormPage() {
   const applicationId = search.get('application') || undefined
   const navigate = useNavigate()
   const store = useStore()
+  const workspaceReads = useRef(store.ensureFresh)
+  workspaceReads.current = store.ensureFresh
+  useEffect(() => { void workspaceReads.current().catch(() => { /* The form's authorized options remain usable when the workspace refresh fails. */ }) }, [id, store.me.id])
   const liveStatus = useLiveStatus()
   const candidate = store.candidates.find((item) => item.id === id)
   const agencies = useReferenceAgencies(true)
@@ -61,6 +66,8 @@ export default function ApplicationFormPage() {
 
   const [leaving, setLeaving] = useState(false)
   const [openStage, setOpenStage] = useState<{ stage: number } | null>(null)
+  const [stageDirty, setStageDirty] = useState(false)
+  const [stageBusy, setStageBusy] = useState(false)
   const [busyKinds, setBusyKinds] = useState<DocumentKind[]>([])
   const [previewOpen, setPreviewOpen] = useState(false)
   const fillRef = useRef<HTMLDivElement>(null)
@@ -68,7 +75,15 @@ export default function ApplicationFormPage() {
   const closePreview = useRef<HTMLButtonElement>(null)
 
   const canWork = form ? form.candidate.canEdit : false
-  const application = form?.application ? store.applications.find((item) => item.id === form.application?.id) : undefined
+  const application = form?.application
+  const selectedStage = application ? openStage?.stage ?? application.currentStage : null
+  useEffect(() => { setOpenStage(null); setStageDirty(false); setStageBusy(false) }, [application?.id])
+  const leaveStage = useCallback(() => !stageBusy && (!stageDirty || window.confirm('Discard the stage feedback you have not saved?')), [stageBusy, stageDirty])
+  const selectStage = useCallback((stage: number) => {
+    if (stage === selectedStage || !leaveStage()) return
+    setStageDirty(false)
+    setOpenStage({ stage })
+  }, [selectedStage, leaveStage])
   // The top bar follows the draft as it is typed: the name, then the reference, client and job.
   const title = candidateTitle(draft ? draft.personal.candidateName : undefined, form?.candidate.name || candidate?.name)
   const name = title.text
@@ -83,17 +98,18 @@ export default function ApplicationFormPage() {
   useEffect(() => { document.title = ['Application form', name, subtitle].filter(Boolean).join(' - ') }, [name, subtitle])
 
   useEffect(() => {
-    if (!dirty) return
+    if (!dirty && !stageDirty) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [dirty])
+  }, [dirty, stageDirty])
 
   const close = useCallback(() => {
+    if (!leaveStage()) return
     if (dirty) { setLeaving(true); return }
     if (window.history.length > 1) navigate(-1)
     else navigate(`/candidates/${id}`, { replace: true })
-  }, [dirty, navigate, id])
+  }, [dirty, navigate, id, leaveStage])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -128,7 +144,7 @@ export default function ApplicationFormPage() {
     try {
       await state.upload(kind, file)
       const entry = documentSlot(kind)
-      store.notify(`${entry?.label ?? 'Document'} uploaded${entry?.readable ? '. Reading it now' : ''}`)
+      store.notify(`${entry?.label ?? 'Document'} uploaded`)
     } finally {
       setBusyKinds((current) => current.filter((item) => item !== kind))
     }
@@ -160,12 +176,17 @@ export default function ApplicationFormPage() {
 
   // A new job means a new application: follow it, so the page keeps showing the candidate's current work.
   const changeAssignment = useCallback(async (field: Parameters<typeof state.changeAssignment>[0], change: Parameters<typeof state.changeAssignment>[1]) => {
+    if (field === 'job' && !leaveStage()) return
     const saved = await state.changeAssignment(field, change)
     if (!saved) return
+    if (field === 'job' || field === 'recruiter') {
+      try { await store.refresh({ keepCurrent: true }) }
+      catch { store.notify('Assignment saved. Refresh the stages to load the latest details.') }
+    }
     const now = saved.application
     const stale = (applicationId && now?.id !== applicationId) || (orderId && now?.orderId !== orderId)
     if (stale) navigate(applicationFormHref(id, null, now?.id ?? null), { replace: true })
-  }, [state, applicationId, orderId, navigate, id])
+  }, [state, applicationId, orderId, navigate, id, leaveStage, store])
 
   const feedbackActions: FeedbackActions = useMemo(() => ({
     busy: state.feedbackBusy,
@@ -188,7 +209,7 @@ export default function ApplicationFormPage() {
     window.setTimeout(() => focusField(item), 60)
   }, [focusField])
 
-  const openTracking = useCallback((row: TrackingRow) => setOpenStage({ stage: row.stage }), [])
+  const openTracking = useCallback((row: TrackingRow) => { selectStage(row.stage); setPreviewOpen(false) }, [selectStage])
 
   const completeness = state.completeness ?? form?.completeness ?? { percent: 0, filled: 0, total: 0, missing: [] }
   const feedback = form?.feedback
@@ -240,16 +261,30 @@ export default function ApplicationFormPage() {
               {/* The assignment is a card of its own at the very top; it scrolls away with the page. */}
               <div className="af-card af-assign-card" id="af-assignment">
                 <SectionHeader compact icon={<Building2 />} id="af-assignment-title" title="Client and recruitment details" />
-                <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} onSwitchApplication={(applicationId) => navigate(applicationFormHref(id, null, applicationId), { replace: true })} />
+                <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={me.role === 'admin' || me.role === 'manager'} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
+                  stageControl={<StageControl form={form} canOpen={Boolean(application) && !stageBusy} onOpen={selectStage} />} />
+                <div className="af-stage-workbench">
+                <RecruitmentStages form={form} canOpen={Boolean(application) && !stageBusy} selectedStage={selectedStage} onOpen={selectStage} />
+                {application && selectedStage && <div className="af-stage-feedback" id="af-stage-feedback">
+                  <StageModal key={`${application.id}-${selectedStage}`} embedded applicationId={application.id} open focusStage={selectedStage}
+                    onDirtyChange={setStageDirty} onBusyChange={setStageBusy}
+                    onStageChanged={() => { setStageDirty(false); setOpenStage(null); void state.reload(true) }}
+                    onClose={() => { if (leaveStage()) { setOpenStage(null); void state.reload(true) } }} />
+                </div>}
+                {!application && <div className="af-stage-empty" id="af-stage-feedback">
+                  <Building2 aria-hidden="true" />
+                  <div><h3>Choose a job to begin</h3><p>Select a client and job above. Each stage will keep its own feedback and saved history here.</p></div>
+                </div>}
+                </div>
               </div>
               {/* One white card for the working area: details, documents, process tracking and notes, split by thin dividers. */}
               <div className="af-card af-work">
                 <div className="af-fill-wrap" ref={fillRef}>
-                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} />
+                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
                 </div>
                 <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[form.candidate.ref, name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
-                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} />
-                <ProcessSection form={form} canOpen={canWork} onOpen={(stage) => setOpenStage({ stage })} />
+                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
+                <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />
                 <NotesPanel feedback={feedback ?? EMPTY_FEEDBACK} actions={feedbackActions} viewer={{ id: store.me.id, role: store.me.role }} canWork={canWork} />
               </div>
             </div>
@@ -289,12 +324,6 @@ export default function ApplicationFormPage() {
       >
         <p className="text-sm text-ink-600">Saving keeps what you typed and leaves the form.</p>
       </Dialog>
-      <StageModal
-        applicationId={openStage && application ? application.id : null}
-        open={Boolean(openStage && application)}
-        focusStage={openStage?.stage}
-        onClose={() => { setOpenStage(null); void state.reload(true) }}
-      />
     </div>
   )
 

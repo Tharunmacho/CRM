@@ -14,6 +14,23 @@ strong.dbt-main { font-weight: 600; }
 .dbt-sub { display: block; min-width: 0; overflow: hidden; font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 .dbt-flag { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--warning-fill); font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap; color: var(--warning-ink); }
 .dbt-agent { display: block; max-width: 100%; font-size: 13px; font-weight: 400; }
+.db-status-summary { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.db-review-trigger { display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--warning-ink); font: inherit; font-size: 11px; line-height: 20px; white-space: nowrap; cursor: pointer; }
+.db-review-trigger svg { width: 13px; height: 13px; flex: none; }
+.db-review-trigger:hover, .db-review-trigger[aria-expanded="true"] { background: var(--warning-fill); }
+.db-review-trigger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.db-review-popover { position: fixed; z-index: 110; width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; border: 1px solid var(--border-control); border-radius: 14px; background: var(--bg-card); color: var(--text-main); box-shadow: 0 12px 36px #10233d26; padding: 16px; text-align: left; }
+.db-review-popover header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.db-review-popover header strong { display: block; font-size: 13px; }
+.db-review-popover header small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 12px; }
+.db-review-popover header button { display: grid; place-items: center; padding: 4px; border: 0; background: transparent; color: var(--text-muted); border-radius: 6px; cursor: pointer; }
+.db-review-popover svg { width: 16px; height: 16px; flex: none; }
+.db-review-popover ul { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 12px; }
+.db-review-popover li { display: flex; align-items: flex-start; gap: 8px; }
+.db-review-popover li > svg { color: var(--warning-ink); margin-top: 2px; }
+.db-review-popover li b { font-size: 12px; }
+.db-review-popover li p { margin-top: 3px; font-size: 12px; color: var(--text-muted); line-height: 1.55; }
+.db-review-popover > a { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid var(--border-control); font-size: 12px; font-weight: 600; color: var(--primary-deep); }
 .dbt-stage { display: block; width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; font: inherit; text-align: left; color: inherit; cursor: pointer; }
 .dbt-stage:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .dbt-line .db-wa { flex: none; width: 22px; height: 22px; }

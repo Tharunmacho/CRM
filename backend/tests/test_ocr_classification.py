@@ -240,3 +240,31 @@ def test_unknown_page_between_different_documents_or_beside_a_resume_stays_unkno
     back = "Some printed text with address details and a barcode. " * 3
     assert classify_pages([PASSPORT, back, AADHAAR])[1].document_type == "unknown"
     assert classify_pages([CV, back])[1].document_type == "unknown"
+
+
+@pytest.mark.parametrize("role", ["Interior Designer", "Clinical Research Coordinator", "Architect"])
+def test_compact_labelled_employment_page_continues_resume_without_occupation_whitelist(role):
+    continuation = f"""Example Interiors Pvt Ltd
+Job title
+: {role}
+Duration
+: November 2024 - February 2026
+Location
+: Example City, India
+Software Skills
+1. Design software
+2. Spreadsheet software
+"""
+    assert classify_page(continuation).document_type == "unknown"
+    assert [page.document_type for page in classify_pages([CV, continuation])] == ["resume", "resume"]
+    assert [page.document_type for page in classify_pages([CV, CERTIFICATE, continuation])] == ["resume", "other", "unknown"]
+
+
+def test_employment_certificate_with_job_labels_is_not_a_resume_continuation():
+    certificate = """EXPERIENCE CERTIFICATE
+This is to certify that Alex Example worked here.
+Job title: Interior Designer
+Duration: November 2024 - February 2026
+Location: Example City, India
+"""
+    assert [page.document_type for page in classify_pages([CV, certificate])] == ["resume", "other"]

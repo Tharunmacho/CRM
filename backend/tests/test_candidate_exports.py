@@ -89,12 +89,39 @@ def test_inspection_contains_full_sections_true_missing_checklist_and_safe_excel
     assert "Invoices" not in workbook
     assert "".join(row[1] for row in workbook["Resume text"][1:]) == "Resume line " * 6000
     checklist = {row[0]: row for row in workbook["Document checklist"][1:]}
-    assert sum(row[1] == "True" for row in checklist.values()) == 12
+    assert sum(row[1] == "True" for row in checklist.values()) == 11
     assert checklist["Resume"][4] == "Uploaded"
-    assert checklist["Application form"][4] == "Missing"
+    assert checklist["Application form"][4] == "Optional"
     assert checklist["Signed offer"][4] == "Missing"
     assert checklist["Medical"][4] == "Needed later"
     assert checklist["Education certificate"][4] == "Optional"
+
+
+def test_placement_invoice_is_visible_only_in_its_form_and_checklist(exports):
+    add_app(exports, "shown", stage=11)
+    add_app(exports, "history", order="other-order", status=ApplicationStatus.closed)
+    add_file(exports, "placement-invoice", "invoice", entity_type="application", entity_id="shown")
+    for app_id, expected in (("shown", True), ("history", False)):
+        response = exports.client.get("/api/candidates/candidate/application-form", params={"applicationId": app_id})
+        assert response.status_code == 200, response.text
+        form = response.json()
+        assert form["documents"]["invoice"]["uploaded"] is expected
+        assert next(row for row in form["tracking"]["rows"] if row["key"] == "invoice_generated")["checked"] is expected
+        archive_response = get(exports, "documents.zip", applicationId=app_id)
+        assert archive_response.status_code == 200, archive_response.text
+        with ZipFile(BytesIO(archive_response.content)) as archive:
+            listing = json.loads(archive.read("manifest.json"))
+            assert next(row for row in listing["checklist"] if row["slot"] == "invoice")["uploaded"] is expected
+            assert any(row["attachmentId"] == "placement-invoice" and row["includedInZip"] for row in listing["documents"])
+
+
+def test_placement_invoice_takes_precedence_over_newer_generic_upload(exports):
+    add_app(exports, "shown", stage=11)
+    add_file(exports, "placement-invoice", "invoice", entity_type="application", entity_id="shown", time=datetime.now(timezone.utc) - timedelta(days=1))
+    add_file(exports, "generic-invoice", "invoice")
+    response = exports.client.get("/api/candidates/candidate/application-form", params={"applicationId": "shown"})
+    assert response.status_code == 200, response.text
+    assert response.json()["documents"]["invoice"]["current"]["attachmentId"] == "placement-invoice"
 
 
 def test_zip_includes_latest_normal_all_other_all_invoice_and_every_own_application(exports):
@@ -143,6 +170,23 @@ def test_context_cannot_select_another_candidates_application_or_unrelated_order
         assert get(exports, suffix, applicationId="foreign").status_code == 404
         assert get(exports, suffix, orderId="other-order").status_code == 404
     assert exports.client.get("/api/candidates/missing/inspection.xlsx").status_code == 404
+
+
+def test_all_identity_files_and_optional_application_form_are_kept_in_export(exports):
+    for slot in ("passport", "aadhaar"):
+        for version in (1, 2):
+            add_file(exports, f"{slot}-{version}", slot, version=version, data=f"{slot} page {version}".encode())
+    add_file(exports, "saved-application-form", "application_form")
+    response = get(exports, "documents.zip")
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response.content)) as archive:
+        listing = json.loads(archive.read("manifest.json"))
+        assert all(row["includedInZip"] for row in listing["documents"])
+        assert len(listing["documents"]) == 5
+        checklist = {row["slot"]: row for row in listing["checklist"]}
+        for slot in ("aadhaar", "application_form"):
+            assert not checklist[slot]["mandatoryBeforeDeployment"] and not checklist[slot]["requiredNow"]
+        assert checklist["application_form"]["status"] == "Uploaded"
 
 
 def test_legacy_alias_timestamp_ties_keep_checklist_current_file_in_zip(exports):
@@ -269,13 +313,32 @@ def test_data_bank_export_has_twelve_shared_document_columns_in_one_metadata_que
         event.remove(engine, "before_cursor_execute", observe)
     rows = sheets(payload)["Candidates"]
     headings = rows[0]
-    assert headings[-13:-1] == [label + " document" for _slot, label in required_for_deployment()]
+    assert headings[-12:-1] == [label + " document" for _slot, label in required_for_deployment()]
     person = next(row for row in rows[1:] if row[0] == "candidate")
     assert person[headings.index("Resume document")] == "Uploaded"
     assert person[headings.index("Invoice document")] == "Uploaded"
     assert person[headings.index("Passport document")] == "Missing"
     assert "Passport" in person[-1] and "Resume" not in person[-1]
     assert len([statement for statement in queries if "document_attachments" in statement]) == 1
+
+
+def test_data_bank_export_names_agency_and_the_actual_profile_issue(exports):
+    with exports.sessions() as db:
+        candidate = db.get(Candidate, "candidate")
+        candidate.phone = ""
+        candidate.needs_review = True
+        candidate.source_detail = "Bulk import"
+        db.commit()
+        rows = sheets(export_candidates(db, Search()))["Candidates"]
+        headings = rows[0]
+        person = next(row for row in rows[1:] if row[0] == "candidate")
+        assert person[headings.index("Agency")] == ""
+        assert person[headings.index("Profile review issues")] == "Phone number missing"
+        candidate.source_detail = "Example Referral Agency"
+        db.commit()
+        rows = sheets(export_candidates(db, Search()))["Candidates"]
+        person = next(row for row in rows[1:] if row[0] == "candidate")
+        assert person[headings.index("Agency")] == "Example Referral Agency"
 
 
 def test_full_history_retains_more_than_fifty_notes_saved_drafts_and_scoped_task_notes(exports):

@@ -66,8 +66,9 @@ def test_domain_names_cover_renamed_models_and_documented_intake_extension():
     expected |= {"crm_client_staff", "crm_reference_agencies"}
     expected |= {"crm_application_feedback"}
     expected |= {"crm_worker_heartbeats"}
+    expected |= {"crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments"}
     assert set(Base.metadata.tables) == expected
-    assert len(Base.metadata.tables) == 64
+    assert len(Base.metadata.tables) == 67
     for table in Base.metadata.tables.values():
         assert table.comment, f"{table.name} needs a browser-visible description"
         for foreign_key in table.foreign_keys:

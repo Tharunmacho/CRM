@@ -66,7 +66,7 @@ log = logging.getLogger("crm.reading")
 # The short id of the file being read (first characters of its hash), for the log lines of this reading.
 _FILE = READING_FILE
 PIPELINE_VERSION = "local-pages-v2"  # v2: jobs are sent as prepared files, so v1 keys (other bytes) must not be reused
-INSPECTION_VERSION = "2026.11.11-application-forms"
+INSPECTION_VERSION = "2026.11.12-orientation-job-continuations"
 _MODELS = {"resume": ResumeResponse, "passport": PassportResponse, "aadhaar": AadhaarResponse}
 _PENDING = {"queued", "running"}
 # The wall clock a job's age is measured with (stored, so it survives a worker restart); replaceable in tests.
@@ -1721,9 +1721,8 @@ def _extract_attachment(
         raise ExtractionFailure("The attachment changed. Start a separate intake for the replacement document.")
     same_source = state.get("source_sha256") == source_hash
     state["source_sha256"] = source_hash
-    # A failed submission has not paid for a provider job. Recheck its pages when
-    # local classification improves, instead of indefinitely restoring an old
-    # misclassification. Accepted jobs retain their original page plan and keys.
+    # Reinspect when classification changes. Paid jobs keep their page plan and
+    # keys; newly found pages are handled by the existing late-part merge.
     def accepted(record):
         return bool(record.get("job_id") or "result" in record or any(accepted(chunk) for chunk in record.get("chunks") or []))
     paid = any(accepted(record) for record in (state.get("provider_jobs") or {}).values()) or bool(
@@ -1744,7 +1743,7 @@ def _extract_attachment(
         "document_timeout": settings.ocr_document_timeout_seconds,
     }
     signature = hashlib.sha256(json.dumps(
-        {"version": PIPELINE_VERSION, **options}, sort_keys=True,
+        {"version": PIPELINE_VERSION, "inspection_version": INSPECTION_VERSION, **options}, sort_keys=True,
     ).encode()).hexdigest()
     inspected = None
     if same_source and state.get("person_detection_version") == 1 and state.get("inspection_signature") == signature and isinstance(state.get("inspection"), dict):
@@ -1761,6 +1760,10 @@ def _extract_attachment(
             pass
     previous_text = (state.get("inspection") or {}).get("unsent_page_text") if same_source and isinstance(state.get("inspection"), dict) else None
     fresh_inspection = inspected is None
+    if state.get("inspection_version") != INSPECTION_VERSION:
+        # Regenerate derived PDFs after reinspection; their former page subset
+        # must not masquerade as a newly expanded complete document.
+        state["documents"] = {}
     try:
         if inspected is None:
             inspected = _inspect_and_send_early(

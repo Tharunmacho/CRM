@@ -73,8 +73,8 @@ test('minimum experience and skills are validated', () => {
   assert.match(f.validateJob({ ...ok, skills: Array.from({ length: 101 }, (_, i) => `s${i}`) }).skills, /100/)
 })
 
-test('"Save and add another job" clears the requirements with the rest', () => {
-  const next = f.nextJobForm({ ...f.emptyJobForm('co1', 'AED'), title: 'Cook', skills: ['Knife'], minExperience: '4', description: 'x' })
+test('a new job has no inherited title requirements', () => {
+  const next = f.emptyJobForm('co1', 'AED')
   assert.deepEqual([next.skills, next.minExperience, next.description, next.companyId], [[], '0', '', 'co1'])
 })
 

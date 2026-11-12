@@ -72,12 +72,12 @@ export function stageRows(
   const currentStage = form.tracking.summary.currentStage || application?.currentStage || 0
   return Array.from({ length: STAGE_COUNT }, (_, index) => {
     const stage = index + 1
-    const row = form.tracking.rows.find((item) => item.stage === stage && !item.extra)
+    const row = form.tracking.rows.find((item) => item.stage === stage)
     let key: StageKey = 'locked'
     if (application) {
       if (row?.status === 'completed') key = 'done'
       else if (row?.status === 'failed') key = 'failed'
-      else if (stage < currentStage) key = 'done'
+      else if (stage < currentStage || application.status === 'deployed') key = 'done'
       else if (stage === currentStage && active) key = 'current'
     }
     return {

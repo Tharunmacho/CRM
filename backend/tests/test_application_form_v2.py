@@ -1,4 +1,4 @@
-"""Application form v2: twelve mandatory and six optional document slots, assignment and recruiter feedback.
+"""Application form v2: eleven checklist and eight optional document slots, assignment and recruiter feedback.
 
 Contract: docs/workflows/application-form-v2-contract.md. DB-backed against the guarded disposable PostgreSQL
 (TEST_DATABASE_URL), with the same API fixture as test_application_form.py.
@@ -19,10 +19,10 @@ from test_database_naming import _migrate, schema_database  # noqa: F401  (fixtu
 from test_document_extraction import pdf
 from test_ocr_classification import CV, PASSPORT
 
-SLOTS = ["application_form", "resume", "passport", "medical", "signed_offer", "pcc", "visa", "air_ticket", "undertaking_letter",
+SLOTS = ["application_form", "resume", "passport", "aadhaar", "medical", "signed_offer", "pcc", "visa", "air_ticket", "undertaking_letter",
          "emigration", "insurance", "invoice", "photo", "education_certificate", "experience_certificate", "google_review", "visa_stamping", "other"]
-ALWAYS = {"application_form", "resume", "passport"}
-OPTIONAL = {"photo", "education_certificate", "experience_certificate", "google_review", "visa_stamping", "other"}
+ALWAYS = {"resume", "passport"}
+OPTIONAL = {"application_form", "aadhaar", "photo", "education_certificate", "experience_certificate", "google_review", "visa_stamping", "other"}
 PNG = b"\x89PNG\r\n\x1a\n" + b"synthetic image bytes"
 POST_PRESCREENING_PAST = "This candidate is already past prescreening for the current job. Unmap the candidate first."
 
@@ -98,10 +98,10 @@ def test_blank_form_lists_the_fourteen_slots_in_order_with_their_rules(desk):
     assert data["documentOrder"] == SLOTS and list(data["documents"]) == SLOTS
     docs = data["documents"]
     assert [docs[s]["label"] for s in SLOTS] == [
-        "Application form", "Resume", "Passport", "Medical", "Signed offer", "Police clearance certificate (PCC)", "Visa", "Air ticket",
+        "Application form", "Resume", "Passport", "Aadhaar", "Medical", "Signed offer", "Police clearance certificate (PCC)", "Visa", "Air ticket",
         "Undertaking letter", "Emigration", "Insurance", "Invoice", "Photo", "Education certificate", "Experience certificate", "Google review", "Visa stamping", "Other documents"]
-    assert {s for s in SLOTS if docs[s]["readable"]} == {"resume", "passport"}
-    assert {s for s in SLOTS if docs[s]["multiple"]} == {"other"}
+    assert {s for s in SLOTS if docs[s]["readable"]} == {"resume", "passport", "aadhaar"}
+    assert {s for s in SLOTS if docs[s]["multiple"]} == {"passport", "aadhaar", "other"}
     assert {s: docs[s]["requiredFromStage"] for s in SLOTS if docs[s]["requiredFromStage"]} == {
         "signed_offer": 5, "medical": 6, "pcc": 7, "visa": 9, "emigration": 10, "air_ticket": 11, "undertaking_letter": 11, "insurance": 11, "invoice": 11}
     for entry in docs.values():
@@ -126,8 +126,8 @@ def test_every_slot_uploads_through_the_form_endpoint_and_only_resume_and_passpo
         row = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.slot == slot))
         jobs = db.scalar(select(func.count()).select_from(DocumentExtractionJob))
     assert row is not None and row.version == 1
-    assert jobs == (1 if slot in ("resume", "passport") else 0)  # OCR is queued only for the two readable slots
-    assert (document["extraction"] is not None) == (slot in ("resume", "passport"))
+    assert jobs == (1 if slot in ("resume", "passport", "aadhaar") else 0)
+    assert (document["extraction"] is not None) == (slot in ("resume", "passport", "aadhaar"))
     if slot == "photo":
         assert out["form"]["photo"]["attachmentId"] == document["current"]["attachmentId"]
 
@@ -188,14 +188,14 @@ def test_invoice_tracking_uses_latest_uploaded_evidence_without_changing_pipelin
         assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 0
 
 
-def test_only_the_twelve_agreed_documents_gate_deployment():
+def test_eleven_documents_in_checklist_exclude_optional_application_form_and_aadhaar():
     from app.services.application_form import deployment_gaps, required_for_deployment
     required = [slot for slot, _label in required_for_deployment()]
-    assert required == SLOTS[:12]
+    assert required == [slot for slot in SLOTS if slot not in OPTIONAL]
     assert deployment_gaps(set(required)) == []
     # Retained legacy and optional evidence cannot fill the four newly required slots.
     old_evidence = {"resume", "passport", "medical", "signed_offer", "pcc", "visa", "air_ticket", "emigration"} | OPTIONAL | {"education", "experience"}
-    assert [item["slot"] for item in deployment_gaps(old_evidence)] == ["application_form", "undertaking_letter", "insurance", "invoice"]
+    assert [item["slot"] for item in deployment_gaps(old_evidence)] == ["undertaking_letter", "insurance", "invoice"]
 
 
 def test_older_education_and_experience_slot_keys_are_folded_into_the_certificate_slots(desk):
@@ -240,23 +240,23 @@ def test_required_documents_follow_the_applications_current_stage(desk, stage, e
 def test_completeness_counts_required_documents_live_and_lists_optional_ones_apart(desk):
     app_id = mapped(desk)
     before = form(desk)["completeness"]
-    assert before["total"] == 19 and {o["slot"] for o in before["optionalDocuments"]} == OPTIONAL
+    assert before["total"] == 18 and {o["slot"] for o in before["optionalDocuments"]} == OPTIONAL
     assert all(o["uploaded"] is False for o in before["optionalDocuments"])
 
     upload(desk, "application_form", pdf("Completed application"))
     after = form(desk)["completeness"]
-    assert after["filled"] == before["filled"] + 1 and after["percent"] > before["percent"]
+    assert (after["filled"], after["total"], after["percent"]) == (before["filled"], before["total"], before["percent"])
     assert "documents.application_form" not in {m["key"] for m in after["missing"]}
 
     upload(desk, "experience_certificate", pdf("Experience certificate"))  # optional: never counted
     upload(desk, "other", pdf("Anything else"))
     optional = form(desk)["completeness"]
     assert (optional["filled"], optional["total"], optional["percent"]) == (after["filled"], after["total"], after["percent"])
-    assert {o["slot"] for o in optional["optionalDocuments"] if o["uploaded"]} == {"experience_certificate", "other"}
+    assert {o["slot"] for o in optional["optionalDocuments"] if o["uploaded"]} == {"application_form", "experience_certificate", "other"}
 
     set_stage(desk, app_id, 5)  # the signed offer is now required: total grows and the percentage can fall
     stage5 = form(desk)["completeness"]
-    assert stage5["total"] == 20 and "documents.signed_offer" in {m["key"] for m in stage5["missing"]}
+    assert stage5["total"] == 19 and "documents.signed_offer" in {m["key"] for m in stage5["missing"]}
     assert stage5["percent"] < optional["percent"]
     upload(desk, "signed_offer", pdf("Signed offer letter"))
     signed = form(desk)["completeness"]
@@ -394,7 +394,8 @@ def test_jobs_that_are_not_open_are_refused_and_nothing_changes(desk, status):
     with desk.sessions() as db:
         assert db.get(Application, first).status == ApplicationStatus.active
         assert db.scalar(select(func.count()).select_from(Application)) == 1
-    assert "other-order" not in {j["orderId"] for c in assignment(desk)["options"]["clients"] for j in c["jobs"]}
+    listed = {j["orderId"]: j for c in assignment(desk)["options"]["clients"] for j in c["jobs"]}
+    assert listed["other-order"]["status"] == status.value  # visible, but still cannot be newly assigned
     assert put_assignment(desk, {"orderId": "missing"}).status_code == 404
 
 
@@ -420,7 +421,8 @@ def test_deployed_job_remains_selected_when_order_is_filled_without_changing_his
         assert block["job"]["orderId"] == "order" and block["job"]["stage"] == 11
         (client,) = block["options"]["clients"]
         assert client["id"] == block["client"]["id"] == "client"
-        assert [(job["orderId"], job["status"]) for job in client["jobs"]] == [("order", "filled")]
+        expected = [("order", "filled"), ("other-order", "filled")] if client_status == "active" else [("order", "filled")]
+        assert [(job["orderId"], job["status"]) for job in client["jobs"]] == expected
 
     with desk.sessions() as db:
         application = db.get(Application, app_id)
@@ -686,7 +688,7 @@ def test_delay_and_issue_notes_notify_admins_and_managers_but_not_the_writer(des
     with desk.sessions() as db:
         rows = db.scalars(select(Notification).where(Notification.kind == "feedback").order_by(Notification.title, Notification.user_id)).all()
         assert {(n.user_id, n.title) for n in rows} == {
-            (u, t) for u in ("admin", "admin-two", "manager") for t in ("Delay noted for Candidate", "Issue noted for Candidate")}
+            (u, t) for u in ("admin", "admin-two", "manager") for t in ("Delay noted for Alex Example", "Issue noted for Alex Example")}
         assert all(n.link_to == "/candidates/candidate/application" for n in rows)
         delay = next(n for n in rows if n.title.startswith("Delay") and n.user_id == "manager")
         assert "Staff" in delay.detail and "Waiting for documents" in delay.detail and "Medical slot is full" in delay.detail
@@ -758,9 +760,9 @@ def test_weekly_staff_report_counts_feedback_notes_per_person(desk):
     assert all("feedbackNotes" in row for row in data["staff"])
 
 
-# ------------------------------------------------------------------ deployment gate
+# ------------------------------------------------------------------ document checklist independent of manual deployment
 
-DEPLOY_ORDER = ["Application form", "Resume", "Passport", "Medical", "Signed offer", "Police clearance certificate (PCC)",
+DEPLOY_ORDER = ["Resume", "Passport", "Medical", "Signed offer", "Police clearance certificate (PCC)",
                 "Visa", "Air ticket", "Undertaking letter", "Emigration", "Insurance", "Invoice"]
 
 
@@ -776,7 +778,7 @@ def at_final_stage(env):
     app_id = mapped(env)
     for stage in range(1, 11):
         complete(env, app_id, payload(env, app_id, stage))
-    saved = save(env, app_id, {"file": attachment(env, app_id, 11)})
+    saved = save(env, app_id, {"feedback": "Travel confirmed by recruiter; missing files will be collected."})
     assert saved.status_code == 200, saved.text
     return app_id, saved.json()["lockVersion"]
 
@@ -785,57 +787,55 @@ def finish(env, app_id, lock_version):
     return env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": lock_version})
 
 
-def test_deployment_gate_lists_every_missing_document_in_form_order_even_for_admins(desk):
+@pytest.mark.parametrize(("actor", "role"), [("staff", Role.staff), ("admin", Role.admin)])
+def test_manual_deployment_preserves_the_missing_document_checklist_for_staff_and_admin(desk, actor, role):
     app_id, version = at_final_stage(desk)
-    for actor, role in (("staff", Role.staff), ("admin", Role.admin)):
-        as_user(desk, actor, role)
-        refused = finish(desk, app_id, version)
-        assert refused.status_code == 409, refused.text
-        assert refused.json()["detail"] == "Upload these documents before deploying: " + ", ".join(DEPLOY_ORDER)
+    as_user(desk, actor, role)
+    done = finish(desk, app_id, version)
+    assert done.status_code == 200, done.text
     with desk.sessions() as db:
         app = db.get(Application, app_id)
-        assert app.status == ApplicationStatus.active and app.current_stage == 11
-        assert db.get(Candidate, "candidate").status.value == "in_process"
+        assert app.status == ApplicationStatus.deployed and app.current_stage == 11
+        assert db.get(Candidate, "candidate").status.value == "deployed"
     deployment = form(desk)["deployment"]
     assert deployment["ready"] is False and [m["label"] for m in deployment["missing"]] == DEPLOY_ORDER
-    assert deployment["missing"][0] == {"slot": "application_form", "label": "Application form"}
+    assert deployment["missing"][0] == {"slot": "resume", "label": "Resume"}
 
 
-def test_one_missing_document_blocks_and_optional_documents_never_count(desk):
+def test_one_missing_document_does_not_block_and_later_upload_does_not_change_stage(desk):
     app_id, version = at_final_stage(desk)
     everything = [slot for slot, _ in __import__("app.services.application_form", fromlist=["x"]).required_for_deployment()]
     put_documents(desk, *[s for s in everything if s != "visa"], "experience_certificate", "other")
-    refused = finish(desk, app_id, version)
-    assert refused.status_code == 409 and refused.json()["detail"] == "Upload these documents before deploying: Visa"
     assert form(desk)["deployment"] == {"ready": False, "missing": [{"slot": "visa", "label": "Visa"}]}
-
-    upload(desk, "visa", pdf("The visa"))  # the form shows it live
-    assert form(desk)["deployment"] == {"ready": True, "missing": []}
     done = finish(desk, app_id, version)
     assert done.status_code == 200, done.text
     assert done.json()["status"] == "deployed"
+    upload(desk, "visa", pdf("The visa"))  # the checklist changes independently of stage
+    assert form(desk)["deployment"] == {"ready": True, "missing": []}
     with desk.sessions() as db:
         assert db.get(Candidate, "candidate").status.value == "deployed"
 
 
-def test_deploying_needs_only_the_required_documents_not_experience_or_other(desk):
+def test_all_required_documents_do_not_replace_written_feedback_for_deployment(desk):
     app_id, version = at_final_stage(desk)
     attach_required_documents(desk, "candidate")
-    assert finish(desk, app_id, version).status_code == 200
+    cleared = save(desk, app_id, {})
+    refused = finish(desk, app_id, cleared.json()["lockVersion"])
+    assert refused.status_code == 422 and refused.json()["detail"]["missing"] == ["Feedback"]
     with desk.sessions() as db:
-        assert db.get(Application, app_id).status == ApplicationStatus.deployed
+        assert db.get(Application, app_id).status == ApplicationStatus.active
 
 
 def test_deployment_block_flips_live_and_older_optional_evidence_stays_available(desk):
-    assert [m["slot"] for m in form(desk)["deployment"]["missing"]][:4] == ["application_form", "resume", "passport", "medical"]
+    assert [m["slot"] for m in form(desk)["deployment"]["missing"]][:4] == ["resume", "passport", "medical", "signed_offer"]
     put_documents(desk, "resume", "passport", "photo")
     desk.client.post("/api/files", data={"entity_type": "candidate", "entity_id": "candidate", "slot": "education"},
                      files={"file": ("e.pdf", pdf("Old education key"), "application/pdf")})
     missing = form(desk)["deployment"]["missing"]
-    assert "education_certificate" not in {m["slot"] for m in missing} and len(missing) == 10
+    assert "education_certificate" not in {m["slot"] for m in missing} and len(missing) == 9
     assert form(desk)["documents"]["education_certificate"]["uploaded"] is True
     upload(desk, "air_ticket", pdf("Ticket"))
-    assert len(form(desk)["deployment"]["missing"]) == 9
+    assert len(form(desk)["deployment"]["missing"]) == 8
     assert form(desk, "second-candidate")["deployment"]["ready"] is False
 
 

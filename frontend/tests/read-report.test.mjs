@@ -54,12 +54,22 @@ test('unresolved pages give one plain note with Read again; ignored pages are no
   const data = coverage({ pages: { total: 16, sent: [1], not_sent: [{ page: 16, reason: 'x', blocking: true }], ignored: [7, 15], unresolved: [16], probed: [] } })
   const report = buildReadReport(data)
   const unresolved = report.notes.find((note) => note.key === 'unresolved')
-  assert.equal(unresolved.text, 'Some pages could not be read.')
+  assert.equal(unresolved.text, 'Page 16 could not be fully read.')
   assert.equal(unresolved.retry, true)
   assert.equal(unresolved.tone, 'warn')
   assert.equal(report.notes.some((note) => note.key === 'ignored'), false)
   assert.deepEqual(buildReadReport(coverage({ pages: { ignored: [4] } })).notes, [])
-  assert.equal(buildReadReport(coverage({ pages: { unresolved: [3, 4] } })).notes[0].text, 'Some pages could not be read.')
+  assert.equal(buildReadReport(coverage({ pages: { unresolved: [3, 4] } })).notes[0].text, 'Pages 3 and 4 could not be fully read.')
+})
+
+test('incomplete coverage is never silently presented as a complete reading for any document kind', () => {
+  for (const kind of ['resume', 'passport', 'aadhaar']) {
+    const data = { kinds: { [kind]: {} }, complete: false }
+    assert.equal(buildReadReport(data).notes[0].text, 'The extracted details need review.')
+    data.pages = { not_sent: [{ page: 2, blocking: true }], unresolved: [] }
+    assert.equal(buildReadReport(data).notes[0].text, 'Page 2 could not be fully read.')
+  }
+  assert.equal(buildReadReport({ complete: false }).notes[0].retry, true)
 })
 
 test('rows left out and differing parts are called out', () => {
@@ -150,4 +160,15 @@ test('application form: one report per reading, newest first, none without data'
   assert.deepEqual(reports.map((item) => item.id), ['j2', 'j1'])
   assert.equal(reports[1].caption, 'Resume')
   assert.deepEqual(formReports([]), [])
+})
+
+test('multi-file passport reports retain each page reading instead of only the latest aggregate result', () => {
+  const reports = formReports([{ slot: 'passport', label: 'Passport', multiple: true,
+    extraction: { jobId: 'aggregate', coverage: coverage() }, files: [
+      { attachmentId: 'front', fileName: 'front.pdf', extraction: { jobId: 'j-front', updatedAt: '2026-11-12T10:00:00Z', coverage: coverage() } },
+      { attachmentId: 'address', fileName: 'address.pdf', extraction: { jobId: 'j-address', updatedAt: '2026-11-12T10:01:00Z', coverage: coverage() } },
+    ] }])
+  assert.deepEqual(reports.map(item => item.id), ['j-address', 'j-front'])
+  assert.equal(reports[0].caption, 'Passport · address.pdf')
+  assert.equal(reports[1].caption, 'Passport · front.pdf')
 })

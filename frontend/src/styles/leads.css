@@ -191,6 +191,10 @@
 .ld-done p { margin: 0; font-size: 13.5px; color: var(--text-muted); }
 .ld-done .ld-done-ref { font-size: 15px; font-weight: 600; color: var(--primary); }
 .ld-done-note { margin-top: 8px !important; }
+.ld-done-actions { display: grid; width: 100%; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ld-done-actions > button { width: 100%; min-width: 0; white-space: normal; }
+.ld-done-actions .ld-done-primary { grid-column: 1 / -1; }
+@media (max-width: 639px) { .ld-done-actions { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- Drawer ---------- */
 .ld-drawer { display: flex; flex-direction: column; gap: 18px; padding: 18px 20px 28px; font-family: 'Poppins', system-ui, sans-serif; }

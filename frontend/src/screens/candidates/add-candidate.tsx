@@ -201,8 +201,6 @@ export default function AddCandidatePage() {
       try {
         await intake.upload('resume', file, { many: true })
         if (!store.isCurrentSession()) return
-        // The first file starts the reading; the round that is running follows every file added after it.
-        void readDocuments(true)
       } catch (error) {
         problems.push(`${file.name}: ${error instanceof Error ? error.message : 'We could not save this file. Please try again.'}`)
         setAddProblems([...problems])
@@ -210,7 +208,7 @@ export default function AddCandidatePage() {
     }
     if (!store.isCurrentSession()) return
     await intake.saveDraft(draftRef.current).catch(() => {})
-    setReadMessage('Your files are saved. You can leave this page and carry on later.')
+    setReadMessage('Files saved. Add all pages, then choose Extract details when you are ready.')
   }
 
   const removeDocument = async (id: string) => {
@@ -225,7 +223,7 @@ export default function AddCandidatePage() {
 
   const retryFile = async (id: string) => {
     if (saving || savedCandidateId) return
-    try { await intake.retry(id); setAddProblems([]); void readDocuments(true) }
+    try { await intake.retry(id); setAddProblems([]); void readDocuments({ retryFailed: false, jobIds: [id] }) }
     catch (error) { setAddProblems([error instanceof Error ? error.message : 'We could not queue this file again. Please try again.']) }
   }
 
@@ -248,17 +246,18 @@ export default function AddCandidatePage() {
   }, [reading, stillWorking, intake.jobs, savedCandidateId])
   // The server accepts a blank name or phone exactly when an upload is attached (intake_group_id is sent).
   const hasDocuments = intake.jobs.length > 0
-  const readDocuments = async (auto = false) => {
+  const readDocuments = async (options: { retryFailed?: boolean; jobIds?: string[] } = {}) => {
     if (readController.current || saving || savedCandidateId) return
-    if (!auto && (intake.uploading || chosen.length === 0)) return
+    if (intake.uploading || chosen.length === 0) return
     const controller = new AbortController()
+    const jobIds = options.jobIds ?? intake.jobs.filter(isDocumentJob).map((job) => job.id)
     readController.current = controller
-    setReading(true); if (!auto) setReadMessage('')
+    setReading(true); setReadMessage('')
     try {
       // A failed autosave must never stop the document from being read; the draft banner already tells the user.
       await intake.saveDraft(draftRef.current).catch(() => {})
       // Each poll puts what is read so far into the rows, the found chips and the form.
-      const jobs = await intake.read(controller.signal, { retryFailed: !auto, onProgress: (values) => { if (readController.current === controller) applyJobs(values) } })
+      const jobs = await intake.read(controller.signal, { ...options, jobIds, onProgress: (values) => { if (readController.current === controller) applyJobs(values) } })
       if (readController.current !== controller || !store.isCurrentSession()) return
       applyJobs(jobs)
     } catch (error) {
@@ -266,8 +265,7 @@ export default function AddCandidatePage() {
     } finally {
       if (readController.current === controller) {
         readController.current = null; setReading(false)
-        // A file that was saved while the last round was finishing still has to be read.
-        if (!controller.signal.aborted && intake.hasUnqueued()) void readDocuments(true)
+        if (!controller.signal.aborted && intake.hasUnqueued()) setReadMessage('Additional files are saved. Choose Extract details when all remaining pages are ready.')
       }
     }
   }
@@ -541,7 +539,7 @@ export default function AddCandidatePage() {
           <div className="ac-form-card">
             <fieldset disabled={disabledAll} className="ac-fieldset">
               {/* ------------------------------------------------------------------ Documents first */}
-              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Resume, passport or Aadhaar, in one file or several. We find each one.">
+              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Add every resume, passport and Aadhaar page, then choose Extract details. You can add files one at a time.">
                 <div className="ac-docs">
                   <EntryUploadZone rows={documentRows} chips={chips} reports={readReports} progress={readProgress(documentRows)} disabled={disabledAll} max={MAX_DOCUMENT_FILES} problems={addProblems}
                     onAdd={(files) => void addDocuments(files)} onRemove={removeDocument} onRetry={retryFile}
@@ -560,7 +558,7 @@ export default function AddCandidatePage() {
                       {severalPeopleFound(intake.jobs, splitSuggested) && intake.jobs[0]?.groupId && <Button disabled={reading || saving || intake.uploading} onClick={() => setBundleSource(intake.jobs[0].groupId)}>Check people in documents</Button>}
                       {reading && <Button variant="ghost" onClick={cancelReading}>Stop waiting</Button>}
                       {chosen.length > 0 && <Button variant="primary" onClick={() => void readDocuments()} disabled={reading || saving || intake.uploading} icon={<Sparkles className="h-4 w-4" />}>
-                        {reading ? 'Reading…' : 'Read again'}
+                        {reading ? 'Reading…' : intake.hasUnqueued() ? 'Extract details' : 'Read again'}
                       </Button>}
                     </div>
                   </div>

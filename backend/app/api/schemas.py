@@ -138,6 +138,9 @@ class DocumentSlotOut(Wire):
     key: str
     label: str
     versions: list[dict[str, Any]] = []
+    uploaded: bool = False
+    file_uploaded: bool = False
+    manual_status: dict[str, Any] | None = None
 
 
 class CallOutcomeOut(Wire):

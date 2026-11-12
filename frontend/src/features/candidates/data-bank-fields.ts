@@ -19,7 +19,7 @@ export const EMPTY_VALUE = '–'
 /** What the list needs from the store to write the few values that are not on the candidate itself. */
 export interface BankContext {
   ownerName: (ownerId: string | null | undefined) => string
-  /** "Agent / referred by" text (empty when none was recorded). */
+  /** "Agency" text (empty when none was recorded). */
   agent: (candidate: Candidate) => string
   statusLabel: (candidate: Candidate) => string
   sourceLabel: (source: string, detail?: string | null) => string
@@ -108,7 +108,7 @@ export const BANK_FIELD_DEFS: readonly BankFieldDef[] = [
 
   { id: 'added', label: 'Added on', group: 'Workflow', width: 110, sortKey: 'added', inColumns: true, value: (c) => dayLabel(c.addedAt) },
   { id: 'owner', label: 'Recruiter', group: 'Workflow', width: 110, sortKey: 'owner', inColumns: true, value: (c, x) => (c.ownerId ? x.ownerName(c.ownerId) : '') },
-  { id: 'agent', label: 'Agent / referred by', group: 'Workflow', width: 130, inColumns: true, value: (c, x) => x.agent(c) },
+  { id: 'agent', label: 'Agency', group: 'Workflow', width: 130, inColumns: true, value: (c, x) => x.agent(c) },
   { id: 'source', label: 'Source', group: 'Workflow', width: 90, sortKey: 'source', inColumns: true, value: (c, x) => x.sourceLabel(c.source, c.sourceDetail) },
   { id: 'stage', label: 'Stage', group: 'Workflow', width: 120, sortKey: 'stage', inColumns: true, value: (c, x) => x.application(c.id)?.stage ?? '' },
   { id: 'order', label: 'Order', group: 'Workflow', width: 110, sortKey: 'order', inColumns: true, value: (c, x) => x.application(c.id)?.order ?? '' },

@@ -58,7 +58,7 @@ class Search:
     skill_mode: str = "all"
     missing_skills: bool = False
     column_filters: str = "{}"
-    sort: str = "added"
+    sort: str = "new_first"
     direction: str = "desc"
     staff: str | None = None
     designation: str = ""
@@ -250,6 +250,12 @@ def search_statement(filters: Search):
         else:
             expression = cast(expression, String)
             query = query.where(literal_contains(expression, term.strip()))
+    if filters.sort == "new_first":
+        # This fixed preset is applied before LIMIT/OFFSET: all New candidates,
+        # then In process, then the other statuses, newest within each group.
+        priority = case((Candidate.status == CandidateStatus.new, 0),
+                        (Candidate.status == CandidateStatus.in_process, 1), else_=2)
+        return query.order_by(priority.asc(), Candidate.created_at.desc(), Candidate.id)
     sortable = {**expressions, **ranks}
     if filters.sort not in sortable:
         raise HTTPException(422, "We cannot sort by this column.")
@@ -344,6 +350,9 @@ def candidate_skill_facets(db, filters: Search):
 
 def export_candidates(db, filters):
     candidates = db.scalars(search_statement(filters)).all()
+    from app.services.candidate_review import review_reasons
+    flagged = [candidate for candidate in candidates if candidate.needs_review or candidate.status == CandidateStatus.needs_review]
+    reasons = review_reasons(db, flagged)
     users = {u.id: u.name for u in db.scalars(select(User))}
     shown = displayed_applications()
     current_apps = {a.candidate_id: a for a in db.scalars(select(Application).join(shown, Application.id == shown.c.id))}
@@ -353,26 +362,51 @@ def export_candidates(db, filters):
     for category, value, label in db.execute(select(FormOption.category, FormOption.value, FormOption.label).where(FormOption.category.in_(("service_charges_status", "interest_level")))):
         labels.setdefault(category, {})[value] = label
     from app.services.application_form import LEGACY_SLOTS, required_for_deployment
+    from app.services.document_status import read_manual_document_statuses
+    from app.services.document_identity import rejected_expression
     required = required_for_deployment()
     matching_ids = search_statement(filters).order_by(None).with_only_columns(Candidate.id)
-    uploaded = {}
-    for candidate_id, slot in db.execute(select(Attachment.entity_id, Attachment.slot).where(
+    manual_records = read_manual_document_statuses(db, matching_ids)
+    agencies = dict(db.execute(select(Candidate.id, agency_display_expression()).where(Candidate.id.in_(matching_ids))).all())
+    uploaded, rejected_files = {}, {}
+    for candidate_id, slot, rejected in db.execute(select(Attachment.entity_id, Attachment.slot, rejected_expression()).where(
         Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
     ).distinct()):
-        uploaded.setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
+        (rejected_files if rejected else uploaded).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
     rows = [["Reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
-             "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level",
+             "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level", "Agency", "Profile review issues",
              *[label + " document" for _slot, label in required], "Missing mandatory documents"]]
     for candidate in candidates:
         app = current_apps.get(candidate.id)
         service = labels.get("service_charges_status", {}).get(candidate.service_charges_status, candidate.service_charges_status)
         interest = labels.get("interest_level", {}).get(candidate.interest_level, candidate.interest_level) if candidate.interest_level else ""
         saved = uploaded.get(candidate.id, set())
+        manual = manual_records.get(candidate.id, {})
+        wrong = rejected_files.get(candidate.id, set())
+        marked = {slot for slot, status in manual.items() if status["uploaded"] and slot not in wrong}
+        review = []
+        if candidate.id in reasons:
+            for key, label in (("missing_name", "Name missing or unreadable"), ("missing_phone", "Phone number missing"),
+                               ("ocr_warning", "Document reading needs checking")):
+                if key in reasons[candidate.id]:
+                    review.append(label)
+            if not candidate.owner_id:
+                review.append("Recruiter not assigned")
+            if not review:
+                review.append("Profile check pending")
         rows.append([candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
                      candidate.total_experience, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
                      candidate.status.value, candidate.created_at.isoformat(),
                      candidate.dob.isoformat() if candidate.dob else "", candidate.whatsapp or "", candidate.country_preference or "", service, interest,
-                     *["Uploaded" if slot in saved else "Missing" for slot, _label in required],
-                     ", ".join(label for slot, label in required if slot not in saved)])
-    return xlsx_rows([("Candidates", rows), ("Filters", [[key, str(val)] for key, val in vars(filters).items()])])
+                     agencies.get(candidate.id) or "", "; ".join(review),
+                     *["Uploaded" if slot in saved else "Wrong document" if slot in wrong else "Marked manually (no file attached)" if slot in marked else "Missing" for slot, _label in required],
+                     ", ".join(label for slot, label in required if slot not in saved | marked)])
+    from app.services.application_form import SLOT_LABELS
+    confirmations = [["Candidate reference", "Document", "Manual status", "Marked by", "Marked at", "Note"]]
+    for candidate in candidates:
+        confirmations.extend([candidate.ref, SLOT_LABELS.get(slot, slot), "Uploaded" if record["uploaded"] else "Pending",
+                              record["by"]["name"], record["at"], record["note"]]
+                             for slot, record in manual_records.get(candidate.id, {}).items())
+    return xlsx_rows([("Candidates", rows), ("Filters", [[key, str(val)] for key, val in vars(filters).items()]),
+                      ("Manual document confirmations", confirmations)])

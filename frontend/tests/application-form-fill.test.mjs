@@ -228,7 +228,8 @@ test('each section counts only its own missing items', () => {
   ]
   const count = (no) => fill.cardMissing(cards.find((card) => card.no === no), missing).length
   assert.deepEqual([1, 2, 3, 4].map(count), [3, 2, 1, 2])
-  assert.equal(fill.toAddText(3), '3 to add')
+  assert.equal(fill.toAddText(3), '3 fields missing')
+  assert.equal(fill.toAddText(1), '1 field missing')
   assert.equal(fill.toAddText(0), '')
 })
 

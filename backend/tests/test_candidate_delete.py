@@ -254,3 +254,79 @@ def test_a_deleted_candidates_files_can_be_read_again_and_the_reason_names_the_o
     assert db.get(m.MailMessage, "msg") is not None and db.scalar(select(m.EmailIngestionJob.status)) == "completed"
     assert processed_hashes(db, ["h-file", "h-mail", "h-wa"]) == {}
     assert duplicate_reason([]).startswith("Duplicate file")
+
+
+@pytest.mark.parametrize("financial_record", ["reserved", "issued", "payment", "voided_payment"])
+def test_imported_candidate_with_financial_history_keeps_invoice_and_files(env, financial_record):
+    cid = candidate(env.db, "financial", source_detail="Bulk import")
+    application(env.db, "financial-placement", cid, "o1", m.ApplicationStatus.deployed)
+    file_path = stored_file(env, env.db, cid, "invoice.pdf", "application", "financial-placement")
+    attachment = env.db.scalar(select(m.Attachment).where(m.Attachment.entity_id == "financial-placement"))
+    invoice = m.CandidateInvoice(id="financial-invoice", candidate_id=cid, application_id="financial-placement",
+                                 scope_key="financial-placement", service_fee=5000, attachment_id=attachment.id,
+                                 number="TEST/001" if financial_record in ("reserved", "issued") else None,
+                                 status="issued" if financial_record == "issued" else "pending_generation")
+    env.db.add(invoice)
+    env.db.flush()
+    if financial_record in ("payment", "voided_payment"):
+        env.db.add(m.InvoicePayment(invoice_id=invoice.id, amount=1000, paid_on=NOW.date(), method="cash",
+                                   idempotency_key="receipt", created_by="admin",
+                                   voided_at=NOW if financial_record == "voided_payment" else None,
+                                   void_reason="Duplicate receipt" if financial_record == "voided_payment" else None,
+                                   voided_by="admin" if financial_record == "voided_payment" else None))
+    env.db.commit()
+    response = env.http().delete(f"/api/candidates/{cid}")
+    assert response.status_code == 409
+    assert "financial history" in response.json()["detail"]
+    assert env.db.get(m.Candidate, cid) is not None
+    assert env.db.get(m.Attachment, attachment.id) is not None
+    assert file_path.exists()
+
+
+def test_delete_waits_for_invoice_reservation_and_checks_committed_financial_history(env):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import time
+    from sqlalchemy import event, text
+
+    cid = candidate(env.db, "invoice-race")
+    env.db.add(m.AssignmentPointer(id=1))
+    env.db.commit()
+    env.db.get(m.User, "admin")
+    engine = env.db.get_bind()
+    waiting = threading.Event()
+    deletion_pid = []
+
+    def before_execute(connection, cursor, statement, parameters, context, executemany):
+        if "FOR UPDATE OF crm_candidates" in statement:
+            deletion_pid.append(connection.connection.driver_connection.info.backend_pid)
+            waiting.set()
+
+    with Session(engine) as issuer, ThreadPoolExecutor(max_workers=1) as pool:
+        issuer.scalar(select(m.Candidate).where(m.Candidate.id == cid).with_for_update())
+        issuer.add(m.CandidateInvoice(candidate_id=cid, scope_key="", service_fee=5000,
+                                      status="pending_generation", number="RACE/001"))
+        issuer.flush()
+        issuer_pid = issuer.scalar(text("SELECT pg_backend_pid()"))
+        event.listen(engine, "before_cursor_execute", before_execute)
+        try:
+            deletion = pool.submit(lambda: env.http().delete(f"/api/candidates/{cid}"))
+            assert waiting.wait(5), "delete must acquire the candidate lock"
+            deadline = time.monotonic() + 5
+            blocked = False
+            while time.monotonic() < deadline:
+                blockers = issuer.scalar(text("SELECT pg_blocking_pids(:pid)"), {"pid": deletion_pid[0]})
+                if issuer_pid in blockers:
+                    blocked = True
+                    break
+                time.sleep(.01)
+            assert blocked, "deletion must be waiting for the invoice writer"
+            issuer.commit()
+            response = deletion.result(timeout=10)
+            assert response.status_code == 409
+            assert "financial history" in response.json()["detail"]
+            env.db.expire_all()
+            assert env.db.get(m.Candidate, cid) is not None
+        finally:
+            issuer.rollback()
+            event.remove(engine, "before_cursor_execute", before_execute)

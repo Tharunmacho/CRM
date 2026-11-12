@@ -103,12 +103,18 @@ def _discard_uncommitted_file(target: Path) -> None:
         logger.warning("Could not remove an uncommitted document from storage.")
 
 
+def _uploaded_file(row: Attachment) -> dict:
+    return {"id": row.id, "name": row.file_name, "sizeKb": row.size_kb, "version": row.version,
+            "key": row.object_key, "url": f"/api/files/{row.id}", "uploadedAt": row.uploaded_at.isoformat()}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def upload(
     entity_type: str = Form(...),
     entity_id: str = Form(...),
     slot: str = Form(...),
     file: UploadFile = File(...),
+    defer_extraction: bool = Form(False),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
@@ -116,6 +122,7 @@ def upload(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Files cannot be added to this kind of record ({entity_type}).")
     if not entity_id or not entity_id.strip() or len(entity_id) > 36:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "We could not tell which record this file belongs to.")
+    deferred = defer_extraction is True  # direct internal callers retain the automatic default
     slot = slot.strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", slot):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose which document this file is for.")
@@ -161,6 +168,21 @@ def upload(
             lead_sheet.ensure_can_work_lead(db, record, user)
         if entity_type == "candidate" and slot == "source_bundle":
             raise HTTPException(422, "The original upload is kept as it was received and cannot be replaced by hand")
+        digest = hashlib.sha256(payload).hexdigest()
+        if entity_type == "candidate" and slot in ("passport", "aadhaar"):
+            # Front/back scans coexist in this slot. Check every file while holding the candidate
+            # lock, including a retry racing another upload or repeating an older front page.
+            duplicate = db.scalar(select(Attachment).where(
+                Attachment.entity_type == entity_type, Attachment.entity_id == entity_id,
+                Attachment.slot == slot, Attachment.content_hash == digest,
+            ).order_by(Attachment.version.desc()).limit(1))
+            if duplicate is not None:
+                from app.services.application_form import requeue_failed
+                if not deferred:
+                    requeue_failed(db, entity_id, duplicate.id)
+                response = _uploaded_file(duplicate)
+                db.commit()
+                return response
         previous = db.scalar(
             select(Attachment)
             .where(
@@ -181,7 +203,7 @@ def upload(
             size_kb=max(1, round(len(payload) / 1024)),
             content_type=content_type,
             object_key=object_key,
-            content_hash=hashlib.sha256(payload).hexdigest(),
+            content_hash=digest,
             uploaded_by=user.id,
             uploaded_at=datetime.now(timezone.utc),
         )
@@ -192,12 +214,13 @@ def upload(
             target=row.file_name,
             entity_type=entity_type,
             entity_id=entity_id,
-            meta={"attachment_id": row.id, "slot": slot, "version": row.version},
+            meta={"attachment_id": row.id, "slot": slot, "version": row.version,
+                  **({"extraction_deferred": True} if deferred and entity_type == "candidate" and slot in ("resume", "passport", "aadhaar") else {})},
             at=row.uploaded_at,
         ))
         if entity_type == "lead":
             lead_sheet.note_resume_uploaded(db, record, user, row)
-        if entity_type == "candidate" and slot in ("resume", "passport", "aadhaar"):
+        if entity_type == "candidate" and slot in ("resume", "passport", "aadhaar") and not deferred:
             # A resume or passport stored for a candidate is read, and what it says fills the application form
             # (empty fields only; see services/form_extraction.py). The extraction worker picks the job up.
             from app.services.application_form import queue_reading
@@ -239,15 +262,17 @@ def upload(
             ) from exc
         raise
 
-    return {
-        "id": row.id,
-        "name": row.file_name,
-        "sizeKb": row.size_kb,
-        "version": row.version,
-        "key": row.object_key,
-        "url": f"/api/files/{row.id}",
-        "uploadedAt": row.uploaded_at.isoformat(),
-    }
+    if (entity_type == "candidate" and slot == "air_ticket") or (entity_type == "application" and slot == "stage_11_file"):
+        # The ticket is already committed. Invoice generation has its own durable pending request,
+        # so a PDF/storage problem cannot erase a successful ticket upload or advance a stage.
+        try:
+            from app.services.candidate_invoices import on_ticket_uploaded
+            on_ticket_uploaded(db, row, user)
+        except Exception:
+            db.rollback()
+            logger.exception("Ticket saved; its invoice can be retried from the candidate form")
+
+    return _uploaded_file(row)
 
 
 def _own_stage_files_only(db: Session, entity_type: str, entity_id: str, user: User) -> None:

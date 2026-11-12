@@ -7,7 +7,6 @@ from app.domain.stages import stage_by_no, validate_payload
 @pytest.mark.parametrize(("stage", "data"), [
     (1, {"result": "unsupported"}),
     (4, {"result": "unsupported", "remarks": "reason"}),
-    (4, {"result": "selected", "remarks": "   "}),
     (5, {"obtained": "yes", "file": "not-an-attachment"}),
     (8, {"collected": "yes", "amount": -100, "receipt": {"id": "receipt"}}),
     (8, {"collected": "yes", "amount": True, "receipt": {"id": "receipt"}}),
@@ -70,3 +69,35 @@ def test_exact_negative_exits(stage, data, reason):
 def test_drafts_allow_incomplete_values_and_normalize_money_and_whitespace():
     assert validate_payload(1, {"remarks": "  In progress  "}) == {"remarks": "In progress"}
     assert validate_payload(8, {"amount": "10.25"}) == {"amount": 10.25, "amountCurrency": "INR"}
+
+
+@pytest.mark.parametrize("stage", range(1, 12))
+def test_feedback_only_stage_move_never_invents_documents_results_or_dates(stage):
+    data = validate_payload(stage, {"feedback": "  Recruiter confirmed this manual move.  "})
+    assert data["feedback"] == "Recruiter confirmed this manual move."
+    result = stage_by_no(stage).evaluate(data)
+    assert result.can_complete and result.outcome == "Completed manually"
+    assert not result.closes and not result.repeats
+    assert not ({"file", "receipt", "travelDate", "date", "result", "amount"} & data.keys())
+
+
+@pytest.mark.parametrize(("stage", "data", "outcome"), [
+    (3, {"scheduled": "yes"}, "Scheduled"),
+    (4, {"result": "selected"}, "Selected"),
+    (5, {"obtained": "yes"}, "Obtained"),
+    (8, {"collected": "yes"}, "Collected"),
+    (10, {"done": "yes"}, "Stamped"),
+    (11, {}, "Completed manually"),
+])
+def test_optional_documents_and_details_do_not_gate_a_manual_move(stage, data, outcome):
+    result = stage_by_no(stage).evaluate(data)
+    assert result.can_complete and result.outcome == outcome
+
+
+@pytest.mark.parametrize(("stage", "data"), [
+    (2, {"forwarded": "no"}),
+    (6, {"result": "unfit"}),
+    (6, {"result": "unfit", "reapplying": "yes"}),
+])
+def test_explicit_negative_outcomes_still_require_a_decision(stage, data):
+    assert not stage_by_no(stage).evaluate({"feedback": "Follow up needed", **data}).can_complete

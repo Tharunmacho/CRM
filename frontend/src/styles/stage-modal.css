@@ -18,6 +18,18 @@
 .workspace-dialog:has(.sm) > .dialog-head h2 { font-size: 19px; }
 .sm-wrap { padding: 24px 24px 40px; overflow-x: clip; }
 .sm-state { padding: 24px; }
+.sm-embedded { min-width: 0; }
+.sm-embedded .sm-current > header { padding: 18px 20px; }
+.sm-embedded .sm-current > header h3 { font-size: 19px; }
+.sm-embedded .sm-check { margin: 16px 20px 0; }
+.sm-embedded .sm-feedback { margin: 16px 20px; }
+.sm-embedded .sm-stage-details { margin: 0 20px 16px; }
+.sm-embedded .sm-foot { padding: 16px 20px; }
+.sm-inline-history { padding: 20px; }
+.sm-inline-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.sm-inline-title small { font-size: 12px; color: var(--text-muted); }
+.sm-inline-title h3 { margin-top: 4px; font-size: 19px; font-weight: 600; color: var(--text-main); }
+.sm-inline-attempt + .sm-inline-attempt { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-main); }
 
 /* ================================================================== Summary card */
 .sm-head { overflow: hidden; border: 1px solid var(--border-main); border-radius: 14px; background: var(--bg-card); box-shadow: var(--shadow-card); }
@@ -140,6 +152,17 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
 .sm-form .ui-field > span:first-child { margin-bottom: 8px; }
 .sm-form :is(.ui-input, select, .custom-select-trigger, .date-picker-trigger) { min-height: 40px; }
 .sm-form .ui-radio-chip { min-width: 72px; }
+.sm-feedback { margin: 24px; padding: 20px; border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border-main)); border-radius: 12px; background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
+.sm-feedback textarea { min-height: 112px; resize: vertical; background: var(--bg-card); }
+.sm-feedback .sm-hint { margin-top: 10px; }
+.sm-stage-details { margin: 0 24px 24px; border: 1px solid var(--border-main); border-radius: 10px; }
+.sm-stage-details > summary { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-main); }
+.sm-stage-details > summary::before { content: '+'; font-size: 18px; color: var(--primary); }
+.sm-stage-details[open] > summary::before { content: '−'; }
+.sm-stage-details > summary span { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.sm-stage-details .sm-form { padding: 16px; border-top: 1px solid var(--border-faint); }
+.sm-step.is-upcoming .sm-node { background: var(--bg-card); color: var(--text-muted); border-color: var(--border-main); }
+.sm-step.is-upcoming .sm-summary-copy b { color: var(--text-muted); }
 .sm-form-note { display: flex; align-items: flex-start; gap: 8px; margin: 0 24px 24px; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
 .sm-form-note svg { flex: none; margin-top: 2px; color: var(--warning-ink); }
 .sm-still { margin: 0 24px 24px; padding: 10px 14px; border: 1px solid var(--error-edge); border-radius: 8px; background: var(--error-fill); font-size: 13px; color: var(--error-ink); }
@@ -218,6 +241,16 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
   .sm-form { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px; }
   .sm-form > .sm-c4, .sm-form > .sm-c8, .sm-form > .sm-c12 { grid-column: 1 / -1; }
   .sm-form-note, .sm-still { margin: 0 16px 16px; }
+  .sm-feedback { margin: 16px; padding: 16px; }
+  .sm-stage-details { margin: 0 16px 16px; }
+  .sm-embedded .sm-current { border: 0; box-shadow: none; }
+  .sm-embedded .sm-current > header { padding: 12px 0; }
+  .sm-embedded .sm-check { margin: 12px 0; padding: 12px; }
+  .sm-embedded .sm-feedback { margin: 12px 0; padding: 14px; }
+  .sm-embedded .sm-stage-details { margin: 0 0 12px; }
+  .sm-embedded .sm-stage-details > summary { padding: 12px; gap: 8px; }
+  .sm-embedded .sm-foot { padding: 12px 0; background: transparent; }
+  .sm-embedded .sm-inline-history { padding: 14px; }
   .sm-foot { flex-direction: column; align-items: stretch; padding: 16px; }
   .sm-foot-meta { flex-basis: auto; max-width: none; }
   .sm-foot-actions { flex-direction: column-reverse; align-items: stretch; margin-left: 0; }

@@ -146,14 +146,18 @@ test('the request body is trimmed, with empty salary and dates sent as null and 
   })
   assert.equal(f.buildJobPayload({ ...f.emptyJobForm('co1', 'AED'), salary: '1800.5' }, 'd1').salary, 1800.5)
   assert.equal(f.buildJobPayload({ ...f.emptyJobForm('co1', 'AED'), deadline: '2026-12-31' }, 'd1').deadline, '2026-12-31')
+  assert.equal(f.buildJobPayload({ ...f.emptyJobForm('co1', 'AED'), interviewDate: '2026-12-10' }, 'd1').interviewDate, '2026-12-10')
 })
 
-test('"Save and add another job" keeps the client and currency and clears the job itself', () => {
-  const filled = { companyId: 'co1', title: 'Cook', openings: '4', country: 'UAE', city: 'Dubai', salary: '1800', currency: 'AED', deadline: '2026-12-31', benefits: 'Food', contractPeriod: '2 years', interviewDate: '2026-12-01', status: 'open' }
-  assert.deepEqual(f.nextJobForm(filled), f.emptyJobForm('co1', 'AED'))
-  assert.equal(f.nextJobForm(filled).companyId, 'co1')
-  assert.equal(f.nextJobForm(filled).title, '')
-  assert.equal(f.nextJobForm(filled).openings, '1')
+test('each new job starts blank and cannot inherit values or skills from an earlier draft', () => {
+  const previous = f.emptyJobForm('co1', 'AED')
+  Object.assign(previous, { title: 'Cook', country: 'UAE', city: 'Dubai', salary: '1800', benefits: 'Food', interviewDate: '2026-12-01' })
+  previous.skills.push('Cooking')
+  const next = f.emptyJobForm('', 'AED')
+  for (const key of ['companyId', 'title', 'country', 'city', 'salary', 'benefits', 'contractPeriod', 'interviewDate', 'deadline']) assert.equal(next[key], '')
+  assert.deepEqual(next.skills, [])
+  assert.equal(next.openings, '1')
+  assert.equal(next.currency, 'AED')
 })
 
 test('server errors land on the right box', () => {

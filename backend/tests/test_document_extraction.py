@@ -116,7 +116,7 @@ def environment(monkeypatch):
         veris_ocr_base_url="https://ocr.invalid", veris_ocr_api_key="synthetic-key",
     )
     state, saved, submissions, polls, opened = {}, [], [], [], []
-    statuses, results = {}, {}
+    statuses, results, submitted_modes = {}, {}, {}
 
     def save(snapshot):
         saved.append(deepcopy(snapshot))
@@ -124,16 +124,21 @@ def environment(monkeypatch):
     class Jobs:
         def submit(self, document, *, mode, idempotency_key):
             # The idempotency intent must be durable before the paid request.
-            assert saved[-1]["provider_jobs"][mode]["idempotency_key"] == idempotency_key
+            assert any(part["idempotency_key"] == idempotency_key for record in saved[-1]["provider_jobs"].values()
+                       for part in record.get("chunks") or [record])
             submissions.append((mode, document, idempotency_key))
             with fitz.open(stream=document.data, filetype="pdf") as sent:
                 results.setdefault(mode, result(mode, sent.page_count))
-            return SimpleNamespace(job_id=f"job-{mode}", status="queued")
+            index = sum(value == mode for value in submitted_modes.values())
+            job_id = f"job-{mode}" + (f"-{index + 1}" if index else "")
+            submitted_modes[job_id] = mode
+            return SimpleNamespace(job_id=job_id, status="queued")
 
         def get(self, job_id):
-            kind = job_id.removeprefix("job-")
+            kind = submitted_modes.get(job_id, job_id.removeprefix("job-"))
             # A crash after acceptance cannot lose the job identifier.
-            assert saved[-1]["provider_jobs"][kind]["job_id"] == job_id
+            assert any(part.get("job_id") == job_id for record in saved[-1]["provider_jobs"].values()
+                       for part in record.get("chunks") or [record])
             polls.append(job_id)
             return SimpleNamespace(
                 status=statuses.get(kind, "succeeded"), result=deepcopy(results[kind]),
@@ -305,6 +310,64 @@ def test_corrupt_cached_page_positions_force_complete_reinspection(environment, 
     assert environment.extract(data)["status"] == "complete"
     assert inspected == [True]
     assert len(environment.submissions) == 1
+
+
+@pytest.mark.parametrize("early_dispatch", [False, True])
+def test_classifier_upgrade_retries_missing_continuation_once_and_reuses_paid_first_page(environment, monkeypatch, early_dispatch):
+    continuation = """Livspace Home Interior
+Job title: Interior Designer
+Duration: November 2024 to February 2026
+Location: Chennai, India
+Software Skills
+AutoCAD and SketchUp
+"""
+    data = pdf(CV, continuation)
+    inspect = subject.inspect_document
+    def old_inspection(*args, **kwargs):
+        report = inspect(*args, **kwargs)
+        report.pages[1].document_type = "unknown"
+        report.pages[1].kinds = []
+        report.pages[1].inherited = False
+        return report
+    environment.settings.veris_early_dispatch = False
+    current_version = subject.INSPECTION_VERSION
+    monkeypatch.setattr(subject, "INSPECTION_VERSION", "old-classifier")
+    monkeypatch.setattr(subject, "inspect_document", old_inspection)
+    environment.results["resume"] = {**result("resume", 1), "total_experience_months": 16,
+        "experience": [{"company": "Designhaus", "title": "Interior Designer", "start": "2023-08", "end": "2024-11",
+                        "country": "India", "is_overseas": False, "duration_months": 16}]}
+    first = environment.extract(data, partial=True)
+    assert first["inspection"]["resume_pages"] == [1] and first["status"] == "needs_review"
+    assert len(environment.submissions) == 1
+    paid = deepcopy(environment.state["provider_jobs"]["resume"])
+    assert paid["selected_pages"] == [1] and paid["status"] == "succeeded"
+    environment.state["documents"] = {"resume": {"object_key": "old-single-page-derived.pdf"}}
+    environment.state["output"] = deepcopy(first)
+    # Mirror the explicit retry endpoint, retaining accepted work and clearing its final output.
+    subject.request_extraction_retry(environment.state)
+    environment.state.pop("output", None)
+    monkeypatch.setattr(subject, "INSPECTION_VERSION", current_version)
+    monkeypatch.setattr(subject, "inspect_document", inspect)
+    environment.settings.veris_early_dispatch = early_dispatch
+    environment.results["resume"] = {**result("resume", 1), "total_experience_months": 15,
+        "experience": [{"company": "Livspace", "title": "Interior Designer", "start": "2024-11", "end": "2026-02",
+                        "country": "India", "is_overseas": False, "duration_months": 15}]}
+    complete = environment.extract(data, partial=True)
+    assert complete["inspection"]["resume_pages"] == [1, 2]
+    assert complete["status"] == "complete" and complete["coverage"]["complete"]
+    assert complete["extractions"]["resume"]["selected_pages"] == [1, 2]
+    assert {entry["company"] for entry in complete["extractions"]["resume"]["raw"]["experience"]} == {"Designhaus", "Livspace"}
+    assert complete["extractions"]["resume"]["raw"]["total_experience_months"] == 31
+    assert environment.state["provider_jobs"]["resume"] == paid
+    assert environment.state["provider_jobs"]["resume+"]["selected_pages"] == [2]
+    assert len(environment.submissions) == 2 and len(environment.polls) == 2
+    with fitz.open(stream=environment.submissions[1][1].data, filetype="pdf") as sent:
+        assert sent.page_count == 1 and "Livspace" in sent[0].get_text() and "CURRICULUM" not in sent[0].get_text()
+    assert environment.state["documents"] == {}
+    subject.request_extraction_retry(environment.state)
+    again = environment.extract(data, partial=True)
+    assert again["status"] == "complete" and again["extractions"]["resume"]["selected_pages"] == [1, 2]
+    assert len(environment.submissions) == 2 and len(environment.polls) == 2
 
 
 def test_paid_result_survives_mapping_failure_without_another_provider_request(environment, monkeypatch):
@@ -610,3 +673,36 @@ def test_damaged_file_is_unreadable_but_a_missing_converter_is_a_retryable_failu
     with pytest.raises(subject.ExtractionFailure) as raised:
         environment.extract(buffer.getvalue(), state={})
     assert not isinstance(raised.value, subject.UnreadableDocument)
+
+
+@pytest.mark.parametrize("missing_last", [False, True])
+def test_every_page_is_accounted_for_across_resume_passport_and_aadhaar(environment, missing_last):
+    from test_ocr_classification import PASSPORT_ADDRESS
+    continuation = """Example Interiors Pvt Ltd
+Job title: Interior Designer
+Duration: November 2024 - February 2026
+Location: Example City, India
+Software Skills
+Design and drawing software
+"""
+    pages = [CV, continuation, PASSPORT, PASSPORT_ADDRESS, AADHAAR, AADHAAR_BACK, CERTIFICATE]
+    if missing_last:
+        pages.append("Unlabelled content with several words and numbers. Its purpose is unknown.")
+    output = environment.extract(pdf(*pages))
+    coverage = output["coverage"]
+    assert coverage["pages"]["total"] == len(pages)
+    assert output["extractions"]["resume"]["selected_pages"] == [1, 2]
+    assert output["extractions"]["passport"]["selected_pages"] == [3, 4]
+    assert output["extractions"]["aadhaar"]["selected_pages"] == [5, 6]
+    sent = set(coverage["pages"]["sent"])
+    excluded = {page["page"] for page in coverage["pages"]["not_sent"]}
+    assert not sent & excluded
+    assert sent | excluded == set(range(1, len(pages) + 1))
+    assert all(page["reason"] for page in coverage["pages"]["not_sent"])
+    assert 7 in coverage["pages"]["ignored"]
+    if missing_last:
+        assert coverage["pages"]["unresolved"] == [8]
+        assert coverage["complete"] is False and output["status"] == "needs_review"
+    else:
+        assert coverage["pages"]["unresolved"] == []
+        assert coverage["complete"] is True and output["status"] == "complete"

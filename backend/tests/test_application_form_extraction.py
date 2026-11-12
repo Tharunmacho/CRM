@@ -151,7 +151,7 @@ def test_manual_zero_is_protected_but_default_zero_is_empty():
 
 def test_extracted_values_are_refreshed_by_a_better_document():
     c = person()
-    fx.apply_values(c, "passport", {"passport_no": "K0000000", "passport_expiry": date(2029, 1, 1)})
+    fx.apply_values(c, "passport", {"passport_no": "K1234567", "passport_expiry": date(2029, 1, 1)})
     fx.apply_values(c, "passport", {"passport_no": "K1234567", "passport_expiry": date(2030, 1, 5)})
     assert (c.passport_no, c.passport_expiry) == ("K1234567", date(2030, 1, 5))
 

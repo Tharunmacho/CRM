@@ -38,7 +38,11 @@ def can_change(user: User, candidate) -> dict:
 # ------------------------------------------------------------------ reads (run in the form's parallel round)
 
 def read_job_options(session: Session, candidate_id: str) -> list:
-    """Every open job of an active client, plus the job the candidate is on now, in one statement."""
+    """All jobs of active clients, empty clients, and the candidate's current placement.
+
+    Non-open jobs stay visible with their status; the existing mapping guard still
+    requires an open job before a new candidate can be assigned.
+    """
     current = select(Application.order_id).where(
         Application.candidate_id == candidate_id,
         Application.status.in_((ApplicationStatus.active, ApplicationStatus.deployed)),
@@ -46,9 +50,11 @@ def read_job_options(session: Session, candidate_id: str) -> list:
     return list(session.execute(
         select(Client.id.label("client_id"), Client.name.label("client_name"), Company.id.label("company_id"), Company.name.label("company_name"),
                Order.id.label("order_id"), Order.ref, Designation.title, Order.openings, Order.status)
-        .select_from(Order).join(Company, Company.id == Order.company_id).join(Client, Client.id == Company.client_id)
-        .join(Designation, Designation.id == Order.designation_id)
-        .where(or_(and_(Order.status == OrderStatus.open, Client.status == "active"), Order.id.in_(current)))
+        .select_from(Client).outerjoin(Company, Company.client_id == Client.id)
+        .outerjoin(Order, and_(Order.company_id == Company.id,
+                             or_(Client.status == "active", Order.id.in_(current))))
+        .outerjoin(Designation, Designation.id == Order.designation_id)
+        .where(or_(Client.status == "active", Order.id.in_(current)))
         .order_by(Client.name, Company.name, Order.ref)).all())
 
 
@@ -84,11 +90,16 @@ def build_block(user: User, candidate, owner_name: str | None, chosen, job_rows:
         agency = {"id": matches[0].id if len(matches) == 1 else None, "name": detail}
     options: dict[str, Any] = {"clients": [], "agencies": [], "recruiters": []}
     if can["job"]:
-        grouped: dict[tuple[str, str], dict] = {}
+        grouped: dict[str, dict] = {}
         for row in job_rows:
-            entry = grouped.setdefault((row.client_id, row.company_id), {
+            entry = grouped.setdefault(row.client_id, {
                 "id": row.client_id, "name": row.client_name, "companyId": row.company_id, "companyName": row.company_name, "jobs": []})
-            entry["jobs"].append({"orderId": row.order_id, "ref": row.ref, "title": row.title, "openings": row.openings, "status": row.status.value})
+            # The Client selector identifies a contact, which can own several companies.
+            # Keep every company's jobs reachable under that one option.
+            if entry["companyId"] != row.company_id:
+                entry["companyId"] = entry["companyName"] = None
+            if row.order_id is not None:
+                entry["jobs"].append({"orderId": row.order_id, "ref": row.ref, "title": row.title, "openings": row.openings, "status": row.status.value})
         options["clients"] = list(grouped.values())
     if can["agency"]:
         options["agencies"] = [{"id": row.id, "name": _agency_name(row)} for row in agencies]

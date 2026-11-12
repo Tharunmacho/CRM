@@ -87,7 +87,7 @@ def save(env, app_id, data, *, lock=None):
 
 
 def complete(env, app_id, data):
-    saved = save(env, app_id, data)
+    saved = save(env, app_id, {"feedback": "Reviewed with the candidate; move this stage.", **data})
     assert saved.status_code == 200, saved.text
     response = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": saved.json()["lockVersion"]})
     assert response.status_code == 200, response.text
@@ -123,7 +123,7 @@ def payload(env, app_id, stage):
         values["file"] = attachment(env, app_id, stage)
     elif stage == 8:
         values["receipt"] = attachment(env, app_id, stage, "receipt")
-    return values
+    return {"feedback": f"Stage {stage} reviewed by the recruiter.", **values}
 
 
 def reach(env, app_id, stage):
@@ -212,15 +212,15 @@ def test_strict_values_and_real_document_ownership_before_advancing(workflow):
     for file in ("invented", {"id": "missing"}, wrong_owner, wrong_stage):
         assert save(env, app_id, {"obtained": "yes", "file": file}).status_code == 422
     own = attachment(env, app_id, 5)
-    response = save(env, app_id, {"obtained": "yes", "file": own})
+    response = save(env, app_id, {"obtained": "yes", "file": own, "feedback": "Offer confirmed; replacement file pending."})
     assert response.status_code == 200
     with env.sessions() as db:
         stored = db.get(Attachment, own["id"])
         (env.storage / stored.object_key).unlink()
     response = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": version(env, app_id)})
-    assert response.status_code == 422
+    assert response.status_code == 200, response.text
     with env.sessions() as db:
-        assert db.get(Application, app_id).current_stage == 5
+        assert db.get(Application, app_id).current_stage == 6
 
 
 def test_owner_guard_and_admin_reopen_restores_stage_and_retains_superseded_history(workflow):
@@ -304,7 +304,7 @@ def test_concurrent_map_and_completion_are_single_transitions(workflow):
     assert sorted(concurrent(lambda: map_to("order"), lambda: map_to("other-order"))) == [200, 409]
     with env.sessions() as db:
         app_id = db.scalar(select(Application.id))
-    saved = save(env, app_id, {"result": "passed"}).json()
+    saved = save(env, app_id, {"result": "passed", "feedback": "Prescreen approved."}).json()
     def finish():
         with env.sessions() as db:
             subject.complete_stage(app_id, subject.CompleteIn(lock_version=saved["lockVersion"]), db, env.actor)
@@ -400,7 +400,7 @@ def test_atomic_complete_records_submitted_values_and_owner_at_completion(workfl
         db.commit()
     env.actor = SimpleNamespace(id="other", role=Role.staff)
     response = env.client.post(f"/api/applications/{app_id}/complete", json={
-        "lock_version": version(env, app_id), "data": {"result": "passed", "remarks": "New submitted values"},
+        "lock_version": version(env, app_id), "data": {"result": "passed", "remarks": "New submitted values", "feedback": "Ready to forward."},
     })
     assert response.status_code == 200, response.text
     with env.sessions() as db:
@@ -416,7 +416,7 @@ def test_concurrent_unmap_and_atomic_complete_have_one_winner(workflow):
     app_id = mapped(env)
     def finish():
         with env.sessions() as db:
-            subject.complete_stage(app_id, subject.CompleteIn(lock_version=0, data={"result": "passed"}), db, env.actor)
+            subject.complete_stage(app_id, subject.CompleteIn(lock_version=0, data={"result": "passed", "feedback": "Prescreen approved."}), db, env.actor)
     def unmap():
         with env.sessions() as db:
             subject.unmap(app_id, subject.UnmapIn(lock_version=0), db, env.actor)

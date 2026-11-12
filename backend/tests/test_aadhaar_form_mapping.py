@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.db.models import AuditEntry, Candidate, Source
 from app.services import form_extraction as fx
 from test_application_form import desk, form, url  # noqa: F401  (fixtures and helpers)
-from test_application_form_extraction import RESUME, person
+from test_application_form_extraction import RESUME as BASE_RESUME, person
 from test_database_naming import schema_database  # noqa: F401
 
 # Synthetic numbers only. The "full number" must never appear in anything the CRM shows, stores outside ocr_data, or logs.
@@ -25,6 +25,7 @@ CARD = {
                 "date_of_birth": "1990-01-01", "gender": "male", "mobile_number": "XXXXXX1234", "address": "1 Example Road, Chennai, Tamil Nadu 600001",
                 "care_of": "S/O: Ramesh Example", "pincode": "600001", "vid": "1111222233334444", "enrollment_id": "0000/00000/00000", "document_side": "both"},
 }
+RESUME = {**BASE_RESUME, "name": "Alex Example"}
 
 
 def card(**identity):
@@ -81,25 +82,25 @@ def test_aadhaar_fills_empty_fields_stamps_extracted_and_remembers_the_source():
 
 
 def test_aadhaar_never_overwrites_a_manual_value():
-    c = person(name="Typed Name", dob=date(1991, 2, 2), father_name="Typed Father", current_address="Typed address")
+    c = person(name="A. Example", dob=date(1991, 2, 2), father_name="Typed Father", current_address="Typed address")
     fx.mark_manual(c, ["name", "dob", "father_name", "current_address"])
     result = fx.apply_values(c, "aadhaar", fx.aadhaar_values(CARD))
-    assert (c.name, c.dob, c.father_name, c.current_address) == ("Typed Name", date(1991, 2, 2), "Typed Father", "Typed address")
+    assert (c.name, c.dob, c.father_name, c.current_address) == ("A. Example", date(1991, 2, 2), "Typed Father", "Typed address")
     assert result.filled == ["personal.gender"]  # the only field that was still empty
     assert {"personal.candidateName", "personal.dateOfBirth", "personal.fatherName", "personal.currentAddress"} <= set(result.kept)
 
 
 def test_precedence_is_passport_over_aadhaar_over_resume_for_identity_in_any_order():
-    passport = {"name": "Passport Name", "dob": date(1989, 9, 9), "gender": "female", "father_name": "Passport Father"}
+    passport = {"name": "Alex Example", "dob": date(1989, 9, 9), "gender": "female", "father_name": "Passport Father"}
     aadhaar = fx.aadhaar_values(CARD)
-    resume = {"name": "Resume Name", "dob": date(1988, 8, 8), "gender": "male", "father_name": "Resume Father"}
+    resume = {"name": "Alex Example", "dob": date(1988, 8, 8), "gender": "male", "father_name": "Resume Father"}
     for order in (("resume", "aadhaar", "passport"), ("passport", "aadhaar", "resume"), ("aadhaar", "passport", "resume"),
                   ("passport", "resume", "aadhaar"), ("aadhaar", "resume", "passport"), ("resume", "passport", "aadhaar")):
         c = person()
         values = {"resume": resume, "aadhaar": aadhaar, "passport": passport}
         for kind in order:
             fx.apply_values(c, kind, values[kind])
-        assert (c.name, c.dob, c.father_name) == ("Passport Name", date(1989, 9, 9), "Passport Father"), order
+        assert (c.name, c.dob, c.father_name) == ("Alex Example", date(1989, 9, 9), "Passport Father"), order
     for order in (("resume", "aadhaar"), ("aadhaar", "resume")):
         c = person()
         for kind in order:

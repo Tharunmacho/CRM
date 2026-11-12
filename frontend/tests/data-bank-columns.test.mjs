@@ -13,6 +13,7 @@ async function load(path) {
 
 const pools = await load('../src/features/candidates/data-bank-pools.ts')
 const assignment = await load('../src/features/candidates/data-bank-assignment.ts')
+const { candidateReviewIssues } = await load('../src/features/candidates/candidate-review.ts')
 
 // Exercise the real status renderer without loading the unrelated store, router and dialogs in this column module.
 const columnSource = await readFile(new URL('../src/features/candidates/components/data-bank-columns.tsx', import.meta.url), 'utf8')
@@ -25,9 +26,10 @@ const statusJs = ts.transpileModule(statusSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
 }).outputText
 const status = {}
-new Function('exports', 'React', 'StatusDot', statusJs)(status, React,
-  ({ tone, title, children }) => React.createElement('span', { 'data-tone': tone, title }, children))
-const renderStatus = candidate => renderToStaticMarkup(React.createElement(status.StatusText, { candidate }))
+new Function('exports', 'React', 'StatusDot', 'candidateReviewIssues', 'CandidateReviewPopover', statusJs)(status, React,
+  ({ tone, title, children }) => React.createElement('span', { 'data-tone': tone, title }, children), candidateReviewIssues,
+  ({ issues }) => React.createElement('button', { 'data-issues': issues.map(issue => issue.label).join('; ') }, `${issues.length} ${issues.length === 1 ? 'issue' : 'issues'}`))
+const renderStatus = candidate => renderToStaticMarkup(React.createElement(status.StatusText, { candidate: { name: 'Test Candidate', ownerId: 'recruiter', ...candidate } }))
 
 // Render the real shared assignment cells used by table rows, cards and the field registry.
 const placementSource = columnTree.statements.filter(statement =>
@@ -71,13 +73,14 @@ test('a candidate with no current or deployed placement keeps blank stage and or
   assert.match(renderToStaticMarkup(placement.StageCell({ candidate: { id: 'candidate' }, store })), /aria-label="None"/)
 })
 
-test('a deployed candidate stays Deployed while a separate profile review explains the missing phone', () => {
+test('a deployed candidate keeps a compact issue control carrying the missing-phone reason', () => {
   const candidate = { status: 'deployed', needsReview: true, phone: '  ' }
   assert.deepEqual(status.candidateStatus(candidate), { label: 'Deployed', tone: 'ok' })
   const html = renderStatus(candidate)
   assert.match(html, /data-tone="ok"[^>]*>Deployed<\/span>/)
-  assert.match(html, /data-tone="warn"[^>]*>Needs review<\/span>/)
-  assert.match(html, /title="Phone number is missing\. Review the profile details\."/)
+  assert.match(html, /data-issues="Phone number missing"[^>]*>1 issue<\/button>/)
+  assert.doesNotMatch(html, />Phone number missing</)
+  assert.doesNotMatch(html, />Needs review</)
 })
 
 test('a review flag does not replace another pipeline status or claim a saved phone is missing', () => {
@@ -85,19 +88,34 @@ test('a review flag does not replace another pipeline status or claim a saved ph
   assert.deepEqual(status.candidateStatus(candidate), { label: 'In process', tone: 'info' })
   const html = renderStatus(candidate)
   assert.match(html, />In process<\/span>/)
-  assert.match(html, />Needs review<\/span>/)
-  assert.match(html, /Check the profile details against the original documents\./)
-  assert.doesNotMatch(html, /Phone number is missing/)
+  assert.match(html, /data-issues="Profile check pending"/)
+  assert.doesNotMatch(html, /Phone number missing/)
 })
 
-test('a primary Needs review status appears once and unflagged candidates keep a single status', () => {
+test('a primary review status explains the issue once and unflagged candidates keep a single status', () => {
   for (const needsReview of [true, false]) {
     const html = renderStatus({ status: 'needs_review', needsReview, phone: '' })
-    assert.equal((html.match(/>Needs review<\/span>/g) ?? []).length, 1)
+    assert.equal((html.match(/>1 issue<\/button>/g) ?? []).length, 1)
+    assert.doesNotMatch(html, />Needs review</)
   }
   const html = renderStatus({ status: 'deployed', needsReview: false, phone: '' })
   assert.match(html, />Deployed<\/span>/)
-  assert.doesNotMatch(html, /Needs review|Phone number is missing/)
+  assert.doesNotMatch(html, /Needs review|Phone number missing/)
+})
+
+test('all known profile gaps retain exact reasons and the relevant staff action', () => {
+  const candidate = { status: 'needs_review', name: 'Name needs review', phone: ' ', ownerId: null }
+  const issues = candidateReviewIssues(candidate)
+  assert.deepEqual(issues.map(issue => issue.label), ['Name missing or unreadable', 'Phone number missing', 'Recruiter not assigned'])
+  assert.match(issues.find(issue => issue.key === 'recruiter').action, /Use Assign recruiter/)
+  assert.match(renderStatus(candidate), />3 issues<\/button>/)
+})
+
+test('fixing a field removes that reason; explicit profile review remains pending until saved', () => {
+  const candidate = { status: 'deployed', name: 'Candidate', ownerId: 'recruiter', phone: '', needsReview: true }
+  assert.deepEqual(candidateReviewIssues(candidate).map(issue => issue.key), ['phone'])
+  assert.deepEqual(candidateReviewIssues({ ...candidate, phone: '9876543210' }).map(issue => issue.key), ['review'])
+  assert.deepEqual(candidateReviewIssues({ ...candidate, phone: '9876543210', needsReview: false }), [])
 })
 
 test('the Data Bank lists the eleven PRD columns in the specified order', () => {

@@ -15,12 +15,15 @@ from app.api.schemas import (
     ApplicationOut, CandidateOut, ClientOut, CompanyOut, DesignationOut,
     NotificationOut, OrderOut, RemarkOut, StageRecordOut, TaskOut, TodoOut, UserOut,
 )
+from app.services.document_reading import pending_expression
+from app.services.document_identity import rejected_expression
 from app.db.models import (
     AgencySettings, Application, ApplicationStage, Attachment, Candidate, Client, ClientStaff, Company,
     Currency, Designation, JobCategory, Notification, Order, Remark, Role, Task, TodoItem, User,
 )
 from app.services import agency_settings
 from app.services.ingestion_revision import revision_expression
+from app.services.document_status import latest_statement as manual_documents_statement
 
 
 def _fields(model, schema, *extra):
@@ -81,7 +84,7 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
     ))
     candidate_files = select(
         Attachment.id, Attachment.entity_id, Attachment.slot, Attachment.version,
-        Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at,
+        Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at, pending_expression(), rejected_expression(),
     ).where(Attachment.entity_type == "candidate")
     # DISTINCT ON returns only the latest agreement, not all historical versions.
     agreements = (
@@ -122,6 +125,7 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
             ("created_at", True), ("id", False),
         ),
         _rows("files", candidate_files, ("version", False)),
+        _rows("manual_documents", manual_documents_statement()),
         _rows("agreements", agreements),
         _rows("applications", application_fields),
         _rows(

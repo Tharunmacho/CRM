@@ -35,14 +35,12 @@ export function StageRail({
     <ol className={cn('sr', numbered && 'is-numbered', className)} aria-label={remaining > 0 ? `The 11 stages, ${remaining} more ${remaining === 1 ? 'step' : 'steps'} to go` : 'The 11 stages'}>
       {STAGES.map((stage) => {
         const state = stateOf(stage.no)
-        // Only stages that were reached carry their title. A future stage stays an anonymous hollow
-        // segment, so the rail never names a step the candidate has not got to.
-        const label = state === 'todo' ? `Step ${stage.no}` : `${stage.no}. ${stage.title}`
+        const label = `${stage.no}. ${stage.title}`
         return (
           <li
             key={stage.no}
             className={cn('sr-seg', `is-${state}`)}
-            title={state === 'todo' ? 'Not reached yet' : state === 'now' ? `${label} (current)` : state === 'closed' ? `${label} (closed here)` : `${label} (done)`}
+            title={state === 'todo' ? `${label} (not started)` : state === 'now' ? `${label} (current)` : state === 'closed' ? `${label} (closed here)` : `${label} (done)`}
             aria-current={state === 'now' ? 'step' : undefined}
           >
             {numbered ? <span className="tnum">{stage.no}</span> : <span className="sr-sr">{label}</span>}

@@ -83,9 +83,13 @@ a.uv-phone:focus-visible { outline: 2px solid var(--primary); outline-offset: 2p
 .uv-status small { font-size: 12px; line-height: 1.35; color: var(--text-muted); }
 .uv-status small.is-ok { color: var(--success-ink); font-weight: 500; }
 .uv-status small.is-leave { color: var(--warning-ink); font-weight: 500; }
-.uv-flags { display: grid; gap: 6px; }
-.uv-flags label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.uv-flags label > span { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.uv-flags { display: grid; gap: 8px; width: 100%; max-width: 172px; min-width: 0; }
+.uv-flags label { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; cursor: pointer; }
+.uv-flags label > span { min-width: 0; font-size: 12.5px; color: var(--text-muted); white-space: normal; line-height: 1.4; }
+.uv-flags label > button { flex: none; }
+.uv-assignment-note { padding: 10px 20px; border-bottom: 1px solid var(--border-faint); background: var(--tint-1); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.uv-directory .ui-data-table td { padding-top: 16px; padding-bottom: 16px; }
+.uv-directory .ui-data-table .uv-status { text-align: left; }
 .uv-flags label.is-muted > span { color: var(--text-light); }
 .uv-work { display: grid; gap: 2px; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
 .uv-work b { font-weight: 600; color: var(--text-main); font-variant-numeric: tabular-nums; }
@@ -109,7 +113,18 @@ a.uv-phone:focus-visible { outline: 2px solid var(--primary); outline-offset: 2p
   .uv-toolbar, .uv-toolbar.has-clear { grid-template-columns: minmax(0, 1fr) 180px 190px; }
   .uv-toolbar.has-clear > .ui-button { grid-column: 1 / -1; justify-self: start; }
 }
-@media (max-width: 767px) { .uv .ui-table-stack-1280 tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 767px) {
+  .uv .ui-table-stack-1280 tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .uv .ui-table-stack-1280 tbody td[data-label='Team member'] { order: 0; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Role'] { order: 1; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Phone'] { order: 2; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Status'] { order: 3; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Open work'] { order: 4; }
+  .uv .ui-table-stack-1280 tbody td[data-label='New candidates'] { order: 5; grid-column: 1 / -1; }
+  .uv .ui-table-stack-1280 tbody td[data-label='Actions'] { order: 6; }
+  .uv .uv-flags { max-width: none; }
+  .uv .uv-phone { white-space: normal; overflow-wrap: anywhere; }
+}
 
 /* ---------- Dialogs and sheets ---------- */
 .uv-toggle { display: grid; gap: 14px; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); }

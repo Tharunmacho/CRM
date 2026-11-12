@@ -464,11 +464,13 @@ def test_resume_upload_to_a_lead_sets_status_and_follows_permissions(env):
 
 
 def test_convert_creates_a_candidate_with_the_leads_data_and_resume(env):
+    from lead_resume_fixtures import checked_resume
     imported(env, [lead_row(1)], assign_to="a")
     lead_id = first_lead(env)["id"]
     act_as(env, "a")
     env.client.post("/api/files", data={"entity_type": "lead", "entity_id": lead_id, "slot": "resume"}, files={"file": ("cv.pdf", PDF, "application/pdf")})
-    done = env.client.post(f"/api/leads/{lead_id}/convert")
+    checked = checked_resume(env, lead_id, PDF, original=True)
+    done = env.client.post(f"/api/leads/{lead_id}/convert", data={"resume_check_id": checked.id})
     assert done.status_code == 200, done.text
     body = done.json()
     assert body["lead"]["status"] == "converted" and body["lead"]["candidateId"] == body["candidate"]["id"] and body["lead"]["candidateRef"].startswith("CND-")
@@ -491,11 +493,13 @@ def test_convert_creates_a_candidate_with_the_leads_data_and_resume(env):
 
 
 def test_convert_with_resume_in_the_request_and_overrides(env):
+    from lead_resume_fixtures import checked_resume
     imported(env, [lead_row(2, email="")], assign_to="a")
     lead_id = first_lead(env)["id"]
     act_as(env, "a")
+    checked = checked_resume(env, lead_id, PDF, name="Corrected Name", filename="new-cv.pdf", overrides={"name": "Corrected Name"})
     done = env.client.post(f"/api/leads/{lead_id}/convert", files={"resume": ("new-cv.pdf", PDF, "application/pdf")},
-                           data={"overrides": json.dumps({"name": "Corrected Name", "totalExperience": 7, "sourceDetail": "Known Referrer"})})
+                           data={"resume_check_id": checked.id, "overrides": json.dumps({"name": "Corrected Name", "totalExperience": 7, "sourceDetail": "Known Referrer"})})
     assert done.status_code == 200 and done.json()["resumeAttached"] is True and done.json()["candidate"]["name"] == "Corrected Name"
     candidate = env.db.get(m.Candidate, done.json()["candidate"]["id"])
     assert candidate.total_experience == 7

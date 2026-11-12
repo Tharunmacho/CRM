@@ -567,6 +567,12 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
 
     With `fill_all=False` only the application-form-only columns (NEW_COLUMNS) are filled; every other column is merely
     stamped "extracted" when it already equals the document (so it counts as read, not typed)."""
+    from app.services.document_identity import identity_conflicts
+    conflicts = identity_conflicts(candidate, values, db)
+    if conflicts:
+        if hasattr(candidate, "needs_review"):
+            candidate.needs_review = True
+        return ApplyResult(conflicts=[SPECS[key].key if key in SPECS else "document.identity" for key in conflicts])
     sources = sources_of(candidate)
     from_passport = set(sources.get("_fromPassport") or [])
     from_aadhaar = set(sources.get("_fromAadhaar") or [])
@@ -688,7 +694,7 @@ def mark_stored_applied(candidate) -> None:
 def apply_document(candidate, kind: str, raw: Any, db: Session | None = None) -> ApplyResult:
     """Apply a freshly read document, then remember it. Marks the candidate so the ocr_data hook does not repeat it."""
     result = apply_values(candidate, kind, values_for(kind, raw), db)
-    if kind == "aadhaar":
+    if kind == "aadhaar" and not result.conflicts:
         note_aadhaar(candidate, raw)
     mark_applied(candidate, kind, raw)
     _flags(candidate)["form_explicit"] = True
@@ -736,8 +742,9 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
         for raw in documents:
             if not force and already_applied(candidate, kind, raw):
                 continue
-            result.merge(apply_values(candidate, kind, values_for(kind, raw), db, fill_all=fill_all))
-            if kind == "aadhaar":
+            applied = apply_values(candidate, kind, values_for(kind, raw), db, fill_all=fill_all)
+            result.merge(applied)
+            if kind == "aadhaar" and not applied.conflicts:
                 note_aadhaar(candidate, raw)
             mark_applied(candidate, kind, raw)
     # A replay may set a field once per stored document; report only the ones whose final value differs from the start.

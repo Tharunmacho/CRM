@@ -162,6 +162,11 @@ def topics_for_statement(statement: str) -> tuple[str, ...]:
     return tuple(sorted(topics))
 
 
+def note_transaction_topics(connection, topics):
+    """Invalidate derived views after commit when their source is an explicitly scoped audit action."""
+    connection.info.setdefault(_INFO_KEY, set()).update(topics)
+
+
 def _note_statement(conn, cursor, statement, parameters, context, executemany):
     head = statement.lstrip()[:8].upper()
     if head[:6] in ("INSERT", "UPDATE", "DELETE") or head[:5] == "WITH ":
@@ -181,7 +186,7 @@ def _note_result(conn, cursor, statement, parameters, context, executemany):
             return  # matched nothing (an idle worker's empty claim): the memo stays valid
     except Exception:
         pass
-    conn.info.setdefault(_INFO_KEY, set()).update(topics)
+    note_transaction_topics(conn, topics)
 
 
 def _forget_rolled_back(conn):

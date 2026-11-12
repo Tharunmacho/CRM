@@ -189,11 +189,12 @@ def read_rows(db: Session, user: User) -> list[dict]:
 def _add_documents(db: Session, rows: list[dict]) -> None:
     """`documents` on every row: {have, required, missing[labels]} against the mandatory list, from ONE statement for all candidates."""
     required = required_for_deployment()
+    from app.services.document_identity import rejected_expression
     stored: dict[str, set[str]] = {}
     ids = sorted({row["candidateId"] for row in rows})
     if ids:
         for candidate_id, slot in db.execute(select(Attachment.entity_id, Attachment.slot).where(
-                Attachment.entity_type == "candidate", Attachment.entity_id.in_(ids)).distinct()).all():
+                Attachment.entity_type == "candidate", Attachment.entity_id.in_(ids), ~rejected_expression()).distinct()).all():
             stored.setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))   # an older slot key counts for its new slot
     for row in rows:
         have = stored.get(row["candidateId"], set())

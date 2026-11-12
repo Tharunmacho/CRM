@@ -127,9 +127,6 @@ export const emptyJobForm = (companyId: string, currency: string): JobForm => ({
   companyId, title: '', skills: [], minExperience: '0', description: '', openings: '1', country: '', city: '', salary: '', currency, deadline: '', benefits: '', contractPeriod: '', interviewDate: '', status: 'open',
 })
 
-/** "Save and add another job": the same client (and currency) stay, everything about the job itself starts over. */
-export const nextJobForm = (form: JobForm): JobForm => emptyJobForm(form.companyId, form.currency)
-
 export const benefitList = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean)
 
 export const MAX_OPENINGS = 100000

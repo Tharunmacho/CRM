@@ -3,7 +3,7 @@ import { ApiError } from '@/shared/api/client'
 import { classifyLoadError, type LoadErrorView } from './load-error'
 import { liveInterval } from '@/shared/state/live'
 import { isOtherRecord } from '@/shared/state/live-events'
-import { FORM_LIVE_TOPICS, addFeedback, deleteFeedback, loadApplicationForm, saveApplicationForm, saveAssignment, uploadFormDocument, type FeedbackDraft, type FormTarget } from './form-api'
+import { FORM_LIVE_TOPICS, addFeedback, deleteFeedback, extractFormDocuments, loadApplicationForm, saveApplicationForm, saveAssignment, saveDocumentStatus, uploadFormDocument, type FeedbackDraft, type FormTarget } from './form-api'
 import { applyAssignmentChange, applyOptimisticUploads, buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, validateDraft } from './form-model'
 import type { ApplicationFormData, AssignmentChange, AssignmentData, DocumentKind, FormDraft } from './types'
 
@@ -179,7 +179,7 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
   const upload = useCallback(async (kind: DocumentKind, file: File) => {
     setPendingUploads((current) => ({ ...current, [kind]: { fileName: file.name, sizeKb: Math.max(1, Math.round(file.size / 1024)) } }))
     try {
-      const answered = await uploadFormDocument(candidateId, kind, file)
+      const answered = await uploadFormDocument(candidateId, kind, file, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId })
       if (answered) {
         lastSignature.current = JSON.stringify(answered)
         apply(answered) // shows "Reading…" at once; the finished reading arrives as a live change
@@ -187,7 +187,23 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
     } finally {
       setPendingUploads((current) => { const { [kind]: _done, ...rest } = current; return rest })
     }
-  }, [candidateId, apply, reload])
+  }, [candidateId, orderId, applicationId, apply, reload])
+
+  const markDocument = useCallback(async (kind: DocumentKind, uploaded: boolean, note: string) => {
+    try {
+      const saved = await saveDocumentStatus(candidateId, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId }, kind, uploaded, note)
+      lastSignature.current = JSON.stringify(saved)
+      apply(saved)
+    } catch (cause) {
+      if (cause instanceof ApiError && (cause.status === 405 || (cause.status === 404 && /^not found$/i.test(cause.message.trim())))) throw new Error('Restart the CRM server to save document status.')
+      throw cause
+    }
+  }, [candidateId, orderId, applicationId, apply])
+
+  const extractDocuments = useCallback(async (attachmentIds: string[]) => {
+    const saved = await extractFormDocuments(candidateId, attachmentIds, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId })
+    if (saved) { lastSignature.current = JSON.stringify(saved); apply(saved) } else await reload(true)
+  }, [candidateId, orderId, applicationId, apply, reload])
 
   /**
    * Save one change to the assignment block. The block shows the new value at once; the server's answer (the whole form) replaces it,
@@ -245,5 +261,5 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
     }
   }, [candidateId, apply, reload])
 
-  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
+  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, markDocument, extractDocuments, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
 }

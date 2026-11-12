@@ -85,6 +85,8 @@ const YES_NO = [
 const need = (d: Record<string, any>, keys: [string, string][]) =>
   keys.filter(([k]) => d[k] == null || (typeof d[k] === 'string' ? !d[k].trim() : !d[k] && d[k] !== 0)).map(([, label]) => label)
 
+const manual = (outcome = 'Completed manually'): StageEvaluation => ({ canComplete: true, missing: [], outcome })
+
 export const STAGES: StageDef[] = [
   {
     no: 1,
@@ -112,7 +114,6 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      const missing = need(d, [['result', 'Result']])
       if (d.result === 'failed')
         return {
           canComplete: true,
@@ -120,7 +121,7 @@ export const STAGES: StageDef[] = [
           closes: { reason: 'prescreen_failed', label: 'Failed prescreening' },
           outcome: 'Failed',
         }
-      return { canComplete: missing.length === 0, missing, outcome: 'Passed' }
+      return manual(d.result === 'passed' ? 'Passed' : undefined)
     },
   },
   {
@@ -170,10 +171,7 @@ export const STAGES: StageDef[] = [
           outcome: 'Not forwarded',
         }
       }
-      const missing = need(d, [
-        ['forwarded', 'Forwarded to client'],
-      ])
-      return { canComplete: missing.length === 0, missing, outcome: 'Forwarded' }
+      return manual(d.forwarded === 'yes' ? 'Forwarded' : undefined)
     },
   },
   {
@@ -219,12 +217,7 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (d.scheduled !== 'yes')
-        return { canComplete: false, missing: ['Interview scheduled'], outcome: '' }
-      const missing = need(d, [
-        ['date', 'Date'],
-      ])
-      return { canComplete: missing.length === 0, missing, outcome: 'Scheduled' }
+      return manual(d.scheduled === 'yes' ? 'Scheduled' : undefined)
     },
   },
   {
@@ -254,11 +247,6 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      const missing = need(d, [
-        ['result', 'Result'],
-        ['remarks', 'Interview remarks'],
-      ])
-      if (missing.length) return { canComplete: false, missing, outcome: '' }
       if (d.result === 'rejected')
         return {
           canComplete: true,
@@ -266,7 +254,7 @@ export const STAGES: StageDef[] = [
           closes: { reason: 'interview_rejected', label: 'Rejected at interview' },
           outcome: 'Rejected',
         }
-      return { canComplete: true, missing: [], outcome: 'Selected' }
+      return manual(d.result === 'selected' ? 'Selected' : undefined)
     },
   },
   {
@@ -287,10 +275,7 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (d.obtained !== 'yes')
-        return { canComplete: false, missing: ['Offer letter obtained'], outcome: '' }
-      const missing = need(d, [['file', 'Offer letter']])
-      return { canComplete: missing.length === 0, missing, outcome: 'Obtained' }
+      return manual(d.obtained === 'yes' ? 'Obtained' : undefined)
     },
   },
   {
@@ -341,9 +326,7 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (d.applied === 'no')
-        return { canComplete: false, missing: ['Applied for medical'], outcome: '' }
-      if (!d.result) return { canComplete: false, missing: ['Result'], outcome: '' }
+      if (!d.result) return manual()
       if (d.result === 'fit') return { canComplete: true, missing: [], outcome: 'Fit' }
       if (d.reapplying === 'yes') {
         const missing = need(d, [['retestDate', 'New medical date']])
@@ -396,10 +379,7 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (d.collected !== 'yes')
-        return { canComplete: false, missing: ['Original passport collected'], outcome: '' }
-      const missing: string[] = []
-      return { canComplete: missing.length === 0, missing, outcome: 'Collected' }
+      return manual(d.collected === 'yes' ? 'Collected' : undefined)
     },
   },
   {
@@ -467,13 +447,7 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (d.collected !== 'yes')
-        return { canComplete: false, missing: ['Advance collected'], outcome: '' }
-      const missing = need(d, [
-        ['amount', 'Amount'],
-        ['receipt', 'Receipt'],
-      ])
-      return { canComplete: missing.length === 0, missing, outcome: 'Collected' }
+      return manual(d.collected === 'yes' ? 'Collected' : undefined)
     },
   },
   {
@@ -501,9 +475,7 @@ export const STAGES: StageDef[] = [
       { name: 'googleReview', label: 'Google review obtained', type: 'checkbox' },
     ],
     evaluate: (d) => {
-      if (d.arrived !== 'yes')
-        return { canComplete: false, missing: ['Visa arrived'], outcome: '' }
-      return { canComplete: true, missing: [], outcome: 'Arrived' }
+      return manual(d.arrived === 'yes' ? 'Arrived' : undefined)
     },
   },
   {
@@ -531,9 +503,7 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (d.done !== 'yes') return { canComplete: false, missing: ['Stamping done'], outcome: '' }
-      const missing = need(d, [['file', 'Stamped visa copy']])
-      return { canComplete: missing.length === 0, missing, outcome: 'Stamped' }
+      return manual(d.done === 'yes' ? 'Stamped' : undefined)
     },
   },
   {
@@ -566,19 +536,26 @@ export const STAGES: StageDef[] = [
       { name: 'file', required: true, label: 'Ticket copy', type: 'file' },
     ],
     evaluate: (d) => {
-      const missing = need(d, [
-        ['file', 'Ticket copy'],
-      ])
-      return { canComplete: missing.length === 0, missing, outcome: 'Booked' }
+      return manual(d.file ? 'Booked' : undefined)
     },
   },
 ]
 
 /** Mirror the server's supplied-value checks before its authoritative validation. */
 for (const definition of STAGES) {
+  // Staff decide when to move. Documents and stage details are optional; the
+  // feedback explains that decision and stays in the completed stage record.
+  definition.fields = [
+    { name: 'feedback', label: 'Stage feedback', type: 'textarea', required: true,
+      placeholder: 'What happened at this stage, and why are you moving it?',
+      help: 'Saved with your name and date in this stage\'s history.' },
+    ...definition.fields.map((field) => ({ ...field, required: ['reason', 'reapplying', 'retestDate'].includes(field.name) })),
+  ]
   const evaluate = definition.evaluate
   definition.evaluate = (data) => {
     const invalid: string[] = []
+    if (typeof data.feedback !== 'string' || !data.feedback.trim()) invalid.push('Stage feedback')
+    else if (data.feedback.trim().length > 10000) invalid.push('Stage feedback: use 10,000 characters or fewer')
     for (const field of definition.fields) {
       const value = data[field.name]
       if (value == null || value === '') continue

@@ -162,6 +162,13 @@
 .aff .aff-status.is-expiring_soon { background: var(--warning-fill); color: var(--warning-ink); }
 .aff .aff-status.is-expired { background: var(--error-fill); color: var(--error-ink); }
 
+.aff .aff-reading-warning { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--warning-ink) 25%, var(--border-main)); border-radius: 10px; background: var(--warning-fill); color: var(--warning-ink); font-size: 13px; line-height: 1.6; }
+.aff .aff-reading-warning > svg { flex: 0 0 auto; margin-top: 3px; }
+.aff .aff-reading-warning > div { min-width: 0; overflow-wrap: anywhere; }
+.aff .aff-reading-warning strong { display: block; font-weight: 600; }
+.aff .aff-reading-warning p { margin: 2px 0; }
+.aff .aff-reading-warning a { display: inline-block; margin-top: 4px; color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+
 /* ---------- Tablet: two across ---------- */
 @container aff (max-width: 759px) {
   .aff .aff-grid > * { grid-column: span var(--span-md, 6); }

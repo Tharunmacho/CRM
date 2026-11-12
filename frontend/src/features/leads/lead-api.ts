@@ -39,6 +39,26 @@ export interface ConvertResponse {
   resumeError?: string | null
 }
 
+export interface UnconvertCheck {
+  allowed: boolean
+  reason: string | null
+  candidate: { id: string; ref: string; name: string } | null
+  restoredStatus: string | null
+}
+
+export interface UnconvertResponse {
+  lead: Lead
+  removedCandidateId: string
+  restoredStatus: string
+  alreadyReversed: boolean
+}
+
+export const checkLeadUnconversion = (id: string, signal?: AbortSignal) =>
+  api.get<UnconvertCheck>(`/leads/${encodeURIComponent(id)}/unconvert-check`, { signal, fresh: true })
+
+export const unconvertLead = (id: string, candidateId: string, reason: string) =>
+  api.post<UnconvertResponse>(`/leads/${encodeURIComponent(id)}/unconvert`, { candidateId, reason })
+
 /** The candidate a 409 `candidate_exists` names. */
 export interface ExistingCandidate {
   id: string
@@ -101,9 +121,10 @@ export async function uploadLeadResume(leadId: string, file: File): Promise<Lead
 }
 
 /** Convert a lead to a candidate, with the updated resume when the recruiter has it (multipart). */
-export async function convertLead(id: string, resume: File | null, overrides: Record<string, unknown> = {}): Promise<ConvertResponse> {
+export async function convertLead(id: string, resume: File | null, overrides: Record<string, unknown> = {}, resumeCheckId?: string): Promise<ConvertResponse> {
   const form = new FormData()
   if (resume) form.append('resume', resume)
+  if (resumeCheckId) form.append('resume_check_id', resumeCheckId)
   if (Object.keys(overrides).length) form.append('overrides', JSON.stringify(overrides))
   return api.form<ConvertResponse>(`/leads/${enc(id)}/convert`, form)
 }
@@ -152,3 +173,20 @@ async function download(path: string, fileName: string) {
 /** The import report: Excel by default (summary, every row, ignored and invalid), CSV as the plain alternative. */
 export const downloadBatchReport = (batchId: string, kind: 'xlsx' | 'csv' = 'xlsx') => download(`/leads/batches/${enc(batchId)}/report.${kind}`, `lead-import-report.${kind}`)
 export const downloadLeadExport = (query: string) => download(`/leads/export.xlsx?${query}`, 'lead-sheet.xlsx')
+
+export interface LeadResumeCheck {
+  jobId: string
+  status: 'pending' | 'processing' | 'verified' | 'rejected' | 'needs_review' | 'failed'
+  canConvert: boolean
+  message: string | null
+}
+
+export async function checkLeadResume(id: string, resume: File | null, name: string): Promise<LeadResumeCheck> {
+  const form = new FormData()
+  if (resume) form.append('resume', resume)
+  form.append('overrides', JSON.stringify({ name }))
+  return api.form<LeadResumeCheck>(`/leads/${enc(id)}/resume-check`, form)
+}
+
+export const readLeadResumeCheck = (id: string, jobId: string, signal?: AbortSignal) =>
+  api.get<LeadResumeCheck>(`/leads/${enc(id)}/resume-check/${enc(jobId)}`, { signal, fresh: true })

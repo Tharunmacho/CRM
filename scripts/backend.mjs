@@ -1,8 +1,9 @@
 /** Run Python workspace tasks with the project's environment, on Windows or Unix. */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { monitorTunnel, startTunnelCheck, usesManagedTunnel } from './db-tunnel-monitor.mjs'
 
 const backend = fileURLToPath(new URL('../backend/', import.meta.url))
 const virtualPython = path.join(
@@ -46,16 +47,28 @@ if (['dev', 'start', 'db:check'].includes(task)
 }
 
 console.log(`[crm] Starting backend ${task}...`)
+const tunnelConfig = path.join(backend, '.db-tunnel.json')
+const managedTunnelPort = usesManagedTunnel(task, process.env, existsSync(tunnelConfig))
+  ? JSON.parse(readFileSync(tunnelConfig, 'utf8').replace(/^\uFEFF/, '')).local_port : null
 const child = spawn(python, [...commands[task], ...extra], {
   cwd: backend,
   stdio: 'inherit',
   env: { ...process.env, PYTHONUTF8: '1', PYTHONUNBUFFERED: '1' },
 })
+const stopTunnelMonitor = managedTunnelPort !== null
+  ? monitorTunnel({
+      port: managedTunnelPort,
+      run: () => startTunnelCheck(python, fileURLToPath(new URL('./db-tunnel.py', import.meta.url)), backend),
+    })
+  : () => {}
+process.once('exit', stopTunnelMonitor)
 child.once('error', (error) => {
+  stopTunnelMonitor()
   console.error(`Could not start Python: ${error.message}`)
   console.error('Create backend/.venv and install backend/requirements-dev.txt; see README.md.')
   process.exitCode = 1
 })
 child.once('exit', (code, signal) => {
+  stopTunnelMonitor()
   process.exitCode = code ?? (signal === 'SIGINT' ? 130 : 1)
 })

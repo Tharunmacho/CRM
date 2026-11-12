@@ -50,7 +50,7 @@
 /* One compact row per document, on fixed columns: icon, name, chip, file, actions. */
 .af .af-doclist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--af-line); border-radius: 12px; overflow: hidden; }
 .af .af-docrow {
-  position: relative; display: grid; grid-template-columns: 28px minmax(112px, 200px) 80px minmax(0, 1fr) 148px; column-gap: 12px; row-gap: 8px; align-items: center;
+  position: relative; display: grid; grid-template-columns: 28px minmax(112px, 200px) 80px minmax(0, 1fr) 148px; column-gap: 12px; row-gap: 8px; align-items: start;
   min-height: 48px; padding: 8px 12px; border-top: 1px solid var(--border-faint); background: var(--bg-card);
 }
 .af .af-docrow:first-child { border-top: 0; }
@@ -67,13 +67,31 @@
 .af .af-doc-chip { justify-self: start; display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .af .af-doc-chip.is-uploaded { background: var(--success-fill); color: var(--success-ink); border: 1px solid var(--success-edge); }
 .af .af-doc-chip.is-pending { background: var(--warning-fill); color: var(--warning-ink); border: 1px solid var(--warning-edge); }
-.af 
 .af .af-docrow-file { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.af .af-docfile { display: flex; align-items: baseline; gap: 8px; margin: 0; min-width: 0; font-size: 13px; line-height: 20px; }
-.af .af-docfile a, .af .af-docfile > span { min-width: 0; color: var(--text-main); font-weight: 500; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.af .af-docfile a:hover { color: var(--primary-deep); text-decoration: underline; text-underline-offset: 2px; }
-.af .af-docfile small { flex: none; font-size: 12px; color: var(--text-light); white-space: nowrap; }
-.af .af-docrow-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 32px; }
+.af .af-docrow.has-files .af-docrow-file { grid-column: 4 / -1; }
+.af .af-docfile { display: flex; align-items: flex-start; gap: 12px; margin: 0; min-width: 0; font-size: 13px; line-height: 20px; }
+.af .af-docfile-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.af .af-docfile-copy a, .af .af-docfile-copy > span { min-width: 0; color: var(--text-main); font-weight: 500; text-decoration: none; overflow-wrap: anywhere; }
+.af .af-docfile-copy a:hover { color: var(--primary-deep); text-decoration: underline; text-underline-offset: 2px; }
+.af .af-docfile small { font-size: 11px; color: var(--text-light); overflow-wrap: anywhere; }
+.af .af-docfile-actions { display: grid; grid-template-columns: 32px 32px 128px; align-items: center; gap: 6px; flex: none; margin-left: auto; }
+.af .af-docfile-actions > :last-child { width: 128px; }
+.af .af-docrow-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-height: 32px; }
+.af .af-doc-manual { display: grid; gap: 2px; font-size: 12px; overflow-wrap: anywhere; }
+.af .af-doc-manual b { font-size: 12px; font-weight: 500; }
+.af .af-doc-manual small, .af .af-doc-hint { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.af .af-doc-manual p { margin: 3px 0 0; }
+.af .af-docbtn.af-doc-manual-action { font-size: 11px; padding-inline: 8px; }
+.aff-passport-upload { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; }
+.aff-passport-upload > .document-extraction-action { flex-basis: 100%; }
+.aff-passport-files { flex-basis: 100%; min-width: 0; font-size: 12px; }
+.aff-passport-files summary { cursor: pointer; color: var(--primary); }
+.aff-passport-files ul { padding: 0; margin: 8px 0 0; list-style: none; display: grid; gap: 8px; }
+.aff-passport-files li { display: grid; gap: 3px; min-width: 0; }
+.aff-passport-files a { display: inline-flex; align-items: flex-start; gap: 6px; overflow-wrap: anywhere; }
+.aff-passport-files svg { width: 14px; height: 14px; flex: none; }
+.aff-passport-files small { color: var(--text-muted); }
+.cp-cert.is-dragging { outline: 2px dashed var(--primary); outline-offset: 3px; }
 .af .af-docbtn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
   border: 1px solid var(--border-control); background: transparent; color: var(--text-main); font: inherit; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color .14s, border-color .14s;
@@ -91,9 +109,25 @@
 .af .af-docrow-progress i { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--primary); animation: af-slide 1.2s ease-in-out infinite; }
 @keyframes af-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
 .af .af-docrow .af-extract { padding: 4px 8px; }
+.af .af-docrow .af-extract.is-wrong-document { flex-wrap: wrap; }
+.af .af-docrow .af-extract.is-wrong-document > span { flex: 1; min-width: 160px; }
+.af .af-docrow .af-extract.is-wrong-document .af-docbtn { margin-left: auto; }
+.af .af-doc-chip.is-rejected { height: auto; min-height: 24px; max-width: 100%; white-space: normal; line-height: 1.4; color: var(--error-ink); background: var(--error-fill); border-color: currentColor; }
 @media screen and (max-width: 760px) {
+  .af .af-docs-card > .af-sh { flex-wrap: wrap; }
+  .af .af-docs-card > .af-sh > .af-sh-title { flex: 1 1 calc(100% - 44px); }
+  .af .af-docs-card > .af-sh > .af-sh-chip { flex: 1 1 100%; justify-content: flex-start; padding-left: 44px; }
+  .af .af-docs-card .af-docs-progress { width: 100%; }
+  .af .af-docs-card .af-docs-progress .af-docs-bar { flex: 1; width: auto; }
   .af .af-docrow { grid-template-columns: 28px minmax(0, 1fr) auto; }
   .af .af-docrow-file, .af .af-docrow-actions { grid-column: 2 / -1; }
+  .af .af-docrow.has-files .af-docrow-file { grid-column: 2 / -1; }
+  .af .af-docrow .af-docfile { flex-wrap: wrap; }
+  .af .af-docrow .af-docfile-copy { flex-basis: 100%; }
+  .af .af-docfile-actions { grid-template-columns: 32px 32px 94px; }
+  .af .af-docfile-actions > :last-child { width: 94px; }
+  .af .af-docrow.is-multi-file .af-docrow-actions { grid-row: 2; }
+  .af .af-docrow.is-multi-file .af-docrow-file { grid-row: 3; }
   .af .af-docrow-actions { justify-content: flex-start; min-height: 0; }
   .af .af-docs-progress .af-docs-bar { width: 80px; }
 }

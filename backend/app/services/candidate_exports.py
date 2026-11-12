@@ -134,9 +134,12 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
 def manifest(inspection: Inspection) -> dict:
     form = inspection.form
     application_map = {row["id"]: row for row in form["applications"]}
-    candidate_documents = [row for row in inspection.attachments if row.entity_type == "candidate"]
-    slots = application_form.document_slots(candidate_documents, [], inspection.names,
-                                           (form.get("application") or {}).get("currentStage"))
+    # The form includes rejected-file and selected-placement evidence; rebuilding
+    # without reading metadata would incorrectly count a known wrong document.
+    slots = form["documents"]
+    rejected_ids = {file["attachmentId"] for entry in slots.values()
+                    for file in [*entry["files"], *entry["history"], *([entry["current"]] if entry["current"] else [])]
+                    if file.get("identityMismatch")}
     mandatory = dict(application_form.required_for_deployment())
     selected = set()
     latest = {}
@@ -146,7 +149,7 @@ def manifest(inspection: Inspection) -> dict:
         previous = latest.get(key)
         if previous is None or (row.uploaded_at, row.version, row.id) > (previous.uploaded_at, previous.version, previous.id):
             latest[key] = row
-        if canonical in {"other", "invoice"}:
+        if canonical in {"other", "invoice", "passport", "aadhaar"}:
             selected.add(row.id)
     for (entity_type, _entity_id, canonical), row in latest.items():
         # Legacy aliases can tie on timestamp/version. The checklist is the
@@ -166,18 +169,20 @@ def manifest(inspection: Inspection) -> dict:
             "fileName": row.file_name, "contentType": row.content_type, "sizeKb": row.size_kb, "version": row.version,
             "uploadedAt": plain(row.uploaded_at), "uploadedBy": inspection.names.get(row.uploaded_by, ""),
             "includedInZip": row.id in selected, "archivePath": entry if row.id in selected else None,
-            "versionNote": "Included" if row.id in selected else "Older version: metadata only",
+            "versionNote": "Wrong document: retained for review" if row.id in rejected_ids else "Included" if row.id in selected else "Older version: metadata only",
+            "identityMismatch": row.id in rejected_ids,
         })
     checklist = [{"slot": slot, "label": entry["label"], "mandatoryBeforeDeployment": slot in mandatory,
                   "requiredNow": entry["required"], "requiredFromStage": entry["requiredFromStage"],
-                  "status": "Uploaded" if entry["uploaded"] else "Missing" if entry["required"] else "Optional" if entry["optional"] else "Needed later",
-                  "uploaded": entry["uploaded"], "current": entry["current"], "versions": entry["versions"]}
+                  "status": "Wrong document — upload the correct file" if entry.get("identityMismatch") and not entry["uploaded"] else "Uploaded" if entry["fileUploaded"] else "Marked manually (no file attached)" if entry["uploaded"] else "Missing" if entry["required"] else "Optional" if entry["optional"] else "Needed later",
+                  "uploaded": entry["uploaded"], "fileUploaded": entry["fileUploaded"], "manualStatus": entry["manualStatus"],
+                  "current": entry["current"], "versions": entry["versions"]}
                  for slot, entry in slots.items()]
     return {
         "candidateId": inspection.candidate.id, "reference": inspection.candidate.ref, "candidateName": inspection.candidate.name,
         "generatedAt": datetime.now(timezone.utc).isoformat(), "selectedApplication": form.get("application"),
         "scope": "This candidate's documents and documents from every one of their applications.",
-        "filePolicy": "Latest document per record and slot; all Other documents and all invoice versions. Older normal-document version metadata is retained in this manifest.",
+        "filePolicy": "Latest document per record and slot; all passport and Aadhaar files, Other documents and all invoice versions. Older normal-document version metadata is retained in this manifest.",
         "missingRequiredBeforeDeployment": application_form.deployment_gaps({slot for slot, entry in slots.items() if entry["uploaded"]}),
         "missingRequiredNow": [{"slot": item["slot"], "label": item["label"]} for item in checklist if item["requiredNow"] and not item["uploaded"]],
         "checklist": checklist, "documents": documents,
@@ -198,7 +203,7 @@ def workbook(inspection: Inspection, listing: dict | None = None) -> bytes:
     sections = [
         ("About", [["Field", "Value"], ["Candidate", candidate.name], ["Reference", candidate.ref],
                    ["Generated at (UTC)", listing["generatedAt"]], ["Scope", listing["scope"]], ["Document policy", listing["filePolicy"]],
-                   ["Document status", "Based on upload records. The document ZIP verifies every included file can be read."],
+                   ["Document status", "Attached files and explicit manual confirmations are identified separately. A manual confirmation does not create a downloadable file. The ZIP verifies every included file can be read."],
                    ["Task visibility", "Task history includes tasks visible to the exporting user: all candidate tasks for managers and administrators, or the recruiter's own tasks."],
                    ["Missing before deployment", ", ".join(item["label"] for item in listing["missingRequiredBeforeDeployment"])]]),
         ("Personal", [["Field", "Value"], *details({**{key: value for key, value in form["candidate"].items() if key != "canEdit"},
@@ -242,12 +247,16 @@ def workbook(inspection: Inspection, listing: dict | None = None) -> bytes:
     remark_rows = [["Note ID", "Task ID", "Note", "Author", "Created at"]]
     remark_rows.extend([row.id, row.task_id, row.body, names.get(row.author_id, ""), plain(row.created_at)]
                        for row in inspection.remarks)
-    checklist_rows = [["Document", "Mandatory before deployment", "Required now", "Required from stage", "Status", "Current file", "Version", "Uploaded at", "Uploaded by"]]
+    checklist_rows = [["Document", "Mandatory before deployment", "Required now", "Required from stage", "Status", "Current file", "Version", "Uploaded at", "Uploaded by",
+                       "File attached", "Manual status", "Marked by", "Marked at", "Manual note"]]
     for item in listing["checklist"]:
         current = item["current"] or {}
+        manual = item["manualStatus"]
         checklist_rows.append([item["label"], item["mandatoryBeforeDeployment"], item["requiredNow"], item["requiredFromStage"], item["status"],
-                               current.get("fileName", ""), current.get("version", ""), current.get("uploadedAt", ""), (current.get("uploadedBy") or {}).get("name", "")])
-    columns = ["attachmentId", "entityType", "applicationId", "orderId", "orderRef", "slot", "fileName", "contentType", "sizeKb", "version", "uploadedAt", "uploadedBy", "includedInZip", "archivePath", "versionNote"]
+                               current.get("fileName", ""), current.get("version", ""), current.get("uploadedAt", ""), (current.get("uploadedBy") or {}).get("name", ""),
+                               item["fileUploaded"], ("Uploaded" if manual["uploaded"] else "Pending") if manual else "",
+                               manual["by"]["name"] if manual else "", manual["at"] if manual else "", manual["note"] if manual else ""])
+    columns = ["attachmentId", "entityType", "applicationId", "orderId", "orderRef", "slot", "fileName", "contentType", "sizeKb", "version", "uploadedAt", "uploadedBy", "includedInZip", "archivePath", "versionNote", "identityMismatch"]
     sections.extend([
         ("Stage history", stage_rows), ("Saved stage drafts", draft_rows), ("Document checklist", checklist_rows),
         ("Document manifest", [columns] + [[item[key] for key in columns] for item in listing["documents"]]),

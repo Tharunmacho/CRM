@@ -1,5 +1,5 @@
 /**
- * The read report: one plain headline, a chip per document and only the notes a recruiter can act on. No page numbers and no
+ * The read report: one plain headline, a chip per document and actionable notes, with page numbers for incomplete readings and no
  * reading internals. Plain data in, plain data out (no React, no network). The server's `coverage` record is additive, so every
  * key is optional here: an older server sends none and `buildReadReport` returns null. Sensitive details (Aadhaar number, VID,
  * enrollment id, mobile number) are never carried: the server already leaves their values out and `unmappedViews` hides them as well.
@@ -128,6 +128,15 @@ function leftOutNotes(kind: string, part: Record<string, unknown>): ReportNote[]
 /** "Resume, Passport and Aadhaar read." */
 const headlineFor = (chips: ReportChip[]) => (chips.length ? `${joinWords(chips.map((chip) => chip.label))} read.` : '')
 
+/** Missing pages stay visible even if an older/partial response forgot to mark complete=false. */
+export function incompleteReadingText(coverage: unknown): string | null {
+  const data = rec(coverage)
+  const pages = rec(data.pages)
+  const unresolved = numbers([...arr(pages.unresolved), ...arr(pages.not_sent).map(rec).filter((page) => page.blocking === true).map((page) => page.page)])
+  if (unresolved.length) return `${plural(unresolved.length, 'Page')} ${joinWords(unresolved.map(String))} could not be fully read.`
+  return data.complete === false ? 'The extracted details need review.' : null
+}
+
 /**
  * The report for one reading, or null when the server sent no coverage or there is nothing to say (an older server).
  * `unmapped` may come beside the coverage (the application form) or inside it (the upload job); it is kept in the view with the
@@ -145,7 +154,8 @@ export function buildReadReport(coverage: unknown, unmapped?: unknown): ReadRepo
   })
   const rowNotes = kindOrder.flatMap((kind) => leftOutNotes(kind, rec(kinds[kind])))
   const notes: ReportNote[] = [...conflictNotes, ...rowNotes]
-  if (numbers(rec(data.pages).unresolved).length) notes.push({ key: 'unresolved', tone: 'warn', retry: true, text: 'Some pages could not be read.' })
+  const incomplete = incompleteReadingText(coverage)
+  if (incomplete) notes.push({ key: 'unresolved', tone: 'warn', retry: true, text: incomplete })
   if (!chips.length && !notes.length) return null
 
   return { headline: headlineFor(chips), chips, notes, unmapped: unmappedViews(arr(unmapped).length ? unmapped : data.unmapped) }
@@ -166,7 +176,8 @@ export function jobReports(jobs: Holder[]): JobReport[] {
   })
 }
 
-type FormSlot = { slot?: string; label?: string; extraction?: { jobId?: string; updatedAt?: string; coverage?: unknown; unmapped?: unknown } | null }
+type FormExtraction = { jobId?: string; updatedAt?: string; coverage?: unknown; unmapped?: unknown }
+type FormSlot = { slot?: string; label?: string; multiple?: boolean; files?: { attachmentId?: string; fileName?: string; extraction?: FormExtraction | null }[]; extraction?: FormExtraction | null }
 export type FormReport = { id: string; caption: string; report: ReadReportView }
 /**
  * The reports in the application form's Documents block: one per reading (a file holding a resume and a passport reaches two slots
@@ -174,7 +185,10 @@ export type FormReport = { id: string; caption: string; report: ReadReportView }
  */
 export function formReports(slots: FormSlot[]): FormReport[] {
   const seen = new Set<string>()
-  const found = slots.flatMap((slot, index) => {
+  const sources = slots.flatMap((slot) => slot.multiple && slot.files?.some((file) => file.extraction)
+    ? slot.files.map((file) => ({ slot: `${slot.slot ?? 'slot'}:${file.attachmentId ?? file.fileName ?? ''}`, label: `${slot.label ?? slot.slot ?? 'Document'} · ${file.fileName ?? 'File'}`, extraction: file.extraction }))
+    : [slot])
+  const found = sources.flatMap((slot, index) => {
     const extraction = slot.extraction
     if (!extraction) return []
     const report = buildReadReport(extraction.coverage, extraction.unmapped)

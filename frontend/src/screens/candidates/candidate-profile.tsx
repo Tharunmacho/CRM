@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, Flag, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Trash2, Unlink, UserCog, UserPlus, ListChecks, Lock } from 'lucide-react'
+import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Trash2, Unlink, UserCog, UserPlus, ListChecks, Lock } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { DOCUMENT_HELP, newestFileVersions } from '@/shared/lib/document-files'
@@ -17,6 +17,7 @@ import { FileLink } from '@/shared/ui/file-drop'
 import { Dialog } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
+import { extractFormDocuments } from '@/features/application-form/form-api'
 import { PersonAvatar } from '@/features/workflow/components/person-avatar'
 import { StageCaption, StageRail } from '@/features/workflow/components/stage-rail'
 import { CallDialog } from '@/features/candidates/components/call-dialog'
@@ -24,6 +25,7 @@ import { MapToOrderDialog } from '@/features/candidates/components/map-dialog'
 import { CandidateSections, type CandidateOcr } from '@/features/candidates/components/profile-sections'
 import { ProfileCard } from '@/features/candidates/components/fact-section'
 import { CandidateEditDialog } from '@/features/candidates/components/candidate-edit-dialog'
+import { candidateReviewIssues } from '@/features/candidates/candidate-review'
 import { CandidateAssignmentHistory } from '@/features/candidates/components/assignment-history'
 import { buildProfileModel, SOURCE_LABEL, type ContactChip, type ProfileFormat } from '@/features/candidates/profile-view'
 import { buildActivity, type ActivityTone } from '@/features/candidates/activity'
@@ -189,7 +191,7 @@ export default function CandidateProfilePage() {
   const [evidenceError, setEvidenceError] = useState('')
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [evidenceRetry, setEvidenceRetry] = useState(0)
-  const [fullText, setFullText] = useState<{ id: string; text: string } | null>(null)
+  const [fullText, setFullText] = useState<{ id: string; text: string; documents: Candidate['documents'] } | null>(null)
   useEffect(() => {
     if (!id) return
     const controller = new AbortController()
@@ -198,7 +200,7 @@ export default function CandidateProfilePage() {
       api.get<Candidate>(`/candidates/${id}`, { signal: controller.signal }),
       api.get<CandidateOcr>(`/candidates/${id}/ocr`, { signal: controller.signal }),
     ]).then(([profile, extracted]) => {
-      if (!controller.signal.aborted) { setFullText({ id, text: profile.resumeText }); setOcr(extracted ?? {}) }
+      if (!controller.signal.aborted) { setFullText({ id, text: profile.resumeText, documents: profile.documents }); setOcr(extracted ?? {}) }
     }).catch(cause => {
       if (!controller.signal.aborted) setEvidenceError(cause instanceof Error ? cause.message : 'We could not load the documents. Please try again.')
     }).finally(() => { if (!controller.signal.aborted) setEvidenceLoading(false) })
@@ -261,8 +263,9 @@ export default function CandidateProfilePage() {
   const canAssign = store.can('reassign')
   const ownerActive = !!cand.ownerId && !!store.user(cand.ownerId)?.active
   const initialTask = store.tasks.find(task => task.candidateId === cand.id && task.kind === 'initial_call' && !task.completedAt && !task.cancelledAt)
-  const hasOriginals = cand.documents.some(document => document.key === 'source_bundle' && document.versions.length > 0)
-  const resumeFile = newestFileVersions(cand.documents.find(document => document.key === 'resume')?.versions ?? [])[0]
+  const profileDocuments = fullText?.id === id ? fullText.documents : cand.documents
+  const hasOriginals = profileDocuments.some(document => document.key === 'source_bundle' && document.versions.length > 0)
+  const resumeFile = newestFileVersions(profileDocuments.find(document => document.key === 'resume')?.versions ?? [])[0]
 
   // One filled button for the next thing that moves this candidate forward; the rest stay outlined.
   const primary: 'assign' | 'stage' | 'map' | null = !cand.ownerId && canAssign ? 'assign' : active ? 'stage' : !deployed ? 'map' : null
@@ -275,7 +278,7 @@ export default function CandidateProfilePage() {
     </span>
   )
   const conversationId = whatsappConversation?.candidateId === cand.id ? whatsappConversation.conversationId : ''
-  const photo = newestFileVersions(cand.documents.find(document => document.key === 'photo')?.versions ?? [])[0]
+  const photo = newestFileVersions(profileDocuments.find(document => document.key === 'photo')?.versions ?? [])[0]
   const unmapApp = apps.find((a) => a.id === unmapping)
   const experience = cand.totalExperience > 0 ? `${cand.totalExperience} ${cand.totalExperience === 1 ? 'year' : 'years'}` : 'Not recorded'
   const overseas = cand.gulfExperience > 0 ? `${cand.gulfExperience} ${cand.gulfExperience === 1 ? 'year' : 'years'} overseas` : 'No overseas experience'
@@ -313,8 +316,8 @@ export default function CandidateProfilePage() {
               <h1>{cand.name}</h1>
               {(model.designation || model.meta.length > 0) && <p className="cp-sub">{[model.designation, ...model.meta].filter(Boolean).join(' · ')}</p>}
               <div className="cp-pills">
-                <span title={cand.status === 'needs_review' ? 'Check these details on your next call' : undefined}><StatusPill status={cand.status} /></span>
-                {cand.needsReview && cand.status !== 'needs_review' && <span title="Check these details on your next call"><Badge tone="amber" variant="dot">Needs review</Badge></span>}
+                {cand.status !== 'needs_review' && <StatusPill status={cand.status} />}
+                {candidateReviewIssues(cand).map(issue => <span key={issue.key} title={issue.action}><Badge tone="amber" variant="dot">{issue.label}</Badge></span>)}
                 {expiry && <Badge tone={expiry.tone === 'expired' ? 'stamp' : 'amber'} variant="dot">{expiry.text}</Badge>}
               </div>
             </div>
@@ -332,9 +335,15 @@ export default function CandidateProfilePage() {
             {primary === 'assign' && <Button variant="primary" icon={<UserPlus />} onClick={() => setReassigning(true)}>Assign recruiter</Button>}
             {primary === 'stage' && active && <Button variant="primary" icon={<ListChecks />} onClick={() => setOpenApp(active.id)}>Open stage {active.currentStage}</Button>}
             {primary === 'map' && mapButton}
+            {canDeleteCandidate(store.me.role) && <Button variant="dangerGhost" icon={<Trash2 />} onClick={() => setDeleting(true)}>Delete candidate</Button>}
           </div>
         </div>
         <ContactChips contacts={model.contacts} />
+        {candidateReviewIssues(cand).length > 0 && <div className="cp-review-note" role="note">
+          <strong>Profile details to check</strong>
+          <ul>{candidateReviewIssues(cand).map(issue => <li key={issue.key}><b>{issue.label}.</b> {issue.action}</li>)}</ul>
+          {candidateReviewIssues(cand).some(issue => issue.key !== 'review') && <p>After checking the details, select “Mark the review as done” in Edit profile and save.</p>}
+        </div>}
         <LeadOriginBadge candidateId={cand.id} />
         {tracked && (
           <div className="cp-track">
@@ -357,7 +366,7 @@ export default function CandidateProfilePage() {
         </nav>
       </div>
 
-      {/* The details read from the CV come first; the workflow cards sit beside them. Nothing is pinned. */}
+      {/* Each section uses the available width, so a long history cannot leave an empty details column. */}
       <div ref={bodyRef} className="cp-grid">
         <div className="cp-main">
           {evidenceLoading && <p role="status" className="cp-note">Loading documents…</p>}
@@ -369,26 +378,13 @@ export default function CandidateProfilePage() {
           )}
           <CandidateSections cand={{ ...cand, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
         </div>
-        <aside aria-label="Recruitment workflow" className="cp-aside">
-          <ProfileCard title="Next step" icon={<Flag size={17} />} accent>
-            <h3 className="cp-next-title">{!cand.ownerId ? 'Assign a recruiter' : active ? `Continue stage ${active.currentStage}: ${stageByNo(active.currentStage).title}` : deployed ? 'Recruitment finished' : initialTask ? 'Make the initial call' : 'Match to a suitable order'}</h3>
-            <p className="cp-next-text">{!cand.ownerId ? 'Once a recruiter is assigned, the initial call task starts.' : active ? 'Your progress and deadlines are saved.' : deployed ? 'Documents and history stay on this page.' : initialTask ? `${owner?.name || 'The assigned recruiter'} will make the call${initialTask.dueAt ? ` · due ${dateTimeLabel(initialTask.dueAt)}` : ''}.` : 'Pick an open order to start the 11 stages.'}</p>
-            {((!cand.ownerId && canAssign) || (initialTask && canWork) || (active && canWork)) && (
-              <div className="cp-next-actions">
-                {!cand.ownerId && canAssign && <Button variant="primary" onClick={() => setReassigning(true)}>Assign recruiter</Button>}
-                {active && <Button variant="primary" onClick={() => setOpenApp(active.id)}>Open stage {active.currentStage}</Button>}
-                {initialTask && canWork && <Button onClick={() => navigate(`/tasks?task=${encodeURIComponent(initialTask.id)}`)}>Open the initial call task</Button>}
-              </div>
-            )}
-          </ProfileCard>
-
-          <ProfileCard title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}. Open one to work on its 11 stages.` : undefined}>
+        <section id="profile-recruitment" data-profile-tab="Recruitment" aria-label="Recruitment" className="cp-group">
+          {(apps.length > 0 || !deployed) && <ProfileCard title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}` : undefined}>
             {apps.length === 0 ? (
               <div>
                 <p className="cp-empty-title">Not matched to any order</p>
                 <p className="cp-empty-text">Until this candidate is matched to an order, there are no stages to work on.</p>
                 {!deployed && mapBlocker && <p id="map-blocker" role="note" className="cp-warn-text">{mapBlocker}</p>}
-                {!deployed && ownerActive && canWork && <Button variant="primary" className="mt-4" icon={<Link2 />} onClick={() => setMapping(true)}>Match to an order</Button>}
               </div>
             ) : (
               <ul className="cp-apps">
@@ -420,18 +416,18 @@ export default function CandidateProfilePage() {
                 })}
               </ul>
             )}
-          </ProfileCard>
+          </ProfileCard>}
 
-          <ProfileCard
-           
+          <div className="cp-recruitment-meta">
+          {(cand.callOutcome || !deployed) && <ProfileCard
             title="Initial call"
             icon={<PhoneCall size={17} />}
-            meta="Did you call, are they interested, and your notes"
+            meta={initialTask?.dueAt ? `Due ${dateTimeLabel(initialTask.dueAt)}` : undefined}
             action={
               canWork && (
-                <Button size="sm" variant="secondary" icon={<PhoneCall />} onClick={() => setCalling(true)}>
+                <div className="cp-call-actions"><Button size="sm" variant="secondary" icon={<PhoneCall />} onClick={() => setCalling(true)}>
                   {cand.callOutcome ? 'Update' : 'Record'}
-                </Button>
+                </Button>{initialTask && <Button size="sm" onClick={() => navigate(`/tasks?task=${encodeURIComponent(initialTask.id)}`)}>Open task</Button>}</div>
               )
             }
           >
@@ -451,7 +447,7 @@ export default function CandidateProfilePage() {
                 No call recorded yet.{initialTask ? ' The initial call task is done once you save the result.' : ''}
               </p>
             )}
-          </ProfileCard>
+          </ProfileCard>}
 
           <ProfileCard
            
@@ -464,18 +460,26 @@ export default function CandidateProfilePage() {
               <CandidateAssignmentHistory candidateId={cand.id} />
             </div>
           </ProfileCard>
+          </div>
+        </section>
 
+        <section id="profile-documents" data-profile-tab="Documents" aria-label="Documents" className="cp-group">
           <ProfileCard title="Documents" icon={<FileText size={17} />} meta={canWork ? DOCUMENT_HELP : undefined}>
             <div className="cp-docs">
               <DocumentList
-                documents={cand.documents}
+                documents={profileDocuments}
                 uploaderName={(userId) => store.user(userId)?.name || 'Former team member'}
                 emptyFor={(slot) => hasOriginals && ['resume', 'passport', 'aadhaar'].includes(slot.key) ? 'In the original upload' : undefined}
+                onExtract={canWork ? async (attachmentIds) => {
+                  await extractFormDocuments(cand.id, attachmentIds, { applicationId: active?.id })
+                  try { await store.refresh({ keepCurrent: true }) }
+                  catch { store.notify('Document reading started. Reload the page to see its progress.', 'warn') }
+                } : undefined}
                 onUpload={canWork ? (slot) => {
                   if (slot.key === 'source_bundle') return undefined
                   const multi = slot.multiple
                   return async (file) => {
-                    await api.upload('candidate', cand.id, slot.key, file)
+                    await api.upload('candidate', cand.id, slot.key, file, { deferExtraction: ['resume', 'passport', 'aadhaar'].includes(slot.key) })
                     try {
                       await store.refresh()
                       store.notify(multi ? `${file.name} added to ${slot.label.toLowerCase()}` : `${slot.label} uploaded`)
@@ -489,21 +493,11 @@ export default function CandidateProfilePage() {
               <CandidateIntakeEvidence candidateId={cand.id} />
             </div>
           </ProfileCard>
-          <div id="profile-activity" data-profile-tab="Activity" className="cp-group empty:hidden">
-            <ActivityCard events={activity} />
-          </div>
-        </aside>
-      </div>
-
-      {canDeleteCandidate(store.me.role) && (
-        <section className="cp-danger" aria-label="Danger area">
-          <div>
-            <h2>Danger area</h2>
-            <p>Deleting removes this candidate, their documents and their history for good.</p>
-          </div>
-          <Button variant="dangerGhost" icon={<Trash2 />} onClick={() => setDeleting(true)}>Delete candidate</Button>
         </section>
-      )}
+          {activity.length > 0 && <div id="profile-activity" data-profile-tab="Activity" className="cp-group">
+            <ActivityCard events={activity} />
+          </div>}
+      </div>
 
       <CallDialog open={calling} onClose={() => setCalling(false)} candidateId={cand.id} />
       {editing && <CandidateEditDialog candidate={cand} onClose={() => setEditing(false)} />}

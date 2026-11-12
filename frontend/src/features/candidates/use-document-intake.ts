@@ -148,7 +148,7 @@ export function useDocumentIntake(ownerId: string) {
     return current.current
   }
   const isReadable = (job: IntakeJob) => SCAN_KINDS.includes(job.kind)
-  /** A file saved but not yet queued for reading (it arrived while the last round was finishing). */
+  /** A saved file awaiting the user's explicit Extract details action. */
   const hasUnqueued = () => current.current.some((job) => isReadable(job) && job.status === 'uploaded')
   /** Puts one file back in the queue (Failed, or Needs a look). */
   const retry = async (jobId: string) => {
@@ -157,18 +157,19 @@ export function useDocumentIntake(ownerId: string) {
     return saved
   }
   /**
-   * Waits for every readable file, polling once a second after each answer (never two requests at once, none while the tab is hidden) while any is queued or being read. Files added while it waits are queued
-   * and followed too. `retryFailed` (the Read again button) also re-queues files that failed or needed a look; an automatic round does not.
+   * Reads only the files present when the user presses Extract details. Files added later wait for another explicit action.
+   * Polls once a second while this batch is queued or reading. `jobIds` scopes a single-file retry without starting other uploads.
    */
-  const read = async (signal: AbortSignal, options: { retryFailed?: boolean; onProgress?: (jobs: IntakeJob[]) => void } = {}) => {
+  const read = async (signal: AbortSignal, options: { retryFailed?: boolean; jobIds?: string[]; onProgress?: (jobs: IntakeJob[]) => void } = {}) => {
     const { retryFailed = true, onProgress } = options
+    const batchIds = new Set(current.current.filter((job) => isReadable(job) && (!options.jobIds || options.jobIds.includes(job.id))).map((job) => job.id))
     let stopAt = Date.now() + 20 * 60000
     let first = true
     // A file the server refuses to queue (for example one that holds several people) must not stop the others: it shows as Failed with the reason.
     const refused = new Map<string, string>()
     while (!signal.aborted) {
       for (const job of [...current.current]) {
-        if (!isReadable(job) || refused.has(job.id)) continue
+        if (!batchIds.has(job.id) || refused.has(job.id)) continue
         if (job.status === 'uploaded' || (first && retryFailed && ['failed', 'needs_review', 'dismissed'].includes(job.status))) {
           try { await retry(job.id) }
           catch (err) { if (signal.aborted) throw err; refused.set(job.id, err instanceof Error ? err.message : 'We could not read this file.') }
@@ -180,7 +181,7 @@ export function useDocumentIntake(ownerId: string) {
       if (refused.size) update(current.current.map((job) => refused.has(job.id) ? { ...job, status: 'failed', lastError: refused.get(job.id)! } : job))
       const values = current.current
       onProgress?.(values)
-      if (!values.some((job) => active.has(job.status) || (isReadable(job) && job.status === 'uploaded'))) return values
+      if (!values.some((job) => batchIds.has(job.id) && (active.has(job.status) || job.status === 'uploaded'))) return values
       if (Date.now() > stopAt) throw new Error('We are still reading. Your files are saved. Come back to this upload later.')
       // The next request is sent only after the previous answer (this loop never overlaps itself), READ_POLL_MS after it, and not at
       // all while the tab is hidden: it is sent the moment the tab is shown again. Time spent hidden does not count towards stopAt.

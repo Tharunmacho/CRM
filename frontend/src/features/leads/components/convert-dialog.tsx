@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Link2, Lock, UserPlus } from 'lucide-react'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Input } from '@/shared/ui/primitives'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
-import { convertLead, existingCandidateFrom, gateFromRefusal, leadApi, type ConvertResponse, type ExistingCandidate } from '../lead-api'
+import { checkLeadResume, readLeadResumeCheck, convertLead, existingCandidateFrom, gateFromRefusal, leadApi, type ConvertResponse, type ExistingCandidate, type LeadResumeCheck } from '../lead-api'
 import { cleanPhone, dobLabel, type Lead } from '../lead-model'
 import type { LeadGate } from '../lead-gate'
 
@@ -51,21 +51,60 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
   const [existing, setExisting] = useState<ExistingCandidate | null>(null)
   const [done, setDone] = useState<ConvertResponse | null>(null)
   const [linked, setLinked] = useState<ExistingCandidate | null>(null)
+  const [resumeCheck, setResumeCheck] = useState<LeadResumeCheck | null>(null)
+  const [checking, setChecking] = useState(false)
+  const checkVersion = useRef(0)
+  const invalidateCheck = () => { checkVersion.current += 1; setResumeCheck(null); setChecking(false) }
+  useEffect(() => () => { checkVersion.current += 1 }, [])
 
   useEffect(() => {
     if (!lead) return
     setFields(fieldsOf(lead)); setResume(null); setBusy(false); setError(''); setExisting(null); setDone(null); setLinked(null)
+    invalidateCheck()
   }, [lead?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => { invalidateCheck() }, [lead?.name, lead?.phone, lead?.email, lead?.resumeReceivedAt]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!lead || !resumeCheck || !['pending', 'processing'].includes(resumeCheck.status)) return
+    const controller = new AbortController()
+    const version = checkVersion.current
+    const timer = window.setTimeout(() => {
+      void readLeadResumeCheck(lead.id, resumeCheck.jobId, controller.signal).then((value) => {
+        if (!controller.signal.aborted && version === checkVersion.current) setResumeCheck(value)
+      }).catch((e) => {
+        if (!controller.signal.aborted) { setError(e instanceof Error ? e.message : 'We could not load the resume check. Try checking it again.'); setResumeCheck(null) }
+      })
+    }, 1500)
+    return () => { controller.abort(); window.clearTimeout(timer) }
+  }, [lead?.id, resumeCheck]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!lead || !fields) return null
-  const set = (key: keyof Fields) => (event: React.ChangeEvent<HTMLInputElement>) => setFields((current) => (current ? { ...current, [key]: event.target.value } : current))
+  const set = (key: keyof Fields) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (key === 'name' || key === 'phone' || key === 'email') invalidateCheck()
+    setFields((current) => (current ? { ...current, [key]: event.target.value } : current))
+  }
   const valid = fields.name.trim().length > 0 && (fields.phone.trim().length > 0 || fields.email.trim().length > 0)
+  const needsCheck = Boolean(resume || lead.hasResume)
+  const ready = !needsCheck || resumeCheck?.canConvert === true
+  const checkPending = checking || ['pending', 'processing'].includes(resumeCheck?.status ?? '')
+
+  const check = async () => {
+    const version = ++checkVersion.current
+    setChecking(true); setError(''); setResumeCheck(null)
+    try {
+      const result = await checkLeadResume(lead.id, resume, fields.name.trim())
+      if (version === checkVersion.current) setResumeCheck(result)
+    } catch (e) {
+      if (version === checkVersion.current) setError(e instanceof Error ? e.message : 'The resume could not be checked. Please try again.')
+    } finally { if (version === checkVersion.current) setChecking(false) }
+  }
 
   const submit = async () => {
-    if (busy || blockedReason || !valid) return
+    if (busy || blockedReason || !valid || !ready) return
     setBusy(true); setError(''); setExisting(null)
     try {
-      const result = await convertLead(lead.id, resume, changedOverrides(lead, fields))
+      const result = await convertLead(lead.id, resume, changedOverrides(lead, fields), resumeCheck?.jobId)
       setDone(result); onChanged()
     } catch (e) {
       const duplicate = existingCandidateFrom(e)
@@ -91,18 +130,18 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
   if (done || linked) {
     const candidate = done ? done.candidate : (linked as ExistingCandidate)
     return (
-      <Dialog open onClose={onClose} title={done ? 'Candidate created' : 'Lead linked'} width="sm"
-        footer={<>
-          <Button variant="secondary" onClick={onClose}>Close</Button>
-          <ApplicationFormButton candidateId={candidate.id} label="Open application form" />
-          <Button variant="primary" onClick={() => { onClose(); navigate(`/candidates/${candidate.id}`) }}>Open candidate</Button>
-        </>}>
+      <Dialog open onClose={onClose} title={done ? 'Candidate created' : 'Lead linked'} width="md"
+        footer={<div className="ld-done-actions">
+          <ApplicationFormButton candidateId={candidate.id} label="Open application form" variant="primary" className="ld-done-primary" />
+          <Button variant="secondary" onClick={() => { onClose(); navigate(`/candidates/${candidate.id}`) }}>Open candidate</Button>
+          <Button variant="ghost" onClick={onClose}>Done</Button>
+        </div>}>
         <div className="ld-done" role="status">
           <span className="ld-result-icon"><CheckCircle2 size={34} aria-hidden="true" /></span>
           <h3>{candidate.name}</h3>
           <p className="ld-done-ref">{candidate.ref}</p>
           <p>{done ? 'This lead is now a candidate in the Data Bank.' : 'This lead is now linked to the candidate who was already in the Data Bank.'}</p>
-          {done && done.resumeAttached && <p className="ld-done-note">The resume was attached. It is being read, and the application form will fill in from it.</p>}
+          {done && done.resumeAttached && <p className="ld-done-note">The resume was attached. Open the application form to check its reading progress and saved details.</p>}
           {done && !done.resumeAttached && !done.resumeError && <p className="ld-done-note">No resume was attached yet. You can add it from the candidate's page.</p>}
           {done?.resumeError && <p className="ld-alert" role="alert"><AlertTriangle size={16} aria-hidden="true" /><span>The candidate was created, but the resume was not attached: {done.resumeError}</span></p>}
         </div>
@@ -115,7 +154,7 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
       description="Check the details that will be saved in the Data Bank, attach the updated resume the person sent you, then convert."
       footer={<>
         <Button variant="secondary" disabled={busy} onClick={onClose}>Cancel</Button>
-        <Button variant="primary" icon={<UserPlus className="h-4 w-4" />} disabled={busy || Boolean(blockedReason) || !valid} title={blockedReason ?? (!valid ? 'A name and a phone number or email are needed' : undefined)} onClick={() => void submit()}>
+        <Button variant="primary" icon={<UserPlus className="h-4 w-4" />} disabled={busy || Boolean(blockedReason) || !valid || !ready} title={blockedReason ?? (!valid ? 'A name and a phone number or email are needed' : !ready ? 'Check the resume before converting' : undefined)} onClick={() => void submit()}>
           {busy ? 'Converting…' : 'Convert to candidate'}
         </Button>
       </>}>
@@ -149,8 +188,10 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
         <section className="ld-section">
           <h3>Updated resume</h3>
           {lead.hasResume && !resume && <p className="ld-hint">A resume is already attached to this lead and will be used. Choose a file below to use a different one.</p>}
-          <FileDrop label="Updated resume" help="PDF, Word or a photo of the resume. It is read automatically after converting." optional variant="row" disabled={busy}
-            onFile={(file) => { setResume(file) }} onChange={(value) => { if (!value) setResume(null) }} />
+          <FileDrop label="Updated resume" help="PDF, Word or a photo. Check the resume before converting so another person's details are not saved." optional variant="row" disabled={busy}
+            onFile={(file) => { setResume(file); invalidateCheck() }} onChange={(value) => { if (!value) { setResume(null); invalidateCheck() } }} />
+          {needsCheck && <Button variant="secondary" disabled={busy || checkPending || !fields.name.trim() || Boolean(blockedReason)} onClick={() => void check()}>{checkPending ? 'Checking resume…' : resumeCheck?.canConvert ? 'Check resume again' : 'Check resume'}</Button>}
+          {resumeCheck?.message && <p role={resumeCheck.status === 'rejected' ? 'alert' : 'status'} className={resumeCheck.canConvert ? 'ld-hint' : 'ld-alert'}>{resumeCheck.message}</p>}
         </section>
         {error && <p role="alert" className="ld-alert"><AlertTriangle size={16} aria-hidden="true" /><span>{error}</span></p>}
       </div>

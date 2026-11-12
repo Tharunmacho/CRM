@@ -49,6 +49,9 @@ class StageInput(BaseModel):
     # Drafts may be incomplete, but submitted values must have the correct type.
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    # Optional while drafting; the transition API requires fresh written feedback.
+    feedback: str | None = Field(default=None, max_length=10000)
+
     @field_validator("*", mode="before")
     @classmethod
     def blank_is_unset(cls, value, info):
@@ -167,7 +170,7 @@ FILE_FIELDS = {5: ("file",), 7: ("copy",), 8: ("receipt",), 9: ("file",), 10: ("
 
 
 def validate_payload(stage: int, data: dict[str, Any], options: StageOptions | None = None) -> dict[str, Any]:
-    """Normalize supplied values; completion alone requires PRD mandatory fields."""
+    """Normalize supplied optional details without inventing an outcome or date."""
     normalized = SCHEMAS[stage - 1].model_validate(data, context=_context(options)).model_dump(mode="json", by_alias=True, exclude_none=True)
     if "amount" in normalized:
         normalized["amount"] = float(normalized["amount"])
@@ -203,7 +206,7 @@ def _file(d: dict, field: str) -> bool:
 def _stage1(d: dict) -> Evaluation:
     if d.get("result") == "failed":
         return _close("prescreen_failed", "Failed prescreening", "Failed")
-    return _ok("Passed") if d.get("result") == "passed" else _need("Result")
+    return _ok("Passed") if d.get("result") == "passed" else _ok("Completed manually")
 
 
 def _stage2(d: dict) -> Evaluation:
@@ -213,35 +216,29 @@ def _stage2(d: dict) -> Evaluation:
         if d.get("reason") == "not_interested":
             return _close("not_interested", "Candidate not interested", "Not forwarded")
         return _need("Reason not forwarded")
-    return _ok("Forwarded") if d.get("forwarded") == "yes" else _need("Forwarded to client")
+    return _ok("Forwarded") if d.get("forwarded") == "yes" else _ok("Completed manually")
 
 
 def _stage3(d: dict) -> Evaluation:
-    if d.get("scheduled") != "yes":
-        return _need("Interview scheduled")
-    return _ok("Scheduled") if d.get("date") else _need("Interview date")
+    return _ok("Scheduled") if d.get("scheduled") == "yes" else _ok("Completed manually")
 
 
 def _stage4(d: dict) -> Evaluation:
-    if not d.get("result") or not d.get("remarks", "").strip():
-        return _need("Result and interview remarks")
+    if not d.get("result"):
+        return _ok("Completed manually")
     return (_close("interview_rejected", "Rejected at interview", "Rejected")
             if d["result"] == "rejected" else _ok("Selected"))
 
 
 def _stage5(d: dict) -> Evaluation:
-    if d.get("obtained") != "yes":
-        return _need("Offer letter obtained")
-    return _ok("Obtained") if _file(d, "file") else _need("Offer letter upload")
+    return _ok("Obtained") if d.get("obtained") == "yes" else _ok("Completed manually")
 
 
 def _stage6(d: dict) -> Evaluation:
-    if d.get("applied") == "no":
-        return _need("Medical application")
     if d.get("result") == "fit":
         return _ok("Fit")
     if d.get("result") != "unfit":
-        return _need("Medical result")
+        return _ok("Completed manually")
     if d.get("reapplying") == "no":
         return _close("medical_unfit", "Medically unfit, not reapplying", "Unfit")
     if d.get("reapplying") == "yes":
@@ -254,29 +251,23 @@ def _stage6(d: dict) -> Evaluation:
 
 
 def _stage7(d: dict) -> Evaluation:
-    return _ok("Collected") if d.get("collected") == "yes" else _need("Original passport collected")
+    return _ok("Collected") if d.get("collected") == "yes" else _ok("Completed manually")
 
 
 def _stage8(d: dict) -> Evaluation:
-    if d.get("collected") != "yes":
-        return _need("Advance collected")
-    if not d.get("amount"):
-        return _need("Positive advance amount")
-    return _ok("Collected") if _file(d, "receipt") else _need("Receipt upload")
+    return _ok("Collected") if d.get("collected") == "yes" else _ok("Completed manually")
 
 
 def _stage9(d: dict) -> Evaluation:
-    return _ok("Arrived") if d.get("arrived") == "yes" else _need("Visa arrived")
+    return _ok("Arrived") if d.get("arrived") == "yes" else _ok("Completed manually")
 
 
 def _stage10(d: dict) -> Evaluation:
-    if d.get("done") != "yes":
-        return _need("Stamping done")
-    return _ok("Stamped") if _file(d, "file") else _need("Stamped visa upload")
+    return _ok("Stamped") if d.get("done") == "yes" else _ok("Completed manually")
 
 
 def _stage11(d: dict) -> Evaluation:
-    return _ok("Booked") if _file(d, "file") else _need("Ticket upload")
+    return _ok("Booked") if _file(d, "file") else _ok("Completed manually")
 
 
 def _validated(stage: int, evaluate: Callable[[dict], Evaluation]):

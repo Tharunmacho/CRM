@@ -1,13 +1,18 @@
 import type { ReportResult } from './report-api'
 
-export type ReportKey = 'funnel' | 'staff' | 'source' | 'orders' | 'rejections' | 'advance'
+export type ReportKey = 'funnel' | 'staff' | 'source' | 'orders' | 'rejections' | 'advance' | 'collections'
 
 /**
- * The six reports. `question` is the plain question the report answers (shown in the report list);
+ * The reports. `question` is the plain question the report answers (shown in the report list);
  * `note` says what it counts; `how` explains, line by line, how the numbers are worked out (these
  * restate the server's rules, they add none).
  */
 export const REPORTS: { key: ReportKey; label: string; question: string; title: string; note: string; how: string[] }[] = [
+  {
+    key: 'collections', label: 'Fee collections', question: 'What is owed and what has been received?', title: 'Candidate fee collections',
+    note: 'Service fees, GST, invoices, actual money received and the remaining balance for each candidate.',
+    how: ['Agreed totals include the saved service fee and GST. Invoiced totals include issued invoices only.', 'Received amounts include confirmed payment records. Voided receipts are retained in history and excluded from received totals.'],
+  },
   {
     key: 'funnel', label: 'Pipeline', question: 'Where do we lose people?', title: 'Pipeline funnel',
     note: 'How many candidates reached each stage, how many were lost before the next one, and how long each stage takes. Only candidates matched to an order in this period are counted. A candidate who is only waiting still counts as active.',

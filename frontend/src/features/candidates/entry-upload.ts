@@ -16,8 +16,8 @@ const ACTIVE = new Set(['pending', 'processing', 'retry'])
 export const isDocKind = (kind: string): kind is DocKind => (DOC_KINDS as readonly string[]).includes(kind)
 /** Files in the documents zone: everything the server reads (resume, passport, Aadhaar), never the photo or the certificates. */
 export const isDocumentJob = (job: Pick<IntakeJob, 'kind' | 'status'>) => isDocKind(job.kind) && job.status !== 'dismissed'
-/** Still to be read or being read (an upload that has not been queued yet counts). */
-export const isWorking = (job: Pick<IntakeJob, 'status'>) => ACTIVE.has(job.status) || job.status === 'uploaded'
+/** Only explicitly queued or currently reading jobs require background polling. */
+export const isWorking = (job: Pick<IntakeJob, 'status'>) => ACTIVE.has(job.status)
 
 type Scan = NonNullable<NonNullable<IntakeJob['result']>['scans']>[DocKind]
 /** Provenance keys older responses stored inside `raw`; they are not read data (same rule as ocr-form). */
@@ -77,7 +77,7 @@ export function safeHint(value: unknown): string {
 
 const WAITING = new Set(['pending', 'retry'])
 /** Waiting in the reading queue (saved and queued, not yet being read). */
-export const isQueued = (job: Pick<IntakeJob, 'status'>) => WAITING.has(job.status) || job.status === 'uploaded'
+export const isQueued = (job: Pick<IntakeJob, 'status'>) => WAITING.has(job.status)
 const aheadOf = (job: Pick<IntakeJob, 'aheadOfYou' | 'queuePosition'>): number | null => {
   const ahead = typeof job.aheadOfYou === 'number' ? job.aheadOfYou : typeof job.queuePosition === 'number' ? job.queuePosition - 1 : null
   return ahead === null || ahead < 0 ? null : ahead
@@ -155,7 +155,7 @@ const NEEDS_LOOK = 'We could not find anything we can read here. Check the file,
 function queuedRow(job: IntakeJob, base: Omit<FileRow, 'state' | 'label' | 'tone'>, clock?: QueueClock): FileRow {
   const now = clock?.now ?? Date.now()
   const queued = { ...base, state: 'queued' as const }
-  if (job.status === 'uploaded') return { ...queued, label: 'Queued', tone: 'muted' }
+  if (job.status === 'uploaded') return { ...queued, label: 'Ready to extract', tone: 'muted' }
   if (job.status === 'retry' && (job.attempts ?? 0) > 0) {
     // A reading attempt ended without a result: say so, and that it is being tried again. Never "restart the server".
     const down = readerDown(job)

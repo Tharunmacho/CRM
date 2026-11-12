@@ -10,6 +10,7 @@ import { FormSection } from '@/shared/ui/form-section'
 import { useFormOptions } from '@/features/form-options/use-form-options'
 import { choicesFor, FORM_OPTION_CATEGORIES } from '@/features/form-options/form-options-model'
 import { normalizedSkills } from '../candidate-skills'
+import { candidateReviewIssues } from '../candidate-review'
 import { candidateEntryErrors, EMPTY_CANDIDATE_FORM } from '../entry-model'
 
 export function CandidateEditDialog({ candidate, onClose }: { candidate: Candidate; onClose: () => void }) {
@@ -76,6 +77,10 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
   }
   return <Dialog open onClose={() => { if (!saving) onClose() }} title="Edit candidate details" description="Change the details on this profile. The original documents stay saved." width="lg" footer={<><Button variant="ghost" disabled={saving} onClick={onClose}>{saved ? 'Close' : 'Cancel'}</Button><Button disabled={saving || !form.name.trim() || !form.phone.trim()} variant="primary" onClick={() => void save()}>{saving ? saved ? 'Refreshing…' : 'Saving…' : saved ? 'Refresh profile' : 'Save changes'}</Button></>}>
     <fieldset disabled={saving || saved} className="ui-fs-stack">
+      {candidateReviewIssues(candidate).length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="note">
+        <strong>Profile details to check</strong>
+        <ul className="mt-2 space-y-1">{candidateReviewIssues(candidate).map(issue => <li key={issue.key}><b>{issue.label}.</b> {issue.action}</li>)}</ul>
+      </div>}
       <FormSection icon={<UserRound size={18} />} title="Name and contact" hint="Who the candidate is and how to reach them">
         {text('name', 'Full name')}
         {text('phone', 'Phone', { placeholder: '+91 98400 00000' })}
@@ -107,7 +112,7 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
         {text('gulf_experience', 'Gulf experience (years)', { type: 'number' })}
         {text('expected_salary', 'Expected salary', { type: 'number' })}
       </FormSection>
-    {candidate.needsReview && (candidate.ownerId
+    {(candidate.needsReview || candidate.status === 'needs_review') && (candidate.ownerId
       ? <label className="mt-6 flex items-center gap-2 text-sm"><CheckboxInput checked={reviewed} onChange={setReviewed} />I checked the profile and documents. Mark the review as done.</label>
       : <p className="mt-6 text-sm text-amber-700">You can save your changes now. Give this candidate a recruiter before you mark the review as done.</p>)}
     </fieldset>

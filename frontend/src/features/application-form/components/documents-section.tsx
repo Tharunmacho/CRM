@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import {
   Briefcase, CheckCircle2, Clock, Download, Eye, FileSignature, FileText, Files, GraduationCap, IdCard, Image as ImageIcon, Landmark,
   Loader2, Paperclip, Plane, ShieldCheck, Stamp, Star, Stethoscope, TriangleAlert, Upload, type LucideIcon,
@@ -7,19 +7,23 @@ import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { fileHref } from '@/shared/api/client'
 import { FileLink } from '@/shared/ui/file-drop'
-import { DOCUMENT_ACCEPT, documentFileError } from '@/shared/lib/document-files'
+import { DOCUMENT_ACCEPT } from '@/shared/lib/document-files'
+import { DocumentUploadQueue, useDocumentUploadQueue } from '@/shared/ui/document-upload-queue'
+import { DocumentExtractionAction } from '@/shared/ui/document-extraction-action'
+import { Button, Field, Textarea } from '@/shared/ui/primitives'
+import { Dialog } from '@/shared/ui/overlay'
 import { documentLabel, documentSlot } from '@/shared/model/document-slots'
 import { describeExtraction, sizeLabel } from '../form-model'
 import { documentRowStates, documentRowsProgress, documentsCountText, type DocumentRowIcon, type DocumentRowState } from '../document-rows'
 import type { ApplicationFormData, DocumentKind, DocumentSlot, FormDocument } from '../types'
 import { SectionHeader } from './section-header'
 import { ReadReport } from '@/features/candidates/components/read-report'
-import { formReports } from '@/features/candidates/read-report'
+import { formReports, incompleteReadingText } from '@/features/candidates/read-report'
 import '@/styles/application-form-aadhaar.css'
 import '@/styles/application-form-v2.css'
 
 const ICONS: Record<string, LucideIcon> = {
-  resume: FileText, passport: IdCard, photo: ImageIcon, education_certificate: GraduationCap, experience_certificate: Briefcase,
+  resume: FileText, passport: IdCard, aadhaar: IdCard, photo: ImageIcon, education_certificate: GraduationCap, experience_certificate: Briefcase,
   signed_offer: FileSignature, medical: Stethoscope, pcc: ShieldCheck, visa: Stamp, google_review: Star, visa_stamping: Stamp,
   emigration: Landmark, air_ticket: Plane, other: Paperclip,
 }
@@ -27,26 +31,28 @@ const ICONS: Record<string, LucideIcon> = {
 const STATE_ICONS: Record<DocumentRowIcon, LucideIcon | null> = { check: CheckCircle2, clock: Clock, dot: null }
 
 /** What the reading of one document did, in the words a recruiter needs. */
-export function ExtractionLine({ kind, slot }: { kind: DocumentKind; slot: DocumentSlot }) {
+export function ExtractionLine({ kind, slot, onCorrect, disabled }: { kind: DocumentKind; slot: DocumentSlot; onCorrect?: () => void; disabled?: boolean }) {
   const note = describeExtraction(kind, slot)
+  const wrongDocument = slot.extraction?.identityMismatch === true
+  const incomplete = wrongDocument ? '' : incompleteReadingText(slot.extraction?.coverage)
   if (note.tone === 'none') return null
-  const Icon = note.tone === 'reading' ? Loader2 : note.tone === 'done' ? CheckCircle2 : TriangleAlert
+  const tone = incomplete ? 'review' : note.tone
+  const Icon = tone === 'reading' ? Loader2 : tone === 'done' ? CheckCircle2 : TriangleAlert
   return (
-    <p className={cn('af-extract', `is-${note.tone}`)} role={note.tone === 'failed' ? 'alert' : 'status'}>
-      <Icon aria-hidden="true" />{note.text}
-    </p>
+    <div className={cn('af-extract', `is-${tone}`, wrongDocument && 'is-wrong-document')} role={tone === 'failed' || incomplete ? 'alert' : 'status'}>
+      <Icon aria-hidden="true" /><span>{incomplete || note.text}</span>{wrongDocument && onCorrect && <button type="button" className="af-docbtn" disabled={disabled} onClick={onCorrect}>Upload correct file</button>}
+    </div>
   )
 }
 
 /** One stored file on one line: its name (a link), then size and date, muted. The name is cut with an ellipsis, never wrapped. */
-function FileRow({ file }: { file: FormDocument }) {
+function FileRow({ file, action }: { file: FormDocument; action?: ReactNode }) {
   const detail = [sizeLabel(file.sizeKb), file.uploadedAt ? dateTimeLabel(file.uploadedAt) : 'Saving'].join(' · ')
   return (
-    <p className="af-docfile">
-      {file.url ? <a href={fileHref(file.url)} target="_blank" rel="noreferrer" title={file.fileName}>{file.fileName}</a> : <span title={file.fileName}>{file.fileName}</span>}
-      <small>{detail}</small>
-      {file.url && <FileLink url={file.url} download title={`Download ${file.fileName}`} className="shrink-0"><Download className="h-4 w-4" /><span className="sr-only">Download {file.fileName}</span></FileLink>}
-    </p>
+    <div className="af-docfile">
+      <div className="af-docfile-copy">{file.url ? <a href={fileHref(file.url)} target="_blank" rel="noreferrer" title={file.fileName}>{file.fileName}</a> : <span title={file.fileName}>{file.fileName}</span>}<small>{detail}</small></div>
+      {file.url && <div className="af-docfile-actions"><a href={fileHref(file.url)} target="_blank" rel="noreferrer" aria-label={`View ${file.fileName}`} title={`View ${file.fileName}`} className="af-docbtn is-icon"><Eye aria-hidden="true" /></a><FileLink url={file.url} download title={`Download ${file.fileName}`} className="af-docbtn is-icon"><Download aria-hidden="true" /><span className="sr-only">Download {file.fileName}</span></FileLink>{action || <span aria-hidden="true" />}</div>}
+    </div>
   )
 }
 
@@ -54,81 +60,80 @@ function FileRow({ file }: { file: FormDocument }) {
 function useSlotUpload(slot: DocumentSlot, canUpload: boolean, busy: boolean, onUpload: (kind: DocumentKind, file: File) => Promise<void>) {
   const input = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
-  const [error, setError] = useState('')
   const imageOnly = documentSlot(slot.slot)?.imageOnly === true
-  const blocked = !canUpload || busy
-  const take = async (files: FileList | null) => {
-    const file = files?.[0]
-    if (!file || blocked) return
-    const invalid = documentFileError(file)
-    if (invalid) { setError(invalid); return }
-    if (imageOnly && !/^image\//.test(file.type) && !/\.(jpe?g|png|webp|heic)$/i.test(file.name)) { setError('Choose a JPG, PNG, WebP or HEIC photo.'); return }
-    setError('')
-    try { await onUpload(slot.slot, file) } catch (cause) { setError(cause instanceof Error ? cause.message : 'The file was not uploaded. Please try again.') }
-  }
+  const queue = useDocumentUploadQueue((file) => onUpload(slot.slot, file), { multiple: slot.multiple, disabled: !canUpload || busy, validate: (file) => imageOnly && !/^image\//.test(file.type) && !/\.(jpe?g|png|webp|heic)$/i.test(file.name) ? 'Choose a JPG, PNG, WebP or HEIC photo.' : null })
+  const blocked = !canUpload || busy || queue.busy
   const accept = imageOnly ? 'image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp,.heic' : DOCUMENT_ACCEPT
   const drop = {
     onDragOver: (event: React.DragEvent) => { event.preventDefault(); if (!blocked) setDragging(true) },
     onDragLeave: () => setDragging(false),
-    onDrop: (event: React.DragEvent) => { event.preventDefault(); setDragging(false); void take(event.dataTransfer.files) },
+    onDrop: (event: React.DragEvent) => { event.preventDefault(); setDragging(false); if (!blocked) void queue.take(event.dataTransfer.files) },
   }
-  return { input, dragging, error, blocked, take, accept, drop, open: () => input.current?.click() }
+  return { input, dragging, blocked, queue, take: queue.take, accept, drop, open: () => input.current?.click() }
 }
 
 /**
  * One document on one compact row, on fixed columns so the rows line up from top to bottom:
  * status icon, name, status chip, file (name, size, date), actions (Upload or Replace, View).
  */
-function DocumentRow({ slot, state, canUpload, busy, onUpload }: {
+function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, onExtract }: {
   slot: DocumentSlot
   state: DocumentRowState
   canUpload: boolean
   busy: boolean
   onUpload: (kind: DocumentKind, file: File) => Promise<void>
+  onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
+  onExtract?: (attachmentIds: string[]) => Promise<void>
 }) {
   const label = documentLabel(slot.slot)
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualNote, setManualNote] = useState('')
+  const [manualBusy, setManualBusy] = useState(false)
+  const [manualError, setManualError] = useState('')
   const upload = useSlotUpload(slot, canUpload && !state.disabled, busy, onUpload)
   const files = slot.multiple ? slot.files : slot.current ? [slot.current] : []
+  const hasFile = files.some((file) => Boolean(file.url))
+  const rejectedOnly = hasFile && files.every((file) => file.identityMismatch)
+  const marked = slot.manualStatus?.uploaded === true && !hasFile
+  const working = busy || upload.queue.busy
   const StateIcon = STATE_ICONS[state.icon] ?? ICONS[slot.slot] ?? FileText
   const mayUpload = canUpload
-  const action = busy ? 'Uploading' : slot.multiple ? 'Add' : files.length ? 'Replace' : 'Upload'
+  const action = working ? 'Uploading' : slot.multiple ? 'Add files' : hasFile ? 'Replace' : 'Upload'
+  const uploadButton = canUpload && <button type="button" className={cn('af-docbtn', !files.length && 'is-primary')} disabled={upload.blocked || manualBusy} aria-label={`${action} ${label}`} onClick={upload.open}>{working ? <Loader2 className="is-spin" aria-hidden="true" /> : <Upload aria-hidden="true" />}{action}</button>
+  const saveManual = async () => {
+    if (!onManualStatus || manualBusy) return
+    setManualBusy(true); setManualError('')
+    try { await onManualStatus(slot.slot, !marked, manualNote.trim()); setManualOpen(false) }
+    catch (cause) { setManualError(cause instanceof Error ? cause.message : 'The document status was not saved.') }
+    finally { setManualBusy(false) }
+  }
   return (
     <li
-      className={cn('af-docrow', `is-${state.key}`, upload.dragging && 'is-dragging', busy && 'is-busy')}
+      className={cn('af-docrow', `is-${state.key}`, hasFile && 'has-files', slot.multiple && 'is-multi-file', !slot.multiple && hasFile && 'is-single-file', upload.dragging && 'is-dragging', busy && 'is-busy')}
       data-document={slot.slot}
-      aria-busy={busy}
+      aria-busy={working || manualBusy}
       {...(mayUpload ? upload.drop : {})}
     >
       <span className={cn('af-docrow-icon', `is-${state.key}`)} aria-hidden="true">{state.icon === 'dot' ? <i /> : <StateIcon />}</span>
       <b className="af-docrow-name" title={label}>{label}</b>
-      <span className={cn('af-doc-chip', `is-${state.key}`)}>{state.chip}</span>
+      <span className={cn('af-doc-chip', `is-${state.key}`, rejectedOnly && 'is-rejected')}>{working ? 'Uploading' : rejectedOnly ? 'Wrong document' : state.chip}</span>
       <div className="af-docrow-file">
-        {files.map((file) => <FileRow key={file.attachmentId} file={file} />)}
-        {busy && <span className="af-docrow-progress" role="progressbar" aria-label={`Uploading ${label}`}><i /></span>}
-        <ExtractionLine kind={slot.slot} slot={slot} />
-        {upload.error && <p className="af-note is-error" role="alert">{upload.error}</p>}
+        {files.map((file, index) => <div key={file.attachmentId}><FileRow file={file} action={index === 0 && hasFile ? uploadButton : undefined} />{slot.multiple && file.extraction && <ExtractionLine kind={slot.slot} slot={{ ...slot, extraction: file.extraction }} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} />}</div>)}
+        {marked && <div className="af-doc-manual"><b>Marked manually · No file attached</b><small>{slot.manualStatus?.by.name || 'Former team member'}{slot.manualStatus?.at ? ` · ${dateTimeLabel(slot.manualStatus.at)}` : ''}</small>{slot.manualStatus?.note && <p>{slot.manualStatus.note}</p>}</div>}
+        {slot.multiple && !hasFile && !marked && <p className="af-doc-hint">{slot.slot === 'passport' ? 'Add the photo page, address page or other passport pages together.' : slot.slot === 'aadhaar' ? 'Add both front and back pages before extracting details.' : 'Choose or drop several files.'}</p>}
+        {(!slot.multiple || !files.some((file) => file.extraction)) && <ExtractionLine kind={slot.slot} slot={slot} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} />}
+        <DocumentUploadQueue queue={upload.queue} />
+        {canUpload && <DocumentExtractionAction files={files} disabled={working} onExtract={onExtract} />}
       </div>
-      <div className="af-docrow-actions">
-        {!slot.multiple && slot.current?.url && (
-          <a className="af-docbtn is-icon" href={fileHref(slot.current.url)} target="_blank" rel="noreferrer" aria-label={`View ${label}`} title={`View ${label}`}><Eye aria-hidden="true" /></a>
-        )}
-        {canUpload && (
-          <button
-            type="button"
-            className={cn('af-docbtn', !files.length && 'is-primary')}
-            disabled={upload.blocked}
-            aria-label={`${action} ${label}`}
-            onClick={upload.open}
-          >
-            {busy ? <Loader2 className="is-spin" aria-hidden="true" /> : <Upload aria-hidden="true" />}
-            {action}
-          </button>
-        )}
-      </div>
+      {!hasFile && <div className="af-docrow-actions">
+        {uploadButton}
+        {canUpload && onManualStatus && slot.manualStatusSupported && !hasFile && <button type="button" className="af-docbtn af-doc-manual-action" disabled={working || manualBusy} onClick={() => { setManualNote(''); setManualError(''); setManualOpen(true) }}>{marked ? 'Mark as pending' : 'Mark as uploaded'}</button>}
+      </div>}
       {mayUpload && (
         <input
           ref={upload.input}
           type="file"
+          multiple={slot.multiple}
           accept={upload.accept}
           className="sr-only"
           tabIndex={-1}
@@ -137,6 +142,7 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload }: {
           onChange={(event) => { void upload.take(event.currentTarget.files); event.currentTarget.value = '' }}
         />
       )}
+      {manualOpen && <Dialog open onClose={() => { if (!manualBusy) setManualOpen(false) }} title={`${marked ? 'Mark as pending' : 'Mark as uploaded'}: ${label}`} description={marked ? 'Return this document to the pending checklist.' : 'Update the checklist when you have received this document. A file can be added later.'} width="sm" footer={<><Button disabled={manualBusy} onClick={() => setManualOpen(false)}>Cancel</Button><Button variant="primary" disabled={manualBusy} onClick={() => void saveManual()}>{manualBusy ? 'Saving…' : marked ? 'Mark as pending' : 'Mark as uploaded'}</Button></>}><Field label="Note (optional)"><Textarea rows={3} maxLength={1000} value={manualNote} disabled={manualBusy} onChange={(event) => setManualNote(event.target.value)} /></Field>{manualError && <p role="alert" className="af-note is-error">{manualError}</p>}</Dialog>}
     </li>
   )
 }
@@ -150,11 +156,15 @@ export function DocumentsSection({
   canUpload,
   onUpload,
   busyKinds,
+  onManualStatus,
+  onExtract,
 }: {
   form: ApplicationFormData
   canUpload: boolean
   onUpload: (kind: DocumentKind, file: File) => Promise<void>
   busyKinds: DocumentKind[]
+  onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
+  onExtract?: (attachmentIds: string[]) => Promise<void>
 }) {
   const rows = documentRowStates(form, canUpload)
   const progress = documentRowsProgress(rows.map((row) => row.state))
@@ -184,6 +194,8 @@ export function DocumentsSection({
             canUpload={canUpload}
             busy={busyKinds.includes(slot.slot)}
             onUpload={onUpload}
+            onManualStatus={onManualStatus}
+            onExtract={onExtract}
           />
         ))}
       </ul>

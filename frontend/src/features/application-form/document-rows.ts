@@ -53,6 +53,7 @@ export function documentRowStates(
   return form.documentOrder
     .map((kind) => form.documents[kind])
     .filter((slot): slot is DocumentSlot => Boolean(slot))
+    .filter((slot) => slot.slot !== 'application_form' || slot.uploaded || Boolean(slot.current) || slot.files.length > 0)
     .map((slot) => ({
       slot,
       state: documentRowState({ entry: documentSlot(slot.slot) ?? { always: slot.required, fromStage: slot.requiredFromStage }, hasFile: slot.uploaded, canWork }),

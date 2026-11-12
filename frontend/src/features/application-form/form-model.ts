@@ -271,6 +271,9 @@ function normaliseDocument(raw: unknown): FormDocument | null {
     url: str(value.url),
     uploadedAt: str(value.uploadedAt),
     uploadedBy: typeof by === 'string' ? by : str(rec(by).name),
+    extraction: normaliseExtraction(value.extraction),
+    extractionPending: typeof value.extractionPending === 'boolean' ? value.extractionPending : undefined,
+    identityMismatch: value.identityMismatch === true || rec(value.extraction).identityMismatch === true,
   }
 }
 
@@ -281,6 +284,7 @@ function normaliseExtraction(raw: unknown): Extraction | null {
   if (!EXTRACTION_STATES.includes(status)) return null
   return {
     status,
+    identityMismatch: value.identityMismatch === true,
     message: str(value.message),
     filled: list(value.filled).map(str),
     kept: list(value.kept).map(str),
@@ -302,19 +306,26 @@ function normaliseSlot(slot: DocumentKind, raw: unknown, stage: number | null): 
   const current = normaliseDocument(value.current)
   const files = list(value.files).map(normaliseDocument).filter((item): item is FormDocument => item !== null)
   const multiple = value.multiple === true || entry?.multiple === true
+  const manual = rec(value.manualStatus)
+  const actor = rec(manual.by)
+  const storedFiles = current ? [current, ...files] : files
   return {
     slot,
     // The shared label always wins: an older server still says "Passport size photo" for the photo.
     label: entry?.label || str(value.label) || documentLabel(slot),
     hint: str(value.hint) || entry?.hint || '',
-    uploaded: value.uploaded === true || current !== null || files.length > 0,
+    uploaded: storedFiles.length ? storedFiles.some((file) => !file.identityMismatch) : value.uploaded === true,
+    fileUploaded: Boolean(current?.url || files.some((file) => file.url)),
+    manualStatusSupported: Object.hasOwn(value, 'fileUploaded') || Object.hasOwn(value, 'manualStatus'),
+    manualStatus: value.manualStatus ? { uploaded: manual.uploaded === true, by: { id: actor.id == null ? null : str(actor.id), name: actor.name == null ? null : str(actor.name) }, at: str(manual.at), note: str(manual.note) } : null,
     current,
     versions: num(value.versions, current ? 1 : 0),
     extraction: normaliseExtraction(value.extraction),
-    required: typeof value.required === 'boolean' ? value.required : entry ? documentExpected(entry, stage) : false,
+    extractionPending: value.extractionPending === true || current?.extractionPending === true || files.some((file) => file.extractionPending),
+    required: slot === 'application_form' || slot === 'aadhaar' ? false : typeof value.required === 'boolean' ? value.required : entry ? documentExpected(entry, stage) : false,
     requiredFromStage: value.requiredFromStage == null ? (entry?.fromStage ?? null) : num(value.requiredFromStage),
     multiple,
-    files,
+    files: multiple && !files.length && current ? [current] : files,
     listed: raw != null && typeof raw === 'object',
   }
 }
@@ -425,6 +436,7 @@ export function normalizeForm(raw: unknown): ApplicationFormData {
   }
 
   const form: ApplicationFormData = {
+    capabilities: { deferredDocumentReading: rec(root.capabilities).deferredDocumentReading === true },
     header: {
       company: str(header.company) || 'Careindia Overseas Pvt Ltd',
       title: str(header.title) || 'JOB APPLICATION FORM',
@@ -672,6 +684,7 @@ export interface ExtractionNote {
 /** What a document's last reading did, in the words a recruiter needs. */
 export function describeExtraction(kind: DocumentKind, slot: Pick<DocumentSlot, 'uploaded' | 'extraction'>): ExtractionNote {
   const extraction = slot.extraction
+  if (extraction?.identityMismatch) return { tone: 'failed', text: 'Wrong document. No details were filled. Upload the correct document.' }
   if (kind === 'photo' || !slot.uploaded || !extraction) return { tone: 'none', text: '' }
   const filled = extraction.filled.length
   const fields = `${filled} ${filled === 1 ? 'field' : 'fields'}`

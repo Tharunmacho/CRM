@@ -69,7 +69,15 @@ function clientOfOrder(sources: AssignmentSources, orderId: string) {
  * permissions) is filled from the workspace.
  */
 export function completeAssignment(assignment: AssignmentData, sources: AssignmentSources): AssignmentData {
-  if (assignment.supported && assignment.serverOptions && assignment.serverCan) return assignment
+  if (assignment.supported && assignment.serverOptions && assignment.serverCan) {
+    if (!assignment.can.job) return assignment
+    const existing = new Set(assignment.options.clients.map((client) => client.id))
+    const missing = fallbackClientOptions(sources, assignment.client?.id ?? '').filter((client) => !existing.has(client.id))
+    if (!missing.length) return assignment
+    // Older assignment APIs can omit clients. The current workspace supplies active clients
+    // and their jobs with status labels. Unavailable jobs remain disabled; saves are revalidated.
+    return { ...assignment, options: { ...assignment.options, clients: [...assignment.options.clients, ...missing].sort((a, b) => a.name.localeCompare(b.name)) } }
+  }
   let next: AssignmentData = assignment
 
   if (!assignment.supported) {

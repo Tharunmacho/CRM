@@ -13,8 +13,8 @@ JSON is camelCase (like the other routers). Query parameters are snake_case (lik
 
 ## Errors
 
-Every error this router raises has `detail = {"code": "...", "message": "..."}` (the client already shows `detail.message`),
-plus extra keys named below. FastAPI's own 422 body validation list and the 401 for a missing session stay as usual.
+Most business errors use `detail = {"code": "...", "message": "..."}` (the client shows `detail.message`),
+plus extra keys named below. Resume-check and reversal errors can also use a plain `detail` string. FastAPI's own 422 body validation list and the 401 for a missing session stay as usual.
 
 | HTTP | code | when |
 | --- | --- | --- |
@@ -25,6 +25,8 @@ plus extra keys named below. FastAPI's own 422 body validation list and the 401 
 | 409 | `already_converted` | call/convert on a converted lead |
 | 409 | `duplicate_lead` | PATCH would give the lead a phone/e-mail another lead already has. Extra: `existingLeadId` |
 | 409 | `candidate_exists` | convert: the phone/email already belongs to a candidate. Extra: `candidate` `{id, ref, name, phone, ownerId, ownerName, matchedOn[], canMerge}` so the UI can offer **link-candidate** |
+| 409 | `resume_verification_required` | an attached/saved resume has no current verified check, its identity/file changed, or final attachment failed; no candidate is created |
+| 409 | `resume_identity_mismatch` | the checked document belongs to another person or contains several people; no candidate is created |
 | 413 | `file_too_large` | import file over 25 MB, or an xlsx that unpacks to over 50 MB |
 | 422 | `unsupported_file` | legacy `.xls`, macro-enabled workbook, zip bomb, empty file, no header row |
 | 422 | `no_usable_columns` | no column could be mapped to a phone, e-mail, lead id or name |
@@ -58,7 +60,8 @@ Activity kinds: `call`, `note`, `status`, `assign`, `import`, `convert`, `resume
 | --- | --- | --- | --- |
 | read list / summary / detail / batches | yes | yes | yes |
 | import, dry-run, delete a batch (admin only), assign, export | yes (delete batch: admin only) | import / assign / export yes | **403 `forbidden_role`** |
-| call, PATCH, convert, link-candidate, upload resume | any lead | any lead | **only leads assigned to them** (`lead_not_yours`) and only when not gated |
+| call, PATCH, check resume, convert, link-candidate, upload resume | any lead | any lead | **only leads assigned to them** (`lead_not_yours`) and only when not gated |
+| check or perform Move back to Lead | yes, subject to unused-candidate guards | no | no |
 
 Staff cannot claim leads; only admin/manager assign.
 
@@ -67,7 +70,7 @@ Staff cannot claim leads; only admin/manager assign.
 A staff member must finish the daily work quota (Tasks > Daily work: today's items plus anything postponed) before they
 may work the lead sheet. For a **staff** user the server answers `403 daily_work_pending` on
 `POST /{id}/call`, `PATCH /{id}`, `POST /{id}/convert`, `POST /{id}/link-candidate` and on a resume upload to a lead
-(`POST /api/files` with `entity_type=lead`) while the gate is locked. Reading is never gated. Admin and manager are never gated.
+(`POST /api/files` with `entity_type=lead`) while the gate is locked. Resume-check start and status endpoints also enforce the work gate. Reading the lead list and saved detail is never gated. Admin and manager are never gated.
 
 ```json
 { "code": "daily_work_pending",
@@ -279,16 +282,39 @@ with the fewest open leads first); it uses its own cursor, so the candidate roun
 assignable staff member. Converted leads are never moved. Returns `{ "assigned": n, "skipped": m, "owners": [ {id, name, count} ] }`.
 Each new owner gets one notification (`kind: lead_assignment`, link `/leads`) per assignment.
 
+### Check resume before conversion (owner staff, admin, manager)
+
+`POST /api/leads/{id}/resume-check` accepts multipart `resume` (optional; otherwise the latest saved lead resume) and `overrides` (optional JSON object containing only a string `name`, the candidate name shown in the conversion dialog). With no selected or saved resume it returns 422. It starts or reuses a durable reading without creating a candidate.
+
+`GET /api/leads/{id}/resume-check/{jobId}` reads that user's check for the same lead. Both endpoints return:
+
+```json
+{ "jobId": "uuid", "status": "pending|processing|verified|rejected|needs_review|failed", "canConvert": false, "message": "..." }
+```
+
+Only a completed, identity-readable resume with complete output and no conflicting identity or multiple-person result is `verified` with `canConvert: true`. Wrong identity is `rejected`; incomplete or uncertain identity stays `needs_review`. Neither can be bypassed by the conversion UI.
+
+The proof binds the user-owned job to the lead ID/name/phone/email/date-of-birth snapshot, effective candidate name, exact file hash and, when using the saved resume, its source attachment ID. A changed identity, different file or replaced saved attachment requires another check. Identity is revalidated against current records on status reads and conversion; there is no time-based proof expiry.
+
 ### POST /api/leads/{id}/convert  (owner staff, admin, manager)
 
-`multipart/form-data` (all parts optional): `resume` (PDF / Word / image), `overrides` (JSON string with any of `name, phone, email, dob,
-gender, currentCity, designations[], totalExperience, countryPreference, sourceDetail, assignTo` to correct the lead's values before the candidate is created).
+`multipart/form-data`: `resume` (optional PDF / Word / image), `resume_check_id` (required whenever a selected or saved resume exists), `overrides` (optional JSON string with any of `name, phone, email, dob,
+gender, currentCity, designations[], totalExperience, countryPreference, sourceDetail, assignTo` to correct the lead's values before the candidate is created). Conversion with no selected or saved resume remains allowed.
 Creates a Data Bank candidate through the normal candidate path (duplicate detection, owner assignment, initial-call task, notifications):
 `source = other`, `sourceDetail = campaign name`, `designations = [positionApplied]`, `countryPreference = countryInterest`,
-owner = the lead's owner when that person is assignable, else the usual next free recruiter. A resume sent here (or the one already uploaded to the
-lead) is attached as the candidate's `resume`, so extraction runs and the application form fills automatically. If a candidate with the same
+owner = the lead's owner when that person is assignable, else the usual next free recruiter. A selected or saved resume must match the current verified check. Its stored extraction is reused through the normal identity and field-provenance guards, without another provider extraction. Candidate creation, the verified candidate attachment, retention of the original with the lead, and the converted lead link commit together; final identity rejection or attachment failure rolls the conversion back. If a candidate with the same
 phone/email exists: `409 candidate_exists` (nothing is created). On success the lead becomes `converted` (`candidateId` set) and the response is
 `{ "lead": Lead, "candidate": {id, ref, name, ownerId, ownerName, taskId}, "resumeAttached": true, "resumeError": null }`.
+
+### Move back to Lead (admin only)
+
+`GET /api/leads/{id}/unconvert-check` returns `{allowed, reason, candidate: {id, ref, name}|null, restoredStatus}`. A refusal explains the actual blocking history. No record is changed by this check.
+
+`POST /api/leads/{id}/unconvert` accepts `{candidateId, reason}`; the normalized reason must contain 3–1000 characters. The exact candidate must have been created by this lead, proven by the conversion activity and origin audit, with a verifiable previous lead status. Linking an existing candidate is never reversible through this action.
+
+Other linked leads or inbox/document sources, any application (including closed ones), invoice/payment records, ticket/invoice attachments, notes/feedback, task events or work already started block removal. Only the untouched automatic initial-call task from conversion may be removed. The server locks and rechecks these conditions when saving.
+
+Success removes the unused candidate, clears its link, restores the prior lead status, retains the lead's original fields/files/history, syncs its follow-up and records the actor/reason in lead history and audit. Response: `{lead: Lead, removedCandidateId, restoredStatus, alreadyReversed}`. Retrying the same candidate ID after a successful reversal returns `alreadyReversed: true`; a different/reconverted candidate is refused with 409.
 
 ### POST /api/leads/{id}/link-candidate  (owner staff, admin, manager)
 
@@ -299,7 +325,7 @@ Body `{ "candidateId": "…" }`. Links the lead to an existing candidate and mar
 Use the existing file endpoints with `entity_type=lead`: `POST /api/files` (`entity_type=lead`, `entity_id=<lead id>`, `slot=resume`, `file`),
 `GET /api/files?entity_type=lead&entity_id=…`, `GET /api/files/{id}`. Same permission rule as call (assigned staff, admin, manager;
 staff gated by the daily tasks). The upload sets the lead to `resume_received` and logs a `resume` activity. Each upload is a new version.
-A lead's resume is not read by OCR; that happens when the lead is converted.
+Uploading alone does not read a lead's resume. **Check resume** reads and verifies it before conversion; conversion reuses that verified output.
 
 ## Import parsing
 

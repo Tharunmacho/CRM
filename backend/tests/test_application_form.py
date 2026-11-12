@@ -46,7 +46,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     _migrate(engine, "head")
     columns = {c["name"]: c for c in inspect(engine).get_columns("crm_candidates")}
     assert FORM_COLUMNS <= set(columns)
-    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats"}  # 0021 adds no table; 0022 adds the option lists; 0024 the lead sheet; 0026 the client staff links and reference agencies; 0027 the feedback notes; 0029 the reader heartbeats
+    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments"}
     with engine.connect() as connection:
         row = connection.execute(text("SELECT name, total_experience, father_name, experience_india, education, work_history, field_sources "
                                       "FROM crm_candidates WHERE id='old'")).one()
@@ -96,7 +96,7 @@ def desk(schema_database, tmp_path, monkeypatch):
         db.flush()
         db.add_all([Order(id=key, ref=ref, company_id="company", designation_id="designation", openings=2, country="Qatar")
                     for key, ref in (("order", "ORD-1"), ("other-order", "ORD-2"))])
-        db.add_all([Candidate(id=key, ref=key, name=key.title(), phone=f"90000000{n:02}", source=Source.walk_in, owner_id="staff")
+        db.add_all([Candidate(id=key, ref=key, name="Alex Example" if key == "candidate" else key.title(), phone=f"90000000{n:02}", source=Source.walk_in, owner_id="staff")
                     for n, key in enumerate(("candidate", "second-candidate"))])
         db.commit()
     settings = SimpleNamespace(storage_dir=str(tmp_path), storage_backend="local", tesseract_cmd=None, ocr_languages="eng",
@@ -181,8 +181,8 @@ def test_blank_candidate_form_has_every_docx_section_and_lists_what_is_missing(d
     missing = {item["key"]: item for item in data["completeness"]["missing"]}
     assert missing["documents.passport"]["message"] == "Passport not uploaded"
     assert missing["personal.fatherName"]["message"] == "Father's name is missing"
-    assert data["completeness"]["total"] == 19 and "personal.candidateName" not in missing  # 16 fields + application form, resume, passport
-    assert data["completeness"]["percent"] == round(100 * data["completeness"]["filled"] / 19)
+    assert data["completeness"]["total"] == 18 and "personal.candidateName" not in missing  # 16 fields + resume and passport
+    assert data["completeness"]["percent"] == round(100 * data["completeness"]["filled"] / 18)
     assert data["candidate"]["canEdit"] is True and data["processing"] is False and data["fieldSources"] == {}
 
 
@@ -272,6 +272,13 @@ def test_passport_format_and_dates_only_warn(desk):
     assert desk.client.put(url(), json={"passport": {"expiryDate": soon}}).json()["passport"]["expiry"]["status"] == "expiring_soon"
 
 
+@pytest.mark.parametrize("number", ["P1234567", "AB123456", "ab123456"])
+def test_indian_passport_accepts_one_or_two_letter_series(desk, number):
+    response = desk.client.put(url(), json={"passport": {"passportNumber": number}})
+    assert response.status_code == 200
+    assert not any("Indian passport number" in warning for warning in response.json()["warnings"])
+
+
 def test_identity_conflicts_and_permissions(desk):
     assert desk.client.put(url(), json={"personal": {"mobileNumber": "9000000001"}}).status_code == 409
     as_user(desk, "other", Role.staff)
@@ -293,7 +300,7 @@ def process_pending(env):
 
 
 def upload(env, slot, data, name="doc.pdf", media="application/pdf", candidate="candidate"):
-    return env.client.post(url(candidate) + "/documents", data={"slot": slot}, files={"file": (name, data, media)})
+    return env.client.post(url(candidate) + "/documents", data={"slot": slot, "defer_extraction": "false"}, files={"file": (name, data, media)})
 
 
 def test_passport_then_resume_fill_the_form_live_and_keep_manual_values(desk):
@@ -317,7 +324,7 @@ def test_passport_then_resume_fill_the_form_live_and_keep_manual_values(desk):
     assert after_passport["documents"]["passport"]["extraction"]["status"] == "done"
     assert after_passport["passport"]["passportNumber"] == "P1234567" and after_passport["passport"]["expiryDate"] == "2030-01-01"
     assert after_passport["personal"]["dateOfBirth"] == "1990-01-01"
-    assert after_passport["personal"]["candidateName"] == "Candidate"  # a name already on file is never replaced by a read
+    assert after_passport["personal"]["candidateName"] == "Alex Example"  # a matching name already on file is retained
     assert after_passport["fieldSources"]["passport.passportNumber"] == "extracted"
     assert "passport.passportNumber" in after_passport["documents"]["passport"]["extraction"]["filled"]
     assert after_passport["processing"] is False
@@ -348,12 +355,12 @@ def test_better_passport_reupload_refreshes_extracted_but_not_typed_values(desk)
     process_pending(desk)
     assert desk.client.put(url(), json={"passport": {"placeOfIssue": "Typed Place"}}).status_code == 200
     desk.results.clear()
-    desk.extra = {"passport": {"mrz": {**first["mrz"], "passport_number": "P0000002", "expiry_date": "2031-01-01"},
+    desk.extra = {"passport": {"mrz": {**first["mrz"], "expiry_date": "2031-01-01"},
                                "fields": [{"label": "Place of Issue", "value": "Scanned Place", "category": "x", "page": 1, "source": "ocr", "confidence": 0.9}]}}
     upload(desk, "passport", pdf(PASSPORT, PASSPORT))
     process_pending(desk)
     data = form(desk)
-    assert data["passport"]["passportNumber"] == "P0000002" and data["passport"]["expiryDate"] == "2031-01-01"
+    assert data["passport"]["passportNumber"] == "P0000001" and data["passport"]["expiryDate"] == "2031-01-01"
     assert data["passport"]["placeOfIssue"] == "Typed Place"
     assert data["documents"]["passport"]["versions"] == 2
 
@@ -405,12 +412,12 @@ def test_plain_file_upload_to_a_candidate_resume_or_passport_slot_is_read_too(de
 
 def test_saving_ocr_data_by_any_path_fills_the_new_columns_but_not_the_older_ones(desk):
     with desk.sessions() as db:
-        db.add(Candidate(id="intake", ref="CND-I", name="Typed Name", phone="9111111111", source=Source.email, ocr_data={"resume": RESUME_RESULT}))
+        db.add(Candidate(id="intake", ref="CND-I", name="Alex Example", phone="9111111111", source=Source.email, ocr_data={"resume": RESUME_RESULT}))
         db.commit()
     with desk.sessions() as db:
         c = db.execute(select(Candidate).where(Candidate.id == "intake")).scalar_one()
         assert c.father_name == "Suresh Example" and c.current_address and c.education and c.experience_india == 1
-        assert c.name == "Typed Name" and c.dob is None and c.languages in (None, [])  # older columns: the intake code's business
+        assert c.name == "Alex Example" and c.dob is None and c.languages in (None, [])  # older columns: the intake code's business
     # a later save that changes ocr_data fills only what is still empty
     with desk.sessions() as db:
         c = db.get(Candidate, "intake")
@@ -435,7 +442,7 @@ def test_backfill_service_fills_existing_candidates_idempotently(desk):
         assert first["updated"] == 1 and first["fieldsFilled"] >= 5
     with desk.sessions() as db:
         c = db.get(Candidate, "candidate")
-        assert c.father_name == "Suresh Example" and c.work_history[0]["company"] == "ACME" and c.name == "Candidate"
+        assert c.father_name == "Suresh Example" and c.work_history[0]["company"] == "ACME" and c.name == "Alex Example"
         assert backfill(db)["updated"] == 0
 
 
@@ -520,7 +527,7 @@ def test_screening_details_save_with_provenance_and_mirror_the_follow_up_date_to
     assert screening["nextFollowUpDate"] == tomorrow.isoformat() and screening["callOutcome"] is None
     assert {"screening.nativePlace", "screening.interestLevel", "screening.nextFollowUpDate", "screening.jobPreference", "screening.skills"} <= set(data["fieldSources"])
     assert data["completeness"]["optional"]["missing"] == [] and data["completeness"]["optional"]["total"] == 9
-    assert data["completeness"]["total"] == 19  # 16 fields and the three always-counted documents
+    assert data["completeness"]["total"] == 18  # 16 fields and the two always-counted documents
     with desk.sessions() as db:
         todo = db.scalar(select(TodoItem))
         assert (todo.owner_id, todo.link_to, todo.link_label, todo.done) == ("staff", "/candidates/candidate", "Follow-up", False)

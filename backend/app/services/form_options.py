@@ -68,7 +68,7 @@ DEFAULT_OPTIONS: list[dict] = [
         ("not_interested", "Not interested", "Does not want to go abroad", "danger")]),
     *_rows("candidate_source", [
         ("email", "Email", None, None), ("whatsapp", "WhatsApp", None, None), ("walk_in", "Walk-in", None, None),
-        ("referral", "Referral / agent", None, None), ("other", "Other", None, None)]),
+        ("referral", "Referral / agency", None, None), ("other", "Other", None, None)]),
     *_rows("job_duration_preference", [
         ("1 year", "1 year"), ("2 years", "2 years"), ("3 years", "3 years"), ("4 years", "4 years"),
         ("5 years", "5 years"), ("Any", "Any duration")]),

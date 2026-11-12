@@ -54,9 +54,13 @@ def rotations_from(completeness: dict | None) -> dict[int, int]:
     """{page number: degrees counter-clockwise} for the pages the local reading only managed to read once turned."""
     found: dict[int, int] = {}
     for entry in (completeness or {}).get("pages_detail") or []:
+        # Merged reads retain their winning orientation separately from their "merged" setting.
+        rotation = entry.get("rotation")
         match = re.search(r"rotate(90|180|270)", str(entry.get("setting") or ""))
-        if match and isinstance(entry.get("page"), int):
-            found[entry["page"]] = int(match.group(1))
+        if rotation not in (90, 180, 270):
+            rotation = int(match.group(1)) if match else None
+        if rotation is not None and isinstance(entry.get("page"), int):
+            found[entry["page"]] = rotation
     return found
 
 

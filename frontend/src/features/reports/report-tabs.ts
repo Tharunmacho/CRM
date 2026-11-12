@@ -1,7 +1,7 @@
 import type { ReportKey } from './report-config'
 
 /** The tabs of the Reports page, in the order they are shown. The URL carries the current one as `?tab=`. */
-export const REPORT_TABS: readonly ReportKey[] = ['funnel', 'staff', 'source', 'orders', 'rejections', 'advance']
+export const REPORT_TABS: readonly ReportKey[] = ['collections', 'funnel', 'staff', 'source', 'orders', 'rejections', 'advance']
 export const DEFAULT_REPORT_TAB: ReportKey = 'funnel'
 
 export function isReportTab(value: string | null | undefined): value is ReportKey {
@@ -14,6 +14,7 @@ export function isReportTab(value: string | null | undefined): value is ReportKe
  */
 export function reportTabFromParams(params: URLSearchParams, supervisor: boolean): ReportKey {
   const tab = params.get('tab')
+  if (tab === 'collections' && !supervisor) return DEFAULT_REPORT_TAB
   if (isReportTab(tab)) return tab
   return supervisor && params.get('staff') ? 'staff' : DEFAULT_REPORT_TAB
 }

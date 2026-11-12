@@ -15,6 +15,7 @@ export interface ProfileDocument {
   versions: FileVersion[]
   /** Several files are kept side by side (Other documents); every other slot keeps one current file plus its history. */
   multiple: boolean
+  manualStatus?: ServerSlot['manualStatus']
 }
 
 /** Earlier slot keys and the shared slot that now holds their files. */
@@ -39,21 +40,24 @@ export function mergeVersions(first: FileVersion[], second: FileVersion[]): File
 export function profileDocuments(documents: ServerSlot[] | undefined): ProfileDocument[] {
   const held = new Map<string, FileVersion[]>()
   const labels = new Map<string, string>()
+  const manual = new Map<string, ServerSlot['manualStatus']>()
   for (const slot of documents ?? []) {
     const key = LEGACY_SLOT_KEYS[slot.key] ?? slot.key
     held.set(key, mergeVersions(held.get(key) ?? [], slot.versions ?? []))
+    if (slot.manualStatus) manual.set(key, slot.manualStatus)
     if (!(slot.key in LEGACY_SLOT_KEYS)) labels.set(key, slot.label)
   }
-  const shared = DOCUMENT_SLOTS.map((entry) => ({ key: entry.slot, label: entry.label, versions: held.get(entry.slot) ?? [], multiple: entry.multiple }))
+  const shared = DOCUMENT_SLOTS.map((entry) => ({ key: entry.slot, label: entry.label, versions: held.get(entry.slot) ?? [], multiple: entry.multiple, manualStatus: manual.get(entry.slot) }))
+    .filter((slot) => slot.key !== 'application_form' || slot.versions.length > 0 || slot.manualStatus?.uploaded)
   const sharedKeys = new Set(DOCUMENT_SLOTS.map((entry) => entry.slot))
   const extras: ProfileDocument[] = []
   for (const [key, versions] of held) {
     if (sharedKeys.has(key)) continue
     if (versions.length === 0 && !(key in ALWAYS_LISTED)) continue
-    extras.push({ key, label: labels.get(key) || ALWAYS_LISTED[key] || key, versions, multiple: false })
+    extras.push({ key, label: labels.get(key) || ALWAYS_LISTED[key] || key, versions, multiple: false, manualStatus: manual.get(key) })
   }
   for (const [key, label] of Object.entries(ALWAYS_LISTED)) {
-    if (!held.has(key)) extras.push({ key, label, versions: [], multiple: false })
+    if (!held.has(key) && !sharedKeys.has(key)) extras.push({ key, label, versions: [], multiple: false })
   }
   return [...shared, ...extras]
 }

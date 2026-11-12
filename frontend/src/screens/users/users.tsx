@@ -113,6 +113,8 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
     const current = availabilityFor(u.id)
     if (u.role !== 'staff') return { text: 'Does not get new candidates', tone: '' }
     if (!u.active) return { text: 'No access', tone: '' }
+    if (current && isLeave(current)) return { text: availabilityWords(current.status, current.label), tone: 'is-leave' }
+    if (!autoOn) return { text: 'Manual assignment', tone: '' }
     if (current) return { text: availabilityWords(current.status, current.label), tone: current.eligible ? 'is-ok' : isLeave(current) ? 'is-leave' : '' }
     return { text: availability.loading ? 'Checking…' : 'Unavailable', tone: '' }
   }
@@ -155,32 +157,32 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
     },
     { key: 'role', header: 'Role', width: '10%', sortable: true, value: (u) => roleRank[u.role], render: (u) => <RolePill role={u.role} /> },
     {
-      key: 'phone', header: 'Phone', width: '12%',
+      key: 'phone', header: 'Phone', width: '13%',
       render: (u) => u.phone ? <div><a className="uv-phone" href={'tel:' + u.phone.replace(/\s+/g, '')} title={'Call ' + u.name}>{u.phone}</a></div> : <span className="uv-none">Not set</span>,
     },
     {
-      key: 'status', header: 'Status', width: '16%',
+      key: 'status', header: 'Status', width: '14%',
       render: (u) => { const line = statusLine(u); return <div className="uv-status">
         <StatusPill status={u.active ? 'active' : 'inactive'} />
-        <small className={line.tone}>{line.text}</small>
+        {u.role === 'staff' && <small className={line.tone}>{line.text}</small>}
       </div> },
     },
     {
-      key: 'assignment', header: 'New candidates', width: '16%',
+      key: 'assignment', header: 'New candidates', width: '18%',
       render: (u) => u.role === 'staff' && u.active ? <div className="uv-flags">
-        <label className={cn(flagText.muted && 'is-muted')} title={flagText.note || undefined}><Switch checked={u.receivesAutoAssign} disabled={!!pending} label={flagText.label + ': ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /><span>{flagText.muted ? flagText.note : flagText.label}</span></label>
-        <label><Switch checked={u.onLeave} disabled={!!pending} label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /><span>On leave</span></label>
+        <label className={cn(flagText.muted && 'is-muted')} title={flagText.note || undefined}><span>Auto-assign</span><Switch checked={u.receivesAutoAssign} disabled={!!pending} label={flagText.label + ': ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /></label>
+        <label><span>On leave</span><Switch checked={u.onLeave} disabled={!!pending} label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /></label>
       </div> : <span className="uv-none">{u.role !== 'staff' ? 'Staff only' : 'Account inactive'}</span>,
     },
     {
-      key: 'work', header: 'Open work', width: '11%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
+      key: 'work', header: 'Open work', width: '12%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
       render: (u) => { const counts = work(u.id); return <div className="uv-work">
         <span><b>{counts.candidates}</b> {counts.candidates === 1 ? 'candidate' : 'candidates'}</span>
         <span><b>{counts.tasks}</b> open {counts.tasks === 1 ? 'task' : 'tasks'}</span>
       </div> },
     },
     {
-      key: 'actions', header: 'Actions', actions: true,
+      key: 'actions', header: 'Actions', width: '10%', actions: true,
       render: (u) => <div className="uv-actions">
         <button type="button" className="uv-edit" title={'Edit ' + u.name} aria-label={'Edit ' + u.name} onClick={() => setEditing({ user: u })}><Pencil size={14} aria-hidden="true" />Edit</button>
         <RowMenu label={'Actions for ' + u.name} items={[
@@ -239,7 +241,8 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
         <div className="uv-sort-narrow"><Select aria-label="Sort team members" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}><option value="name">Sort: Name</option><option value="role">Sort: Role</option><option value="work">Sort: Open work</option></Select></div>
         {filtered && <Button variant="ghost" onClick={clearFilters}>Clear filters</Button>}
       </div>
-      <DataTable compact stackBelow={1280} pageSize={PAGE_SIZE} rows={rows} columns={columns} rowKey={(u) => u.id}
+      {!autoOn && <p className="uv-assignment-note">Automatic assignment is off. Staff preferences below are saved for when it is enabled.</p>}
+      <DataTable compact plain stackBelow={1280} pageSize={PAGE_SIZE} rows={rows} columns={columns.map(column => ({ ...column, align: column.actions ? 'right' : 'left' }))} rowKey={(u) => u.id}
         resetPageKey={`${query}|${roleFilter}|${statusFilter}`} rowClassName={(u) => cn(!u.active && 'uv-row-off')}
         empty={<EmptyState title="No team members match" description="Try a different name, email or filter."
           action={filtered ? <Button onClick={clearFilters}>Clear filters</Button> : undefined} />} />

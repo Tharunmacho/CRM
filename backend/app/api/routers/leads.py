@@ -10,7 +10,7 @@ import json
 from datetime import date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -208,6 +208,7 @@ def assign(body: AssignBody, db: Session = Depends(get_db), user: User = Depends
 
 @router.post("/{lead_id}/convert")
 def convert(lead_id: str, resume: UploadFile | None = File(default=None), overrides: str | None = Form(default=None),
+            resume_check_id: str | None = Form(default=None),
             db: Session = Depends(get_db), user: User = Depends(current_user)):
     allowed = {"name", "phone", "email", "dob", "gender", "currentCity", "designations", "totalExperience", "countryPreference", "sourceDetail", "assignTo"}
     values = {}
@@ -218,12 +219,50 @@ def convert(lead_id: str, resume: UploadFile | None = File(default=None), overri
                 raise ValueError()
         except ValueError:
             raise fail(422, "invalid_request", "overrides must be a JSON object using only: " + ", ".join(sorted(allowed))) from None
-    return lead_sheet.convert_lead(db, user, lead_id, values, resume)
+    return lead_sheet.convert_lead(db, user, lead_id, values, resume, resume_check_id=resume_check_id)
+
+
+@router.post("/{lead_id}/resume-check")
+def check_resume(lead_id: str, resume: UploadFile | None = File(default=None), overrides: str | None = Form(default=None),
+                 db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from app.services import lead_resume_check
+    try:
+        values = json.loads(overrides) if overrides else {}
+        if not isinstance(values, dict) or set(values) - {"name"} or any(not isinstance(v, str) for v in values.values()):
+            raise ValueError()
+    except ValueError:
+        raise fail(422, "invalid_request", "Resume check overrides must contain only the candidate name.") from None
+    return lead_resume_check.start(db, user, lead_id, resume, values)
+
+
+@router.get("/{lead_id}/resume-check/{job_id}")
+def resume_check_status(lead_id: str, job_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from app.services import lead_resume_check
+    return lead_resume_check.status(db, user, lead_id, job_id)
 
 
 class LinkBody(Wire):
     model_config = ConfigDict(alias_generator=Wire.model_config["alias_generator"], populate_by_name=True, extra="forbid")
     candidate_id: str = Field(min_length=1, max_length=36)
+
+
+class UnconvertBody(Wire):
+    model_config = ConfigDict(alias_generator=Wire.model_config["alias_generator"], populate_by_name=True, extra="forbid")
+    candidate_id: str = Field(min_length=1, max_length=36)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+@router.get("/{lead_id}/unconvert-check")
+def unconvert_check(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+    from app.services import lead_reversal
+    return lead_reversal.check(db, user, lead_id)
+
+
+@router.post("/{lead_id}/unconvert")
+def unconvert(lead_id: str, body: UnconvertBody, background: BackgroundTasks, db: Session = Depends(get_db),
+              user: User = Depends(require_role(Role.admin))):
+    from app.services import lead_reversal
+    return lead_reversal.reverse(db, user, lead_id, body.candidate_id, body.reason, background)
 
 
 @router.post("/{lead_id}/link-candidate")

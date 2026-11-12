@@ -449,12 +449,14 @@ async function upload(
   entityId: string,
   slot: string,
   file: File,
+  options: { deferExtraction?: boolean } = {},
 ): Promise<UploadedFile> {
   const form = new FormData()
   form.append('entity_type', entityType)
   form.append('entity_id', entityId)
   form.append('slot', slot)
   form.append('file', file)
+  if (options.deferExtraction) form.append('defer_extraction', 'true')
   return postForm<UploadedFile>('/files', form, 'The file was not uploaded.')
 }
 

@@ -1687,3 +1687,65 @@ class WorkerHeartbeat(Base):
     threads: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"), comment="How many documents this worker can read at once.")
     busy: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"), comment="How many documents it was reading at the last report.")
     version: Mapped[str | None] = mapped_column(Text, comment="The code version the worker runs, so an old worker can be told from a current one.")
+
+
+class InvoiceSettings(Base):
+    __tablename__ = "crm_invoice_settings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    invoice_prefix: Mapped[str] = mapped_column(String(32), nullable=False, server_default="")
+    next_number: Mapped[int | None] = mapped_column(Integer)
+    cgst_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, server_default="9")
+    sgst_rate: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, server_default="9")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    __table_args__ = ({"comment": "Reviewed issuer details and locked invoice number sequence; no invoice is issued before setup is saved."},)
+
+
+class CandidateInvoice(Base, PkMixin, TimestampMixin):
+    __tablename__ = "crm_candidate_invoices"
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("crm_candidates.id", ondelete="SET NULL"))
+    application_id: Mapped[str | None] = mapped_column(ForeignKey("crm_applications.id", ondelete="SET NULL"))
+    scope_key: Mapped[str] = mapped_column(String(36), nullable=False, server_default="", comment="Application id, or empty while awaiting an unambiguous placement.")
+    service_fee: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending_fee")
+    number: Mapped[str | None] = mapped_column(String(48), unique=True)
+    ticket_attachment_id: Mapped[str | None] = mapped_column(ForeignKey("document_attachments.id", ondelete="SET NULL"))
+    attachment_id: Mapped[str | None] = mapped_column(ForeignKey("document_attachments.id", ondelete="SET NULL"))
+    snapshot: Mapped[dict | None] = mapped_column(JSONB, comment="Immutable issuer, recipient, tax amounts and number as they appeared on the issued PDF.")
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    issued_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    lock_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "scope_key", name="uq_candidate_invoice_placement"),
+        CheckConstraint("service_fee IS NULL OR (service_fee >= 5000 AND service_fee <= 30000)", name="ck_candidate_invoice_fee"),
+        {"comment": "One automatic service invoice per candidate placement, with pending prerequisites and frozen issued evidence."},
+    )
+
+
+class InvoicePayment(Base, PkMixin):
+    __tablename__ = "crm_invoice_payments"
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("crm_candidate_invoices.id", ondelete="RESTRICT"), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    paid_on: Mapped[date] = mapped_column(Date, nullable=False)
+    method: Mapped[str] = mapped_column(String(12), nullable=False)
+    reference: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
+    note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_stage_id: Mapped[str | None] = mapped_column(String(36), unique=True)
+    source_application_id: Mapped[str | None] = mapped_column(String(36), unique=True, comment="One explicitly confirmed historical advance per placement, including reopened attempts.")
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    void_reason: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("invoice_id", "idempotency_key", name="uq_invoice_payment_request"),
+        Index("ix_invoice_payments_invoice_date", "invoice_id", "paid_on"),
+        CheckConstraint("amount > 0", name="ck_invoice_payment_positive"),
+        CheckConstraint("method IN ('cash','bank','upi','cheque')", name="ck_invoice_payment_method"),
+        CheckConstraint("(source_stage_id IS NULL) = (source_application_id IS NULL)", name="ck_invoice_payment_source"),
+        CheckConstraint("(voided_at IS NULL AND void_reason IS NULL AND voided_by IS NULL) OR (voided_at IS NOT NULL AND void_reason IS NOT NULL AND length(trim(void_reason)) > 0)", name="ck_invoice_payment_void"),
+        {"comment": "Actual candidate fee receipts. Financial entries are immutable; supervised voids retain the original receipt and reason."},
+    )

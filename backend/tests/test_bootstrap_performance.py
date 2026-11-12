@@ -38,9 +38,9 @@ STAMP = datetime(2026, 1, 10, 9, 30, tzinfo=timezone.utc)
 SNAPSHOT_COLLECTIONS = {
     "users", "clients", "companies", "designations", "orders", "candidates",
     "files", "agreements", "applications", "stages", "tasks", "remarks",
-    "todos", "notifications",
+    "todos", "notifications", "manual_documents",
 }
-WIRE_COLLECTIONS = SNAPSHOT_COLLECTIONS - {"files", "agreements", "stages"}
+WIRE_COLLECTIONS = SNAPSHOT_COLLECTIONS - {"files", "agreements", "stages", "manual_documents"}
 # The agency profile, currency list and job category list ride in the same statement (migrations 0017 and 0019 seed them).
 SETTINGS_COLUMNS = {"agency", "currencies", "categories"}
 # Email completions, WhatsApp completions and candidate changes: count:epoch each.
@@ -89,9 +89,16 @@ def test_snapshot_compilation_uses_an_explicit_public_projection():
         assert field not in sql
     for private_table in (
         "auth_sessions", "email_accounts", "email_messages", "email_attachments",
-        "ingestion_failures", "system_audit_log",
+        "ingestion_failures",
     ):
         assert private_table not in sql
+    # Only explicit document-confirmation fields may come from audit history;
+    # generic audit targets and arbitrary metadata never cross this projection.
+    assert "Changed document checklist status" in compiled.params.values()
+    assert "system_audit_log.action =" in sql
+    assert "system_audit_log.meta AS" not in sql
+    assert "system_audit_log.target" not in sql
+    assert all(key in compiled.params.values() for key in ("slot", "uploaded", "note"))
     assert "personal_todos.owner_id =" in sql
     assert "system_notifications.user_id =" in sql
     assert "email_ingestion_jobs.updated_at" in sql
@@ -354,6 +361,7 @@ def test_bootstrap_preserves_full_wire_contract_with_two_database_queries(
                 "sizeKb": 125, "version": version,
                 "url": f"/api/files/schema-file-v{version}", "uploadedBy": "schema-user",
                 "uploadedAt": "2026-01-10T09:30:00Z",
+                "extractionPending": False, "identityMismatch": False,
             }
             for version in (1, 2)
         ]

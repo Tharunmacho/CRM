@@ -30,7 +30,7 @@ const renderSource = change => renderToStaticMarkup(React.createElement(SourceLi
 test('the default inventory columns show Source instead of Stage and keep allocation fields optional', () => {
   const columns = dataBankColumns({ store, ...handlers })
   assert.deepEqual(columns.filter(column => !column.off).map(column => column.header),
-    ['Candidate', 'Contact', 'Source', 'Agent', 'Recruiter', 'Status', 'Actions'])
+    ['Candidate', 'Contact', 'Source', 'Agency', 'Recruiter', 'Status', 'Actions'])
   const source = columns.find(column => column.key === 'source')
   assert.equal(source.optional, undefined)
   assert.equal(source.sortKey, 'source')
@@ -56,10 +56,10 @@ test('mobile cards show Source instead of Stage and keep the referring agency se
   const lead = renderCard({ sourceDetail: 'lead_sheet:private-record-id' })
   assert.match(lead, /<dt>Source<\/dt>/)
   assert.match(lead, />Lead Sheet</)
-  assert.doesNotMatch(lead, /<dt>Stage<\/dt>|<dt>Agent<\/dt>|private-record-id/)
+  assert.doesNotMatch(lead, /<dt>Stage<\/dt>|<dt>Agency<\/dt>|private-record-id/)
   const referral = renderCard({ source: 'referral', sourceDetail: 'Al Noor Agency' })
   assert.match(referral, /<dt>Source<\/dt>/)
   assert.match(referral, />Referral</)
-  assert.match(referral, /<dt>Agent<\/dt>/)
+  assert.match(referral, /<dt>Agency<\/dt>/)
   assert.match(referral, />Al Noor Agency</)
 })

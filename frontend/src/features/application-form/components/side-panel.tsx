@@ -92,7 +92,9 @@ export function SidePanel({
         </div>
       )}
       {missing.length === 0 && (
-        <div className="af-card af-allgood"><CheckCircle2 aria-hidden="true" />All required details and documents are on the form.</div>
+        <div className="af-card af-allgood"><CheckCircle2 aria-hidden="true" />{documents.uploaded < documents.total
+          ? 'Details for this stage are complete. Document collection is tracked separately.'
+          : 'All required details and documents are on the form.'}</div>
       )}
 
       <nav className="af-card af-nav" aria-label="Form sections">

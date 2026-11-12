@@ -1,4 +1,4 @@
-import { FileSearch, PhoneCall, UserPlus, UserCheck, MessageCircle, ListChecks, UserRoundX, Trash2 } from 'lucide-react'
+import { FileSearch, PhoneCall, UserPlus, UserCheck, MessageCircle, ListChecks, UserRoundX, Trash2, Undo2 } from 'lucide-react'
 import { whatsappHref } from '@/features/candidates/data-bank-view'
 import type { RowMenuItem } from '@/features/candidates/components/db-parts'
 import type { User } from '@/shared/model/types'
@@ -22,6 +22,8 @@ export interface LeadColumnContext {
   /** Admin only: delete one lead (row menu and drawer). */
   canDelete?: boolean
   onDelete?: (lead: Lead) => void
+  /** Admin only: checks whether a mistaken conversion can be reversed. */
+  onUnconvert?: (lead: Lead) => void
 }
 
 /** The reason a work action on this lead is unavailable: the daily-work gate first, then ownership. */
@@ -44,6 +46,7 @@ export function leadMenuItems(context: LeadColumnContext, lead: Lead): RowMenuIt
   const converted = lead.candidateId || lead.status === 'converted' ? 'This lead is already a candidate.' : undefined
   if (context.onChangeStatus) items.push({ label: 'Change status', icon: ListChecks, onSelect: () => context.onChangeStatus?.(lead), disabledReason: block ?? converted })
   items.push({ label: 'Not interested', icon: UserRoundX, onSelect: () => context.onNotInterested(lead), disabledReason: block ?? converted })
+  if (context.me.role === 'admin' && lead.candidateId && context.onUnconvert) items.push({ label: 'Move back to Lead', icon: Undo2, onSelect: () => context.onUnconvert?.(lead) })
   if (context.canDelete && context.onDelete) items.push({ label: 'Delete lead', icon: Trash2, onSelect: () => context.onDelete?.(lead), disabledReason: lead.candidateId ? 'This lead was converted to a candidate, so it cannot be deleted.' : undefined })
   return items
 }

@@ -5,13 +5,13 @@ from datetime import date
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.routers import applications as applications_router, files as files_router
 from app.core.deps import current_user
-from app.db.models import Attachment, Candidate, User
+from app.db.models import Application, Attachment, Candidate, User
 from app.db.session import get_db
 from app.services import application_form as service, form_assignment, form_feedback
 
@@ -123,6 +123,11 @@ class FeedbackEditIn(_Section):
     body: str | None = Field(default=None, max_length=5000)
 
 
+class DocumentStatusIn(_Section):
+    uploaded: StrictBool
+    note: str = Field(default="", max_length=1000)
+
+
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
 
@@ -204,11 +209,22 @@ def refresh_form(candidate_id: str, response: Response, orderId: str | None = Qu
     return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
 
 
-@router.post("/documents", status_code=status.HTTP_202_ACCEPTED)
-def upload_document(candidate_id: str, response: Response, slot: str = Form(...), file: UploadFile = File(...),
+@router.put("/documents/{slot}/status")
+def document_status(candidate_id: str, slot: str, body: DocumentStatusIn, response: Response,
                     orderId: str | None = Query(default=None, max_length=36), applicationId: str | None = Query(default=None, max_length=36),
                     db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    """Store a document of any slot exactly like POST /api/files; resume and passport are queued for reading, the rest are only stored."""
+    _no_store(response)
+    with applications_router._mutation(db):
+        service.set_document_status(db, user, candidate_id, slot, body.uploaded, body.note, application_id=applicationId, order_id=orderId)
+    return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
+
+
+@router.post("/documents", status_code=status.HTTP_202_ACCEPTED)
+def upload_document(candidate_id: str, response: Response, slot: str = Form(...), file: UploadFile = File(...),
+                    defer_extraction: bool = Form(True),
+                    orderId: str | None = Query(default=None, max_length=36), applicationId: str | None = Query(default=None, max_length=36),
+                    db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Store a document; manual form uploads await explicit Extract details by default."""
     _no_store(response)
     slot = slot.strip()
     if slot not in service.SLOTS:
@@ -223,8 +239,8 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
     digest = hashlib.sha256(payload).hexdigest()
     latest = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
                                                 Attachment.slot == slot).order_by(Attachment.version.desc()).limit(1))
-    if slot == "other" and latest is not None and latest.content_hash != digest:
-        # Several files are kept in "other": the same bytes again, whichever version they were, are not stored twice.
+    if slot in ("passport", "aadhaar", "other") and latest is not None and latest.content_hash != digest:
+        # Multi-file slots keep every page: repeated bytes are not stored twice.
         latest = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
                                                     Attachment.slot == slot, Attachment.content_hash == digest).limit(1)) or latest
     if latest is not None and latest.content_hash == digest:
@@ -233,13 +249,39 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
         if candidate is None:
             raise HTTPException(404, "Candidate not found")
         service.ensure_can_edit(user, candidate)
-        if slot in service.READ_SLOTS and service.requeue_failed(db, candidate_id, latest.id):
+        if not defer_extraction and slot in service.READ_SLOTS and service.requeue_failed(db, candidate_id, latest.id):
             db.commit()
     else:
         file.file.seek(0)
-        files_router.upload(entity_type="candidate", entity_id=candidate_id, slot=slot, file=file, db=db, user=user)
+        files_router.upload(entity_type="candidate", entity_id=candidate_id, slot=slot, file=file, defer_extraction=defer_extraction, db=db, user=user)
     form = service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
     document = form["documents"][slot]
-    extraction = document["extraction"] or {"status": "done", "message": None, "jobId": None, "updatedAt": None,
-                                           "kindsFound": [], "filled": [], "kept": []}
+    extraction = document["extraction"]
+    if extraction is None and not document.get("extractionPending"):
+        extraction = {"status": "done", "message": None, "jobId": None, "updatedAt": None,
+                      "kindsFound": [], "filled": [], "kept": []}
     return {"document": document, "extraction": extraction, "form": form}
+
+
+class StartReadingIn(_Section):
+    attachmentIds: list[str] = Field(min_length=1, max_length=100)
+
+
+@router.post("/extract", status_code=202)
+def start_document_reading(candidate_id: str, body: StartReadingIn, response: Response,
+                           applicationId: str | None = Query(default=None, max_length=36),
+                           orderId: str | None = Query(default=None, max_length=36),
+                           db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    from app.services import document_reading
+    _no_store(response)
+    if applicationId or orderId:
+        statement = select(Application.id).where(Application.candidate_id == candidate_id)
+        if applicationId:
+            statement = statement.where(Application.id == applicationId)
+        if orderId:
+            statement = statement.where(Application.order_id == orderId)
+        if db.scalar(statement.limit(1)) is None:
+            raise HTTPException(404, "This candidate has no such application.")
+    outcome = document_reading.start(db, candidate_id, user, body.attachmentIds)
+    db.commit()
+    return {**outcome, "form": service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)}

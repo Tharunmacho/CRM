@@ -49,7 +49,7 @@ export const FALLBACK_OPTIONS: FormOptions = {
     ['more_interested', 'More interested', 'Keen to go abroad now', 'success'], ['interested', 'Interested', 'Wants to go and is open to offers', 'info'],
     ['somewhat_interested', 'Somewhat interested', 'May go if the offer is right', 'warning'], ['not_interested', 'Not interested', 'Does not want to go abroad', 'danger'],
   ]),
-  candidate_source: make('candidate_source', [['walk_in', 'Walk-in'], ['referral', 'Referral / agent'], ['email', 'Email'], ['whatsapp', 'WhatsApp'], ['other', 'Other']]),
+  candidate_source: make('candidate_source', [['walk_in', 'Walk-in'], ['referral', 'Referral / agency'], ['email', 'Email'], ['whatsapp', 'WhatsApp'], ['other', 'Other']]),
   job_duration_preference: make('job_duration_preference', [['1 year', '1 year'], ['2 years', '2 years'], ['3 years', '3 years'], ['Any', 'Any duration']]),
   best_time_to_contact: make('best_time_to_contact', [['Morning', 'Morning'], ['Afternoon', 'Afternoon'], ['Evening', 'Evening'], ['Anytime', 'Anytime']]),
   education_level: [],
@@ -71,7 +71,8 @@ export function normalizeOption(raw: unknown, fallbackCategory = ''): FormOption
     id: row.id == null ? undefined : text(row.id),
     category: text(row.category ?? fallbackCategory),
     value,
-    label,
+    label: text(row.category ?? fallbackCategory) === 'candidate_source' && value === 'referral' && label === 'Referral / agent'
+      ? 'Referral / agency' : label,
     hint: row.hint == null || row.hint === '' ? null : text(row.hint),
     tone: row.tone == null || row.tone === '' ? null : text(row.tone),
     sort: Number.isFinite(order) ? order : 0,

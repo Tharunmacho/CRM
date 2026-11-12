@@ -63,6 +63,32 @@ test('an empty or partial payload still yields a complete, blank form', () => {
   assert.equal(form.completeness.percent, 0)
 })
 
+test('manual document marks preserve attribution without inventing file links, and all passport pages keep their own reading result', () => {
+  const form = model.normalizeForm(server({ capabilities: { deferredDocumentReading: true }, documents: {
+    medical: { uploaded: true, fileUploaded: false, current: null, manualStatus: { uploaded: true, by: { id: 'u1', name: 'Ravi' }, at: '2026-11-12T10:00:00Z', note: 'Received at the office' } },
+    passport: { multiple: true, files: [
+      { attachmentId: 'p1', fileName: 'front.pdf', url: '/api/files/p1', extraction: { status: 'failed', message: 'A clearer photo page is needed.' } },
+      { attachmentId: 'p2', fileName: 'address.pdf', url: '/api/files/p2', extractionPending: true, extraction: { status: 'done', filled: ['passport.placeOfIssue'] } },
+    ] },
+  } }))
+  assert.equal(form.documents.medical.uploaded, true)
+  assert.equal(form.documents.medical.fileUploaded, false)
+  assert.equal(form.documents.medical.manualStatusSupported, true)
+  assert.equal(form.documents.medical.current, null)
+  assert.deepEqual(form.documents.medical.files, [])
+  assert.equal(form.documents.medical.manualStatus.by.name, 'Ravi')
+  assert.equal(form.documents.medical.manualStatus.note, 'Received at the office')
+  assert.equal(form.documents.passport.fileUploaded, true)
+  assert.equal(form.documents.passport.multiple, true)
+  assert.equal(form.capabilities.deferredDocumentReading, true)
+  assert.equal(form.documents.passport.files[1].extractionPending, true)
+  assert.deepEqual(form.documents.passport.files.map(file => file.extraction.status), ['failed', 'done'])
+  const older = model.normalizeForm(server({ documents: { passport: { current: { attachmentId: 'old', fileName: 'saved.pdf', url: '/api/files/old' } } } }))
+  assert.equal(older.documents.passport.files[0].attachmentId, 'old')
+  assert.equal(older.documents.passport.manualStatusSupported, false)
+  assert.equal(older.capabilities.deferredDocumentReading, false)
+})
+
 test('missing-field detection preserves older payloads without counting optional photos', () => {
   const form = model.normalizeForm(server())
   const live = model.completenessOf(model.toDraft(form), form.documents)
@@ -115,6 +141,23 @@ test('the extraction note says reading, filled N fields, or enter manually', () 
   assert.match(failed.text, /Enter the details manually/)
   assert.equal(model.describeExtraction('photo', slot({ status: 'done', filled: [], message: '' })).tone, 'none')
   assert.equal(model.isReading({ processing: false, documents: { resume: slot({ status: 'processing' }), passport: slot(null), photo: slot(null) } }), true)
+})
+
+test('a rejected identity stays viewable but never counts as an accepted document or a successful reading', () => {
+  const extraction = { status: 'needs_review', identityMismatch: true, filled: [], coverage: { complete: false }, message: 'Different person' }
+  const file = { attachmentId: 'wrong', fileName: 'wrong-person.pdf', url: '/api/files/wrong', identityMismatch: true, extractionPending: true, extraction }
+  const form = model.normalizeForm(server({ documents: { passport: { uploaded: true, current: file, files: [file], extraction } } }))
+  const slot = form.documents.passport
+  assert.equal(slot.uploaded, false)
+  assert.equal(slot.fileUploaded, true)
+  assert.equal(slot.files[0].identityMismatch, true)
+  assert.equal(slot.extraction.identityMismatch, true)
+  assert.deepEqual(model.describeExtraction('passport', slot), { tone: 'failed', text: 'Wrong document. No details were filled. Upload the correct document.' })
+  assert.ok(model.completenessOf(model.toDraft(form), form.documents).missing.some(item => item.key === 'documents.passport'))
+  const valid = { attachmentId: 'valid', fileName: 'correct-back.pdf', url: '/api/files/valid' }
+  const mixed = model.normalizeForm(server({ documents: { passport: { uploaded: true, current: file, files: [file, valid], extraction } } }))
+  assert.equal(mixed.documents.passport.uploaded, true)
+  assert.equal(mixed.documents.passport.files.length, 2)
 })
 
 test('tracking: rows map to the docx wording, untracked rows are not progress, the current stage is flagged', () => {

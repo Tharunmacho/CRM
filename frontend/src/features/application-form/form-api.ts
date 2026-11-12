@@ -28,12 +28,22 @@ export async function saveApplicationForm(candidateId: string, target: FormTarge
 }
 
 /** Upload a file into one document slot (resume, passport, photo, education certificate, ...). The server answers at once, reads the document in the background, and the form refreshes live. */
-export async function uploadFormDocument(candidateId: string, kind: DocumentKind, file: File): Promise<ApplicationFormData | null> {
+export async function uploadFormDocument(candidateId: string, kind: DocumentKind, file: File, target: FormTarget = {}): Promise<ApplicationFormData | null> {
   const form = new FormData()
   form.append('slot', kind)
   form.append('file', file)
-  const result = await api.form<{ form?: unknown }>(`/candidates/${encodeURIComponent(candidateId)}/application-form/documents`, form)
+  if (['resume', 'passport', 'aadhaar'].includes(kind)) form.append('defer_extraction', 'true')
+  const result = await api.form<{ form?: unknown }>(formPath(candidateId, target, '/documents'), form)
   return result.form ? normalizeForm(result.form) : null
+}
+
+export async function extractFormDocuments(candidateId: string, attachmentIds: string[], target: FormTarget = {}): Promise<ApplicationFormData | null> {
+  const result = await api.post<{ form?: unknown }>(formPath(candidateId, target, '/extract'), { attachmentIds })
+  return result.form ? normalizeForm(result.form) : null
+}
+
+export async function saveDocumentStatus(candidateId: string, target: FormTarget, kind: DocumentKind, uploaded: boolean, note: string): Promise<ApplicationFormData> {
+  return normalizeForm(await api.put<unknown>(formPath(candidateId, target, `/documents/${encodeURIComponent(kind)}/status`), { uploaded, note }))
 }
 
 /** Change the client's job, the source, the agency or the recruiter. Partial; the answer is the whole form. */

@@ -80,14 +80,11 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 .cp-tabs { position: sticky; top: 64px; z-index: 20; background: var(--bg-main); }
 .cp-tabs .ui-tabs-line { padding: 0; }
 
-/* Layout: the details read from the CV are the main column; the recruitment workflow (next step, pipeline,
-   initial call, recruiter, documents) sits in a side column. One column on a phone or tablet, details first.
-   Nothing is sticky and nothing scrolls inside itself, so no card can trap or cover another. */
+/* Full-width section flow keeps documents and activity useful even on short profiles. */
 .cp-grid { display: grid; align-items: start; gap: 20px; grid-template-columns: minmax(0, 1fr); }
-@media (min-width: 1100px) { .cp-grid { grid-template-columns: minmax(0, 1fr) 360px; } }
-@media (min-width: 1360px) { .cp-grid { grid-template-columns: minmax(0, 1fr) 400px; } }
-.cp-main, .cp-group, .cp-aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.cp-aside > * { flex: none; }
+.cp-main, .cp-group { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.cp-recruitment-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); align-items: start; gap: 16px; }
+.cp-call-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .cp-group { scroll-margin-top: 128px; }
 .cp-note { font-size: 14px; color: var(--text-muted); }
 
@@ -262,11 +259,11 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 }
 
 /* ---------- Added after the first release, drawn in the same flat card language ---------- */
-/* Admin-only danger area: its own card at the foot of the profile, apart from the everyday actions. */
-.cp-danger { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 12px 16px; border: 1px solid var(--error-edge); border-radius: 12px; background: var(--bg-card); }
-.cp-danger h2 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--error-ink); }
-.cp-danger p { margin-top: 2px; font-size: 13.5px; line-height: 1.5; color: var(--text-muted); }
 /* Remove-from-order dialog: where the application stood, then what happens. */
 .cp-unmap { display: grid; gap: 14px; }
 .cp-unmap-route { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border-faint); border-radius: 10px; background: var(--tint-1); }
 
+.cp-review-note { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--warning-border, #f3d49f); border-radius: 12px; background: var(--warning-fill); color: var(--text-main); font-size: 13px; line-height: 1.6; }
+.cp-review-note > strong { display: block; color: var(--warning-ink); }
+.cp-review-note ul { margin: 6px 0 0; padding-left: 18px; list-style: disc; }
+.cp-review-note p { margin-top: 6px; color: var(--text-muted); }

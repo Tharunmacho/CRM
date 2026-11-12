@@ -72,12 +72,17 @@ export interface FileVersion {
   url: string
   uploadedBy: string
   uploadedAt: string
+  extractionPending?: boolean
+  identityMismatch?: boolean
 }
 
 export interface DocumentSlot {
   key: string
   label: string
   versions: FileVersion[]
+  uploaded?: boolean
+  fileUploaded?: boolean
+  manualStatus?: { uploaded: boolean; by: { id: string | null; name: string | null }; at: string; note: string } | null
 }
 
 export interface Candidate {

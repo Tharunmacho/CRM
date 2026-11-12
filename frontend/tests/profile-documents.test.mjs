@@ -14,18 +14,20 @@ const slots = await import(slotsUrl)
 const model = await import(moduleUrl((await read('features/candidates/profile-documents-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`)))
 
 const file = (id, version, uploadedAt, name = `${id}.pdf`) => ({ id, name, version, uploadedAt, sizeKb: 10, url: `/api/files/${id}`, uploadedBy: 'u1' })
-const ORDER = ['application_form', 'resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice', 'photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other']
+const ORDER = ['application_form', 'resume', 'passport', 'aadhaar', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice', 'photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other']
 
-test('the shared list keeps twelve mandatory documents and six optional slots in the agreed order', () => {
-  assert.deepEqual(slots.DOCUMENT_SLOTS.filter(entry => slots.documentExpected(entry, 11)).map(entry => entry.slot), ORDER.slice(0, 12))
+const EMPTY_ORDER = ORDER.filter(key => key !== 'application_form')
+
+test('the shared list keeps eleven required documents and optional application/Aadhaar evidence in order', () => {
+  assert.deepEqual(slots.DOCUMENT_SLOTS.filter(entry => slots.documentExpected(entry, 11)).map(entry => entry.slot), ['resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice'])
   assert.deepEqual(slots.DOCUMENT_SLOT_KEYS, ORDER)
   assert.equal(slots.documentLabel('photo'), 'Photo')
   assert.equal(slots.documentLabel('passport'), 'Passport')
   assert.equal(slots.documentLabel('pcc'), 'Police clearance certificate (PCC)')
   assert.equal(slots.documentLabel('other'), 'Other documents')
   assert.ok(slots.DOCUMENT_SLOTS.every((entry) => !/passport-size/i.test(entry.label)))
-  // Only "Other documents" keeps several files.
-  assert.deepEqual(slots.DOCUMENT_SLOTS.filter((entry) => entry.multiple).map((entry) => entry.slot), ['other'])
+  // Every passport page is retained alongside the other multi-file documents.
+  assert.deepEqual(slots.DOCUMENT_SLOTS.filter((entry) => entry.multiple).map((entry) => entry.slot), ['passport', 'aadhaar', 'other'])
 })
 
 test('the expected-by-stage rule follows the contract', () => {
@@ -34,7 +36,7 @@ test('the expected-by-stage rule follows the contract', () => {
   assert.equal(slots.documentExpected(signedOffer, 5), true)
   assert.equal(slots.documentExpected(signedOffer, null), false)
   // Always-expected documents count even with no application; optional ones never do without a stage.
-  assert.equal(slots.documentExpected(slots.documentSlot('application_form'), null), true)
+  assert.equal(slots.documentExpected(slots.documentSlot('application_form'), null), false)
   assert.equal(slots.documentExpected(slots.documentSlot('photo'), null), false)
   assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 9), false)
   assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 10), true)
@@ -47,13 +49,21 @@ test('the expected-by-stage rule follows the contract', () => {
 
 test('an empty candidate still lists every slot, in order, labelled from the shared list', () => {
   const rows = model.profileDocuments([])
-  assert.deepEqual(rows.slice(0, ORDER.length).map((row) => row.key), ORDER)
-  assert.ok(rows.slice(0, ORDER.length).every((row) => row.versions.length === 0))
+  assert.deepEqual(rows.slice(0, EMPTY_ORDER.length).map((row) => row.key), EMPTY_ORDER)
+  assert.ok(rows.slice(0, EMPTY_ORDER.length).every((row) => row.versions.length === 0))
   assert.equal(rows.find((row) => row.key === 'other').multiple, true)
   assert.equal(rows.find((row) => row.key === 'photo').multiple, false)
-  // Aadhaar is not part of the shared list but stays offered on the profile, after it.
-  assert.deepEqual(rows.slice(ORDER.length).map((row) => row.key), ['aadhaar'])
+  // Aadhaar is now a shared multi-file slot; the empty optional application form stays hidden.
+  assert.deepEqual(rows.slice(EMPTY_ORDER.length).map((row) => row.key), [])
   assert.deepEqual(model.profileDocuments(undefined).map((row) => row.key), rows.map((row) => row.key))
+})
+
+test('manually collected documents retain attribution with no synthetic file versions', () => {
+  const manualStatus = { uploaded: true, by: { id: 'u1', name: 'Ravi' }, at: '2026-11-12T10:00:00Z', note: 'Received at the office' }
+  const rows = model.profileDocuments([{ key: 'medical', label: 'Medical', versions: [], uploaded: true, fileUploaded: false, manualStatus }])
+  assert.deepEqual(rows.find(row => row.key === 'medical').manualStatus, manualStatus)
+  assert.deepEqual(rows.find(row => row.key === 'medical').versions, [])
+  assert.equal(rows.find(row => row.key === 'passport').multiple, true)
 })
 
 test('server labels are replaced by the shared ones, files stay with their slot', () => {
@@ -95,7 +105,7 @@ test('other slots the server holds are listed after the shared ones only when th
     { key: 'aadhaar', label: 'Aadhaar copy', versions: [file('a1', 1, '2026-10-01T09:00:00Z')] },
     { key: 'source_bundle', label: 'Source document evidence', versions: [] },
   ])
-  assert.deepEqual(rows.slice(ORDER.length).map((row) => row.key), ['aadhaar'])
+  assert.deepEqual(rows.slice(EMPTY_ORDER.length).map((row) => row.key), [])
   const withEvidence = model.profileDocuments([{ key: 'source_bundle', label: 'Source document evidence', versions: [file('s1', 1, '2026-10-01T09:00:00Z')] }])
-  assert.deepEqual(withEvidence.slice(ORDER.length).map((row) => [row.key, row.label]), [['source_bundle', 'Source document evidence'], ['aadhaar', 'Aadhaar copy']])
+  assert.deepEqual(withEvidence.slice(EMPTY_ORDER.length).map((row) => [row.key, row.label]), [['source_bundle', 'Source document evidence']])
 })

@@ -9,6 +9,7 @@ import { FillRows } from './fill-rows'
 import { PhotoTile } from './fill-photo'
 import { PassportDetailsFields, PassportStatusChip } from './passport-details'
 import { PassportUpload } from './passport-upload'
+import { ExperienceReadingWarning } from './experience-reading-warning'
 import {
   EDUCATION_COLUMNS_FILL,
   EXPERIENCE_COLUMNS_FILL,
@@ -32,11 +33,12 @@ const ICONS: Record<FillCard['kind'], LucideIcon> = { fields: UserRound, passpor
  * completeness and the "N to add" counts follow every keystroke. Sections 5 to 7 (Documents, Client and recruitment,
  * Recruitment process tracking) are the shell's; the passport document itself is also a row of the Documents list.
  */
-export function FillView({ ctx, canWork, upload, busyKinds }: {
+export function FillView({ ctx, canWork, upload, busyKinds, onExtract }: {
   ctx: FormContext
   canWork: boolean
   upload: (kind: DocumentKind, file: File) => Promise<void>
   busyKinds: DocumentKind[]
+  onExtract?: (attachmentIds: string[]) => Promise<void>
 }): JSX.Element {
   const env = useFillEnv(ctx)
   const { form, draft, setDraft, errors } = ctx
@@ -47,7 +49,7 @@ export function FillView({ ctx, canWork, upload, busyKinds }: {
   const passportAside = (
     <>
       <PassportStatusChip expiryDate={draft.passport.expiryDate} />
-      <PassportUpload slot={form.documents.passport} canWork={canWork} busy={busyKinds.includes('passport')} upload={upload} />
+      <PassportUpload slot={form.documents.passport} canWork={canWork} busy={busyKinds.includes('passport')} upload={upload} onExtract={onExtract} />
     </>
   )
 
@@ -86,7 +88,7 @@ export function FillView({ ctx, canWork, upload, busyKinds }: {
     )
     if (card.kind === 'passport') return <PassportDetailsFields ctx={ctx} canWork={canWork} />
     if (card.kind === 'education') return education
-    if (card.kind === 'experience') return <>{grid}{experienceRows}</>
+    if (card.kind === 'experience') return <><ExperienceReadingWarning slot={form.documents.resume} />{grid}{experienceRows}</>
     return grid
   }
 

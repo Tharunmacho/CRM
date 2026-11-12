@@ -190,6 +190,13 @@ def test_rotations_come_from_the_winning_reading_setting_only():
     assert rotations_from(completeness) == {2: 90, 4: 270} and rotations_from(None) == {}
 
 
+def test_merged_read_keeps_its_winning_orientation_for_provider_preparation():
+    completeness = {"pages_detail": [{"page": 1, "setting": "merged", "rotation": 90},
+                                      {"page": 2, "setting": "merged", "rotation": 45},
+                                      {"page": 3, "setting": "merged", "variants": ["rotate270 psm3"]}]}
+    assert rotations_from(completeness) == {1: 90}
+
+
 # ------------------------------------------------------------------------------ blank and duplicate pages
 
 

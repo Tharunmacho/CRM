@@ -14,10 +14,11 @@ import { AdvanceReport, FunnelReport, OrdersReport, RejectionsReport, SourceRepo
 import { validDateFilter } from '@/features/staff/task-filters'
 import { rangeFromParams } from '@/features/staff-report/staff-report-model'
 import { StaffWeeklyBody, StaffWeeklyExport, StaffWeeklyPeriod, useStaffWeekly } from '@/features/staff-report/staff-weekly-report'
+import { FeeCollectionsReport } from '@/features/reports/fee-collections'
 import '@/styles/reports-page.css'
 import '@/styles/reports-v2.css'
 
-const ICONS: Record<ReportKey, LucideIcon> = { funnel: GitBranch, staff: Activity, source: Inbox, orders: ClipboardList, rejections: UserX, advance: Banknote }
+const ICONS: Record<ReportKey, LucideIcon> = { funnel: GitBranch, staff: Activity, source: Inbox, orders: ClipboardList, rejections: UserX, advance: Banknote, collections: Banknote }
 
 function shiftDay(day: string, days: number) { const date = new Date(`${day}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10) }
 const FIELDS = [['client_id', 'Client', 'clients'], ['order_id', 'Order', 'orders'], ['designation_id', 'Job title', 'designations']] as const
@@ -35,6 +36,7 @@ export default function ReportsPage() {
   const supervisor = store.can('all_reports')
   const report = reportTabFromParams(params, supervisor)
   const weeklyMode = store.can('staff_report') && report === 'staff'
+  const collectionsMode = report === 'collections'
   // In the weekly report ?from=&to=&staff= mean its week and the open person; elsewhere they seed the Filters card.
   const linkedStaff = supervisor && !weeklyMode ? params.get('staff') || '' : ''
   // The server's agency day, not the browser's zone or a compiled-in constant.
@@ -52,7 +54,7 @@ export default function ReportsPage() {
   const [exportError, setExportError] = useState('')
   const [exported, setExported] = useState('')
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => !!value)).toString()
-  const { data: fresh, error, refresh, refreshing } = useReportData<ReportResult>(weeklyMode ? null : `/reports?${query}`, store.me.id)
+  const { data: fresh, error, refresh, refreshing } = useReportData<ReportResult>(weeklyMode || collectionsMode ? null : `/reports?${query}`, store.me.id)
   // Keep the previous result on screen (dimmed) while new filters load, so the page does not jump.
   const last = useRef<{ user: string; data: ReportResult } | null>(null)
   if (fresh) last.current = { user: store.me.id, data: fresh }
@@ -94,14 +96,14 @@ export default function ReportsPage() {
   const Icon = ICONS[report]
   const busy = weeklyMode ? weekly.refreshing : refreshing
   return <div className="reports-page rv">
-    <PageHeader title="Reports" description={supervisor ? 'How recruitment is going, how busy each person is, and advance money collected, for the whole team.' : 'How your recruitment is going, how busy you are, and advance money collected.'} actions={
+    <PageHeader title="Reports" description={supervisor ? 'Recruitment progress, team activity and candidate fee collections.' : 'How your recruitment is going, how busy you are, and advance money collected.'} actions={collectionsMode ? undefined :
       <Button size="sm" icon={<RefreshCw size={14} className={busy ? 'animate-spin' : undefined} />} disabled={busy} onClick={weeklyMode ? weekly.refresh : refresh}>{busy ? 'Refreshing' : 'Refresh'}</Button>} />
 
     <section className="rv-card rv-report-head" aria-label="Choose a report">
-      <Tabs tabs={REPORTS.map(item => ({ key: item.key, label: item.label }))} active={report} onChange={chooseReport} />
+      <Tabs tabs={REPORTS.filter(item => supervisor || item.key !== 'collections').map(item => ({ key: item.key, label: item.label }))} active={report} onChange={chooseReport} />
       <header>
         <div className="rv-report-title"><span className="rv-icon is-lg"><Icon size={20} strokeWidth={1.8} /></span><div><h2>{copy.title}</h2><p>{copy.note}</p></div></div>
-        {weeklyMode ? <StaffWeeklyExport weekly={weekly} /> : <div className="rv-export">
+        {collectionsMode ? null : weeklyMode ? <StaffWeeklyExport weekly={weekly} /> : <div className="rv-export">
           <div role="group" aria-label="Export this report">
             <Button size="sm" disabled={!data || !!exporting} icon={exporting === 'xlsx' ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} onClick={() => void exportFile('xlsx')}>{exporting === 'xlsx' ? 'Preparing Excel…' : 'Export Excel'}</Button>
             <Button size="sm" disabled={!data || !!exporting} icon={exporting === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} onClick={() => void exportFile('pdf')}>{exporting === 'pdf' ? 'Preparing PDF…' : 'Export PDF'}</Button>
@@ -114,7 +116,7 @@ export default function ReportsPage() {
       </header>
     </section>
 
-    {weeklyMode
+    {collectionsMode ? <FeeCollectionsReport /> : weeklyMode
       ? <>
         <StaffWeeklyPeriod range={range} today={today} onRange={setRange} weekly={weekly} />
         <div className="rv-report-body" role="tabpanel" aria-label={copy.title}>

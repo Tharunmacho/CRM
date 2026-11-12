@@ -102,12 +102,21 @@ FORM_DOCUMENT_SLOTS = [
 ]
 
 
+def _accepted_document(versions, manual) -> bool:
+    return any(not file.get("identity_mismatch") for file in versions or ()) or bool(not versions and manual and manual["uploaded"])
+
+
 def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: type[CandidateOut] = CandidateOut,
-                   slots: list[tuple[str, str]] = DOCUMENT_SLOTS) -> CandidateOut:
+                   slots: list[tuple[str, str]] = DOCUMENT_SLOTS, manual_records: dict | None = None) -> CandidateOut:
+    manual_records = manual_records or {}
+    from app.services.application_form import LEGACY_SLOTS
     documents = [
         {
             "key": key,
             "label": label,
+            "uploaded": _accepted_document(files.get((c["id"], key)), manual_records.get(LEGACY_SLOTS.get(key, key))),
+            "fileUploaded": bool(files.get((c["id"], key))),
+            "manualStatus": manual_records.get(LEGACY_SLOTS.get(key, key)),
             "versions": [
                 {
                     "id": f["id"],
@@ -115,8 +124,9 @@ def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: typ
                     "sizeKb": f["size_kb"],
                     "version": f["version"],
                     "url": f"/api/files/{f['id']}",
-                    "uploadedBy": f["uploaded_by"],
+                    "uploadedBy": f["uploaded_by"], "extractionPending": bool(f.get("extraction_pending")),
                     "uploadedAt": datetime.fromisoformat(f["uploaded_at"]),
+                    "identityMismatch": bool(f.get("identity_mismatch")),
                 }
                 for f in files.get((c["id"], key), [])
             ],
@@ -139,7 +149,7 @@ def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: typ
 _DATETIME = TypeAdapter(datetime)
 
 
-def _candidate_json(c: dict, files: dict[tuple[str, str], list[dict]]) -> dict[str, Any]:
+def _candidate_json(c: dict, files: dict[tuple[str, str], list[dict]], manual_records: dict | None = None) -> dict[str, Any]:
     """The desk's wire form of one candidate, identical to `_candidate_out(c, files).model_dump(by_alias=True, mode="json")`.
 
     A candidate has seven document slots, most of them empty. Validating and dumping seven nested models per
@@ -147,12 +157,16 @@ def _candidate_json(c: dict, files: dict[tuple[str, str], list[dict]]) -> dict[s
     schema types `versions` as free-form), so they are written directly and only the candidate's own fields go through
     the model. `test_workspace_startup` and `test_bootstrap_performance` compare the whole wire contract.
     """
+    manual_records = manual_records or {}
+    from app.services.application_form import LEGACY_SLOTS
     documents = []
     for key, label in DOCUMENT_SLOTS:
         versions = files.get((c["id"], key))
-        documents.append({"key": key, "label": label, "versions": [
+        manual = manual_records.get(LEGACY_SLOTS.get(key, key))
+        documents.append({"key": key, "label": label, "uploaded": _accepted_document(versions, manual),
+                          "fileUploaded": bool(versions), "manualStatus": manual, "versions": [
             {"id": f["id"], "name": f["file_name"], "sizeKb": f["size_kb"], "version": f["version"], "url": f"/api/files/{f['id']}",
-             "uploadedBy": f["uploaded_by"],
+             "uploadedBy": f["uploaded_by"], "extractionPending": bool(f.get("extraction_pending")), "identityMismatch": bool(f.get("identity_mismatch")),
              "uploadedAt": _DATETIME.dump_python(datetime.fromisoformat(f["uploaded_at"]), mode="json")}
             for f in versions or ()
         ]})
@@ -230,6 +244,8 @@ def _bootstrap(db: Session, user: User, compact: bool = False) -> dict[str, Any]
     # The sidebar's unread mail badge rides in the same round trip (a second statement beside the snapshot), so the page
     # does not need a separate /api/inbox/pulse request right after it loads.
     snapshot, unread = parallel_reads(db, lambda session: read_snapshot(session, user.id, compact=compact), _unread_badge)
+    from app.services.document_status import statuses_by_candidate
+    manual_records = statuses_by_candidate(snapshot.get("manual_documents"))
 
     files: dict[tuple[str, str], list[dict]] = {}
     for f in snapshot["files"]:
@@ -264,7 +280,7 @@ def _bootstrap(db: Session, user: User, compact: bool = False) -> dict[str, Any]
         "companies": [company_out(c) for c in snapshot["companies"]],
         "designations": [DesignationOut.model_validate(d).model_dump(by_alias=True, mode="json") for d in snapshot["designations"]],
         "orders": [OrderOut.model_validate(o).model_dump(by_alias=True, mode="json") for o in snapshot["orders"]],
-        "candidates": [_candidate_json(c, files) for c in snapshot["candidates"]],
+        "candidates": [_candidate_json(c, files, manual_records.get(c["id"])) for c in snapshot["candidates"]],
         "applications": [a.model_dump(by_alias=True, mode="json") for a in apps_out],
         "tasks": [TaskOut.model_validate(t).model_dump(by_alias=True, mode="json") for t in snapshot["tasks"]],
         "remarks": [RemarkOut.model_validate(r).model_dump(by_alias=True, mode="json") for r in snapshot["remarks"]],

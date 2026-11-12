@@ -16,7 +16,7 @@ form columns).
 |---|---|---|---|
 | GET | `/api/candidates/{id}/application-form?orderId=&applicationId=` | any signed-in user | The whole form |
 | PUT | `/api/candidates/{id}/application-form` | admin, manager, the candidate's recruiter | Partial manual save |
-| POST | `/api/candidates/{id}/application-form/documents` | admin, manager, the candidate's recruiter (or the creator within 24 h) | Upload resume / passport / photo, start reading it |
+| POST | `/api/candidates/{id}/application-form/documents` | admin, manager, the candidate's recruiter (or the creator within 24 h) | Store resume / passport / photo without starting reading |
 | POST | `/api/candidates/{id}/application-form/refresh` | same as PUT | Re-apply the already stored OCR output (fills empty / still-extracted fields) |
 
 Which application (order) the form shows: `applicationId` wins, then `orderId` (the candidate's application for
@@ -31,13 +31,11 @@ Unknown `orderId`/`applicationId` for this candidate: 404.
 Resume, passport and photo are ordinary candidate attachments (`entity_type=candidate`, slots `resume`,
 `passport`, `photo`). Use the **POST `.../application-form/documents`** endpoint for the form's upload buttons - it
 stores the file exactly like `POST /api/files` does and in addition returns the form and the reading status in one answer.
-Plain `POST /api/files` with `entity_type=candidate` and `slot=resume` or `slot=passport` (the Documents card of the candidate
-profile) queues the same reading, so every upload of those two slots is read whichever endpoint was used; the form then updates
-through the live feed. Download/preview with `GET /api/files/{attachmentId}` (the `url` in the payload).
+Form uploads defer reading by default. Form/profile clients explicitly send multipart `defer_extraction=true`, add all front/back/additional files, then call `POST .../application-form/extract` with `{attachmentIds:[...]}`. The generic `POST /api/files` default remains automatic for existing intake integrations; those integrations are not changed by this form flow. Download/preview with `GET /api/files/{attachmentId}` (the `url` in the payload).
 
 Reading is asynchronous: the document-extraction worker (started by `python -m app.runtime`) picks the job up,
 and when done fills the form columns and commits. The commit publishes a live change event, so an open form just
-refetches (section 8). The POST answers `202` immediately with `extraction.status = "processing"`.
+refetches (section 8). The explicit extraction POST answers `202` with `{form,queued,existing,jobIds}`. Upload alone creates no reading job and performs no inspection or autofill; `extraction` is null and `extractionPending=true` until started.
 
 ## 2. GET response (also the PUT / POST / refresh response, `form` key for POST)
 
@@ -122,10 +120,10 @@ refetches (section 8). The POST answers `202` immediately with `extraction.statu
                  "applicationStatus": "active|closed|deployed|none", "closureLabel": "Failed prescreening|null" },
     "rows": [ TrackingRow ]
   },
-  "completeness": { "percent": 63, "filled": 12, "total": 19, "missing": [ MissingItem ],
+  "completeness": { "percent": 67, "filled": 12, "total": 18, "missing": [ MissingItem ],
                     "optional": { "filled": 3, "total": 9, "missing": [ MissingItem ] } },   // screening details: listed, not in the percentage
   "fieldSources": { "personal.fatherName": "extracted", "passport.passportNumber": "manual" },
-  "warnings": [ "Passport number does not look like an Indian passport number (a letter followed by seven digits)." ],
+  "warnings": [ "Check the Indian passport number against the uploaded passport (one letter and seven digits, or two letters and six digits)." ],
   "processing": false                           // true while any document of this candidate is still being read
 }
 ```
@@ -249,11 +247,10 @@ Response: `200` with the full form payload (section 2). Rules:
 a photo must be an image). Response `202`:
 ```jsonc
 { "document": DocumentSlot,                   // the slot after the upload
-  "extraction": Extraction,                   // status "processing" for resume/passport; photo: {"status":"done","message":null,...}
+  "extraction": Extraction | null,            // null for stored readable files awaiting Extract details
   "form": <full payload> }
 ```
-- A new version is written each time (nothing is overwritten); the same bytes re-sent do not create a version, but do
-  re-queue reading if the earlier attempt had failed.
+- A new file is retained for every distinct passport front/back/additional upload. Repeating any older passport file reuses its attachment. Deferred upload never retries a reading; explicit Extract details requeues failed jobs and reuses queued/completed jobs.
 - Files uploaded to the wrong slot are still read by what they contain (the reader classifies pages), and the
   `message` says so ("This file holds a passport, not a resume.").
 - Resume read: fills education, work history, experience totals, address, father's name, marital status, languages,
@@ -261,6 +258,12 @@ a photo must be an image). Response `202`:
   nationality, father's name (when printed), address (when printed). The passport is the authority for passport fields and
   identity fields; a resume's passport section only fills what is still empty.
 - Photo: just stored (no reading); the form's photo box shows `photo.url`.
+
+### Explicit extraction start
+
+`POST /api/candidates/{id}/application-form/extract` accepts `{attachmentIds:[...]}` (1 to 100 stored resume/passport/Aadhaar files for that candidate), plus optional `applicationId` / `orderId` query parameters. The candidate's recruiter or a supervisor starts the batch. All identifiers and scope are validated before any job is queued; a candidate lock makes repeated/concurrent starts idempotent. The response is `{form,queued:number,existing:number,jobIds:string[]}`. Each file retains its own result and page coverage. Worker writes protect manually entered fields and preserve complementary fields from the other files.
+
+`capabilities.deferredDocumentReading=true` advertises this API; clients must gate the new flow on this capability. Stored unread files expose `extractionPending=true` on form files/current/slot and profile/bootstrap file versions. More files can be added while an earlier reading runs; they wait for the next explicit start. Every source page is either selected for the applicable reader or listed in coverage with a reason; unread/unresolved pages prevent a complete result. Partial extracted totals must remain visibly under review.
 
 ## 6. POST /api/candidates/{id}/application-form/refresh
 
@@ -473,7 +476,7 @@ characters; unknown keys are still rejected with 422, so the screen can stop str
 
 ## 14. Aadhaar copies in the application form (13E)
 
-An Aadhaar copy is read like a resume or a passport (`kind: "aadhaar"`; the Add candidate page already scanned it, and a file uploaded to a candidate's `aadhaar` document slot is now queued for reading as well). What the card says fills the form under the same rules as every other document (section 7):
+An Aadhaar copy is read like a resume or a passport (`kind: "aadhaar"`; the Add candidate page already scanned it, and a profile upload to `aadhaar` is queued by explicit Extract details after files are ready). What the card says fills the form under the same rules as every other document (section 7):
 
 | Aadhaar value | Form field (`fieldSources` key) | Rule |
 | --- | --- | --- |
@@ -491,3 +494,5 @@ An Aadhaar copy is read like a resume or a passport (`kind: "aadhaar"`; the Add 
 * Known gap, not changed here: `GET /api/candidates/{id}/ocr` returns the stored Aadhaar number unmasked to an admin, a manager and the candidate's owner (everyone else gets it masked to the last four digits); the document job result of an Aadhaar read (`/api/ocr/jobs/...`) also holds the verbatim card for the person who read it. Masking those too is a product decision.
 
 Tests: `backend/tests/test_aadhaar_form_mapping.py` (mapping, fill rule, precedence in every order, masking, audit and log checks), `backend/tests/test_ocr_mapping.py`, `frontend/tests/application-form.test.mjs`, `frontend/tests/candidate-ocr.test.mjs`.
+
+Passport and Aadhaar keep every uploaded front/back/additional file, with per-file reading state and all files included in candidate exports. Aadhaar and application-form uploads are optional and never lower completeness. A failed file retains its failure message and `extractionPending: true` until staff explicitly request another reading. Resume keeps its existing latest-version form view; every page of the selected file is accounted for.

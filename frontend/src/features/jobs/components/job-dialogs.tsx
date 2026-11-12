@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
-import { Briefcase, CalendarDays, ListChecks, MapPin } from 'lucide-react'
+import { Briefcase, CalendarDays, ListChecks, MapPin, Plus } from 'lucide-react'
 import { api, ApiError } from '@/shared/api/client'
-import type { Designation, Order } from '@/shared/model/types'
+import type { Client, Company, Designation, Order } from '@/shared/model/types'
 import { useStore } from '@/shared/state/crm-store'
 import { currencyChoices, currencyLabel } from '@/shared/lib/agency'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
@@ -11,12 +11,12 @@ import { Dialog } from '@/shared/ui/overlay'
 import { refreshMasterData } from '@/features/master-data/components/record-audit'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { Flag, FormSection } from '@/features/clients/components/parts'
-import { useCountryOptions } from '@/features/clients/components/client-dialog'
+import { ClientDialog, useCountryOptions } from '@/features/clients/components/client-dialog'
 import { ComboInput, TagInput } from '@/features/jobs/components/search-select'
 import { canonicalCountry, countryOptions } from '@/features/jobs/country-options'
 import { ClientPicker } from '@/features/jobs/components/client-picker'
 import {
-  buildClientOptions, buildJobPayload, decideTitle, emptyJobForm, jobErrorsFromApi, nextJobForm, planDesignation, requirementsOf, skillSuggestions, titleKey, validateJob,
+  buildClientOptions, buildJobPayload, decideTitle, emptyJobForm, jobErrorsFromApi, planDesignation, requirementsOf, skillSuggestions, titleKey, validateJob,
   type JobFieldErrors, type JobForm,
 } from '@/features/jobs/job-form'
 import '@/styles/jobs.css'
@@ -52,6 +52,9 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
   const [errors, setErrors] = useState<JobFieldErrors>({})
   const [general, setGeneral] = useState('')
   const [saving, setSaving] = useState(false)
+  const [addingClient, setAddingClient] = useState(false)
+  // Keep the confirmed response selectable even if the background workspace refresh is delayed.
+  const [createdClients, setCreatedClients] = useState<(Client & { company: Company })[]>([])
   // Titles this dialog already added (title key -> id), so a second try after a failed save never adds a copy.
   const created = useRef(new Map<string, string>())
   const titleBox = useRef<HTMLInputElement>(null)
@@ -63,8 +66,12 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
   const locked = history.length > 0
   const clientFixed = locked || (!!companyId && creating)
   const options = useMemo(
-    () => buildClientOptions({ clients: store.clients, companies: store.companies, orders: store.orders, keepCompanyId: order?.companyId ?? companyId }),
-    [store.clients, store.companies, store.orders, order?.companyId, companyId],
+    () => buildClientOptions({
+      clients: [...store.clients, ...createdClients.filter((record) => !store.clients.some((row) => row.id === record.id))],
+      companies: [...store.companies, ...createdClients.map((record) => record.company).filter((record) => !store.companies.some((row) => row.id === record.id))],
+      orders: store.orders, keepCompanyId: order?.companyId ?? companyId,
+    }),
+    [store.clients, store.companies, store.orders, createdClients, order?.companyId, companyId],
   )
   const titles = useMemo(() => store.designations.map((item) => item.title), [store.designations])
   const skillChoices = useMemo(() => skillSuggestions(store.designations), [store.designations])
@@ -88,7 +95,7 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
     if (errors.title) setErrors((previous) => { const rest = { ...previous }; delete rest.title; return rest })
   }
 
-  const save = async (another: boolean) => {
+  const save = async () => {
     if (saving) return
     const typed = { ...form, country: properCountry(form.country) }
     const found = validateJob(typed, counts)
@@ -116,11 +123,7 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
       const record = order ? await api.put<Order>('/orders/' + order.id, payload) : await api.post<Order>('/orders', payload)
       await refreshMasterData(store, 'Job saved')
       if (store.isCurrentSession()) onSaved?.(record.id)
-      if (another && creating) {
-        // Same client, a fresh job: only the job's own boxes start over.
-        setForm(nextJobForm(typed)); setErrors({}); shownFor.current = ''
-        window.setTimeout(() => titleBox.current?.focus(), 0)
-      } else onClose()
+      onClose()
     } catch (err) {
       const detail = err instanceof ApiError ? err.detail : undefined
       const message = err instanceof Error ? err.message : ''
@@ -136,27 +139,27 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
 
   const statusBlocked = (key: string) => key === 'filled' ? counts.deployed < Number(form.openings) : key === 'closed' ? counts.active > 0 : false
 
-  return <Dialog open onClose={close} width="lg" scroll="inside" title={order ? `Edit job · ${order.ref}` : 'New job'}
+  return <><Dialog open={!addingClient} onClose={close} width="lg" scroll="inside" title={order ? `Edit job · ${order.ref}` : 'New job'}
     footer={<>
       <Button variant="ghost" disabled={saving} onClick={close}>Cancel</Button>
-      {creating && <Button disabled={saving} onClick={() => void save(true)}>Save and add another job</Button>}
       <Button variant="primary" type="submit" form="job-form" disabled={saving}>{saving ? 'Saving…' : 'Save job'}</Button>
     </>}>
     <DialogMark />
     {general && <p role="alert" className="client-form-error">{general}</p>}
-    <form id="job-form" className="form-stack jv-form jobs-simple" noValidate onSubmit={(event) => { event.preventDefault(); void save(false) }}>
+    <form id="job-form" className="form-stack jv-form jobs-simple" noValidate autoComplete="off" onSubmit={(event) => { event.preventDefault(); void save() }}>
       <fieldset disabled={saving} className="form-stack js-fields">
         <FormSection icon={<Briefcase size={18} />} title="Job">
           <div className="ui-field sm:col-span-2">
             <span className="ui-field-label">Client<span className="ui-field-req" aria-hidden="true">*</span></span>
             <ClientPicker options={options} value={form.companyId} locked={clientFixed} disabled={saving} invalid={!!errors.companyId} emptyText="No active clients yet. Add a client first."
               onChange={(option) => set('companyId', option.companyId)} />
+            {creating && !clientFixed && <Button size="sm" variant="ghost" className="mt-1 self-start" disabled={saving} onClick={() => setAddingClient(true)}><Plus size={14} />New client</Button>}
             {errors.companyId ? <span className="ui-field-error" role="alert">{errors.companyId}</span> : locked ? <span className="ui-field-hint">The client cannot change once candidates are matched.</span> : null}
           </div>
           <Field label="Job title" required className="sm:col-span-2" error={errors.title}
             hint={locked ? 'The job title cannot change once candidates are matched.' : decision.kind === 'new' ? `“${decision.title}” is new and will be added to your job titles.` : undefined}>
             <ComboInput inputRef={titleBox} maxLength={160} value={form.title} onChange={setTitle} options={titles} disabled={locked} invalid={!!errors.title}
-              placeholder="Choose a job title or type a new one" ariaLabel="Job title" noMatchNote={(typed) => `“${typed}” will be added as a new job title.`} />
+              placeholder="Enter a job title" ariaLabel="Job title" noMatchNote={(typed) => `“${typed}” will be added as a new job title.`} />
           </Field>
           <Field label="Openings" required error={errors.openings}>
             <Input type="number" inputMode="numeric" min={Math.max(1, counts.deployed)} max={100000} step={1} value={form.openings} onChange={(e) => set('openings', e.target.value)} aria-invalid={!!errors.openings} />
@@ -190,9 +193,9 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
             <ComboInput value={form.country} onChange={(value) => set('country', value)} options={countries} ariaLabel="Country" placeholder="Start typing a country" maxLength={100}
               prefix={<Flag country={form.country} />} renderOption={(name) => <Flag country={name} />} normalize={properCountry} noMatchNote={() => 'Any country name can be typed.'} />
           </Field>
-          <Field label="City" error={errors.city}><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Dubai" /></Field>
+          <Field label="City" error={errors.city}><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Enter a city" /></Field>
           <Field label="Salary (per month)" error={errors.salary}>
-            <Input type="number" inputMode="decimal" min={0} max={9999999999.99} step={0.01} value={form.salary} onChange={(e) => set('salary', e.target.value)} placeholder="1800" aria-invalid={!!errors.salary} />
+            <Input type="number" inputMode="decimal" min={0} max={9999999999.99} step={0.01} value={form.salary} onChange={(e) => set('salary', e.target.value)} placeholder="Optional amount" aria-invalid={!!errors.salary} />
           </Field>
           <Field label="Currency" required error={errors.currency}>
             <Select value={form.currency} onChange={(e) => set('currency', e.target.value)} aria-invalid={!!errors.currency}>
@@ -200,16 +203,21 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
               {currencyChoices(store.settings.currencies, order?.currency).map((currency) => <option key={currency.code} value={currency.code}>{currencyLabel(currency)}</option>)}
             </Select>
           </Field>
-          <Field label="Contract period" error={errors.contractPeriod}><Input maxLength={60} value={form.contractPeriod} onChange={(e) => set('contractPeriod', e.target.value)} placeholder="2 years" /></Field>
+          <Field label="Contract period" error={errors.contractPeriod}><Input maxLength={60} value={form.contractPeriod} onChange={(e) => set('contractPeriod', e.target.value)} placeholder="Enter the agreed period" /></Field>
           <Field label="Benefits (separate with commas)" className="sm:col-span-2" error={errors.benefits}>
-            <Input value={form.benefits} onChange={(e) => set('benefits', e.target.value)} placeholder="Food, Accommodation" />
+            <Input value={form.benefits} onChange={(e) => set('benefits', e.target.value)} placeholder="Enter the agreed benefits" />
           </Field>
         </FormSection>
 
         <FormSection icon={<CalendarDays size={18} />} title="Interview">
-          <Field label="Interview date" error={errors.interviewDate}><DatePicker value={form.interviewDate} onChange={(value) => set('interviewDate', value)} /></Field>
+          <Field label="Interview date" hint="Optional" error={errors.interviewDate}><DatePicker value={form.interviewDate} onChange={(value) => set('interviewDate', value)} /></Field>
         </FormSection>
       </fieldset>
     </form>
   </Dialog>
+    {addingClient && <ClientDialog onClose={() => setAddingClient(false)} onSaved={(record) => {
+      setCreatedClients((previous) => [...previous.filter((row) => row.id !== record.id), record])
+      set('companyId', record.company.id)
+    }} />}
+  </>
 }

@@ -353,9 +353,9 @@ export function DocumentSlotRow({
           <p className="text-sm text-ink">{label}</p>
           {latest ? (
             <p className="truncate text-micro text-ink-400">
-              <FileLink url={latest.url} title={`Open ${latest.name}`}>
+              {latest.url ? <FileLink url={latest.url} title={`Open ${latest.name}`}>
                 {latest.name}
-              </FileLink>{' '}
+              </FileLink> : latest.name}{' '}
               · v{latest.version} · {latest.sizeKb} KB
             </p>
           ) : (
@@ -372,7 +372,7 @@ export function DocumentSlotRow({
             {open ? 'Hide history' : `History (${versions.length})`}
           </button>
         )}
-        {latest && (
+        {latest?.url && (
           <FileLink url={latest.url} className="shrink-0 text-xs font-medium hover:no-underline">
             View
           </FileLink>
@@ -386,7 +386,7 @@ export function DocumentSlotRow({
               disabled={busy}
               className="shrink-0 text-xs font-medium text-navy-700 hover:text-navy-600 disabled:opacity-50"
             >
-              {busy ? 'Uploading…' : latest ? 'Replace' : 'Upload'}
+              {busy ? 'Uploading…' : latest?.identityMismatch ? 'Upload correct file' : latest ? 'Replace' : 'Upload'}
             </button>
             <input
               ref={pickRef}
@@ -424,7 +424,7 @@ export function DocumentSlotRow({
           {newestFileVersions(versions).map((v, index) => (
             <li key={v.id} className="flex items-start gap-2 text-micro text-ink-400">
               <div className="min-w-0 flex-1">
-                <p className="break-words"><span className="tnum">v{v.version}{index === 0 ? ' · Latest' : ''}</span> · <FileLink url={v.url}>{v.name}</FileLink></p>
+                <p className="break-words"><span className="tnum">v{v.version}{index === 0 ? ' · Latest' : ''}</span> · {v.url ? <FileLink url={v.url}>{v.name}</FileLink> : v.name}</p>
                 <p>{uploaderName?.(v.uploadedBy) || v.uploadedBy || 'Unknown uploader'} · {dateTimeLabel(v.uploadedAt)} · {v.sizeKb} KB</p>
               </div>
               <DownloadLink file={v} />

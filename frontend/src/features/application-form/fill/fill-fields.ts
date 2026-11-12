@@ -201,9 +201,9 @@ export function cardMissing(card: Pick<FillCard, 'kind' | 'fields'>, missing: Mi
   })
 }
 
-/** "3 to add". Empty when nothing is missing, so a complete card shows no chip of this kind. */
+/** Names missing form fields separately from uploaded document files. */
 export function toAddText(count: number): string {
-  return count > 0 ? `${count} to add` : ''
+  return count > 0 ? `${count} ${count === 1 ? 'field' : 'fields'} missing` : ''
 }
 
 /** Whether a card has anything the server counts as required (so a finished card can say "Complete"). */

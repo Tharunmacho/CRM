@@ -12,7 +12,7 @@ async function load(path) {
 const table = await load('../src/features/candidates/data-bank-table.ts')
 
 test('the candidate table has seven columns, Actions last and right-aligned, the rest left-aligned', () => {
-  assert.deepEqual(table.BANK_TABLE_COLUMNS.map((column) => column.header), ['Candidate', 'Contact', 'Source', 'Agent', 'Recruiter', 'Status', 'Actions'])
+  assert.deepEqual(table.BANK_TABLE_COLUMNS.map((column) => column.header), ['Candidate', 'Contact', 'Source', 'Agency', 'Recruiter', 'Status', 'Actions'])
   assert.equal(table.BANK_TABLE_COLUMNS.some((column) => /country/i.test(column.header)), false)
   assert.deepEqual(table.BANK_TABLE_COLUMNS.map((column) => column.align), ['left', 'left', 'left', 'left', 'left', 'left', 'right'])
 })

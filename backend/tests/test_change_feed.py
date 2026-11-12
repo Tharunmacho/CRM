@@ -94,6 +94,21 @@ def test_personal_topics_name_their_owner_only_when_known():
     assert "u" not in json.loads(unknown.payload(now_ms=1))
 
 
+def test_invoice_changes_keep_financial_row_ids_out_of_candidate_namespace():
+    pending = Pending()
+    for table, identifier, candidate_id in (
+        ("crm_invoice_settings", 1, None),
+        ("crm_candidate_invoices", "invoice-1", "candidate-1"),
+        ("crm_invoice_payments", "payment-1", None),
+    ):
+        pending.note_table("UPDATE", table)
+        pending.note_object(table, identifier, None, candidate_id)
+    body = json.loads(pending.payload(now_ms=1))
+    assert body == {"t": ["candidates", "documents", "reports"], "ids": {"candidates": ["candidate-1"]}, "at": 1}
+    assert "ids" not in visible_to(body, "staff", "staff-1")
+    assert change_feed._CANDIDATE_LINKS["crm_candidate_invoices"] == "candidate_id"
+
+
 def test_role_filtering_of_topics_and_ids():
     payload = {"t": ["candidates", "todos", "notifications", "users", "reports", "_auth", "bogus"],
                "ids": {"candidates": ["c1"], "todos": ["t1"]}, "u": {"todos": ["alice"], "notifications": ["alice"]}, "at": 9}

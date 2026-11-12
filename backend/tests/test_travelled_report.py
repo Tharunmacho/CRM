@@ -65,7 +65,7 @@ def env(schema_database):
                 # an earlier attempt of the ticket stage must not be read: only the latest attempt counts
                 db.add(ApplicationStage(application_id=application.id, stage=11, attempt=1, data={"travelDate": "2001-01-01"}, completed_by=recruiter))
                 db.add(ApplicationStage(application_id=application.id, stage=11, attempt=2, data=data, completed_by=recruiter))
-        # Akash has all twelve mandatory documents. Arun has four required documents and retained optional evidence;
+        # Akash has all eleven checklist documents. Arun has four required documents and retained optional evidence;
         # an application-stage file does not fill a candidate slot.
         for slot, _label in required_for_deployment():
             db.add(Attachment(entity_type="candidate", entity_id="c1", slot=slot, file_name=f"{slot}.pdf", object_key=f"k/c1-{slot}"))
@@ -109,7 +109,7 @@ def test_every_travelled_placement_is_listed_newest_first_with_its_client_and_ag
         "applicationId": "a1", "candidateId": "c1", "ref": "CND-00001", "name": "Akash Murugesan", "client": "Century Mechanical Systems Factory LLC",
         "clientId": "client", "country": "UAE", "job": "Machine Operator", "orderRef": "ORD-1", "orderId": "o1", "passportNumber": "P7654321", "agency": "Star Agency",
         "travelDate": "2026-05-09", "airline": "Air Arabia G9472", "pnr": "6ZA8JH", "recruiter": "Staff", "status": "deployed",
-        "documents": {"have": 12, "required": 12, "missing": []}}
+        "documents": {"have": 11, "required": 11, "missing": []}}
     by_name = {row["name"]: row for row in body["rows"]}
     assert by_name["Selvam Balraj"]["agency"] is None      # "Bulk import" is provenance, not an agency
     assert by_name["Visakh Kumar"]["travelDate"] is None and by_name["Visakh Kumar"]["agency"] is None
@@ -195,7 +195,7 @@ def test_deployed_without_a_ticket_or_any_documents_remains_travelled(env):
         db.commit()
     row = next(row for row in get(env, undated="true")["rows"] if row["candidateId"] == "c7")
     assert row["status"] == "deployed" and row["travelDate"] is None
-    assert row["documents"]["have"] == 0 and len(row["documents"]["missing"]) == 12
+    assert row["documents"]["have"] == 0 and len(row["documents"]["missing"]) == 11
 
 
 def test_invalid_or_reopened_latest_ticket_never_invents_a_travel_date(env):
@@ -211,11 +211,11 @@ def test_invalid_or_reopened_latest_ticket_never_invents_a_travel_date(env):
 
 def test_each_row_says_which_mandatory_documents_are_missing(env):
     rows = {row["name"]: row["documents"] for row in get(env)["rows"]}
-    assert rows["Akash Murugesan"] == {"have": 12, "required": 12, "missing": []}
+    assert rows["Akash Murugesan"] == {"have": 11, "required": 11, "missing": []}
     # Arun: resume (two versions = one document), passport, photo, medical, visa and the education certificate under its older key
-    assert rows["Arun Kumar"]["have"] == 4 and rows["Arun Kumar"]["required"] == 12
-    assert rows["Arun Kumar"]["missing"] == ["Application form", "Signed offer", "Police clearance certificate (PCC)", "Air ticket", "Undertaking letter", "Emigration", "Insurance", "Invoice"]
-    assert rows["Gladwin Gnanaraj"]["have"] == 0 and len(rows["Gladwin Gnanaraj"]["missing"]) == 12   # nothing uploaded at all
+    assert rows["Arun Kumar"]["have"] == 4 and rows["Arun Kumar"]["required"] == 11
+    assert rows["Arun Kumar"]["missing"] == ["Signed offer", "Police clearance certificate (PCC)", "Air ticket", "Undertaking letter", "Emigration", "Insurance", "Invoice"]
+    assert rows["Gladwin Gnanaraj"]["have"] == 0 and len(rows["Gladwin Gnanaraj"]["missing"]) == 11   # nothing uploaded at all
 
 
 def test_only_candidates_with_missing_documents_can_be_asked_for(env):
@@ -341,8 +341,8 @@ def test_csv_export_follows_the_filters_and_is_safe_for_spreadsheets(env):
     assert [r[1] for r in rows[1:]] == ["'=Formula Name", "Arun Kumar"]       # a name starting with "=" is not run as a formula
     assert rows[2][:5] == ["2026-05-12", "Arun Kumar", "CND-00002", "Century Mechanical Systems Factory LLC", "UAE"]
     assert rows[2][7] == "Star Agency"
-    assert rows[2][12] == "Application form, Signed offer, Police clearance certificate (PCC), Air ticket, Undertaking letter, Emigration, Insurance, Invoice"
-    assert rows[1][12].startswith("Application form, Resume, Passport, Medical, Signed offer, Police clearance")   # nothing on file: all twelve
+    assert rows[2][12] == "Signed offer, Police clearance certificate (PCC), Air ticket, Undertaking letter, Emigration, Insurance, Invoice"
+    assert rows[1][12].startswith("Resume, Passport, Medical, Signed offer, Police clearance")   # nothing on file: all eleven
 
 
 def test_xlsx_export_holds_every_row_and_respects_staff_visibility(env):

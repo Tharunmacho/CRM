@@ -291,6 +291,95 @@ def test_sideways_page_is_retried_with_orientation_aware_layout_and_shares_the_p
     assert all(0 < timeout <= 30 for _, timeout in calls)
 
 
+@pytest.mark.parametrize("first_words,confidence", [(0, 0), (8, 85)])
+def test_unclassified_sideways_scan_turns_before_enhancement_even_without_words(monkeypatch, first_words, confidence):
+    calls = []
+    fragments = "vx mn rqt lmp hq vb yt zw" if first_words else ""
+
+    def read(image, command, languages, timeout, **options):
+        calls.append((image.size, options["psm"], timeout))
+        if image.size == (60, 40):
+            lines = [subject.merge.Line(line, 94, len(line.split()), (0, n / 15, 1, (n + 1) / 15))
+                     for n, line in enumerate(CV.splitlines()) if line.strip()]
+            return subject.OCRRead(CV, 94, words=40, good_words=40, lines=lines)
+        lines = [subject.merge.Line(fragments, confidence, first_words, (0, 0, 1, .1))] if fragments else []
+        return subject.OCRRead(fragments, confidence, words=first_words, good_words=first_words, lines=lines)
+
+    monkeypatch.setattr(subject, "_tesseract", read)
+    monkeypatch.setattr(subject.enhance, "looks_like_photo", lambda _: False)
+    monkeypatch.setattr(subject.second_opinion, "available", lambda: False)
+    with Image.new("L", (40, 60), 255) as image:
+        result = subject._ocr_image(image, command="test-tesseract", languages="eng",
+                                    deadline=time.monotonic() + 30, need_more=subject.needs_more_reading)
+    assert subject.classify_page(result.text).document_type == "resume"
+    assert result.notes["rotation"] == 90
+    assert "rotate90 psm3" in result.variants
+    assert not any("sparse" in variant or "contrast" in variant for variant in result.variants)
+    assert all(0 < timeout <= 30 for _, _, timeout in calls)
+    if first_words:
+        assert result.setting == "merged"  # the orientation survives combining readable fragments
+
+
+def test_low_confidence_ordinary_fragments_do_not_stop_a_mixed_orientation_passport(monkeypatch):
+    calls = []
+    fragments = "\n".join(["the and of in to at for with from is are was example text" for _ in range(8)])
+    assert not subject.needs_more_reading(fragments)  # content alone mistakes this for ordinary prose
+
+    def read(image, command, languages, timeout, **options):
+        calls.append((image.size, options["psm"]))
+        if image.size == (60, 40) and options["psm"] == 6:
+            return subject.OCRRead(PASSPORT, 40, words=30, good_words=12)
+        return subject.OCRRead(fragments, 38, words=107, good_words=30)
+
+    monkeypatch.setattr(subject, "_tesseract", read)
+    monkeypatch.setattr(subject.second_opinion, "available", lambda: False)
+    with Image.new("L", (40, 60), 255) as image:
+        result = subject._ocr_image(image, command="test-tesseract", languages="eng",
+                                    deadline=time.monotonic() + 30, need_more=subject.needs_more_reading)
+    assert subject.classify_page(result.text).document_type == "passport"
+    assert result.notes["rotation"] == 90
+    assert calls[:4] == [((40, 60), 3), ((40, 60), 1), ((60, 40), 3), ((60, 40), 6)]
+
+
+def test_merging_noise_cannot_discard_an_identified_passport(monkeypatch):
+    noise = "vx mn rqt lmp hq vb yt zw " * 4
+    noise_line = subject.merge.Line(noise, 40, 32, (0, 0, 1, 1))
+
+    def read(image, command, languages, timeout, **options):
+        text = PASSPORT if image.size == (60, 40) else noise
+        return subject.OCRRead(text, 40, words=32, good_words=12,
+                               lines=[subject.merge.Line(text, 40, 32, (0, 0, 1, 1))])
+
+    monkeypatch.setattr(subject, "_tesseract", read)
+    monkeypatch.setattr(subject.merge, "merge_candidates", lambda _: ([noise_line], 0))
+    monkeypatch.setattr(subject.second_opinion, "available", lambda: False)
+    with Image.new("L", (40, 60), 255) as image:
+        result = subject._ocr_image(image, command="test-tesseract", languages="eng",
+                                    deadline=time.monotonic() + 30, need_more=subject.needs_more_reading)
+    assert result.text == PASSPORT
+    assert result.setting == "rotate90 psm3"
+    assert result.notes["rotation"] == 90
+
+
+def test_expired_orientation_window_never_starts_another_read(monkeypatch):
+    calls = []
+    now = [10.0]
+
+    def read(*args, **kwargs):
+        calls.append(kwargs["psm"])
+        now[0] = 12.0
+        return subject.OCRRead("", 0)
+
+    monkeypatch.setattr(subject.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(subject, "_tesseract", read)
+    monkeypatch.setattr(subject.enhance, "looks_like_photo", lambda _: False)
+    monkeypatch.setattr(subject.second_opinion, "available", lambda: False)
+    with Image.new("L", (40, 60), 255) as image:
+        subject._ocr_image(image, command="test-tesseract", languages="eng", deadline=11.0,
+                           need_more=subject.needs_more_reading)
+    assert calls == [3]
+
+
 def test_clean_page_costs_one_tesseract_call(monkeypatch):
     calls = []
     def read(image, command, languages, timeout, **options):

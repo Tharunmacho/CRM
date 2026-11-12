@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Select } from '@/shared/ui/primitives'
@@ -38,6 +39,8 @@ export function AssignmentBar({
   applications = [],
   activeApplicationId = '',
   onSwitchApplication,
+  stageControl,
+  canManageJobs = false,
 }: {
   assignment: AssignmentData
   saving: Partial<Record<AssignmentField, boolean>>
@@ -47,6 +50,8 @@ export function AssignmentBar({
   applications?: ApplicationRef[]
   activeApplicationId?: string
   onSwitchApplication?: (applicationId: string) => void
+  stageControl?: ReactNode
+  canManageJobs?: boolean
 }) {
   const { options, can } = assignment
   const [clientId, setClientId] = useState(assignment.client?.id ?? '')
@@ -65,6 +70,7 @@ export function AssignmentBar({
     return list
   }, [client, assignment.job, serverClientId])
   const jobValue = assignment.job && client && client.id === serverClientId ? assignment.job.orderId : ''
+  const noAvailableJobs = Boolean(clientId) && !jobs.some((job) => job.orderId === jobValue || !jobUnavailableReason(job))
 
   const [agencyText, setAgencyText] = useState(cleanAgencyName(assignment.agency?.name))
   const serverAgency = cleanAgencyName(assignment.agency?.name)
@@ -123,10 +129,10 @@ export function AssignmentBar({
       </Field>
 
       <Field id="job" label="Job" saving={saving.job} error={errors.job}
-        hint={!editJob && assignment.job && (assignment.job.ref || assignment.job.country) ? [assignment.job.ref, assignment.job.country].filter(Boolean).join(' · ') : undefined}>
+        hint={editJob && noAvailableJobs ? <>{jobs.length ? 'These jobs are filled, closed or on hold. A job must be reopened before assigning another candidate.' : 'No jobs have been added for this client.'}{canManageJobs && <> <Link to="/jobs">Manage jobs</Link></>}</> : !editJob && assignment.job && (assignment.job.ref || assignment.job.country) ? [assignment.job.ref, assignment.job.country].filter(Boolean).join(' · ') : undefined}>
         {editJob ? (
           <Select id="af-assign-job" searchable value={jobSelectValue} aria-label="Job" disabled={!clientId && !several} onChange={(event) => pickJob(event.target.value)}>
-            <option value="">{clientId ? 'No job chosen' : 'Choose a client first'}</option>
+            <option value="">{clientId ? jobs.length ? 'No job chosen' : 'No open jobs available' : 'Choose a client first'}</option>
             {owned.map((item) => <option key={item.id} value={`app:${item.id}`}>{applicationOptionText(item, item.id === activeApplicationId)}</option>)}
             {jobs.filter((job) => !ownedOrders.has(job.orderId)).map((job) => {
               const reason = job.orderId === jobValue ? '' : jobUnavailableReason(job)
@@ -184,6 +190,7 @@ export function AssignmentBar({
           <p className="af-assign-value" id="af-assign-recruiter">{assignment.recruiter?.name || NOT_ASSIGNED_TEXT}</p>
         )}
       </Field>
+      {stageControl}
     </section>
   )
 }

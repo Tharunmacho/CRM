@@ -440,17 +440,15 @@ def complete_stage(application_id: str, body: CompleteIn,
         _active(app)
         _check_version(app, body.lock_version)
         _owner(db, candidate)
-        data = _normalized_data(db, app, body.data if body.data is not None else app.draft or {}, require_bytes=True)
+        data = _normalized_data(db, app, body.data if body.data is not None else app.draft or {})
+        if not data.get("feedback", "").strip():
+            raise HTTPException(422, {"message": "Write feedback before saving and moving this stage.", "missing": ["Feedback"]})
         definition = stage_by_no(app.current_stage)
         result = definition.evaluate(data, _stage_options(db, app.current_stage))
         if not result.can_complete:
             raise HTTPException(422, {"message": "This stage is not complete.", "missing": result.missing})
         if app.current_stage == TOTAL_STAGES:
-            # Deployment gate (admins included): every document required by the end of the process must be on file.
-            from app.services.application_form import missing_required_documents
-            gaps = missing_required_documents(db, candidate.id)
-            if gaps:
-                raise HTTPException(409, "Upload these documents before deploying: " + ", ".join(g["label"] for g in gaps))
+            # Documents remain in the inspection checklist, independently of a manual stage move.
             deployed = db.scalar(select(func.count()).select_from(Application).where(
                 Application.order_id == order.id, Application.status == ApplicationStatus.deployed,
             )) or 0
@@ -538,6 +536,8 @@ def reopen_stage(application_id: str, body: ReopenIn, db: Session = Depends(get_
         at = datetime.now(timezone.utc)
         previous_status = app.status.value
         app.draft = dict(targets[-1].data)
+        # Keep old feedback in attempt history; the next move must have fresh feedback.
+        app.draft.pop("feedback", None)
         for record in records:
             record.reopened_reason = reason
         for task in _open_tasks(db, app):

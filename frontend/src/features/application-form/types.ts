@@ -118,12 +118,16 @@ export interface FormDocument {
   url: string
   uploadedAt: string
   uploadedBy: string
+  extraction?: Extraction | null
+  extractionPending?: boolean
+  identityMismatch?: boolean
 }
 
 export type ExtractionStatusCode = 'processing' | 'done' | 'failed' | 'unreadable' | 'needs_review'
 
 export interface Extraction {
   status: ExtractionStatusCode
+  identityMismatch?: boolean
   message: string
   filled: string[]
   kept: string[]
@@ -140,14 +144,18 @@ export interface DocumentSlot {
   label: string
   hint: string
   uploaded: boolean
+  fileUploaded?: boolean
+  manualStatusSupported?: boolean
+  manualStatus?: { uploaded: boolean; by: { id: string | null; name: string | null }; at: string; note: string } | null
   current: FormDocument | null
   versions: number
   extraction: Extraction | null
+  extractionPending?: boolean
   /** Counted towards completeness for this application (the server decides; worked out from the stage for an older server). */
   required: boolean
   /** The stage from which it is expected; null when always expected or optional. */
   requiredFromStage: number | null
-  /** More than one file is kept (Other documents). */
+  /** More than one file is kept (Passport and Other documents). */
   multiple: boolean
   /** Newest first; only filled for slots that keep several files. */
   files: FormDocument[]
@@ -267,6 +275,7 @@ export interface FeedbackData {
 export interface OptionalDocument { slot: string; label: string; uploaded: boolean }
 
 export interface ApplicationFormData {
+  capabilities?: { deferredDocumentReading: boolean }
   header: { company: string; title: string; address: string; phone: string; email: string }
   candidate: { id: string; ref: string; name: string; status: string; needsReview: boolean; ownerId: string; ownerName: string; updatedAt: string; canEdit: boolean }
   application: ApplicationRef | null

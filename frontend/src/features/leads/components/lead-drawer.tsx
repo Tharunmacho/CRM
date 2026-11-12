@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ExternalLink, FileUp, Link2, Lock, MessageCircle, PhoneCall, Trash2, UserCheck, UserPlus, Loader2 } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FileUp, Link2, Lock, MessageCircle, PhoneCall, Trash2, UserCheck, UserPlus, Loader2, Undo2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { User } from '@/shared/model/types'
 import { Sheet } from '@/shared/ui/overlay'
@@ -35,6 +35,7 @@ interface Props {
   /** Admin only: delete this lead (asks for confirmation first). */
   canDelete?: boolean
   onDelete?: (lead: Lead) => void
+  onUnconvert?: (lead: Lead) => void
   /** The status was saved from here: the screen offers an Undo toast. */
   onStatusChange?: (lead: Lead, from: string, to: string) => void
 }
@@ -50,7 +51,7 @@ const Section = ({ title, children }: { title: string; children: ReactNode }) =>
 const experienceText = (text: string | null | undefined, years: number | string | null | undefined) =>
   text && !/^\d+(\.\d+)?$/.test(text.trim()) ? text : yearsLabel(years) ?? text ?? ''
 
-const KIND_LABEL: Record<string, string> = { call: 'Call', note: 'Note', status: 'Status', assign: 'Assigned', import: 'Imported', convert: 'Converted', resume: 'Resume', edit: 'Edited' }
+const KIND_LABEL: Record<string, string> = { call: 'Call', note: 'Note', status: 'Status', assign: 'Assigned', import: 'Imported', convert: 'Converted', unconvert: 'Moved back to Lead', resume: 'Resume', edit: 'Edited' }
 
 function Timeline({ items }: { items: LeadActivity[] }) {
   if (items.length === 0) return <p className="ld-hint">Nothing has happened with this lead yet.</p>
@@ -73,7 +74,7 @@ function Timeline({ items }: { items: LeadActivity[] }) {
 }
 
 /** The side drawer of one lead: everything we know, what to do next, and the timeline. */
-export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUploadResume, onGateRefusal, canDelete, onDelete, onStatusChange }: Props) {
+export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUploadResume, onGateRefusal, canDelete, onDelete, onUnconvert, onStatusChange }: Props) {
   const navigate = useNavigate()
   const [detail, setDetail] = useState<LeadDetail | null>(null)
   const [error, setError] = useState('')
@@ -169,6 +170,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
               onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void attach(file) }} />
           </label>
           {canAssign && <Button variant="secondary" icon={<UserCheck className="h-4 w-4" />} onClick={() => onAssign(shown)}>Assign</Button>}
+          {me.role === 'admin' && shown.candidateId && onUnconvert && <Button variant="secondary" icon={<Undo2 className="h-4 w-4" />} onClick={() => onUnconvert(shown)}>Move back to Lead</Button>}
           {canDelete && onDelete && <Button variant="dangerGhost" icon={<Trash2 className="h-4 w-4" />} disabled={Boolean(shown.candidateId)} title={shown.candidateId ? 'This lead was converted to a candidate, so it cannot be deleted.' : undefined} onClick={() => onDelete(shown)}>Delete lead</Button>}
           {wa && <button type="button" className="ld-btn ld-wa-btn" aria-haspopup="dialog" onClick={(event) => openWhatsApp({ id: shown.id, name: shown.name, phone, positionApplied: shown.positionApplied }, event.currentTarget)}><MessageCircle className="h-4 w-4" />WhatsApp</button>}
         </div>

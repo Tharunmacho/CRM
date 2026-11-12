@@ -123,6 +123,41 @@ def test_search_pages_and_counts_stay_correct(people):
     assert search_candidates(people, Search(q='ravi, kumar'), 1, 1)['items'][0]['id'] != page['items'][0]['id']
 
 
+def test_default_new_candidates_first_orders_the_entire_result_before_paging(bank):
+    # Every non-New record is newer than every New record, so sorting a fetched
+    # newest-first page in memory could never produce the expected first pages.
+    records = [
+        ('new-old', m.CandidateStatus.new, 1),
+        ('new-b', m.CandidateStatus.new, 2),
+        ('new-a', m.CandidateStatus.new, 2),
+        ('process-old', m.CandidateStatus.in_process, 3),
+        ('process-new', m.CandidateStatus.in_process, 4),
+        ('deployed', m.CandidateStatus.deployed, 5),
+        ('review', m.CandidateStatus.needs_review, 6),
+    ]
+    for identifier, status, day in records:
+        add(bank, identifier, status=status, created_at=datetime(2026, 1, day, tzinfo=timezone.utc))
+    bank.commit()
+    pages = [search_candidates(bank, Search(), page, 2) for page in range(4)]
+    assert all(page['total'] == 7 for page in pages)
+    assert [[row['id'] for row in page['items']] for page in pages] == [
+        ['new-a', 'new-b'], ['new-old', 'process-new'], ['process-old', 'review'], ['deployed'],
+    ]
+    explicit = search_candidates(bank, Search(sort='added', direction='desc'), 0, 2)
+    assert [row['id'] for row in explicit['items']] == ['review', 'deployed']
+    oldest = search_candidates(bank, Search(sort='added', direction='asc'), 0, 2)
+    assert [row['id'] for row in oldest['items']] == ['new-old', 'new-a']
+    alphabetical = search_candidates(bank, Search(sort='name', direction='asc'), 0, 2)
+    assert [row['id'] for row in alphabetical['items']] == ['deployed', 'new-a']
+    client = make_client(bank, 'asha')
+    default_page = client.get('/api/candidates', params={'page': 1, 'page_size': 2})
+    assert default_page.status_code == 200, default_page.text
+    assert [row['id'] for row in default_page.json()['items']] == ['new-old', 'process-new']
+    newest_page = client.get('/api/candidates', params={'sort': 'added', 'direction': 'desc', 'page_size': 2})
+    assert newest_page.status_code == 200, newest_page.text
+    assert [row['id'] for row in newest_page.json()['items']] == ['review', 'deployed']
+
+
 def test_position_groups_follow_the_search_and_list_the_unmapped(people):
     everything = position_groups(people, Search())
     assert everything['positions'] == 2 and everything['resumes'] == 4

@@ -55,7 +55,7 @@ _HEADINGS = (
     "personal particulars", "personal data", "about me", "areas of expertise", "machinery handled",
     "equipment handled", "site experience", "passport details", "visa status", "career summary",
     "professional profile", "strengths", "achievements", "hobbies", "interests", "training", "summary",
-    "experience", "key projects", "safety training", "core competencies", "academic qualifications",
+    "experience", "key projects", "safety training", "core competencies", "academic qualifications", "software skills",
 )
 _HEADING_RE = re.compile(
     r"^\s*(" + "|".join(re.escape(h) for h in sorted(_HEADINGS, key=len, reverse=True))
@@ -327,6 +327,19 @@ def _is_aadhaar(text: str) -> bool:
     )
 
 
+_JOB_ROLE_LABEL = re.compile(r"^\s*(?:job\s+title|designation|position|role)\s*(?::.*)?$", re.I | re.M)
+_JOB_DETAIL_LABEL = re.compile(r"^\s*(?:duration|period|location|company|employer)\s*(?::.*)?$", re.I | re.M)
+
+
+def _labelled_work_period(text: str) -> bool:
+    """A compact CV continuation may contain just employer, labelled job/dates and location.
+
+    This supplies continuation evidence only: it still needs a neighboring resume and cannot
+    cross a certificate or identity page. No list of recognized occupations is required.
+    """
+    return bool(_DATES.search(text) and _JOB_ROLE_LABEL.search(text) and _JOB_DETAIL_LABEL.search(text))
+
+
 def _signals(text: str) -> tuple[bool, bool, bool, int]:
     headings = _headings_in(text)
     titled = bool(_TITLE.search(text))
@@ -344,6 +357,7 @@ def _signals(text: str) -> tuple[bool, bool, bool, int]:
         (len(headings) >= 1 and career)
         or (len(headings) >= 2)
         or (len(set(_WORK.findall(text.lower()))) >= 2 and bool(_ROLE.search(text)))
+        or _labelled_work_period(text)
     )
     return seed, continuation, titled, len(headings)
 

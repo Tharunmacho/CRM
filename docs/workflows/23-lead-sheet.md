@@ -37,7 +37,8 @@ A wrong upload can be undone by an admin from the upload history, as long as nob
    (status, campaign, job, country, owner, date, has resume, already a candidate, follow-up due).
 2. Open a lead and call. Record the outcome: answered, interested, not interested, no answer or wrong number, add remarks and optionally the next follow-up. The status, call count and history update.
 3. Ask an interested lead for an updated resume. Set **Resume requested**. When the person sends it, upload it to the lead; the status becomes **Resume received**.
-4. **Convert to candidate** creates the Data Bank candidate from the lead (name, phone, e-mail, birth date, job, country interest, campaign as the source) and attaches the resume, which is then read like any other resume and fills the application form.
+4. In **Convert to candidate**, choose the updated resume or use the one already saved, then press **Check resume**. Wait for a verified match before converting. A wrong person's file, several people's resumes, incomplete reading or uncertain identity blocks conversion and creates no candidate. Changing the selected file or candidate name requires another check.
+   **Convert to candidate** then creates the Data Bank candidate and attaches the checked resume together, reusing its saved reading to fill permitted fields. It does not run the paid extraction again. Conversion without a resume remains available when none is selected or saved.
    If the phone or e-mail already belongs to a candidate, the CRM shows that candidate instead of creating a second one; **Link** connects the lead to it.
 5. Leads that do not go anywhere are set to **Not interested**, **Invalid** or **Wrong number**; nothing is deleted.
 
@@ -51,6 +52,13 @@ New, Contacted, Interested, Resume requested, Resume received, Converted, Not in
 * Two people uploading at the same time cannot create duplicates.
 * An upload that stopped half way stores nothing (it is one transaction); upload it again.
 * "Finish today's tasks first": complete or release the open daily items and the gate lifts at once (the screen refreshes by itself).
+* A failed or uncertain resume check leaves the lead intact. Choose the correct, clearer file and check again; there is no bypass for an unchecked attached resume.
+
+## Correct a mistaken conversion
+
+An **admin** can choose **Move back to Lead** from a converted lead's menu or drawer. The confirmation identifies the candidate that will be removed and the lead status that will be restored; a reason is required and kept in the history. The original lead, its files and its history remain.
+
+This is available only for an unused candidate created by that lead. Existing/shared candidates, any job application (including closed history), invoices or payments, ticket/invoice documents, other inbox/source links, recruiter notes or work already started block reversal. Only the untouched automatic initial-call task may be removed. The server checks again when saving; retrying the same saved reversal does not remove another candidate.
 
 ## The table
 
@@ -73,7 +81,9 @@ New, Contacted, Interested, Resume requested, Resume received, Converted, Not in
 * [ ] Upload a longer file: only the new people are added.
 * [ ] As staff with open daily tasks: lead calls and edits are refused with the daily tasks message; as admin they work.
 * [ ] Staff cannot upload, assign or export; staff cannot work another person's lead.
-* [ ] Convert a lead with a resume; the candidate appears in the Data Bank and the resume is read.
+* [ ] Check the correct resume, then convert: one candidate and its checked file appear together, using the saved reading.
+* [ ] A wrong-person, changed or unverified resume cannot create a candidate; no-resume conversion still works.
+* [ ] As admin, reverse an unused conversion with a reason; the lead and source resume remain. A candidate with recruitment or financial history cannot be reversed.
 
 ## Campaigns tab, follow-up reminders, "In Data Bank" found later, WhatsApp messages
 

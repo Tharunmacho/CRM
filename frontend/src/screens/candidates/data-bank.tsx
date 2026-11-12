@@ -4,7 +4,7 @@ import { cn } from '@/shared/lib/cn'
 import { ChevronsDownUp, ChevronsUpDown, Download, RefreshCw, Search, UserCog, UserPlus } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { withoutDeleted } from '@/shared/state/candidate-removal'
-import { api, fileHref } from '@/shared/api/client'
+import { api, ApiError, fileHref } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
 import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
 import { LeadsSkeleton } from '@/features/leads/components/leads-skeleton'
@@ -35,6 +35,7 @@ import '@/styles/data-bank-v2.css'
 import '@/styles/data-bank-top.css'
 
 const SORT_OPTIONS: [string, string][] = [
+  ['new_first:desc', 'New candidates first'],
   ['added:desc', 'Newest first'], ['added:asc', 'Oldest first'], ['name:asc', 'Name A–Z'], ['name:desc', 'Name Z–A'],
   ['phone:asc', 'Phone number'], ['designation:asc', 'Job title A–Z'], ['experience:desc', 'Most experience'], ['experience:asc', 'Least experience'],
   ['passport:desc', 'Passport saved first'], ['source:asc', 'Source'], ['owner:asc', 'Recruiter'], ['order:asc', 'Order'],
@@ -69,7 +70,7 @@ export default function DataBankPage() {
   const [skillMode, setSkillMode] = useState<'all' | 'any'>('all')
   const [skillStatus, setSkillStatus] = useState('all')
   const [page, setPage] = useState(0)
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'added', dir: 'desc' })
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'new_first', dir: 'desc' })
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
   const [moreOpen, setMoreOpen] = useState(false)
   const [view, setView] = useState<DbView>(() => readView('data-bank'))
@@ -125,7 +126,16 @@ export default function DataBankPage() {
     const timer = window.setTimeout(() => {
       api.get<{ items: Candidate[]; total: number; page: number }>(`/candidates?${filterQuery}&page=${page}&page_size=${pageSize}`, { signal: controller.signal })
         .then(data => { if (!controller.signal.aborted) setSnapshot({ ...data, scope: filterQuery }) })
-        .catch(error => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : 'We could not search. Please try again.') })
+        .catch(error => {
+          if (controller.signal.aborted) return
+          // An open browser can receive the new screen before its API is updated.
+          // Use an available server sort and keep the displayed selection honest.
+          if (sort.key === 'new_first' && error instanceof ApiError && error.status === 422 && error.message === 'We cannot sort by this column.') {
+            setSort({ key: 'added', dir: 'desc' })
+            return
+          }
+          setLoadError(error instanceof Error ? error.message : 'We could not search. Please try again.')
+        })
         .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     }, SEARCH_DELAY_MS)
     return () => { window.clearTimeout(timer); controller.abort() }
@@ -247,7 +257,7 @@ export default function DataBankPage() {
         <div className="dbt-toolbar">
           <label className="db-search">
             <Search size={15} aria-hidden="true" />
-            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, phone, email…" title="Finds candidate details as you type. Separate words with commas to match all of them, for example: ravi, suresh agent" aria-label="Search candidates by name, phone, email, agent, recruiter, skills or resume content. Separate words with commas to match all of them." />
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, phone, email…" title="Finds candidate details as you type. Separate words with commas to match all of them, for example: ravi, care agency" aria-label="Search candidates by name, phone, email, agency, recruiter, skills or resume content. Separate words with commas to match all of them." />
           </label>
           <span className="dbt-sort">
             <Select aria-label="Sort candidates by" value={`${sort.key}:${sort.dir}`} onChange={event => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>

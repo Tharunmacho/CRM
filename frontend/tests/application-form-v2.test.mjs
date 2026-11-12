@@ -33,7 +33,7 @@ const doc = (name) => ({ attachmentId: `f-${name}`, fileName: name, sizeKb: 120,
 const v2 = (patch = {}) => base({
   documentOrder: DOCUMENT_SLOT_KEYS,
   documents: Object.fromEntries(DOCUMENT_SLOT_KEYS.map((key) => [key, slot(key, {
-    required: ['application_form', 'resume', 'passport', 'signed_offer'].includes(key),
+    required: ['resume', 'passport', 'signed_offer'].includes(key),
     requiredFromStage: { signed_offer: 5, medical: 6, pcc: 7, visa: 9, emigration: 10, air_ticket: 11, undertaking_letter: 11, insurance: 11, invoice: 11 }[key] ?? null,
     multiple: key === 'other',
   })])),
@@ -65,7 +65,7 @@ const v2 = (patch = {}) => base({
 test('the documents list the mandatory checklist first and retain optional evidence', () => {
   const form = model.normalizeForm(v2())
   const labels = form.documentOrder.map((key) => form.documents[key].label)
-  assert.deepEqual(labels, ['Application form', 'Resume', 'Passport', 'Medical', 'Signed offer', 'Police clearance certificate (PCC)',
+  assert.deepEqual(labels, ['Application form', 'Resume', 'Passport', 'Aadhaar copy', 'Medical', 'Signed offer', 'Police clearance certificate (PCC)',
     'Visa', 'Air ticket', 'Undertaking letter', 'Emigration', 'Insurance', 'Invoice', 'Photo', 'Education certificate', 'Experience certificate', 'Google review', 'Visa stamping', 'Other documents'])
   assert.ok(form.documentOrder.indexOf('google_review') < form.documentOrder.indexOf('visa_stamping'))
   assert.equal(form.documents.other.multiple, true)
@@ -74,7 +74,7 @@ test('the documents list the mandatory checklist first and retain optional evide
 
 test('an older server that sends three documents still yields the whole checklist, and only counts what it sent', () => {
   const form = model.normalizeForm(base({ documents: { resume: slot('resume', { uploaded: true, current: doc('cv.pdf') }), passport: slot('passport'), photo: slot('photo') } }))
-  assert.equal(form.documentOrder.length, 18)
+  assert.equal(form.documentOrder.length, 19)
   assert.equal(form.documents.education_certificate.listed, false)
   // Stage 5 asks for the signed offer, worked out locally because the server did not say.
   assert.equal(form.documents.signed_offer.required, true)
@@ -88,9 +88,10 @@ test('the server decides what is required, and the missing list names the missin
   const form = model.normalizeForm(v2())
   const live = model.completenessOf(model.toDraft(form), form.documents)
   const keys = live.missing.map((item) => item.key)
-  assert.deepEqual(keys.filter((key) => key.startsWith('documents.')), ['documents.application_form', 'documents.resume', 'documents.passport', 'documents.signed_offer'])
-  assert.equal(live.total, 16 + 4)
-  assert.equal(live.missing.find((item) => item.key === 'documents.application_form').message, 'Application form not uploaded')
+  assert.deepEqual(keys.filter((key) => key.startsWith('documents.')), ['documents.resume', 'documents.passport', 'documents.signed_offer'])
+  assert.equal(live.total, 16 + 3)
+  assert.equal(form.documents.application_form.required, false)
+  assert.equal(form.documents.aadhaar.required, false)
   assert.ok(!keys.includes('documents.experience_certificate'))
   assert.ok(!keys.includes('documents.medical'))
 })
@@ -99,15 +100,15 @@ test('uploads raise the percentage at once, before the server answers', () => {
   const form = model.normalizeForm(v2())
   const draft = model.toDraft(form)
   const before = model.completenessOf(draft, form.documents)
-  const pending = { application_form: { fileName: 'application.pdf', sizeKb: 80 }, other: { fileName: 'extra.pdf', sizeKb: 10 } }
+  const pending = { resume: { fileName: 'resume.pdf', sizeKb: 80 }, other: { fileName: 'extra.pdf', sizeKb: 10 } }
   const documents = model.applyOptimisticUploads(form.documents, pending)
   const after = model.completenessOf(draft, documents)
   assert.ok(after.percent > before.percent)
   assert.equal(after.filled, before.filled + 1)
-  assert.equal(documents.application_form.uploaded, true)
-  assert.equal(documents.application_form.current.fileName, 'application.pdf')
+  assert.equal(documents.resume.uploaded, true)
+  assert.equal(documents.resume.current.fileName, 'resume.pdf')
   assert.equal(documents.other.files[0].fileName, 'extra.pdf')
-  assert.equal(form.documents.application_form.uploaded, false)
+  assert.equal(form.documents.resume.uploaded, false)
   assert.equal(model.applyOptimisticUploads(form.documents, {}), form.documents)
   // An optional document never changes the percentage.
   assert.equal(model.completenessOf(draft, model.applyOptimisticUploads(form.documents, { other: pending.other })).percent, before.percent)
@@ -116,9 +117,9 @@ test('uploads raise the percentage at once, before the server answers', () => {
 test('documents are grouped as required now, later in the process and optional, keeping the contract order', () => {
   const form = model.normalizeForm(v2())
   const groups = model.groupDocuments(form.documents, form.documentOrder)
-  assert.deepEqual(groups.required.map((item) => item.slot), ['application_form', 'resume', 'passport', 'signed_offer'])
+  assert.deepEqual(groups.required.map((item) => item.slot), ['resume', 'passport', 'signed_offer'])
   assert.deepEqual(groups.later.map((item) => item.slot), ['medical', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice'])
-  assert.deepEqual(groups.optional.map((item) => item.slot), ['photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other'])
+  assert.deepEqual(groups.optional.map((item) => item.slot), ['application_form', 'aadhaar', 'photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other'])
   assert.equal(model.documentState(form.documents.medical), 'later')
   assert.equal(model.documentState(form.documents.other), 'optional')
   assert.equal(model.documentState(form.documents.resume), 'required')
@@ -310,7 +311,9 @@ test('without a way to work the candidate nothing is editable; managers and admi
 
 test('a server that sends the block keeps its own values, options and permissions', () => {
   const served = model.normalizeForm(v2()).assignment
-  assert.equal(fallback.completeAssignment(served, { ...workspace(), canEdit: false }), served)
+  const completed = fallback.completeAssignment(served, { ...workspace(), canEdit: false })
+  assert.deepEqual(completed.can, served.can)
+  for (const client of served.options.clients) assert.deepEqual(completed.options.clients.find(item => item.id === client.id), client)
   const partial = model.normalizeForm(v2({ assignment: { client: { id: 'clx', name: 'Served Client' }, job: null, source: { key: 'email' }, agency: null, recruiter: null } })).assignment
   assert.equal(partial.supported, true)
   assert.equal(partial.serverOptions, false)
@@ -319,6 +322,18 @@ test('a server that sends the block keeps its own values, options and permission
   assert.equal(filled.source.key, 'email')
   assert.equal(filled.options.clients.length, 2)
   assert.equal(filled.can.job, true)
+})
+
+test('active clients and all labelled workspace jobs stay visible when an older server omits them, without reopening unavailable jobs', () => {
+  const served = model.normalizeForm(v2()).assignment
+  served.options.clients = []
+  const completed = fallback.completeAssignment(served, workspace())
+  assert.deepEqual(completed.options.clients.map(client => client.id), ['cl1', 'cl2'])
+  assert.deepEqual(completed.options.clients.flatMap(client => client.jobs.map(job => job.orderId)), ['o1', 'o2', 'o3'])
+  assert.equal(model.jobUnavailableReason(completed.options.clients[0].jobs[1]), 'Filled')
+  assert.equal(model.jobUnavailableReason(completed.options.clients[1].jobs[0]), 'On hold')
+  served.can.job = false
+  assert.equal(fallback.completeAssignment(served, workspace()), served)
 })
 
 /* ------------------------------------------------------------------ The paper form and the screen around it */
@@ -402,6 +417,22 @@ const rows = await import(moduleUrl(rowsSource.replace("'@/shared/model/document
 const slotsModule = await import(slotsUrl)
 const stateOf = (key, hasFile = false, canWork = true) => rows.documentRowState({ entry: slotsModule.documentSlot(key), hasFile, canWork })
 
+test('optional application-form evidence stays accessible without a pending row or completeness requirement', () => {
+  const served = v2()
+  served.documents.application_form.required = true // A response from the older server.
+  const empty = model.normalizeForm(served)
+  assert.equal(empty.documents.application_form.required, false)
+  assert.equal(rows.documentRowStates(empty, true).some(({ slot }) => slot.slot === 'application_form'), false)
+  const before = model.completenessOf(model.toDraft(empty), empty.documents)
+  served.documents.application_form = slot('application_form', { required: true, uploaded: true, current: doc('saved-form.pdf') })
+  const saved = model.normalizeForm(served)
+  const evidence = rows.documentRowStates(saved, true).find(({ slot }) => slot.slot === 'application_form')
+  assert.equal(evidence.slot.current.fileName, 'saved-form.pdf')
+  assert.equal(evidence.state.counted, false)
+  assert.equal(evidence.state.chip, 'Uploaded')
+  assert.deepEqual(model.completenessOf(model.toDraft(saved), saved.documents), before)
+})
+
 test('no document is ever locked: each is Pending, Optional or Uploaded, and can always be uploaded', () => {
   for (const key of slotsModule.DOCUMENT_SLOT_KEYS) {
     const state = stateOf(key)
@@ -410,10 +441,10 @@ test('no document is ever locked: each is Pending, Optional or Uploaded, and can
     assert.equal(state.disabled, false, key)
     assert.ok(!('locked' in state) && !('tooltip' in state) && !/^(un)?lock$/.test(state.icon), key)
   }
-  for (const key of ['application_form', 'resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice']) {
+  for (const key of ['resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice']) {
     assert.deepEqual([stateOf(key).key, stateOf(key).chip, stateOf(key).icon], ['pending', 'Pending', 'clock'], key)
   }
-  for (const key of ['photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other']) assert.deepEqual([stateOf(key).key, stateOf(key).chip], ['optional', 'Optional'], key)
+  for (const key of ['application_form', 'aadhaar', 'photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other']) assert.deepEqual([stateOf(key).key, stateOf(key).chip], ['optional', 'Optional'], key)
   const done = stateOf('air_ticket', true)
   assert.deepEqual([done.key, done.chip, done.icon], ['uploaded', 'Uploaded', 'check'])
   assert.equal(stateOf('other', true).key, 'uploaded')
@@ -431,7 +462,7 @@ test('the count is every document that is not optional', () => {
     const documents = model.applyOptimisticUploads(form.documents, uploads)
     return rows.documentRowsProgress(rows.documentRowStates({ documents, documentOrder: form.documentOrder }, true).map((row) => row.state))
   }
-  assert.deepEqual(at(), { uploaded: 0, total: 12, percent: 0 })
+  assert.deepEqual(at(), { uploaded: 0, total: 11, percent: 0 })
   assert.equal(at({ passport: { fileName: 'p.pdf', sizeKb: 1 }, air_ticket: { fileName: 'a.pdf', sizeKb: 1 }, other: { fileName: 'o.pdf', sizeKb: 1 } }).uploaded, 2)
   assert.equal(rows.documentsCountText({ uploaded: 5, total: 8 }), '5 of 8 documents')
 })
@@ -507,6 +538,26 @@ test('each stage lists the documents that belong to it, with their live status',
   assert.deepEqual(docs(10), [['Emigration', false]])
   assert.deepEqual(docs(11), [['Air ticket', false], ['Undertaking letter', false], ['Insurance', false], ['Invoice', false]])
   for (const stage of [1, 2, 3, 4, 8]) assert.deepEqual(docs(stage), [])
+})
+
+test('stage cards retain saved dates for stages omitted from the printed form', () => {
+  const form = stageForm(9)
+  for (const stage of [3, 4, 7, 8]) form.tracking.rows[stage - 1].extra = true
+  const rows = stages.stageRows(form, true)
+  for (const stage of [3, 4, 7, 8]) {
+    assert.equal(rows[stage - 1].key, 'done')
+    assert.equal(rows[stage - 1].date, `2026-10-${String(stage).padStart(2, '0')}`)
+    assert.equal(rows[stage - 1].completedBy, 'Ravi')
+  }
+})
+
+test('already deployed candidates show all stages complete without inventing missing completion dates', () => {
+  const form = stageForm(11)
+  form.application.status = 'deployed'
+  form.tracking.rows = []
+  const rows = stages.stageRows(form, true)
+  assert.equal(stages.stagesDoneText(rows), '11 of 11 stages completed')
+  assert.ok(rows.every((row) => row.date === '' && row.completedBy === ''))
 })
 
 test('the last stage says whether the candidate is ready to deploy; an older server says nothing', () => {
