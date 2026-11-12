@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -290,11 +290,12 @@ def dismiss(job_id: str, db: Session = Depends(get_db), user: User = Depends(cur
 class AttachIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candidateId: str = Field(min_length=1, max_length=36)
+    originalOnly: StrictBool = False
 
 
 @router.post("/{job_id}/attach")
 def attach(job_id: str, body: AttachIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    try: return attach_original(db, user, job_id, body.candidateId, get_settings())
+    try: return attach_original(db, user, job_id, body.candidateId, get_settings(), original_only=body.originalOnly)
     except HTTPException: raise
     except Exception:
         db.rollback()

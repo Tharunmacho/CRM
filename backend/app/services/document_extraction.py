@@ -178,13 +178,11 @@ def request_extraction_retry(state: dict, *, automatic: bool = False) -> list[st
         generations = state.setdefault("provider_generations", {})
         generations[kind] = generations.get(kind, 0) + 1
         del state["provider_jobs"][kind]
-        late = state["provider_jobs"].pop(kind + "+", None) if not kind.endswith("+") else None
-        if late is not None:
-            # The page plan of this kind is about to change, so its late part would be left behind with nothing to merge into.
-            state["provider_job_history"].setdefault(kind + "+", []).append(deepcopy(late))
+        # Other parts have their own durable identity/results. Retrying this part
+        # never discards accepted late work; _split_parts rejoins every saved part.
         if kind == "passport" and record.get("status") == "failed":
             # Which pages the reader failed on (numbers only): the next attempt reads fewer of them (see _narrowed).
-            tried = sorted({*record["selected_pages"], *((late or {}).get("selected_pages") or [])})
+            tried = sorted(record["selected_pages"])
             state.setdefault("passport_plan", {}).setdefault("tried", []).append(tried)
         restarted.append(kind)
     return restarted
@@ -1266,7 +1264,7 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
 
     def ready(kind, payload) -> bool:
         """A kind whose jobs are all in: its fields are put in the saved state now, before the other kinds finish."""
-        if kind.endswith("+") or kind + "+" in parts:
+        if kind.endswith("+") or any(key != kind and _mode(key) == kind for key in parts):
             return False
         try:
             response = _MODELS[kind].model_validate(payload)
@@ -1302,27 +1300,34 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         log.warning("%s: could not read the %s (reader codes: %s); what was read is kept and the file goes to review",
                     _who(), ", ".join(sorted(lost, key=_order)), provider_codes(state))
     late_merge: dict[str, dict] = {}
+    first_parts = {kind: min((key for key in parts if _mode(key) == kind), key=len) for kind in kinds}
     for kind in kinds:
-        if kind + "+" not in parts or kind in lost:
+        keys = sorted((key for key in parts if _mode(key) == kind), key=len)
+        if kind in lost:
             continue
-        first, late = payloads.get(kind), payloads.get(kind + "+")
-        if first is None or late is None:
+        if len(keys) == 1:
+            payloads[kind] = payloads.get(keys[0])
+            continue
+        if any(payloads.get(key) is None for key in keys):
             payloads[kind] = None
             continue
-        if kind == "passport":
-            first = physical_passport_payload(first, PassportResponse.model_validate(first), len(parts[kind]))
-            late = physical_passport_payload(late, PassportResponse.model_validate(late), len(parts[kind + "+"]))
         place = {page: index for index, page in enumerate(final[kind], 1)}
-        merged, conflicts, notes = merge_results(kind, [
-            ([place[p] for p in parts[kind]], first), ([place[p] for p in parts[kind + "+"]], late)])
+        pieces = []
+        for key in keys:
+            payload = payloads[key]
+            if kind == "passport":
+                payload = physical_passport_payload(payload, PassportResponse.model_validate(payload), len(parts[key]))
+            pieces.append(([place[page] for page in parts[key]], payload))
+        merged, conflicts, notes = merge_results(kind, pieces)
+        late_merge[kind] = {"conflicts": conflicts, "notes": notes,
+                            "chunk_pages": [parts[key] for key in keys[1:]],
+                            "request_ids": [payloads[key].get("request_id") for key in keys if payloads[key].get("request_id")]}
         payloads[kind] = merged
-        late_merge[kind] = {"conflicts": conflicts, "notes": notes, "pages": parts[kind + "+"],
-                            "request_ids": [p.get("request_id") for p in (first, late) if p.get("request_id")]}
     for kind in kinds:
         if kind in lost:
             continue
         selected = selected_by_kind[kind]
-        record = state["provider_jobs"][kind]
+        record = state["provider_jobs"][first_parts[kind]]
         payload = payloads[kind]
         if payload is None:
             covered = False
@@ -1347,9 +1352,9 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         merge = deepcopy(record.get("merge")) if record.get("merge") else None
         if kind in late_merge:
             extra = late_merge[kind]
-            merge = merge or {"chunks": 1, "chunk_pages": [parts[kind]], "request_ids": [], "conflicts": [], "notes": []}
-            merge["chunks"] += 1
-            merge["chunk_pages"] = [*merge["chunk_pages"], extra["pages"]]
+            merge = merge or {"chunks": 1, "chunk_pages": [parts[first_parts[kind]]], "request_ids": [], "conflicts": [], "notes": []}
+            merge["chunks"] += len(extra["chunk_pages"])
+            merge["chunk_pages"] = [*merge["chunk_pages"], *extra["chunk_pages"]]
             merge["request_ids"] = [*merge["request_ids"], *extra["request_ids"]]
             merge["conflicts"] = [*merge["conflicts"], *extra["conflicts"]]
             merge["notes"] = [*merge["notes"], *extra["notes"]]
@@ -1386,26 +1391,34 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
 
 
 def _split_parts(selected_by_kind: dict, state: dict) -> tuple[dict, dict]:
-    """(jobs to run, pages per kind). A kind already sent with fewer pages gets a late part for the rest, and one
-    already sent with pages the new plan does not list keeps them (a page once sent is never taken back)."""
+    """Keep every saved provider intent unchanged; newly found pages get a new late part.
+
+    Reinspection may add or remove a classification. Neither changes the bytes/pages of an
+    already submitted primary or late job. All saved parts remain in the final page account.
+    """
     jobs = state.get("provider_jobs", {})
     parts: dict[str, list[int]] = {}
     final: dict[str, list[int]] = {}
     for kind, selected in selected_by_kind.items():
-        if not selected:
-            continue
-        record = jobs.get(kind)
-        sent = (record or {}).get("selected_pages")
-        if sent and sent != selected:
-            selected = sorted({*sent, *selected})
-            parts[kind] = list(sent)
-            late = [page for page in selected if page not in set(sent)]
-            if late:
-                parts[kind + "+"] = late
-        else:
-            parts[kind] = list(selected)
-        final[kind] = list(selected)
+        keys = sorted((key for key in jobs if _mode(key) == kind and jobs[key].get("selected_pages")), key=len)
+        sent = set()
+        for key in keys:
+            pages = list(jobs[key]["selected_pages"])
+            if sent.intersection(pages):
+                raise ExtractionFailure("Saved document page groups overlap. Check the saved results before trying again.")
+            parts[key] = pages
+            sent.update(pages)
+        extra = sorted(set(selected) - sent)
+        if extra:
+            key = kind
+            while key in parts:
+                key += "+"
+            parts[key] = extra
+            sent.update(extra)
+        if sent:
+            final[kind] = sorted(sent)
     return parts, final
+
 
 
 def _map_fields(kind: str, response, designations):
@@ -1652,13 +1665,44 @@ def _found(kind: str, payload: dict) -> bool:
     return any(identity.get(name) for name in ("name", "aadhaar_number", "masked_aadhaar_number", "date_of_birth", "address", "vid"))
 
 
-def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict, warnings: list[str]) -> list[str]:
+def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict, warnings: list[str], review: list[str] | None = None) -> list[str]:
     """Decide what the candidate pages turned out to be. Returns the kinds whose candidate pages were promoted.
 
     A kind with no identified page and nothing found is dropped (the reader saw no passport / card there). A kind with
     nothing identified before and something found takes the candidate pages as its own. Where the kind already had pages,
     its candidates stay candidates that were read along with them."""
-    promoted = []
+    # A weak page can be probed in both identity modes. Conflicting positive answers
+    # do not establish two documents: keep the paid raw results, but no typed file/fields.
+    claims: dict[int, list[str]] = {}
+    for kind, pages in probes.items():
+        extraction = extractions.get(kind)
+        if extraction is None or not _found(kind, extraction["raw"]):
+            continue
+        # With an independently identified page, positive fields can belong to that
+        # page rather than its adjoining probe; they are not evidence of a conflict.
+        if any(not inspected.pages[number - 1].reason.startswith("Confirmed as a ")
+               for number in classified.get(kind, [])):
+            continue
+        for number in pages:
+            page = inspected.pages[number - 1]
+            if page.document_type == "unknown" or page.status == "unread" or page.reason.startswith("Confirmed as a "):
+                claims.setdefault(number, []).append(kind)
+    ambiguous = {number for number, kinds in claims.items() if len(kinds) > 1}
+    changed = set()
+    if ambiguous:
+        message = f"Pages {_ranges(sorted(ambiguous))} gave conflicting passport and Aadhaar interpretations. Check the original; no typed document or fields from those readings were applied."
+        warnings.append(message)
+        if review is not None:
+            review.append(message)
+        for number in ambiguous:
+            page = inspected.pages[number - 1]
+            page.status, page.document_type, page.also, page.inherited = "read", "unknown", [], False
+            page.reason = "Conflicting identity-document interpretations need manual review."
+        for kind in {kind for number in ambiguous for kind in claims[number]}:
+            # The merged provider fields cannot be assigned to individual physical pages safely.
+            extractions.pop(kind, None)
+            changed.add(kind)
+    promoted = list(changed)
     for kind, pages in probes.items():
         extraction = extractions.get(kind)
         if extraction is None or classified.get(kind):
@@ -1856,12 +1900,14 @@ def _extract_attachment(
         check = _cross_check(kind, (state.get("local_patterns") or {}).get(kind) or {}, extraction["raw"])
         if check:
             extraction["coverage"]["crossCheck"] = check
-    promoted = _settle_probes(inspected, probes, classified, extractions, warnings)
+    promoted = _settle_probes(inspected, probes, classified, extractions, warnings, review)
     if promoted:
         # Pages the document reader confirmed are now identified pages of the file.
         report = inspected.to_dict()
         state["inspection"] = {**report, "unsent_page_text": held} if held else report
         for kind in promoted:
+            if kind not in extractions:
+                continue
             extractions[kind]["source"]["local_inspection"] = {**report, "selected_pages": list(selected_by_kind[kind])}
     page_reasons = {page: f"Not sent: {reason}." for page, reason in payload_drops.items()}
     page_reasons.update(_passport_reasons(state, inspected, set(selected_by_kind["passport"])))

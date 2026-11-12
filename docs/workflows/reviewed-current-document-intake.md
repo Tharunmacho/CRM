@@ -1,0 +1,11 @@
+# Reviewed current-candidate document intake
+
+Normal candidate creation remains a current/new intake. It uses the existing assignment rules and creates no client/job placement or travelled stage. Complete uploaded originals remain preserved as `source_bundle`.
+
+`POST /api/ocr/jobs/{job_id}/attach` accepts optional `originalOnly: true` (a JSON boolean). The default remains `false`, retaining existing automatic attachment behavior. The option attaches only the verified original and binds the job to its candidate; it preserves the saved reading, provider job IDs, raw results and derived storage objects. Owner, candidate-work, single-person and source-hash checks apply unchanged. Repeating attachment to the same candidate is idempotent and cannot later add the omitted files; a different candidate is rejected.
+
+After human review, normal deferred file uploads can place selected pages in their actual document slots. A complete resume includes its continuation pages. Historical supporting documents do not prove a current offer, visa, medical result or travel event. A reviewed application form must not become an Aadhaar attachment merely because an automated probe guessed that kind.
+
+Every physical source page must be accounted for. A terminal `needs_review` reading can supply evidence for a human-reviewed candidate; it is not a claim of error-free OCR. Exact unresolved warnings and their dispositions remain in the review provenance and a visible candidate update note. Failed or running readings and split-person evidence remain held. A rejected reading kind is preserved as review evidence outside replayable `ocr_data` document keys, so an ordinary refresh cannot apply its rejected fields.
+
+Provider continuation checkpoints retain the exact selected pages and idempotency key of every primary or late part. Reinspection adds a new late part only for genuinely new pages, and merges all saved parts in physical page order. An explicit retry of one failed part preserves other accepted parts. Conflicting positive identity probes without independently identified document pages remain a review issue; their paid raw responses survive, but their ambiguous typed attachments and fields are withheld.

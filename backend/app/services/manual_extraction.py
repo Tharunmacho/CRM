@@ -280,7 +280,17 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         # Retain selected PDFs beside the original bundle; later attachment is a
         # short transaction and never needs to resubmit paid extraction work.
         documents = state.setdefault("documents", {})
-        if output.get("extractions"):
+        # A previous attempt may already have stored a typed PDF before later
+        # review changed its classification or page set. Keep the old object and
+        # metadata as history, but never attach it as the current document.
+        current_extractions = output.get("extractions") or {}
+        for kind, document in list(documents.items()):
+            selected = (current_extractions.get(kind) or {}).get("selected_pages")
+            if not selected or document.get("selected_pages") != selected:
+                state.setdefault("document_history", {}).setdefault(kind, []).append(deepcopy(document))
+                del documents[kind]
+        checkpoint(state)
+        if current_extractions:
             inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True)
             for kind, extraction in output["extractions"].items():
                 if kind in documents:
@@ -296,7 +306,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 # distinct key. Repeating the same bytes reuses that key safely.
                 document_key = put_bytes(settings, "manual/" + owner + "/" + identifier + "/" + kind + "-" + digest + ".pdf", content, "application/pdf")
                 documents[kind] = {"object_key": document_key, "file_name": kind + ".pdf", "content_type": "application/pdf",
-                                   "size_kb": max(1, (len(content) + 1023) // 1024), "content_hash": digest}
+                                   "size_kb": max(1, (len(content) + 1023) // 1024), "content_hash": digest, "selected_pages": list(selected)}
                 checkpoint(state)
         with sessions() as db:
             # A file read for a candidate's application form fills that candidate's form in this same transaction.
@@ -363,7 +373,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 db.commit()
 
 
-def attach_original(db, user, identifier, candidate_id, settings):
+def attach_original(db, user, identifier, candidate_id, settings, *, original_only=False):
     from app.api.routers.candidates import lock_assignment_cursor
     from app.services.document_person_split import ensure_single_person_source
     lock_assignment_cursor(db)
@@ -390,8 +400,8 @@ def attach_original(db, user, identifier, candidate_id, settings):
         raise HTTPException(409, "The saved file looks damaged. Upload it again.")
     documents = {"source_bundle": {"object_key": job.object_key, "file_name": job.filename,
                   "content_type": job.content_type, "size_kb": job.size_kb, "content_hash": job.content_hash},
-                 **deepcopy((job.state or {}).get("documents", {}))}
-    if job.kind in {"photo", "education", "experience"}:
+                 **({} if original_only else deepcopy((job.state or {}).get("documents", {})))}
+    if not original_only and job.kind in {"photo", "education", "experience"}:
         documents[job.kind] = deepcopy(documents["source_bundle"])
     attached = {}
     for slot, document in documents.items():
@@ -408,12 +418,12 @@ def attach_original(db, user, identifier, candidate_id, settings):
         attached[slot] = row.id
         db.add(AuditEntry(actor_id=user.id, action="Added a saved document to a candidate", target=row.file_name,
             entity_type="candidate", entity_id=candidate.id, meta={"attachment_id": row.id, "slot": slot,
-            "version": row.version, "document_job_id": job.id}))
+            "version": row.version, "document_job_id": job.id, "original_only": original_only}))
     db.flush()
     job.attachment_id = attached["source_bundle"]
     job.candidate_id = candidate.id
     job.status = "attached"
     job.updated_at = now()
-    job.state = {**deepcopy(job.state or {}), "attached_documents": attached}
+    job.state = {**deepcopy(job.state or {}), "attached_documents": attached, "attached_original_only": original_only}
     db.commit()
     return job_out(job, detail=True)

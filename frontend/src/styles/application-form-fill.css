@@ -31,13 +31,13 @@
 /* ---------- Section: identical header, divider above, 32px rhythm ---------- */
 .aff .aff-card { display: flex; flex-direction: column; min-width: 0; padding: 32px 0; border-top: 1px solid var(--border-main); scroll-margin-top: 16px; }
 .aff .aff-card:first-child { padding-top: 0; border-top: 0; }
-.aff .aff-card-head { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
+.aff .aff-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
 .aff .aff-tile { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
 .aff .aff-tile svg { width: 17px; height: 17px; }
-.aff .aff-card-title { flex: 1 1 auto; min-width: 0; }
-.aff .aff-card-title h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; letter-spacing: -0.01em; color: var(--text-main); overflow-wrap: anywhere; }
+.aff .aff-card-title { flex: 1 1 180px; min-width: 0; }
+.aff .aff-card-title h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; letter-spacing: -0.01em; color: var(--text-main); overflow-wrap: normal; }
 .aff .aff-card-title p { margin: 0; font-size: 13px; line-height: 20px; color: var(--text-muted); overflow-wrap: anywhere; }
-.aff .aff-card-aside { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.aff .aff-card-aside { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; max-width: 100%; }
 .aff .aff-card-aside > .aff-note { flex-basis: 100%; margin: 0; text-align: right; }
 .aff .aff-small-btn { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font-size: 12.5px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; transition: border-color .14s, background-color .14s; }
 .aff .aff-small-btn svg { width: 13px; height: 13px; }

@@ -46,12 +46,7 @@ export function FillView({ ctx, canWork, upload, busyKinds, onExtract }: {
   // Worked out from the draft with the form's own rule, so the counts move as the person types and uploads.
   const missing = useMemo(() => completenessOf(draft, form.documents).missing, [draft, form.documents])
 
-  const passportAside = (
-    <>
-      <PassportStatusChip expiryDate={draft.passport.expiryDate} />
-      <PassportUpload slot={form.documents.passport} canWork={canWork} busy={busyKinds.includes('passport')} upload={upload} onExtract={onExtract} />
-    </>
-  )
+  const passportAside = <PassportStatusChip expiryDate={draft.passport.expiryDate} />
 
   const education = (
     <FillRows
@@ -86,7 +81,10 @@ export function FillView({ ctx, canWork, upload, busyKinds, onExtract }: {
         {card.fields.map((item) => <FillFieldView key={item.key} env={env} field={item} canWork={canWork} />)}
       </div>
     )
-    if (card.kind === 'passport') return <PassportDetailsFields ctx={ctx} canWork={canWork} />
+    if (card.kind === 'passport') return <>
+      <PassportUpload slot={form.documents.passport} canWork={canWork} busy={busyKinds.includes('passport')} upload={upload} onExtract={onExtract} />
+      <PassportDetailsFields ctx={ctx} canWork={canWork} />
+    </>
     if (card.kind === 'education') return education
     if (card.kind === 'experience') return <><ExperienceReadingWarning slot={form.documents.resume} />{grid}{experienceRows}</>
     return grid

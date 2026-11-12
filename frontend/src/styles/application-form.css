@@ -85,14 +85,14 @@ body.af-open { overflow: hidden; }
 .af-sec { min-width: 0; padding: 32px 0; border-top: 1px solid var(--af-line); scroll-margin-top: 16px; }
 .af-work > .af-sec:last-child { padding-bottom: 0; }
 /* The header every block shares (it mirrors the Fill details sections): icon chip, title, chip at the right, a hairline under it. */
-.af-sh { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
+.af-sh { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 44px; margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-faint); }
 .af-sh.is-compact { min-height: 32px; margin-bottom: 16px; padding-bottom: 12px; }
 .af-sh-tile { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); }
 .af-sh-tile svg { width: 17px; height: 17px; }
-.af-sh-title { flex: 1 1 auto; min-width: 0; }
-.af-sh-title h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.af-sh-title { flex: 1 1 180px; min-width: 0; }
+.af-sh-title h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; letter-spacing: -0.01em; overflow-wrap: normal; }
 .af-sh-title p { margin: 0; font-size: 13px; line-height: 20px; color: var(--text-muted); }
-.af-sh-chip { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 8px; min-height: 24px; }
+.af-sh-chip { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; max-width: 100%; min-height: 24px; }
 .af-sh-count { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
 
 /* The preview drawer: the paper form, live, on the right. */

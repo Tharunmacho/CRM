@@ -160,6 +160,32 @@ def test_attach_keeps_original_and_selected_documents_without_changing_human_fie
     assert intake.client.get("/api/ocr/jobs").json() == []
 
 
+
+def test_reviewed_original_only_attachment_preserves_cached_reading_without_filing_unreviewed_slots(intake):
+    data = pdf(CV, PASSPORT)
+    job = upload(intake, data)
+    start(intake, job["id"]); process(intake, job["id"])
+    with intake.sessions() as db:
+        before = deepcopy(db.get(DocumentExtractionJob, job["id"]).state)
+        assert set(before["documents"]) == {"resume", "passport"}
+    endpoint = "/api/ocr/jobs/" + job["id"] + "/attach"
+    response = intake.client.post(endpoint, json={"candidateId": "candidate", "originalOnly": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "attached"
+    # A repeated request, even an older client using the default, cannot add more files.
+    assert intake.client.post(endpoint, json={"candidateId": "candidate"}).status_code == 200
+    with intake.sessions() as db:
+        rows = list(db.scalars(select(Attachment).where(Attachment.entity_id == "candidate")))
+        assert len(rows) == 1 and rows[0].slot == "source_bundle"
+        assert read_bytes(intake.settings, rows[0].object_key) == data
+        saved = db.get(DocumentExtractionJob, job["id"])
+        assert saved.candidate_id == "candidate" and saved.attachment_id == rows[0].id
+        assert saved.state["documents"] == before["documents"]
+        assert saved.state["provider_jobs"] == before["provider_jobs"]
+        assert saved.state["attached_original_only"] is True
+        assert db.get(Candidate, "candidate").name == "Human reviewed name"
+    assert len(intake.submissions) == 2
+
 def test_saved_original_can_attach_without_reading_and_cannot_be_moved(intake):
     job = upload(intake)
     endpoint = "/api/ocr/jobs/" + job["id"] + "/attach"
@@ -173,14 +199,15 @@ def test_saved_original_can_attach_without_reading_and_cannot_be_moved(intake):
         assert db.scalar(select(func.count()).select_from(Attachment)) == 1
 
 
-def test_saved_files_attach_only_to_a_candidate_the_person_may_work(intake):
+@pytest.mark.parametrize("original_only", [False, True])
+def test_saved_files_attach_only_to_a_candidate_the_person_may_work(intake, original_only):
     job = upload(intake)
     endpoint = "/api/ocr/jobs/" + job["id"] + "/attach"
     with intake.sessions() as db:
         # Entered by this person, since given to someone else: no longer theirs to add files to.
         db.add(Candidate(id="theirs", ref="C-THEIRS", name="Theirs", phone="777777", owner_id="other", created_by="owner", source=Source.walk_in))
         db.commit()
-    refused = intake.client.post(endpoint, json={"candidateId": "theirs"})
+    refused = intake.client.post(endpoint, json={"candidateId": "theirs", "originalOnly": original_only})
     assert refused.status_code == 403 and "assigned to Other" in refused.json()["detail"]
     with intake.sessions() as db:
         assert db.scalar(select(func.count()).select_from(Attachment)) == 0
@@ -468,3 +495,45 @@ def test_expanded_cached_resume_preserves_immutable_old_pdf_and_saves_both_jobs_
         assert db.scalar(select(func.count()).select_from(Attachment).where(Attachment.entity_id == "candidate")) == 1
     assert len(list((Path(intake.settings.storage_dir)/'manual'/'owner'/saved['id']).glob('resume*.pdf'))) == 2
     assert intake.submissions == [] and intake.polls == []
+
+
+@pytest.mark.parametrize("value", ["false", "true", 1, None, []])
+def test_original_only_requires_a_boolean_before_any_attachment(intake, value):
+    job = upload(intake)
+    response = intake.client.post("/api/ocr/jobs/" + job["id"] + "/attach", json={"candidateId": "candidate", "originalOnly": value})
+    assert response.status_code == 422
+    with intake.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Attachment)) == 0
+
+
+def test_conflicting_probe_results_finish_as_review_not_repeated_selected_page_failure(intake, monkeypatch):
+    from test_document_extraction import UNCLASSIFIED
+    monkeypatch.setattr(document_extraction, "_probe_pages", lambda inspected: {"passport": [2], "aadhaar": [2]})
+    intake.settings.veris_early_dispatch = False
+    job = upload(intake, pdf(CV, UNCLASSIFIED))
+    start(intake, job["id"]); process(intake, job["id"])
+    with intake.sessions() as db:
+        saved = db.get(DocumentExtractionJob, job["id"])
+        assert saved.status == "needs_review" and saved.attempts == 0
+        assert set(saved.state["documents"]) == {"resume"}
+        assert saved.state["provider_jobs"]["passport"]["result"]
+        assert saved.state["provider_jobs"]["aadhaar"]["result"]
+        assert saved.result["coverage"]["complete"] is False
+        # An earlier failed run could have filed a now-rejected interpretation.
+        # A retry removes only its current pointer, retaining bytes/history and paid jobs.
+        state = deepcopy(saved.state)
+        stale = deepcopy(state["documents"]["resume"])
+        stale["selected_pages"] = [2]
+        state["documents"]["aadhaar"] = stale
+        state.pop("output", None)
+        saved.state, saved.status = state, "pending"
+        db.commit()
+    paid_count = len(intake.submissions)
+    process(intake, job["id"])
+    with intake.sessions() as db:
+        saved = db.get(DocumentExtractionJob, job["id"])
+        assert saved.status == "needs_review"
+        assert set(saved.state["documents"]) == {"resume"}
+        assert saved.state["document_history"]["aadhaar"][-1] == stale
+        assert read_bytes(intake.settings, stale["object_key"])
+    assert len(intake.submissions) == paid_count

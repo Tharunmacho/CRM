@@ -706,3 +706,84 @@ Design and drawing software
     else:
         assert coverage["pages"]["unresolved"] == []
         assert coverage["complete"] is True and output["status"] == "complete"
+
+
+def test_reinspection_preserves_accepted_late_pages_and_adds_third_part_once(environment, monkeypatch):
+    data = pdf(CV, CV, CV)
+    inspect = subject.inspect_document
+    selected = {1}
+    def changed_inspection(*args, **kwargs):
+        report = inspect(*args, **kwargs)
+        for page in report.pages:
+            if page.page_number not in selected:
+                page.document_type, page.also, page.inherited = "unknown", [], False
+        return report
+    monkeypatch.setattr(subject, "inspect_document", changed_inspection)
+    monkeypatch.setattr(subject, "_probe_pages", lambda inspected: {})
+    environment.settings.veris_early_dispatch = False
+    environment.extract(data)
+    first = deepcopy(environment.state["provider_jobs"]["resume"])
+    selected.add(2)
+    environment.settings.ocr_languages = "eng+hin"
+    environment.extract(data)
+    late = deepcopy(environment.state["provider_jobs"]["resume+"])
+    # The next local pass drops page2 and discovers page3. Accepted page2 stays paid and bound.
+    selected.remove(2); selected.add(3)
+    environment.settings.ocr_languages = "eng+tam"
+    final = environment.extract(data)
+    assert environment.state["provider_jobs"]["resume"] == first
+    assert environment.state["provider_jobs"]["resume+"] == late
+    assert environment.state["provider_jobs"]["resume++"]["selected_pages"] == [3]
+    assert final["extractions"]["resume"]["source"]["selected_pages"] == [1, 2, 3]
+    assert final["coverage"]["pages"]["sent"] == [1, 2, 3]
+    assert len(environment.submissions) == len(environment.polls) == 3
+    environment.extract(data)
+    assert len(environment.submissions) == len(environment.polls) == 3
+
+
+def test_conflicting_identity_probes_stay_reviewable_without_two_typed_documents(environment, monkeypatch):
+    data = pdf(CV, UNCLASSIFIED)
+    monkeypatch.setattr(subject, "_probe_pages", lambda inspected: {"passport": [2], "aadhaar": [2]})
+    environment.settings.veris_early_dispatch = False
+    output = environment.extract(data)
+    assert output["status"] == "needs_review" and output["coverage"]["complete"] is False
+    assert set(output["extractions"]) == {"resume"}
+    assert output["inspection"]["passport_pages"] == output["inspection"]["aadhaar_pages"] == []
+    assert output["inspection"]["unknown_pages"] == [2]
+    assert any("conflicting passport and Aadhaar" in issue for issue in output["coverage"]["issues"])
+    for kind in ("passport", "aadhaar"):
+        assert environment.state["provider_jobs"][kind]["result"] == environment.results[kind]
+    again = environment.extract(data)
+    assert set(again["extractions"]) == {"resume"} and again["status"] == "needs_review"
+    assert len(environment.submissions) == len(environment.polls) == 3
+
+
+def test_explicit_retry_preserves_paid_late_parts_even_when_no_primary_remains(environment):
+    import hashlib
+    data = pdf(CV, CV, CV)
+    digest = hashlib.sha256(data).hexdigest()
+    state = {"provider_jobs": {}}
+    for kind, page, status in [("resume", 1, "failed"), ("resume+", 2, "failed"), ("resume++", 3, "succeeded")]:
+        record = subject._new_record(kind, [page], digest, 0, environment.settings)
+        record.update(job_id="existing-" + kind, status=status)
+        if status == "succeeded":
+            record["result"] = result("resume", 1)
+        state["provider_jobs"][kind] = record
+    paid = deepcopy(state["provider_jobs"]["resume++"])
+    subject.request_extraction_retry(state)
+    assert set(state["provider_jobs"]) == {"resume++"}
+    assert state["provider_jobs"]["resume++"] == paid
+    inspected = subject.inspect_document(data)
+    def run(pages):
+        return subject._run_kinds({"resume": pages}, inspected, inspected.to_dict(), digest,
+            state=state, save=lambda value: environment.saved.append(deepcopy(value)), settings=environment.settings,
+            designations=[], unsaved=True)
+    extracted, _warnings, covered, _review = run([3])
+    assert covered and extracted["resume"]["source"]["selected_pages"] == [3]
+    assert not environment.submissions and not environment.polls
+    # New primary work may now be retried; already paid page3 still never resubmits.
+    extracted, _warnings, covered, _review = run([1, 3])
+    assert covered and extracted["resume"]["source"]["selected_pages"] == [1, 3]
+    assert state["provider_jobs"]["resume++"]["job_id"] == paid["job_id"]
+    assert state["provider_jobs"]["resume++"]["result"] == paid["result"]
+    assert len(environment.submissions) == len(environment.polls) == 1
