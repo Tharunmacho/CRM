@@ -138,11 +138,6 @@ export function queryFor(filters: TravelledFilters): string {
   return query.toString()
 }
 
-/** Validate a draft before applying it, preserving the same rules as a bookmarked URL. */
-export function normalizeFilters(filters: TravelledFilters): TravelledFilters {
-  return filtersFromParams(new URLSearchParams(queryFor(filters)))
-}
-
 /** Change one filter. Changing a date part clears the parts after it; a year, month or day replaces any From / To range. */
 export function setFilter(filters: TravelledFilters, key: TravelledFilterKey, value: string): TravelledFilters {
   const next = { ...filters, [key]: value }
