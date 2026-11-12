@@ -11,6 +11,8 @@ How it works now.
   dies the lease simply runs out and the job is claimed again (status ``processing`` with an expired lease is ready).
 * Ready jobs are taken oldest first, interleaved by owner (everyone's first file, then everyone's second ...), so one
   person's twenty files do not hold back a single new upload.
+* Manual reads due for a continuation for at least a minute alternate with ordinary ready work. A bulk upload cannot
+  postpone polling accepted provider jobs until every new file has been inspected, and retries cannot starve new files.
 * ``Dispatcher`` keeps ``concurrency`` jobs running and claims a new one the moment a slot frees. It wakes at once on a
   Postgres NOTIFY (``crm_extraction_wake``) sent when a document is queued, so polling is only a safety net: every
   ``busy_poll`` seconds for a couple of seconds after work was found, otherwise every ``idle_poll`` seconds (15 by
@@ -79,6 +81,7 @@ class LeasedQueue:
     sessions: Callable
     order_col: str = "next_attempt_at"
     order_expr: str = ""   # when set, ``{a}`` is the alias: the due time to order by (instead of the column order_col)
+    lane_expr: str = "0"   # optional 0/1 expression: overdue continuations use lane 1, ordinary work uses lane 0
     owner_expr: str = "j.owner_id"
     join: str = ""
     where: str = ""
@@ -86,6 +89,7 @@ class LeasedQueue:
     release_set: str = "status = 'retry', next_attempt_at = :due, updated_at = :now, claimed_by = NULL, lease_until = NULL"
     release_where: str = "status = 'processing'"
     extra_params: dict = field(default_factory=dict)
+    _preferred_lane: int = field(default=1, init=False, repr=False)
 
     def _ready(self, alias: str) -> str:
         return self.ready.format(a=alias)
@@ -94,31 +98,46 @@ class LeasedQueue:
         return self.order_expr.format(a=alias) if self.order_expr else f"{alias}.{self.order_col}"
 
     def claim(self, worker: str, limit: int, lease_seconds: float, *, now: datetime | None = None) -> list[str]:
-        """Claim up to ``limit`` ready jobs (oldest first, fair across owners) in ONE statement."""
+        """Claim ready jobs in one statement, fair across owners and, when enabled, both scheduling lanes."""
         if limit <= 0:
             return []
         now = now or utcnow()
         statement = text(f"""
-            WITH ranked AS (
-                SELECT j.id, row_number() OVER (PARTITION BY {self.owner_expr} ORDER BY {self._order('j')}, j.id) AS rn
+            WITH eligible AS (
+                SELECT j.id, {self.owner_expr} AS owner, {self._order('j')} AS due,
+                       {self.lane_expr.format(a='j')} AS lane
                 FROM {self.table} j {self.join}
                 WHERE {self._ready('j')} {self.where}
+            ), lanes AS (
+                SELECT eligible.*, CASE WHEN lane = :preferred_lane THEN 0 ELSE 1 END AS lane_priority,
+                       row_number() OVER (PARTITION BY owner, lane ORDER BY due, id) AS lane_rank
+                FROM eligible
+            ), ranked AS (
+                SELECT lanes.*, row_number() OVER (
+                    PARTITION BY owner ORDER BY lane_rank, lane_priority, due, id) AS rn
+                FROM lanes
             ), pick AS (
-                SELECT j.id, ranked.rn, {self._order('j')} AS due
+                SELECT j.id, ranked.rn, ranked.lane_priority, ranked.due
                 FROM {self.table} j JOIN ranked ON ranked.id = j.id
                 WHERE {self._ready('j')}
-                ORDER BY ranked.rn, {self._order('j')}, j.id
+                ORDER BY ranked.rn, ranked.lane_priority, ranked.due, j.id
                 LIMIT :limit FOR UPDATE OF j SKIP LOCKED
             )
             UPDATE {self.table} t SET {self.set_clause}, claimed_by = :worker, lease_until = :lease
             FROM pick WHERE t.id = pick.id AND {self._ready('t')}
-            RETURNING t.id, pick.rn, pick.due
+            RETURNING t.id, pick.rn, pick.lane_priority, pick.due
         """)
-        params = {"now": now, "lease": now + timedelta(seconds=lease_seconds), "worker": worker, "limit": limit, **self.extra_params}
+        params = {"now": now, "lease": now + timedelta(seconds=lease_seconds), "worker": worker, "limit": limit,
+                  "preferred_lane": self._preferred_lane, **self.extra_params}
         with self.sessions() as db:
             rows = db.execute(statement, params).all()
             db.commit()
-        return [row.id for row in sorted(rows, key=lambda row: (row.rn, row.due, row.id))]
+        if rows:
+            # A dispatcher usually refills one slot at a time. Alternating only within a claim batch would still
+            # starve one lane at concurrency 1. Each worker alternates successful claims independently; no extra
+            # scheduling row, cross-worker lock or write is needed. A restart may give either lane one extra turn.
+            self._preferred_lane = 1 - self._preferred_lane
+        return [row.id for row in sorted(rows, key=lambda row: (row.rn, row.lane_priority, row.due, row.id))]
 
     def peek_sql(self, index: int) -> str:
         """``EXISTS(...)`` for 'is any job ready?'. Read only: it never locks, never writes, never wakes a browser."""
@@ -155,6 +174,8 @@ def manual_queue(sessions, settings) -> LeasedQueue:
         # Due time = ready_at for rows stamped by an installation (whose next_attempt_at is hidden from older readers, see
         # migration 0032), next_attempt_at for older rows.
         order_expr="COALESCE({a}.ready_at, {a}.next_attempt_at)",
+        lane_expr="CASE WHEN {a}.started_at IS NOT NULL AND "
+                  "COALESCE({a}.ready_at, {a}.next_attempt_at) <= :now - interval '60 seconds' THEN 1 ELSE 0 END",
         ready="(({a}.status IN ('pending','retry') AND COALESCE({a}.ready_at, {a}.next_attempt_at) <= :now) "
               "OR ({a}.status = 'processing' AND ({a}.lease_until IS NULL OR {a}.lease_until < :now)))",
         set_clause="status = 'processing', started_at = :now, updated_at = :now",

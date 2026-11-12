@@ -166,6 +166,7 @@ def test_expired_lease_is_claimed_again_but_a_live_one_is_not(env):
 
 def test_two_workers_claiming_from_threads_never_take_the_same_job(env):
     ids = add_jobs(env, 60)
+    mark_continuations(env, ids[::2], due=utcnow() - timedelta(seconds=80))
     taken = {"one": [], "two": []}
     barrier = threading.Barrier(2)
 
@@ -192,6 +193,102 @@ def test_owners_are_interleaved_so_one_big_upload_does_not_starve_a_single_file(
     claimed = queue_for(env, None).claim("w", 10, 60)
     assert claimed.index(single[0]) == 1 and claimed[0] == many[0]    # second in line, not seventh
     assert [i for i in claimed if i in many] == many                  # each owner's own files stay in order
+
+
+def mark_continuations(env, identifiers, *, due, started=None):
+    with env.sessions() as db:
+        db.execute(text("UPDATE document_extraction_jobs SET status='retry', started_at=:started, "
+                        "next_attempt_at=:due, ready_at=:due WHERE id=ANY(:ids)"),
+                   {"ids": identifiers, "due": due, "started": started or due - timedelta(seconds=10)})
+        db.commit()
+
+
+def test_single_slot_refills_alternate_overdue_continuations_and_an_initial_backlog(env):
+    ordinary = add_jobs(env, 6, oldest=600)
+    continued = add_jobs(env, 2, prefix="retry", oldest=80)
+    now = utcnow()
+    mark_continuations(env, continued, due=now - timedelta(seconds=80))
+    queue = queue_for(env, None)
+    taken = []
+    # The provider stays busy indefinitely: each continuation becomes overdue again before the next turn.
+    # Both kinds must progress even though each claim can only refill ONE slot.
+    for _ in range(8):
+        identifier, = queue.claim("w", 1, 60, now=now)
+        taken.append(identifier)
+        with env.sessions() as db:
+            if identifier in continued:
+                db.execute(text("UPDATE document_extraction_jobs SET status='retry', ready_at=:due, next_attempt_at=:due, "
+                                "claimed_by=NULL, lease_until=NULL WHERE id=:id"),
+                           {"id": identifier, "due": now - timedelta(seconds=61)})
+            else:
+                db.execute(text("UPDATE document_extraction_jobs SET status='completed', claimed_by=NULL, lease_until=NULL "
+                                "WHERE id=:id"), {"id": identifier})
+            db.commit()
+        now += timedelta(seconds=1)
+    assert taken[::2] == [continued[0], continued[1], continued[0], continued[1]]
+    assert taken[1::2] == ordinary[:4]
+
+
+def test_lane_order_keeps_every_owners_first_turn_before_a_second_turn(env):
+    ordinary = add_jobs(env, 3, owner="a", oldest=600)
+    continued = add_jobs(env, 2, owner="a", prefix="retry", oldest=80)
+    other = add_jobs(env, 1, owner="b", oldest=5)
+    now = utcnow()
+    mark_continuations(env, continued, due=now - timedelta(seconds=80))
+    claimed = queue_for(env, None).claim("w", 10, 60, now=now)
+    assert claimed[:2] == [continued[0], other[0]]
+    assert [value for value in claimed if value != other[0]] == [
+        continued[0], ordinary[0], continued[1], ordinary[1], ordinary[2]]
+
+
+def test_promotion_requires_a_started_overdue_job_and_never_bypasses_eligibility(env):
+    ordinary = add_jobs(env, 1, oldest=600)
+    recent, future, leased, overdue = add_jobs(env, 4, prefix="retry", oldest=80)
+    now = utcnow()
+    mark_continuations(env, [recent], due=now - timedelta(seconds=59))
+    mark_continuations(env, [future], due=now + timedelta(seconds=1))
+    mark_continuations(env, [leased, overdue], due=now - timedelta(seconds=60))
+    with env.sessions() as db:
+        db.execute(text("UPDATE document_extraction_jobs SET status='processing', claimed_by='another', lease_until=:lease "
+                        "WHERE id=:id"), {"id": leased, "lease": now + timedelta(seconds=120)})
+        db.commit()
+    assert queue_for(env, None).claim("w", 10, 60, now=now) == [overdue, ordinary[0], recent]
+
+
+def test_overdue_accepted_job_is_polled_without_resubmitting_before_initial_backlog(intake, monkeypatch):
+    job = upload(intake)
+    start(intake, job["id"])
+    intake.statuses["resume"] = "running"
+    queue = manual_queue(intake.sessions, intake.settings)
+    assert queue.claim("w", 1, 120) == [job["id"]]
+    queue.runner(job["id"], "w")
+    assert len(intake.submissions) == 1 and intake.polls == ["job-resume"]
+    now = utcnow()
+    fixture = SimpleNamespace(sessions=intake.sessions, counter=0)
+    backlog = add_jobs(fixture, 8, owner="owner", oldest=600)
+    mark_continuations(fixture, [job["id"]], due=now - timedelta(seconds=61))
+
+    class PollOnly:
+        def __init__(self, **_options): self.jobs = self
+        def __enter__(self): return self
+        def __exit__(self, *_args): pass
+        def submit(self, *_args, **_kwargs): pytest.fail("Accepted provider work must not be submitted again")
+        def get(self, identifier):
+            assert identifier == "job-resume"
+            intake.polls.append(identifier)
+            return SimpleNamespace(status="succeeded", result=intake.results["resume"], error=None)
+
+    monkeypatch.setattr(document_extraction, "VerisOCR", PollOnly)
+    monkeypatch.setattr(document_extraction, "inspect_document", lambda *_a, **_k: pytest.fail("Inspection repeated"))
+    # The previous successful claim switched to ordinary preference: one new file gets a turn, then the old
+    # accepted job is polled while seven untouched initial uploads still wait.
+    assert queue.claim("w", 1, 120, now=now) == backlog[:1]
+    assert queue.claim("w", 1, 120, now=now) == [job["id"]]
+    queue.runner(job["id"], "w")
+    with intake.sessions() as db:
+        assert db.get(DocumentExtractionJob, job["id"]).status == "completed"
+        assert all(db.get(DocumentExtractionJob, identifier).status == "pending" for identifier in backlog[1:])
+    assert len(intake.submissions) == 1 and intake.polls == ["job-resume", "job-resume"]
 
 
 def test_bundles_are_leased_too_and_a_failed_bundle_is_left_alone(env):
