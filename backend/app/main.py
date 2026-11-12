@@ -20,6 +20,7 @@ from app.api.routers import candidate_import as candidate_import_router
 from app.api.routers import application_form, form_options, daily_work as daily_work_router, document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
 from app.api.routers import reference_agencies as reference_agencies_router
 from app.api.routers import travelled as travelled_router
+from app.api.routers import candidate_exports
 from app.core.config import get_settings
 from app.core.timing import ApiTimingMiddleware
 from app.db.models import User
@@ -140,6 +141,7 @@ app.include_router(auth.router)
 app.include_router(applications.router)
 app.include_router(candidates.router)
 app.include_router(candidate_import_router.router)
+app.include_router(candidate_exports.router)
 app.include_router(application_form.router)
 app.include_router(form_options.router)
 app.include_router(data.router)

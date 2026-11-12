@@ -11,7 +11,7 @@ from sqlalchemy.orm import aliased, defer
 from sqlalchemy.orm.attributes import set_committed_value
 from app.api.schemas import CandidateOut
 from app.core.config import get_settings
-from app.db.models import Application, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
+from app.db.models import Application, Attachment, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
 from app.domain.stages import STAGES
 from app.services.candidate_identity import normalized_labels
 from app.services.agency_display import agency_display_expression
@@ -352,15 +352,27 @@ def export_candidates(db, filters):
     labels: dict[str, dict[str, str]] = {}
     for category, value, label in db.execute(select(FormOption.category, FormOption.value, FormOption.label).where(FormOption.category.in_(("service_charges_status", "interest_level")))):
         labels.setdefault(category, {})[value] = label
+    from app.services.application_form import LEGACY_SLOTS, required_for_deployment
+    required = required_for_deployment()
+    matching_ids = search_statement(filters).order_by(None).with_only_columns(Candidate.id)
+    uploaded = {}
+    for candidate_id, slot in db.execute(select(Attachment.entity_id, Attachment.slot).where(
+        Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
+    ).distinct()):
+        uploaded.setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
     rows = [["Reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
-             "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level"]]
+             "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level",
+             *[label + " document" for _slot, label in required], "Missing mandatory documents"]]
     for candidate in candidates:
         app = current_apps.get(candidate.id)
         service = labels.get("service_charges_status", {}).get(candidate.service_charges_status, candidate.service_charges_status)
         interest = labels.get("interest_level", {}).get(candidate.interest_level, candidate.interest_level) if candidate.interest_level else ""
+        saved = uploaded.get(candidate.id, set())
         rows.append([candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
                      candidate.total_experience, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
                      candidate.status.value, candidate.created_at.isoformat(),
-                     candidate.dob.isoformat() if candidate.dob else "", candidate.whatsapp or "", candidate.country_preference or "", service, interest])
+                     candidate.dob.isoformat() if candidate.dob else "", candidate.whatsapp or "", candidate.country_preference or "", service, interest,
+                     *["Uploaded" if slot in saved else "Missing" for slot, _label in required],
+                     ", ".join(label for slot, label in required if slot not in saved)])
     return xlsx_rows([("Candidates", rows), ("Filters", [[key, str(val)] for key, val in vars(filters).items()])])

@@ -32,26 +32,30 @@ from app.services.reading_notes import plain_issues, plain_notes
 # Document slots of the form, in the order shown (docs/workflows/application-form-v2-contract.md section 2):
 # (slot, label, hint, required from this stage on (None: see `always`), always counted, read by OCR, several files allowed)
 SLOT_SPECS = (
+    ("application_form", "Application form", "The completed candidate application form.", None, True, False, False),
     ("resume", "Resume", "The latest resume. It is read to fill the form.", None, True, True, False),
     ("passport", "Passport", "The photo page of the passport. It is read to fill the form.", None, True, True, False),
-    ("photo", "Photo", "A recent passport-size photo (an image).", None, True, False, False),
-    ("education_certificate", "Education certificate", "The highest qualification certificate.", None, True, False, False),
-    ("experience_certificate", "Experience certificate", "Optional. Certificates from previous employers.", None, False, False, False),
-    ("signed_offer", "Signed offer", "The offer letter signed by the candidate.", 5, False, False, False),
     ("medical", "Medical", "The medical fitness report.", 6, False, False, False),
+    ("signed_offer", "Signed offer", "The offer letter signed by the candidate.", 5, False, False, False),
     ("pcc", "Police clearance certificate (PCC)", "The police clearance certificate.", 7, False, False, False),
     ("visa", "Visa", "The visa received for the candidate.", 9, False, False, False),
-    ("google_review", "Google review", "Proof of the candidate's Google review.", 9, False, False, False),
-    ("visa_stamping", "Visa stamping", "The passport page with the visa stamp.", 10, False, False, False),
-    ("emigration", "Emigration", "The emigration clearance.", 10, False, False, False),
     ("air_ticket", "Air ticket", "The air ticket.", 11, False, False, False),
+    ("undertaking_letter", "Undertaking letter", "The undertaking letter signed by the candidate, before deployment.", 11, False, False, False),
+    ("emigration", "Emigration", "The emigration clearance, required after the visa stage.", 10, False, False, False),
+    ("insurance", "Insurance", "The candidate's insurance policy, before deployment.", 11, False, False, False),
+    ("invoice", "Invoice", "The candidate's invoice, before deployment.", 11, False, False, False),
+    ("photo", "Photo", "Optional. A recent passport-size photo (an image).", None, False, False, False),
+    ("education_certificate", "Education certificate", "Optional. The highest qualification certificate.", None, False, False, False),
+    ("experience_certificate", "Experience certificate", "Optional. Certificates from previous employers.", None, False, False, False),
+    ("google_review", "Google review", "Optional. Proof of the candidate's Google review.", None, False, False, False),
+    ("visa_stamping", "Visa stamping", "Optional. The passport page with the visa stamp.", None, False, False, False),
     ("other", "Other documents", "Optional. Anything else, several files allowed.", None, False, False, True),
 )
 SLOTS = tuple(spec[0] for spec in SLOT_SPECS)
 READ_SLOTS = tuple(spec[0] for spec in SLOT_SPECS if spec[5])
 SLOT_LABELS = {spec[0]: spec[1] for spec in SLOT_SPECS}
 # The slots that are not part of the candidate's older Documents list (data.DOCUMENT_SLOTS): stored only.
-EXTRA_SLOTS = tuple(spec[0] for spec in SLOT_SPECS[3:])
+EXTRA_SLOTS = tuple(slot for slot in SLOTS if slot not in {"resume", "passport", "photo"})
 # Slot keys stored before the form had its own certificate slots; they are folded into the new ones when the payload is built.
 LEGACY_SLOTS = {"education": "education_certificate", "experience": "experience_certificate"}
 STORED_SLOTS = SLOTS + tuple(LEGACY_SLOTS)
@@ -80,11 +84,10 @@ TRACKING = (
     ("visa", "Visa", 9, True),
     ("visa_stamping", "Visa Stamping", 10, True),
     ("ticket", "Ticket", 11, True),
-    ("invoice_generated", "Invoice Generated", None, True),
+    ("invoice_generated", "Invoice", None, True),
 )
 NOT_TRACKED_NOTE = {
     "pcc": "Police clearance is not a stage in the CRM, so it is not tracked here.",
-    "invoice_generated": "Invoicing is not a stage in the CRM, so it is not tracked here.",
 }
 FAILED_OUTCOMES = {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 6: {"Unfit"}}
 CLOSURE_LABELS = {
@@ -129,7 +132,8 @@ def expiry_info(expiry: date | None, today: date) -> dict:
     return {"status": status, "daysLeft": days}
 
 
-def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: ZoneInfo | None = None) -> dict:
+def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: ZoneInfo | None = None,
+                     invoice: dict | None = None) -> dict:
     """Rows of section 7 from the application's own stage records.
 
     `application` is an Application (or anything with status/current_stage/closure_reason) or None;
@@ -151,6 +155,16 @@ def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: Z
             "extra": not listed, "tracked": stage is not None, "status": "not_started", "checked": False,
             "date": None, "completedAt": None, "completedBy": None, "outcome": None, "attempt": None, "note": NOT_TRACKED_NOTE.get(key),
         }
+        if key == "invoice_generated":
+            row.update(tracked=True, note="Invoice not uploaded.")
+            if invoice is not None:
+                uploaded_at = invoice.get("uploadedAt")
+                row.update(status="completed", checked=True, completedAt=uploaded_at,
+                           date=datetime.fromisoformat(uploaded_at).astimezone(tz).date().isoformat() if uploaded_at else None,
+                           completedBy=invoice.get("uploadedBy"), outcome="Uploaded",
+                           note="Invoice on file. Upload time is shown; this does not record payment.")
+            rows.append(row)
+            continue
         if stage is None:
             row["status"] = "not_applicable"
             rows.append(row)
@@ -175,7 +189,8 @@ def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: Z
             row["status"] = "not_applicable"
             row["note"] = "The application is closed."
         rows.append(row)
-    tracked = [r for r in rows if r["tracked"]]
+    # Invoice evidence is visible but is not a twelfth workflow stage.
+    tracked = [r for r in rows if r["stage"] is not None]
     done = sum(1 for r in tracked if r["status"] == "completed")
     summary = {
         "completed": done, "tracked": len(tracked), "percent": round(100 * done / len(tracked)),
@@ -519,7 +534,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
             "sourceDetail": candidate.source_detail,
             "recruiter": {"id": candidate.owner_id, "name": owner_name or "Former team member"} if candidate.owner_id else None,
         },
-        "tracking": tracking_payload(application, selected_stages, names, tz),
+        "tracking": tracking_payload(application, selected_stages, names, tz, invoice=slots["invoice"]["current"]),
         "fieldSources": fx.public_sources(sources),
         "documentOrder": list(SLOTS),
         "deployment": _deployment(slots),

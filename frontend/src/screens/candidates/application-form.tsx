@@ -21,6 +21,7 @@ import { FormErrorCard, FormSkeleton } from '@/features/application-form/compone
 import { SectionHeader } from '@/features/application-form/components/section-header'
 import { AssignmentBar } from '@/features/application-form/components/assignment-bar'
 import { DocumentsSection } from '@/features/application-form/components/documents-section'
+import { RecordDownloads } from '@/features/application-form/components/record-downloads'
 import { FillView } from '@/features/application-form/fill/fill-view'
 import { NotesPanel, StageClockBar, type FeedbackActions } from '@/features/application-form/components/feedback-panel'
 import { FormSheet } from '@/features/application-form/components/form-sheet'
@@ -28,6 +29,7 @@ import { SidePanel } from '@/features/application-form/components/side-panel'
 import type { FormContext } from '@/features/application-form/components/sections'
 import '@/styles/application-form.css'
 import '@/styles/application-form-v2.css'
+import '@/styles/candidate-records.css'
 
 /** Stands in for the notes of a server that has none yet: the panel still opens its composer for people who can work the candidate. */
 const EMPTY_FEEDBACK: FeedbackData = { supported: false, items: [], canWrite: false, stageClock: null }
@@ -245,6 +247,7 @@ export default function ApplicationFormPage() {
                 <div className="af-fill-wrap" ref={fillRef}>
                   <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} />
                 </div>
+                <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[form.candidate.ref, name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
                 <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} />
                 <ProcessSection form={form} canOpen={canWork} onOpen={(stage) => setOpenStage({ stage })} />
                 <NotesPanel feedback={feedback ?? EMPTY_FEEDBACK} actions={feedbackActions} viewer={{ id: store.me.id, role: store.me.role }} canWork={canWork} />

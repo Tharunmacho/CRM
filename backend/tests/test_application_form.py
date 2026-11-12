@@ -181,8 +181,8 @@ def test_blank_candidate_form_has_every_docx_section_and_lists_what_is_missing(d
     missing = {item["key"]: item for item in data["completeness"]["missing"]}
     assert missing["documents.passport"]["message"] == "Passport not uploaded"
     assert missing["personal.fatherName"]["message"] == "Father's name is missing"
-    assert data["completeness"]["total"] == 20 and "personal.candidateName" not in missing  # 16 fields + resume, passport, photo, education certificate
-    assert data["completeness"]["percent"] == round(100 * data["completeness"]["filled"] / 20)
+    assert data["completeness"]["total"] == 19 and "personal.candidateName" not in missing  # 16 fields + application form, resume, passport
+    assert data["completeness"]["percent"] == round(100 * data["completeness"]["filled"] / 19)
     assert data["candidate"]["canEdit"] is True and data["processing"] is False and data["fieldSources"] == {}
 
 
@@ -449,7 +449,8 @@ def test_tracking_follows_the_stage_records_live(desk):
     assert data["recruitment"]["position"] == "Welder" and data["recruitment"]["clientContact"] == "Mr Contact"
     rows = {r["key"]: r for r in data["tracking"]["rows"]}
     assert rows["prescreening"]["status"] == "in_progress" and rows["forwarded"]["status"] == "not_started"
-    assert rows["pcc"]["status"] == rows["invoice_generated"]["status"] == "not_applicable" and rows["pcc"]["stage"] is None
+    assert rows["pcc"]["status"] == "not_applicable" and rows["pcc"]["stage"] is None
+    assert rows["invoice_generated"]["status"] == "not_started" and rows["invoice_generated"]["label"] == "Invoice"
 
     complete(desk, app_id, payload(desk, app_id, 1))
     rows = {r["key"]: r for r in form(desk)["tracking"]["rows"]}
@@ -519,7 +520,7 @@ def test_screening_details_save_with_provenance_and_mirror_the_follow_up_date_to
     assert screening["nextFollowUpDate"] == tomorrow.isoformat() and screening["callOutcome"] is None
     assert {"screening.nativePlace", "screening.interestLevel", "screening.nextFollowUpDate", "screening.jobPreference", "screening.skills"} <= set(data["fieldSources"])
     assert data["completeness"]["optional"]["missing"] == [] and data["completeness"]["optional"]["total"] == 9
-    assert data["completeness"]["total"] == 20  # 16 fields and the four always-counted documents
+    assert data["completeness"]["total"] == 19  # 16 fields and the three always-counted documents
     with desk.sessions() as db:
         todo = db.scalar(select(TodoItem))
         assert (todo.owner_id, todo.link_to, todo.link_label, todo.done) == ("staff", "/candidates/candidate", "Follow-up", False)

@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import {
-  Briefcase, CheckCircle2, Clock, Eye, FileSignature, FileText, Files, GraduationCap, IdCard, Image as ImageIcon, Landmark,
+  Briefcase, CheckCircle2, Clock, Download, Eye, FileSignature, FileText, Files, GraduationCap, IdCard, Image as ImageIcon, Landmark,
   Loader2, Paperclip, Plane, ShieldCheck, Stamp, Star, Stethoscope, TriangleAlert, Upload, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { fileHref } from '@/shared/api/client'
+import { FileLink } from '@/shared/ui/file-drop'
 import { DOCUMENT_ACCEPT, documentFileError } from '@/shared/lib/document-files'
 import { documentLabel, documentSlot } from '@/shared/model/document-slots'
 import { describeExtraction, sizeLabel } from '../form-model'
@@ -44,6 +45,7 @@ function FileRow({ file }: { file: FormDocument }) {
     <p className="af-docfile">
       {file.url ? <a href={fileHref(file.url)} target="_blank" rel="noreferrer" title={file.fileName}>{file.fileName}</a> : <span title={file.fileName}>{file.fileName}</span>}
       <small>{detail}</small>
+      {file.url && <FileLink url={file.url} download title={`Download ${file.fileName}`} className="shrink-0"><Download className="h-4 w-4" /><span className="sr-only">Download {file.fileName}</span></FileLink>}
     </p>
   )
 }

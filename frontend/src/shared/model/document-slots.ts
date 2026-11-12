@@ -20,19 +20,23 @@ export interface DocumentSlot {
 }
 
 export const DOCUMENT_SLOTS: DocumentSlot[] = [
+  { slot: 'application_form', label: 'Application form', hint: 'The completed candidate application form.', readable: false, multiple: false, always: true, fromStage: null },
   { slot: 'resume', label: 'Resume', hint: 'Name, contact, education and experience are read from it.', readable: true, multiple: false, always: true, fromStage: null },
   { slot: 'passport', label: 'Passport', hint: 'Number, dates, place of issue and father\'s name are read from it.', readable: true, multiple: false, always: true, fromStage: null },
-  { slot: 'photo', label: 'Photo', hint: 'Shown in the photo box at the top of the form.', readable: false, multiple: false, always: true, fromStage: null, imageOnly: true },
-  { slot: 'education_certificate', label: 'Education certificate', hint: 'The highest qualification.', readable: false, multiple: false, always: true, fromStage: null },
-  { slot: 'experience_certificate', label: 'Experience certificate', hint: 'Optional. From the latest employer.', readable: false, multiple: false, always: false, fromStage: null },
-  { slot: 'signed_offer', label: 'Signed offer', hint: 'The offer letter signed by the candidate.', readable: false, multiple: false, always: false, fromStage: 5 },
   { slot: 'medical', label: 'Medical', hint: 'The medical report.', readable: false, multiple: false, always: false, fromStage: 6 },
+  { slot: 'signed_offer', label: 'Signed offer', hint: 'The offer letter signed by the candidate.', readable: false, multiple: false, always: false, fromStage: 5 },
   { slot: 'pcc', label: 'Police clearance certificate (PCC)', hint: 'Needed once the passport stage starts.', readable: false, multiple: false, always: false, fromStage: 7 },
   { slot: 'visa', label: 'Visa', hint: 'The visa received for the candidate.', readable: false, multiple: false, always: false, fromStage: 9 },
-  { slot: 'google_review', label: 'Google review', hint: 'Proof of the review, before the visa stamping.', readable: false, multiple: false, always: false, fromStage: 9 },
-  { slot: 'visa_stamping', label: 'Visa stamping', hint: 'The stamped passport page.', readable: false, multiple: false, always: false, fromStage: 10 },
-  { slot: 'emigration', label: 'Emigration', hint: 'The emigration clearance.', readable: false, multiple: false, always: false, fromStage: 10 },
   { slot: 'air_ticket', label: 'Air ticket', hint: 'The confirmed ticket.', readable: false, multiple: false, always: false, fromStage: 11 },
+  { slot: 'undertaking_letter', label: 'Undertaking letter', hint: 'The candidate’s signed undertaking, before deployment.', readable: false, multiple: false, always: false, fromStage: 11 },
+  { slot: 'emigration', label: 'Emigration', hint: 'The emigration clearance, required after the visa stage.', readable: false, multiple: false, always: false, fromStage: 10 },
+  { slot: 'insurance', label: 'Insurance', hint: 'The candidate’s insurance policy, before deployment.', readable: false, multiple: false, always: false, fromStage: 11 },
+  { slot: 'invoice', label: 'Invoice', hint: 'The candidate’s invoice, before deployment.', readable: false, multiple: false, always: false, fromStage: 11 },
+  { slot: 'photo', label: 'Photo', hint: 'Optional. Shown in the photo box at the top of the form.', readable: false, multiple: false, always: false, fromStage: null, imageOnly: true },
+  { slot: 'education_certificate', label: 'Education certificate', hint: 'Optional. The highest qualification.', readable: false, multiple: false, always: false, fromStage: null },
+  { slot: 'experience_certificate', label: 'Experience certificate', hint: 'Optional. From the latest employer.', readable: false, multiple: false, always: false, fromStage: null },
+  { slot: 'google_review', label: 'Google review', hint: 'Optional. Proof of the candidate’s Google review.', readable: false, multiple: false, always: false, fromStage: null },
+  { slot: 'visa_stamping', label: 'Visa stamping', hint: 'Optional. The stamped passport page.', readable: false, multiple: false, always: false, fromStage: null },
   { slot: 'other', label: 'Other documents', hint: 'Anything else, several files allowed.', readable: false, multiple: true, always: false, fromStage: null },
 ]
 

@@ -57,6 +57,10 @@ IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".heic")
 # so the more specific names ("visa stamping", "passport size photo") come before the general ones ("visa", "passport").
 _RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     ("photo", ("photo", "picture", "selfie", "passportsize", "ppsize"), ("pic",)),
+    ("application_form", ("applicationform", "jobapplication"), ()),
+    ("undertaking_letter", ("undertaking",), ()),
+    ("insurance", ("insurance",), ()),
+    ("invoice", ("invoice",), ()),
     (ADVANCE_RECEIPT, ("receipt", "advance", "payment", "servicecharge"), ()),
     ("visa_stamping", ("stamp",), ("vfs",)),
     ("signed_offer", ("offer", "appointment", "contract"), ("loa",)),

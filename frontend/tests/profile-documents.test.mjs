@@ -14,9 +14,10 @@ const slots = await import(slotsUrl)
 const model = await import(moduleUrl((await read('features/candidates/profile-documents-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`)))
 
 const file = (id, version, uploadedAt, name = `${id}.pdf`) => ({ id, name, version, uploadedAt, sizeKb: 10, url: `/api/files/${id}`, uploadedBy: 'u1' })
-const ORDER = ['resume', 'passport', 'photo', 'education_certificate', 'experience_certificate', 'signed_offer', 'medical', 'pcc', 'visa', 'google_review', 'visa_stamping', 'emigration', 'air_ticket', 'other']
+const ORDER = ['application_form', 'resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice', 'photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other']
 
-test('the shared list has the 14 slots in the agreed order with the agreed labels', () => {
+test('the shared list keeps twelve mandatory documents and six optional slots in the agreed order', () => {
+  assert.deepEqual(slots.DOCUMENT_SLOTS.filter(entry => slots.documentExpected(entry, 11)).map(entry => entry.slot), ORDER.slice(0, 12))
   assert.deepEqual(slots.DOCUMENT_SLOT_KEYS, ORDER)
   assert.equal(slots.documentLabel('photo'), 'Photo')
   assert.equal(slots.documentLabel('passport'), 'Passport')
@@ -33,18 +34,25 @@ test('the expected-by-stage rule follows the contract', () => {
   assert.equal(slots.documentExpected(signedOffer, 5), true)
   assert.equal(slots.documentExpected(signedOffer, null), false)
   // Always-expected documents count even with no application; optional ones never do without a stage.
-  assert.equal(slots.documentExpected(slots.documentSlot('photo'), null), true)
+  assert.equal(slots.documentExpected(slots.documentSlot('application_form'), null), true)
+  assert.equal(slots.documentExpected(slots.documentSlot('photo'), null), false)
+  assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 9), false)
+  assert.equal(slots.documentExpected(slots.documentSlot('emigration'), 10), true)
+  for (const key of ['undertaking_letter', 'insurance', 'invoice']) {
+    assert.equal(slots.documentExpected(slots.documentSlot(key), 10), false)
+    assert.equal(slots.documentExpected(slots.documentSlot(key), 11), true)
+  }
   assert.equal(slots.documentExpected(slots.documentSlot('other'), 11), false)
 })
 
 test('an empty candidate still lists every slot, in order, labelled from the shared list', () => {
   const rows = model.profileDocuments([])
-  assert.deepEqual(rows.slice(0, 14).map((row) => row.key), ORDER)
-  assert.ok(rows.slice(0, 14).every((row) => row.versions.length === 0))
+  assert.deepEqual(rows.slice(0, ORDER.length).map((row) => row.key), ORDER)
+  assert.ok(rows.slice(0, ORDER.length).every((row) => row.versions.length === 0))
   assert.equal(rows.find((row) => row.key === 'other').multiple, true)
   assert.equal(rows.find((row) => row.key === 'photo').multiple, false)
   // Aadhaar is not part of the shared list but stays offered on the profile, after it.
-  assert.deepEqual(rows.slice(14).map((row) => row.key), ['aadhaar'])
+  assert.deepEqual(rows.slice(ORDER.length).map((row) => row.key), ['aadhaar'])
   assert.deepEqual(model.profileDocuments(undefined).map((row) => row.key), rows.map((row) => row.key))
 })
 
@@ -87,7 +95,7 @@ test('other slots the server holds are listed after the shared ones only when th
     { key: 'aadhaar', label: 'Aadhaar copy', versions: [file('a1', 1, '2026-10-01T09:00:00Z')] },
     { key: 'source_bundle', label: 'Source document evidence', versions: [] },
   ])
-  assert.deepEqual(rows.slice(14).map((row) => row.key), ['aadhaar'])
+  assert.deepEqual(rows.slice(ORDER.length).map((row) => row.key), ['aadhaar'])
   const withEvidence = model.profileDocuments([{ key: 'source_bundle', label: 'Source document evidence', versions: [file('s1', 1, '2026-10-01T09:00:00Z')] }])
-  assert.deepEqual(withEvidence.slice(14).map((row) => [row.key, row.label]), [['source_bundle', 'Source document evidence'], ['aadhaar', 'Aadhaar copy']])
+  assert.deepEqual(withEvidence.slice(ORDER.length).map((row) => [row.key, row.label]), [['source_bundle', 'Source document evidence'], ['aadhaar', 'Aadhaar copy']])
 })

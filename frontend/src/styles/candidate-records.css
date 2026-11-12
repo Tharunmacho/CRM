@@ -1,0 +1,11 @@
+.af .af-record-downloads { padding: 24px 28px; border-top: 1px solid var(--border-soft); display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.af .af-record-downloads > div:first-child { flex: 1 1 320px; }
+.af .af-record-downloads strong { font-size: 15px; }
+.af .af-record-downloads p { margin: 5px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.af .af-record-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.af .af-record-downloads > .is-error { flex-basis: 100%; color: var(--error-ink); }
+@media (max-width: 600px) {
+  .af .af-record-downloads { padding: 20px 16px; }
+  .af .af-record-buttons { width: 100%; }
+  .af .af-record-buttons button { flex: 1 1 auto; }
+}

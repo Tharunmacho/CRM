@@ -80,10 +80,14 @@ DOCUMENT_SLOTS = [
     ("education", "Education certificates"),
     ("experience", "Experience certificates"),
 ]
-# The candidate profile (GET /api/candidates/{id}) also lists the documents the application form collects (the 14 form slots
+# The candidate profile (GET /api/candidates/{id}) also lists the documents the application form collects (the 18 form slots
 # of services/application_form.SLOT_SPECS; "education"/"experience" above are the older keys and stay readable). The desk
-# snapshot keeps the seven above: it carries every candidate and these eleven are stored only.
+# snapshot keeps the seven above: it carries every candidate and the additional form slots are stored only.
 FORM_DOCUMENT_SLOTS = [
+    ("application_form", "Application form"),
+    ("undertaking_letter", "Undertaking letter"),
+    ("insurance", "Insurance"),
+    ("invoice", "Invoice"),
     ("education_certificate", "Education certificate"),
     ("experience_certificate", "Experience certificate"),
     ("signed_offer", "Signed offer"),

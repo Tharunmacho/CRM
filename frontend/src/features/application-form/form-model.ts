@@ -185,9 +185,9 @@ export function trackingStatus(value: unknown): TrackingStatus {
   return 'not_started'
 }
 
-/** Counts shown above the tracking table. Untracked rows (PCC, Invoice Generated) are not part of the progress. */
+/** Count workflow stages; tracked document evidence such as invoices is shown separately. */
 export function summariseTracking(rows: TrackingRow[]) {
-  const tracked = rows.filter((row) => row.tracked)
+  const tracked = rows.filter((row) => row.tracked && row.stage > 0)
   const completed = tracked.filter((row) => row.status === 'completed').length
   return {
     total: tracked.length,
@@ -370,7 +370,7 @@ function normaliseTracking(raw: unknown, application: ApplicationRef | null): { 
   return {
     summary: {
       completed: num(summary.completed),
-      tracked: num(summary.tracked, rows.filter((row) => row.tracked).length),
+      tracked: num(summary.tracked, rows.filter((row) => row.tracked && row.stage > 0).length),
       percent: num(summary.percent),
       currentStage,
       currentStageLabel: str(summary.currentStageLabel),

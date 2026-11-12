@@ -23,7 +23,7 @@ with patch("app.core.config.get_settings", return_value=SETTINGS):
     from app.api.routers import applications, candidate_import as subject, candidates as candidates_router, files as files_router
 
 PDF = b"%PDF-1.7 synthetic document"
-ALL_DOCUMENTS = ["Resume.pdf", "Passport.pdf", "Photo.jpg", "Education certificate.pdf", "Offer letter.pdf", "Medical.pdf", "PCC.pdf",
+ALL_DOCUMENTS = ["Application form.pdf", "Resume.pdf", "Passport.pdf", "Undertaking letter.pdf", "Insurance.pdf", "Invoice.pdf", "Photo.jpg", "Education certificate.pdf", "Offer letter.pdf", "Medical.pdf", "PCC.pdf",
                  "Visa.pdf", "Google review.png", "Visa stamping.pdf", "Emigration.pdf", "Air ticket.pdf", "Advance receipt.pdf"]
 FULL_ROW = {"phone": "9876543210", "order": "ORD-1", "interview_date": "10/01/2026", "advance_amount": "15,000",
             "advance_currency": "INR", "medical_date": "20/01/2026", "passport_collected_date": "25/01/2026", "advance_date": "28/01/2026",
@@ -33,6 +33,9 @@ FULL_ROW = {"phone": "9876543210", "order": "ORD-1", "interview_date": "10/01/20
 # ------------------------------------------------------------------ pure parts
 
 @pytest.mark.parametrize("path,kind", [
+    ("Application form.pdf", "application_form"), ("Job application.pdf", "application_form"),
+    ("Undertaking letter.pdf", "undertaking_letter"), ("Insurance policy.pdf", "insurance"), ("Invoice.pdf", "invoice"),
+    ("Application.pdf", None), ("Policy.pdf", None),
     ("Resume.pdf", "resume"), ("CV rahul.docx", "resume"), ("Passport copy.jpg", "passport"), ("passport size photo.jpg", "photo"),
     ("Offer Letter.pdf", "signed_offer"), ("Medical fit.pdf", "medical"), ("Police Clearance.pdf", "pcc"), ("Visa.pdf", "visa"),
     ("Visa Stamping.pdf", "visa_stamping"), ("stamped visa.pdf", "visa_stamping"), ("AirTicket.pdf", "air_ticket"),
@@ -174,8 +177,8 @@ def test_a_complete_folder_becomes_a_deployed_candidate_with_all_eleven_stages(e
         slots = {a.slot for a in db.scalars(select(Attachment).where(Attachment.entity_type == "application", Attachment.entity_id == application.id))}
         assert slots == {"stage_5_file", "stage_8_receipt", "stage_9_file", "stage_10_file", "stage_11_file"}
         documents = {a.slot for a in db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id))}
-        assert documents == {"resume", "passport", "photo", "education_certificate", "signed_offer", "medical", "pcc", "visa",
-                             "google_review", "visa_stamping", "emigration", "air_ticket"}
+        assert documents == {"application_form", "resume", "passport", "photo", "education_certificate", "signed_offer", "medical", "pcc", "visa",
+                             "google_review", "visa_stamping", "emigration", "air_ticket", "undertaking_letter", "insurance", "invoice"}
         # the resume and passport are queued to be read, and no stage task is left open
         assert db.scalar(select(func.count()).select_from(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == candidate.id)) == 2
         assert db.scalar(select(func.count()).select_from(Task).where(Task.candidate_id == candidate.id)) == 0

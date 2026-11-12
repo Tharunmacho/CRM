@@ -58,23 +58,23 @@ test('an empty or partial payload still yields a complete, blank form', () => {
   assert.equal(form.application, null)
   assert.equal(form.documents.passport.uploaded, false)
   assert.equal(form.extrasSupported, false)
-  // No completeness key: it is worked out locally by the server's own rule (19 counted items).
-  assert.equal(form.completeness.total, 19)
+  // An older response counts its sixteen fields and the two original mandatory document slots.
+  assert.equal(form.completeness.total, 18)
   assert.equal(form.completeness.percent, 0)
 })
 
-test('missing-field detection follows the 19 counted items', () => {
+test('missing-field detection preserves older payloads without counting optional photos', () => {
   const form = model.normalizeForm(server())
   const live = model.completenessOf(model.toDraft(form), form.documents)
   const keys = live.missing.map((item) => item.key)
   assert.ok(keys.includes('documents.passport'))
-  assert.ok(keys.includes('documents.photo'))
+  assert.ok(!keys.includes('documents.photo'))
   assert.ok(keys.includes('passport.passportNumber'))
   assert.ok(!keys.includes('personal.fatherName'))
   assert.ok(!keys.includes('education'))
-  assert.equal(live.total, 19)
-  assert.equal(live.filled + live.missing.length, 19)
-  assert.equal(live.percent, Math.round((live.filled / 19) * 100))
+  assert.equal(live.total, 18)
+  assert.equal(live.filled + live.missing.length, 18)
+  assert.equal(live.percent, Math.round((live.filled / 18) * 100))
   // Experience in India / abroad are highlighted when empty but not counted.
   assert.ok(model.EXPERIENCE_FIELDS.filter((field) => !field.counted).length === 2)
 })
@@ -134,6 +134,24 @@ test('tracking: rows map to the docx wording, untracked rows are not progress, t
   // A closed application has no current stage.
   const closed = model.normalizeForm(server({ application: { id: 'a1', orderId: 'o1', status: 'closed', currentStage: 4 } }))
   assert.equal(closed.tracking.rows.some((row) => row.current), false)
+})
+
+test('invoice upload evidence is shown without becoming a twelfth workflow stage', () => {
+  for (const invoiceStatus of ['not_started', 'completed']) {
+    const form = model.normalizeForm(server({ tracking: { rows: [
+      ...Array.from({ length: 11 }, (_, index) => ({ key: `stage-${index + 1}`, stage: index + 1, tracked: true, status: index < 5 ? 'completed' : 'not_started' })),
+      { key: 'invoice_generated', label: 'Invoice', stage: null, tracked: true, status: invoiceStatus, completedBy: { id: 'u1', name: 'Ravi' } },
+    ] } }))
+    const summary = model.summariseTracking(form.tracking.rows)
+    assert.equal(form.tracking.summary.tracked, 11)
+    assert.equal(summary.total, 11)
+    assert.equal(summary.completed, 5)
+    assert.equal(summary.percent, 45)
+    const invoice = form.tracking.rows.find(row => row.key === 'invoice_generated')
+    assert.equal(invoice.status, invoiceStatus)
+    assert.equal(invoice.completedBy, 'Ravi')
+    assert.equal(model.isOpenableRow(invoice), false)
+  }
 })
 
 test('date, age and years formatting', () => {

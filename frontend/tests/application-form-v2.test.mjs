@@ -33,8 +33,8 @@ const doc = (name) => ({ attachmentId: `f-${name}`, fileName: name, sizeKb: 120,
 const v2 = (patch = {}) => base({
   documentOrder: DOCUMENT_SLOT_KEYS,
   documents: Object.fromEntries(DOCUMENT_SLOT_KEYS.map((key) => [key, slot(key, {
-    required: ['resume', 'passport', 'photo', 'education_certificate', 'signed_offer'].includes(key),
-    requiredFromStage: { signed_offer: 5, medical: 6, pcc: 7, visa: 9, google_review: 9, visa_stamping: 10, emigration: 10, air_ticket: 11 }[key] ?? null,
+    required: ['application_form', 'resume', 'passport', 'signed_offer'].includes(key),
+    requiredFromStage: { signed_offer: 5, medical: 6, pcc: 7, visa: 9, emigration: 10, air_ticket: 11, undertaking_letter: 11, insurance: 11, invoice: 11 }[key] ?? null,
     multiple: key === 'other',
   })])),
   assignment: {
@@ -62,11 +62,11 @@ const v2 = (patch = {}) => base({
   ...patch,
 })
 
-test('the documents come in the contract order with the contract labels, Google review before Visa stamping', () => {
+test('the documents list the mandatory checklist first and retain optional evidence', () => {
   const form = model.normalizeForm(v2())
   const labels = form.documentOrder.map((key) => form.documents[key].label)
-  assert.deepEqual(labels, ['Resume', 'Passport', 'Photo', 'Education certificate', 'Experience certificate', 'Signed offer', 'Medical',
-    'Police clearance certificate (PCC)', 'Visa', 'Google review', 'Visa stamping', 'Emigration', 'Air ticket', 'Other documents'])
+  assert.deepEqual(labels, ['Application form', 'Resume', 'Passport', 'Medical', 'Signed offer', 'Police clearance certificate (PCC)',
+    'Visa', 'Air ticket', 'Undertaking letter', 'Emigration', 'Insurance', 'Invoice', 'Photo', 'Education certificate', 'Experience certificate', 'Google review', 'Visa stamping', 'Other documents'])
   assert.ok(form.documentOrder.indexOf('google_review') < form.documentOrder.indexOf('visa_stamping'))
   assert.equal(form.documents.other.multiple, true)
   assert.equal(form.documents.photo.hint.length > 0, true)
@@ -74,13 +74,13 @@ test('the documents come in the contract order with the contract labels, Google 
 
 test('an older server that sends three documents still yields the whole checklist, and only counts what it sent', () => {
   const form = model.normalizeForm(base({ documents: { resume: slot('resume', { uploaded: true, current: doc('cv.pdf') }), passport: slot('passport'), photo: slot('photo') } }))
-  assert.equal(form.documentOrder.length, 14)
+  assert.equal(form.documentOrder.length, 18)
   assert.equal(form.documents.education_certificate.listed, false)
   // Stage 5 asks for the signed offer, worked out locally because the server did not say.
   assert.equal(form.documents.signed_offer.required, true)
   assert.equal(form.documents.medical.required, false)
   const live = model.completenessOf(model.toDraft(form), form.documents)
-  assert.equal(live.total, 19)
+  assert.equal(live.total, 18)
   assert.ok(!live.missing.some((item) => item.key === 'documents.education_certificate'))
 })
 
@@ -88,9 +88,9 @@ test('the server decides what is required, and the missing list names the missin
   const form = model.normalizeForm(v2())
   const live = model.completenessOf(model.toDraft(form), form.documents)
   const keys = live.missing.map((item) => item.key)
-  assert.deepEqual(keys.filter((key) => key.startsWith('documents.')), ['documents.resume', 'documents.passport', 'documents.photo', 'documents.education_certificate', 'documents.signed_offer'])
-  assert.equal(live.total, 16 + 5)
-  assert.equal(live.missing.find((item) => item.key === 'documents.education_certificate').message, 'Education certificate not uploaded')
+  assert.deepEqual(keys.filter((key) => key.startsWith('documents.')), ['documents.application_form', 'documents.resume', 'documents.passport', 'documents.signed_offer'])
+  assert.equal(live.total, 16 + 4)
+  assert.equal(live.missing.find((item) => item.key === 'documents.application_form').message, 'Application form not uploaded')
   assert.ok(!keys.includes('documents.experience_certificate'))
   assert.ok(!keys.includes('documents.medical'))
 })
@@ -99,15 +99,15 @@ test('uploads raise the percentage at once, before the server answers', () => {
   const form = model.normalizeForm(v2())
   const draft = model.toDraft(form)
   const before = model.completenessOf(draft, form.documents)
-  const pending = { photo: { fileName: 'me.jpg', sizeKb: 80 }, other: { fileName: 'extra.pdf', sizeKb: 10 } }
+  const pending = { application_form: { fileName: 'application.pdf', sizeKb: 80 }, other: { fileName: 'extra.pdf', sizeKb: 10 } }
   const documents = model.applyOptimisticUploads(form.documents, pending)
   const after = model.completenessOf(draft, documents)
   assert.ok(after.percent > before.percent)
   assert.equal(after.filled, before.filled + 1)
-  assert.equal(documents.photo.uploaded, true)
-  assert.equal(documents.photo.current.fileName, 'me.jpg')
+  assert.equal(documents.application_form.uploaded, true)
+  assert.equal(documents.application_form.current.fileName, 'application.pdf')
   assert.equal(documents.other.files[0].fileName, 'extra.pdf')
-  assert.equal(form.documents.photo.uploaded, false)
+  assert.equal(form.documents.application_form.uploaded, false)
   assert.equal(model.applyOptimisticUploads(form.documents, {}), form.documents)
   // An optional document never changes the percentage.
   assert.equal(model.completenessOf(draft, model.applyOptimisticUploads(form.documents, { other: pending.other })).percent, before.percent)
@@ -116,9 +116,9 @@ test('uploads raise the percentage at once, before the server answers', () => {
 test('documents are grouped as required now, later in the process and optional, keeping the contract order', () => {
   const form = model.normalizeForm(v2())
   const groups = model.groupDocuments(form.documents, form.documentOrder)
-  assert.deepEqual(groups.required.map((item) => item.slot), ['resume', 'passport', 'photo', 'education_certificate', 'signed_offer'])
-  assert.deepEqual(groups.later.map((item) => item.slot), ['medical', 'pcc', 'visa', 'google_review', 'visa_stamping', 'emigration', 'air_ticket'])
-  assert.deepEqual(groups.optional.map((item) => item.slot), ['experience_certificate', 'other'])
+  assert.deepEqual(groups.required.map((item) => item.slot), ['application_form', 'resume', 'passport', 'signed_offer'])
+  assert.deepEqual(groups.later.map((item) => item.slot), ['medical', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice'])
+  assert.deepEqual(groups.optional.map((item) => item.slot), ['photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other'])
   assert.equal(model.documentState(form.documents.medical), 'later')
   assert.equal(model.documentState(form.documents.other), 'optional')
   assert.equal(model.documentState(form.documents.resume), 'required')
@@ -410,10 +410,10 @@ test('no document is ever locked: each is Pending, Optional or Uploaded, and can
     assert.equal(state.disabled, false, key)
     assert.ok(!('locked' in state) && !('tooltip' in state) && !/^(un)?lock$/.test(state.icon), key)
   }
-  for (const key of ['resume', 'passport', 'photo', 'education_certificate', 'signed_offer', 'medical', 'pcc', 'visa', 'google_review', 'visa_stamping', 'emigration', 'air_ticket']) {
+  for (const key of ['application_form', 'resume', 'passport', 'medical', 'signed_offer', 'pcc', 'visa', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice']) {
     assert.deepEqual([stateOf(key).key, stateOf(key).chip, stateOf(key).icon], ['pending', 'Pending', 'clock'], key)
   }
-  for (const key of ['experience_certificate', 'other']) assert.deepEqual([stateOf(key).key, stateOf(key).chip], ['optional', 'Optional'], key)
+  for (const key of ['photo', 'education_certificate', 'experience_certificate', 'google_review', 'visa_stamping', 'other']) assert.deepEqual([stateOf(key).key, stateOf(key).chip], ['optional', 'Optional'], key)
   const done = stateOf('air_ticket', true)
   assert.deepEqual([done.key, done.chip, done.icon], ['uploaded', 'Uploaded', 'check'])
   assert.equal(stateOf('other', true).key, 'uploaded')
@@ -445,7 +445,7 @@ test('the shared labels always win: the photo is "Photo" even when an older serv
   assert.equal(form.documents.passport.label, 'Passport')
   assert.ok(!form.optionalDocuments.some((item) => /passport size/i.test(item.label)))
   const incomplete = model.completenessOf(model.toDraft(form), form.documents)
-  assert.ok(incomplete.missing.some((item) => item.key === 'documents.photo' && item.label === 'Photo'))
+  assert.ok(!incomplete.missing.some((item) => item.key === 'documents.photo'))
   assert.ok(!JSON.stringify(incomplete).match(/passport size/i))
 })
 
@@ -503,9 +503,9 @@ test('each stage lists the documents that belong to it, with their live status',
   assert.deepEqual(docs(5), [['Signed offer', false]])
   assert.deepEqual(docs(6), [['Medical', true]])
   assert.deepEqual(docs(7), [['Police clearance certificate (PCC)', false]])
-  assert.deepEqual(docs(9), [['Visa', false], ['Google review', true]])
-  assert.deepEqual(docs(10), [['Visa stamping', false], ['Emigration', false]])
-  assert.deepEqual(docs(11), [['Air ticket', false]])
+  assert.deepEqual(docs(9), [['Visa', false]])
+  assert.deepEqual(docs(10), [['Emigration', false]])
+  assert.deepEqual(docs(11), [['Air ticket', false], ['Undertaking letter', false], ['Insurance', false], ['Invoice', false]])
   for (const stage of [1, 2, 3, 4, 8]) assert.deepEqual(docs(stage), [])
 })
 

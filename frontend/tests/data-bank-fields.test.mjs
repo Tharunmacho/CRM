@@ -140,7 +140,7 @@ test('documents on file use the shared labels in the shared order, folding the o
     { key: 'pcc', label: 'PCC', versions: file },
     { key: 'aadhaar', label: 'Aadhaar copy', versions: file },
   ])
-  assert.deepEqual(held, ['Passport', 'Photo', 'Education certificate', 'Experience certificate', 'Police clearance certificate (PCC)', 'Other documents', 'Aadhaar'])
+  assert.deepEqual(held, ['Passport', 'Police clearance certificate (PCC)', 'Photo', 'Education certificate', 'Experience certificate', 'Other documents', 'Aadhaar'])
   assert.deepEqual(documentsOnFile([{ key: 'education_certificate', versions: file }, { key: 'education', versions: file }]), ['Education certificate'])
   assert.deepEqual(documentsOnFile(undefined), [])
   assert.deepEqual(documentsOnFile([]), [])

@@ -54,24 +54,28 @@ Answers the whole form (same as the other PUTs). Rules:
 
 | slot | label (UI) | read by OCR | counted when |
 |---|---|---|---|
+| `application_form` | Application form | no | always; completed application uploaded as evidence |
 | `resume` | Resume | yes | always |
 | `passport` | Passport | yes | always |
-| `photo` | Photo | no | always (was "Passport-size photo") |
-| `education_certificate` | Education certificate | no | always |
-| `experience_certificate` | Experience certificate | no | optional (never counted as missing) |
-| `signed_offer` | Signed offer | no | from stage 5 (Offer letter) |
 | `medical` | Medical | no | from stage 6 |
+| `signed_offer` | Signed offer | no | from stage 5 (Offer letter) |
 | `pcc` | Police clearance certificate (PCC) | no | from stage 7 (Passport) |
 | `visa` | Visa | no | from stage 9 (Visa arrival) |
-| `google_review` | Google review | no | from stage 9 (it comes BEFORE visa stamping) |
-| `visa_stamping` | Visa stamping | no | from stage 10 |
-| `emigration` | Emigration | no | from stage 10 |
 | `air_ticket` | Air ticket | no | from stage 11 |
+| `undertaking_letter` | Undertaking letter | no | from stage 11, before deployment |
+| `emigration` | Emigration | no | from stage 10, after visa |
+| `insurance` | Insurance | no | from stage 11, before deployment |
+| `invoice` | Invoice | no | from stage 11, before deployment |
+| `photo` | Photo | no | optional; existing uploads retained |
+| `education_certificate` | Education certificate | no | optional; existing uploads retained |
+| `experience_certificate` | Experience certificate | no | optional (never counted as missing) |
+| `google_review` | Google review | no | optional; existing uploads retained |
+| `visa_stamping` | Visa stamping | no | optional; existing uploads retained |
 | `other` | Other documents | no | optional, several files allowed |
 
 Each entry: `{ slot, label, hint, required: bool, requiredFromStage: number|null, readable: bool, multiple: bool, current: Document|null, history: Document[], files: Document[] }`
 (`files` only for `other`, newest first, `[]` for the other slots). The entry also keeps the older keys `uploaded: bool`, `versions: number`,
-`extraction: Extraction|null` (null unless the slot is read) and adds `optional: bool` (experience certificate and other documents: never counted).
+`extraction: Extraction|null` (null unless the slot is read) and adds `optional: bool` (the six optional slots above are never counted).
 `history` = the older versions of the slot, newest first (everything but `current`). `required` is computed from the application's current stage (no application: only the
 "always" ones). Allowed file types/size as today (PDF, Word, JPG, PNG, WebP, HEIC up to 25 MB); `photo` image only.
 `POST /api/candidates/{id}/application-form/documents` accepts every slot (multipart `slot`, `file`); `resume` and `passport` queue reading,
@@ -79,17 +83,23 @@ the others are only stored (and appear in the candidate's Documents card). Plain
 
 **Completeness** (`completeness`: `{ percent, filled, total, missing: [{key,label,section}] }` as today) now counts: every personal/passport/etc.
 field as before, plus every document with `required: true`. Uploading a document or filling a field raises the percentage live.
+
+The twelve non-optional slots are required before a new deployment is completed. Existing deployed applications keep their status;
+the checklist reports missing evidence without rewriting history. Uploads may be added before their required stage. The application
+form slot is uploaded evidence: printing the editable form alone does not mark it received. The `invoice_generated` tracking key is
+retained for compatibility, labelled **Invoice**, and reflects the latest invoice attachment and its upload time, never payment status.
+It does not add a workflow stage or change the eleven-stage progress denominator.
 Optional documents never lower it and are listed under `completeness.optionalDocuments: [{slot,label,uploaded}]`. With no application the
-total is 20 (16 fields + resume, passport, photo, education certificate); each required-by-stage document adds one.
+total is 19 (16 fields + application form, resume and passport); each required-by-stage document adds one.
 Slot keys stored before v2 (`education`, `experience`) are folded into `education_certificate` / `experience_certificate` (by upload time).
-The candidate profile (`GET /api/candidates/{id}`) lists the 14 slots after the older keys in its `documents`; the desk snapshot keeps its
+The candidate profile (`GET /api/candidates/{id}`) lists the 18 slots after the older keys in its `documents`; the desk snapshot keeps its
 seven older keys (labels now "Passport" and "Photo").
 
 **Deployment gate.** "All the documents that are necessary are required, and only then are they deployed." Completing the final stage
 (11, Air ticket) is the only path that sets an application and the candidate to Deployed (`POST /api/applications/{id}/complete`). It is refused,
 for every role including admins, with `409 {"detail": "Upload these documents before deploying: Signed offer, Medical, ..."}` unless every
-document that is required by stage 11 is uploaded: resume, passport, photo, education certificate, signed offer, medical, PCC, visa, Google
-review, visa stamping, emigration, air ticket. The labels in the message are in the order of the table above. Experience certificate and other
+document that is required by stage 11 is uploaded: application form, resume, passport, medical, signed offer, PCC, visa, air ticket,
+undertaking letter, emigration, insurance and invoice. The labels in the message are in the order of the table above. The six optional
 documents never block. One function does the check (`application_form.missing_required_documents(db, candidate_id)`, one statement; older
 `education`/`experience` slot keys count for their new slots). The form payload carries the same answer, live:
 `"deployment": { "ready": bool, "missing": [ { "slot": "signed_offer", "label": "Signed offer" } ] }` (always computed against stage 11,
@@ -121,3 +131,25 @@ Live topic `feedback` (add the table to `change_feed.py`); the staff weekly repo
 Every label on the form uses proper sentences/names: e.g. "Name of institution", "Address of institution", "Period of employment", "Reason for
 leaving", "Place of issue", "Date of issue", "Date of expiry", "Father's name", "Contact number of a family member". No abbreviations or
 shouting capitals in labels (the section bars keep their capitals as printed on the paper form). Hints are one short sentence.
+
+## 5. Candidate inspection downloads
+
+`GET /api/candidates/{id}/inspection.xlsx` exports saved candidate details, recruitment source, passport, education,
+work history, screening, placements, stage history, saved stage drafts, document checklist, document versions and
+recruiter notes. Feedback is not limited to the form's latest fifty notes. Task notes retain the normal visibility
+rule: staff see their own tasks, while administrators and managers see every task for the candidate. Oversized
+history is refused explicitly instead of being silently truncated.
+`GET /api/candidates/{id}/documents.zip` includes that workbook, `manifest.json`, the latest file for each ordinary
+document slot on the candidate and their applications, and every Other and Invoice file. Older versions of the
+ordinary slots remain listed in the manifest. Missing checklist items stay explicitly missing; no placeholder file
+is counted as evidence. A stored file that cannot be read fails the whole package before the download starts.
+
+Both routes accept optional `applicationId` or `orderId` query parameters to select the form context. The archive
+still includes the candidate's own application history, never another candidate's documents. Full exports require
+the assigned recruiter, an administrator or a manager because they include detailed stage history. Responses use
+private, no-store caching. The UI requires pending form edits to be saved before exporting.
+
+The existing administrator Data Bank Excel export adds a column for each of the twelve required documents and a
+combined missing-document list, using the same checklist as the application form and Travelled. These are stored
+document statuses, not a declaration that a policy or certificate is valid. Invoice generation is deferred; Invoice
+is an upload-only document slot.

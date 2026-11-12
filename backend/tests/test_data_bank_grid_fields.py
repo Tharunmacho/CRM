@@ -72,7 +72,9 @@ def test_export_has_the_same_extra_columns_with_the_labels_admins_set(grid):
         sheet = ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
     rows = [[''.join(cell.itertext()) for cell in row.findall('{*}c')] for row in sheet.findall('{*}sheetData/{*}row')]
     header, body = rows[0], {row[1]: row for row in rows[1:]}
-    assert header[-5:] == ['Date of birth', 'WhatsApp', 'Preferred country', 'Service charges', 'Interest level']
-    assert body['Ravi Kumar'][-5:-1] == ['1994-03-12', '+91 98765 43210', 'Saudi Arabia, UAE', body['Ravi Kumar'][-2]]
-    assert body['Ravi Kumar'][-2] in ('Agreed', 'Agreed to pay') and body['Ravi Kumar'][-1] == 'More interested'
-    assert body['Nobody Noted'][-2] == 'Not discussed' and body['Nobody Noted'][-1] == ''
+    assert header[14:19] == ['Date of birth', 'WhatsApp', 'Preferred country', 'Service charges', 'Interest level']
+    assert body['Ravi Kumar'][14:17] == ['1994-03-12', '+91 98765 43210', 'Saudi Arabia, UAE']
+    assert body['Ravi Kumar'][header.index('Service charges')] in ('Agreed', 'Agreed to pay')
+    assert body['Ravi Kumar'][header.index('Interest level')] == 'More interested'
+    assert body['Nobody Noted'][header.index('Service charges')] == 'Not discussed'
+    assert body['Nobody Noted'][header.index('Interest level')] == ''
