@@ -21,12 +21,13 @@ export function searchTerms(query: string): string[] {
 export const normalizeSearch = (query: string): string => searchTerms(query).join(',')
 
 /** Automatic intake keeps a pointer to the message it came from in the same field a person types an agent into. */
-const MACHINE_DETAIL = /^(email_message|whatsapp_message|person_review):/
+const MACHINE_DETAIL = /^(email_message|whatsapp_message|person_review|lead_sheet):/i
 
 /** The agent / referrer recorded for a candidate ("More about the source"); empty when there is none. */
-export function agentName(candidate: { sourceDetail?: string | null }): string {
+export function agentName(candidate: { sourceDetail?: string | null; source?: string }): string {
   const detail = candidate.sourceDetail?.trim() ?? ''
-  return MACHINE_DETAIL.test(detail) ? '' : detail
+  const importMarker = candidate.source !== 'referral' && detail.replace(/\s+/g, ' ').toLowerCase() === 'bulk import'
+  return MACHINE_DETAIL.test(detail) || importMarker ? '' : detail
 }
 
 /** One position (an order) holding resumes, as returned by GET /candidates/position-groups. */

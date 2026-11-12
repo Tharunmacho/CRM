@@ -468,7 +468,7 @@ export function normalizeForm(raw: unknown): ApplicationFormData {
     recruitment: {
       client: str(recruitment.client), clientContact: str(recruitment.clientContact), country: str(recruitment.country),
       position: str(recruitment.position), orderRef: str(recruitment.orderRef), source: str(recruitment.source),
-      sourceDetail: cleanAgencyName(str(recruitment.sourceDetail)), recruiter: personName(recruitment.recruiter),
+      sourceDetail: cleanAgencyName(str(recruitment.sourceDetail), str(recruitment.sourceCode) || sourceKeyFrom(str(recruitment.source))), recruiter: personName(recruitment.recruiter),
     },
     tracking: normaliseTracking(root.tracking, application),
     extras: readExtras(root),
@@ -947,12 +947,13 @@ export function applyOptimisticUploads(documents: Record<DocumentKind, DocumentS
 /* ------------------------------------------------------------------ Assignment block */
 
 /** Automatic intake keeps a pointer to the message a candidate came from in the same field a person types an agency into. */
-const MACHINE_DETAIL = /^(email_message|whatsapp_message|person_review):/i
+const MACHINE_DETAIL = /^(email_message|whatsapp_message|person_review|lead_sheet):/i
 
 /** An agency name as a person typed it; the intake pointers ("email_message:8a9c...") are not names and read as empty everywhere. */
-export function cleanAgencyName(name: string | null | undefined): string {
+export function cleanAgencyName(name: string | null | undefined, source?: string): string {
   const text = (name ?? '').trim()
-  return MACHINE_DETAIL.test(text) ? '' : text
+  const importMarker = source !== undefined && source !== 'referral' && text.replace(/\s+/g, ' ').toLowerCase() === 'bulk import'
+  return MACHINE_DETAIL.test(text) || importMarker ? '' : text
 }
 
 export const SOURCE_OPTIONS: { key: string; label: string }[] = [
@@ -991,7 +992,7 @@ function normaliseAssignment(raw: unknown, recruitment: Record<string, unknown>,
     // An older server: show what the recruitment details already say, read only.
     const clientName = str(recruitment.client)
     const sourceKey = str(recruitment.sourceCode) || sourceKeyFrom(str(recruitment.source))
-    const detail = cleanAgencyName(str(recruitment.sourceDetail))
+    const detail = cleanAgencyName(str(recruitment.sourceDetail), sourceKey)
     const hasJob = Boolean(application) || Boolean(str(recruitment.position))
     return {
       supported: false,

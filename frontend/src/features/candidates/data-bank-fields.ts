@@ -25,7 +25,7 @@ export interface BankContext {
   sourceLabel: (source: string) => string
   /** The admin's label for a stored form-option value (the value itself when unknown). */
   optionLabel: (category: string, value: string) => string
-  /** The live application's stage title and order reference, or null when the candidate has no order yet. */
+  /** The active or latest deployed application's stage and order; null when no placement is recorded. */
   application: (candidateId: string) => { stage: string; order: string } | null
 }
 

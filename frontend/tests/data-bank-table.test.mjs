@@ -39,10 +39,19 @@ test('the agent never shows an internal pointer', () => {
   assert.equal(table.agentLabel('email_message:3f9c2a'), '')
   assert.equal(table.agentLabel('whatsapp_message:abc-123'), '')
   assert.equal(table.agentLabel('person_review:77'), '')
+  assert.equal(table.agentLabel('lead_sheet:77', 'other'), '')
   assert.equal(table.agentLabel('  Al Noor Agency  '), 'Al Noor Agency')
   assert.equal(table.agentLabel('Ref: Hassan'), 'Ref: Hassan')
   assert.equal(table.agentLabel(null), '')
   assert.equal(table.agentLabel(undefined), '')
+})
+
+test('import provenance is not an agent, while real referring names keep their intake channel', () => {
+  assert.equal(table.agentLabel('  Bulk  import  ', 'other'), '')
+  assert.equal(table.agentLabel('Bulk import', 'email'), '')
+  assert.equal(table.agentLabel('Bulk import', 'referral'), 'Bulk import')
+  assert.equal(table.agentLabel('Al Noor Agency', 'email'), 'Al Noor Agency')
+  assert.equal(table.agentLabel('Al Noor Agency', 'referral'), 'Al Noor Agency')
 })
 
 test('the unread-name placeholder and blank names are flagged, real names are not', () => {

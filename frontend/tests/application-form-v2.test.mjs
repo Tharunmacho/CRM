@@ -619,7 +619,7 @@ test('the subtitle is the reference, the client and the job, with empty parts le
 /* ------------------------------------------------------------------ Intake pointers are never an agency; long references are not shown */
 test('an intake pointer in the source detail is never an agency, in the server block, the older server block, the fallback and the paper form', () => {
   const pointer = 'email_message:8a9c0b52-5d99-4c1e-9b0a-2f3d4e5f6a7b'
-  for (const prefix of ['email_message:', 'whatsapp_message:', 'person_review:']) assert.equal(model.cleanAgencyName(`${prefix}12`), '')
+  for (const prefix of ['email_message:', 'whatsapp_message:', 'person_review:', 'lead_sheet:']) assert.equal(model.cleanAgencyName(`${prefix}12`), '')
   assert.equal(model.cleanAgencyName('  Kerala Recruiters '), 'Kerala Recruiters')
   assert.equal(model.cleanAgencyName(null), '')
   // A server that sends the pointer as the agency name.
@@ -638,6 +638,20 @@ test('an intake pointer in the source detail is never an agency, in the server b
   const leaked = { ...model.normalizeForm(v2()).assignment, agency: { id: '', name: pointer } }
   assert.ok(!paper.identLines(leaked).some((line) => line.key === 'agency'))
   assert.ok(!paper.recruitmentRows(leaked, null, 'o1').some((line) => line.key === 'agency'))
+})
+
+test('import provenance stays out of legacy agency fallbacks while explicit referring agencies remain visible', () => {
+  const older = model.normalizeForm(base({ recruitment: { ...base().recruitment, source: 'Other', sourceCode: 'other', sourceDetail: '  Bulk  import  ' } }))
+  assert.equal(older.assignment.agency, null)
+  assert.equal(older.recruitment.sourceDetail, '')
+  const imported = { ...workspace(), candidate: { source: 'other', sourceDetail: 'Bulk import', ownerId: null } }
+  assert.equal(fallback.completeAssignment(older.assignment, imported).agency, null)
+  const referral = fallback.completeAssignment(older.assignment, { ...imported, candidate: { ...imported.candidate, source: 'referral', sourceDetail: 'Tamil Agents' } })
+  assert.equal(referral.agency.name, 'Tamil Agents')
+  const known = fallback.completeAssignment(older.assignment, { ...imported, agencies: [{ id: 'agency-1', agencyName: 'Bulk import' }] })
+  assert.equal(known.agency.name, 'Bulk import')
+  const explicit = model.normalizeForm(v2({ assignment: { ...v2().assignment, agency: { id: 'agency-1', name: 'Bulk import' } } }))
+  assert.equal(explicit.assignment.agency.name, 'Bulk import')
 })
 
 test('the reference is shown only when it is a short readable code', () => {

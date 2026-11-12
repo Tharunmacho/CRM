@@ -50,9 +50,10 @@ export function isPlaceholderName(name?: string | null): boolean {
 const POINTER = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+:\S*$/i
 
 /** The agent or agency a profile came through, or '' when none was recorded (or only an internal pointer is stored). */
-export function agentLabel(detail?: string | null): string {
+export function agentLabel(detail?: string | null, source?: string): string {
   const text = (detail ?? '').trim()
-  return POINTER.test(text) ? '' : text
+  const importMarker = source !== 'referral' && text.replace(/\s+/g, ' ').toLowerCase() === 'bulk import'
+  return POINTER.test(text) || importMarker ? '' : text
 }
 
 /** "REF-1234 · 05 Jan 1990": the muted line under the name. Either part may be missing. */

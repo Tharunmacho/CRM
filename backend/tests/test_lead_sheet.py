@@ -474,13 +474,18 @@ def test_convert_creates_a_candidate_with_the_leads_data_and_resume(env):
     assert body["lead"]["status"] == "converted" and body["lead"]["candidateId"] == body["candidate"]["id"] and body["lead"]["candidateRef"].startswith("CND-")
     assert body["resumeAttached"] is True and body["candidate"]["ownerId"] == "a"
     candidate = env.db.get(m.Candidate, body["candidate"]["id"])
-    assert (candidate.name, candidate.phone, candidate.source, candidate.source_detail) == ("Test Lead 00001", "+919000000001", m.Source.other, "Dubai-Chef-03-11")
+    assert (candidate.name, candidate.phone, candidate.source, candidate.source_detail) == ("Test Lead 00001", "+919000000001", m.Source.other, f"lead_sheet:{lead_id}")
     assert candidate.designations == ["Kitchen Helper"] and candidate.country_preference == "Dubai" and candidate.gender == "male" and candidate.owner_id == "a"
     resume = env.db.scalars(select(m.Attachment).where(m.Attachment.entity_type == "candidate", m.Attachment.entity_id == candidate.id, m.Attachment.slot == "resume")).one()
     assert resume.file_name == "cv.pdf"
     assert env.db.scalar(select(func.count()).select_from(m.DocumentExtractionJob).where(m.DocumentExtractionJob.candidate_id == candidate.id)) == 1
     detail = env.client.get(f"/api/leads/{lead_id}").json()
     assert detail["status"] == "converted" and any(a["kind"] == "convert" for a in detail["activities"])
+    assert detail["campaignName"] == "Dubai-Chef-03-11"
+    activity = env.db.scalars(select(m.LeadActivity).where(m.LeadActivity.lead_id == lead_id, m.LeadActivity.kind == "convert")).one()
+    assert activity.meta["leadId"] == lead_id and activity.meta["campaignName"] == detail["campaignName"]
+    audit = env.db.scalars(select(m.AuditEntry).where(m.AuditEntry.entity_id == candidate.id, m.AuditEntry.action == "Converted lead to candidate")).one()
+    assert audit.meta["leadId"] == lead_id and audit.meta["campaignName"] == detail["campaignName"]
     assert env.client.post(f"/api/leads/{lead_id}/convert").json()["detail"]["code"] == "already_converted"
     assert env.client.post(f"/api/leads/{lead_id}/call", json={"outcome": "answered"}).status_code == 409
 
@@ -490,10 +495,12 @@ def test_convert_with_resume_in_the_request_and_overrides(env):
     lead_id = first_lead(env)["id"]
     act_as(env, "a")
     done = env.client.post(f"/api/leads/{lead_id}/convert", files={"resume": ("new-cv.pdf", PDF, "application/pdf")},
-                           data={"overrides": json.dumps({"name": "Corrected Name", "totalExperience": 7})})
+                           data={"overrides": json.dumps({"name": "Corrected Name", "totalExperience": 7, "sourceDetail": "Known Referrer"})})
     assert done.status_code == 200 and done.json()["resumeAttached"] is True and done.json()["candidate"]["name"] == "Corrected Name"
     candidate = env.db.get(m.Candidate, done.json()["candidate"]["id"])
     assert candidate.total_experience == 7
+    assert candidate.source_detail == "Known Referrer"  # Explicitly supplied referral details are preserved.
+    assert env.db.get(m.Lead, lead_id).campaign_name == "Dubai-Chef-03-11"
     assert env.db.scalars(select(m.Attachment).where(m.Attachment.entity_id == candidate.id, m.Attachment.slot == "resume")).one().file_name == "new-cv.pdf"
     bad = env.client.post(f"/api/leads/{lead_id}/convert", data={"overrides": "[1]"})
     assert bad.status_code == 422
@@ -501,6 +508,8 @@ def test_convert_with_resume_in_the_request_and_overrides(env):
 
 def test_convert_refuses_an_existing_candidate_and_link_connects_it(env):
     existing = add_candidate(env, "9000000003", owner="b")
+    existing.source, existing.source_detail = m.Source.referral, "Existing Referral Agency"
+    env.db.commit()
     imported(env, [lead_row(3, email="")], assign_to="a")
     lead_id = first_lead(env)["id"]
     act_as(env, "a")
@@ -512,6 +521,8 @@ def test_convert_refuses_an_existing_candidate_and_link_connects_it(env):
     assert env.db.scalar(select(func.count()).select_from(m.Candidate)) == 1 and env.client.get(f"/api/leads/{lead_id}").json()["status"] == "new"
     linked = env.client.post(f"/api/leads/{lead_id}/link-candidate", json={"candidateId": existing.id})
     assert linked.status_code == 200 and linked.json()["status"] == "converted" and linked.json()["candidateId"] == existing.id
+    env.db.refresh(existing)
+    assert (existing.name, existing.owner_id, existing.source, existing.source_detail) == ("Existing Person", "b", m.Source.referral, "Existing Referral Agency")
     assert env.client.post(f"/api/leads/{lead_id}/link-candidate", json={"candidateId": existing.id}).status_code == 409
     act_as(env, "admin")
     imported(env, [lead_row(9)], assign_to="a")

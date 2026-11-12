@@ -12,6 +12,7 @@ async function load(path) {
 }
 
 const pools = await load('../src/features/candidates/data-bank-pools.ts')
+const assignment = await load('../src/features/candidates/data-bank-assignment.ts')
 
 // Exercise the real status renderer without loading the unrelated store, router and dialogs in this column module.
 const columnSource = await readFile(new URL('../src/features/candidates/components/data-bank-columns.tsx', import.meta.url), 'utf8')
@@ -27,6 +28,48 @@ const status = {}
 new Function('exports', 'React', 'StatusDot', statusJs)(status, React,
   ({ tone, title, children }) => React.createElement('span', { 'data-tone': tone, title }, children))
 const renderStatus = candidate => renderToStaticMarkup(React.createElement(status.StatusText, { candidate }))
+
+// Render the real shared assignment cells used by table rows, cards and the field registry.
+const placementSource = columnTree.statements.filter(statement =>
+  ts.isFunctionDeclaration(statement) && ['bankContext', 'formOrderId', 'StageCell'].includes(statement.name?.text),
+).map(statement => statement.getText(columnTree)).join('\n')
+const placementJs = ts.transpileModule(placementSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
+}).outputText
+const placement = {}
+new Function('exports', 'React', 'bankApplication', 'bankFormApplication', 'stageByNo', 'StageChip', 'Dash', placementJs)(
+  placement, React, assignment.bankApplication, assignment.bankFormApplication,
+  stage => ({ title: stage === 11 ? 'Deployed' : `Stage ${stage}` }),
+  ({ stage }) => React.createElement('span', { 'data-stage': stage }, `Stage ${stage}`),
+  () => React.createElement('span', { 'aria-label': 'None' }, 'None'),
+)
+const placementStore = applications => ({
+  applicationsFor: () => applications,
+  activeApplicationFor: () => { throw new Error('Display must include deployed placements') },
+  order: orderId => ({ ref: `REF-${orderId}` }),
+  orderLabel: orderId => `Job ${orderId}`,
+})
+
+test('deployed stage, order fields and form navigation agree in Data Bank', () => {
+  const candidate = { id: 'candidate-deployed' }
+  const deployed = { id: 'deployment', orderId: 'assigned', currentStage: 11, status: 'deployed', createdAt: '2026-10-01T00:00:00Z' }
+  const store = placementStore([deployed])
+  assert.deepEqual(placement.bankContext(store).application(candidate.id), { stage: 'Deployed', order: 'REF-assigned' })
+  assert.equal(placement.formOrderId(store, candidate.id), 'assigned')
+  const opened = []
+  const cell = placement.StageCell({ candidate, store, onOpenStage: id => opened.push(id) })
+  const html = renderToStaticMarkup(cell)
+  assert.match(html, /data-stage="11"/)
+  assert.match(html, /See the 11 stages for Job assigned/)
+  cell.props.onClick({ stopPropagation() {} })
+  assert.deepEqual(opened, ['deployment'])
+})
+
+test('a candidate with no current or deployed placement keeps blank stage and order fields', () => {
+  const store = placementStore([{ id: 'closed', orderId: 'past', currentStage: 3, status: 'closed', createdAt: '2026-10-01T00:00:00Z' }])
+  assert.equal(placement.bankContext(store).application('candidate'), null)
+  assert.match(renderToStaticMarkup(placement.StageCell({ candidate: { id: 'candidate' }, store })), /aria-label="None"/)
+})
 
 test('a deployed candidate stays Deployed while a separate profile review explains the missing phone', () => {
   const candidate = { status: 'deployed', needsReview: true, phone: '  ' }

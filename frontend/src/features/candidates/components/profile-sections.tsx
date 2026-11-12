@@ -8,6 +8,7 @@ import type { AadhaarOcr, CandidateOcr, PassportOcr } from './ocr-types'
 import { AadhaarReading, PassportReading } from './ocr-sections'
 import { primaryDocument } from '../ocr-view'
 import { SOURCE_LABEL, type ProfileModel } from '../profile-view'
+import { sourceDetailLabel } from '../activity'
 
 export type { CandidateOcr, ResumeOcr } from './ocr-types'
 
@@ -37,7 +38,7 @@ function workProfileFacts(cand: Candidate): Fact[] {
     ['Gulf or overseas experience', years(cand.gulfExperience)],
     ['Expected salary', cand.expectedSalary != null ? money(cand.expectedSalary) : 'Not recorded'],
     ['Source', SOURCE_LABEL[cand.source] ?? cand.source],
-    ['More about the source', cand.sourceDetail || 'Not recorded'],
+    ['More about the source', sourceDetailLabel(cand.sourceDetail) || 'Not recorded'],
     ['Added on', dateLabel(cand.addedAt)],
   ]
 }

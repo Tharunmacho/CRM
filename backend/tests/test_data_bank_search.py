@@ -1,11 +1,15 @@
 """Data Bank search: case-insensitive, one box over every detail, comma-separated terms all have to match,
 and the position groups agree with the list. Real PostgreSQL (isolated test database only)."""
-from datetime import date
+from datetime import date, datetime, timezone
+from io import BytesIO
+import json
+from xml.etree import ElementTree
+from zipfile import ZipFile
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.db import models as m
-from app.services.candidate_search import Search, position_groups, search_candidates, search_terms
+from app.services.candidate_search import Search, export_candidates, pool_counts, position_groups, search_candidates, search_terms
 from test_candidate_workflows import make_client
 from test_database_naming import schema_database, _migrate  # noqa: F401  (fixture)
 
@@ -136,6 +140,103 @@ def test_a_position_lists_only_its_own_resumes(people):
     assert ids(people, '', order_id='o-1') == {'ravi-a', 'meena'}
     assert ids(people, 'ravi', order_id='o-1') == {'ravi-a'}
     assert ids(people, '', order_id='none') == {'nobody'}
+
+
+def test_review_filter_includes_flagged_pipeline_statuses_without_replacing_them(bank):
+    add(bank, 'flagged', status=m.CandidateStatus.deployed, needs_review=True)
+    add(bank, 'complete', status=m.CandidateStatus.deployed, needs_review=False)
+    add(bank, 'review', status=m.CandidateStatus.needs_review, needs_review=False)
+    add(bank, 'new', status=m.CandidateStatus.new, needs_review=False)
+    bank.commit()
+    expected = {'flagged', 'review'}
+    for label in ('Needs review', 'needs_review', 'needs', 'review'):
+        assert ids(bank, '', column_filters=json.dumps({'status': label})) == expected
+    assert ids(bank, '', pool='needs_review') == expected
+    assert ids(bank, 'needs review') == expected
+    assert pool_counts(bank)['needs_review'] == 2
+    assert ids(bank, '', column_filters='{"status":"Deployed"}') == {'flagged', 'complete'}
+    assert ids(bank, '', pool='needs_review', column_filters='{"status":"deployed"}') == {'flagged'}
+    rows = search_candidates(bank, Search(sort='status', direction='asc'), 0, 50)['items']
+    assert len(rows) == 4 and next(row for row in rows if row['id'] == 'flagged')['status'] == 'deployed'
+
+
+def test_deployed_candidates_remain_in_their_order_stage_and_counts_even_when_flagged(bank):
+    for index in range(26):
+        identifier = f'travelled-{index:02d}'
+        add(bank, identifier, status=m.CandidateStatus.deployed, needs_review=index < 7)
+        bank.add(m.Application(id=f'placement-{index}', candidate_id=identifier, order_id='o-1', owner_id='asha',
+                               current_stage=11, status=m.ApplicationStatus.deployed))
+    add(bank, 'unplaced-1')
+    add(bank, 'unplaced-2')
+    bank.commit()
+    deployed = {f'travelled-{index:02d}' for index in range(26)}
+    assert ids(bank, '', column_filters='{"status":"deployed"}') == deployed
+    assert ids(bank, '', column_filters='{"stage":"11"}') == deployed
+    assert ids(bank, '', column_filters='{"order":"ORD-WELD"}') == deployed
+    assert ids(bank, '', order_id='o-1') == deployed
+    assert ids(bank, 'al noor, welder') == deployed
+    assert ids(bank, '', order_id='none') == {'unplaced-1', 'unplaced-2'}
+    assert ids(bank, '', pool='unmapped') == {'unplaced-1', 'unplaced-2'}
+    counts = pool_counts(bank)
+    assert (counts['all'], counts['unmapped'], counts['needs_review']) == (28, 2, 7)
+    groups = position_groups(bank, Search())
+    assert groups['positions'] == 1 and groups['resumes'] == 28
+    assert {(row['orderId'], row['resumes']) for row in groups['groups']} == {('o-1', 26), (None, 2)}
+
+
+def test_displayed_placement_prefers_active_then_latest_deployed_and_never_duplicates_rows(bank):
+    for identifier, state in [('history', m.CandidateStatus.deployed), ('active', m.CandidateStatus.in_process),
+                              ('closed', m.CandidateStatus.new), ('unplaced', m.CandidateStatus.new)]:
+        add(bank, identifier, status=state)
+
+    def placement(identifier, candidate, order, state, year, stage):
+        bank.add(m.Application(id=identifier, candidate_id=candidate, order_id=order, owner_id='asha', current_stage=stage,
+                               status=state, created_at=datetime(year, 1, 1, tzinfo=timezone.utc)))
+
+    placement('history-old', 'history', 'o-1', m.ApplicationStatus.deployed, 2024, 11)
+    placement('history-new', 'history', 'o-2', m.ApplicationStatus.deployed, 2025, 11)
+    placement('history-closed', 'history', 'o-1', m.ApplicationStatus.closed, 2026, 2)
+    placement('active-current', 'active', 'o-1', m.ApplicationStatus.active, 2023, 4)
+    placement('active-travelled', 'active', 'o-2', m.ApplicationStatus.deployed, 2025, 11)
+    placement('closed-only', 'closed', 'o-2', m.ApplicationStatus.closed, 2026, 1)
+    bank.commit()
+    assert ids(bank, '', order_id='o-1') == {'active'}
+    assert ids(bank, '', order_id='o-2') == {'history'}
+    assert ids(bank, '', column_filters='{"stage":"11"}') == {'history'}
+    assert ids(bank, '', column_filters='{"stage":"4"}') == {'active'}
+    assert ids(bank, '', order_id='none') == {'closed', 'unplaced'}
+    assert ids(bank, '', matchable=True) == {'closed', 'unplaced'}
+    page = search_candidates(bank, Search(), 0, 50)
+    assert page['total'] == len(page['items']) == 4
+    assert position_groups(bank, Search())['resumes'] == 4
+    with ZipFile(BytesIO(export_candidates(bank, Search()))) as archive:
+        sheet = ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
+    rows = [[''.join(cell.itertext()) for cell in row.findall('{*}c')] for row in sheet.findall('{*}sheetData/{*}row')]
+    header = rows[0]
+    body = {row[1]: row for row in rows[1:]}
+    assert len(body) == 4
+    for identifier, order, stage in [('history', 'ORD-ELEC', '11'), ('active', 'ORD-WELD', '4'), ('closed', '', ''), ('unplaced', '', '')]:
+        assert body[identifier][header.index('Mapped order')] == order
+        assert body[identifier][header.index('Stage')] == stage
+    assert body['history'][header.index('Status')] == 'deployed'
+
+
+def test_agency_search_matches_form_assignment_without_treating_import_provenance_as_an_agency(bank):
+    add(bank, 'imported', source=m.Source.other, source_detail='  BULK   import  ')
+    add(bank, 'email-agency', source=m.Source.email, source_detail='True Referrer')
+    add(bank, 'explicit-referral', source=m.Source.referral, source_detail='Bulk import')
+    add(bank, 'lead', source=m.Source.other, source_detail='lead_sheet:private-row-pointer')
+    bank.commit()
+    assert ids(bank, 'bulk import') == {'explicit-referral'}
+    assert ids(bank, 'true referrer') == {'email-agency'}
+    assert ids(bank, 'truereferrer') == {'email-agency'}
+    assert ids(bank, 'private-row-pointer') == set()
+    assert ids(bank, 'lead_sheet') == set()
+    bank.get(m.Candidate, 'imported').source_detail = 'Bulk import'
+    bank.add(m.ReferenceAgency(id='registered-import', name='Agency Contact', agency_name='BULK IMPORT'))
+    bank.commit()
+    assert ids(bank, 'bulk import') == {'imported', 'explicit-referral'}
+    assert bank.get(m.Candidate, 'lead').source_detail == 'lead_sheet:private-row-pointer'
 
 
 def test_endpoints_serve_the_search_and_groups_without_breaking_order_matching(people):

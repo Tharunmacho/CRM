@@ -21,14 +21,21 @@ export interface ActivityLookups {
 
 const NEGATIVE = ['Failed', 'Rejected', 'Unfit', 'Not forwarded']
 
+/** Keep a lead's internal link readable in candidate source facts and history. */
+export function sourceDetailLabel(detail?: string | null): string {
+  const value = (detail ?? '').trim()
+  return /^lead_sheet:\S+$/i.test(value) ? 'Lead Sheet' : value
+}
+
 /**
  * Everything the saved record can say about a candidate, newest first: when they were added, the
  * initial call, and for each application when it was matched, every recorded stage outcome (with
  * who and when), reopenings, and how it ended. Built only from data already on the page.
  */
 export function buildActivity(cand: Candidate, apps: Application[], look: ActivityLookups): ActivityEvent[] {
+  const detail = sourceDetailLabel(cand.sourceDetail)
   const events: ActivityEvent[] = [
-    { id: `added-${cand.id}`, at: cand.addedAt, title: 'Added to the Data Bank', detail: look.sourceLabel(cand.source) + (cand.sourceDetail ? ` · ${cand.sourceDetail}` : ''), tone: 'plain' },
+    { id: `added-${cand.id}`, at: cand.addedAt, title: 'Added to the Data Bank', detail: look.sourceLabel(cand.source) + (detail ? ` · ${detail}` : ''), tone: 'plain' },
   ]
   if (cand.callOutcome) {
     const { called, interested, remarks, recordedAt } = cand.callOutcome

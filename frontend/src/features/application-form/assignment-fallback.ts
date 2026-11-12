@@ -78,7 +78,11 @@ export function completeAssignment(assignment: AssignmentData, sources: Assignme
     const designation = order ? sources.designations.find((item) => item.id === order.designationId) : undefined
     const sourceKey = sources.candidate?.source || assignment.source.key
     // The detail may hold an intake pointer instead of a name: that is not an agency.
-    const detail = cleanAgencyName(sources.candidate?.sourceDetail) || cleanAgencyName(assignment.agency?.name)
+    const agencyName = (value?: string) => {
+      const known = sources.agencies?.some(item => (item.agencyName || item.name || '').trim().toLowerCase() === (value ?? '').trim().toLowerCase())
+      return cleanAgencyName(value, known ? 'referral' : sourceKey)
+    }
+    const detail = agencyName(sources.candidate?.sourceDetail) || agencyName(assignment.agency?.name)
     const agency = detail ? { id: sources.agencies?.find((item) => (item.agencyName || item.name || '').toLowerCase() === detail.toLowerCase())?.id ?? '', name: detail } : null
     const owner = sources.candidate?.ownerId ? sources.users.find((item) => item.id === sources.candidate?.ownerId) : undefined
     next = {

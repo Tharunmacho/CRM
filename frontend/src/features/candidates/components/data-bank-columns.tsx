@@ -15,6 +15,7 @@ import { DeleteCandidateDialog } from '@/features/candidates/components/delete-c
 import type { useStore } from '@/shared/state/crm-store'
 import { workRefusal } from '@/features/candidates/candidate-access'
 import { BANK_FIELD_DEFS, DEFAULT_COLUMN_FIELDS, FIELD_PREFIX, type BankContext, type BankFieldDef } from '@/features/candidates/data-bank-fields'
+import { bankApplication, bankFormApplication } from '@/features/candidates/data-bank-assignment'
 import { BANK_TABLE_COLUMNS, PLACEHOLDER_NAME, agentLabel, bankColumnWidth, candidateSubline, isPlaceholderName } from '@/features/candidates/data-bank-table'
 import '@/styles/data-bank-table.css'
 
@@ -107,12 +108,12 @@ const humanize = (value: string) => { const text = value.replace(/_/g, ' ').trim
 export function bankContext(store: Store, options: FormOptions = {}): BankContext {
   return {
     ownerName: (id) => (id ? store.user(id)?.name ?? '' : ''),
-    agent: (candidate) => agentLabel(candidate.sourceDetail),
+    agent: (candidate) => agentLabel(candidate.sourceDetail, candidate.source),
     statusLabel: (candidate) => candidateStatus(candidate).label,
     sourceLabel: (source) => SOURCE_LABEL[source] ?? source,
     optionLabel: (category, value) => { const label = labelFor(options, category, value); return label === value ? humanize(value) : label },
     application: (candidateId) => {
-      const app = store.activeApplicationFor(candidateId)
+      const app = bankApplication(store.applicationsFor(candidateId))
       if (!app) return null
       return { stage: stageByNo(app.currentStage).title, order: store.order(app.orderId)?.ref ?? '' }
     },
@@ -125,10 +126,9 @@ export function FieldCell({ candidate, field, context }: { candidate: Candidate;
   return value ? <span className="db-clamp" title={value}>{value}</span> : <Dash />
 }
 
-/** The order a candidate's application form opens on: the live application, else the most recent one. */
+/** Open the displayed placement's form, retaining access to closed-only application history. */
 export function formOrderId(store: Store, candidateId: string): string | undefined {
-  const applications = store.applicationsFor(candidateId)
-  return (applications.find((application) => application.status === 'active') ?? applications[applications.length - 1])?.orderId
+  return bankFormApplication(store.applicationsFor(candidateId))?.orderId
 }
 
 /** The always-visible way into a candidate's application form (icon and label, never inside a menu). */
@@ -216,13 +216,13 @@ export function ContactLines({ candidate, mark = plain }: CellProps) {
 
 /** The agent or agency that sent the profile; a muted dash when none was recorded (internal pointers are never shown). */
 export function AgentLine({ candidate, mark = plain }: CellProps) {
-  const agent = agentLabel(candidate.sourceDetail)
+  const agent = agentLabel(candidate.sourceDetail, candidate.source)
   return agent ? <span className="dbt-main dbt-agent" title={`Agent / referred by: ${agent}`}>{mark(agent)}</span> : <span className="db-muted" title="No agent recorded">–</span>
 }
 
 /** The compact 11-stage indicator; with `onOpenStage` it opens the stage modal. A dash while the candidate has no order. */
 export function StageCell({ candidate, store, onOpenStage }: { candidate: Candidate; store: Store; onOpenStage?: (applicationId: string) => void }) {
-  const app = store.activeApplicationFor(candidate.id)
+  const app = bankApplication(store.applicationsFor(candidate.id))
   if (!app) return <Dash />
   if (!onOpenStage) return <StageChip stage={app.currentStage} />
   return (

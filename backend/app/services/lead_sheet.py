@@ -568,7 +568,10 @@ def candidate_body(lead: Lead, overrides: dict, user: User, assign_to: str | Non
         "total_experience": min(80, int(years or 0)), "country_preference": lead.country_interest,
         "marital_status": lead.marital_status if (lead.marital_status or "").lower() in MARITAL else None,
         "education": [{"level": lead.education_level}] if lead.education_level else [],
-        "source": "other", "source_detail": lead.campaign_name,
+        # A campaign identifies where the lead came from, not a referral agency.
+        # Keep the campaign on the linked lead and store an explicit provenance
+        # pointer so candidate screens do not label advertising text as an agent.
+        "source": "other", "source_detail": f"lead_sheet:{lead.id}",
     }
     camel = {"currentCity": "current_city", "totalExperience": "total_experience", "countryPreference": "country_preference",
              "sourceDetail": "source_detail"}
@@ -642,9 +645,13 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
     lead = load_lead(db, lead_id_, lock=True)
     lead.status, lead.candidate_id = "converted", candidate.id
     lead.updated_at = datetime.now(timezone.utc)
+    provenance = {"leadId": lead.id, "campaignId": lead.campaign_id, "campaignName": lead.campaign_name,
+                  "formName": lead.form_name, "platform": lead.platform}
     log_activity(db, lead.id, user.id, "convert", f"Converted to candidate {candidate.ref}",
-                 {"candidateId": candidate.id, "candidateRef": candidate.ref, "from": lead_status_before, "resumeAttached": resume_attached})
-    db.add(AuditEntry(actor_id=user.id, action="Converted lead to candidate", target=candidate.name, entity_type="candidate", entity_id=candidate.id))
+                 {**provenance, "candidateId": candidate.id, "candidateRef": candidate.ref,
+                  "from": lead_status_before, "resumeAttached": resume_attached})
+    db.add(AuditEntry(actor_id=user.id, action="Converted lead to candidate", target=candidate.name,
+                      entity_type="candidate", entity_id=candidate.id, meta=provenance))
     lead_matching.clear_self_match(lead)
     lead_followups.sync(db, [lead.id])
     db.commit()

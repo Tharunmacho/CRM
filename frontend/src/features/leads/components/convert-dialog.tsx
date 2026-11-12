@@ -143,7 +143,7 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
             <Field label="Preferred country"><Input value={fields.country} onChange={set('country')} /></Field>
             <Field label="Current city"><Input value={fields.city} onChange={set('city')} /></Field>
           </div>
-          <p className="ld-hint">Also carried over: {[lead.dob ? `born ${dobLabel(lead.dob)}` : '', lead.gender ?? '', lead.experienceTotalYears !== null && lead.experienceTotalYears !== undefined ? `${lead.experienceTotalYears} years of experience` : '', lead.campaignName ? `source: ${lead.campaignName}` : ''].filter(Boolean).join(' · ') || 'nothing else'}. {lead.ownerName ? `The candidate stays with ${lead.ownerName}.` : 'The candidate is not assigned. An admin can choose a recruiter later.'}</p>
+          <p className="ld-hint">Also carried over: {[lead.dob ? `born ${dobLabel(lead.dob)}` : '', lead.gender ?? '', lead.experienceTotalYears !== null && lead.experienceTotalYears !== undefined ? `${lead.experienceTotalYears} years of experience` : ''].filter(Boolean).join(' · ') || 'nothing else'}. {lead.campaignName && `Campaign: ${lead.campaignName} remains on the lead. `}{lead.ownerName ? `The candidate stays with ${lead.ownerName} if they are eligible; otherwise normal recruiter assignment rules apply.` : 'Normal recruiter assignment rules apply.'}</p>
         </section>
 
         <section className="ld-section">

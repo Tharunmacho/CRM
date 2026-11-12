@@ -26,9 +26,10 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import current_user
 from app.db.models import (
-    Application, ApplicationStage, Attachment, ApplicationStatus, Candidate, Client, Company, Designation, Order, Source, User,
+    Application, ApplicationStage, Attachment, ApplicationStatus, Candidate, Client, Company, Designation, Order, User,
 )
 from app.db.session import get_db
+from app.services.agency_display import agency_display_expression
 from app.services.application_form import LEGACY_SLOTS, required_for_deployment
 
 router = APIRouter(prefix="/api/travelled", tags=["travelled"])
@@ -146,8 +147,8 @@ def read_rows(db: Session, user: User) -> list[dict]:
         ranked.c.rank == 1, ranked.c.reopened_reason.is_(None)).subquery()
     travel = ticket.c.data["travelDate"].as_string()
     statement = (
-        select(Application.id, Application.status, Candidate.id, Candidate.ref, Candidate.name, Candidate.source,
-               Candidate.source_detail, Order.ref, Order.country, Company.name, Company.country, Client.id, Designation.title,
+        select(Application.id, Application.status, Candidate.id, Candidate.ref, Candidate.name,
+               agency_display_expression().label("agency"), Order.ref, Order.country, Company.name, Company.country, Client.id, Designation.title,
                User.name, travel, ticket.c.data["airline"].as_string(), ticket.c.data["pnr"].as_string(),
                Candidate.passport_no, Order.id)
         .select_from(Application)
@@ -163,7 +164,7 @@ def read_rows(db: Session, user: User) -> list[dict]:
     if user.role.value == "staff":
         statement = statement.where(Application.owner_id == user.id)
     rows = []
-    for (app_id, status, cand_id, ref, name, source, detail, order_ref, order_country, company, company_country, client_id,
+    for (app_id, status, cand_id, ref, name, agency, order_ref, order_country, company, company_country, client_id,
          job, recruiter, travel_date, airline, pnr, passport, order_id) in db.execute(statement).all():
         day = None
         if isinstance(travel_date, str) and _DAY.fullmatch(travel_date):
@@ -175,7 +176,7 @@ def read_rows(db: Session, user: User) -> list[dict]:
             "applicationId": app_id, "candidateId": cand_id, "ref": ref, "name": name, "client": company, "clientId": client_id,
             "country": _text(order_country) or _text(company_country), "job": job, "orderRef": order_ref,
             "orderId": order_id, "passportNumber": passport or None,
-            "agency": (detail or None) if getattr(source, "value", source) == Source.referral.value else None,
+            "agency": agency,
             "travelDate": day, "airline": airline or None, "pnr": pnr or None, "recruiter": recruiter,
             "status": getattr(status, "value", status),
         })

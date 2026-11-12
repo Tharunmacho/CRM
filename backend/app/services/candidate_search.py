@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.db.models import Application, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
 from app.domain.stages import STAGES
 from app.services.candidate_identity import normalized_labels
+from app.services.agency_display import agency_display_expression
 from app.services.parallel_reads import parallel_reads
 from app.services.report_exports import xlsx_rows
 
@@ -24,8 +25,6 @@ UNASSIGNED_LABEL = "Needs assignment"
 # "experience" (exact years) and "added" (one day, or text) keep working as before.
 RANGE_KEYS = {"experience_min", "experience_max", "added_from", "added_to"}
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in", "referral": "Referral", "other": "Other"}
-# source_detail holds the agent / referrer a person typed, but automatic intake stores a machine pointer there.
-MACHINE_SOURCE_DETAIL = r"^(email_message|whatsapp_message|person_review):"
 SERVICE_CHARGE_ORDER = ("agreed", "pending", "declined", "not_discussed")
 INTEREST_ORDER = ("more_interested", "interested", "somewhat_interested", "not_interested")
 MAX_SEARCH_TERMS = 10
@@ -67,7 +66,7 @@ class Search:
     passport: str = "any"
     location: str = ""
     matchable: bool = False
-    # Only the resumes of one position (an order id), or "none" for candidates with no active order.
+    # Only the resumes of one position, or "none" without an active or deployed placement.
     order_id: str = ""
 
 
@@ -92,8 +91,27 @@ def search_terms(q: str) -> list[str]:
     return terms
 
 
+def displayed_applications():
+    """One placement per candidate: active first, otherwise their latest deployed placement.
+
+    Closed applications remain history. Ranking before joining prevents multiple
+    deployments from duplicating candidate rows, counts, skills and export rows.
+    """
+    ranked = select(
+        Application.id, Application.candidate_id, Application.current_stage, Application.order_id,
+        func.row_number().over(
+            partition_by=Application.candidate_id,
+            order_by=(case((Application.status == "active", 0), else_=1),
+                      Application.created_at.desc(), Application.id.desc()),
+        ).label("placement_rank"),
+    ).where(Application.status.in_(("active", "deployed"))).subquery("ranked_applications")
+    return select(ranked.c.id, ranked.c.candidate_id, ranked.c.current_stage, ranked.c.order_id).where(
+        ranked.c.placement_rank == 1,
+    ).subquery("current_app")
+
+
 def search_statement(filters: Search):
-    app = select(Application.candidate_id, Application.current_stage, Application.order_id).where(Application.status == "active").subquery("current_app")
+    app = displayed_applications()
     source = case((Candidate.source == "email", "Email"), (Candidate.source == "whatsapp", "WhatsApp"),
                   (Candidate.source == "walk_in", "Walk-in"), (Candidate.source == "referral", "Referral"), else_="Other")
     expressions = {
@@ -114,7 +132,7 @@ def search_statement(filters: Search):
              .outerjoin(app, app.c.candidate_id == Candidate.id).outerjoin(Order, Order.id == app.c.order_id)
              .outerjoin(Designation, Designation.id == Order.designation_id).outerjoin(Company, Company.id == Order.company_id)
              .outerjoin(Client, Client.id == Company.client_id))
-    agent = case((Candidate.source_detail.op("~")(MACHINE_SOURCE_DETAIL), ""), else_=func.coalesce(Candidate.source_detail, ""))
+    agent = agency_display_expression()
 
     def term_matches(term: str):
         """True when this one term appears (any case) in at least one of the candidate's details."""
@@ -218,7 +236,10 @@ def search_statement(filters: Search):
                 label = case(*((Candidate.status == value, name) for value, name in STATUS_LABELS.items()), else_=cast(Candidate.status, String))
             else:
                 label = case((Candidate.owner_id.is_(None), "Unassigned"), else_=User.name)
-            query = query.where(or_(literal_contains(cast(expression, String), term.strip()), literal_contains(label, term.strip())))
+            clauses = [literal_contains(cast(expression, String), term.strip()), literal_contains(label, term.strip())]
+            if key == "status" and any(term.strip().lower() in value for value in ("needs_review", "needs review")):
+                clauses.append(Candidate.needs_review.is_(True))
+            query = query.where(or_(*clauses))
             continue
         if key in ("experience", "stage"):
             try:
@@ -240,7 +261,7 @@ def position_groups(db, filters: Search):
     """The positions (orders) holding the candidates this search finds, with how many resumes each holds.
 
     One grouped statement over the same predicates as the list, so the numbers always agree with it.
-    Candidates with no active order form one last group with a null order id."""
+    Candidates without an active or deployed placement form one last group with a null order id."""
     pool = (search_statement(filters).order_by(None)
             .with_only_columns(Candidate.id.label("candidate_id"), Order.id.label("order_id"), Order.ref.label("ref"), Designation.title.label("title"),
                                Company.name.label("company"), Client.name.label("client"), Order.country.label("country"), Order.city.label("city"),
@@ -324,7 +345,8 @@ def candidate_skill_facets(db, filters: Search):
 def export_candidates(db, filters):
     candidates = db.scalars(search_statement(filters)).all()
     users = {u.id: u.name for u in db.scalars(select(User))}
-    current_apps = {a.candidate_id: a for a in db.scalars(select(Application).where(Application.status == "active"))}
+    shown = displayed_applications()
+    current_apps = {a.candidate_id: a for a in db.scalars(select(Application).join(shown, Application.id == shown.c.id))}
     orders = {o.id: o.ref for o in db.scalars(select(Order))}
     # The labels an admin has set for service charges and interest level; a stored value with no option reads as itself.
     labels: dict[str, dict[str, str]] = {}

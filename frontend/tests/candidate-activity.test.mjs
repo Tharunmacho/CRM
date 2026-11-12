@@ -10,7 +10,7 @@ function moduleUrl(source) {
   return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
 }
 
-const { buildActivity } = await import(moduleUrl(await readFile(new URL('../src/features/candidates/activity.ts', import.meta.url), 'utf8')))
+const { buildActivity, sourceDetailLabel } = await import(moduleUrl(await readFile(new URL('../src/features/candidates/activity.ts', import.meta.url), 'utf8')))
 const { passportExpiryNotice } = await import(moduleUrl(await readFile(new URL('../src/features/candidates/passport-expiry.ts', import.meta.url), 'utf8')))
 
 const look = {
@@ -21,6 +21,15 @@ const look = {
   sourceLabel: (source) => source.toUpperCase(),
 }
 const candidate = { id: 'c1', source: 'email', sourceDetail: 'hr@x', addedAt: '2026-10-01T09:00:00Z', ownerId: 'u1', callOutcome: null }
+
+test('Lead Sheet provenance is readable in source facts and history, preserving recorded referral text', () => {
+  assert.equal(sourceDetailLabel('lead_sheet:lead-123'), 'Lead Sheet')
+  assert.equal(sourceDetailLabel('Known Referral Agency'), 'Known Referral Agency')
+  assert.equal(sourceDetailLabel(undefined), '')
+  const events = buildActivity({ ...candidate, source: 'other', sourceDetail: 'lead_sheet:lead-123' }, [], look)
+  assert.equal(events[0].detail, 'OTHER · Lead Sheet')
+  assert.ok(!events[0].detail.includes('lead-123'))
+})
 
 test('activity lists the add, the call, mapping, every stage and the ending, newest first', () => {
   const cand = { ...candidate, callOutcome: { called: true, interested: 'yes', remarks: 'Keen', recordedAt: '2026-10-02T09:00:00Z' } }

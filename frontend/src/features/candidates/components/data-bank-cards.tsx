@@ -29,7 +29,7 @@ export function DataBankCards({ rows, store, onOpen, onReassign, onEdit, onOpenS
             <div className="is-wide"><dt>Contact</dt><dd><ContactLines candidate={candidate} /></dd></div>
             <div><dt>Recruiter</dt><dd><OwnerText candidate={candidate} store={store} /></dd></div>
             <div><dt>Stage</dt><dd><StageCell candidate={candidate} store={store} onOpenStage={onOpenStage} /></dd></div>
-            {agentLabel(candidate.sourceDetail) && <div className="is-wide"><dt>Agent</dt><dd><AgentLine candidate={candidate} /></dd></div>}
+            {agentLabel(candidate.sourceDetail, candidate.source) && <div className="is-wide"><dt>Agent</dt><dd><AgentLine candidate={candidate} /></dd></div>}
           </dl>
           <div className="db-mini-foot">
             <CandidateActions candidate={candidate} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} />

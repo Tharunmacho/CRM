@@ -13,7 +13,7 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
-    Application, ApplicationStage, ApplicationStatus, Attachment, Candidate, Client, Company, Designation, Order, Role, Source, User,
+    Application, ApplicationStage, ApplicationStatus, Attachment, Candidate, Client, Company, Designation, Order, ReferenceAgency, Role, Source, User,
 )
 from test_database_naming import _migrate, schema_database
 from app.services.application_form import required_for_deployment
@@ -111,9 +111,57 @@ def test_every_travelled_placement_is_listed_newest_first_with_its_client_and_ag
         "travelDate": "2026-05-09", "airline": "Air Arabia G9472", "pnr": "6ZA8JH", "recruiter": "Staff", "status": "deployed",
         "documents": {"have": 12, "required": 12, "missing": []}}
     by_name = {row["name"]: row for row in body["rows"]}
-    assert by_name["Selvam Balraj"]["agency"] is None      # only a referral names an agency; "Bulk import" is not one
+    assert by_name["Selvam Balraj"]["agency"] is None      # "Bulk import" is provenance, not an agency
     assert by_name["Visakh Kumar"]["travelDate"] is None and by_name["Visakh Kumar"]["agency"] is None
     assert all(row["status"] == "deployed" for row in body["rows"])
+
+
+def test_agency_matches_form_assignment_for_real_names_and_intake_provenance(env):
+    from app.services.form_assignment import build_block, read_agencies
+
+    values = {
+        "c1": (Source.email, "  Actual Referrer  ", "Actual Referrer"),
+        "c2": (Source.other, "\tBuLK  import\n", None),
+        "c3": (Source.email, "email_message:receipt", None),
+        "c4": (Source.whatsapp, "whatsapp_message:receipt", None),
+        "c5": (Source.referral, "Bulk import", "Bulk import"),
+        "c6": (Source.other, "person_review:group", None),
+        "c8": (Source.other, "lead_sheet:original-lead", None),
+    }
+    with env.sessions() as db:
+        for identifier, (source, detail, _expected) in values.items():
+            candidate = db.get(Candidate, identifier)
+            candidate.source, candidate.source_detail = source, detail
+        db.commit()
+
+    rows = {row["candidateId"]: row for row in get(env)["rows"]}
+    with env.sessions() as db:
+        agencies = read_agencies(db)
+        for identifier, (_source, _detail, expected) in values.items():
+            assignment = build_block(env.actor, db.get(Candidate, identifier), None, None, [], agencies, [])
+            form_agency = assignment["agency"]["name"] if assignment["agency"] else None
+            assert rows[identifier]["agency"] == form_agency == expected
+    assert names(get(env, agency="Actual Referrer")) == ["Akash Murugesan"]
+    assert "Actual Referrer" in get(env)["options"]["agencies"]
+    exported = list(csv.reader(StringIO(env.client.get("/api/travelled/export", params={"format": "csv", "agency": "Actual Referrer"}).content.decode("utf-8-sig"))))
+    assert len(exported) == 2 and exported[1][7] == "Actual Referrer"
+
+
+def test_registered_agency_named_bulk_import_is_preserved_without_changing_source(env):
+    from app.services.form_assignment import build_block, read_agencies
+
+    with env.sessions() as db:
+        candidate = db.get(Candidate, "c3")
+        candidate.source, candidate.source_detail = Source.email, "  Bulk import  "
+        db.add(ReferenceAgency(id="literal-import-agency", name="Contact", agency_name="  bULK IMPORT  "))
+        db.commit()
+    body = get(env, agency="Bulk import")
+    assert names(body) == ["Selvam Balraj"]
+    with env.sessions() as db:
+        candidate = db.get(Candidate, "c3")
+        assignment = build_block(env.actor, candidate, None, None, [], read_agencies(db), [])
+        assert body["rows"][0]["agency"] == assignment["agency"]["name"] == "Bulk import"
+        assert candidate.source == Source.email
 
 
 def test_only_the_latest_ticket_attempt_is_read(env):

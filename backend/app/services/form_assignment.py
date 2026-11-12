@@ -18,11 +18,12 @@ from app.db.models import (
     Application, ApplicationStatus, AuditEntry, Candidate, Client, Company, Designation, Order, OrderStatus, ReferenceAgency,
     Role, Source, User,
 )
+from app.services.agency_display import MACHINE_SOURCE_DETAIL_PATTERN
 
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in", "referral": "Referral", "other": "Other"}
 SOURCE_ORDER = ("whatsapp", "email", "walk_in", "referral", "other")
 # source_detail holds a typed agent / referrer, but automatic intake stores a machine pointer there (see candidate_search).
-MACHINE_SOURCE_DETAIL = re.compile(r"^(email_message|whatsapp_message|person_review):")
+MACHINE_SOURCE_DETAIL = re.compile(MACHINE_SOURCE_DETAIL_PATTERN)
 RECRUITER_ROLES = (Role.staff, Role.manager)
 SOURCE_DETAIL_LIMIT = 255
 
