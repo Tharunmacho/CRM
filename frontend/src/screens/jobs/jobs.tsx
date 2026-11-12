@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, BriefcaseBusiness, LayoutGrid, Pencil, Plus, Search, Table2, X } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import type { Order } from '@/shared/model/types'
+import { money } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/primitives'
 import { Panel } from '@/shared/ui/display'
 import { DataTable, type Column } from '@/shared/ui/table'
@@ -74,12 +75,19 @@ function Openings({ row }: { row: JobRow }) {
   </span>
 }
 
+function Salary({ order }: { order: Order }) {
+  return order.salary === null || order.salary === undefined
+    ? <span className="cl-quiet" aria-label="Salary not set">—</span>
+    : <span className="cl-cell js-salary"><b>{money(order.salary, order.currency)}</b><span>per month</span></span>
+}
+
 function JobCards({ rows, query, newId, onOpen, onEdit }: { rows: JobRow[]; query: string; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void }) {
   return <div className="cs-grid">{rows.map((row) => {
     const o = row.order
     const facts: { label: string; value: ReactNode }[] = [
       { label: 'Client', value: <span className="js-client"><b title={row.company}><Hi text={row.company} query={query} /></b>{row.contact && <small title={row.contact}><Hi text={row.contact} query={query} /></small>}</span> },
       { label: 'Location', value: <Location country={row.country} city={row.city} query={query} /> },
+      { label: 'Salary', value: <Salary order={o} /> },
       { label: 'Openings', value: <Openings row={row} /> },
       { label: 'Status', value: <OrderStatusText order={o} /> },
     ]
@@ -101,25 +109,26 @@ function JobCards({ rows, query, newId, onOpen, onEdit }: { rows: JobRow[]; quer
 function JobTable({ rows, query, loading, newId, onOpen, onEdit }: { rows: JobRow[]; query: string; loading: boolean; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void }) {
   const columns: Column<JobRow>[] = [
     {
-      key: 'job', header: 'Job', width: '22%', minWidth: '12rem',
+      key: 'job', header: 'Job', width: '20%',
       render: (row) => <div className="cl-cell"><b title={row.title}><Hi text={row.title} query={query} /></b><span className="ident" title={row.order.ref}><Hi text={row.order.ref} query={query} /></span></div>,
     },
     {
-      key: 'client', header: 'Client', width: '22%', align: 'left',
+      key: 'client', header: 'Client', width: '20%', align: 'left',
       render: (row) => <div className="cl-cell"><b title={row.company}><Hi text={row.company} query={query} /></b>{row.contact && <span title={row.contact}><Hi text={row.contact} query={query} /></span>}</div>,
     },
-    { key: 'location', header: 'Location', width: '16%', align: 'left', render: (row) => <Location country={row.country} city={row.city} query={query} /> },
-    { key: 'openings', header: 'Openings', width: '15%', align: 'left', render: (row) => <Openings row={row} /> },
+    { key: 'location', header: 'Location', width: '13%', align: 'left', render: (row) => <Location country={row.country} city={row.city} query={query} /> },
+    { key: 'salary', header: 'Salary', width: '13%', align: 'left', render: (row) => <Salary order={row.order} /> },
+    { key: 'openings', header: 'Openings', width: '12%', align: 'left', render: (row) => <Openings row={row} /> },
     { key: 'status', header: 'Status', width: '9%', align: 'left', render: (row) => <OrderStatusText order={row.order} /> },
     {
-      key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
+      key: 'actions', header: 'Actions', actions: true, minWidth: '8.5rem',
       render: (row) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cs-icon-act" onClick={(event) => { event.stopPropagation(); onEdit(row.order) }} aria-label={`Edit ${row.title} ${row.order.ref}`} title="Edit"><Pencil size={14} aria-hidden="true" /></button>}
         <button type="button" className="cl-open" onClick={(event) => { event.stopPropagation(); onOpen(row.order) }} aria-label={`Open ${row.title} ${row.order.ref}`}>Open<ArrowRight size={14} aria-hidden="true" /></button>
       </span>,
     },
   ]
-  return <Panel flush><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.order.id} rowClassName={(row) => row.order.id === newId ? 'js-new' : undefined} onRowClick={(row) => onOpen(row.order)} /></Panel>
+  return <Panel flush className="js-jobs-table"><DataTable compact stackBelow={1280} loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.order.id} rowClassName={(row) => row.order.id === newId ? 'js-new' : undefined} onRowClick={(row) => onOpen(row.order)} /></Panel>
 }
 
 function Skeleton({ layout }: { layout: Layout }) {

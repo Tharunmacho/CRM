@@ -87,6 +87,8 @@ def cell_xml(ref: str, value, style: int | None = None) -> str:
     if isinstance(value, (int, float, Decimal)):
         return f'<c r="{ref}"' + (f' s="{style}"' if style else "") + f'><v>{value}</v></c>'
     text = clean(str(value))
+    if style in (None, DEFAULT) and "\n" in text:
+        style = WRAP
     return f'<c r="{ref}" s="{style if style else TEXT}" t="inlineStr"><is><t xml:space="preserve">{escape(text)}</t></is></c>'
 
 
@@ -99,6 +101,10 @@ def sheet_xml(rows: list[list], widths: list[float] | None, header: bool, freeze
             style = HEADER if header and r == 1 else (BOLD if bold_first and c == 0 else None)
             cells.append(cell_xml(f"{column_name(c)}{r}", value, style))
         height = ' ht="30" customHeight="1"' if header and r == 1 else ""
+        if not height:
+            lines = max((len(value.splitlines()) for value in row if isinstance(value, str)), default=1)
+            if lines > 1:
+                height = f' ht="{min(409, 18 * lines + 8)}" customHeight="1"'
         out.append(f'<row r="{r}"{height}>' + "".join(cells) + "</row>")
     cols = ""
     if widths:
@@ -146,11 +152,12 @@ def build_workbook(sheets: list[dict]) -> bytes:
 
 
 def fit_widths(rows: list[list], minimum: float = 8, maximum: float = 48) -> list[float]:
-    """Column widths from the longest value in the first 200 rows (a date counts as 14 characters)."""
+    """Widths from the longest line in the first 200 rows (dates count as 14 characters)."""
     width = max((len(r) for r in rows), default=0)
     sizes = [minimum] * width
     for row in rows[:200]:
         for c, value in enumerate(row):
-            length = 14 if isinstance(value, (datetime, date)) else len(str(value)) if value is not None else 0
+            length = (14 if isinstance(value, (datetime, date)) else
+                      max((len(line) for line in str(value).splitlines()), default=0) if value is not None else 0)
             sizes[c] = max(sizes[c], min(maximum, length + 3))
     return sizes

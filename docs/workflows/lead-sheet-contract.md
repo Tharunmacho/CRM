@@ -99,6 +99,10 @@ Used in list rows and `GET /{id}` (detail adds `extra`, `raw`, `activities`, `re
   "positionApplied": "South Indian Chef (CDP)", "countryInterest": "Dubai",
   "experienceRestaurantYears": 10, "experienceRestaurantText": "10+ years",
   "experienceTotalYears": 1, "experienceTotalText": "1-3 years",
+  "experienceRestaurantQuestion": "How many years of experience do you have in the restaurant industry?",
+  "experienceTotalQuestion": "What is your total years of work experience?",
+  "experienceIndiaYears": null, "experienceIndiaText": null, "experienceIndiaQuestion": null,
+  "experienceAbroadYears": null, "experienceAbroadText": null, "experienceAbroadQuestion": null,
   "gender": "Male", "maritalStatus": "Married", "dob": "1990-09-25",
   "educationLevel": "High school / GED", "militaryStatus": "No",
   "platform": "ig", "isOrganic": false, "leadStatusSource": "complete",
@@ -117,6 +121,41 @@ Detail only: `extra` (every file column that has no CRM field, header to raw tex
 `activities` `[{id, kind, summary, userId, userName, meta, createdAt}]` newest first (max 100),
 `resume` `{id, name, sizeKb, version, url, uploadedAt}|null` (latest resume of the lead; open with `GET /api/files/{id}`),
 `dailyWorkGate`. For a converted lead the candidate's resume is the one to show: `candidateId` is set.
+
+The ordinary list, detail and mutation responses also include nullable `experienceRestaurantQuestion` and
+`experienceTotalQuestion`: the original mapped sheet headers made readable, without truncating the question or guessing
+what a Yes/No answer means. The existing batch column mapping (including explicit import overrides) supplies these labels
+through the same list query, without a per-lead lookup or exposing raw rows. Missing/ambiguous mapping returns null.
+For a stored answer, its original raw cell must also match; an answer filled from a later upload is not mislabeled with an
+unrelated first-upload question. Existing text and numeric fields are unchanged. A Yes to a combined years/qualification
+question is not an exact number of years, and a No must be displayed as its original answer rather than inferred zero years.
+
+The six optional `experienceIndiaYears/Text/Question` and `experienceAbroadYears/Text/Question` fields are read-only projections
+of explicitly labelled source answers in retained raw/custom questions. India/Indian experience can supply India; abroad,
+overseas, foreign, Gulf or explicitly outside-India experience can supply Abroad. Restaurant experience, destination country, and domestic/local wording
+alone never imply India. Positive matches require a clear regional experience label or explicit work-location wording.
+Questions about software, company nationality, customers/clients/vendors/suppliers, nationality, citizenship or residence do not establish work location
+and remain custom answers. Multiple applicable questions or a combined India/abroad question return unknown rather than choosing
+or summing. Blank answers stay blank, and N/A/unknown never become zero. The original question remains available, including
+for Yes/No answers. Only the source-provided Total is displayed; no geographic total is invented. New imports keep these
+geographic columns in raw/extra instead of incorrectly auto-mapping them to total/restaurant experience; explicit import mapping
+overrides still apply. These projections use the same bounded list query and require no new stored fields or backfill.
+
+Filtered CSV/Excel and selected-lead Excel exports share the same source-aware experience data: Yes/No, ranges and month-based answers remain literal,
+plain numeric answers remain numeric Excel cells, and numeric-only legacy values remain available. Experience headings omit
+the misleading “years” suffix and have full source-question companion columns. Existing batch/list filters scope exported rows;
+missing India/Abroad values stay empty. Other custom question columns remain included.
+
+Downloads start with **Name / Age / Contact**, **Job applied**, **Education**, **India experience**, **Abroad experience**,
+**Total experience** and **Location**, matching the lead list's order. The identity cell contains separate wrapped lines;
+Excel gives multiline body rows an explicit bounded height and measures column width by the longest line.
+Age is computed only from a saved date of birth, as of the agency's current date. Missing ages are omitted. Later columns
+retain individual Name/Age/Phone/E-mail/WhatsApp/date-of-birth and location fields for filtering, every original experience
+question, and workflow metadata. Source Created and Imported timestamps are separate, so an absent source date is not invented.
+An exported file can be previewed for re-import without mapping the combined identity or question companions as answers.
+The separate Name/Phone columns remain authoritative; original geographic source answers are collapsed with their exported
+counterparts only when the saved question and answer agree. Conflicts stay unknown. Full question context survives the round trip,
+and preview samples include the original Total/Restaurant answer text so Yes/No does not appear as a derived zero or missing value.
 
 Normalisation of a stored lead (all editable by `PATCH`): see **Import parsing** below.
 
@@ -498,3 +537,17 @@ attachment uses it, the stored file; writes a `Deleted lead` audit entry.
 
 A single status change uses the existing `PATCH /api/leads/{id}` `{status}` (row menu "Change status" / "Not interested", drawer). The screen remembers the previous status and offers an **Undo** toast for 10 seconds
 ("Marked not interested. Undo"); Undo is a second `PATCH` with the previous status, so both changes are in the lead's history (`status` activities). Bulk status changes have no undo.
+
+### Permanently delete one upload (admin only)
+
+This separate action removes the upload itself and every lead whose `batch_id` identifies that upload as its first owner. It includes their raw/extra answers, activities, generated follow-up reminders (including completed reminders), lead attachments and safely finished resume-check jobs. Leads first owned by another upload, their earlier fill-empty updates, and Data Bank candidates are never removed. The existing `DELETE /batches/{id}` partial revert remains unchanged.
+
+1. `GET /api/leads/batches/{id}/deletion-preview` returns `{batchId,fileName,leadCount,protectedCount,duplicateRows,updatedExistingRows,preservedExistingLeadCount,canDelete,reasons:[{code,message,count}],previewToken}` with `Cache-Control: private, no-store`.
+2. After reviewing that preview and typing **DELETE**, send `DELETE /api/leads/batches/{id}/permanent` with `{previewToken,expectedLeadCount,confirm:"DELETE"}`. The server validates the literal confirmation, administrator, count and preview fingerprint inside the deletion transaction.
+3. Success returns `{deleted:true,batchId,deletedLeads,deletedActivities,deletedFollowUps,deletedAttachments,deletedExtractionJobs,duplicateRows,preservedExistingLeadCount}`. Retrying the same request by the same administrator returns the original audit receipt; it does not delete twice. A missing upload without that matching receipt is `404`.
+
+`duplicateRows` and `updatedExistingRows` describe the original import, not the number of people preserved. Duplicates may be repeated rows within the deleted file. `preservedExistingLeadCount` counts distinct currently existing leads from other uploads named by a complete duplicate report; it is `null` when the old report is truncated or incomplete. The UI must not label all duplicate rows as preserved people.
+
+The operation is all-or-nothing. Converted/candidate-linked leads, queued/running reading, candidate-attached reading jobs and document-person reviews produce `409 upload_protected` with specific reasons. Concurrent changes or resume checking produce `409 upload_busy`; changed preview data produces `409 preview_changed` and requires a fresh preview. No valid subset is silently deleted.
+
+Deletion acquires transaction locks and nonwaiting table/row locks before rechecking the exact source state. Lead resume checks hold the matching advisory lock on a dedicated physical connection across their existing commits and release it before returning that connection. This prevents a new check from writing an orphan job during deletion. A minimal administrator audit receipt remains; source rows and the batch report are removed. Unreferenced file bytes are cleaned only after commit, with shared references preserved and cleanup failures logged without turning a committed deletion into a failed response. The same file can then be imported again; no tombstone or file-hash block prevents re-upload.

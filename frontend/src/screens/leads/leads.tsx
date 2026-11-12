@@ -29,7 +29,7 @@ import { ConvertDialog } from '@/features/leads/components/convert-dialog'
 import { UnconvertDialog } from '@/features/leads/components/unconvert-dialog'
 import { AssignLeadsDialog } from '@/features/leads/components/assign-dialog'
 import { useLeadBulk } from '@/features/leads/use-lead-bulk'
-import { downloadLeadExport, gateFromRefusal, leadApi, uploadLeadResume } from '@/features/leads/lead-api'
+import { downloadLeadExport, gateFromRefusal, leadApi, uploadLeadResume, type UploadDeletionResult } from '@/features/leads/lead-api'
 import { useLeadData } from '@/features/leads/use-leads'
 import { GATE_REASON, gateBlocks, gateState, publishGate, type LeadGate } from '@/features/leads/lead-gate'
 import {
@@ -76,7 +76,7 @@ export default function LeadsPage() {
   const [exporting, setExporting] = useState(false)
   const [message, setMessage] = useState('')
   const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>()
-  const [choices, setChoices] = useColumnChoices(VIEW_SCOPE)
+  const [choices, setChoices] = useColumnChoices('leads-details-v2')
 
   const query = useMemo(() => buildLeadQuery(filters, sort), [filters, sort])
   const [extras, setExtras] = useState<ExtraColumn[]>([])
@@ -146,6 +146,19 @@ export default function LeadsPage() {
     setTab('leads')
     setFilters({ ...EMPTY_FILTERS, campaign })
     setParams((previous) => { const next = new URLSearchParams(previous); next.delete('batch'); return next })
+  }
+
+  const uploadDeleted = (result: UploadDeletionResult) => {
+    setFilters(current => current.batchId === result.batchId ? { ...current, batchId: '' } : current)
+    setParams(previous => {
+      const next = new URLSearchParams(previous)
+      if (next.get('batch') === result.batchId) next.delete('batch')
+      next.delete('lead')
+      return next
+    }, { replace: true })
+    setPage(0); setOpen(null); setCalling(null); setConverting(null); setUnconverting(null); setAssigning(null); setExpanded([]); setFresh('')
+    refreshAll()
+    flash(`Upload permanently deleted. ${result.deletedLeads.toLocaleString()} ${result.deletedLeads === 1 ? 'lead removed' : 'leads removed'}.${result.duplicateRows > 0 ? ' Existing leads from other uploads were kept.' : ''}`)
   }
 
   const uploadResume = useCallback(async (lead: Lead, file: File) => {
@@ -247,9 +260,9 @@ export default function LeadsPage() {
         </div>
 
         {tab === 'campaigns' ? (
-          <CampaignsTab refreshKey={historyKey} onPickCampaign={viewCampaign} />
+          <CampaignsTab refreshKey={historyKey} onPickCampaign={viewCampaign} canAdmin={me.role === 'admin'} onManageUploads={() => setTab('uploads')} />
         ) : tab === 'uploads' && supervisor ? (
-          <ImportHistory supervisor={supervisor} refreshKey={historyKey} onViewBatch={viewBatch} onUpload={() => setUploading(true)} />
+          <ImportHistory supervisor={supervisor} canAdmin={me.role === 'admin'} refreshKey={historyKey} onViewBatch={viewBatch} onUpload={() => setUploading(true)} onDeleted={uploadDeleted} />
         ) : (
           <>
             <div className="db-panel-head">

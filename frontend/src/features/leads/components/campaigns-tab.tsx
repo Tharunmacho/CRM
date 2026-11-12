@@ -129,13 +129,15 @@ interface Props {
   onPickCampaign: (campaign: string) => void
   /** Re-read when this changes (an upload finished). */
   refreshKey?: number
+  canAdmin?: boolean
+  onManageUploads?: () => void
 }
 
 /**
  * Campaigns tab: one row per ad campaign with its counts, rates and a conversion bar, a total row, sortable columns, a row per form
  * under the arrow, cards on narrow widths. Clicking a campaign opens the Leads tab filtered by it. Staff see only their own leads.
  */
-export function CampaignsTab({ onPickCampaign, refreshKey = 0 }: Props) {
+export function CampaignsTab({ onPickCampaign, refreshKey = 0, canAdmin = false, onManageUploads }: Props) {
   const [data, setData] = useState<CampaignsResponse | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -201,7 +203,8 @@ export function CampaignsTab({ onPickCampaign, refreshKey = 0 }: Props) {
         <p className="lc-sum" role="status">
           {data ? <><strong>{campaignCount.toLocaleString()}</strong> {campaignCount === 1 ? 'campaign' : 'campaigns'} · <strong>{data.total.leads.toLocaleString()}</strong> {data.total.leads === 1 ? 'lead' : 'leads'}{scopeMine ? ' assigned to you' : ''}{loading ? ' · updating…' : ''}</> : loading ? 'Loading…' : ''}
         </p>
-        <div className="lc-tools">
+        <div className="lc-tools flex-wrap min-w-0 max-w-full">
+          {canAdmin && onManageUploads && <Button variant="secondary" onClick={onManageUploads}>Manage uploads</Button>}
           {cards && (
             <Select aria-label="Sort campaigns by" value={`${sort.key}:${sort.dir}`} onChange={(event) => { const [key, dir] = event.target.value.split(':'); if (isCampaignSort(key)) setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
               {CAMPAIGN_SORTS.flatMap((key) => [<option key={`${key}:desc`} value={`${key}:desc`}>{SORT_LABEL[key]} (high to low)</option>, <option key={`${key}:asc`} value={`${key}:asc`}>{SORT_LABEL[key]} (low to high)</option>])}

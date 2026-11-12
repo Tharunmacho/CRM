@@ -12,6 +12,11 @@
 .jobs-simple .js-chip { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); color: var(--text-muted); }
 .jobs-simple .js-facts > div { grid-template-columns: 78px minmax(0, 1fr); }
 .jobs-simple .js-facts dd { align-items: flex-start; }
+.jobs-simple .js-salary { font-variant-numeric: tabular-nums; }
+.jobs-simple .js-salary b { white-space: normal; overflow-wrap: anywhere; }
+@media (min-width: 1280px) {
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 13%; min-width: 8.5rem; }
+}
 
 /* A job just saved: a soft tint that fades, always next to the job itself. */
 .jobs-simple tr.js-new > td { animation: js-new-fade 6s ease-out; }

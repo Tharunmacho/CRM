@@ -4,7 +4,7 @@
  * all read this list, so a heading cannot differ between them. Custom questions the ad forms ask are appended from the data
  * (GET /leads/columns); their headings are the sheet's own, tidied.
  */
-import { LEAD_HEADINGS, cleanPhone, dobLabel, extraAnswer, leadStatus, yearsLabel, type ExtraColumn, type Lead } from './lead-model'
+import { LEAD_HEADINGS, cleanPhone, dobLabel, experienceLabel, extraAnswer, leadAge, leadDate, leadStatus, type ExtraColumn, type Lead } from './lead-model'
 
 export const FIELD_GROUPS = ['Person', 'Contact', 'Job answers', 'Campaign & ad', 'Workflow'] as const
 export type FieldGroup = (typeof FIELD_GROUPS)[number]
@@ -27,13 +27,14 @@ const when = (value?: string | null): string => {
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
-const years = (value: number | string | null | undefined, written?: string | null) => yearsLabel(value) ?? text(written)
+const years = (value: number | string | null | undefined, written?: string | null) => experienceLabel(value, written) ?? ''
 
 export const LEAD_FIELD_DEFS: readonly LeadFieldDef[] = [
-  { id: 'created', label: 'Created time', group: 'Workflow', width: 110, value: (l) => when(l.createdTime) },
+  { id: 'created', label: 'Created time', group: 'Workflow', width: 110, value: (l) => when(leadDate(l)?.value) },
   { id: 'name', label: 'Full name', group: 'Person', width: 140, value: (l) => text(l.name) },
   { id: 'gender', label: 'Gender', group: 'Person', width: 90, value: (l) => text(l.gender) },
   { id: 'dob', label: 'Date of birth', group: 'Person', width: 110, value: (l) => dobLabel(l.dob) },
+  { id: 'age', label: 'Age', group: 'Person', width: 80, value: (l) => { const age = leadAge(l.dob); return age === null ? '' : `${age} yrs` } },
   { id: 'maritalStatus', label: 'Marital status', group: 'Person', width: 110, value: (l) => text(l.maritalStatus) },
   { id: 'educationLevel', label: 'Education level', group: 'Person', width: 140, value: (l) => text(l.educationLevel) },
   { id: 'militaryStatus', label: 'Military status', group: 'Person', width: 110, value: (l) => text(l.militaryStatus) },
@@ -43,8 +44,10 @@ export const LEAD_FIELD_DEFS: readonly LeadFieldDef[] = [
   { id: 'state', label: 'State', group: 'Contact', width: 110, value: (l) => text(l.state) },
   { id: 'currentLocation', label: 'Current location', group: 'Contact', width: 130, value: (l) => text(l.currentLocation) },
   { id: 'position', label: 'Which position are you applying for?', group: 'Job answers', width: 150, value: (l) => text(l.positionApplied) },
-  { id: 'restaurantYears', label: 'Years of experience in the restaurant industry', group: 'Job answers', width: 120, value: (l) => years(l.experienceRestaurantYears, l.experienceRestaurantText) },
-  { id: 'totalYears', label: 'Total years of work experience', group: 'Job answers', width: 120, value: (l) => years(l.experienceTotalYears, l.experienceTotalText) },
+  { id: 'restaurantYears', label: 'Restaurant experience', group: 'Job answers', width: 120, value: (l) => years(l.experienceRestaurantYears, l.experienceRestaurantText) },
+  { id: 'indiaYears', label: 'India experience', group: 'Job answers', width: 120, value: (l) => years(l.experienceIndiaYears, l.experienceIndiaText) },
+  { id: 'abroadYears', label: 'Abroad experience', group: 'Job answers', width: 120, value: (l) => years(l.experienceAbroadYears, l.experienceAbroadText) },
+  { id: 'totalYears', label: 'Total work experience', group: 'Job answers', width: 120, value: (l) => years(l.experienceTotalYears, l.experienceTotalText) },
   { id: 'country', label: LEAD_HEADINGS.country, group: 'Job answers', width: 110, value: (l) => text(l.countryInterest) },
   { id: 'platform', label: 'Platform', group: 'Campaign & ad', width: 90, value: (l) => text(l.platform) },
   { id: 'campaign', label: 'Campaign name', group: 'Campaign & ad', width: 150, value: (l) => text(l.campaignName) },
@@ -67,7 +70,7 @@ export const fieldDef = (id: string) => LEAD_FIELD_DEFS.find((field) => field.id
 
 /** Fields that already have a column of their own in the default table (the Columns menu lists them once, under that column). */
 export const DEFAULT_COLUMN_FIELDS: ReadonlySet<string> = new Set([
-  'created', 'name', 'gender', 'dob', 'phone', 'email', 'city', 'state', 'position', 'restaurantYears', 'totalYears',
+  'created', 'name', 'gender', 'dob', 'age', 'phone', 'email', 'city', 'state', 'position', 'indiaYears', 'abroadYears', 'totalYears', 'educationLevel',
   'platform', 'campaign', 'form', 'status', 'owner',
 ])
 
@@ -81,7 +84,9 @@ export interface LeadFieldRow { key: string; label: string; value: string; custo
 
 /** Every field of one lead with its heading, for the expandable row: the registry first, then the custom questions it answered. */
 export function leadFieldRows(lead: Lead, extras: readonly ExtraColumn[] = []): LeadFieldRow[] {
-  const rows: LeadFieldRow[] = LEAD_FIELD_DEFS.map((field) => ({ key: field.id, label: field.label, value: field.value(lead), custom: false }))
+  const rows: LeadFieldRow[] = LEAD_FIELD_DEFS.map((field) => ({ key: field.id,
+    label: (field.id === 'created' ? `${leadDate(lead)?.label || 'Created'} time` : field.id === 'restaurantYears' ? lead.experienceRestaurantQuestion : field.id === 'indiaYears' ? lead.experienceIndiaQuestion : field.id === 'abroadYears' ? lead.experienceAbroadQuestion : field.id === 'totalYears' ? lead.experienceTotalQuestion : null) || field.label,
+    value: field.value(lead), custom: false }))
   const labels = new Map(extras.map((column) => [column.key, column.label]))
   const keys = [...new Set([...extras.map((column) => column.key), ...Object.keys(lead.extra ?? {})])]
   for (const key of keys) rows.push({ key: `x:${key}`, label: labels.get(key) ?? (prettyHeader(key) || key), value: extraAnswer(lead, key), custom: true })

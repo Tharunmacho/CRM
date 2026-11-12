@@ -23,6 +23,8 @@ export interface Lead {
   positionApplied?: string | null
   experienceRestaurantYears?: number | string | null
   experienceTotalYears?: number | string | null
+  experienceIndiaYears?: number | string | null
+  experienceAbroadYears?: number | string | null
   gender?: string | null
   maritalStatus?: string | null
   dob?: string | null
@@ -54,6 +56,12 @@ export interface Lead {
   militaryStatus?: string | null
   experienceRestaurantText?: string | null
   experienceTotalText?: string | null
+  experienceRestaurantQuestion?: string | null
+  experienceTotalQuestion?: string | null
+  experienceIndiaText?: string | null
+  experienceAbroadText?: string | null
+  experienceIndiaQuestion?: string | null
+  experienceAbroadQuestion?: string | null
   adsetName?: string | null
   leadStatusSource?: string | null
   isOrganic?: boolean | null
@@ -109,7 +117,8 @@ export interface LeadFacets {
 
 /** The table's headings, in one place: a rename is a one-line change here. Custom question headings come from the uploaded sheets. */
 export const LEAD_HEADINGS = {
-  actions: 'Actions', created: 'Created', name: 'Name / DOB', contact: 'Contact', position: 'Job applied', experience: 'Experience',
+  actions: 'Actions', created: 'Created', name: 'Name / Age / Contact', contact: 'Contact', position: 'Job applied', experience: 'Total experience',
+  experienceIndia: 'India experience', experienceAbroad: 'Abroad experience', education: 'Education', state: 'State',
   location: 'Location', campaign: 'Campaign', country: 'Country', status: 'Status', followup: 'Follow‑up', resume: 'Resume',
 } as const
 
@@ -321,6 +330,13 @@ export function createdParts(value?: string | null): { day: string; year: string
   return { day: `${two(date.getDate())} ${MONTHS[date.getMonth()]}`, year: String(date.getFullYear()) }
 }
 
+/** Source creation date when supplied; otherwise the CRM import time, explicitly labelled. */
+export function leadDate(lead: Pick<Lead, 'createdTime' | 'createdAt'>): { value: string; label: 'Created' | 'Imported' } | null {
+  if (lead.createdTime && createdParts(lead.createdTime)) return { value: lead.createdTime, label: 'Created' }
+  if (lead.createdAt && createdParts(lead.createdAt)) return { value: lead.createdAt, label: 'Imported' }
+  return null
+}
+
 export type FollowUpState = 'none' | 'overdue' | 'today' | 'soon' | 'later' | 'closed'
 
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
@@ -374,20 +390,66 @@ export function dobLabel(value?: string | null): string {
   return `${match[3]} ${MONTHS[month - 1]} ${match[1]}`
 }
 
+/** Completed years from a valid recorded birth date; missing, invalid and future dates stay unknown. */
+export function leadAge(value?: string | null, today: Date = new Date()): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '')
+  if (!match || Number.isNaN(today.getTime())) return null
+  const [year, month, day] = match.slice(1).map(Number)
+  const birth = new Date(Date.UTC(year, month - 1, day))
+  if (birth.getUTCFullYear() !== year || birth.getUTCMonth() !== month - 1 || birth.getUTCDate() !== day) return null
+  const beforeBirthday = today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)
+  const age = today.getFullYear() - year - Number(beforeBirthday)
+  return age >= 0 ? age : null
+}
+
 /* ------------------------------------------------------------ small cells */
 
 /** "3 yrs" / "1 yr" / "0 yrs" from a number or numeric text; null when the value is not a number. */
 export function yearsLabel(value: number | string | null | undefined): string | null {
   if (value === null || value === undefined || value === '') return null
-  const years = typeof value === 'number' ? value : Number(String(value).replace(/[^\d.]/g, ''))
-  if (!Number.isFinite(years)) return null
+  const numeric = typeof value === 'number' ? String(value) : value.trim()
+  if (!/^\d+(?:\.\d+)?(?:\s*(?:years?|yrs?))?$/i.test(numeric)) return null
+  const years = Number.parseFloat(numeric)
+  if (!Number.isFinite(years) || years < 0) return null
   const rounded = Math.round(years * 10) / 10
   return `${rounded} ${rounded === 1 ? 'yr' : 'yrs'}`
 }
 
-/** Restaurant over total experience as the two lines of the Experience cell. */
-export function experienceLines(lead: Pick<Lead, 'experienceRestaurantYears' | 'experienceTotalYears'>): { restaurant: string | null; total: string | null } {
-  return { restaurant: yearsLabel(lead.experienceRestaurantYears), total: yearsLabel(lead.experienceTotalYears) }
+/** Keep the sheet's answer, including Yes/No and ranges, instead of presenting it as an exact duration. */
+export function experienceLabel(years: number | string | null | undefined, written?: string | null): string | null {
+  const answer = written?.trim()
+  if (answer) {
+    if (/^(yes|no)$/i.test(answer)) return answer.toLowerCase() === 'yes' ? 'Yes' : 'No'
+    if (!/^\d+(?:\.\d+)?$/.test(answer)) return answer
+    return yearsLabel(years) ?? yearsLabel(answer)
+  }
+  return yearsLabel(years)
+}
+
+export type LeadExperienceKind = 'restaurant' | 'india' | 'abroad' | 'total'
+
+/** Each experience category uses its own supplied answer; one category never fills another. */
+export function experienceAnswer(lead: Lead, kind: LeadExperienceKind): { value: string | null; question: string | null } {
+  const prefix = { restaurant: 'experienceRestaurant', india: 'experienceIndia', abroad: 'experienceAbroad', total: 'experienceTotal' }[kind] as 'experienceRestaurant' | 'experienceIndia' | 'experienceAbroad' | 'experienceTotal'
+  return { value: experienceLabel(lead[`${prefix}Years`], lead[`${prefix}Text`]), question: lead[`${prefix}Question`] || null }
+}
+
+/** A compact cue; the full source question stays available alongside the answer. */
+export function experienceQuestionSummary(question?: string | null): string {
+  if (!question) return 'Experience question'
+  const text = question.replace(/_/g, ' ')
+  const duration = text.match(/\b((?:(?:at least|more than|less than|up to|over|minimum(?: of)?)\s+)?\d+(?:\.\d+)?(?:\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?)?\s*(?:\+|plus|or more)?\s*(?:years?|yrs?))\b/i)?.[1]
+  const qualification = /\b(mba|qualification|degree|diploma)\b/i.test(text)
+  if (duration) return `${duration.replace(/\s+/g, ' ').trim()}${qualification ? ' + qualification' : ''}`
+  return qualification ? 'Experience + qualification' : 'Experience question'
+}
+
+/** Restaurant and total answers for the shared table/card experience cell. */
+export function experienceLines(lead: Pick<Lead, 'experienceRestaurantYears' | 'experienceTotalYears' | 'experienceRestaurantText' | 'experienceTotalText'>): { restaurant: string | null; total: string | null } {
+  return {
+    restaurant: experienceLabel(lead.experienceRestaurantYears, lead.experienceRestaurantText),
+    total: experienceLabel(lead.experienceTotalYears, lead.experienceTotalText),
+  }
 }
 
 export type PlatformKind = 'facebook' | 'instagram' | 'google' | 'other'

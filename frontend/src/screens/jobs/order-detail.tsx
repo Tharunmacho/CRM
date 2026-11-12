@@ -283,7 +283,7 @@ export default function OrderDetailPage() {
               <div className="jv-field"><dt><Users size={14} aria-hidden="true" />Number of openings</dt><dd className="tnum">{order.openings}</dd></div>
               <div className="jv-field"><dt><Globe2 size={14} aria-hidden="true" />Work country</dt><dd>{order.country ? <span className="jv-place"><Flag country={order.country} />{order.country}</span> : <i>Not set</i>}</dd></div>
               <div className="jv-field"><dt><MapPin size={14} aria-hidden="true" />Work city</dt><dd>{order.city || <i>Not set</i>}</dd></div>
-              <div className="jv-field"><dt><Wallet size={14} aria-hidden="true" />Salary</dt><dd className="tnum">{order.salary ? `${money(order.salary, order.currency)} / month` : <i>Not set</i>}</dd></div>
+              <div className="jv-field"><dt><Wallet size={14} aria-hidden="true" />Salary</dt><dd className="tnum">{order.salary !== null && order.salary !== undefined ? `${money(order.salary, order.currency)} / month` : <i>Not set</i>}</dd></div>
               <div className="jv-field"><dt><Coins size={14} aria-hidden="true" />Currency</dt><dd>{order.currency}</dd></div>
               <div className="jv-field"><dt><FileText size={14} aria-hidden="true" />Contract period</dt><dd>{order.contractPeriod || <i>Not set</i>}</dd></div>
               <div className="jv-field"><dt><CalendarClock size={14} aria-hidden="true" />Interview date</dt><dd>{order.interviewDate ? dateLabel(order.interviewDate) : <i>Not set</i>}</dd></div>
@@ -294,12 +294,18 @@ export default function OrderDetailPage() {
         </Panel>
 
         <Panel flush>
-          <PanelHeader title="Candidate requirements" meta="Used when matching candidates" action={<Button className="whitespace-nowrap" onClick={() => navigate(`/clients/${client.clientId}`)}>View client</Button>} />
+          <PanelHeader title="Candidate requirements" meta="Responsibilities, skills and employer requirements" action={<Button className="whitespace-nowrap" onClick={() => navigate(`/clients/${client.clientId}`)}>View client</Button>} />
           <div className="jv-card-body">
             <p className="jv-require-title">{designation.title}<span>{designation.minExperience > 0 ? `${designation.minExperience}+ years experience` : 'Any experience'}</span></p>
-            <p className="jv-require-copy">{designation.description || 'Check each candidate\'s skills and experience before you start. If something is missing from a profile, ask the candidate.'}</p>
-            <p className="jv-subtle">Required skills</p>
+            <p className="jv-subtle">Responsibilities</p>
+            <p className="jv-require-copy">{designation.description || 'No responsibilities added'}</p>
+            <p className="jv-subtle">Required / additional skills</p>
             <div className="jv-chips">{designation.requiredSkills.length ? designation.requiredSkills.map((skill) => <span key={skill}>{skill}</span>) : <i>No skills added</i>}</div>
+            <dl className="jv-eligibility">
+              <div><dt>Age</dt><dd>{order.ageRequirement || <i>Not specified</i>}</dd></div>
+              <div><dt>Gender</dt><dd>{order.genderRequirement || <i>Not specified</i>}</dd></div>
+              <div><dt>Education</dt><dd>{order.educationRequirement || <i>Not specified</i>}</dd></div>
+            </dl>
             {!canMatch && <p role="status" className="jv-pause">You cannot match new candidates because this job is {order.status === 'on_hold' ? 'on hold' : order.status}. Candidates already matched stay on the job.</p>}
           </div>
         </Panel>

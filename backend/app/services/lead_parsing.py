@@ -394,9 +394,73 @@ for _field, _names in _ALIASES.items():
     for _alias in _names:
         ALIAS_LOOKUP.setdefault(_alias, _field)
 
+# Companion headings emitted by the CRM export contain question text, not answers.
+EXPERIENCE_QUESTION_COMPANIONS = {
+    "experienceindia": "indiaexperiencequestion", "experienceabroad": "abroadexperiencequestion",
+    "experiencetotal": "totalexperiencequestion", "experiencerestaurant": "restaurantexperiencequestion",
+}
+
 
 def header_key(header: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", unicodedata.normalize("NFKC", header).lower())
+
+
+def geographic_experience_scope(header: str) -> str | None:
+    """Recognise explicitly labelled experience, never cuisine or residence.
+
+    Mixed India/abroad questions stay ambiguous. Keeping this independent of
+    field mapping also lets older imports expose their retained source answers.
+    """
+    label = unicodedata.normalize("NFKC", clean_cell(header))
+    label = re.sub(r"([a-z])([A-Z])", r"\1 \2", label)
+    words = re.sub(r"[^a-z0-9]+", " ", label.lower()).strip()
+    compact = header_key(header)
+    if compact in EXPERIENCE_QUESTION_COMPANIONS.values():
+        return None
+    short = {
+        "indiaexperience": "india", "indianexperience": "india", "experienceindia": "india",
+        "indiaexp": "india", "expindia": "india", "indianexp": "india", "expindian": "india",
+        "domesticexperience": "unspecified", "domesticexp": "unspecified", "experiencedomestic": "unspecified", "expdomestic": "unspecified",
+        "localexperience": "unspecified", "localexp": "unspecified", "experiencelocal": "unspecified", "explocal": "unspecified",
+        "abroadexperience": "abroad", "experienceabroad": "abroad", "abroadexp": "abroad", "expabroad": "abroad",
+        "overseasexperience": "abroad", "experienceoverseas": "abroad", "overseasexp": "abroad", "expoverseas": "abroad",
+        "gulfexperience": "abroad", "experiencegulf": "abroad", "gulfexp": "abroad", "expgulf": "abroad",
+        "foreignexperience": "abroad", "experienceforeign": "abroad", "foreignexp": "abroad", "expforeign": "abroad",
+    }
+    if compact in short:
+        return short[compact]
+    if not re.search(r"\b(?:experience|exp|worked|working|employed)\b", words):
+        return None
+    geographic_words = bool(re.search(r"\b(?:india|indian|abroad|overseas|gulf|foreign|domestic|local)\b", words))
+    if geographic_words and re.search(
+        r"\b(?:customers?|clients?|consumers?|vendors?|suppliers?|citizens?|citizenship|nationality|nationals?|passport|"
+        r"birth|born|residence|residents?|residing|lived|living)\b", words
+    ):
+        # A customer's location or a candidate's nationality/residence is not
+        # evidence of work location. Keep even compound questions unassigned.
+        return "unspecified"
+    # A geographical adjective alone can describe software, employers or food.
+    # Require a regional experience label or an explicit work-location phrase.
+    bridge = r"(?:(?:do you have|have you had|have you gained|you have|gained|acquired|obtained) )?"
+    experience = rf"\b(?:experience|exp) {bridge}(?:working |work )?"
+    india = bool(re.search(r"\b(?:india|indian) (?:work )?(?:experience|exp)\b", words)
+                 or re.search(experience + r"(?:in|within) india\b", words)
+                 or re.search(r"\b(?:worked|working|employed) (?:in|within) india\b", words))
+    abroad_location = r"(?:abroad|overseas|in (?:the )?gulf|in foreign countries|outside(?: of)? india)\b"
+    abroad = bool(re.search(r"\b(?:abroad|overseas|gulf|foreign) (?:work )?(?:experience|exp)\b", words)
+                  or re.search(experience + abroad_location, words)
+                  or re.search(r"\b(?:worked|working|employed) " + abroad_location, words))
+    combined = re.search(r"\b(?:india|indian) (?:and|or) (?:abroad|overseas|gulf|foreign|outside(?: of)? india)\b|"
+                         r"\b(?:abroad|overseas|gulf|foreign) (?:and|or) (?:india|indian)\b", words)
+    if combined:
+        return "mixed"
+    if india and abroad:
+        return "mixed"
+    if india or abroad:
+        return "india" if india else "abroad"
+    # Retain ambiguous geographic questions without inferring a location or
+    # incorrectly treating a narrower question as total work experience.
+    return "unspecified" if geographic_words else None
 
 
 def _fuzzy_field(key: str) -> str | None:
@@ -449,6 +513,13 @@ def map_headers(headers: list[str], override: dict | None = None) -> ColumnMap:
         elif key in ALIAS_LOOKUP:
             field_name = ALIAS_LOOKUP[key]
             how = "exact" if key == header_key(field_name) else "alias"
+        elif key in EXPERIENCE_QUESTION_COMPANIONS.values():
+            field_name, how = None, None
+        elif geographic_experience_scope(header):
+            # There are no geographic experience columns in the lead table.
+            # Retain these in raw/extra; the read API projects their answers.
+            # They must not steal the total/restaurant field through fuzzy matching.
+            field_name, how = None, None
         else:
             field_name = _fuzzy_field(key)
             how = "fuzzy" if field_name else None

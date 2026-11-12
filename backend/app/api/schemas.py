@@ -129,6 +129,9 @@ class OrderOut(Wire):
     currency: str
     benefits: list[str] = []
     contract_period: str | None = None
+    age_requirement: str | None = None
+    gender_requirement: str | None = None
+    education_requirement: str | None = None
     interview_date: date | None = None
     deadline: date | None = None
     status: str

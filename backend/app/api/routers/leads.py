@@ -100,6 +100,35 @@ def batch_revert(batch_id: str, db: Session = Depends(get_db), user: User = Depe
     return result
 
 
+@router.get("/batches/{batch_id}/deletion-preview")
+def batch_deletion_preview(batch_id: str, response: Response, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+    from app.services import lead_upload_delete
+    response.headers["Cache-Control"] = "private, no-store"
+    return lead_upload_delete.preview(db, user, batch_id)
+
+
+class PermanentBatchDeletion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    previewToken: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expectedLeadCount: int = Field(ge=0, le=100000)
+    confirm: Literal["DELETE"]
+
+
+@router.delete("/batches/{batch_id}/permanent")
+def batch_delete_permanently(batch_id: str, body: PermanentBatchDeletion, background: BackgroundTasks,
+                             db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+    from app.services import lead_upload_delete
+    try:
+        result, keys = lead_upload_delete.remove(db, user, batch_id, body.previewToken, body.expectedLeadCount, body.confirm)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    if keys:
+        background.add_task(lead_upload_delete.cleanup_files, db.get_bind(), keys)
+    return result
+
+
 # ------------------------------------------------------------------ reads
 
 @router.get("")

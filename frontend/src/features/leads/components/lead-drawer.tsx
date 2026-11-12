@@ -8,7 +8,7 @@ import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { FileLink } from '@/shared/ui/file-drop'
 import { gateFromRefusal, leadApi, type LeadActivity, type LeadDetail } from '../lead-api'
 import {
-  PLATFORM_LABEL, SETTABLE_STATUSES, cleanPhone, createdParts, dobLabel, followUpLabel, followUpState, fromLocalInput, leadStatus, platformKind, toLocalInput, whatsappLink, yearsLabel,
+  PLATFORM_LABEL, SETTABLE_STATUSES, cleanPhone, createdParts, dobLabel, experienceLabel, followUpLabel, followUpState, fromLocalInput, leadDate, leadStatus, platformKind, toLocalInput, whatsappLink,
   type Lead, type LeadActor,
 } from '../lead-model'
 import { GATE_REASON, gateBlocks, type GateState, type LeadGate } from '../lead-gate'
@@ -46,10 +46,6 @@ const Row = ({ label, children }: { label: string; children: ReactNode }) => (
 const Section = ({ title, children }: { title: string; children: ReactNode }) => (
   <section className="ld-dsec"><h3>{title}</h3><dl className="ld-dl">{children}</dl></section>
 )
-
-/** The person's own wording when it says more than a number ("10+ years"), else the number as years. */
-const experienceText = (text: string | null | undefined, years: number | string | null | undefined) =>
-  text && !/^\d+(\.\d+)?$/.test(text.trim()) ? text : yearsLabel(years) ?? text ?? ''
 
 const KIND_LABEL: Record<string, string> = { call: 'Call', note: 'Note', status: 'Status', assign: 'Assigned', import: 'Imported', convert: 'Converted', unconvert: 'Moved back to Lead', resume: 'Resume', edit: 'Edited' }
 
@@ -116,7 +112,8 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
   const phone = cleanPhone(shown.phone)
   const wa = whatsappLink(phone)
   const st = leadStatus(shown.status)
-  const created = createdParts(shown.createdTime)
+  const date = leadDate(shown)
+  const created = createdParts(date?.value)
   const followState = followUpState(shown.nextFollowUpAt, shown.status)
   const platform = platformKind(shown.platform)
   const extra = Object.entries(detail?.extra ?? {}).filter(([, value]) => value && String(value).trim())
@@ -210,8 +207,10 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
         <Section title="About the person">
           <Row label="Job applied">{shown.positionApplied}</Row>
           <Row label="Country interest">{shown.countryInterest}</Row>
-          <Row label="Restaurant experience">{experienceText(shown.experienceRestaurantText, shown.experienceRestaurantYears)}</Row>
-          <Row label="Total experience">{experienceText(shown.experienceTotalText, shown.experienceTotalYears)}</Row>
+          <Row label={shown.experienceRestaurantQuestion || 'Restaurant experience'}>{experienceLabel(shown.experienceRestaurantYears, shown.experienceRestaurantText)}</Row>
+          <Row label={shown.experienceIndiaQuestion || 'India experience'}>{experienceLabel(shown.experienceIndiaYears, shown.experienceIndiaText)}</Row>
+          <Row label={shown.experienceAbroadQuestion || 'Abroad experience'}>{experienceLabel(shown.experienceAbroadYears, shown.experienceAbroadText)}</Row>
+          <Row label={shown.experienceTotalQuestion || 'Total experience'}>{experienceLabel(shown.experienceTotalYears, shown.experienceTotalText)}</Row>
           <Row label="Gender">{shown.gender}</Row>
           <Row label="Date of birth">{dobLabel(shown.dob)}</Row>
           <Row label="Marital status">{shown.maritalStatus}</Row>
@@ -219,7 +218,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
         </Section>
 
         <Section title="Ad and campaign">
-          <Row label="Created">{created ? `${created.day} ${created.year}, ${new Date(shown.createdTime as string).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : null}</Row>
+          <Row label={date?.label || 'Created'}>{created ? `${created.day} ${created.year}, ${new Date(date!.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : null}</Row>
           <Row label="Platform">{shown.platform ? `${PLATFORM_LABEL[platform]}${shown.isOrganic ? ' (organic)' : ''}` : null}</Row>
           <Row label="Campaign">{shown.campaignName}</Row>
           <Row label="Ad set">{shown.adsetName}</Row>

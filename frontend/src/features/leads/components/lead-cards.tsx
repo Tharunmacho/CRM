@@ -3,8 +3,8 @@ import { useRef } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
 import { RowMenu } from '@/features/candidates/components/db-parts'
-import { cleanPhone, createdParts, followUpLabel, followUpState, type Lead } from '../lead-model'
-import { CopyButton, LeadWhatsApp, OwnerCell, PositionText, StatusText } from './lead-columns'
+import { createdParts, followUpLabel, followUpState, leadDate, type Lead } from '../lead-model'
+import { CampaignCell, EducationCell, ExperienceCell, LocationCell, NameCell, OwnerCell, PositionText, StatusText } from './lead-columns'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
 
 /** Stacked cards for narrow screens: the same lead facts and actions as the table row. */
@@ -27,9 +27,9 @@ export function LeadCards({ rows, context, onOpen, selectable, selected, onSelec
 function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh }: { lead: Lead; context: LeadColumnContext; onOpen: (lead: Lead) => void; selectable: boolean; selected: string[]; onSelect: (ids: string[]) => void; fresh: boolean }) {
   const input = useRef<HTMLInputElement>(null)
   const block = workBlock(context, lead)
-  const created = createdParts(lead.createdTime)
+  const date = leadDate(lead)
+  const created = createdParts(date?.value)
   const follow = followUpState(lead.nextFollowUpAt, lead.status)
-  const phone = cleanPhone(lead.phone)
   return (
     <li className={cn('db-mini ld-card', fresh && 'is-fresh', follow === 'overdue' && 'is-late')} tabIndex={0} onClick={() => onOpen(lead)}
       onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(lead) } }}>
@@ -37,18 +37,22 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
         <div className="ld-card-who">
           {selectable && <span onClick={(event) => event.stopPropagation()}><Checkbox checked={selected.includes(lead.id)} aria-label={`Select ${lead.name}`} onChange={() => onSelect(selected.includes(lead.id) ? selected.filter((id) => id !== lead.id) : [...selected, lead.id])} /></span>}
           <div className="min-w-0">
-            <strong className="ld-card-name">{lead.name || 'Unnamed'}</strong>
-            <small className="ld-card-sub">{created ? `${created.day} ${created.year}` : ''}{lead.city ? ` · ${lead.city}` : ''}</small>
+            <NameCell lead={lead} />
+            {created && <small className="ld-card-sub">{date?.label === 'Imported' ? 'Imported ' : ''}{created.day} {created.year}</small>}
           </div>
         </div>
         <StatusText lead={lead} />
       </div>
       <dl className="db-mini-meta">
         <div><dt>Job</dt><dd><PositionText value={lead.positionApplied} /></dd></div>
-        <div><dt>Phone</dt><dd className="ld-copyrow">{phone ? <><span className="ident">{phone}</span><CopyButton value={phone} label="Copy phone" /></> : '–'}</dd></div>
+        <div><dt>Education</dt><dd><EducationCell lead={lead} /></dd></div>
+        <div><dt>India experience</dt><dd><ExperienceCell lead={lead} kind="india" /></dd></div>
+        <div><dt>Abroad experience</dt><dd><ExperienceCell lead={lead} kind="abroad" /></dd></div>
+        <div><dt>Total experience</dt><dd><ExperienceCell lead={lead} kind="total" /></dd></div>
+        <div><dt>Location</dt><dd><LocationCell lead={lead} /></dd></div>
+        <div><dt>Campaign</dt><dd><CampaignCell lead={lead} /></dd></div>
         <div><dt>Assigned to</dt><dd><OwnerCell lead={lead} userById={context.userById} /></dd></div>
         <div><dt>Follow-up</dt><dd className={cn(follow === 'overdue' && 'ld-late-text')}>{follow === 'none' || follow === 'closed' ? '–' : followUpLabel(lead.nextFollowUpAt)}</dd></div>
-        <div><dt>Campaign</dt><dd title={lead.campaignName ?? ''}>{lead.campaignName || '–'}</dd></div>
         <div><dt>Country</dt><dd>{lead.countryInterest || '–'}</dd></div>
       </dl>
       <div className="db-mini-foot" onClick={(event) => event.stopPropagation()}>
@@ -61,7 +65,6 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
               : <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Attach the updated resume'} onClick={() => input.current?.click()}><FileUp size={14} /><span>Resume</span></button>}
           <input ref={input} type="file" className="sr-only" tabIndex={-1} accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp" aria-label={`Resume for ${lead.name}`}
             onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) context.onUploadResume(lead, file) }} />
-          <LeadWhatsApp lead={lead} />
           <RowMenu label={`More actions for ${lead.name}`} items={leadMenuItems(context, lead)} />
         </div>
       </div>

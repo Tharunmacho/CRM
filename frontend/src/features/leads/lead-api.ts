@@ -73,6 +73,31 @@ export interface ExistingCandidate {
 
 export interface CallBody { outcome: string; remarks: string; nextFollowUpAt: string | null }
 
+export interface UploadDeletionPreview {
+  batchId: string
+  fileName: string
+  leadCount: number
+  protectedCount: number
+  duplicateRows: number
+  updatedExistingRows: number
+  preservedExistingLeadCount: number | null
+  canDelete: boolean
+  reasons: { code: string; message: string; count: number }[]
+  previewToken: string
+}
+
+export interface UploadDeletionResult {
+  deleted: true
+  batchId: string
+  deletedLeads: number
+  deletedActivities: number
+  deletedFollowUps: number
+  deletedAttachments: number
+  deletedExtractionJobs: number
+  duplicateRows: number
+  preservedExistingLeadCount: number | null
+}
+
 const enc = encodeURIComponent
 
 export const leadApi = {
@@ -89,6 +114,12 @@ export const leadApi = {
   assign: (ids: string[], ownerId: string) => api.post<{ assigned: number; skipped: number }>('/leads/assign', { ids, ownerId }),
   linkCandidate: (id: string, candidateId: string) => api.post<Lead>(`/leads/${enc(id)}/link-candidate`, { candidateId }),
   deleteBatch: (id: string) => api.del<{ deleted: number; kept: number }>(`/leads/batches/${enc(id)}`),
+  deletionPreview: (id: string, signal?: AbortSignal) =>
+    api.get<UploadDeletionPreview>(`/leads/batches/${enc(id)}/deletion-preview`, { signal, fresh: true }),
+  permanentlyDeleteBatch: (preview: UploadDeletionPreview, confirm: 'DELETE') =>
+    api.del<UploadDeletionResult>(`/leads/batches/${enc(preview.batchId)}/permanent`, {
+      previewToken: preview.previewToken, expectedLeadCount: preview.leadCount, confirm,
+    }),
 }
 
 /** Dry run or real import of one file. Dry runs save nothing. */

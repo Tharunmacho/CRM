@@ -1,0 +1,20 @@
+.ld-delete-upload { display: grid; gap: 18px; min-width: 0; font-size: 14px; line-height: 1.55; }
+.ld-delete-upload p { margin: 0; }
+.ld-delete-upload-file { overflow-wrap: anywhere; color: var(--text-main); }
+.ld-delete-upload-counts { display: grid; gap: 10px; margin: 0; padding: 14px; border: 1px solid var(--border-main); border-radius: 8px; }
+.ld-delete-upload-counts > div { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+.ld-delete-upload-counts dt { color: var(--text-muted); }
+.ld-delete-upload-counts dd { flex: none; margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ld-delete-upload-warning { display: flex; align-items: start; gap: 10px; padding: 14px; border: 1px solid var(--warning-edge); border-radius: 8px; color: var(--warning-ink); background: var(--warning-fill); }
+.ld-delete-upload-warning > svg { flex: none; margin-top: 2px; }
+.ld-delete-upload-warning ul { margin: 8px 0; padding-left: 18px; }
+.ld-delete-upload-error { color: var(--error-ink); }
+.ld-delete-upload-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; width: 100%; }
+.ld-upload-cards { display: grid; gap: 14px; padding: 16px; list-style: none; margin: 0; }
+.ld-upload-cards > li { min-width: 0; padding: 16px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
+.ld-upload-cards h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.ld-upload-cards p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.ld-upload-cards dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; font-size: 12px; }
+.ld-upload-cards dd { margin: 3px 0 0; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ld-upload-cards .ld-batch-acts { justify-content: flex-start; flex-wrap: wrap; }
+@media (max-width: 420px) { .ld-delete-upload-footer > button { flex: 1 1 auto; min-width: 0; white-space: normal; } }

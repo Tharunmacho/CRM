@@ -1,12 +1,13 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, UserCheck, Globe, Link2, BellRing } from 'lucide-react'
+import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, UserCheck, Globe, Link2, BellRing, Info } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
+import { Dialog } from '@/shared/ui/overlay'
 import { whatsappHref } from '@/features/candidates/data-bank-view'
 import { WhatsAppTemplateButton } from './wa-template'
 import { Avatar, RowMenu } from '@/features/candidates/components/db-parts'
 import {
-  cleanPhone, createdParts, dobLabel, experienceLines, extraAnswer, followUpLabel, followUpState, isClosed, leadStatus,
+  cleanPhone, createdParts, dobLabel, experienceAnswer, experienceQuestionSummary, extraAnswer, followUpLabel, followUpState, isClosed, leadAge, leadDate, leadStatus,
   platformKind, PLATFORM_LABEL, type ExtraColumn, type Lead,
 } from '../lead-model'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
@@ -15,17 +16,21 @@ import { EMPTY_VALUE, leadFieldRows, type LeadFieldDef } from '../lead-fields'
 const Dash = () => <span className="db-muted" aria-label="None">–</span>
 
 export function CreatedCell({ lead }: { lead: Lead }) {
-  const parts = createdParts(lead.createdTime)
-  if (!parts) return <Dash />
-  return <span className="db-2l" title={`Created ${new Date(lead.createdTime as string).toLocaleString()}`}><strong className="db-num">{parts.day}</strong><small>{parts.year}</small></span>
+  const date = leadDate(lead)
+  const parts = createdParts(date?.value)
+  if (!date || !parts) return <Dash />
+  return <span className="db-2l" title={`${date.label} ${new Date(date.value).toLocaleString()}`}><strong className="db-num">{parts.day}</strong><small>{parts.year}{date.label === 'Imported' && ' · Imported'}</small></span>
 }
 
 export function NameCell({ lead }: { lead: Lead }) {
   const dob = dobLabel(lead.dob)
+  const age = leadAge(lead.dob)
+  const phone = cleanPhone(lead.phone)
   return (
-    <span className="db-2l is-name" title={`${lead.name}${dob ? ` · born ${dob}` : ''}${lead.gender ? ` · ${lead.gender}` : ''}`}>
-      <strong className="db-clamp">{lead.name || 'Unnamed'}</strong>
-      {dob || lead.gender ? <small>{[dob, lead.gender].filter(Boolean).join(' · ')}</small> : <small className="db-muted">No date of birth</small>}
+    <span className="db-2l is-name ld-identity" title={`${lead.name}${dob ? ` · born ${dob}` : ''}${lead.gender ? ` · ${lead.gender}` : ''}`}>
+      <strong className="ld-identity-name">{lead.name || 'Unnamed'}</strong>
+      <small>{age === null ? 'Age —' : `Age ${age}`}</small>
+      {phone ? <span className="ld-identity-phone"><span className="ident db-num">{phone}</span>{whatsappHref(phone) && <LeadWhatsApp lead={lead} />}<CopyButton value={phone} label={`Copy ${phone}`} /></span> : <small className="db-muted">Phone —</small>}
     </span>
   )
 }
@@ -65,22 +70,46 @@ export function PositionText({ value }: { value?: string | null }) {
   return <strong className="ld-position" title={text}>{text}</strong>
 }
 
-export function ExperienceCell({ lead }: { lead: Lead }) {
-  const { restaurant, total } = experienceLines(lead)
-  if (!restaurant && !total) return <Dash />
+export function ExperienceCell({ lead, kind = 'total' }: { lead: Lead; kind?: 'restaurant' | 'india' | 'abroad' | 'total' }) {
+  const [open, setOpen] = useState(false)
+  const { value, question } = experienceAnswer(lead, kind)
+  if (!value) return <Dash />
+  const label = { restaurant: 'Restaurant experience', india: 'India experience', abroad: 'Abroad experience', total: 'Total experience' }[kind]
+  const showQuestion = Boolean(question && /^(yes|no)$/i.test(value))
+  const title = `${question || label}: ${value}`
+  const content = <>
+    <strong className="db-num ld-experience-value">{value}{showQuestion && <Info size={12} aria-hidden="true" />}</strong>
+    {showQuestion && <small>{experienceQuestionSummary(question)}</small>}
+  </>
   return (
-    <span className="db-2l" title={`Restaurant ${restaurant ?? 'not given'} · total ${total ?? 'not given'}`}>
-      <strong className="db-num">{restaurant ?? '–'}</strong>
-      <small>{total ? `${total} total` : 'total not given'}</small>
+    <span className={`ld-experience-cell is-${kind}`} onClick={showQuestion ? event => event.stopPropagation() : undefined}>
+      {showQuestion
+        ? <button type="button" className="db-2l ld-experience-answer" title={title} aria-label={`${title}. View experience question`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>{content}</button>
+        : <span className="db-2l" title={title}>{content}</span>}
+      <Dialog open={open} onClose={() => setOpen(false)} title="Experience answers" width="sm">
+        <dl className="ld-experience-questions">
+          <div><dt>{question || label}</dt><dd>{value}</dd></div>
+        </dl>
+      </Dialog>
     </span>
   )
+}
+
+export function EducationCell({ lead }: { lead: Lead }) {
+  const value = lead.educationLevel?.trim()
+  return value ? <span className="ld-answer-text" title={value}>{value}</span> : <Dash />
+}
+
+export function StateCell({ lead }: { lead: Lead }) {
+  const value = lead.state?.trim()
+  return value ? <span className="ld-answer-text" title={value}>{value}</span> : <Dash />
 }
 
 export function LocationCell({ lead }: { lead: Lead }) {
   if (!lead.city && !lead.state) return <Dash />
   return (
-    <span className="db-2l" title={[lead.city, lead.state].filter(Boolean).join(', ')}>
-      <strong className="db-clamp">{lead.city || lead.state}</strong>
+    <span className="db-2l ld-location" title={[lead.city, lead.state].filter(Boolean).join(', ')}>
+      <strong className="ld-answer-text">{lead.city || lead.state}</strong>
       {lead.city && lead.state && <small>{lead.state}</small>}
     </span>
   )

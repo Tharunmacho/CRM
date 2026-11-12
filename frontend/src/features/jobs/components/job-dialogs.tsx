@@ -48,6 +48,7 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
     companyId: order.companyId, title: store.designation(order.designationId)?.title ?? '', ...requirementsOf(store.designation(order.designationId)), openings: String(order.openings), country: properCountry(order.country ?? ''), city: order.city ?? '',
     salary: order.salary === undefined || order.salary === null ? '' : String(order.salary), currency: order.currency, deadline: order.deadline ?? '',
     benefits: order.benefits.join(', '), contractPeriod: order.contractPeriod ?? '', interviewDate: order.interviewDate ?? '', status: order.status,
+    ageRequirement: order.ageRequirement ?? '', genderRequirement: order.genderRequirement ?? '', educationRequirement: order.educationRequirement ?? '',
   } : { ...emptyJobForm(companyId ?? '', store.settings.defaultOrderCurrency), title: designation?.title ?? '', ...requirementsOf(designation) })
   const [errors, setErrors] = useState<JobFieldErrors>({})
   const [general, setGeneral] = useState('')
@@ -161,6 +162,50 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
             <ComboInput inputRef={titleBox} maxLength={160} value={form.title} onChange={setTitle} options={titles} disabled={locked} invalid={!!errors.title}
               placeholder="Enter a job title" ariaLabel="Job title" noMatchNote={(typed) => `“${typed}” will be added as a new job title.`} />
           </Field>
+        </FormSection>
+
+        <FormSection icon={<ListChecks size={18} />} title="Responsibilities and skills" hint="Responsibilities, skills and minimum experience apply to every job with this title.">
+          <Field label="Responsibilities" className="sm:col-span-2" error={errors.description}>
+            <Textarea rows={3} maxLength={20000} value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Describe the work and main duties" />
+          </Field>
+          <div className="ui-field sm:col-span-2">
+            <span className="ui-field-label">Required / additional skills</span>
+            <TagInput value={form.skills} onChange={(skills) => setForm((previous) => ({ ...previous, skills }))} suggestions={skillChoices} ariaLabel="Required / additional skills"
+              placeholder="Type a skill and press Enter" invalid={!!errors.skills} />
+            {errors.skills && <span className="ui-field-error" role="alert">{errors.skills}</span>}
+          </div>
+          <Field label="Minimum experience (years)" error={errors.minExperience}>
+            <Input type="number" inputMode="numeric" min={0} max={60} step={1} value={form.minExperience} onChange={(e) => set('minExperience', e.target.value)} aria-invalid={!!errors.minExperience} />
+          </Field>
+        </FormSection>
+
+        <FormSection icon={<ListChecks size={18} />} title="Candidate requirements and salary" hint="Optional details saved for this job.">
+          <Field label="Age requirement" error={errors.ageRequirement}>
+            <Input maxLength={120} value={form.ageRequirement} onChange={(e) => set('ageRequirement', e.target.value)} placeholder="Enter the agreed age range" aria-invalid={!!errors.ageRequirement} />
+          </Field>
+          <Field label="Gender requirement" error={errors.genderRequirement}>
+            <Input maxLength={120} value={form.genderRequirement} onChange={(e) => set('genderRequirement', e.target.value)} placeholder="Enter the client's requirement" aria-invalid={!!errors.genderRequirement} />
+          </Field>
+          <Field label="Education requirement" className="sm:col-span-2" error={errors.educationRequirement}>
+            <Textarea rows={2} maxLength={2000} value={form.educationRequirement} onChange={(e) => set('educationRequirement', e.target.value)} placeholder="Qualifications or education needed" aria-invalid={!!errors.educationRequirement} />
+          </Field>
+          <Field label="Salary (per month)" error={errors.salary}>
+            <Input type="number" inputMode="decimal" min={0} max={9999999999.99} step={0.01} value={form.salary} onChange={(e) => set('salary', e.target.value)} placeholder="Optional amount" aria-invalid={!!errors.salary} />
+          </Field>
+          <Field label="Currency" required error={errors.currency}>
+            <Select value={form.currency} onChange={(e) => set('currency', e.target.value)} aria-invalid={!!errors.currency}>
+              {!form.currency && <option value="">Choose a currency</option>}
+              {currencyChoices(store.settings.currencies, order?.currency).map((currency) => <option key={currency.code} value={currency.code}>{currencyLabel(currency)}</option>)}
+            </Select>
+          </Field>
+        </FormSection>
+
+        <FormSection icon={<MapPin size={18} />} title="Location and openings">
+          <Field label="Country" error={errors.country}>
+            <ComboInput value={form.country} onChange={(value) => set('country', value)} options={countries} ariaLabel="Country" placeholder="Start typing a country" maxLength={100}
+              prefix={<Flag country={form.country} />} renderOption={(name) => <Flag country={name} />} normalize={properCountry} noMatchNote={() => 'Any country name can be typed.'} />
+          </Field>
+          <Field label="City" error={errors.city}><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Enter a city" /></Field>
           <Field label="Openings" required error={errors.openings}>
             <Input type="number" inputMode="numeric" min={Math.max(1, counts.deployed)} max={100000} step={1} value={form.openings} onChange={(e) => set('openings', e.target.value)} aria-invalid={!!errors.openings} />
           </Field>
@@ -171,38 +216,6 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
               <option value="filled" disabled={statusBlocked('filled')}>Filled</option><option value="closed" disabled={statusBlocked('closed')}>Closed</option>
             </Select>
           </Field>}
-        </FormSection>
-
-        <FormSection icon={<ListChecks size={18} />} title="Requirements" hint="Applies to every job with this title.">
-          <div className="ui-field sm:col-span-2">
-            <span className="ui-field-label">Required skills</span>
-            <TagInput value={form.skills} onChange={(skills) => setForm((previous) => ({ ...previous, skills }))} suggestions={skillChoices} ariaLabel="Required skills"
-              placeholder="Type a skill and press Enter" invalid={!!errors.skills} />
-            {errors.skills && <span className="ui-field-error" role="alert">{errors.skills}</span>}
-          </div>
-          <Field label="Minimum experience (years)" error={errors.minExperience}>
-            <Input type="number" inputMode="numeric" min={0} max={60} step={1} value={form.minExperience} onChange={(e) => set('minExperience', e.target.value)} aria-invalid={!!errors.minExperience} />
-          </Field>
-          <Field label="Description" className="sm:col-span-2" error={errors.description}>
-            <Textarea rows={3} maxLength={20000} value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="What the role involves and who suits it" />
-          </Field>
-        </FormSection>
-
-        <FormSection icon={<MapPin size={18} />} title="Location and pay">
-          <Field label="Country" error={errors.country}>
-            <ComboInput value={form.country} onChange={(value) => set('country', value)} options={countries} ariaLabel="Country" placeholder="Start typing a country" maxLength={100}
-              prefix={<Flag country={form.country} />} renderOption={(name) => <Flag country={name} />} normalize={properCountry} noMatchNote={() => 'Any country name can be typed.'} />
-          </Field>
-          <Field label="City" error={errors.city}><Input maxLength={100} value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Enter a city" /></Field>
-          <Field label="Salary (per month)" error={errors.salary}>
-            <Input type="number" inputMode="decimal" min={0} max={9999999999.99} step={0.01} value={form.salary} onChange={(e) => set('salary', e.target.value)} placeholder="Optional amount" aria-invalid={!!errors.salary} />
-          </Field>
-          <Field label="Currency" required error={errors.currency}>
-            <Select value={form.currency} onChange={(e) => set('currency', e.target.value)} aria-invalid={!!errors.currency}>
-              {!form.currency && <option value="">Choose a currency</option>}
-              {currencyChoices(store.settings.currencies, order?.currency).map((currency) => <option key={currency.code} value={currency.code}>{currencyLabel(currency)}</option>)}
-            </Select>
-          </Field>
           <Field label="Contract period" error={errors.contractPeriod}><Input maxLength={60} value={form.contractPeriod} onChange={(e) => set('contractPeriod', e.target.value)} placeholder="Enter the agreed period" /></Field>
           <Field label="Benefits (separate with commas)" className="sm:col-span-2" error={errors.benefits}>
             <Input value={form.benefits} onChange={(e) => set('benefits', e.target.value)} placeholder="Enter the agreed benefits" />

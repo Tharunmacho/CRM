@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import ARRAY, String, any_, literal, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from app.core.config import get_settings
 from app.db.models import AuditEntry, Lead, LEAD_STATUSES, Notification, Role, User
@@ -327,7 +327,7 @@ def export_selected(db: Session, user: User, body: dict) -> tuple[bytes, int]:
         query = lead_sheet.apply_filters(query, owner, has_resume, user, filt)
     else:
         raise fail(422, "invalid_request", "Choose the leads (ids) or give a filter.")
-    found = db.execute(query.order_by(*lead_sheet._order(owner, sort, direction)).limit(BULK_LIMIT + 1)).all()
+    found = db.execute(query.options(undefer(Lead.extra)).order_by(*lead_sheet._order(owner, sort, direction)).limit(BULK_LIMIT + 1)).all()
     if len(found) > BULK_LIMIT:
         raise too_many(None)
     if not found:
@@ -335,13 +335,6 @@ def export_selected(db: Session, user: User, body: dict) -> tuple[bytes, int]:
     expected = body.get("expectedCount")
     if not body.get("ids") and expected is not None and expected != len(found):
         raise fail(409, "selection_changed", f"The matching leads changed: {len(found):,} now match, not {expected:,}. Review the list and try again.", matching=len(found))
-    counts: dict[str, int] = {}
-    for row in found:
-        for key, value in (row[0].extra or {}).items():
-            if value not in (None, ""):
-                counts[key] = counts.get(key, 0) + 1
-    extra_keys = [key for key, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:60]]
-    header = [name for name, _ in lead_sheet.EXPORT_COLUMNS] + [lead_sheet.pretty_header(key) or key for key in extra_keys]
-    rows = [[fn(row[0], row[1]) for _, fn in lead_sheet.EXPORT_COLUMNS] + [(row[0].extra or {}).get(key) for key in extra_keys] for row in found]
+    header, rows = lead_sheet.export_table(found)
     sheet = [header] + [[(float(v) if isinstance(v, Decimal) else v) for v in row] for row in rows]
     return lead_xlsx.build_workbook([{"name": "Lead sheet", "rows": sheet, "widths": lead_xlsx.fit_widths(sheet)}]), len(found)

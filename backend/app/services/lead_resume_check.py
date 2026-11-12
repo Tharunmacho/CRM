@@ -64,6 +64,12 @@ def _status(db, lead, job):
 
 
 def start(db, user, lead_id, resume=None, overrides=None):
+    from app.services.lead_upload_delete import resume_check_guard
+    with resume_check_guard(db, lead_id):
+        return _start(db, user, lead_id, resume, overrides)
+
+
+def _start(db, user, lead_id, resume=None, overrides=None):
     from app.api.routers import document_jobs
     from app.core.config import get_settings
     from app.services.document_storage import read_bytes

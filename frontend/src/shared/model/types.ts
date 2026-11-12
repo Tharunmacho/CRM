@@ -236,6 +236,9 @@ export interface Order {
   benefits: string[]
   contractPeriod: string | null
   interviewDate?: string | null
+  ageRequirement?: string | null
+  genderRequirement?: string | null
+  educationRequirement?: string | null
   deadline: string | null
   status: OrderStatus
   createdAt: string

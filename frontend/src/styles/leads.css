@@ -55,6 +55,32 @@
 .db-menu-item { white-space: nowrap; }
 
 /* ---------- Cells ---------- */
+.ld-experience-answer { max-width: 100%; border: 0; padding: 3px; border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.ld-experience-answer:hover { background: var(--tint-2); }
+.ld-experience-answer:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ld-experience-answer strong svg { display: inline; margin-left: 5px; vertical-align: middle; color: var(--primary); }
+.ld-experience-answer small { white-space: normal; line-height: 1.35; }
+.ld-experience-questions { display: grid; gap: 20px; margin: 0; }
+.ld-experience-questions dt { line-height: 1.6; color: var(--text-muted); }
+.ld-experience-questions dd { margin: 6px 0 0; font-size: 18px; font-weight: 600; color: var(--text-main); }
+.ld-identity { width: 100%; min-width: 0; align-items: flex-start; text-align: left; }
+.ld-identity-name { display: block; width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
+.ld-identity-phone { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; max-width: 100%; min-width: 0; }
+.ld-identity-phone > .ident { white-space: normal; overflow-wrap: anywhere; }
+.ld-experience-cell { display: block; width: 100%; min-width: 0; }
+.ld-experience-cell .db-2l { width: 100%; }
+.ld-experience-value, .ld-answer-text { display: block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.ld .ld-experience-cell .ld-experience-value, .ld .db-tbl.is-fit .ld-experience-cell .ld-experience-value { max-width: 100%; overflow: visible; white-space: normal; text-overflow: clip; }
+.ld .db-tbl.is-fit .ld-identity-phone > .ident { max-width: 100%; overflow: visible; white-space: normal; text-overflow: clip; }
+:root:root .ld .db-tbl.is-grid.is-fit thead th { white-space: normal; }
+.ld .db-tbl.is-fit .db-th-label { white-space: normal; line-height: 1.3; }
+.ld-experience-cell .ld-experience-answer small { display: block; white-space: normal; overflow-wrap: normal; text-overflow: clip; overflow: visible; }
+.ld-card .ld-identity { margin-bottom: 5px; }
+.ld-card .db-mini-head > .db-tone { flex: none; white-space: nowrap; }
+.ld-card .ld-experience-answer { text-align: left; align-items: flex-start; }
+.ld-card .db-mini-meta { grid-template-columns: minmax(0, 1fr); }
+.ld-card .db-mini-meta > div { display: grid; grid-template-columns: minmax(0, 112px) minmax(0, 1fr); align-items: baseline; gap: 12px; }
+.ld-card .db-mini-meta dt { font-size: 12px; line-height: 1.4; letter-spacing: 0; text-transform: none; }
 .ld-position { display: block; max-width: 100%; overflow-wrap: anywhere; line-height: 1.35; font-weight: 600; color: var(--text-main); }
 .ld-line { display: inline-flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; min-width: 0; }
 .ld-copy { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: var(--text-light); cursor: pointer; }

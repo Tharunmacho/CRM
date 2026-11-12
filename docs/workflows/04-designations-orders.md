@@ -21,6 +21,10 @@ All three roles can create designations and orders. Prepare an active employer a
 
 Designation editing must expose the saved skills and minimum experience used by matching. Order forms validate numeric openings/amounts and supplied dates, maintain explicit currency and require valid active parents. Editing must preserve the order reference and application relationships.
 
+The Jobs list includes salary and currency. In the job form, responsibilities (the designation description), required/additional skills and minimum experience remain shared by every job with that title. The form labels this scope. Salary/currency and optional `ageRequirement`, `genderRequirement` and `educationRequirement` belong to the individual order. Age and gender accept up to 120 characters each; education accepts 2,000. Free text preserves the employer's wording, including age ranges, without inventing a requirement or adding a matching gate. The optional interview date remains available.
+
+`POST /api/orders` and `PUT /api/orders/{id}` return these fields in the same camelCase shape as the workspace/bootstrap order list. Blank or null requirements clear the corresponding value; omitting a new field on an existing-client PUT preserves its saved value. Changes appear in the order audit history. Migration `0037_order_requirements` adds three nullable columns to `crm_job_orders` without defaults or backfill; existing jobs and designation requirements remain unchanged.
+
 The order page shows openings, active matched applications, selected candidates, deployed candidates and closed history. **Filled** depends on deployments against openings. Closing requires resolution of active applications. Lowering capacity cannot bypass existing deployment constraints. Concurrent final-stage completions recheck capacity under the order lock.
 
 ## Recovery and handoffs

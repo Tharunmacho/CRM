@@ -143,6 +143,20 @@ test('fields: one registry drives labels, groups, values and the opened row', ()
   assert.equal(fields.prettyHeader('___'), '')
 })
 
+test('expanded experience answers retain the sheet question and do not turn No into zero years', () => {
+  const question = 'Do you have 5+ years of experience with an MBA or relevant qualification?'
+  const rows = fields.leadFieldRows({ id: '1', name: 'Test', status: 'new', experienceTotalYears: 0, experienceTotalText: 'No', experienceTotalQuestion: question })
+  assert.equal(rows.find(row => row.key === 'totalYears').value, 'No')
+  assert.equal(rows.find(row => row.key === 'totalYears').label, question)
+  assert.equal(fields.fieldDef('restaurantYears').value({ experienceRestaurantYears: 5, experienceRestaurantText: '5+ years' }), '5+ years')
+})
+
+test('expanded date identifies an import timestamp rather than a source creation date', () => {
+  const rows = fields.leadFieldRows({ id: '1', name: 'Test', status: 'new', createdAt: '2026-11-12T11:13:15Z' })
+  assert.equal(rows.find(row => row.key === 'created').label, 'Imported time')
+  assert.equal(rows.find(row => row.key === 'created').value, '12 Nov 2026')
+})
+
 test('consistency: the table headings come from the one config and nothing else', async () => {
   const columns = await readFile(new URL('../src/features/leads/components/lead-column-definitions.tsx', import.meta.url), 'utf8')
   const start = columns.indexOf('export function leadColumns')

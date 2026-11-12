@@ -241,6 +241,27 @@ def test_export_selected_uses_the_styled_workbook_with_custom_columns(env):
     assert by_status(env) == {"new": 5}
 
 
+def test_selected_export_keeps_literal_experience_and_question_context(env):
+    from lead_sheet_fixtures import csv_bytes
+    from test_lead_experience_answers import excel_rows
+    question = "Do you have 5+ years of experience with a relevant qualification?"
+    response = env.client.post("/api/leads/import", files={"file": ("answers.csv", csv_bytes([
+        ["Synthetic Answer A", "9000070071", "Yes"], ["Synthetic Answer B", "9000070072", "No"],
+        ["Synthetic Unselected", "9000070073", "Yes"],
+    ], headers=["Name", "Phone", question]), "text/csv")})
+    assert response.status_code == 200
+    ids = all_ids(env, sort="name", direction="asc")
+    exported = bulk(env, action="export", ids=ids[:2])
+    assert exported.status_code == 200
+    rows = excel_rows(exported.content)
+    header = [cell[0] for cell in rows[0]]
+    assert len(rows) == 3
+    assert {row[header.index("Experience (total)")][0] for row in rows[1:]} == {"Yes", "No"}
+    assert all(row[header.index("Total experience question")][0] == question for row in rows[1:])
+    env.db.rollback()
+    assert by_status(env) == {"new": 3}
+
+
 # ------------------------------------------------------------------ delete
 
 def test_delete_one_is_admin_only_refuses_linked_leads_and_audits(env):

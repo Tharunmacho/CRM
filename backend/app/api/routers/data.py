@@ -469,9 +469,17 @@ class OrderIn(MasterInput):
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     benefits: list[str] = Field(default_factory=list, max_length=100)
     contractPeriod: str | None = Field(default=None, max_length=60)
+    ageRequirement: str | None = Field(default=None, max_length=120)
+    genderRequirement: str | None = Field(default=None, max_length=120)
+    educationRequirement: str | None = Field(default=None, max_length=2000)
     interviewDate: date | None = None
     deadline: date | None = None
     status: OrderStatus = OrderStatus.open
+
+    @field_validator("ageRequirement", "genderRequirement", "educationRequirement")
+    @classmethod
+    def optional_requirements(cls, value):
+        return value or None
 
     @model_validator(mode="after")
     def dates_in_order(self):
@@ -492,6 +500,8 @@ def _master_values(body: MasterInput):
                "requiredSkills": "required_skills", "minExperience": "min_experience",
                "companyId": "company_id", "designationId": "designation_id",
                "contractPeriod": "contract_period", "interviewDate": "interview_date",
+               "ageRequirement": "age_requirement", "genderRequirement": "gender_requirement",
+               "educationRequirement": "education_requirement",
                "staffContacts": "staff_contacts", "agencyName": "agency_name",
                "preferredCountries": "preferred_countries"}
     return {aliases.get(key, key): value for key, value in body.model_dump(exclude={"company", "staffIds"}).items()}
@@ -508,7 +518,9 @@ def _master_save(db, user, row, body, kind, schema, *, new=False, commit=True, e
     values = _master_values(body)
     if not new and "staffContacts" not in body.model_fields_set:
         values.pop("staff_contacts", None)  # a PUT that does not mention the team keeps it
-    for wire, column in (("specialisations", "specialisations"), ("preferredCountries", "preferred_countries")):
+    for wire, column in (("specialisations", "specialisations"), ("preferredCountries", "preferred_countries"),
+                         ("ageRequirement", "age_requirement"), ("genderRequirement", "gender_requirement"),
+                         ("educationRequirement", "education_requirement")):
         if not new and wire not in body.model_fields_set:
             values.pop(column, None)  # nor does it clear a selection it never mentioned
     for key, value in values.items():

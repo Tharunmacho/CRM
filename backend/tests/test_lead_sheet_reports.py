@@ -135,11 +135,12 @@ def test_export_has_text_phones_real_dates_and_the_custom_question_columns(env):
     book = read_book(env.client.get("/api/leads/export.xlsx", params={"q": "Test Lead"}).content)
     sheet = book["Lead sheet"]
     head = texts(sheet)[0]
-    assert head[0] == "Created" and "Do you have a passport" in head and "Preferred shift" in head
-    first = sheet["rows"][1]
-    assert first[0][1] == 3 and first[0][2] == "n", "Created is a real date-time"
+    assert head[0] == "Name / Age / Contact" and "Do you have a passport" in head and "Preferred shift" in head
+    from test_lead_experience_answers import excel_rows
+    first = excel_rows(env.client.get("/api/leads/export.xlsx", params={"q": "Test Lead"}).content)[1]
+    assert first[head.index("Created")][2] == 3 and first[head.index("Created")][1] == "n", "Created is a real date-time"
     phone = head.index("Phone")
-    assert first[phone][2] == "t" and first[phone][0].startswith("+91")
+    assert first[phone][1] == "inlineStr" and first[phone][0].startswith("+91")
     assert 'state="frozen"' in sheet["xml"] and "<autoFilter" in sheet["xml"]
     assert "Do you have a passport" in env.client.get("/api/leads/export.csv").content.decode("utf-8-sig").splitlines()[0]
 

@@ -621,9 +621,9 @@ def test_export_is_supervisor_only_filtered_and_formula_safe(env):
     act_as(env, "manager")
     exported = env.client.get("/api/leads/export.csv", params={"q": "@example.test"})
     rows = list(csv.reader(io.StringIO(exported.content.decode("utf-8-sig"))))
-    assert rows[0][:3] == ["Created", "Name", "Phone"] and len(rows) == 4
-    names = {r[1] for r in rows[1:]}
-    assert any(r[2] == "+919000000001" for r in rows[1:]), "a phone number is not mangled into text"
+    assert rows[0][:3] == ["Name / Age / Contact", "Job applied", "Education"] and len(rows) == 4
+    names = {r[rows[0].index("Name")] for r in rows[1:]}
+    assert any(r[rows[0].index("Phone")] == "+919000000001" for r in rows[1:]), "a phone number is not mangled into text"
     assert "'=cmd|' /C calc'!A0" in names and "'+sum(1)" in names and "Test Lead 00001" in names
     assert len(list(csv.reader(io.StringIO(env.client.get("/api/leads/export.csv", params={"q": "00001"}).content.decode("utf-8-sig"))))) == 2
     book = env.client.get("/api/leads/export.xlsx")

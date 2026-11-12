@@ -111,6 +111,10 @@ export interface JobForm {
   skills: string[]
   minExperience: string
   description: string
+  /** Optional eligibility notes for this job, not the shared job title. */
+  ageRequirement: string
+  genderRequirement: string
+  educationRequirement: string
   openings: string
   country: string
   city: string
@@ -124,7 +128,7 @@ export interface JobForm {
 }
 
 export const emptyJobForm = (companyId: string, currency: string): JobForm => ({
-  companyId, title: '', skills: [], minExperience: '0', description: '', openings: '1', country: '', city: '', salary: '', currency, deadline: '', benefits: '', contractPeriod: '', interviewDate: '', status: 'open',
+  companyId, title: '', skills: [], minExperience: '0', description: '', ageRequirement: '', genderRequirement: '', educationRequirement: '', openings: '1', country: '', city: '', salary: '', currency, deadline: '', benefits: '', contractPeriod: '', interviewDate: '', status: 'open',
 })
 
 export const benefitList = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean)
@@ -146,6 +150,9 @@ export function validateJob(form: JobForm, counts: JobCounts = { deployed: 0, ac
   if (form.minExperience.trim() === '' || !Number.isInteger(experience) || experience < 0 || experience > 60) errors.minExperience = 'Enter the minimum experience as whole years, from 0 to 60.'
   if (form.skills.length > 100) errors.skills = 'A job title can have up to 100 required skills.'
   if (form.description.length > 20000) errors.description = 'The description is too long.'
+  if ((form.ageRequirement ?? '').trim().length > 120) errors.ageRequirement = 'Use up to 120 characters for the age requirement.'
+  if ((form.genderRequirement ?? '').trim().length > 120) errors.genderRequirement = 'Use up to 120 characters for the gender requirement.'
+  if ((form.educationRequirement ?? '').trim().length > 2000) errors.educationRequirement = 'Use up to 2,000 characters for the education requirement.'
   const openings = Number(form.openings)
   const floor = Math.max(1, counts.deployed)
   if (form.openings.trim() === '' || !Number.isInteger(openings) || openings < 1) errors.openings = 'Enter how many people are needed, a whole number of at least 1.'
@@ -176,6 +183,9 @@ export function buildJobPayload(form: JobForm, designationId: string) {
     benefits: benefitList(form.benefits),
     contractPeriod: form.contractPeriod.trim(),
     interviewDate: form.interviewDate || null,
+    ageRequirement: form.ageRequirement?.trim() || null,
+    genderRequirement: form.genderRequirement?.trim() || null,
+    educationRequirement: form.educationRequirement?.trim() || null,
     deadline: form.deadline || null,
     status: form.status || 'open',
   }
@@ -186,6 +196,7 @@ export function buildJobPayload(form: JobForm, designationId: string) {
 const FIELD_OF: Record<string, string> = {
   companyid: 'companyId', designationid: 'title', title: 'title', requiredskills: 'skills', minexperience: 'minExperience', description: 'description', openings: 'openings', country: 'country', city: 'city', salary: 'salary',
   currency: 'currency', benefits: 'benefits', contractperiod: 'contractPeriod', interviewdate: 'interviewDate', deadline: 'deadline', status: 'status',
+  agerequirement: 'ageRequirement', genderrequirement: 'genderRequirement', educationrequirement: 'educationRequirement',
 }
 
 function sentence(message: string) {

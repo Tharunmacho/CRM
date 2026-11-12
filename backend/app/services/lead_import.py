@@ -69,6 +69,7 @@ SAMPLE_FIELDS = {
     "externalId": "external_id", "createdTime": "created_time", "name": "name", "phone": "phone", "email": "email",
     "city": "city", "state": "state", "currentLocation": "current_location", "positionApplied": "position_applied",
     "countryInterest": "country_interest", "experienceRestaurantYears": "experience_restaurant_years",
+    "experienceRestaurantText": "experience_restaurant_text", "experienceTotalText": "experience_total_text",
     "experienceTotalYears": "experience_total_years", "gender": "gender", "maritalStatus": "marital_status", "dob": "dob",
     "educationLevel": "education_level", "militaryStatus": "military_status", "platform": "platform",
     "campaignName": "campaign_name", "adName": "ad_name", "formName": "form_name",

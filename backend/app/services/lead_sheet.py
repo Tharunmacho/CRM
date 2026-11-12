@@ -15,7 +15,8 @@ from decimal import Decimal
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import and_, case, cast, exists, func, or_, select, text, String
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session, aliased, undefer
 
 from app.db.models import (Attachment, AuditEntry, Candidate, Lead, LeadActivity, LeadBatch, Notification, Role, User,
                            LEAD_STATUSES)
@@ -109,7 +110,73 @@ def log_activity(db: Session, lead_id: str, user_id: str | None, kind: str, summ
     db.add(LeadActivity(id=str(uuid.uuid4()), lead_id=lead_id, user_id=user_id, kind=kind, summary=summary[:2000], meta=meta))
 
 
-def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=None, matched_name=None, has_resume=False) -> dict:
+def source_question(header: str, raw: dict | None = None) -> str:
+    companion = lp.EXPERIENCE_QUESTION_COMPANIONS.get(lp.header_key(header))
+    supplied = [value for key, value in (raw or {}).items() if lp.header_key(key) == companion and isinstance(value, str) and value.strip()] if companion else []
+    return supplied[0] if len(supplied) == 1 else header
+
+
+def readable_question(header: str) -> str | None:
+    words = " ".join(lp.clean_cell(header).replace("_", " ").split())
+    return words[:1].upper() + words[1:] if words else None
+
+
+def experience_question(column_map: dict | None, field: str, *, answer=None, raw=None) -> str | None:
+    """The exact mapped sheet question, made readable without guessing its meaning.
+
+    Use the persisted import mapping, including explicit overrides. Never infer a
+    question from a numeric value or from another answer in raw/extra. Older leads
+    without mapping metadata simply have no source question.
+    """
+    if not isinstance(column_map, dict):
+        return None
+    headers = [header for header, mapped in column_map.items() if mapped == field and isinstance(header, str) and header.strip()]
+    if len(headers) != 1:
+        return None
+    if answer is not None:
+        # fill_empty may have copied an answer from a later sheet without moving
+        # the lead's original batch/raw. Do not label it with an unrelated older
+        # question when its source can no longer be established.
+        original = raw.get(headers[0]) if isinstance(raw, dict) else None
+        if original is None or lp.clean_cell(original)[:200] != answer:
+            return None
+    return readable_question(source_question(headers[0], raw))
+
+
+def geographic_experience(source: dict, scope: str) -> dict:
+    """One explicit source question or an unknown value, without inferred totals."""
+    raw = source.get("raw") if isinstance(source.get("raw"), dict) else {}
+    headers = [header for header in raw if lp.geographic_experience_scope(header) in (scope, "mixed")]
+    # An exported answer can coexist with its original custom-question column.
+    # Collapse only an explicitly identified, agreeing copy; never pick between
+    # different questions or contradictory answers.
+    canonical = [header for header in headers if lp.header_key(header) == "experience" + scope]
+    if len(canonical) == 1:
+        primary = canonical[0]
+        question = source_question(primary, raw)
+        if question != primary and lp.geographic_experience_scope(question) == scope:
+            def agrees(other):
+                first, second = lp.clean_cell(raw[primary]), lp.clean_cell(raw[other])
+                return first == second or (re.fullmatch(r"\d+(?:[.,]\d+)?", first) and re.fullmatch(r"\d+(?:[.,]\d+)?", second)
+                                          and Decimal(first.replace(",", ".")) == Decimal(second.replace(",", ".")))
+            headers = [header for header in headers if header == primary or lp.header_key(header) != lp.header_key(question) or not agrees(header)]
+    result = {"Years": None, "Text": None, "Question": None}
+    if len(headers) != 1 or lp.geographic_experience_scope(headers[0]) != scope:
+        return result
+    header = headers[0]
+    years, answer = lp.parse_experience(raw[header])
+    if lp.header_key(answer or "") in {"na", "notapplicable", "notavailable", "unknown", "notknown", "notsupplied", "notprovided"}:
+        years = None
+    result.update(Years=years, Text=answer, Question=readable_question(source_question(header, raw)))
+    return result
+
+
+def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=None, matched_name=None, has_resume=False,
+              experience_source=None) -> dict:
+    source = experience_source if isinstance(experience_source, dict) else {}
+    geography = {f"experience{label}{suffix}": value
+                 for label, scope in (("India", "india"), ("Abroad", "abroad"))
+                 for suffix, value in geographic_experience(source, scope).items()}
     return {
         "id": lead.id, "externalId": lead.external_id, "batchId": lead.batch_id, "importRow": lead.import_row,
         "createdTime": iso(lead.created_time), "name": lead.name, "phone": lead.phone, "phoneCountryCode": lead.phone_country_code,
@@ -117,6 +184,11 @@ def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=No
         "currentLocation": lead.current_location, "positionApplied": lead.position_applied, "countryInterest": lead.country_interest,
         "experienceRestaurantYears": iso(lead.experience_restaurant_years), "experienceRestaurantText": lead.experience_restaurant_text,
         "experienceTotalYears": iso(lead.experience_total_years), "experienceTotalText": lead.experience_total_text,
+        "experienceRestaurantQuestion": experience_question(source.get("mapping"), "experienceRestaurant",
+                                                              answer=lead.experience_restaurant_text, raw=source.get("raw")),
+        "experienceTotalQuestion": experience_question(source.get("mapping"), "experienceTotal",
+                                                         answer=lead.experience_total_text, raw=source.get("raw")),
+        **geography,
         "gender": lead.gender, "maritalStatus": lead.marital_status, "dob": iso(lead.dob), "educationLevel": lead.education_level,
         "militaryStatus": lead.military_status, "platform": lead.platform, "isOrganic": lead.is_organic,
         "leadStatusSource": lead.lead_status_source, "campaignId": lead.campaign_id, "campaignName": lead.campaign_name,
@@ -134,16 +206,35 @@ def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=No
 def _base_query():
     cand, matched, owner = aliased(Candidate), aliased(Candidate), aliased(User)
     has_resume = exists().where(Attachment.entity_type == "lead", Attachment.entity_id == Lead.id, Attachment.slot == "resume")
-    query = (select(Lead, owner.name, cand.ref, matched.ref, matched.name, has_resume.label("has_resume"))
+    mapping = case((func.jsonb_typeof(LeadBatch.column_map) == "object", LeadBatch.column_map), else_=cast({}, JSONB))
+    raw = case((func.jsonb_typeof(Lead.raw) == "object", Lead.raw), else_=cast({}, JSONB))
+    extra = case((func.jsonb_typeof(Lead.extra) == "object", Lead.extra), else_=cast({}, JSONB))
+    # Mapping keys retain blank questions; raw/extra also support old unbatched
+    # leads. Raw wins when both contain the same original source header.
+    keys = func.jsonb_each_text(mapping.op("||")(extra).op("||")(raw)).table_valued("key", "value")
+    possible_geography = and_(keys.c.key.op("~*")("experience|exp|work|employed"),
+                              keys.c.key.op("~*")("india|abroad|overseas|gulf|foreign"))
+    question_companion = func.regexp_replace(func.lower(keys.c.key), "[^a-z0-9]", "", "g").in_(tuple(lp.EXPERIENCE_QUESTION_COMPANIONS.values()))
+    # raw/extra remain deferred. Return only mapped or geographic experience
+    # cells in this query, then apply strict header classification in Python.
+    experience_source = (select(func.jsonb_build_object(
+        "mapping", func.jsonb_object_agg(keys.c.key, mapping[keys.c.key]),
+        "raw", func.jsonb_object_agg(keys.c.key, func.coalesce(raw[keys.c.key], extra[keys.c.key]))))
+        .select_from(keys).where(or_(mapping[keys.c.key].astext.in_(("experienceRestaurant", "experienceTotal")), possible_geography, question_companion))
+        .correlate(Lead, LeadBatch).scalar_subquery())
+    query = (select(Lead, owner.name, cand.ref, matched.ref, matched.name, has_resume.label("has_resume"),
+                    experience_source.label("experience_source"))
              .outerjoin(owner, owner.id == Lead.owner_id)
              .outerjoin(cand, cand.id == Lead.candidate_id)
-             .outerjoin(matched, matched.id == Lead.matched_candidate_id))
+             .outerjoin(matched, matched.id == Lead.matched_candidate_id)
+             .outerjoin(LeadBatch, LeadBatch.id == Lead.batch_id))
     return query, owner, has_resume
 
 
 def _row_out(row) -> dict:
-    lead, owner_name, cand_ref, matched_ref, matched_name, has_resume = row
-    return lead_dict(lead, owner_name=owner_name, candidate_ref=cand_ref, matched_ref=matched_ref, matched_name=matched_name, has_resume=has_resume)
+    lead, owner_name, cand_ref, matched_ref, matched_name, has_resume, experience_source = row
+    return lead_dict(lead, owner_name=owner_name, candidate_ref=cand_ref, matched_ref=matched_ref, matched_name=matched_name,
+                     has_resume=has_resume, experience_source=experience_source)
 
 
 # ------------------------------------------------------------------ search and filters
@@ -283,7 +374,7 @@ def search_leads(db: Session, user: User, filters: dict, page: int, page_size: i
         total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
         page = min(page, max(0, (total - 1) // page_size))
         found = db.execute(listing.offset(page * page_size).limit(page_size)).all()
-    items = [_row_out(row[:6]) for row in found]
+    items = [_row_out(row[:-1]) for row in found]  # The final selected column is the total-count window.
     wanted = [k for k in dict.fromkeys(extra_keys or []) if k]
     if wanted:  # the custom question answers: `*` = every answer the lead has, else just the named ones
         keys = None if "*" in wanted else wanted[:MAX_EXTRA_COLUMNS]
@@ -729,25 +820,55 @@ def revert_batch(db: Session, user: User, batch_id: str) -> dict:
 
 # ------------------------------------------------------------------ export
 
+def experience_export_value(value: dict, field: str):
+    """Keep the actual answer; only unqualified numeric answers become numbers."""
+    answer = value.get(field + "Text")
+    years = value.get(field + "Years")
+    if isinstance(answer, str) and answer.strip():
+        answer = answer.strip()
+        if years is not None and re.fullmatch(r"\d+(?:[.,]\d+)?", answer):
+            return years
+        return answer
+    return years
+
+
+def export_age(dob: date | None, today: date) -> int | None:
+    if not isinstance(dob, date) or dob > today:
+        return None
+    years = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    return years if 0 <= years <= 120 else None
+
+
 EXPORT_COLUMNS = [
-    ("Created", lambda l, o: l.created_time), ("Name", lambda l, o: l.name), ("Phone", lambda l, o: l.phone), ("E-mail", lambda l, o: l.email),
-    ("City", lambda l, o: l.city), ("State", lambda l, o: l.state), ("Position", lambda l, o: l.position_applied),
-    ("Country interest", lambda l, o: l.country_interest), ("Experience (restaurant, years)", lambda l, o: l.experience_restaurant_years),
-    ("Experience (total, years)", lambda l, o: l.experience_total_years), ("Gender", lambda l, o: l.gender),
-    ("Date of birth", lambda l, o: l.dob), ("Education", lambda l, o: l.education_level), ("Platform", lambda l, o: l.platform),
-    ("Campaign", lambda l, o: l.campaign_name), ("Form", lambda l, o: l.form_name), ("Status", lambda l, o: STATUS_LABELS.get(l.status, l.status)),
-    ("Owner", lambda l, o: o), ("Calls", lambda l, o: l.call_count), ("Last contacted", lambda l, o: l.last_contacted_at),
-    ("Next follow-up", lambda l, o: l.next_follow_up_at), ("Notes", lambda l, o: l.notes), ("Lead id", lambda l, o: l.external_id),
+    ("Name / Age / Contact", lambda l, o, e: e["_exportIdentity"]),
+    ("Job applied", lambda l, o, e: l.position_applied),
+    ("Education", lambda l, o, e: l.education_level),
+    ("Experience (India)", lambda l, o, e: experience_export_value(e, "experienceIndia")),
+    ("Experience (Abroad)", lambda l, o, e: experience_export_value(e, "experienceAbroad")),
+    ("Experience (total)", lambda l, o, e: experience_export_value(e, "experienceTotal")),
+    ("Location", lambda l, o, e: e["_exportLocation"]),
+    ("Created", lambda l, o, e: l.created_time), ("Imported", lambda l, o, e: l.created_at),
+    ("Campaign", lambda l, o, e: l.campaign_name), ("Form", lambda l, o, e: l.form_name), ("Status", lambda l, o, e: STATUS_LABELS.get(l.status, l.status)),
+    ("Owner", lambda l, o, e: o), ("Calls", lambda l, o, e: l.call_count), ("Last contacted", lambda l, o, e: l.last_contacted_at),
+    ("Next follow-up", lambda l, o, e: l.next_follow_up_at), ("Notes", lambda l, o, e: l.notes),
+    ("Name", lambda l, o, e: l.name), ("Age", lambda l, o, e: e["_exportAge"]),
+    ("Phone", lambda l, o, e: l.phone), ("E-mail", lambda l, o, e: l.email), ("WhatsApp", lambda l, o, e: l.whatsapp),
+    ("City", lambda l, o, e: l.city), ("State", lambda l, o, e: l.state), ("Current location", lambda l, o, e: l.current_location),
+    ("Country interest", lambda l, o, e: l.country_interest), ("Gender", lambda l, o, e: l.gender),
+    ("Date of birth", lambda l, o, e: l.dob),
+    ("India experience question", lambda l, o, e: e["experienceIndiaQuestion"]),
+    ("Abroad experience question", lambda l, o, e: e["experienceAbroadQuestion"]),
+    ("Total experience question", lambda l, o, e: e["experienceTotalQuestion"]),
+    ("Experience (restaurant)", lambda l, o, e: experience_export_value(e, "experienceRestaurant")),
+    ("Restaurant experience question", lambda l, o, e: e["experienceRestaurantQuestion"]),
+    ("Platform", lambda l, o, e: l.platform), ("Lead id", lambda l, o, e: l.external_id),
 ]
 
 
-def export_leads(db: Session, user: User, filters: dict, fmt: str, sort: str = "created", direction: str = "desc") -> tuple[bytes, str, str]:
-    """The filtered, sorted list as Excel or CSV: every core column, then one column per custom question the exported leads answered
-    (headed with the sheet's own wording). Excel keeps phone numbers and ids as text and dates as real dates."""
-    from app.services import lead_xlsx
-    query, owner, has_resume = _base_query()
-    query = apply_filters(query, owner, has_resume, user, filters).order_by(*_order(owner, sort, direction)).limit(EXPORT_LIMIT)
-    found = db.execute(query).all()
+def export_table(found) -> tuple[list[str], list[list]]:
+    """Shared table for filtered CSV/XLSX and selected-lead Excel downloads."""
+    from app.services.daily_work import agency_today
+    today = agency_today(datetime.now(timezone.utc))
     counts: dict[str, int] = {}
     for row in found:
         for key, value in (row[0].extra or {}).items():
@@ -755,7 +876,26 @@ def export_leads(db: Session, user: User, filters: dict, fmt: str, sort: str = "
                 counts[key] = counts.get(key, 0) + 1
     extra_keys = [key for key, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:60]]
     header = [name for name, _ in EXPORT_COLUMNS] + [pretty_header(key) or key for key in extra_keys]
-    rows = [[fn(row[0], row[1]) for _, fn in EXPORT_COLUMNS] + [(row[0].extra or {}).get(key) for key in extra_keys] for row in found]
+    rows = []
+    for row in found:
+        experience = _row_out(row)
+        lead = row[0]
+        age = export_age(lead.dob, today)
+        experience["_exportAge"] = age
+        experience["_exportIdentity"] = "\n".join(str(value) for value in (
+            lead.name, f"Age: {age}" if age is not None else None, lead.phone, lead.email) if value)
+        experience["_exportLocation"] = ", ".join(value for value in (lead.city, lead.state) if value) or lead.current_location
+        rows.append([fn(row[0], row[1], experience) for _, fn in EXPORT_COLUMNS] + [(row[0].extra or {}).get(key) for key in extra_keys])
+    return header, rows
+
+
+def export_leads(db: Session, user: User, filters: dict, fmt: str, sort: str = "created", direction: str = "desc") -> tuple[bytes, str, str]:
+    """The filtered, sorted list as Excel or CSV: every core column, then one column per custom question the exported leads answered
+    (headed with the sheet's own wording). Excel keeps phone numbers and ids as text and dates as real dates."""
+    from app.services import lead_xlsx
+    query, owner, has_resume = _base_query()
+    query = apply_filters(query, owner, has_resume, user, filters).options(undefer(Lead.extra)).order_by(*_order(owner, sort, direction)).limit(EXPORT_LIMIT)
+    header, rows = export_table(db.execute(query).all())
     if fmt == "csv":
         out = io.StringIO()
         writer = csv.writer(out, lineterminator="\r\n")

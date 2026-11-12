@@ -125,6 +125,59 @@ test('cells: years, platform, phone and WhatsApp link', () => {
   assert.equal(m.whatsappLink(null), null)
 })
 
+test('experience answers preserve Yes/No, ranges and missing values from mixed lead sheets', () => {
+  for (const value of ['Yes', 'No', 'Unknown', 'N/A', ' ', '-2', '2–5 years']) assert.equal(m.yearsLabel(value), null)
+  assert.equal(m.yearsLabel('2 years'), '2 yrs')
+  assert.equal(m.experienceLabel(null, ' yes '), 'Yes')
+  assert.equal(m.experienceLabel(0, 'NO'), 'No', 'a legacy parsed zero must not replace the actual No answer')
+  assert.equal(m.experienceLabel(0, 'N/A'), 'N/A')
+  assert.equal(m.experienceLabel(5, '5+ years'), '5+ years')
+  assert.equal(m.experienceLabel(2, '2–5 years'), '2–5 years')
+  assert.equal(m.experienceLabel(0.5, '6 months'), '6 months')
+  assert.equal(m.experienceLabel(10, '10'), '10 yrs')
+  assert.equal(m.experienceLabel(null, '0'), '0 yrs')
+  assert.equal(m.experienceLabel(null, ''), null)
+  assert.deepEqual(m.experienceLines({ experienceTotalYears: null, experienceTotalText: 'Yes' }), { restaurant: null, total: 'Yes' })
+  assert.deepEqual(m.experienceLines({ experienceRestaurantYears: 0, experienceRestaurantText: 'No', experienceTotalYears: 8 }), { restaurant: 'No', total: '8 yrs' })
+})
+
+test('experience question summaries follow the source threshold and retain qualification context', () => {
+  assert.equal(m.experienceQuestionSummary('Do you have 5+ years of experience in reputed companies with an MBA or relevant qualification?'), '5+ years + qualification')
+  assert.equal(m.experienceQuestionSummary('Do you have 10 years of work experience?'), '10 years')
+  assert.equal(m.experienceQuestionSummary('do_you_have_3+_years_of_experience?'), '3+ years')
+  assert.equal(m.experienceQuestionSummary('Do you have at least 3 years of experience?'), 'at least 3 years')
+  assert.equal(m.experienceQuestionSummary('Do you have 2–5 years of experience?'), '2–5 years')
+  assert.equal(m.experienceQuestionSummary('Do you have less than 2 years of experience?'), 'less than 2 years')
+  assert.equal(m.experienceQuestionSummary('Do you have relevant experience and a degree?'), 'Experience + qualification')
+  assert.equal(m.experienceQuestionSummary(null), 'Experience question')
+})
+
+test('lead date uses source creation when known and labels an import fallback honestly', () => {
+  const source = '2026-11-04T12:00:00Z'
+  const imported = '2026-11-12T11:13:15Z'
+  assert.deepEqual(m.leadDate({ createdTime: source, createdAt: imported }), { value: source, label: 'Created' })
+  assert.deepEqual(m.leadDate({ createdTime: null, createdAt: imported }), { value: imported, label: 'Imported' })
+  assert.deepEqual(m.leadDate({ createdTime: 'bad date', createdAt: imported }), { value: imported, label: 'Imported' })
+  assert.equal(m.leadDate({}), null)
+  assert.equal(m.leadDate({ createdTime: 'bad date' }), null)
+})
+
+test('lead age is calculated at the birthday without inventing missing ages', () => {
+  const today = new Date(2026, 10, 12)
+  assert.equal(m.leadAge('1990-11-12', today), 36)
+  assert.equal(m.leadAge('1990-11-13', today), 35)
+  assert.equal(m.leadAge('1990-11-11', today), 36)
+  for (const dob of [null, '', 'unknown', '2026-02-30', '2027-01-01']) assert.equal(m.leadAge(dob, today), null)
+})
+
+test('India and abroad experience stay distinct from restaurant and total answers', () => {
+  const lead = { id: '1', name: 'Test', status: 'new', experienceRestaurantYears: 8, experienceTotalYears: 10 }
+  assert.deepEqual(m.experienceAnswer(lead, 'india'), { value: null, question: null })
+  assert.deepEqual(m.experienceAnswer(lead, 'abroad'), { value: null, question: null })
+  assert.deepEqual(m.experienceAnswer({ ...lead, experienceIndiaYears: 3, experienceIndiaText: '3+' }, 'india'), { value: '3+', question: null })
+  assert.deepEqual(m.experienceAnswer({ ...lead, experienceAbroadYears: 0, experienceAbroadText: 'No', experienceAbroadQuestion: 'Have you worked abroad?' }, 'abroad'), { value: 'No', question: 'Have you worked abroad?' })
+})
+
 const admin = { id: 'a', role: 'admin' }
 const manager = { id: 'm', role: 'manager' }
 const staff = { id: 's1', role: 'staff' }

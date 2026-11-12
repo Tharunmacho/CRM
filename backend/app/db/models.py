@@ -313,6 +313,9 @@ class Order(Base, PkMixin, TimestampMixin):
     currency: Mapped[str] = mapped_column(String(8), server_default=text("'AED'"))
     benefits: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     contract_period: Mapped[str | None] = mapped_column(String(60))
+    age_requirement: Mapped[str | None] = mapped_column(String(120))
+    gender_requirement: Mapped[str | None] = mapped_column(String(120))
+    education_requirement: Mapped[str | None] = mapped_column(String(2000))
     interview_date: Mapped[datetime | None] = mapped_column(Date)
     deadline: Mapped[datetime | None] = mapped_column(Date)
     status: Mapped[OrderStatus] = mapped_column(

@@ -142,7 +142,7 @@ test('the request body is trimmed, with empty salary and dates sent as null and 
   }, 'd2')
   assert.deepEqual(body, {
     companyId: 'co1', designationId: 'd2', openings: 4, country: 'UAE', city: 'Dubai', salary: null, currency: 'AED', benefits: ['Food', 'Accommodation'],
-    contractPeriod: '2 years', interviewDate: null, deadline: null, status: 'open',
+    contractPeriod: '2 years', interviewDate: null, ageRequirement: null, genderRequirement: null, educationRequirement: null, deadline: null, status: 'open',
   })
   assert.equal(f.buildJobPayload({ ...f.emptyJobForm('co1', 'AED'), salary: '1800.5' }, 'd1').salary, 1800.5)
   assert.equal(f.buildJobPayload({ ...f.emptyJobForm('co1', 'AED'), deadline: '2026-12-31' }, 'd1').deadline, '2026-12-31')
@@ -154,10 +154,35 @@ test('each new job starts blank and cannot inherit values or skills from an earl
   Object.assign(previous, { title: 'Cook', country: 'UAE', city: 'Dubai', salary: '1800', benefits: 'Food', interviewDate: '2026-12-01' })
   previous.skills.push('Cooking')
   const next = f.emptyJobForm('', 'AED')
-  for (const key of ['companyId', 'title', 'country', 'city', 'salary', 'benefits', 'contractPeriod', 'interviewDate', 'deadline']) assert.equal(next[key], '')
+  for (const key of ['companyId', 'title', 'country', 'city', 'salary', 'benefits', 'contractPeriod', 'interviewDate', 'deadline', 'ageRequirement', 'genderRequirement', 'educationRequirement']) assert.equal(next[key], '')
   assert.deepEqual(next.skills, [])
   assert.equal(next.openings, '1')
   assert.equal(next.currency, 'AED')
+})
+
+test('job eligibility notes retain phrases and ranges independently from shared title requirements', () => {
+  const form = { ...f.emptyJobForm('co1', 'AED'), title: 'Cook', ageRequirement: ' 21–45 years ', genderRequirement: ' Any gender ', educationRequirement: ' Diploma in catering\nFood safety training ', interviewDate: '2026-12-10' }
+  assert.deepEqual(f.validateJob(form), {})
+  const payload = f.buildJobPayload(form, 'd2')
+  assert.equal(payload.ageRequirement, '21–45 years')
+  assert.equal(payload.genderRequirement, 'Any gender')
+  assert.equal(payload.educationRequirement, 'Diploma in catering\nFood safety training')
+  assert.equal(payload.interviewDate, '2026-12-10')
+  assert.equal(Object.hasOwn(f.designationBody('Cook', null, form), 'ageRequirement'), false)
+  const cleared = f.buildJobPayload({ ...form, ageRequirement: '', genderRequirement: ' ', educationRequirement: '' }, 'd2')
+  assert.deepEqual([cleared.ageRequirement, cleared.genderRequirement, cleared.educationRequirement], [null, null, null])
+  const errors = f.validateJob({ ...form, ageRequirement: 'x'.repeat(121), genderRequirement: 'x'.repeat(121), educationRequirement: 'x'.repeat(2001) })
+  assert.deepEqual(Object.keys(errors).sort(), ['ageRequirement', 'educationRequirement', 'genderRequirement'])
+})
+
+test('server validation for job eligibility points to the matching optional field', () => {
+  const result = f.jobErrorsFromApi([
+    { loc: ['body', 'ageRequirement'], msg: 'String should have at most 120 characters' },
+    { loc: ['body', 'genderRequirement'], msg: 'String should have at most 120 characters' },
+    { loc: ['body', 'educationRequirement'], msg: 'String should have at most 2000 characters' },
+  ])
+  assert.deepEqual(Object.keys(result.fields).sort(), ['ageRequirement', 'educationRequirement', 'genderRequirement'])
+  assert.equal(result.general, '')
 })
 
 test('server errors land on the right box', () => {
