@@ -187,22 +187,25 @@ function ClientTable({ rows, query, loading, onOpen, onEdit }: { rows: ClientRow
 }
 
 function AgencyTable({ rows, query, loading, onEdit, onDelete }: { rows: AgencyRow[]; query: string; loading: boolean; onEdit?: (a: ReferenceAgency) => void; onDelete?: (a: ReferenceAgency) => void }) {
+  // Keep the flexible widths below 100% so the fixed action column always has space.
+  const empty = <span className="cl-quiet" aria-label="Not added">—</span>
   const columns: Column<AgencyRow>[] = [
-    { key: 'agency', header: 'Agency', width: '24%', minWidth: '12rem', render: ({ agency }) => <Identity name={agencyDisplayName(agency)} query={query} /> },
-    { key: 'contact', header: 'Contact', width: '25%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name === agency.agencyName ? '' : agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
-    { key: 'location', header: 'Location', width: '27%', align: 'left', render: ({ agency }) => <Location primary={[agency.place, agency.state].filter(Boolean).join(', ')} secondary={agency.address} query={query} /> },
-    { key: 'focus', header: 'Specialisation and country', width: '22%', minWidth: '12rem', align: 'left', render: ({ agency }) => (agency.specialisations?.length || agency.preferredCountries?.length)
-      ? <span className="cs-tagstack"><ChipList values={agency.specialisations} label="Specialisation" /><ChipList values={agency.preferredCountries} label="Preferred country" /></span> : <Quiet>Not added</Quiet> },
-    { key: 'staff', header: 'Staff details', width: '10%', align: 'left', render: ({ agency }) => staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
+    { key: 'agency', header: 'Agency', width: '24%', render: ({ agency }) => <Identity name={agencyDisplayName(agency)} query={query} /> },
+    { key: 'contact', header: 'Contact', width: '22%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name === agency.agencyName ? '' : agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
+    { key: 'location', header: 'Location', width: '18%', align: 'left', render: ({ agency }) => agency.place || agency.state || agency.address
+      ? <Location primary={[agency.place, agency.state].filter(Boolean).join(', ')} secondary={agency.address} query={query} /> : empty },
+    { key: 'focus', header: 'Specialisation / country', width: '12%', align: 'left', render: ({ agency }) => (agency.specialisations?.length || agency.preferredCountries?.length)
+      ? <span className="cs-tagstack"><ChipList values={agency.specialisations} label="Specialisation" /><ChipList values={agency.preferredCountries} label="Preferred country" /></span> : empty },
+    { key: 'staff', header: 'Team', width: '6%', align: 'left', render: ({ agency }) => staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : empty },
     {
-      key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
+      key: 'actions', header: 'Actions', actions: true, minWidth: '8.5rem',
       render: ({ agency }) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cl-open" onClick={() => onEdit(agency)} aria-label={`Edit ${agencyDisplayName(agency)}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
         {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agencyDisplayName(agency)}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
       </span>,
     },
   ]
-  return <Panel flush><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={({ agency }) => agency.id} /></Panel>
+  return <Panel flush className="cs-agency-table"><DataTable compact loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={({ agency }) => agency.id} /></Panel>
 }
 
 function Skeleton({ layout, side }: { layout: Layout; side: Side }) {

@@ -68,6 +68,13 @@
 .clients-simple .cl-open.is-danger:hover { border-color: var(--error-ink); color: var(--error-ink); }
 .clients-simple .cl-open { cursor: pointer; }
 
+/* Agency-only width budget: keep Edit/Delete visible without changing other directories. */
+@media (min-width: 768px) {
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 8.5rem; min-width: 8.5rem; }
+}
+.cs-agency-table .record-name { white-space: normal; overflow-wrap: anywhere; }
+.clients-simple .cs-agency-table .cs-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+
 /* Highlighted search match: a soft tint that reads in both themes, always paired with the text itself. */
 .clients-simple .cs-mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, #e6a817 28%, transparent); color: inherit; }
 
