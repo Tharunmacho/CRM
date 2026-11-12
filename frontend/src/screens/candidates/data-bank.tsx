@@ -21,13 +21,12 @@ import { DataBankFilters } from '@/features/candidates/components/data-bank-filt
 import { DataBankCards } from '@/features/candidates/components/data-bank-cards'
 import { DataBankStats } from '@/features/candidates/components/data-bank-stats'
 import { poolAfterCardPress, statCards } from '@/features/candidates/data-bank-stats'
-import { PositionGroupsList } from '@/features/candidates/components/position-groups'
 import { CandidateEditDialog } from '@/features/candidates/components/candidate-edit-dialog'
 import { DbTable, useElementWidth } from '@/features/candidates/components/db-table'
 import { fitColumns } from '@/features/candidates/components/column-fit'
 import { ColumnMenu, useColumnChoices } from '@/features/candidates/components/column-menu'
 import { Pager, ViewToggle, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
-import { normalizeSearch, positionGroupsPath, resumeCount, searchTerms, type PositionGroups } from '@/features/candidates/data-bank-search'
+import { normalizeSearch } from '@/features/candidates/data-bank-search'
 import {
   activeFilterCount, assignWaitingLabel, assignWaitingMessage, canAssignWaiting, emptyPoolCopy, poolCountsPath,
   type AssignWaitingResult, type DataBankPool, type PoolCounts,
@@ -43,12 +42,6 @@ const SORT_OPTIONS: [string, string][] = [
   ['stage:desc', 'Latest stage first'], ['stage:asc', 'Earliest stage first'], ['status:asc', 'Status'],
 ]
 
-/** The Data Bank opens grouped by job; the flat list of every resume is one click away. */
-type BankMode = 'positions' | 'resumes'
-const MODE_KEY = 'crm-db-mode:data-bank'
-const readMode = (): BankMode => { try { return window.localStorage.getItem(MODE_KEY) === 'resumes' ? 'resumes' : 'positions' } catch { return 'positions' } }
-/** Jobs that open on their own when a search narrows the bank to just a few. */
-const AUTO_OPEN_LIMIT = 3
 /** Short, so results follow the typing. */
 const SEARCH_DELAY_MS = 180
 
@@ -80,10 +73,6 @@ export default function DataBankPage() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
   const [moreOpen, setMoreOpen] = useState(false)
   const [view, setView] = useState<DbView>(() => readView('data-bank'))
-  const [mode, setMode] = useState<BankMode>(readMode)
-  const [groupsSnapshot, setGroupsSnapshot] = useState<{ data: PositionGroups; scope: string } | null>(null)
-  const [groupsLoading, setGroupsLoading] = useState(true)
-  const [groupsError, setGroupsError] = useState('')
   const [pageSize, setPageSize] = useState(20)
   const [boxRef, boxWidth] = useElementWidth<HTMLDivElement>()
   const [columnChoices, setColumnChoices] = useColumnChoices('data-bank')
@@ -131,7 +120,6 @@ export default function DataBankPage() {
   useEffect(() => { setPage(0); setSelected([]); setReassigning(null) }, [filterQuery, pageSize])
   useEffect(() => {
     if (!directoryReady) return
-    if (mode !== 'resumes') { setLoading(false); return }  // the grouped view reads its resumes position by position
     const controller = new AbortController()
     setLoading(true); setLoadError('')
     const timer = window.setTimeout(() => {
@@ -141,25 +129,7 @@ export default function DataBankPage() {
         .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     }, SEARCH_DELAY_MS)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [directoryReady, mode, filterQuery, page, pageSize, store.candidates, store.me.id])
-  // The positions and their resume counts come from one grouped query under the same search and filters.
-  useEffect(() => {
-    if (!directoryReady) return
-    const controller = new AbortController()
-    setGroupsLoading(true); setGroupsError('')
-    const timer = window.setTimeout(() => {
-      api.get<PositionGroups>(positionGroupsPath(filterQuery), { signal: controller.signal })
-        .then(data => { if (!controller.signal.aborted) setGroupsSnapshot({ data, scope: filterQuery }) })
-        .catch(error => { if (!controller.signal.aborted) setGroupsError(error instanceof Error ? error.message : 'We could not search. Please try again.') })
-        .finally(() => { if (!controller.signal.aborted) setGroupsLoading(false) })
-    }, SEARCH_DELAY_MS)
-    return () => { window.clearTimeout(timer); controller.abort() }
-  }, [directoryReady, filterQuery, store.candidates, store.applications, store.me.id])
-  // Open positions read their resumes again whenever the directory is reloaded.
-  const directory = useRef({ source: store.candidates, applications: store.applications, version: 0 })
-  if (directory.current.source !== store.candidates || directory.current.applications !== store.applications) {
-    directory.current = { source: store.candidates, applications: store.applications, version: directory.current.version + 1 }
-  }
+  }, [directoryReady, filterQuery, page, pageSize, store.candidates, store.me.id])
   const rows = withoutDeleted(result?.items ?? [])
   const countsScope = `${staffFilter}:${refreshToken}`
   useEffect(() => {
@@ -173,7 +143,6 @@ export default function DataBankPage() {
   }, [directoryReady, countsScope, store.candidates])
   const counts = poolCounts?.scope === countsScope ? poolCounts.counts : null
   const changeView = (next: DbView) => { setView(next); saveView('data-bank', next) }
-  const changeMode = (next: BankMode) => { setMode(next); setSelected([]); try { window.localStorage.setItem(MODE_KEY, next) } catch { /* ignore */ } }
   const assignWaiting = async () => {
     if (assigningWaiting) return
     setAssigningWaiting(true); setMutationError('')
@@ -217,21 +186,16 @@ export default function DataBankPage() {
   const fieldContext = bankContext(store, formOptions)
   const toggleExpand = (id: string) => setExpanded(current => (current.includes(id) ? current.filter(value => value !== id) : [...current, id]))
   const allOpen = rows.length > 0 && rows.every(row => expanded.includes(row.id))
-  const fit = fitColumns(allColumns, boxWidth, columnChoices)
+  const fit = fitColumns(allColumns, boxWidth, { ...columnChoices, source: true })
   const columns = allColumns.filter((column) => fit.keys.includes(column.key))
   const cards = statCards({ all: counts?.all ?? ownedCandidates.length, unassigned: counts?.unassigned ?? ownedCandidates.filter((candidate) => !candidate.ownerId).length, needs_review: counts?.needs_review ?? ownedCandidates.filter((candidate) => candidate.needsReview || candidate.status === 'needs_review').length }, pool, store.me.role)
   const onFile = counts?.all ?? ownedCandidates.length
   const total = result?.total ?? 0
-  const positionsMode = mode === 'positions'
-  const groups = groupsSnapshot?.data
-  const groupsStale = !!groupsSnapshot && groupsSnapshot.scope !== filterQuery
-  // The figures on screen are those of the active view: the grouped query or the flat list.
-  const loaded = positionsMode ? groupsSnapshot : result
-  const failure = positionsMode ? groupsError : loadError
-  const searching = positionsMode ? groupsLoading : loading
-  const terms = searchTerms(query)
+  const loaded = result
+  const failure = loadError
+  const searching = loading
   const narrowed = filterCount > 0 || Boolean(query.trim())
-  const busy = positionsMode ? groupsLoading || groupsStale : loading || stale
+  const busy = loading || stale
   const emptyState = searching && !loaded ? (
     <LeadsSkeleton rows={8} columns={7} label="Loading candidates…" />
   ) : failure && !loaded ? (
@@ -274,7 +238,7 @@ export default function DataBankPage() {
           </>
         }
       />
-      {(failure || mutationError) && !(failure && !loaded) && <p role="alert" className="db-alert">{failure || mutationError}{failure && loaded && (positionsMode ? ' Showing the last loaded jobs.' : ' Showing the last loaded page.')}</p>}
+      {(failure || mutationError) && !(failure && !loaded) && <p role="alert" className="db-alert">{failure || mutationError}{failure && loaded && ' Showing the last loaded page.'}</p>}
       {mutationError && failure && !loaded && <p role="alert" className="db-alert">{mutationError}</p>}
 
       <DataBankStats cards={cards} onPress={card => setPool(current => poolAfterCardPress(current, card))} />
@@ -283,17 +247,13 @@ export default function DataBankPage() {
         <div className="dbt-toolbar">
           <label className="db-search">
             <Search size={15} aria-hidden="true" />
-            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, agent, phone, job…" title="Finds any detail in any letter case as you type. Separate words with commas to match all of them, for example: ravi, suresh agent" aria-label="Search by name, agent, phone, job, client, recruiter, skills or resume content. Separate words with commas to match all of them." />
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, phone, email…" title="Finds candidate details as you type. Separate words with commas to match all of them, for example: ravi, suresh agent" aria-label="Search candidates by name, phone, email, agent, recruiter, skills or resume content. Separate words with commas to match all of them." />
           </label>
           <span className="dbt-sort">
             <Select aria-label="Sort candidates by" value={`${sort.key}:${sort.dir}`} onChange={event => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
               {SORT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </Select>
           </span>
-          <div className="dbp-mode" role="group" aria-label="Show resumes">
-            <button type="button" className={cn(positionsMode && 'is-on')} aria-pressed={positionsMode} onClick={() => changeMode('positions')}>By job</button>
-            <button type="button" className={cn(!positionsMode && 'is-on')} aria-pressed={!positionsMode} onClick={() => changeMode('resumes')}>All resumes</button>
-          </div>
           <button type="button" className="db-refresh" title="Refresh the list" aria-label="Refresh the list" onClick={() => { setSelected([]); setReassigning(null); setRefreshToken(value => value + 1) }}><RefreshCw size={15} /></button>
         </div>
 
@@ -320,35 +280,21 @@ export default function DataBankPage() {
         />
 
         <div className="dbt-subbar">
-          <p className="dbt-count tnum" role="status">{searching && !loaded ? 'Searching…' : positionsMode
-            ? `${resumeCount(groups?.resumes ?? 0)} in ${groups?.positions ?? 0} ${groups?.positions === 1 ? 'job' : 'jobs'}${narrowed ? ` match your search · ${onFile} on file` : ''}${busy ? ' · updating…' : ''}`
-            : `Showing ${total} of ${onFile} candidates${busy ? ' · updating…' : ''}`}</p>
-          {!positionsMode && !forceCards && (
+          <p className="dbt-count tnum" role="status">{searching && !loaded ? 'Searching…' : `Showing ${total} of ${onFile} candidates${busy ? ' · updating…' : ''}`}</p>
+          {!forceCards && (
             <div className="dbt-subtools">
               {!showCards && <>
                 <button type="button" className="db-refresh" title={allOpen ? 'Collapse every row' : 'Expand every row to see all fields'} aria-label={allOpen ? 'Collapse all rows' : 'Expand all rows'} onClick={() => setExpanded(allOpen ? [] : rows.map(row => row.id))}>{allOpen ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}</button>
-                <ColumnMenu columns={allColumns.filter((column) => column.key !== 'actions')} groups={BANK_GROUPS} shown={fit.keys} choices={columnChoices} onChange={setColumnChoices} hidden={fit.hidden} />
+                <ColumnMenu columns={allColumns.filter((column) => column.key !== 'actions' && column.key !== 'source')} groups={BANK_GROUPS} shown={fit.keys} choices={columnChoices} onChange={setColumnChoices} hidden={fit.hidden} />
               </>}
               <ViewToggle view={view} onChange={changeView} />
             </div>
           )}
         </div>
 
-        {!positionsMode && !showCards && fit.hidden > 0 && <p className="ld-fitnote" role="status">{fit.hidden} {fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Open a row (the arrow at its start) to see every field, or choose Columns.</p>}
+        {!showCards && fit.hidden > 0 && <p className="ld-fitnote" role="status">{fit.hidden} {fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Open a row (the arrow at its start) to see every field, or choose Columns.</p>}
         <div ref={boxRef} className={cn('db-box', fit.compact && 'is-compact', busy && loaded && 'is-busy')} aria-busy={busy || undefined}>
-          {positionsMode ? (!groups || groups.groups.length === 0 ? emptyState : (
-            <PositionGroupsList
-              groups={groups.groups}
-              scope={filterQuery}
-              terms={terms}
-              store={store}
-              version={directory.current.version}
-              autoOpen={groups.groups.length === 1 || (narrowed && groups.groups.length <= AUTO_OPEN_LIMIT)}
-              onOpen={openCandidate}
-              onReassign={reassignOne}
-              onEdit={setEditing}
-            />
-          )) : rows.length === 0 ? emptyState : showCards ? (
+          {rows.length === 0 ? emptyState : showCards ? (
             <DataBankCards rows={rows} store={store} onOpen={openCandidate} onReassign={reassignOne} onEdit={setEditing} onOpenStage={setOpenStage} />
           ) : (
             <DbTable
@@ -370,8 +316,8 @@ export default function DataBankPage() {
             />
           )}
         </div>
-        {!positionsMode && rows.length > 0 && <Pager page={result?.page ?? page} pageSize={pageSize} total={total} noun="candidates" onPage={setPage} onPageSize={setPageSize} />}
-        <p className="db-hint">{positionsMode ? 'Open a job to see its resumes. Click a resume to open the candidate.' : 'Click a row to open the candidate. Click an order to see its 11 stages.'}</p>
+        {rows.length > 0 && <Pager page={result?.page ?? page} pageSize={pageSize} total={total} noun="candidates" onPage={setPage} onPageSize={setPageSize} />}
+        <p className="db-hint">Candidates from every source. Open a candidate to see their details; view job allocations from Clients or Jobs.</p>
       </Panel>
 
       {reassigning && <ReassignCandidatesDialog candidateIds={reassigning} onClose={() => setReassigning(null)} onSaved={() => setSelected([])} />}

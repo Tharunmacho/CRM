@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, Building2, ChevronRight, Download, FileSpreadsheet, Globe2, Loader2, Plane, RefreshCw, Users, X } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader, StatusPill } from '@/shared/ui/display'
@@ -9,7 +9,7 @@ import { SummaryCards } from '@/shared/ui/workspace'
 import { downloadTravelled, useTravelled } from '@/features/travelled/travelled-api'
 import {
   EMPTY_FILTERS, MONTH_NAMES, activeChips, activeQuick, agencyToday, barPercent, chooseTravelDate, clearChip, dateBarLabel, dateLevel, dateSummary, documentsLabel,
-  documentsTitle, drillTo, filtersFromParams, formatTravelDay, monthName, queryFor, quickRanges, setFilter,
+  documentsTitle, drillTo, filtersFromParams, formatTravelDay, monthName, normalizeFilters, queryFor, quickRanges, setFilter,
   toggleFilter, toggleIncomplete, toggleQuick, toggleUndated, withChosen,
   type TravelledFilterKey, type TravelledFilters, type TravelledResult, type TravelledRow,
 } from '@/features/travelled/travelled-model'
@@ -21,15 +21,25 @@ type Options = TravelledResult['options']
 const NO_OPTIONS: Options = { years: [], months: [], undated: 0, clients: [], agencies: [], countries: [], orders: [] }
 
 /**
- * Who has travelled, when, for which client and through which agency. Every choice is in the address
- * (?year=2026&month=05&client=...), so a view can be bookmarked or sent to someone. Clicking a bar of a breakdown
- * narrows the list to it; clicking it again widens it.
+ * All travelled candidates by default. Filter controls are a draft until Apply filters is pressed.
+ * The address contains only applied filters, so bookmarked views and exports describe the same list.
+ * Clicking a breakdown or removing an applied chip explicitly changes that list.
  */
 export default function TravelledPage() {
   const store = useStore()
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const filters = filtersFromParams(params)
-  const apply = (next: TravelledFilters, replace = false) => setParams(new URLSearchParams(queryFor(next)), { replace })
+  const filterQuery = queryFor(filters)
+  const [draft, setDraft] = useState(filters)
+  // Navigation restores the controls even when two history entries use the same applied query.
+  useEffect(() => { setDraft(filtersFromParams(new URLSearchParams(filterQuery))) }, [filterQuery, location.key])
+  const apply = (next: TravelledFilters) => {
+    const normalized = normalizeFilters(next)
+    setDraft(normalized)
+    setParams(new URLSearchParams(queryFor(normalized)))
+  }
+  const pending = queryFor(normalizeFilters(draft)) !== filterQuery
 
   const { data: fresh, error, refresh, refreshing } = useTravelled(filters, store.me.id)
   // Keep the previous list on screen (dimmed) while a new choice loads, so the page does not jump.
@@ -40,17 +50,6 @@ export default function TravelledPage() {
 
   // Options describe every visible placement, independently of the filters. An empty answer clears old options too.
   const options = data?.options ?? NO_OPTIONS
-  const filterQuery = queryFor(filters)
-
-  // The search box types freely and moves the address a moment after typing stops.
-  const [search, setSearch] = useState(filters.q)
-  useEffect(() => { setSearch(filters.q) }, [filters.q])
-  useEffect(() => {
-    const wanted = search.replace(/\s+/g, ' ').trim()
-    if (wanted === filters.q) return undefined
-    const timer = window.setTimeout(() => apply(setFilter(filters, 'q', wanted), true), 300)
-    return () => window.clearTimeout(timer)
-  }, [search, filterQuery]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [exporting, setExporting] = useState<'' | 'xlsx' | 'csv'>('')
   const [exportError, setExportError] = useState('')
@@ -63,13 +62,13 @@ export default function TravelledPage() {
   }
 
   const chips = activeChips(filters)
-  const set = (key: TravelledFilterKey, value: string) => apply(setFilter(filters, key, value))
-  const orders = (options.orders ?? []).filter(order => !filters.client || order.client === filters.client || order.id === filters.order)
+  const set = (key: TravelledFilterKey, value: string) => setDraft(current => key === 'q' ? { ...current, q: value } : setFilter(current, key, value))
+  const orders = (options.orders ?? []).filter(order => !draft.client || order.client === draft.client || order.id === draft.order)
   const today = agencyToday()
-  const years = withChosen([...new Set([today.slice(0, 4), ...options.years.map(String)])].sort().reverse(), filters.year)
+  const years = withChosen([...new Set([today.slice(0, 4), ...options.years.map(String)])].sort().reverse(), draft.year)
   const otherYears = Array.from({ length: 111 }, (_, index) => String(2100 - index)).filter(year => !years.includes(year))
-  const quick = activeQuick(filters, today)
-  const travelDate = filters.year && filters.month && filters.day ? `${filters.year}-${filters.month}-${filters.day}` : ''
+  const quick = activeQuick(draft, today)
+  const travelDate = draft.year && draft.month && draft.day ? `${draft.year}-${draft.month}-${draft.day}` : ''
   const busy = refreshing || (stale && !error)
 
   return <div className="tv" aria-busy={busy}>
@@ -81,25 +80,30 @@ export default function TravelledPage() {
 
     <section className="tv-card tv-filters" aria-label="Filters">
       <div className="tv-quick" role="group" aria-label="Quick dates">
-        <button type="button" className={!dateSummary(filters) ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!dateSummary(filters)} onClick={() => apply(drillTo(filters, ''))}>All dates</button>
+        <button type="button" className={!dateSummary(draft) ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!dateSummary(draft)} onClick={() => setDraft(current => drillTo(current, ''))}>All dates</button>
         {quickRanges(today).map(range => <button key={range.key} type="button" className={quick === range.key ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={quick === range.key}
-          title={`${formatTravelDay(range.from)} to ${formatTravelDay(range.to)}`} onClick={() => apply(toggleQuick(filters, range.key, today))}>{range.label}</button>)}
-        <button type="button" className={filters.undated ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!!filters.undated} onClick={() => apply(toggleUndated(filters))}>Date not recorded{options.undated ? ` (${options.undated})` : ''}</button>
+          title={`${formatTravelDay(range.from)} to ${formatTravelDay(range.to)}`} onClick={() => setDraft(current => toggleQuick(current, range.key, today))}>{range.label}</button>)}
+        <button type="button" className={draft.undated ? 'tv-quick-btn is-on' : 'tv-quick-btn'} aria-pressed={!!draft.undated} onClick={() => setDraft(current => toggleUndated(current))}>Date not recorded{options.undated ? ` (${options.undated})` : ''}</button>
       </div>
       <div className="tv-filter-grid">
-        <label>Year<Select aria-label="Year" searchable value={filters.year} onChange={e => set('year', e.target.value)}><option value="">All years</option><optgroup label="Current and recorded years">{years.map(year => <option key={year} value={year}>{year}</option>)}</optgroup><optgroup label="Other years">{otherYears.map(year => <option key={year} value={year}>{year}</option>)}</optgroup></Select></label>
-        <label>Month<Select aria-label="Travel month" value={filters.month} disabled={!filters.year} onChange={e => set('month', e.target.value)}><option value="">{filters.year ? 'All months' : 'Choose a year'}</option>{MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</Select></label>
-        <label>Travel date<Input type="date" aria-label="Travel date" min="1990-01-01" max="2100-12-31" value={travelDate} onChange={e => apply(chooseTravelDate(filters, e.target.value))} /></label>
-        <label>Client<Select aria-label="Client" value={filters.client} onChange={e => set('client', e.target.value)}><option value="">All clients</option>{withChosen(options.clients, filters.client).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
-        <label>Job / order<Select aria-label="Job or order" value={filters.order} onChange={e => set('order', e.target.value)}><option value="">All jobs / orders</option>{filters.order && !orders.some(order => order.id === filters.order) && <option value={filters.order}>Selected order</option>}{orders.map(order => <option key={order.id} value={order.id}>{order.job || 'Job'} · {order.ref || order.client}{!filters.client ? ` · ${order.client}` : ''}</option>)}</Select></label>
-        <label>Agency<Select aria-label="Agency" value={filters.agency} onChange={e => set('agency', e.target.value)}><option value="">All agencies</option>{withChosen(options.agencies, filters.agency).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
-        <label>Country<Select aria-label="Country" value={filters.country} onChange={e => set('country', e.target.value)}><option value="">All countries</option>{withChosen(options.countries, filters.country).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
+        <label>Year<Select aria-label="Year" searchable value={draft.year} onChange={e => set('year', e.target.value)}><option value="">All years</option><optgroup label="Current and recorded years">{years.map(year => <option key={year} value={year}>{year}</option>)}</optgroup><optgroup label="Other years">{otherYears.map(year => <option key={year} value={year}>{year}</option>)}</optgroup></Select></label>
+        <label>Month<Select aria-label="Travel month" value={draft.month} disabled={!draft.year} onChange={e => set('month', e.target.value)}><option value="">{draft.year ? 'All months' : 'Choose a year'}</option>{MONTH_NAMES.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</Select></label>
+        <label>Travel date<Input type="date" aria-label="Travel date" min="1990-01-01" max="2100-12-31" value={travelDate} onChange={e => setDraft(current => chooseTravelDate(current, e.target.value))} /></label>
+        <label>Client<Select aria-label="Client" value={draft.client} onChange={e => set('client', e.target.value)}><option value="">All clients</option>{withChosen(options.clients, draft.client).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
+        <label>Job / order<Select aria-label="Job or order" value={draft.order} onChange={e => set('order', e.target.value)}><option value="">All jobs / orders</option>{draft.order && !orders.some(order => order.id === draft.order) && <option value={draft.order}>Selected order</option>}{orders.map(order => <option key={order.id} value={order.id}>{order.job || 'Job'} · {order.ref || order.client}{!draft.client ? ` · ${order.client}` : ''}</option>)}</Select></label>
+        <label>Agency<Select aria-label="Agency" value={draft.agency} onChange={e => set('agency', e.target.value)}><option value="">All agencies</option>{withChosen(options.agencies, draft.agency).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
+        <label>Country<Select aria-label="Country" value={draft.country} onChange={e => set('country', e.target.value)}><option value="">All countries</option>{withChosen(options.countries, draft.country).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
         <div className="tv-search-row">
-          <label className="tv-search">Search<Input type="search" aria-label="Search candidate, passport, client, job or flight" placeholder="Name, passport, client, job or PNR" value={search} onChange={e => setSearch(e.target.value)} /></label>
-          <button type="button" className={filters.incomplete ? 'tv-toggle is-on' : 'tv-toggle'} aria-pressed={!!filters.incomplete} onClick={() => apply(toggleIncomplete(filters))}>Missing documents only</button>
+          <label className="tv-search">Search<Input type="search" aria-label="Search candidate, passport, client, job or flight" placeholder="Name, passport, client, job or PNR" value={draft.q} onChange={e => set('q', e.target.value)} /></label>
+          <button type="button" className={draft.incomplete ? 'tv-toggle is-on' : 'tv-toggle'} aria-pressed={!!draft.incomplete} onClick={() => setDraft(current => toggleIncomplete(current))}>Missing documents only</button>
         </div>
       </div>
-      {data && <p className="tv-filter-note">Travelled shows deployed placements; Data Bank also includes candidates who have not travelled. {!!options.undated && <>{options.undated} travelled {options.undated === 1 ? 'record has' : 'records have'} no saved travel date. Choose All dates or Date not recorded to include them.</>}</p>}
+      <div className="tv-filter-actions">
+        <Button size="sm" variant="primary" disabled={!pending} onClick={() => apply(draft)}>Apply filters</Button>
+        <Button size="sm" onClick={() => apply(EMPTY_FILTERS)}>Show all candidates</Button>
+        <p role="status">{pending ? 'Filters changed. Apply filters to update the list.' : 'Choose filters, then apply them to narrow the list.'}</p>
+      </div>
+      {data && <p className="tv-filter-note">Travelled shows deployed placements; Data Bank also includes candidates who have not travelled. {!!options.undated && <>{options.undated} travelled {options.undated === 1 ? 'record has' : 'records have'} no saved travel date. Choose All dates or Date not recorded, then apply filters to include them.</>}</p>}
       {chips.length > 0 && <div className="tv-chips" role="group" aria-label="Filters in use">
         {chips.map(chip => <button key={chip.key} type="button" className="tv-chip" onClick={() => apply(clearChip(filters, chip.key))} aria-label={`Remove ${chip.label}`}>{chip.label}<X size={12} aria-hidden="true" /></button>)}
         <button type="button" className="tv-clear" onClick={() => apply(EMPTY_FILTERS)}>Clear all</button>

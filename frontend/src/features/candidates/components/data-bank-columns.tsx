@@ -16,7 +16,7 @@ import type { useStore } from '@/shared/state/crm-store'
 import { workRefusal } from '@/features/candidates/candidate-access'
 import { BANK_FIELD_DEFS, DEFAULT_COLUMN_FIELDS, FIELD_PREFIX, type BankContext, type BankFieldDef } from '@/features/candidates/data-bank-fields'
 import { bankApplication, bankFormApplication } from '@/features/candidates/data-bank-assignment'
-import { BANK_TABLE_COLUMNS, PLACEHOLDER_NAME, agentLabel, bankColumnWidth, candidateSubline, isPlaceholderName } from '@/features/candidates/data-bank-table'
+import { BANK_TABLE_COLUMNS, PLACEHOLDER_NAME, agentLabel, bankColumnWidth, candidateSubline, isPlaceholderName, sourceProvenance } from '@/features/candidates/data-bank-table'
 import '@/styles/data-bank-table.css'
 
 export const SOURCE_LABEL: Record<string, string> = {
@@ -57,6 +57,16 @@ export const shortDate = (value: string) => { const d = new Date(value); return 
 export function SourceDot({ source }: { source: string }) {
   const Icon = SOURCE_ICON[source] ?? Link2
   return <span className={`db-source is-${source}`}><Icon size={15} aria-hidden="true" /><span>{SOURCE_LABEL[source] ?? source}</span></span>
+}
+
+/** Intake channel, with human provenance for imports and Lead Sheet conversions. */
+export function SourceLine({ candidate }: { candidate: Candidate }) {
+  const label = SOURCE_LABEL[candidate.source] ?? candidate.source
+  const detail = sourceProvenance(candidate.source, candidate.sourceDetail)
+  return <span className="dbt-stack" title={[label, detail].filter(Boolean).join(' · ')}>
+    <span className="dbt-main">{label}</span>
+    {detail && <small className="dbt-sub">{detail}</small>}
+  </span>
 }
 
 /** Table form of the source: the icon alone, with the channel in a tooltip and for screen readers. */
@@ -110,7 +120,7 @@ export function bankContext(store: Store, options: FormOptions = {}): BankContex
     ownerName: (id) => (id ? store.user(id)?.name ?? '' : ''),
     agent: (candidate) => agentLabel(candidate.sourceDetail, candidate.source),
     statusLabel: (candidate) => candidateStatus(candidate).label,
-    sourceLabel: (source) => SOURCE_LABEL[source] ?? source,
+    sourceLabel: (source, detail) => [SOURCE_LABEL[source] ?? source, sourceProvenance(source, detail)].filter(Boolean).join(' · '),
     optionLabel: (category, value) => { const label = labelFor(options, category, value); return label === value ? humanize(value) : label },
     application: (candidateId) => {
       const app = bankApplication(store.applicationsFor(candidateId))
@@ -261,21 +271,21 @@ export function WhatsAppLink({ candidate }: { candidate: Candidate }) {
 }
 
 /**
- * The Data Bank table: Candidate, Contact, Agent, Recruiter, Stage, Status, Actions. The widths come from one list
+ * The Data Bank table: Candidate, Contact, Source, Agent, Recruiter, Status, Actions. The widths come from one list
  * (data-bank-table.ts) that the job groups and the cards read too. Every column is left-aligned (Actions right) with the
  * same padding in the header and the body. Everything else the profile holds (preferred country, passport, job, documents on
  * file ...) is in the expanded row, and in the Columns menu as columns that start switched off.
  */
-export function dataBankColumns({ store, onOpen, onReassign, onEdit, onOpenStage, options }: ColumnContext): DbColumn<Candidate>[] {
+export function dataBankColumns({ store, onOpen, onReassign, onEdit, options }: ColumnContext): DbColumn<Candidate>[] {
   const context = bankContext(store, options)
   const spec = Object.fromEntries(BANK_TABLE_COLUMNS.map((column) => [column.key, column]))
   const base = (key: (typeof BANK_TABLE_COLUMNS)[number]['key']) => ({ key, header: spec[key].header, sortKey: spec[key].sortKey, width: bankColumnWidth(spec[key]), align: spec[key].align })
   const core: DbColumn<Candidate>[] = [
     { ...base('candidate'), group: 'Person', render: (c) => <CandidateCell candidate={c} /> },
     { ...base('contact'), group: 'Contact', render: (c) => <ContactLines candidate={c} /> },
+    { ...base('source'), group: 'Workflow', render: (c) => <SourceLine candidate={c} /> },
     { ...base('agent'), group: 'Workflow', render: (c) => <AgentLine candidate={c} /> },
     { ...base('owner'), group: 'Workflow', render: (c) => <OwnerText candidate={c} store={store} /> },
-    { ...base('stage'), group: 'Workflow', render: (c) => <StageCell candidate={c} store={store} onOpenStage={onOpenStage} /> },
     { ...base('status'), group: 'Workflow', render: (c) => <StatusText candidate={c} /> },
     { ...base('actions'), render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /> },
   ]

@@ -13,10 +13,25 @@ const model = await load('../src/features/travelled/travelled-model.ts')
 const {
   EMPTY_FILTERS, activeChips, activeQuick, agencyToday, barPercent, chooseTravelDate, clearChip, dateBarLabel, dateLevel, dateSummary,
   daysInMonth, documentsLabel, documentsTitle, drillTo, exportName, filtersFromParams, formatTravelDay,
-  queryFor, quickRanges, setFilter, toggleFilter, toggleIncomplete, toggleQuick, toggleUndated, validIsoDate, withChosen,
+  normalizeFilters, queryFor, quickRanges, setFilter, toggleFilter, toggleIncomplete, toggleQuick, toggleUndated, validIsoDate, withChosen,
 } = model
 
 const parse = (query) => filtersFromParams(new URLSearchParams(query))
+
+test('applying a draft normalizes search text and dates without changing the edited draft', () => {
+  const draft = { ...EMPTY_FILTERS, year: '2026', month: '8', day: '32', q: '  Arun   Kumar  ' }
+  const applied = normalizeFilters(draft)
+  assert.equal(queryFor(applied), 'year=2026&month=08&q=Arun+Kumar')
+  assert.equal(draft.q, '  Arun   Kumar  ')
+  assert.equal(draft.day, '32')
+  assert.deepEqual(normalizeFilters(applied), applied)
+})
+
+test('an empty draft applies all dates including undated records, while bookmarked filters remain explicit', () => {
+  assert.equal(queryFor(normalizeFilters(EMPTY_FILTERS)), '')
+  assert.equal(queryFor(normalizeFilters(parse('year=2026&month=08'))), 'year=2026&month=08')
+  assert.equal(queryFor(normalizeFilters({ ...EMPTY_FILTERS, q: '  ' })), '')
+})
 
 test('an address becomes filters and back, in a fixed order', () => {
   const filters = parse('country=UAE&client=Century%20Mechanical&month=05&year=2026&agency=ETA&q=raj')

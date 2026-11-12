@@ -39,14 +39,14 @@ export function statCards(counts: Pick<PoolCounts, 'all' | 'unassigned' | 'needs
 export const poolAfterCardPress = (current: DataBankPool, card: Pick<StatCard, 'pool'>): DataBankPool =>
   card.pool === 'all' ? 'all' : togglePool(current, card.pool)
 
-export type VisibleFilter = 'scope' | 'status' | 'stage' | 'staff'
+export type VisibleFilter = 'scope' | 'source' | 'status' | 'staff'
 
 /** The selects always on show beside the search; Staff is for the people who assign candidates. Everything else lives under More filters. */
 export const visibleFilters = (role: string | null | undefined): VisibleFilter[] =>
-  isSupervisor(role) ? ['scope', 'status', 'stage', 'staff'] : ['scope', 'status', 'stage']
+  isSupervisor(role) ? ['scope', 'source', 'status', 'staff'] : ['scope', 'source', 'status']
 
-/** Behind "More filters": the pool list (No order yet, Not interested...), source and passport come first, then the text, years, date and skill filters. */
-export const MORE_FILTER_SELECTS = ['pool', 'source', 'passport'] as const
+/** Behind "More filters": the pool list (No order yet, Not interested...), stage and passport come first, then the text, years, date and skill filters. */
+export const MORE_FILTER_SELECTS = ['pool', 'stage', 'passport'] as const
 
 /** "Everyone" or "My candidates": staff is the person's own id, anything else means another staff member was picked in the Staff filter. */
 export type ScopeValue = 'everyone' | 'mine' | 'other'

@@ -12,7 +12,7 @@ async function load(path) {
 const table = await load('../src/features/candidates/data-bank-table.ts')
 
 test('the candidate table has seven columns, Actions last and right-aligned, the rest left-aligned', () => {
-  assert.deepEqual(table.BANK_TABLE_COLUMNS.map((column) => column.header), ['Candidate', 'Contact', 'Agent', 'Recruiter', 'Stage', 'Status', 'Actions'])
+  assert.deepEqual(table.BANK_TABLE_COLUMNS.map((column) => column.header), ['Candidate', 'Contact', 'Source', 'Agent', 'Recruiter', 'Status', 'Actions'])
   assert.equal(table.BANK_TABLE_COLUMNS.some((column) => /country/i.test(column.header)), false)
   assert.deepEqual(table.BANK_TABLE_COLUMNS.map((column) => column.align), ['left', 'left', 'left', 'left', 'left', 'left', 'right'])
 })
@@ -52,6 +52,16 @@ test('import provenance is not an agent, while real referring names keep their i
   assert.equal(table.agentLabel('Bulk import', 'referral'), 'Bulk import')
   assert.equal(table.agentLabel('Al Noor Agency', 'email'), 'Al Noor Agency')
   assert.equal(table.agentLabel('Al Noor Agency', 'referral'), 'Al Noor Agency')
+})
+
+test('Other intake shows human provenance without record identifiers or agency names', () => {
+  assert.equal(table.sourceProvenance('other', 'lead_sheet:private-record-id'), 'Lead Sheet')
+  assert.equal(table.sourceProvenance('other', '  Bulk  import  '), 'Bulk import')
+  assert.equal(table.sourceProvenance('other', 'Al Noor Agency'), '')
+  assert.equal(table.sourceProvenance('other', 'person_review:private-record-id'), '')
+  assert.equal(table.sourceProvenance('email', 'email_message:private-record-id'), '')
+  assert.equal(table.sourceProvenance('referral', 'Bulk import'), '')
+  assert.equal(table.sourceProvenance('other', null), '')
 })
 
 test('the unread-name placeholder and blank names are flagged, real names are not', () => {

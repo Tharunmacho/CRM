@@ -40,16 +40,16 @@
 .dbp-note.is-error { color: var(--error-ink); }
 .dbp-more { display: flex; justify-content: center; padding: 12px 16px 14px; border-top: 1px solid var(--border-faint); }
 
-/* Narrow: each resume becomes a stacked card (name and status on top, contact, recruiter and stage below). */
+/* Narrow: each resume becomes a stacked card with contact, recruiter and intake source. */
 @container (max-width: 760px) {
   .dbp-row.is-head { display: none; }
-  .dbp-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'candidate status' 'contact contact' 'owner stage' 'agent actions'; gap: 6px 12px; padding: 12px 14px; min-height: 0; }
+  .dbp-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'candidate status' 'contact contact' 'source owner' 'agent actions'; gap: 6px 12px; padding: 12px 14px; min-height: 0; }
   .dbp-row > * { padding: 0; }
   .dbp-row > [data-col='candidate'] { grid-area: candidate; }
   .dbp-row > [data-col='status'] { grid-area: status; justify-self: end; }
   .dbp-row > [data-col='contact'] { grid-area: contact; }
   .dbp-row > [data-col='owner'] { grid-area: owner; }
-  .dbp-row > [data-col='stage'] { grid-area: stage; }
+  .dbp-row > [data-col='source'] { grid-area: source; }
   .dbp-row > [data-col='agent'] { grid-area: agent; }
   .dbp-row > [data-col='actions'] { grid-area: actions; justify-self: end; padding: 0; }
 }

@@ -1,13 +1,13 @@
 /**
- * The Data Bank candidate table: one column set shared by the flat "All resumes" table, the rows inside each job group and
- * the mobile cards, so they can never drift apart. Pure (no React, no store), so it is unit-tested on its own.
+ * The Data Bank intake inventory: candidate identity, intake source, recruiter and status.
+ * Pure (no React, no store), so its columns and source labels are unit-tested on their own.
  *
  * `share` is the column's part of the row in percent (they add up to 100). The table turns a share into a minimum width of
  * `PX_PER_SHARE` px, so the whole table needs no more than `BANK_TABLE_MIN_WIDTH` px before it gives way to cards.
  */
 
 export interface BankTableColumn {
-  key: 'candidate' | 'contact' | 'agent' | 'owner' | 'stage' | 'status' | 'actions'
+  key: 'candidate' | 'contact' | 'agent' | 'owner' | 'source' | 'status' | 'actions'
   header: string
   /** Server sort key; the header becomes a sort button when set. */
   sortKey?: string
@@ -19,9 +19,9 @@ export interface BankTableColumn {
 export const BANK_TABLE_COLUMNS: readonly BankTableColumn[] = [
   { key: 'candidate', header: 'Candidate', sortKey: 'name', share: 24, align: 'left' },
   { key: 'contact', header: 'Contact', sortKey: 'phone', share: 19, align: 'left' },
+  { key: 'source', header: 'Source', sortKey: 'source', share: 12, align: 'left' },
   { key: 'agent', header: 'Agent', share: 12, align: 'left' },
   { key: 'owner', header: 'Recruiter', sortKey: 'owner', share: 11, align: 'left' },
-  { key: 'stage', header: 'Stage', sortKey: 'stage', share: 12, align: 'left' },
   { key: 'status', header: 'Status', sortKey: 'status', share: 13, align: 'left' },
   { key: 'actions', header: 'Actions', share: 9, align: 'right' },
 ]
@@ -54,6 +54,15 @@ export function agentLabel(detail?: string | null, source?: string): string {
   const text = (detail ?? '').trim()
   const importMarker = source !== 'referral' && text.replace(/\s+/g, ' ').toLowerCase() === 'bulk import'
   return POINTER.test(text) || importMarker ? '' : text
+}
+
+/** Human intake provenance for the Other channel; never expose the stored record pointer. */
+export function sourceProvenance(source: string, detail?: string | null): string {
+  if (source !== 'other') return ''
+  const text = (detail ?? '').trim()
+  if (/^lead_sheet:/i.test(text)) return 'Lead Sheet'
+  if (text.replace(/\s+/g, ' ').toLowerCase() === 'bulk import') return 'Bulk import'
+  return ''
 }
 
 /** "REF-1234 · 05 Jan 1990": the muted line under the name. Either part may be missing. */

@@ -12,7 +12,7 @@ import {
   REPORT_BUTTON, allNewLine, invalidReason, leadFileError, resultSummary, sampleValues, setMappingOverride, splitMappings,
   type ColumnInfo, type DuplicateRow, type ImportCounts, type ImportResponse, type InvalidRow, type Lead,
 } from '../lead-model'
-import { CreatedCell, PositionPill } from './lead-columns'
+import { CreatedCell, PositionText } from './lead-columns'
 
 type Stage = 'choose' | 'checking' | 'preview' | 'importing' | 'result'
 type PreviewTab = 'rows' | 'ignored' | 'invalid'
@@ -123,7 +123,7 @@ const previewColumns: DbColumn<SampleRow>[] = [
   { key: 'created', header: 'Created', width: 68, render: (l) => <CreatedCell lead={l as Lead} /> },
   { key: 'name', header: 'Name', width: 130, render: (l) => <span className="db-2l is-name"><strong className="db-clamp">{l.name || 'Unnamed'}</strong>{l.gender && <small>{l.gender}</small>}</span> },
   { key: 'phone', header: 'Phone / Email', width: 176, render: (l) => contactCell(l.phone, l.email) },
-  { key: 'position', header: 'Job applied', width: 140, render: (l) => <PositionPill value={l.positionApplied} /> },
+  { key: 'position', header: 'Job applied', width: 140, render: (l) => <PositionText value={l.positionApplied} /> },
   { key: 'city', header: 'City / State', width: 108, render: (l) => <span className="db-2l"><strong className="db-clamp">{l.city || '–'}</strong>{l.state && <small className="db-ellip">{l.state}</small>}</span> },
   { key: 'campaign', header: 'Campaign', width: 130, render: (l) => <span className="db-2l"><span className="db-clamp">{l.campaignName || '–'}</span>{l.platform && <small>{l.platform}</small>}</span> },
   { key: 'country', header: 'Country interest', width: 108, render: (l) => <CountryPills value={l.countryInterest} /> },

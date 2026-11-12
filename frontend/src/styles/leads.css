@@ -55,6 +55,7 @@
 .db-menu-item { white-space: nowrap; }
 
 /* ---------- Cells ---------- */
+.ld-position { display: block; max-width: 100%; overflow-wrap: anywhere; line-height: 1.35; font-weight: 600; color: var(--text-main); }
 .ld-line { display: inline-flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; min-width: 0; }
 .ld-copy { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: var(--text-light); cursor: pointer; }
 .ld-copy:hover { background: var(--tint-2); color: var(--text-main); }

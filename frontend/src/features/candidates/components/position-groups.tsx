@@ -5,7 +5,7 @@ import { api } from '@/shared/api/client'
 import type { Candidate } from '@/shared/model/types'
 import type { useStore } from '@/shared/state/crm-store'
 import { Button } from '@/shared/ui/primitives'
-import { AgentLine, CandidateCell, ContactLines, OwnerText, RowActions, StageCell, StatusText } from '@/features/candidates/components/data-bank-columns'
+import { AgentLine, CandidateCell, ContactLines, OwnerText, RowActions, SourceLine, StatusText } from '@/features/candidates/components/data-bank-columns'
 import { BANK_TABLE_COLUMNS, bankGridTemplate, groupClientLine, groupHeading } from '@/features/candidates/data-bank-table'
 import {
   groupKey, groupResumesPath, highlightParts, resumeCount,
@@ -79,9 +79,9 @@ function GroupResumes({ scope, groupId, terms, store, version, onOpen, onReassig
           onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(candidate) } }}>
           <span role="cell" data-col="candidate" data-label="Candidate"><CandidateCell candidate={candidate} mark={mark} /></span>
           <span role="cell" data-col="contact" data-label="Contact"><ContactLines candidate={candidate} mark={mark} /></span>
+          <span role="cell" data-col="source" data-label="Source"><SourceLine candidate={candidate} /></span>
           <span role="cell" data-col="agent" data-label="Agent"><AgentLine candidate={candidate} mark={mark} /></span>
           <span role="cell" data-col="owner" data-label="Recruiter"><OwnerText candidate={candidate} store={store} /></span>
-          <span role="cell" data-col="stage" data-label="Stage"><StageCell candidate={candidate} store={store} /></span>
           <span role="cell" data-col="status" data-label="Status"><StatusText candidate={candidate} /></span>
           <span role="cell" data-col="actions"><RowActions candidate={candidate} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /></span>
         </div>

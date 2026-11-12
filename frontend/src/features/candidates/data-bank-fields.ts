@@ -22,7 +22,7 @@ export interface BankContext {
   /** "Agent / referred by" text (empty when none was recorded). */
   agent: (candidate: Candidate) => string
   statusLabel: (candidate: Candidate) => string
-  sourceLabel: (source: string) => string
+  sourceLabel: (source: string, detail?: string | null) => string
   /** The admin's label for a stored form-option value (the value itself when unknown). */
   optionLabel: (category: string, value: string) => string
   /** The active or latest deployed application's stage and order; null when no placement is recorded. */
@@ -109,7 +109,7 @@ export const BANK_FIELD_DEFS: readonly BankFieldDef[] = [
   { id: 'added', label: 'Added on', group: 'Workflow', width: 110, sortKey: 'added', inColumns: true, value: (c) => dayLabel(c.addedAt) },
   { id: 'owner', label: 'Recruiter', group: 'Workflow', width: 110, sortKey: 'owner', inColumns: true, value: (c, x) => (c.ownerId ? x.ownerName(c.ownerId) : '') },
   { id: 'agent', label: 'Agent / referred by', group: 'Workflow', width: 130, inColumns: true, value: (c, x) => x.agent(c) },
-  { id: 'source', label: 'Source', group: 'Workflow', width: 90, sortKey: 'source', inColumns: true, value: (c, x) => x.sourceLabel(c.source) },
+  { id: 'source', label: 'Source', group: 'Workflow', width: 90, sortKey: 'source', inColumns: true, value: (c, x) => x.sourceLabel(c.source, c.sourceDetail) },
   { id: 'stage', label: 'Stage', group: 'Workflow', width: 120, sortKey: 'stage', inColumns: true, value: (c, x) => x.application(c.id)?.stage ?? '' },
   { id: 'order', label: 'Order', group: 'Workflow', width: 110, sortKey: 'order', inColumns: true, value: (c, x) => x.application(c.id)?.order ?? '' },
   { id: 'status', label: 'Status', group: 'Workflow', width: 110, sortKey: 'status', inColumns: true, value: (c, x) => x.statusLabel(c) },
@@ -128,11 +128,11 @@ export const bankFieldDef = (id: string) => BANK_FIELD_DEFS.find((field) => fiel
 
 /**
  * Fields that already have a column of their own in the default table (the Columns menu lists them once, under that column;
- * several fields share one cell: name over date of birth, phone with WhatsApp over e-mail, stage over order, agent over source).
+ * several fields share one cell: name over date of birth, phone with WhatsApp over e-mail).
  */
 export const DEFAULT_COLUMN_FIELDS: ReadonlySet<string> = new Set([
   'name', 'dob', 'phone', 'whatsapp', 'email', 'passportNo', 'designations', 'totalExperience', 'countryPreference', 'serviceCharges',
-  'interestLevel', 'added', 'owner', 'agent', 'source', 'stage', 'order', 'status',
+  'interestLevel', 'added', 'owner', 'agent', 'source', 'status',
 ])
 
 export interface BankFieldRow { key: string; label: string; value: string; large: boolean }

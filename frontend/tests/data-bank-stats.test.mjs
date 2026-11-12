@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
+import React from 'react'
 import ts from 'typescript'
 
 
@@ -11,6 +12,67 @@ const poolsUrl = `data:text/javascript;base64,${Buffer.from(poolsJs).toString('b
 const statsSource = await readFile(new URL('../src/features/candidates/data-bank-stats.ts', import.meta.url), 'utf8')
 const statsJs = ts.transpileModule(statsSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText.replace("'./data-bank-pools'", `'${poolsUrl}'`)
 const stats = await import(`data:text/javascript;base64,${Buffer.from(statsJs).toString('base64')}`)
+const pools = await import(poolsUrl)
+
+// Exercise the real filter component without loading its CSS or unrelated column dialogs.
+const columnSource = await readFile(new URL('../src/features/candidates/components/data-bank-columns.tsx', import.meta.url), 'utf8')
+const columnTree = ts.createSourceFile('columns.tsx', columnSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const sourceLabel = columnTree.statements.find(statement => ts.isVariableStatement(statement)
+  && statement.declarationList.declarations.some(declaration => declaration.name.getText(columnTree) === 'SOURCE_LABEL'))
+const labels = {}
+new Function('exports', ts.transpileModule(sourceLabel.getText(columnTree), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS },
+}).outputText)(labels)
+const filterSource = await readFile(new URL('../src/features/candidates/components/data-bank-filters.tsx', import.meta.url), 'utf8')
+const filterTree = ts.createSourceFile('filters.tsx', filterSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const filterJs = ts.transpileModule(filterTree.statements.filter(statement => !ts.isImportDeclaration(statement))
+  .map(statement => statement.getText(filterTree)).join('\n'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
+}).outputText
+const components = {}
+const bindings = { ...stats, ...labels, PRD_COLUMNS: pools.PRD_COLUMNS, ChevronDown: 'svg', X: 'svg',
+  Select: 'select', Field: 'label', Input: 'input', cn: (...values) => values.filter(Boolean).join(' '),
+  stageByNo: number => ({ title: `Workflow ${number}` }) }
+new Function('exports', 'React', ...Object.keys(bindings), filterJs)(components, React, ...Object.values(bindings))
+const noop = () => {}
+const filterProps = (overrides = {}) => ({
+  me: { id: 'u1', role: 'staff' }, filters: {}, onFilter: noop, pool: 'all', onPool: noop,
+  staff: '', onStaff: noop, users: [], skills: [], onSkills: noop, skillMode: 'all', onSkillMode: noop,
+  skillStatus: 'all', onSkillStatus: noop, coverage: { data: null, loading: false, error: '' },
+  moreOpen: false, onMoreToggle: noop, canClear: false, onClear: noop, ...overrides,
+})
+const descendants = node => React.Children.toArray(node).flatMap(child => React.isValidElement(child)
+  ? [child, ...descendants(child.props.children)] : [])
+const findLabel = (tree, label) => descendants(tree).find(node => node.props['aria-label'] === label)
+
+test('source is visible in the main filter bar and preserves the backend source values', () => {
+  const changes = []
+  const tree = components.DataBankFilters(filterProps({ filters: { source: 'Walk-in' }, onFilter: (...args) => changes.push(args) }))
+  const bar = descendants(tree).find(node => node.props.className === 'dbt-bar')
+  const source = findLabel(bar, 'Filter by Source')
+  assert.ok(source)
+  assert.equal(source.props.value, 'Walk-in')
+  assert.deepEqual(descendants(source).filter(node => node.type === 'option').map(node => node.props.value),
+    ['', 'Email', 'WhatsApp', 'Walk-in', 'Referral', 'Other'])
+  source.props.onChange({ target: { value: 'Referral' } })
+  assert.deepEqual(changes, [['source', 'Referral']])
+  assert.equal(findLabel(bar, 'Filter by Stage'), undefined)
+  assert.ok(findLabel(bar, 'Filter by Status'))
+  assert.equal(descendants(tree).filter(node => node.props['aria-label'] === 'Filter by Source').length, 1)
+  assert.equal(findLabel(tree, 'Some of these filters are active'), undefined)
+})
+
+test('an existing stage selection remains available in More filters and marks hidden filters active', () => {
+  const changes = []
+  const tree = components.DataBankFilters(filterProps({ filters: { stage: '11' }, onFilter: (...args) => changes.push(args) }))
+  const more = descendants(tree).find(node => node.props.id === 'db-more-filters')
+  const stage = findLabel(more, 'Filter by Stage')
+  assert.equal(more.props.hidden, true)
+  assert.equal(stage.props.value, '11')
+  assert.ok(findLabel(tree, 'Some of these filters are active'))
+  stage.props.onChange({ target: { value: '' } })
+  assert.deepEqual(changes, [['stage', '']])
+})
 
 const counts = { all: 4, unassigned: 3, needs_review: 0 }
 
@@ -47,10 +109,10 @@ test('pressing Resumes shows everyone; pressing another card toggles its pool', 
 })
 
 test('the visible filters follow the role and Staff is only for admin and manager', () => {
-  assert.deepEqual(stats.visibleFilters('admin'), ['scope', 'status', 'stage', 'staff'])
-  assert.deepEqual(stats.visibleFilters('manager'), ['scope', 'status', 'stage', 'staff'])
-  assert.deepEqual(stats.visibleFilters('staff'), ['scope', 'status', 'stage'])
-  assert.deepEqual([...stats.MORE_FILTER_SELECTS], ['pool', 'source', 'passport'])
+  assert.deepEqual(stats.visibleFilters('admin'), ['scope', 'source', 'status', 'staff'])
+  assert.deepEqual(stats.visibleFilters('manager'), ['scope', 'source', 'status', 'staff'])
+  assert.deepEqual(stats.visibleFilters('staff'), ['scope', 'source', 'status'])
+  assert.deepEqual([...stats.MORE_FILTER_SELECTS], ['pool', 'stage', 'passport'])
 })
 
 test('Everyone / My candidates maps to the staff filter', () => {

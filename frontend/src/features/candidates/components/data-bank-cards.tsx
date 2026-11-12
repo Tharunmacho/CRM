@@ -1,7 +1,7 @@
 import type { Candidate } from '@/shared/model/types'
 import type { useStore } from '@/shared/state/crm-store'
 import { agentLabel } from '@/features/candidates/data-bank-table'
-import { AgentLine, CandidateActions, CandidateCell, ContactLines, OwnerText, StageCell, StatusText } from '@/features/candidates/components/data-bank-columns'
+import { AgentLine, CandidateActions, CandidateCell, ContactLines, OwnerText, SourceLine, StatusText } from '@/features/candidates/components/data-bank-columns'
 
 interface Props {
   rows: Candidate[]
@@ -13,8 +13,8 @@ interface Props {
   onOpenStage?: (applicationId: string) => void
 }
 
-/** Cards (phones and the card view): name and status on top; contact, recruiter and stage below; the actions at the foot. Same cells as the table. */
-export function DataBankCards({ rows, store, onOpen, onReassign, onEdit, onOpenStage }: Props) {
+/** Cards: identity and status above the contact, recruiter and intake source; actions at the foot. */
+export function DataBankCards({ rows, store, onOpen, onReassign, onEdit }: Props) {
   return (
     <ul className="db-grid" aria-label="Candidates">
       {rows.map((candidate) => (
@@ -27,8 +27,8 @@ export function DataBankCards({ rows, store, onOpen, onReassign, onEdit, onOpenS
           </div>
           <dl className="db-mini-meta">
             <div className="is-wide"><dt>Contact</dt><dd><ContactLines candidate={candidate} /></dd></div>
+            <div><dt>Source</dt><dd><SourceLine candidate={candidate} /></dd></div>
             <div><dt>Recruiter</dt><dd><OwnerText candidate={candidate} store={store} /></dd></div>
-            <div><dt>Stage</dt><dd><StageCell candidate={candidate} store={store} onOpenStage={onOpenStage} /></dd></div>
             {agentLabel(candidate.sourceDetail, candidate.source) && <div className="is-wide"><dt>Agent</dt><dd><AgentLine candidate={candidate} /></dd></div>}
           </dl>
           <div className="db-mini-foot">

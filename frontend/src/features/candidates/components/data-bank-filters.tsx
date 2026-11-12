@@ -20,8 +20,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 const labelOf = (key: string) => PRD_COLUMNS.find((column) => column.key === key)?.label ?? key
 
-/** The filters that live behind "More filters": the pool list, source, passport, text matches, exact years, order reference, date and skills. */
-const HIDDEN_KEYS = ['source', 'passport', 'name', 'phone', 'designation', 'experience', 'experience_min', 'experience_max', 'order', 'added', 'added_from', 'added_to']
+/** The filters that live behind "More filters": the pool list, stage, passport, text matches, exact years, order reference, date and skills. */
+const HIDDEN_KEYS = ['stage', 'passport', 'name', 'phone', 'designation', 'experience', 'experience_min', 'experience_max', 'order', 'added', 'added_from', 'added_to']
 const hasMoreFilters = (filters: Record<string, string>, skills: string[], skillStatus: string, pool: DataBankPool = 'all') =>
   HIDDEN_KEYS.some((key) => (filters[key] ?? '').trim()) || skills.length > 0 || skillStatus !== 'all' || pool !== 'all'
 
@@ -49,8 +49,8 @@ interface Props {
 }
 
 /**
- * One row of equal selects: Everyone / My candidates, Status, Stage and (admin, manager) Staff. "More filters" holds the rest: the pool
- * list, source, passport, name, phone, job title, experience, mapped order, date added and skills. Every PRD column stays filterable.
+ * One row of equal selects: Everyone / My candidates, Source, Status and (admin, manager) Staff. "More filters" holds the rest: the pool
+ * list, stage, passport, name, phone, job title, experience, mapped order, date added and skills. Every PRD column stays filterable.
  */
 export function DataBankFilters(props: Props) {
   const { me, filters, onFilter, pool, onPool, staff, onStaff, users, skills, onSkills, skillMode, onSkillMode, skillStatus, onSkillStatus, coverage, moreOpen, onMoreToggle, canClear, onClear } = props
@@ -91,8 +91,8 @@ export function DataBankFilters(props: Props) {
             {scope === 'other' && <option value="other" disabled>Chosen staff member</option>}
           </Select>
         )}
+        {shown.includes('source') && choice('source', 'Any source', Object.values(SOURCE_LABEL).map((label) => [label, label]))}
         {shown.includes('status') && choice('status', 'Any status', Object.entries(STATUS_LABEL))}
-        {shown.includes('stage') && choice('stage', 'Any stage', [['0', 'No order yet'], ...Array.from({ length: 11 }, (_, index): [string, string] => [String(index + 1), `Stage ${index + 1} · ${stageByNo(index + 1).title}`])])}
         {shown.includes('staff') && (
           <Select aria-label="Filter by assigned staff" value={staff} onChange={(event) => onStaff(event.target.value)}>
             <option value="">All staff</option>
@@ -125,7 +125,7 @@ export function DataBankFilters(props: Props) {
               {poolChoices(me.role, pool).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </Select>
           ))}
-          {labelled('Source', choice('source', 'Any source', Object.values(SOURCE_LABEL).map((label) => [label, label])))}
+          {labelled('Stage', choice('stage', 'Any stage', [['0', 'No order yet'], ...Array.from({ length: 11 }, (_, index): [string, string] => [String(index + 1), `Stage ${index + 1} · ${stageByNo(index + 1).title}`])]))}
           {labelled('Passport', choice('passport', 'Any passport', [['Yes', 'Has a passport'], ['No', 'No passport']]))}
           {text('name', 'Contains')}
           {text('phone', 'Contains')}

@@ -2,8 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, UserCheck, Globe, Link2, BellRing } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
-import { countryTone, whatsappHref } from '@/features/candidates/data-bank-view'
-import { CountryPills } from '@/features/candidates/components/data-bank-columns'
+import { whatsappHref } from '@/features/candidates/data-bank-view'
 import { WhatsAppTemplateButton } from './wa-template'
 import { Avatar, RowMenu } from '@/features/candidates/components/db-parts'
 import {
@@ -59,11 +58,11 @@ export function ContactCell({ lead }: { lead: Lead }) {
   )
 }
 
-/** The position as a solid pill whose colour is stable for that text. */
-export function PositionPill({ value }: { value?: string | null }) {
+/** A readable job title using the same plain text treatment as the other lead facts. */
+export function PositionText({ value }: { value?: string | null }) {
   const text = (value ?? '').trim()
   if (!text) return <Dash />
-  return <span className="db-cpills" title={text}><span className={`db-cpill is-c${countryTone(text)}`}>{text}</span></span>
+  return <strong className="ld-position" title={text}>{text}</strong>
 }
 
 export function ExperienceCell({ lead }: { lead: Lead }) {
@@ -135,12 +134,13 @@ export function StatusOwnerCell({ lead, userById }: { lead: Lead; userById: Lead
   )
 }
 
-/** The position pill with the country the person wants to go to under it. */
+/** Job title over the muted preferred country, without decorative badges. */
 export function PositionCountryCell({ lead }: { lead: Lead }) {
+  const country = lead.countryInterest?.trim()
   return (
     <span className="db-2l ld-poscountry">
-      <PositionPill value={lead.positionApplied} />
-      {lead.countryInterest ? <CountryPills value={lead.countryInterest} max={1} /> : null}
+      <PositionText value={lead.positionApplied} />
+      {country ? <small className="db-clamp" title={country}>{country}</small> : null}
     </span>
   )
 }

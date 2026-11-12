@@ -1,5 +1,5 @@
 /*
- * The Data Bank candidate table: Candidate, Contact, Agent, Recruiter, Stage, Status, Actions.
+ * The Data Bank candidate table: Candidate, Contact, Source, Agent, Recruiter, Status, Actions.
  * Header and body cells share one padding (16px sides) and one alignment (text left, Actions right); widths are shares of the row;
  * every cell is a single line cut with an ellipsis; rows are 64px with a hairline between them. The job groups (data-bank-positions.css)
  * and the mobile cards use the same cells. Rules carry :root:root so they beat the shared grid skin (data-bank-v2.css, db-fit.css, skin.css).
@@ -67,7 +67,7 @@ strong.dbt-main { font-weight: 600; }
 .db-tbl.is-bank .db-cpills { flex-wrap: nowrap; justify-content: flex-start; overflow: hidden; }
 .db-tbl.is-bank .db-muted { font-size: 13px; }
 
-/* ---- mobile cards: name and status on top, contact, recruiter and stage below */
+/* ---- mobile cards: name and status on top, contact, source and recruiter below */
 .db-mini-head { align-items: center; }
 .db-mini-head > .dbt-stack { flex: 1 1 auto; }
 .db-mini-head > .db-pill { flex: none; }
