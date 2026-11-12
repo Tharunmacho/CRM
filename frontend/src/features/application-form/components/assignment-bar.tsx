@@ -175,6 +175,9 @@ export function AssignmentBar({
         {can.recruiter ? (
           <Select id="af-assign-recruiter" searchable value={assignment.recruiter?.id ?? ''} aria-label="Recruiter" onChange={(event) => { if (event.target.value && event.target.value !== assignment.recruiter?.id) onChange('recruiter', { recruiterId: event.target.value }) }}>
             {!assignment.recruiter && <option value="">Not assigned</option>}
+            {assignment.recruiter && !options.recruiters.some((item) => item.id === assignment.recruiter?.id) && (
+              <option value={assignment.recruiter.id} disabled>{assignment.recruiter.name}</option>
+            )}
             {options.recruiters.map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` (${item.role})` : ''}</option>)}
           </Select>
         ) : (
