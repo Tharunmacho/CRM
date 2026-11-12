@@ -12,6 +12,9 @@ export interface PartyFields {
   email: string
   address: string
   state: string
+  /** Used by reference agencies only. Client validation remains unchanged. */
+  place?: string
+  notes?: string
 }
 
 /** One row of the "Staff details" group as typed (every value is a string while editing). */
@@ -126,15 +129,33 @@ export function validateParty(fields: PartyFields, rows: StaffRow[]): FieldError
 
 const optional = (value: string) => trim(value) || undefined
 
+/** One available name is enough for a reference agency. Never invent a contact person. */
+export function agencyDisplayName(fields: { name?: string | null; agencyName?: string | null }): string {
+  return trim(fields.agencyName) || (trim(fields.name) ? `${trim(fields.name)} Agency` : '')
+}
+
+export function validateAgency(fields: PartyFields, rows: StaffRow[]): FieldErrors {
+  const errors = validateParty(fields, rows)
+  delete errors.name
+  delete errors.agencyName
+  if (!trim(fields.name) && !trim(fields.agencyName)) errors.agencyName = 'Enter an agency name or contact person.'
+  else if (agencyDisplayName(fields).length > 200) errors.agencyName = 'Use an agency name of 200 characters or fewer.'
+  if (trim(fields.place).length > 200) errors.place = 'Use a place or city of 200 characters or fewer.'
+  return errors
+}
+
 /** Body for POST /reference-agencies and PUT /reference-agencies/:id. */
 export function buildAgencyPayload(fields: PartyFields, rows: StaffRow[], focus: AgencyFocus = emptyFocus()) {
   return {
     name: trim(fields.name),
-    agencyName: trim(fields.agencyName),
+    agencyName: agencyDisplayName(fields),
     phone: optional(fields.phone),
     email: optional(fields.email),
     address: optional(fields.address),
+    // Explicit blank clears the field; omission is reserved for older clients.
+    place: trim(fields.place),
     state: optional(fields.state),
+    notes: trim(fields.notes),
     staffContacts: cleanStaffRows(rows),
     specialisations: normaliseSpecialisations(focus.specialisations),
     preferredCountries: PREFERRED_COUNTRIES.filter((name) => focus.preferredCountries.includes(name)),
@@ -146,7 +167,7 @@ const FIELD_ALIASES: Record<string, string> = {
   agency_name: 'agencyName', agencyname: 'agencyName', contactemail: 'email', contact_email: 'email', contactperson: 'name', contact_person: 'name',
   staff_contacts: 'staff', staffcontacts: 'staff', preferred_countries: 'preferredCountries', preferredcountries: 'preferredCountries',
 }
-const FORM_FIELDS = new Set(['name', 'agencyName', 'phone', 'email', 'address', 'state', 'staff', 'staffIds', 'specialisations', 'preferredCountries'])
+const FORM_FIELDS = new Set(['name', 'agencyName', 'phone', 'email', 'address', 'place', 'state', 'notes', 'staff', 'staffIds', 'specialisations', 'preferredCountries'])
 
 /**
  * Turns a 422 body (`[{loc: ['body', 'staffContacts', 0, 'email'], msg}]`) into field errors, so each message shows under

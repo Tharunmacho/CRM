@@ -396,3 +396,75 @@ def test_a_selected_page_that_was_not_checked_still_fails_the_job_with_the_pages
     assert "The selected pages no longer match what was checked earlier" in detail["lastError"]
     with intake.sessions() as db:
         assert "passport" not in (db.get(DocumentExtractionJob, job["id"]).state.get("documents") or {})
+
+
+@pytest.mark.parametrize("needs_review", [False, True])
+def test_expanded_cached_resume_preserves_immutable_old_pdf_and_saves_both_jobs_without_provider_calls(intake, monkeypatch, needs_review):
+    import hashlib
+    from pathlib import Path
+    from app.services.document_storage import put_bytes
+    from app.services.form_extraction import values_for
+
+    single = pdf(CV)
+    expanded = pdf(CV, "Second synthetic employer and another period of work")
+    saved = upload(intake, expanded)
+    old_key = f"manual/owner/{saved['id']}/resume.pdf"
+    put_bytes(intake.settings, old_key, single, "application/pdf")
+    raw = {**result("resume", 2), "total_experience_months": 30, "indian_experience_months": 30,
+           "skills": ["Document skill"], "experience": [
+               {"company": "First Synthetic Studio", "title": "Designer", "country": "India", "start": "2023-08", "end": "2024-11", "duration_months": 15},
+               {"company": "Second Synthetic Studio", "title": "Senior Designer", "country": "India", "start": "2024-11", "end": "2026-02", "duration_months": 15}]}
+    paid = {"resume": {"job_id": "paid-first", "status": "succeeded", "selected_pages": [1], "result": {"retained": "first"}},
+            "resume+": {"job_id": "paid-second", "status": "succeeded", "selected_pages": [2], "result": {"retained": "second"}}}
+    notice = "Different parts of the resume gave different values for industry, designation. The first was kept; check them against the original."
+    output = {"status": "needs_review" if needs_review else "complete", "inspection": {"page_count": 2, "resume_pages": [1, 2]},
+        "extractions": {"resume": {"raw": raw, "fields": values_for("resume", raw), "selected_pages": [1, 2]}},
+        "coverage": {"complete": not needs_review, "pages": {"total": 2, "sent": [1, 2], "unresolved": []}, "issues": [notice] if needs_review else []},
+        "warnings": [notice] if needs_review else []}
+    with intake.sessions() as db:
+        job = db.get(DocumentExtractionJob, saved["id"])
+        candidate = db.get(Candidate, "candidate")
+        candidate.name = "Alex Example"
+        candidate.total_experience = candidate.experience_india = 1
+        candidate.work_history = [{"company": "First Synthetic Studio", "designation": "Designer", "country": "India", "period": "2023-08 - 2024-11"}]
+        candidate.field_sources = {"personal.candidateName": "manual", "screening.skills": "manual", "experience.history": "extracted",
+                                   "experience.totalExperience": "extracted", "experience.experienceIndia": "extracted"}
+        attachment = Attachment(entity_type="candidate", entity_id=candidate.id, slot="resume", version=1, file_name="synthetic.pdf",
+            content_type="application/pdf", size_kb=1, object_key=job.object_key, content_hash=job.content_hash, uploaded_by="owner")
+        db.add(attachment); db.flush()
+        job.candidate_id, job.attachment_id, job.status = candidate.id, attachment.id, "pending"
+        job.draft = {"applicationForm": {"candidateId": candidate.id, "attachmentId": attachment.id, "slot": "resume"}}
+        # Exact recovery point: both provider results/output are cached, while the
+        # newly expanded derivative has not been saved because the old key exists.
+        job.state = {"source_sha256": job.content_hash, "output": output, "provider_jobs": deepcopy(paid), "documents": {}}
+        db.commit()
+    monkeypatch.setattr(manual_extraction, "extract_attachment", lambda *a, **k: pytest.fail("No paid extraction may run again"))
+    monkeypatch.setattr(document_extraction, "checked_person_output", lambda data, output, state, settings: output)
+    monkeypatch.setattr(manual_extraction, "restore_inspection", lambda *a, **k: SimpleNamespace(resume_pages=[1, 2], pdf_for_pages=lambda selected: expanded))
+    process(intake, saved["id"])
+    with intake.sessions() as db:
+        job = db.get(DocumentExtractionJob, saved["id"])
+        assert job.status == ("needs_review" if needs_review else "completed") and job.attempts == 0
+        new_key = job.state["documents"]["resume"]["object_key"]
+        assert new_key != old_key and read_bytes(intake.settings, new_key) == expanded
+        assert read_bytes(intake.settings, old_key) == single
+        assert job.state["provider_jobs"] == paid
+        candidate = db.get(Candidate, "candidate")
+        assert candidate.name == "Alex Example" and candidate.skills == ["Human skill"]
+        assert {row["company"] for row in candidate.work_history} == {"First Synthetic Studio", "Second Synthetic Studio"}
+        assert candidate.total_experience == candidate.experience_india == 2
+        assert bool(job.draft["applicationForm"]["result"]["coverage"]["issues"]) == needs_review
+        # Recreate a lost checkpoint after the blob write. Repeating identical
+        # bytes must reuse the same immutable object, with no extra provider call.
+        job.state = {**job.state, "documents": {}}
+        job.status = "pending"
+        db.commit()
+    process(intake, saved["id"])
+    with intake.sessions() as db:
+        job = db.get(DocumentExtractionJob, saved["id"])
+        assert job.status == ("needs_review" if needs_review else "completed") and job.attempts == 0
+        assert job.state["documents"]["resume"]["object_key"] == new_key and job.state["provider_jobs"] == paid
+        assert job.state["documents"]["resume"]["content_hash"] == hashlib.sha256(expanded).hexdigest()
+        assert db.scalar(select(func.count()).select_from(Attachment).where(Attachment.entity_id == "candidate")) == 1
+    assert len(list((Path(intake.settings.storage_dir)/'manual'/'owner'/saved['id']).glob('resume*.pdf'))) == 2
+    assert intake.submissions == [] and intake.polls == []

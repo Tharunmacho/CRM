@@ -159,7 +159,22 @@ def _number_text(raw: str) -> str:
     return text
 
 
-def read_xlsx(data: bytes) -> list[list[str]]:
+def workbook_sheets(data: bytes) -> list[str]:
+    """Worksheet labels for a bounded import preview; no workbook values are evaluated."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            if len(archive.infolist()) > MAX_ZIP_ENTRIES or sum(i.file_size for i in archive.infolist()) > MAX_UNPACKED:
+                raise LeadFileError("file_too_large", "The workbook is too large. Save the needed sheet as CSV.", 413)
+            root = ET.fromstring(_read_member(archive, "xl/workbook.xml", [MAX_UNPACKED]))
+            return [sheet.get("name", "") for sheet in root.findall(f"{_NS}sheets/{_NS}sheet")]
+    except (zipfile.BadZipFile, KeyError, ET.ParseError, RuntimeError):
+        raise LeadFileError("unsupported_file", "The workbook could not be read. Save it as .xlsx or .csv.") from None
+
+
+def read_xlsx(data: bytes, *, sheet_name: str | None = None, max_rows: int | None = None,
+              max_columns: int | None = None, preserve_row_numbers: bool = False) -> list[list[str]]:
+    max_rows = MAX_ROWS if max_rows is None else max_rows
+    max_columns = MAX_COLUMNS if max_columns is None else max_columns
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
@@ -182,8 +197,8 @@ def read_xlsx(data: bytes) -> list[list[str]]:
         shared: list[str] = []
         if "xl/sharedStrings.xml" in names:
             shared = _shared_strings(_read_member(archive, "xl/sharedStrings.xml", budget))
-        sheet_name = _first_sheet(archive, names, budget)
-        raw = _read_member(archive, sheet_name, budget)
+        sheet_path = _first_sheet(archive, names, budget, sheet_name)
+        raw = _read_member(archive, sheet_path, budget)
     rows: list[list[str]] = []
     row: dict[int, str] = {}
     current = -1
@@ -201,6 +216,14 @@ def read_xlsx(data: bytes) -> list[list[str]]:
                 in_inline = True
             elif tag == _NS + "row":
                 row = {}
+                if preserve_row_numbers:
+                    try:
+                        number = int(element.get("r", str(len(rows) + 1)))
+                    except ValueError:
+                        raise LeadFileError("unsupported_file", "The workbook has an invalid row number.") from None
+                    if number > max_rows + 1 or number < len(rows) + 1:
+                        raise LeadFileError("too_many_rows", f"The sheet must use at most {max_rows:,} rows in order.")
+                    rows.extend([[] for _ in range(number - len(rows) - 1)])
             continue
         if tag == _NS + "v":
             cell_text = element.text or ""
@@ -226,7 +249,9 @@ def read_xlsx(data: bytes) -> list[list[str]]:
             index = _col_index(cell_ref)
             if index < 0:
                 index = (max(row) + 1) if row else 0
-            if index < MAX_COLUMNS and value != "":
+            if index >= max_columns and value != "" and max_columns != MAX_COLUMNS:
+                raise LeadFileError("too_many_columns", f"The sheet must have at most {max_columns} columns.")
+            if index < max_columns and value != "":
                 row[index] = clean_cell(value)
             element.clear()
         elif tag == _NS + "row":
@@ -236,16 +261,19 @@ def read_xlsx(data: bytes) -> list[list[str]]:
                 rows.append([row.get(i, "") for i in range(width)])
             else:
                 rows.append([])
-            if len(rows) > MAX_ROWS + 1:
-                raise LeadFileError("too_many_rows", f"The sheet has more than {MAX_ROWS:,} rows. Split it and upload the parts one by one.")
+            if len(rows) > max_rows + 1:
+                raise LeadFileError("too_many_rows", f"The sheet has more than {max_rows:,} rows. Split it and upload the parts one by one.")
             element.clear()
     return rows
 
 
-def _first_sheet(archive: zipfile.ZipFile, names: set[str], budget: list[int]) -> str:
+def _first_sheet(archive: zipfile.ZipFile, names: set[str], budget: list[int], selected: str | None = None) -> str:
     try:
         workbook = ET.fromstring(_read_member(archive, "xl/workbook.xml", budget))
-        first = workbook.find(f"{_NS}sheets/{_NS}sheet")
+        sheets = workbook.findall(f"{_NS}sheets/{_NS}sheet")
+        first = next((sheet for sheet in sheets if selected is None or sheet.get("name") == selected), None)
+        if selected is not None and first is None:
+            raise LeadFileError("unsupported_file", "Choose one of the workbook's worksheets.")
         rid = first.get(_OFFICE_REL + "id") if first is not None else None
         if rid and "xl/_rels/workbook.xml.rels" in names:
             rels = ET.fromstring(_read_member(archive, "xl/_rels/workbook.xml.rels", budget))
@@ -257,6 +285,8 @@ def _first_sheet(archive: zipfile.ZipFile, names: set[str], budget: list[int]) -
                         return path
     except ET.ParseError:
         raise LeadFileError("unsupported_file", "The workbook could not be read. Save it again as .xlsx or .csv.") from None
+    if selected is not None:
+        raise LeadFileError("unsupported_file", "The selected worksheet could not be read.")
     for candidate in ("xl/worksheets/sheet1.xml",):
         if candidate in names:
             return candidate

@@ -3,7 +3,7 @@ import { Globe, Plus, Search, Tags, Trash2, UserRound, Users } from 'lucide-reac
 import type { User } from '@/shared/model/types'
 import { Field, Input, Textarea } from '@/shared/ui/primitives'
 import { Avatar } from '@/features/clients/components/parts'
-import { emptyStaffRow, MAX_STAFF_ROWS, PREFERRED_COUNTRIES, SPECIALISATIONS, toggleSpecialisation, togglePreferredCountry, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
+import { agencyDisplayName, emptyStaffRow, MAX_STAFF_ROWS, PREFERRED_COUNTRIES, SPECIALISATIONS, toggleSpecialisation, togglePreferredCountry, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
 import { foldText } from '@/features/clients/client-search'
 import '@/styles/clients-simple.css'
 
@@ -16,32 +16,43 @@ export function Section({ icon, title, count, children }: { icon: ReactNode; tit
 }
 
 /** The six details of a client or reference agency: name, agency, contact no, email, then address and state (2:1). */
-export function PartyFieldsSection({ values, onChange, errors, title = 'Details' }: {
+export function PartyFieldsSection({ values, onChange, errors, title = 'Details', agency = false }: {
   values: PartyFields
   onChange: (key: keyof PartyFields, value: string) => void
   errors: FieldErrors
   title?: string
+  agency?: boolean
 }) {
   return <Section icon={<UserRound size={17} />} title={title}>
     <div className="cs-grid6">
-      <Field label="Name (contact person)" required error={errors.name} className="span-3">
-        <Input required maxLength={200} value={values.name} onChange={(e) => onChange('name', e.target.value)} aria-invalid={!!errors.name} placeholder="Khalid Rahman" autoComplete="off" />
+      <Field label="Name (contact person)" required={!agency} error={errors.name} className="span-3">
+        <Input required={!agency} maxLength={200} value={values.name} onChange={(e) => onChange('name', e.target.value)} aria-invalid={!!errors.name} placeholder={agency ? 'Contact person, if known' : 'Khalid Rahman'} autoComplete="off" />
       </Field>
-      <Field label="Name of the agency" required error={errors.agencyName} className="span-3">
-        <Input required maxLength={200} value={values.agencyName} onChange={(e) => onChange('agencyName', e.target.value)} aria-invalid={!!errors.agencyName} placeholder="Gulf Build Contracting LLC" autoComplete="off" />
+      <Field label="Name of the agency" required={!agency} error={errors.agencyName} className="span-3">
+        <Input required={!agency} maxLength={200} value={values.agencyName} onChange={(e) => onChange('agencyName', e.target.value)} aria-invalid={!!errors.agencyName} placeholder={agency ? 'Agency name, if known' : 'Gulf Build Contracting LLC'} autoComplete="off" />
       </Field>
+      {agency && !values.agencyName.trim() && values.name.trim() && <p className="cs-agency-name-preview span-6">Agency name: <strong>{agencyDisplayName(values)}</strong></p>}
       <Field label="Contact no" error={errors.phone} className="span-3">
         <Input type="tel" maxLength={40} value={values.phone} onChange={(e) => onChange('phone', e.target.value)} aria-invalid={!!errors.phone} placeholder="+91 98765 43210" autoComplete="off" />
       </Field>
       <Field label="Email" error={errors.email} className="span-3">
         <Input type="email" maxLength={255} value={values.email} onChange={(e) => onChange('email', e.target.value)} aria-invalid={!!errors.email} placeholder="name@company.com" autoComplete="off" />
       </Field>
-      <Field label="Address" error={errors.address} className="span-4">
+      {agency && <Field label="Place / City" error={errors.place} className="span-4">
+        <Input maxLength={200} value={values.place ?? ''} onChange={(e) => onChange('place', e.target.value)} aria-invalid={!!errors.place} placeholder="Town, city or place" autoComplete="off" />
+      </Field>}
+      {agency && <Field label="State" error={errors.state} className="span-2">
+        <Input maxLength={100} value={values.state} onChange={(e) => onChange('state', e.target.value)} placeholder="State, if known" autoComplete="off" />
+      </Field>}
+      <Field label="Address" error={errors.address} className={agency ? 'span-6' : 'span-4'}>
         <Textarea rows={3} maxLength={2000} value={values.address} onChange={(e) => onChange('address', e.target.value)} placeholder="Building, street, area" />
       </Field>
-      <Field label="State" error={errors.state} className="span-2">
+      {!agency && <Field label="State" error={errors.state} className="span-2">
         <Input maxLength={100} value={values.state} onChange={(e) => onChange('state', e.target.value)} placeholder="Kerala" autoComplete="off" />
-      </Field>
+      </Field>}
+      {agency && <Field label="Notes" error={errors.notes} className="span-6">
+        <Textarea rows={2} maxLength={20000} value={values.notes ?? ''} onChange={(e) => onChange('notes', e.target.value)} placeholder="Additional agency details, if needed" />
+      </Field>}
     </div>
   </Section>
 }

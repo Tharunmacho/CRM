@@ -72,6 +72,7 @@ class ReferenceAgencyOut(Wire):
     agency_name: str
     phone: str | None = None
     email: str | None = None
+    place: str | None = None
     address: str | None = None
     state: str | None = None
     staff_contacts: list[StaffContactOut] = []

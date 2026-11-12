@@ -18,6 +18,10 @@
 .clients-simple .cs-btn-green:hover { border-color: color-mix(in srgb, var(--cs-solid) 82%, #000); background: color-mix(in srgb, var(--cs-solid) 82%, #000); }
 .clients-simple .cs-btn-primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); font-weight: 600; }
 .clients-simple .cs-btn-primary:hover { border-color: var(--primary-hover); background: var(--primary-hover); }
+.clients-simple .cs-btn-import { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 0 16px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 14px; font-weight: 500; cursor: pointer; }
+.clients-simple .cs-btn-import:hover { border-color: var(--primary); color: var(--primary); }
+.clients-simple .cs-agency-name-preview { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--tint-1); color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.clients-simple .cs-agency-name-preview strong { color: var(--text-main); }
 
 /* ---------- Switch, search and view toggle in one white panel ---------- */
 .clients-simple .cs-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; padding: 12px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); }
@@ -160,7 +164,7 @@
   .clients-simple .cs-seg button { flex: 1 1 0; padding: 0 10px; }
   .clients-simple .cs-search { flex-basis: 0; }
   .clients-simple .cs-hero { min-height: 0; }
-  .clients-simple .cs-grid6 > * { grid-column: 1 / -1; }
+  .clients-simple .cs-grid6 > :is(.span-2, .span-3, .span-4, .span-6) { grid-column: 1 / -1; }
   .clients-simple .cs-sec { padding: 16px; }
   .clients-simple .cs-staff-row { flex-direction: column; }
   .clients-simple .cs-round-btn { align-self: flex-end; margin-top: 0; }

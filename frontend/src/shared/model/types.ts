@@ -177,7 +177,10 @@ export interface ReferenceAgency {
   phone?: string
   email?: string
   address?: string
+  /** Town, city or local place, kept separate from a street address. */
+  place?: string
   state?: string
+  notes?: string
   staffContacts?: StaffContact[]
   /** Sectors the agency specialises in; `All sectors` stands alone. Absent on a server that predates migration 0033. */
   specialisations?: string[]

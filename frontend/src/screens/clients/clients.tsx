@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, LayoutGrid, Pencil, Plus, Search, Table2, Trash2, Users, X } from 'lucide-react'
+import { ArrowRight, FileSpreadsheet, LayoutGrid, Pencil, Plus, Search, Table2, Trash2, Users, X } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import type { Client, Company, ReferenceAgency } from '@/shared/model/types'
 import { initials } from '@/shared/lib/format'
@@ -10,9 +10,10 @@ import { Panel } from '@/shared/ui/display'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { ClientDialog } from '@/features/clients/components/client-dialog'
 import { AgencyDialog } from '@/features/clients/components/agency-dialog'
+import { AgencyImportDialog } from '@/features/clients/components/agency-import-dialog'
 import { Avatar, CopyButton, Flag, hueOf } from '@/features/clients/components/parts'
 import { agencyApi, useReferenceAgencies } from '@/features/clients/agency-api'
-import { firstName } from '@/features/clients/client-form'
+import { agencyDisplayName, firstName } from '@/features/clients/client-form'
 import { highlightPhone, highlightPieces, matchesSearch, type Searchable } from '@/features/clients/client-search'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import '@/styles/clients-simple.css'
@@ -69,7 +70,7 @@ function Identity({ name, query }: { name: string; query: string }) {
 /** Contact person, then their phone and email (with the copy button) under it, as the old table showed them. */
 function ContactCell({ name, phone, email, query }: { name: string; phone: string; email: string; query: string }) {
   return <div className="cl-cell">
-    <b title={name}><Hi text={name} query={query} /></b>
+    {name && <b title={name}><Hi text={name} query={query} /></b>}
     {phone && <span className="cl-line ident"><a href={`tel:${phone.replace(/[^\d+]/g, '')}`} title={phone} onClick={(event) => event.stopPropagation()}><HiPhone text={phone} query={query} /></a></span>}
     {email && <span className="cl-line"><a href={`mailto:${email}`} title={email} onClick={(event) => event.stopPropagation()}><Hi text={email} query={query} /></a><CopyButton value={email} label={`Copy email of ${name}`} /></span>}
     {!phone && !email && <span className="cl-quiet">No phone or email</span>}
@@ -120,7 +121,7 @@ function RecordCard({ title, contact, facts, staff, actions }: { title: string; 
   return <article className="cs-card">
     <header>
       <Avatar name={title} size="lg" />
-      <div className="cs-title"><h3 title={title}>{title}</h3><p title={contact}>{contact}</p></div>
+      <div className="cs-title"><h3 title={title}>{title}</h3>{contact && contact !== title && <p title={contact}>{contact}</p>}</div>
     </header>
     <dl className="cs-facts">{facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>
     {staff && <div className="cs-staff"><span className="cs-staff-label">Recruiter</span>{staff}</div>}
@@ -151,19 +152,19 @@ function ClientCards({ rows, query, onOpen, onEdit }: { rows: ClientRow[]; query
 }
 
 function AgencyCards({ rows, query, onEdit, onDelete }: { rows: AgencyRow[]; query: string; onEdit?: (a: ReferenceAgency) => void; onDelete?: (a: ReferenceAgency) => void }) {
-  return <div className="cs-grid">{rows.map(({ agency }) => <RecordCard key={agency.id} title={agency.agencyName} contact={agency.name}
+  return <div className="cs-grid">{rows.map(({ agency }) => <RecordCard key={agency.id} title={agencyDisplayName(agency)} contact={agency.name}
     facts={[
       { label: 'Contact no', value: tel(agency.phone ?? '', query) },
       { label: 'Email', value: mail(agency.email ?? '', agency.name, query) },
       { label: 'Address', value: place(agency.address ?? '', query) },
-      { label: 'State', value: <Location primary={agency.state ?? ''} query={query} /> },
+      { label: 'Place / City', value: <Location primary={agency.place ?? ''} secondary={agency.state} query={query} /> },
       { label: 'Specialisation', value: <ChipList values={agency.specialisations} label="Specialisation" /> },
       { label: 'Preferred country', value: <ChipList values={agency.preferredCountries} label="Preferred country" /> },
       { label: 'Staff', value: staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
     ]}
     actions={<>
-      {onEdit && <button type="button" className="cl-open cs-wide" onClick={() => onEdit(agency)} aria-label={`Edit ${agency.agencyName}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
-      {onDelete && <button type="button" className="cl-open cs-wide is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agency.agencyName}`}><Trash2 size={13} aria-hidden="true" />Delete</button>}
+      {onEdit && <button type="button" className="cl-open cs-wide" onClick={() => onEdit(agency)} aria-label={`Edit ${agencyDisplayName(agency)}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
+      {onDelete && <button type="button" className="cl-open cs-wide is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agencyDisplayName(agency)}`}><Trash2 size={13} aria-hidden="true" />Delete</button>}
     </>} />)}</div>
 }
 
@@ -187,17 +188,17 @@ function ClientTable({ rows, query, loading, onOpen, onEdit }: { rows: ClientRow
 
 function AgencyTable({ rows, query, loading, onEdit, onDelete }: { rows: AgencyRow[]; query: string; loading: boolean; onEdit?: (a: ReferenceAgency) => void; onDelete?: (a: ReferenceAgency) => void }) {
   const columns: Column<AgencyRow>[] = [
-    { key: 'agency', header: 'Agency', width: '24%', minWidth: '12rem', render: ({ agency }) => <Identity name={agency.agencyName} query={query} /> },
-    { key: 'contact', header: 'Contact person', width: '25%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
-    { key: 'location', header: 'Location', width: '27%', align: 'left', render: ({ agency }) => <Location primary={agency.state ?? ''} secondary={agency.address} query={query} /> },
+    { key: 'agency', header: 'Agency', width: '24%', minWidth: '12rem', render: ({ agency }) => <Identity name={agencyDisplayName(agency)} query={query} /> },
+    { key: 'contact', header: 'Contact', width: '25%', align: 'left', render: ({ agency }) => <ContactCell name={agency.name === agency.agencyName ? '' : agency.name} phone={agency.phone ?? ''} email={agency.email ?? ''} query={query} /> },
+    { key: 'location', header: 'Location', width: '27%', align: 'left', render: ({ agency }) => <Location primary={[agency.place, agency.state].filter(Boolean).join(', ')} secondary={agency.address} query={query} /> },
     { key: 'focus', header: 'Specialisation and country', width: '22%', minWidth: '12rem', align: 'left', render: ({ agency }) => (agency.specialisations?.length || agency.preferredCountries?.length)
       ? <span className="cs-tagstack"><ChipList values={agency.specialisations} label="Specialisation" /><ChipList values={agency.preferredCountries} label="Preferred country" /></span> : <Quiet>Not added</Quiet> },
     { key: 'staff', header: 'Staff details', width: '10%', align: 'left', render: ({ agency }) => staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
     {
       key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
       render: ({ agency }) => <span className="cs-row-actions">
-        {onEdit && <button type="button" className="cl-open" onClick={() => onEdit(agency)} aria-label={`Edit ${agency.agencyName}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
-        {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agency.agencyName}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
+        {onEdit && <button type="button" className="cl-open" onClick={() => onEdit(agency)} aria-label={`Edit ${agencyDisplayName(agency)}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
+        {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={() => onDelete(agency)} aria-label={`Delete ${agencyDisplayName(agency)}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
       </span>,
     },
   ]
@@ -231,6 +232,7 @@ export default function ClientsPage() {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Client | null>(null)
   const [addingAgency, setAddingAgency] = useState(false)
+  const [importingAgencies, setImportingAgencies] = useState(false)
   const [editingAgency, setEditingAgency] = useState<ReferenceAgency | null>(null)
   const [deleting, setDeleting] = useState<ReferenceAgency | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
@@ -289,7 +291,7 @@ export default function ClientsPage() {
 
   const agencyRows = useMemo<AgencyRow[]>(() => (agencies.items ?? []).map((agency) => ({
     agency,
-    search: { name: agency.name, agencyName: agency.agencyName, email: agency.email, address: agency.address, state: agency.state, phone: agency.phone, staffContacts: agency.staffContacts,
+    search: { name: agency.name, agencyName: agencyDisplayName(agency), email: agency.email, address: [agency.place, agency.address].filter(Boolean).join(' '), state: agency.state, phone: agency.phone, staffContacts: agency.staffContacts,
       tags: [...(agency.specialisations ?? []), ...(agency.preferredCountries ?? [])] },
   })), [agencies.items])
 
@@ -369,10 +371,11 @@ export default function ClientsPage() {
   return (
     <div className="clients-simple cs-page">
       <header className="cs-head">
-        <h1>Clients</h1>
+        <h1>{side === 'agencies' ? 'Agencies' : 'Clients'}</h1>
         {canEdit && <div className="cs-actions">
-          <button type="button" className="cs-btn-primary" onClick={() => setAdding(true)}><Plus size={16} />New client</button>
-          <button type="button" className="cs-btn-green" onClick={() => setAddingAgency(true)}><Plus size={16} />Add agency</button>
+          {side === 'clients' && <button type="button" className="cs-btn-primary" onClick={() => setAdding(true)}><Plus size={16} />New client</button>}
+          {side === 'agencies' && <button type="button" className="cs-btn-import" onClick={() => setImportingAgencies(true)}><FileSpreadsheet size={16} />Import Excel / CSV</button>}
+          <button type="button" className="cs-btn-green" onClick={() => setAddingAgency(true)}><Plus size={16} />New agency</button>
         </div>}
       </header>
 
@@ -384,7 +387,7 @@ export default function ClientsPage() {
         <label className="cs-search">
           <Search size={18} aria-hidden="true" />
           <input ref={searchBox} autoFocus type="search" value={text} onChange={(event) => setText(event.target.value)} maxLength={120} autoComplete="off" spellCheck={false} aria-keyshortcuts="/"
-            placeholder={side === 'clients' ? 'Search by name, company, phone, email or recruiter' : 'Search by name, agency, phone, email, state or staff'} aria-label={`Search ${nouns}`} />
+            placeholder={side === 'clients' ? 'Search by name, company, phone, email or recruiter' : 'Search by agency, name, phone, place or staff'} aria-label={`Search ${nouns}`} />
           {text && <button type="button" className="cs-search-clear" aria-label="Clear search" onClick={clear}><X size={15} /></button>}
         </label>
         <div className="cs-layout" role="group" aria-label="View as">
@@ -406,10 +409,11 @@ export default function ClientsPage() {
       {editing && <ClientDialog client={editing} onClose={() => setEditing(null)} />}
       {addingAgency && <AgencyDialog onClose={() => setAddingAgency(false)} onSaved={agencies.refresh} />}
       {editingAgency && <AgencyDialog agency={editingAgency} onClose={() => setEditingAgency(null)} onSaved={agencies.refresh} />}
+      {importingAgencies && <AgencyImportDialog onClose={() => setImportingAgencies(false)} onImported={() => { agencies.refresh(); setText(''); patch({ view: 'agencies', all: '1', q: null }) }} />}
       {deleting && <Dialog open onClose={() => { if (!deleteBusy) setDeleting(null) }} width="sm" title="Delete agency"
         footer={<><Button variant="ghost" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="danger" disabled={deleteBusy} onClick={() => void confirmDelete()}>{deleteBusy ? 'Deleting…' : 'Delete'}</Button></>}>
         {deleteError && <p role="alert" className="client-form-error">{deleteError}</p>}
-        <p>Delete <b>{deleting.agencyName}</b> from the agencies? Candidates already recorded with this agency keep their text.</p>
+        <p>Delete <b>{agencyDisplayName(deleting)}</b> from the agencies? Candidates already recorded with this agency keep their text.</p>
       </Dialog>}
     </div>
   )

@@ -290,9 +290,13 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 if not selected or not set(selected) <= set(getattr(inspected, kind + "_pages")):
                     raise ExtractionFailure("The selected pages no longer match what was checked earlier. Check the pages and try again.")
                 content = inspected.pdf_for_pages(selected)
-                document_key = put_bytes(settings, "manual/" + owner + "/" + identifier + "/" + kind + ".pdf", content, "application/pdf")
+                digest = hashlib.sha256(content).hexdigest()
+                # Classification can add pages to a previously read document. Storage is
+                # immutable: retain its earlier PDF and publish the expanded bytes at a
+                # distinct key. Repeating the same bytes reuses that key safely.
+                document_key = put_bytes(settings, "manual/" + owner + "/" + identifier + "/" + kind + "-" + digest + ".pdf", content, "application/pdf")
                 documents[kind] = {"object_key": document_key, "file_name": kind + ".pdf", "content_type": "application/pdf",
-                                   "size_kb": max(1, (len(content) + 1023) // 1024), "content_hash": hashlib.sha256(content).hexdigest()}
+                                   "size_kb": max(1, (len(content) + 1023) // 1024), "content_hash": digest}
                 checkpoint(state)
         with sessions() as db:
             # A file read for a candidate's application form fills that candidate's form in this same transaction.

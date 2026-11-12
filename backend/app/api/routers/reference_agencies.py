@@ -9,10 +9,11 @@ points at an agency, so removing one cannot orphan a record. Every change is wri
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, status
-from pydantic import Field, field_validator
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -34,16 +35,40 @@ PreferredCountry = Literal["Singapore", "Malaysia", "Europe", "Gulf", "Others"]
 
 class ReferenceAgencyIn(MasterInput):
     # The contact person.
-    name: str = Field(min_length=1, max_length=200)
-    agencyName: str = Field(min_length=1, max_length=200)
+    name: str | None = Field(default=None, max_length=200)
+    agencyName: str | None = Field(default=None, max_length=200)
     phone: str | None = Field(default=None, max_length=40)
     email: str | None = Field(default=None, max_length=255)
+    place: str | None = Field(default=None, max_length=200)
     address: str | None = Field(default=None, max_length=2000)
     state: str | None = Field(default=None, max_length=100)
     notes: str | None = Field(default=None, max_length=20000)
     staffContacts: list[StaffContactIn] = Field(default_factory=list, max_length=MAX_STAFF_CONTACTS)
     specialisations: list[Specialisation] = Field(default_factory=list, max_length=len(SPECIALISATIONS) * 2)
     preferredCountries: list[PreferredCountry] = Field(default_factory=list, max_length=len(PREFERRED_COUNTRIES) * 2)
+
+    @field_validator("name", "agencyName", "phone", "email", "place", "address", "state", "notes", mode="before")
+    @classmethod
+    def clean_text(cls, value):
+        from app.services.reference_agency_import import clean_text
+        return clean_text(value) or None if isinstance(value, str) or value is None else value
+
+    @field_validator("phone")
+    @classmethod
+    def valid_phone(cls, value):
+        if value and (not re.fullmatch(r"[0-9+\-().\s/]+", value) or not 5 <= len(re.sub(r"\D", "", value)) <= 15):
+            raise ValueError("phone: use 5 to 15 digits with optional country code, spaces or punctuation. Put additional numbers in separate team contacts.")
+        return value
+
+    @model_validator(mode="after")
+    def display_names(self):
+        if not self.name and not self.agencyName:
+            raise ValueError("Enter an agency name or a contact name.")
+        self.agencyName = self.agencyName or f"{self.name} Agency"
+        if len(self.agencyName) > 200:
+            raise ValueError("The generated agency name is too long. Enter an agency name of at most 200 characters.")
+        self.name = self.name or self.agencyName
+        return self
 
     @field_validator("specialisations")
     @classmethod
@@ -71,9 +96,33 @@ def create_reference_agency(body: ReferenceAgencyIn, db: Session = Depends(get_d
     return _master_save(db, user, ReferenceAgency(), body, "reference_agency", ReferenceAgencyOut, new=True)
 
 
+@router.post("/import/preview")
+def preview_import(file: UploadFile = File(...), mapping: str | None = Form(None),
+                   headerRow: int | None = Form(None), sheetName: str | None = Form(None),
+                   db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from app.services import reference_agency_import as imports
+    parsed = imports.parse_upload(file, mapping=mapping, header_row=headerRow, sheet_name=sheetName)
+    return imports.preview(db, parsed)
+
+
+@router.post("/import/confirm")
+def confirm_import(file: UploadFile = File(...), previewHash: str = Form(...), mapping: str | None = Form(None),
+                   headerRow: int | None = Form(None), sheetName: str | None = Form(None),
+                   db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from app.services import reference_agency_import as imports
+    parsed = imports.parse_upload(file, mapping=mapping, header_row=headerRow, sheet_name=sheetName)
+    if parsed["previewHash"] != previewHash:
+        raise HTTPException(409, "The file or column mapping changed. Preview the import again before saving.")
+    return imports.confirm(db, user, parsed)
+
+
 @router.put("/{agency_id}")
 def update_reference_agency(agency_id: str, body: ReferenceAgencyIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return _master_save(db, user, _master_row(db, ReferenceAgency, agency_id), body, "reference_agency", ReferenceAgencyOut)
+    row = _master_row(db, ReferenceAgency, agency_id)
+    for field in ("place", "notes"):
+        if field not in body.model_fields_set:
+            setattr(body, field, getattr(row, field))  # Older forms do not clear unrepresented fields.
+    return _master_save(db, user, row, body, "reference_agency", ReferenceAgencyOut)
 
 
 @router.delete("/{agency_id}", status_code=status.HTTP_204_NO_CONTENT)

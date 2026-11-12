@@ -10,7 +10,7 @@ async function load(relative) {
 }
 
 const form = await load('../src/features/clients/client-form.ts')
-const { cleanStaffRows, validateParty, buildAgencyPayload, fieldErrorsFromApi, firstName, staffRowsOf, emptyStaffRow, emptyParty, isEmptyStaffRow,
+const { cleanStaffRows, validateParty, validateAgency, agencyDisplayName, buildAgencyPayload, fieldErrorsFromApi, firstName, staffRowsOf, emptyStaffRow, emptyParty, isEmptyStaffRow,
   toggleSpecialisation, togglePreferredCountry, focusOf, SPECIALISATIONS, PREFERRED_COUNTRIES } = form
 
 const party = { name: ' Khalid Rahman ', agencyName: ' Gulf Build ', phone: '+91 98765 43210', email: 'khalid@example.com', address: ' 12 Marina Road ', state: 'Kerala' }
@@ -66,9 +66,48 @@ test('no more than 50 staff entries', () => {
 test('the agency body trims values, leaves blanks out and carries the cleaned staff', () => {
   const body = buildAgencyPayload({ ...party, phone: '', state: ' ' }, [{ name: 'Ravi', designation: '', phone: '', email: '' }, emptyStaffRow()])
   assert.deepEqual(body, {
-    name: 'Khalid Rahman', agencyName: 'Gulf Build', phone: undefined, email: 'khalid@example.com', address: '12 Marina Road', state: undefined,
+    name: 'Khalid Rahman', agencyName: 'Gulf Build', phone: undefined, email: 'khalid@example.com', address: '12 Marina Road', place: '', state: undefined, notes: '',
     staffContacts: [{ name: 'Ravi' }], specialisations: [], preferredCountries: [],
   })
+})
+
+test('reference agencies accept either name while client validation keeps both requirements', () => {
+  const personOnly = { ...emptyParty(), name: ' Tharun ', place: ' Chennai ' }
+  assert.deepEqual(validateAgency(personOnly, []), {})
+  assert.equal(agencyDisplayName(personOnly), 'Tharun Agency')
+  const payload = buildAgencyPayload(personOnly, [])
+  assert.equal(payload.name, 'Tharun')
+  assert.equal(payload.agencyName, 'Tharun Agency')
+  assert.equal(payload.place, 'Chennai')
+  assert.equal(payload.address, undefined)
+  assert.match(validateParty(personOnly, []).agencyName, /name of the agency/)
+
+  const agencyOnly = { ...emptyParty(), agencyName: ' Pearl Overseas ' }
+  assert.deepEqual(validateAgency(agencyOnly, []), {})
+  assert.equal(agencyDisplayName(agencyOnly), 'Pearl Overseas')
+  assert.equal(buildAgencyPayload(agencyOnly, []).name, '')
+  assert.deepEqual(Object.keys(validateAgency(emptyParty(), [])), ['agencyName'])
+})
+
+test('agency fallback never hides provided contact errors or exceeds field limits', () => {
+  const fields = { ...emptyParty(), name: 'Tharun', phone: 'not a number', email: 'not an email', place: 'x'.repeat(201) }
+  const problems = validateAgency(fields, [])
+  assert.ok(problems.phone)
+  assert.ok(problems.email)
+  assert.ok(problems.place)
+  assert.ok(validateAgency({ ...emptyParty(), name: 'x'.repeat(200) }, []).agencyName)
+  assert.equal(agencyDisplayName({ agencyName: ' Saved agency ', name: 'Contact' }), 'Saved agency')
+  assert.equal(fieldErrorsFromApi([{ loc: ['body', 'place'], msg: 'Too long' }]).fields.place, 'Too long.')
+})
+
+test('clearing a saved place is explicit and imported notes survive ordinary edits', () => {
+  const saved = { ...party, place: 'Chennai', notes: 'Imported trade contacts' }
+  const unchanged = JSON.parse(JSON.stringify(buildAgencyPayload(saved, [])))
+  assert.equal(unchanged.place, 'Chennai')
+  assert.equal(unchanged.notes, 'Imported trade contacts')
+  const cleared = JSON.parse(JSON.stringify(buildAgencyPayload({ ...saved, place: '' }, [])))
+  assert.equal(cleared.place, '')
+  assert.equal(cleared.notes, 'Imported trade contacts')
 })
 
 test('server 422 errors land on the right field', () => {

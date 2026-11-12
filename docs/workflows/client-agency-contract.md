@@ -5,8 +5,8 @@ Shared by the backend and the two frontend screens. Keep this file in step with 
 ## What the client wants
 
 - **Clients page**: simple and crisp like the Dashboard. No KPI cards, no All/Active/Inactive tabs, no agreement/status badges.
-  Two buttons: **New client** and **Add reference agency**. Each record is a card.
-- **Card fields** (client and reference agency alike): Name (contact person), Name of the agency, Contact no, Email, Address, State.
+  Clients and Agencies have their own tabs, table/card views and creation actions. Agencies also has **Import Excel / CSV**.
+- **Card fields**: Name (contact person), Name of the agency, Contact no, Email, Address, State. Agencies additionally keep an optional Place / City.
 - **Staff details**: an optional list of people on the client's / agency's own team (name, designation, phone, email), added in the same form.
 - **Allocate staff** (clients only): a dropdown of the CRM staff created in User Management (multi-select). The chosen staff look after
   that client end to end: every candidate who comes in (direct, WhatsApp, email, manual) for that client's jobs/requirements, and every
@@ -19,7 +19,7 @@ Shared by the backend and the two frontend screens. Keep this file in step with 
 | `crm_employer_companies.state` | `String(100)`, nullable. The agency's state. (Company already holds name, address, phone, email.) |
 | `crm_client_contacts.staff_contacts` | `JSONB NOT NULL DEFAULT '[]'`: `[{name, designation?, phone?, email?}]`, max 50 entries. |
 | `crm_client_staff` | `(client_id FK crm_client_contacts ON DELETE CASCADE, user_id FK auth_users ON DELETE CASCADE)`, primary key on both. |
-| `crm_reference_agencies` | `id`, `name` (contact person, required), `agency_name` (required), `phone`, `email`, `address` (Text), `state`, `staff_contacts` JSONB default `[]`, `notes`, timestamps. Unique index on `lower(agency_name)` is NOT wanted (two branches may share a name). |
+| `crm_reference_agencies` | `id`, `name`, `agency_name`, `phone`, `email`, `address` (Text), `place` (nullable String(200), migration 0036), `state`, `staff_contacts` JSONB default `[]`, `notes`, timestamps. Both names are stored, but either input name is sufficient under the fallback rule below. No unique index on `lower(agency_name)` because branches may share a name. |
 
 ## API (camelCase JSON)
 
@@ -57,8 +57,8 @@ Shared by the backend and the two frontend screens. Keep this file in step with 
 
 ## Frontend
 
-- `/clients`: header, a two-way switch **Clients | Reference agencies**, a search box, then a card grid. Buttons **Add reference agency** and
-  **New client**. A card shows the six fields, the allocated staff (client) as small avatars with names, and Open / Edit.
+- `/clients`: header, a two-way switch **Clients | Agencies**, a search box, then a table or card grid. **New client** is available on Clients;
+  **New agency** and **Import Excel / CSV** are available on Agencies. Cards show contact/location fields, allocated staff for clients, and actions.
 - `/clients/:id`: the same simple style: header with the agency name, a details card (the six fields + allocated staff + staff details),
   then the orders and the candidates matched to them. No KPI cards, no agreement/status badges.
 - Dialogs: `ClientDialog` (keep its props) and a new `AgencyDialog`. Fields in a clean two-column grid; "Staff details" is a repeatable
@@ -75,3 +75,23 @@ Two multi-select button groups in the agency dialog, after the details and befor
 - Storage: `crm_reference_agencies.specialisations` and `.preferred_countries`, JSONB NOT NULL DEFAULT `'[]'`. Additive and idempotent; an older server sharing the
   database ignores the columns and its INSERTs (which do not name them) still work. Older rows read as empty lists. Downgrade drops both columns.
 - The agency list shows the choices as compact chips (table column and card rows) and the search box matches them.
+
+## Agency naming, places and spreadsheet import (migration `0036_reference_agency_place`)
+
+- Manual entry and import accept either an agency name or a contact name. Contact-only `Tharun` becomes `Tharun Agency`.
+  Agency-only input is used for both stored names; the UI suppresses the repeated contact label. There is no missing-name badge or corrective
+  **Add agency name** action. Both blank is invalid. Client name requirements are unchanged.
+- Place / City is independent of an optional street address and state. Missing phone, address or place is not invented. A PUT that omits
+  `place` preserves the stored place, while an explicit blank clears it.
+- `POST /api/reference-agencies/import/preview` accepts multipart `file` (`.xlsx` or `.csv`, up to 5 MB and 2,000 data rows), optional
+  `mapping` (JSON field-to-zero-based-column-index map), `headerRow` (0 for no header, otherwise 1–20), and `sheetName`.
+  It returns worksheet/column choices, the resolved mapping, `previewHash`, row decisions, counts and `canConfirm`. Preview writes nothing.
+- `POST /api/reference-agencies/import/confirm` accepts the same file/options plus `previewHash`. Changed bytes or mapping return 409.
+  It rechecks the current directory under a short table lock and commits changes and audits together. Repeated identical imports skip saved rows.
+- Recognised section headings carry Trichy/Madurai or an explicit `Place: ...`/`City: ...` into following rows. **Other Places** resets that
+  inherited place; it is not a city. An unnamed phone column can be suggested from its values and remains editable in preview.
+- The preview classifies each row as `create`, `add_contact`, `duplicate`, `conflict`, `invalid` or `section`. A distinct contact for the same
+  agency/place is added to its team without replacing the primary contact. Conflicting details, ambiguous matches and invalid rows are skipped
+  with explanations. Named branches can remain separate agencies. Existing details are never overwritten by import.
+- Changing worksheet redetects its columns. Changing a mapping or header requires a fresh preview before confirmation. A failed confirmation
+  also requires a fresh preview so an uncertain response can be retried without duplicating saved agencies.

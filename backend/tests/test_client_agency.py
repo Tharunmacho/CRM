@@ -327,7 +327,7 @@ def test_reference_agency_crud_audit_and_order(env):
 
 
 @pytest.mark.parametrize("bad", [
-    {"agencyName": "A"}, {"name": "N"}, {"name": " ", "agencyName": "A"}, {"name": "N", "agencyName": " "},
+    {}, {"name": " ", "agencyName": " "},
     {"name": "N", "agencyName": "A", "email": "not-an-email"}, {"name": "N", "agencyName": "A", "phone": "1" * 41},
     {"name": "N", "agencyName": "A", "state": "s" * 101}, {"name": "N", "agencyName": "A", "staffContacts": [{"phone": "1"}]},
     {"name": "N", "agencyName": "A", "staffContacts": [{"name": "x"}] * 51}, {"name": "N", "agencyName": "A", "colour": "red"},

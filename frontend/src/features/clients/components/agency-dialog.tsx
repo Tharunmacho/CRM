@@ -8,7 +8,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { DialogMark } from '@/features/master-data/components/dialog-mark'
 import { AgencyFocusSection, PartyFieldsSection, StaffDetailsSection } from '@/features/clients/components/party-fields'
 import { agencyApi } from '@/features/clients/agency-api'
-import { buildAgencyPayload, emptyParty, fieldErrorsFromApi, focusOf, staffRowsOf, validateParty, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
+import { buildAgencyPayload, emptyParty, fieldErrorsFromApi, focusOf, staffRowsOf, validateAgency, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
 import '@/styles/clients-simple.css'
 
 /** Add or edit a reference agency: the same details and staff details as a client, without allocated CRM staff. */
@@ -16,7 +16,7 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
   const store = useStore()
   const creating = !agency
   const [values, setValues] = useState<PartyFields>(() => agency
-    ? { name: agency.name, agencyName: agency.agencyName, phone: agency.phone ?? '', email: agency.email ?? '', address: agency.address ?? '', state: agency.state ?? '' }
+    ? { name: agency.name, agencyName: agency.agencyName, phone: agency.phone ?? '', email: agency.email ?? '', address: agency.address ?? '', place: agency.place ?? '', state: agency.state ?? '', notes: agency.notes ?? '' }
     : emptyParty())
   const [rows, setRows] = useState<StaffRow[]>(() => staffRowsOf(agency?.staffContacts))
   const [focus, setFocus] = useState<AgencyFocus>(() => focusOf(agency))
@@ -28,7 +28,7 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
 
   const save = async () => {
     if (saving) return
-    const problems = validateParty(values, rows)
+    const problems = validateAgency(values, rows)
     setErrors(problems)
     if (Object.keys(problems).length) { setError('Please fix the highlighted fields.'); return }
     setSaving(true); setError('')
@@ -57,7 +57,7 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
     {error && <p role="alert" className="client-form-error">{error}</p>}
     <form id="agency-form" noValidate className="client-form clients-simple" onSubmit={(event) => { event.preventDefault(); void save() }}>
       <fieldset disabled={saving} className="client-form-fields">
-        <PartyFieldsSection values={values} onChange={set} errors={errors} />
+        <PartyFieldsSection agency values={values} onChange={set} errors={errors} />
         <AgencyFocusSection value={focus} onChange={setFocus} errors={errors} />
         <StaffDetailsSection rows={rows} onChange={setRows} errors={errors} />
       </fieldset>

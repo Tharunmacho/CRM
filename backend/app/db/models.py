@@ -245,6 +245,7 @@ class ReferenceAgency(Base, PkMixin, TimestampMixin):
     agency_name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(40))
     email: Mapped[str | None] = mapped_column(String(255))
+    place: Mapped[str | None] = mapped_column(String(200))
     address: Mapped[str | None] = mapped_column(Text)
     state: Mapped[str | None] = mapped_column(String(100))
     staff_contacts: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
