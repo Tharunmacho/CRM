@@ -280,6 +280,41 @@ def test_combining_conflicting_birth_date_or_gender_requires_review(field, first
         ])
 
 
+@pytest.mark.parametrize("field, first, second", [
+    ("dob", "1990-01-01", "1991-01-01"),
+    ("gender", "male", "female"),
+])
+def test_reviewed_demographic_conflict_keeps_content_but_not_the_conflicting_identity(field, first, second):
+    tolerated = set()
+    fields, raw, review = subject.combine_extractions([
+        extraction(fields={field: first, "skills": ["Welding"], "total_experience": 8, "gulf_experience": 6}),
+        extraction(kind="passport", fields={field: second}),
+    ], allow_reviewed_demographic_conflicts=True, tolerated_conflicts=tolerated)
+
+    # This escape hatch is only for a reviewer-confirmed bundle.  It retains
+    # the evidence/content but never selects the disagreeing identity value.
+    assert review is True and tolerated == {field} and field not in fields
+    assert set(raw) >= {"resume", "passport"}
+    values = subject.candidate_values(fields, raw)
+    assert field not in values
+    assert values["skills"] == ["Welding"]
+    assert (values["total_experience"], values["gulf_experience"]) == (8, 6)
+
+
+@pytest.mark.parametrize("first, second", [
+    ({}, {"name": "Another Applicant"}),
+    ({}, {"phone": "9000000099"}),
+    ({}, {"email": "a.lex@example.test"}),
+    ({"passport_no": "P0000001"}, {"passport_no": "P0000002"}),
+])
+def test_reviewed_demographic_opt_in_still_rejects_name_contact_and_passport_conflicts(first, second):
+    with pytest.raises(subject.IntakeReviewError):
+        subject.combine_extractions([
+            extraction(fields=first),
+            extraction(kind="passport", fields=second),
+        ], allow_reviewed_demographic_conflicts=True, tolerated_conflicts=set())
+
+
 def test_receipt_cursor_and_job_are_idempotent_and_account_scoped(intake, monkeypatch):
     calls = mailbox(monkeypatch)
     for account in ("account-a", "account-a", "account-b"):

@@ -438,6 +438,33 @@ def fake_provider(monkeypatch, submissions):
     monkeypatch.setattr(document_extraction, "VerisOCR", Provider)
 
 
+def test_reviewed_group_dob_conflict_keeps_only_content_fields_and_raw_evidence():
+    pages = [{"sourceId": "source", "pageNumber": 1, "kind": "resume"},
+             {"sourceId": "source", "pageNumber": 2, "kind": "passport"}]
+    resume_fields = {"name": "Alex Example", "phone": "9876543210", "email": "alex@example.test",
+                     "passport_no": "P0000000", "dob": "1990-01-01", "gender": "male",
+                     "nationality": "Indian", "current_city": "Chennai", "languages": ["English"],
+                     "designation": "Welder", "skills": ["Welding"], "total_experience": 8,
+                     "gulf_experience": 6}
+    output = {"warnings": [], "extractions": {
+        "resume": {"fields": resume_fields, "raw": {"request_id": "resume", "pages": []}, "selected_pages": [1]},
+        "passport": {"fields": {**resume_fields, "dob": "1991-01-01"},
+                     "raw": {"request_id": "passport", "pages": []}, "selected_pages": [2]},
+    }}
+    group = SimpleNamespace(id="group", pages=pages)
+    bundle = SimpleNamespace(id="bundle", source_type="manual", sources=[{"group_extractions": {
+        group.id: {"signature": subject._group_signature(pages), "output": output},
+    }}])
+
+    fields, raw, warnings, conflicts = subject._ocr_for_group(bundle, group)
+
+    assert conflicts == ["dob"]
+    assert {"resume", "passport"} <= set(raw)
+    assert any("date of birth" in warning for warning in warnings)
+    assert fields == {"current_city": "Chennai", "languages": ["English"], "designation": "Welder",
+                      "skills": ["Welding"], "total_experience": 8, "gulf_experience": 6}
+
+
 def test_confirmed_people_are_read_by_the_normal_extraction_and_reviewer_values_win(env, monkeypatch):
     env.settings.veris_ocr_base_url, env.settings.veris_ocr_api_key = "https://ocr.invalid", "synthetic-key"
     submissions = []

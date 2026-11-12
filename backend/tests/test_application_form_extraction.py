@@ -211,6 +211,34 @@ def test_stored_documents_replay_is_idempotent_and_latest_wins():
     assert second.filled == [] and vars(c) == snapshot
 
 
+def test_reviewed_identity_conflict_replay_fills_only_resume_content():
+    """A future forced refresh must not revive OCR identity values a reviewer rejected."""
+    c = person(name="Arjun Menon", dob=date(1980, 5, 25), gender="female", passport_no="R7654321",
+               passport_place="Reviewer-selected place", ocr_data={
+                   "resume": RESUME,
+                   "passport": PASSPORT,
+                   "person_split": {"contentOnlyAutofill": True, "ocrIdentityConflictFields": ["dob", "gender"]},
+               })
+    fx.mark_manual(c, ["name", "dob", "gender", "passport_no", "passport_place"])
+
+    first = fx.apply_stored_ocr(c, force=True)
+
+    # The manually reviewed identity is unchanged, including blank contact and
+    # non-content form fields that the resume would otherwise provide.
+    assert (c.name, c.dob, c.gender, c.passport_no, c.passport_place) == (
+        "Arjun Menon", date(1980, 5, 25), "female", "R7654321", "Reviewer-selected place")
+    assert c.phone == "" and c.email is None
+    assert c.father_name is None and c.current_address is None
+    # Work/profile content survives and remains available to the recruiters.
+    assert c.education and c.work_history
+    assert (c.total_experience, c.experience_india, c.gulf_experience) == (5, 2, 3)
+    assert c.skills == ["AutoCAD", "Estimating"] and c.designations == ["Site Engineer"]
+    assert first.filled
+
+    again = fx.apply_stored_ocr(c, force=True)
+    assert again.filled == []
+
+
 def test_primary_document_is_applied_once_and_stale_primary_does_not_undo_an_upload():
     c = person(ocr_data={"passport": {"mrz": {**PASSPORT["mrz"], "passport_number": "K0000000"}, "fields": []}})
     fx.apply_stored_ocr(c)

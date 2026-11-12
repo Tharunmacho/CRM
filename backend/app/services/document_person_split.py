@@ -25,6 +25,11 @@ KINDS = {"resume", "passport", "aadhaar", "photo", "education", "experience", "s
 FIELD_KEYS = {"name", "phone", "email", "whatsapp", "dob", "gender", "nationality", "current_city", "languages",
               "passport_no", "passport_issue", "passport_expiry", "passport_place", "designations", "skills",
               "total_experience", "gulf_experience", "expected_salary", "source"}
+# When a human-confirmed bundle has a conflicting DOB or gender, its OCR may
+# enrich only work/profile content.  The reviewed form fields remain the sole
+# source of identity and passport information.
+REVIEWED_CONTENT_FIELDS = frozenset({"education", "work_history", "skills", "designation", "designations",
+                                     "total_experience", "experience_india", "gulf_experience", "current_city", "languages"})
 
 
 def now():
@@ -456,23 +461,40 @@ def extract_groups(db, identifier, user, revision, settings):
 
 
 def _ocr_for_group(bundle, group):
-    """Merged OCR fields/raw/warnings for a confirmed group, or (None, None, [warning])."""
+    """Merged OCR fields/raw/warnings for a confirmed group.
+
+    A reviewer-confirmed group is allowed to keep non-identity resume content when
+    only DOB/gender conflicts.  All stronger identity conflicts still fail closed.
+    """
     record = _saved_extractions(bundle).get(group.id)
     if not record or record.get("signature") != _group_signature(group.pages):
-        return None, None, []
+        return None, None, [], []
     output = record.get("output")
     if not output:
         if record.get("error"):
-            return None, None, [f"Automatic reading did not finish ({record['error']}) Only the reviewed details were saved."]
-        return None, None, []
+            return None, None, [f"Automatic reading did not finish ({record['error']}) Only the reviewed details were saved."], []
+        return None, None, [], []
     from app.services.email_intake import IntakeReviewError, combine_extractions
+    result = [{**output, "source": {
+        "channel": bundle.source_type, "bundle_id": bundle.id, "group_id": group.id}}]
+    tolerated: set[str] = set()
     try:
-        fields, raw, review = combine_extractions([{**output, "source": {
-            "channel": bundle.source_type, "bundle_id": bundle.id, "group_id": group.id}}])
+        fields, raw, review = combine_extractions(result)
     except IntakeReviewError as exc:
-        return None, None, [f"The documents of this person disagree: {exc} Only the reviewed details were saved."]
+        try:
+            fields, raw, review = combine_extractions(result, allow_reviewed_demographic_conflicts=True,
+                                                       tolerated_conflicts=tolerated)
+        except IntakeReviewError:
+            return None, None, [f"The documents of this person disagree: {exc} Only the reviewed details were saved."], []
     warnings = list(output.get("warnings", []))
-    return fields, raw, warnings
+    if tolerated:
+        # The reviewer has explicitly selected the person and pages, but did
+        # not approve any OCR identity value.  Keep only content which is safe
+        # to enrich; raw OCR is retained separately for its audit trail.
+        fields = {key: value for key, value in fields.items() if key in REVIEWED_CONTENT_FIELDS}
+        labels = ", ".join("date of birth" if key == "dob" else key for key in sorted(tolerated))
+        warnings.append(f"The reviewed documents differ on {labels}. The reviewer-selected identity was retained; only non-identity resume details were filled.")
+    return fields, raw, warnings, sorted(tolerated)
 
 
 def commit_review(db, identifier, user, revision, decisions, settings):
@@ -502,7 +524,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
         except ValidationError as exc:
             raise HTTPException(422, {"message": f"Check {group.label}: " + "; ".join(f'{".".join(map(str, issue["loc"]))}: {issue["msg"]}' for issue in exc.errors(include_input=False))}) from None
         values = normalize_candidate_values(person.model_dump(exclude={"intake_group_id", "ocr_data", "resume_text", "source_detail", "source"}))
-        ocr_fields, ocr_raw, notes = _ocr_for_group(bundle, group)
+        ocr_fields, ocr_raw, notes, identity_conflicts = _ocr_for_group(bundle, group)
         if ocr_fields is not None:
             from app.services.email_intake import candidate_values
             read = candidate_values(ocr_fields, ocr_raw)
@@ -516,7 +538,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 values = merged
             except ValueError:
                 notes = [*notes, "Values read from the documents conflict with the reviewed details and were not applied."]
-        extraction[group.id] = (ocr_raw, notes)
+        extraction[group.id] = (ocr_raw, notes, identity_conflicts)
         for key, normalize in (("phone", normalize_phone), ("email", normalize_email), ("passport_no", normalize_passport)):
             identity = normalize(values.get(key))
             if identity and identity in within[key]:
@@ -560,10 +582,15 @@ def commit_review(db, identifier, user, revision, decisions, settings):
     admins = set(db.scalars(select(User.id).where(User.active.is_(True), User.role == Role.admin)))
     supervisors = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
     for group, values, candidate in prepared:
-        ocr_raw, notes = extraction.get(group.id, (None, []))
+        ocr_raw, notes, identity_conflicts = extraction.get(group.id, (None, [], []))
         provenance = {"bundleId": bundle.id, "groupId": group.id, "sourceType": bundle.source_type, "sourceId": bundle.source_id, "pages": group.pages}
         if notes:
             provenance["extractionWarnings"] = notes
+        if identity_conflicts:
+            # `form_extraction` uses this to apply only safe resume content even
+            # when an administrator later presses Refresh from the form.
+            provenance["ocrIdentityConflictFields"] = identity_conflicts
+            provenance["contentOnlyAutofill"] = True
         stored_ocr = merge_ocr_data(ocr_raw or {}, {"person_split": provenance})
         selected_keys = {_page_key(page) for page in group.pages if page["kind"] == "resume"}
         resume_text = "\n".join(page.get("text", "") for page in bundle.pages if _page_key(page) in selected_keys)
@@ -584,6 +611,10 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 owner_id=owner.id if owner else None, intake_owner_id=owner.id if owner else None,
                 status=CandidateStatus.new if owner and not notes else CandidateStatus.needs_review, needs_review=owner is None or bool(notes),
                 resume_text=resume_text or None, ocr_data=stored_ocr)
+            # Values entered while reviewing the person/pages are authoritative
+            # over a later OCR refresh, including any conflicting passport detail.
+            from app.services import form_extraction as form_fx
+            form_fx.mark_manual(candidate, [key for key in group.fields if key in form_fx.SPECS])
             db.add(candidate); db.flush()
             if owner:
                 started = now()

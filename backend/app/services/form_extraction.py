@@ -99,6 +99,11 @@ IDENTITY = frozenset({"phone", "email", "passport_no"})
 # these (the older columns are the business of the code that stored the document and may have been cleared on purpose);
 # a form upload, the refresh button and the backfill fill every column.
 NEW_COLUMNS = frozenset({"father_name", "marital_status", "current_address", "education", "work_history", "experience_india"})
+# A reviewer may confirm that pages are one person while recording a DOB/gender
+# discrepancy for staff to resolve.  In that narrow case raw OCR is retained, but
+# a later refresh may only fill content that cannot change the person's identity.
+REVIEWED_CONTENT_ONLY_COLUMNS = frozenset({"education", "work_history", "total_experience", "experience_india",
+                                           "gulf_experience", "skills", "designations"})
 
 
 # ------------------------------------------------------------------ tiny helpers
@@ -735,6 +740,9 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
     before = {column: copy.deepcopy(getattr(candidate, column)) for column in SPECS}
     result = ApplyResult()
     ocr_data = candidate.ocr_data
+    reviewed = _dict(ocr_data).get("person_split")
+    content_only = isinstance(reviewed, dict) and bool(reviewed.get("contentOnlyAutofill")) \
+        and bool(reviewed.get("ocrIdentityConflictFields"))
     for kind in SLOT_KINDS:
         documents = stored_documents(ocr_data, kind)
         if not force:
@@ -742,7 +750,10 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
         for raw in documents:
             if not force and already_applied(candidate, kind, raw):
                 continue
-            applied = apply_values(candidate, kind, values_for(kind, raw), db, fill_all=fill_all)
+            values = values_for(kind, raw)
+            if content_only:
+                values = {key: value for key, value in values.items() if key in REVIEWED_CONTENT_ONLY_COLUMNS}
+            applied = apply_values(candidate, kind, values, db, fill_all=fill_all)
             result.merge(applied)
             if kind == "aadhaar" and not applied.conflicts:
                 note_aadhaar(candidate, raw)

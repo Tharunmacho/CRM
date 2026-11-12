@@ -162,12 +162,22 @@ def _receive_job(db: Session, message: MailMessage, stored) -> None:
 _PASSPORT_KEYS = ("passport_no", "passport_issue", "passport_expiry", "passport_place")
 
 
-def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
-    """Merge only evidence for one person. Sender and filenames are never identity."""
+def combine_extractions(results: list[dict], *, allow_reviewed_demographic_conflicts: bool = False,
+                        tolerated_conflicts: set[str] | None = None) -> tuple[dict, dict, bool]:
+    """Merge only evidence for one person. Sender and filenames are never identity.
+
+    Normal email/WhatsApp intake stays fail-closed: any conflicting identity value
+    rejects the merge.  A human-reviewed document bundle is different: the reviewer
+    has already confirmed that the exact pages belong to one person.  In that narrow
+    path a conflicting DOB or gender may be retained as a visible review issue while
+    the unrelated resume content (education, work history and skills) remains usable.
+    Phone, email, passport-number and name conflicts are never tolerated.
+    """
     fields, raw = {}, {}
     names: list[str] = []
     needs_review = False
     identity = {}
+    demographic_conflicts: set[str] = set()
     for result in results:
         # A file that was set aside (a logo, a vCard) is not a reason to doubt the candidate.
         needs_review = needs_review or result.get("status") == "needs_review" or (
@@ -186,7 +196,10 @@ def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
                     else str(value or "").strip().casefold()
                 )
                 if normalized and key in identity and identity[key] != normalized:
-                    raise IntakeReviewError("The attachments seem to belong to different people. Check them before you create a candidate.")
+                    if allow_reviewed_demographic_conflicts and key in {"dob", "gender"}:
+                        demographic_conflicts.add(key)
+                    else:
+                        raise IntakeReviewError("The attachments seem to belong to different people. Check them before you create a candidate.")
                 if normalized:
                     identity[key] = normalized
             document = extraction["raw"]
@@ -222,6 +235,15 @@ def combine_extractions(results: list[dict]) -> tuple[dict, dict, bool]:
         raise IntakeReviewError("The documents name different people. Check them and split the files by person before trying again.")
     if "partial" in relations:
         needs_review = True
+    if demographic_conflicts:
+        # Never let a value which disagreed across reviewed documents choose an
+        # identity field.  The reviewer-selected identity remains authoritative;
+        # only the non-identity resume content will be used by the bundle path.
+        for key in demographic_conflicts:
+            fields.pop(key, None)
+        needs_review = True
+        if tolerated_conflicts is not None:
+            tolerated_conflicts.update(demographic_conflicts)
     return fields, raw, needs_review
 
 
