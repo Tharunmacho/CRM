@@ -115,6 +115,8 @@ export interface Candidate {
   /** Full form rows are returned by the individual profile endpoint, not the desk snapshot. */
   education?: { level?: string | null; passedYear?: number | null; institute?: string | null }[]
   workHistory?: { company?: string | null; designation?: string | null; country?: string | null; period?: string | null }[]
+  /** Exact, reviewed wording where the numeric matching fields would lose detail (loaded on the profile only). */
+  sourceClaims?: Partial<Record<'totalExperience' | 'experienceIndia' | 'experienceAbroad' | 'expectedSalary' | 'jobApplied', string>>
   /** Optional provenance from the application-form read. It lets display code distinguish an unconfirmed default zero from a confirmed value. */
   fieldSources?: Record<string, 'extracted' | 'manual'>
   nativePlace?: string | null

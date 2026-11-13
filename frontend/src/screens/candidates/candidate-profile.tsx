@@ -244,7 +244,7 @@ export default function CandidateProfilePage() {
     return () => controller.abort()
   }, [id, cand?.whatsapp, cand?.ownerId])
 
-  const profileCandidate = useMemo(() => (cand && fullText?.id === id
+  const profileCandidate = useMemo(() => (cand && fullText && fullText.id === id
     ? { ...cand, ...fullText.candidate, documents: fullText.documents }
     : cand), [cand, fullText, id])
   const model = useMemo(() => (profileCandidate ? buildProfileModel(profileCandidate, ocr, FORMAT) : null), [profileCandidate, ocr])

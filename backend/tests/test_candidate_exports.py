@@ -341,6 +341,19 @@ def test_data_bank_export_names_agency_and_the_actual_profile_issue(exports):
         assert person[headings.index("Agency")] == "Example Referral Agency"
 
 
+def test_exports_keep_exact_reviewed_source_wording(exports):
+    with exports.sessions() as db:
+        db.get(Candidate, "candidate").source_claims = {"experienceIndia": "1.5 years", "expectedSalary": "Negotiable"}
+        db.commit()
+        bank = sheets(export_candidates(db, Search()))["Candidates"]
+        headings = bank[0]
+        person = next(row for row in bank[1:] if row[0] == "candidate")
+        assert person[headings.index("Exact source wording")] == "expectedSalary: Negotiable; experienceIndia: 1.5 years"
+    response = get(exports)
+    assert response.status_code == 200, response.text
+    assert sheets(response.content)["Reviewed source wording"][1:] == [["expectedSalary", "Negotiable"], ["experienceIndia", "1.5 years"]]
+
+
 def test_full_history_retains_more_than_fifty_notes_saved_drafts_and_scoped_task_notes(exports):
     add_app(exports, "shown", stage=5)
     now = datetime.now(timezone.utc)

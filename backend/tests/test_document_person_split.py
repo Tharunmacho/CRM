@@ -494,6 +494,76 @@ def test_reviewed_group_dob_conflict_keeps_only_content_fields_and_raw_evidence(
                       "current_address": "14 Review Street, Chennai"}
 
 
+def test_reviewed_group_quarantines_untrusted_passport_but_keeps_resume_enrichment():
+    """A corrupt passport read must not discard the valid reviewed resume."""
+    pages = [{"sourceId": "source", "pageNumber": 1, "kind": "resume"},
+             {"sourceId": "source", "pageNumber": 2, "kind": "passport"}]
+    reviewed = {"name": "Alex Example", "phone": "9876543210", "passport_no": "P0000000",
+                "dob": "1990-01-01", "passport_issue": "2020-01-01", "passport_expiry": "2030-01-01",
+                "passport_place": "Chennai", "source": "other"}
+    resume = {"fields": {**reviewed, "father_name": "Resume Parent", "marital_status": "Married",
+                           "current_address": "12 Source Road, Chennai", "languages": ["Tamil", "English"],
+                           "education": [{"level": "ITI", "passedYear": 2010}],
+                           "work_history": [{"company": "Source Works", "designation": "Electrician"}],
+                           "experience_india": 3, "total_experience": 9, "gulf_experience": 6,
+                           "skills": ["Wiring"]},
+              "raw": {"request_id": "resume", "pages": []}, "selected_pages": [1],
+              "source": {"source_sha256": "r" * 64, "selected_pages": [1]}}
+    passport = {"fields": {"name": "Wrong Person", "passport_no": "P9999999", "dob": "1991-01-01",
+                            "passport_issue": "2021-01-01", "passport_expiry": "2031-01-01", "passport_place": "Other"},
+                "raw": {"request_id": "passport", "mrz": {"all_check_digits_valid": False,
+                        "individual_check_digits": {"passport_number": False, "date_of_birth": False}}},
+                "selected_pages": [2], "source": {"source_sha256": "p" * 64, "selected_pages": [2]}}
+    output = {"warnings": [], "extractions": {"resume": resume, "passport": passport}}
+    group = SimpleNamespace(id="group", pages=pages, fields=reviewed)
+    bundle = SimpleNamespace(id="bundle", source_type="manual", sources=[{"group_extractions": {
+        group.id: {"signature": subject._group_signature(pages), "output": output},
+    }}])
+
+    fields, raw, warnings, conflicts = subject._ocr_for_group(bundle, group)
+
+    assert conflicts == []
+    assert fields["father_name"] == "Resume Parent"
+    assert fields["current_address"] == "12 Source Road, Chennai"
+    assert fields["education"] == [{"level": "ITI", "passedYear": 2010}]
+    assert fields["work_history"] == [{"company": "Source Works", "designation": "Electrician"}]
+    assert (fields["experience_india"], fields["total_experience"], fields["gulf_experience"]) == (3, 9, 6)
+    assert set(raw) >= {"resume", "quarantined_passport", "_sources"}
+    assert "passport" not in raw
+    assert raw["quarantined_passport"] == passport["raw"]
+    provenance = raw["_sources"]["quarantined_passport"]
+    assert provenance["selected_pages"] == [2]
+    assert provenance["quarantine"]["reason"] == "reviewed_passport_ocr"
+    assert any("MRZ check digits" in reason for reason in provenance["quarantine"]["reasons"])
+    assert any("kept as evidence but not used" in warning for warning in warnings)
+    # The saved review still has the complete evidence; the merge used a copy.
+    assert output["extractions"]["passport"] == passport
+
+
+def test_reviewed_group_keeps_compatible_passport_as_a_normal_document():
+    pages = [{"sourceId": "source", "pageNumber": 1, "kind": "resume"},
+             {"sourceId": "source", "pageNumber": 2, "kind": "passport"}]
+    reviewed = {"name": "Alex Example", "passport_no": "P0000000", "dob": "1990-01-01", "source": "other"}
+    output = {"warnings": [], "extractions": {
+        "resume": {"fields": {**reviewed, "phone": "9876543210", "skills": ["Wiring"]},
+                   "raw": {"request_id": "resume"}, "selected_pages": [1]},
+        "passport": {"fields": {**reviewed},
+                     "raw": {"request_id": "passport", "mrz": {"all_check_digits_valid": True,
+                             "individual_check_digits": {"passport_number": True, "date_of_birth": True}}},
+                     "selected_pages": [2]},
+    }}
+    group = SimpleNamespace(id="group", pages=pages, fields=reviewed)
+    bundle = SimpleNamespace(id="bundle", source_type="manual", sources=[{"group_extractions": {
+        group.id: {"signature": subject._group_signature(pages), "output": output},
+    }}])
+
+    fields, raw, warnings, conflicts = subject._ocr_for_group(bundle, group)
+
+    assert fields["skills"] == ["Wiring"] and conflicts == []
+    assert {"resume", "passport"} <= set(raw) and "quarantined_passport" not in raw
+    assert not any("kept as evidence but not used" in warning for warning in warnings)
+
+
 def test_confirmed_people_are_read_by_the_normal_extraction_and_reviewer_values_win(env, monkeypatch):
     env.settings.veris_ocr_base_url, env.settings.veris_ocr_api_key = "https://ocr.invalid", "synthetic-key"
     submissions = []

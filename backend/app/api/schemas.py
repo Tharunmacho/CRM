@@ -206,6 +206,9 @@ class CandidateWithFormOut(CandidateOut):
 
     education: list[dict[str, Any]] = []
     work_history: list[dict[str, Any]] = []
+    # Kept off the desk/list payload: only an individual profile needs the exact source
+    # wording where a numeric field would otherwise round or omit it.
+    source_claims: dict[str, str] = {}
 
 
 class StageRecordOut(Wire):

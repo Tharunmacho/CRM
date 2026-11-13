@@ -205,7 +205,8 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
   const overseas = span(r?.overseas_experience_months, r?.overseas_experience_human)
   const experienceMeta = [total && `${total} in total`, overseas && `${overseas} overseas`].filter(Boolean).join(' · ')
 
-  const designation = cand.designations.map(clean).filter(Boolean).join(', ') || clean(r?.designation)
+  const sourceClaim = (key: keyof NonNullable<typeof cand.sourceClaims>) => clean(cand.sourceClaims?.[key])
+  const designation = sourceClaim('jobApplied') || cand.designations.map(clean).filter(Boolean).join(', ') || clean(r?.designation)
   const email = clean(cand.email) || clean(contact?.emails?.[0])
   const whatsapp = clean(cand.whatsapp) || clean(contact?.whatsapp)
   const phone = clean(cand.phone)
@@ -232,10 +233,12 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
   const totalConfirmed = cand.totalExperience > 0 || Boolean(cand.fieldSources?.['experience.totalExperience'])
   const overseasConfirmed = cand.gulfExperience > 0 || Boolean(cand.fieldSources?.['experience.experienceAbroad'])
   const indiaConfirmed = (cand.experienceIndia ?? 0) > 0 || Boolean(cand.fieldSources?.['experience.experienceIndia'])
-  const totalExperience = totalConfirmed ? experienceLabel(cand.totalExperience, cand.fieldSources?.['experience.totalExperience']) : total
-  const overseasExperience = overseasConfirmed ? experienceLabel(cand.gulfExperience, cand.fieldSources?.['experience.experienceAbroad']) : overseas
-  const indiaExperience = indiaConfirmed ? experienceLabel(cand.experienceIndia, cand.fieldSources?.['experience.experienceIndia'])
-    : span(r?.indian_experience_months, r?.indian_experience_human)
+  // A reviewer can preserve exact wording such as "14 years 4 months" without changing
+  // the typed numeric values used by filters and job matching.
+  const totalExperience = sourceClaim('totalExperience') || (totalConfirmed ? experienceLabel(cand.totalExperience, cand.fieldSources?.['experience.totalExperience']) : total)
+  const overseasExperience = sourceClaim('experienceAbroad') || (overseasConfirmed ? experienceLabel(cand.gulfExperience, cand.fieldSources?.['experience.experienceAbroad']) : overseas)
+  const indiaExperience = sourceClaim('experienceIndia') || (indiaConfirmed ? experienceLabel(cand.experienceIndia, cand.fieldSources?.['experience.experienceIndia'])
+    : span(r?.indian_experience_months, r?.indian_experience_human))
   const industry = clean(r?.industry)
   const qualification = clean(r?.highest_qualification)
 
@@ -258,7 +261,7 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
   ])
 
   const job = present([
-    row('Expected salary', cand.expectedSalary != null ? fmt.money(cand.expectedSalary) : ''),
+    row('Expected salary', sourceClaim('expectedSalary') || (cand.expectedSalary != null ? fmt.money(cand.expectedSalary) : '')),
   ])
 
   const additional = present([

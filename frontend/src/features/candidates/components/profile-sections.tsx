@@ -33,9 +33,10 @@ function TabGroup({ id, label, children }: { id: string; label: string; children
  * salary (work profile) and where the candidate came from (source). Read from the saved record.
  */
 function workProfileFacts(cand: Candidate): Fact[] {
+  const source = cand.sourceClaims ?? {}
   return [
-    ['Gulf or overseas experience', experienceLabel(cand.gulfExperience, cand.fieldSources?.['experience.experienceAbroad'], 'overseas')],
-    ['Expected salary', cand.expectedSalary != null ? money(cand.expectedSalary) : 'Not recorded'],
+    ['Gulf or overseas experience', source.experienceAbroad || experienceLabel(cand.gulfExperience, cand.fieldSources?.['experience.experienceAbroad'], 'overseas')],
+    ['Expected salary', source.expectedSalary || (cand.expectedSalary != null ? money(cand.expectedSalary) : 'Not recorded')],
     ['Source', SOURCE_LABEL[cand.source] ?? cand.source],
     ['More about the source', sourceDetailLabel(cand.sourceDetail) || 'Not recorded'],
     ['Added on', dateLabel(cand.addedAt)],

@@ -98,6 +98,24 @@ def test_correction_marks_changed_fields_manual_and_validates(db):
     assert api.patch(f"/api/candidates/{saved['id']}", json={"workHistory": [{"company": "A" * 300}]}).status_code == 422
 
 
+def test_exact_reviewed_source_wording_is_bounded_and_returned_on_the_profile(db):
+    api = make_client(db)
+    body = {
+        "name": "Exact Source", "phone": "9000000041", "totalExperience": 14,
+        "sourceClaims": {"totalExperience": "14 years 4 months", "experienceIndia": "1.5 years", "expectedSalary": "Negotiable"},
+    }
+    created = api.post("/api/candidates", json=body)
+    assert created.status_code == 201, created.text
+    db.expire_all()
+    candidate = db.get(m.Candidate, created.json()["id"])
+    assert candidate.source_claims == body["sourceClaims"]
+    detail = api.get(f"/api/candidates/{candidate.id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["sourceClaims"] == body["sourceClaims"]
+    # The narrow map prevents arbitrary OCR blobs from becoming reviewed evidence.
+    assert api.patch(f"/api/candidates/{candidate.id}", json={"sourceClaims": {"unreviewed": "No"}}).status_code == 422
+
+
 ALL_FORM_KEYS = ["fatherName", "maritalStatus", "currentAddress", "experienceIndia", "experienceAbroad", "education", "workHistory",
                  "nativePlace", "familyMemberNumber", "jobDurationPreference", "countryPreference", "jobPreference",
                  "serviceChargesStatus", "bestTimeToContact", "interestLevel", "nextFollowUpDate", "whatsappSameAsPhone"]

@@ -382,6 +382,11 @@ class Candidate(Base, PkMixin, TimestampMixin):
     education: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"), deferred=True)
     work_history: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"), deferred=True)
     field_sources: Mapped[dict | None] = mapped_column(JSONB, server_default=text("'{}'::jsonb"), deferred=True)
+    # Exact reviewed wording that cannot safely be represented by the typed matching fields above
+    # (for example "14 years 4 months" or an expected salary recorded as "Negotiable").
+    # The numeric fields remain the source for filtering and matching; this compact, bounded
+    # evidence record prevents a reviewer from having to round or discard what the document says.
+    source_claims: Mapped[dict | None] = mapped_column(JSONB, server_default=text("'{}'::jsonb"), deferred=True)
     # Screening details from the telemarketer's intake form (also migration 0021). Job preference is `designations`,
     # the agent is `source_detail`, the assigned staff `owner_id`, the telemarketer notes `call_remarks`.
     native_place: Mapped[str | None] = mapped_column(String(120))

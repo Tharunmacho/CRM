@@ -30,7 +30,7 @@ with patch("app.core.config.get_settings", return_value=SimpleNamespace(
 )):
     from app.api.routers import application_form as subject, applications, files as files_router
 
-FORM_COLUMNS = {"father_name", "marital_status", "current_address", "experience_india", "education", "work_history", "field_sources"}
+FORM_COLUMNS = {"father_name", "marital_status", "current_address", "experience_india", "education", "work_history", "field_sources", "source_claims"}
 
 
 # ------------------------------------------------------------------ migration
@@ -48,17 +48,17 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     assert FORM_COLUMNS <= set(columns)
     assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments"}
     with engine.connect() as connection:
-        row = connection.execute(text("SELECT name, total_experience, father_name, experience_india, education, work_history, field_sources "
+        row = connection.execute(text("SELECT name, total_experience, father_name, experience_india, education, work_history, field_sources, source_claims "
                                       "FROM crm_candidates WHERE id='old'")).one()
-        assert row == ("Old Candidate", 4, None, 0, [], [], {})
+        assert row == ("Old Candidate", 4, None, 0, [], [], {}, {})
         assert connection.scalar(text("SELECT col_description('crm_candidates'::regclass, attnum) FROM pg_attribute "
                                       "WHERE attrelid='crm_candidates'::regclass AND attname='father_name'"))
     with engine.begin() as connection:
-        connection.execute(text("UPDATE crm_candidates SET father_name='Kept', education='[{\"level\":\"BE\"}]'"))
+        connection.execute(text("UPDATE crm_candidates SET father_name='Kept', education='[{\"level\":\"BE\"}]', source_claims='{\"totalExperience\":\"4 years 6 months\"}'"))
         connection.execute(text("UPDATE alembic_version SET version_num = '0020_daily_work_quota'"))
     _migrate(engine, "head")  # a repeat of 0021 over its own columns is harmless and keeps the data
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT father_name, education FROM crm_candidates")).one() == ("Kept", [{"level": "BE"}])
+        assert connection.execute(text("SELECT father_name, education, source_claims FROM crm_candidates")).one() == ("Kept", [{"level": "BE"}], {"totalExperience": "4 years 6 months"})
     _migrate(engine, "0020_daily_work_quota", downgrade=True)
     assert "crm_form_options" not in inspect(engine).get_table_names()
     assert not FORM_COLUMNS & {c["name"] for c in inspect(engine).get_columns("crm_candidates")}

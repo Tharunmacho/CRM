@@ -246,6 +246,33 @@ class OcrDataIn(BaseModel):
 
 PROFILE_CHECK_FIELDS = ("phone", "dob", "passport_issue", "passport_expiry", "total_experience", "gulf_experience")
 
+# Exact source wording is deliberately narrow.  These fields already have typed database
+# columns for matching and reporting; source_claims preserves a reviewed phrase when that
+# type would lose meaning (for example, "1.5 years" or "Negotiable").
+SOURCE_CLAIM_KEYS = frozenset({"totalExperience", "experienceIndia", "experienceAbroad", "expectedSalary", "jobApplied"})
+
+
+def normalize_source_claims(values: dict[str, str] | None) -> dict[str, str]:
+    """Validate the compact, reviewed source wording stored beside typed candidate values."""
+    if not values:
+        return {}
+    unknown = sorted(set(values) - SOURCE_CLAIM_KEYS)
+    if unknown:
+        raise ValueError(f"Unknown source claim: {unknown[0]}")
+    if len(values) > len(SOURCE_CLAIM_KEYS):
+        raise ValueError("Too many source claims.")
+    cleaned: dict[str, str] = {}
+    for key, raw in values.items():
+        if not isinstance(raw, str):
+            raise ValueError("Each source claim must be text copied from the reviewed source.")
+        value = raw.strip()
+        if not value:
+            raise ValueError("A source claim cannot be blank.")
+        if len(value) > 500:
+            raise ValueError("A source claim may be at most 500 characters.")
+        cleaned[key] = value
+    return cleaned
+
 
 def _validate_profile_relationships(values, supplied=None):
     """Validate the combined record; partial input defers missing pairs to the locked row."""
@@ -320,6 +347,9 @@ class CandidateIn(BaseModel):
     education: list[EducationRowIn] = Field(default_factory=list, max_length=form_fx.MAX_EDUCATION)
     work_history: list[WorkRowIn] = Field(default_factory=list, max_length=form_fx.MAX_HISTORY)
     experience_india: int = Field(default=0, ge=0, le=80)
+    # Exact reviewed wording where a numeric experience/salary field would be lossy.  This
+    # is intentionally a small allowlisted map, never a second free-form OCR payload.
+    source_claims: dict[str, str] = Field(default_factory=dict)
 
     # Screening details (telemarketer intake form). Job preference is `designations`, the agent `source_detail`.
     native_place: str | None = None
@@ -385,6 +415,14 @@ class CandidateIn(BaseModel):
         if len(values) > 200 or any(len(item) > 200 for item in values):
             raise ValueError("Use at most 200 entries, each no longer than 200 characters.")
         return values
+
+    @field_validator("source_claims")
+    @classmethod
+    def bounded_source_claims(cls, values):
+        try:
+            return normalize_source_claims(values)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
     @model_validator(mode="after")
     def dates(self):
@@ -612,6 +650,7 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
         gulf_experience=body.gulf_experience,
         skills=body.skills,
         expected_salary=body.expected_salary,
+        source_claims=body.source_claims,
         **form_fx.form_columns_from(body),
         source=body.source,
         source_detail=body.source_detail,

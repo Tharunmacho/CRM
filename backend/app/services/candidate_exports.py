@@ -215,6 +215,7 @@ def workbook(inspection: Inspection, listing: dict | None = None) -> bytes:
         ("Passport", [["Field", "Value"], *details(form["passport"]), *details(form.get("aadhaar"), "Aadhaar")]),
         ("Education", [["Field", "Value"], *details(form["education"])]),
         ("Work history", [["Field", "Value"], *details(form["experience"])]),
+        ("Reviewed source wording", [["Field", "Value"], *details(candidate.source_claims or {})]),
         ("Screening", [["Field", "Value"], *details({**form["screening"], "expectedSalary": candidate.expected_salary,
                       "callCalled": candidate.call_called, "callInterested": candidate.call_interested, "callRemarks": candidate.call_remarks,
                       "callRecordedAt": plain(candidate.call_recorded_at)})]),

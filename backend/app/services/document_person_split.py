@@ -16,8 +16,10 @@ from app.db.models import (Attachment, AuditEntry, Candidate, CandidateStatus, D
     DocumentPersonGroup, EmailIngestionJob, MailAttachment, MailMessage, MultiPersonIntake,
     Notification, Role, Source, Task, TaskKind, User, WhatsAppMessage)
 from app.integrations.ocr.inspection import inspect_document
+from app.integrations.ocr.mapping import parse_loose_date
 from app.integrations.ocr.person_split import page_identity, propose_groups
-from app.services.candidate_identity import enrich_empty, identity_matches, merge_ocr_data, normalize_candidate_values, normalize_phone, normalize_email, normalize_passport
+from app.services.candidate_identity import (enrich_empty, identity_matches, merge_ocr_data, name_relation,
+    normalize_candidate_values, normalize_phone, normalize_email, normalize_passport)
 from app.services.document_storage import put_bytes, read_bytes
 
 MAX_PAGES = 120
@@ -25,7 +27,7 @@ KINDS = {"resume", "passport", "aadhaar", "photo", "education", "experience", "s
 FIELD_KEYS = {"name", "phone", "email", "whatsapp", "dob", "gender", "nationality", "current_city", "languages",
               "passport_no", "passport_issue", "passport_expiry", "passport_place", "designations", "skills",
               "total_experience", "experience_india", "gulf_experience", "expected_salary", "father_name",
-              "marital_status", "current_address", "education", "work_history", "source"}
+              "marital_status", "current_address", "education", "work_history", "source_claims", "source"}
 # When a human-confirmed bundle has a conflicting DOB or gender, its OCR may
 # enrich only work/profile content.  The reviewed form fields remain the sole
 # source of identity and passport information.
@@ -462,6 +464,99 @@ def extract_groups(db, identifier, user, revision, settings):
         raise HTTPException(409, {"message": "The files are still being read. Nothing is lost. Try again in a minute.", "code": "extraction_pending"})
 
 
+def _identity_text(value):
+    """A deliberately small normalizer for reviewer-vs-passport comparisons."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _identity_date(value):
+    """Only compare dates that the shared form parser can actually understand."""
+    parsed = parse_loose_date(str(value)) if value not in (None, "") else None
+    return parsed.isoformat() if parsed else ""
+
+
+def _untrusted_reviewed_passport_reasons(reviewed, passport):
+    """Why a passport OCR result cannot participate in a human-reviewed merge.
+
+    The original and its verbatim OCR response are still retained.  This narrow
+    check only decides whether the response may choose candidate fields.  It is
+    intentionally confined to a person/pages review: the reviewer has already
+    confirmed the person and their passport details, while a malformed or
+    mismatched OCR read must not make an otherwise valid resume unusable.
+    """
+    if not isinstance(passport, dict):
+        return []
+    fields = passport.get("fields") if isinstance(passport.get("fields"), dict) else {}
+    raw = passport.get("raw") if isinstance(passport.get("raw"), dict) else {}
+    mrz = raw.get("mrz") if isinstance(raw.get("mrz"), dict) else {}
+    checks = mrz.get("individual_check_digits") if isinstance(mrz.get("individual_check_digits"), dict) else {}
+    reasons = []
+    # An absent MRZ is normal for some scans.  Only an explicit failed check is
+    # enough to quarantine it, never a missing value.
+    if mrz.get("all_check_digits_valid") is False or any(value is False for value in checks.values()):
+        reasons.append("the passport MRZ check digits did not validate")
+
+    reviewed_number, read_number = normalize_passport(reviewed.get("passport_no")), normalize_passport(fields.get("passport_no"))
+    if reviewed_number and read_number and reviewed_number != read_number:
+        reasons.append("the passport number differs from the reviewer-confirmed passport number")
+
+    reviewed_name, read_name = reviewed.get("name"), fields.get("name")
+    if reviewed_name and read_name and name_relation(str(reviewed_name), str(read_name)) == "different":
+        reasons.append("the passport name differs from the reviewer-confirmed name")
+
+    for key, label in (("dob", "date of birth"), ("passport_issue", "passport issue date"),
+                       ("passport_expiry", "passport expiry date")):
+        confirmed, extracted = _identity_date(reviewed.get(key)), _identity_date(fields.get(key))
+        if confirmed and extracted and confirmed != extracted:
+            reasons.append(f"the {label} differs from the reviewer-confirmed value")
+
+    for key, label in (("gender", "gender"), ("passport_place", "place of issue")):
+        confirmed, extracted = _identity_text(reviewed.get(key)), _identity_text(fields.get(key))
+        if confirmed and extracted and confirmed != extracted:
+            reasons.append(f"the passport {label} differs from the reviewer-confirmed value")
+    return reasons
+
+
+def _reviewed_ocr_input(bundle, group, output):
+    """Return merge-safe OCR output plus quarantined passport evidence, if any."""
+    safe = deepcopy(output) if isinstance(output, dict) else {}
+    extractions = safe.get("extractions")
+    if not isinstance(extractions, dict):
+        return safe, None, []
+    passport = extractions.get("passport")
+    reasons = _untrusted_reviewed_passport_reasons(getattr(group, "fields", None) or {}, passport)
+    if not reasons:
+        return safe, None, []
+    # Do not mutate the saved extraction checkpoint: it is the complete OCR
+    # evidence.  Remove the untrusted result only from the temporary merge.
+    passport = deepcopy(passport)
+    extractions.pop("passport", None)
+    warning = ("Automatic passport reading was kept as evidence but not used because "
+               + "; ".join(reasons) + ". The reviewer-confirmed passport details remain authoritative.")
+    warnings = list(safe.get("warnings") or [])
+    if warning not in warnings:
+        warnings.append(warning)
+    safe["warnings"] = warnings
+    return safe, passport, reasons
+
+
+def _quarantined_passport_evidence(raw, passport, root_source, reasons):
+    """Keep excluded passport OCR and provenance in the candidate audit record.
+
+    ``quarantined_passport`` is deliberately not a normal document slot, so a
+    later form refresh cannot replay it into identity/passport fields.
+    """
+    if not isinstance(passport, dict) or not isinstance(passport.get("raw"), dict):
+        return raw
+    provenance = deepcopy(passport.get("source")) if isinstance(passport.get("source"), dict) else {}
+    if isinstance(root_source, dict):
+        provenance = {"source_file": {**deepcopy(root_source), "selected_pages": deepcopy(passport.get("selected_pages") or [])},
+                      **provenance}
+    provenance["quarantine"] = {"reason": "reviewed_passport_ocr", "reasons": list(reasons)}
+    return merge_ocr_data(raw or {}, {"quarantined_passport": deepcopy(passport["raw"]),
+                                      "_sources": {"quarantined_passport": provenance}})
+
+
 def _ocr_for_group(bundle, group):
     """Merged OCR fields/raw/warnings for a confirmed group.
 
@@ -477,8 +572,10 @@ def _ocr_for_group(bundle, group):
             return None, None, [f"Automatic reading did not finish ({record['error']}) Only the reviewed details were saved."], []
         return None, None, [], []
     from app.services.email_intake import IntakeReviewError, combine_extractions
-    result = [{**output, "source": {
-        "channel": bundle.source_type, "bundle_id": bundle.id, "group_id": group.id}}]
+    safe_output, quarantined_passport, quarantine_reasons = _reviewed_ocr_input(bundle, group, output)
+    root_source = {
+        "channel": bundle.source_type, "bundle_id": bundle.id, "group_id": group.id}
+    result = [{**safe_output, "source": root_source}]
     tolerated: set[str] = set()
     try:
         fields, raw, review = combine_extractions(result)
@@ -487,8 +584,10 @@ def _ocr_for_group(bundle, group):
             fields, raw, review = combine_extractions(result, allow_reviewed_demographic_conflicts=True,
                                                        tolerated_conflicts=tolerated)
         except IntakeReviewError:
-            return None, None, [f"The documents of this person disagree: {exc} Only the reviewed details were saved."], []
-    warnings = list(output.get("warnings", []))
+            retained = _quarantined_passport_evidence({}, quarantined_passport, root_source, quarantine_reasons)
+            return None, retained or None, [f"The documents of this person disagree: {exc} Only the reviewed details were saved."], []
+    raw = _quarantined_passport_evidence(raw, quarantined_passport, root_source, quarantine_reasons)
+    warnings = list(safe_output.get("warnings", []))
     if tolerated:
         # The reviewer has explicitly selected the person and pages, but did
         # not approve any OCR identity value.  Keep only content which is safe

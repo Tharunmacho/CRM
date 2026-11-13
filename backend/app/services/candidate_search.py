@@ -7,7 +7,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import String, and_, case, cast, exists, func, literal_column, or_, select, true
-from sqlalchemy.orm import aliased, defer
+from sqlalchemy.orm import aliased, defer, undefer
 from sqlalchemy.orm.attributes import set_committed_value
 from app.api.schemas import CandidateOut
 from app.core.config import get_settings
@@ -349,7 +349,9 @@ def candidate_skill_facets(db, filters: Search):
 
 
 def export_candidates(db, filters):
-    candidates = db.scalars(search_statement(filters)).all()
+    # Source claims are deferred on ordinary list reads.  The export explicitly includes
+    # them in the main candidate query so an Excel export never creates one query per row.
+    candidates = db.scalars(search_statement(filters).options(undefer(Candidate.source_claims))).all()
     from app.services.candidate_review import review_reasons
     flagged = [candidate for candidate in candidates if candidate.needs_review or candidate.status == CandidateStatus.needs_review]
     reasons = review_reasons(db, flagged)
@@ -373,7 +375,7 @@ def export_candidates(db, filters):
         Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
     ).distinct()):
         (rejected_files if rejected else uploaded).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
-    rows = [["Reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
+    rows = [["Reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
              "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level", "Agency", "Profile review issues",
              *[label + " document" for _slot, label in required], "Missing mandatory documents"]]
     for candidate in candidates:
@@ -394,8 +396,9 @@ def export_candidates(db, filters):
                 review.append("Recruiter not assigned")
             if not review:
                 review.append("Profile check pending")
+        exact = "; ".join(f"{key}: {value}" for key, value in sorted((candidate.source_claims or {}).items()))
         rows.append([candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
-                     candidate.total_experience, "Yes" if candidate.passport_no else "No", candidate.source.value,
+                     candidate.total_experience, exact, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
                      candidate.status.value, candidate.created_at.isoformat(),
                      candidate.dob.isoformat() if candidate.dob else "", candidate.whatsapp or "", candidate.country_preference or "", service, interest,

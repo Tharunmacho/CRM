@@ -168,6 +168,21 @@ test('saved application-form fields win over stale OCR and render without a stor
   assert.deepEqual(model.jobs, [{ title: 'Electrical Technician', company: 'Saved Works', location: 'India', overseas: false, period: '2016 - 2019', duration: '', description: '' }])
 })
 
+test('exact reviewed source wording wins only for display while numeric fields stay available for matching', () => {
+  const saved = candidate({
+    totalExperience: 14, experienceIndia: 1, gulfExperience: 12, expectedSalary: 2500, designations: ['Electrical Technician'],
+    sourceClaims: { totalExperience: '14 years 4 months', experienceIndia: '1.5 years', experienceAbroad: '12 years 10 months', expectedSalary: 'Negotiable', jobApplied: 'E&I Technician' },
+  })
+  const model = buildProfileModel(saved, {}, fmt)
+  const row = (rows, label) => rows.find((r) => r.label === label)?.value
+  assert.equal(model.designation, 'E&I Technician')
+  assert.equal(row(model.details, 'Total experience'), '14 years 4 months')
+  assert.equal(row(model.additional, 'Experience in India'), '1.5 years')
+  assert.equal(row(model.additional, 'Overseas experience'), '12 years 10 months')
+  assert.equal(row(model.job, 'Expected salary'), 'Negotiable')
+  assert.equal(saved.totalExperience, 14)
+})
+
 test('an unconfirmed zero is never rendered as no experience', () => {
   assert.equal(experienceLabel(0), 'Not confirmed')
   assert.equal(experienceLabel(0, 'manual', 'overseas'), '0 years overseas')
