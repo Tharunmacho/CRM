@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, Check, CheckCircle2, Copy, FileUp, Loader2, Pencil, Instagram, Facebook, UserCheck, Globe, Link2, BellRing, Info } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, UserCheck, Globe, Link2, BellRing, Info } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
 import { Dialog } from '@/shared/ui/overlay'
@@ -229,62 +229,10 @@ export function ResumeCell({ lead, block, onUpload, onConvert }: { lead: Lead; b
 }
 
 export function LeadActions({ lead, context }: { lead: Lead; context: LeadColumnContext }) {
-  const block = workBlock(context, lead)
   return (
     <div className="db-acts is-grid ld-acts" onClick={(event) => event.stopPropagation()}>
-      {context.onEdit && (
-        <button type="button" className="db-act ld-edit-btn" disabled={Boolean(block)} title={block ?? `Edit ${lead.name || 'this lead'}`} aria-label={`Edit ${lead.name || 'this lead'}`} onClick={() => context.onEdit?.(lead)}>
-          <Pencil size={14} aria-hidden="true" />
-        </button>
-      )}
       <RowMenu label={`More actions for ${lead.name}`} items={leadMenuItems(context, lead)} />
     </div>
-  )
-}
-
-/**
- * The row's Remarks (the lead's notes), typed straight into the table or a card. Saves on blur or Enter (Shift+Enter for a
- * new line), Escape undoes the edit; shows Saving / Saved / the server's refusal. Read-only text when the lead cannot be worked.
- */
-export function RemarksCell({ lead, context }: { lead: Lead; context: LeadColumnContext }) {
-  const stored = lead.notes ?? ''
-  const [text, setText] = useState(stored)
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [error, setError] = useState('')
-  const focused = useRef(false)
-  const timer = useRef(0)
-  // A fresh copy from the server replaces the box, unless the recruiter is typing in it.
-  useEffect(() => { if (!focused.current) setText(stored) }, [stored])
-  useEffect(() => () => window.clearTimeout(timer.current), [])
-  const block = workBlock(context, lead)
-  if (block || !context.saveRemarks) {
-    return stored ? <span className="db-clamp ld-remarks-text" title={stored}>{stored}</span> : <Dash />
-  }
-  const save = async () => {
-    const next = text.trim()
-    if (next === stored.trim() || state === 'saving') return
-    setState('saving'); setError('')
-    try {
-      await context.saveRemarks?.(lead, next)
-      setState('saved'); window.clearTimeout(timer.current); timer.current = window.setTimeout(() => setState('idle'), 1800)
-    } catch (e) { setState('error'); setError(e instanceof Error ? e.message : 'The remark was not saved.') }
-  }
-  return (
-    <span className={cn('ld-remarks', `is-${state}`)} onClick={(event) => event.stopPropagation()}>
-      <textarea className="ld-remarks-input" rows={2} value={text} maxLength={5000} placeholder="Add a remark…" aria-label={`Remarks for ${lead.name || 'this lead'}`}
-        title={text || 'Type a remark; Enter saves, Shift+Enter adds a line'}
-        onFocus={() => { focused.current = true }}
-        onBlur={() => { focused.current = false; void save() }}
-        onChange={(event) => { setText(event.target.value); if (state !== 'saving') setState('idle') }}
-        onKeyDown={(event) => {
-          event.stopPropagation()
-          if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void save() }
-          if (event.key === 'Escape') { setText(stored); setState('idle'); event.currentTarget.blur() }
-        }} />
-      {state === 'saving' && <small className="ld-remarks-state" role="status"><Loader2 size={11} className="ld-spin" aria-hidden="true" />Saving…</small>}
-      {state === 'saved' && <small className="ld-remarks-state is-ok" role="status"><Check size={11} aria-hidden="true" />Saved</small>}
-      {state === 'error' && <small className="ld-remarks-state is-bad" role="alert" title={error}><AlertCircle size={11} aria-hidden="true" />{error || 'Not saved'}</small>}
-    </span>
   )
 }
 

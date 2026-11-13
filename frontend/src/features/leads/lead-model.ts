@@ -119,7 +119,7 @@ export interface LeadFacets {
 export const LEAD_HEADINGS = {
   actions: 'Actions', created: 'Created', name: 'Name / Age / Contact', contact: 'Contact', position: 'Job applied', experience: 'Total experience',
   experienceIndia: 'India experience', experienceAbroad: 'Abroad experience', education: 'Education', state: 'State',
-  location: 'Location', campaign: 'Campaign', country: 'Country', status: 'Status', followup: 'Follow‑up', remarks: 'Remarks', resume: 'Resume',
+  location: 'Location', campaign: 'Campaign', country: 'Country', status: 'Status', followup: 'Follow‑up', resume: 'Resume',
 } as const
 
 /** A custom question column the stored sheets contain (GET /leads/columns). */

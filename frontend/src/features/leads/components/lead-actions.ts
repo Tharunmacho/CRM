@@ -24,10 +24,8 @@ export interface LeadColumnContext {
   onDelete?: (lead: Lead) => void
   /** Admin only: checks whether a mistaken conversion can be reversed. */
   onUnconvert?: (lead: Lead) => void
-  /** Opens the edit form with every fact of the row (row menu, pencil button, card). */
+  /** Opens the edit form with every fact of the row (row "…" menu). */
   onEdit?: (lead: Lead) => void
-  /** Saves the row's Remarks (the lead's notes); rejects with the server's message. */
-  saveRemarks?: (lead: Lead, text: string) => Promise<void>
 }
 
 /** The reason a work action on this lead is unavailable: the daily-work gate first, then ownership. */
@@ -42,7 +40,7 @@ export function leadMenuItems(context: LeadColumnContext, lead: Lead): RowMenuIt
   const wa = whatsappHref(lead.phone)
   const items: RowMenuItem[] = [
     { label: 'Open lead', icon: FileSearch, onSelect: () => context.onOpen(lead) },
-    ...(context.onEdit ? [{ label: 'Edit details', icon: Pencil, onSelect: () => context.onEdit?.(lead), disabledReason: block ?? undefined }] : []),
+    ...(context.onEdit ? [{ label: 'Edit', icon: Pencil, onSelect: () => context.onEdit?.(lead), disabledReason: block ?? undefined }] : []),
     { label: 'Log a call', icon: PhoneCall, onSelect: () => context.onLogCall(lead), disabledReason: block ?? undefined },
     { label: 'Convert to candidate', icon: UserPlus, onSelect: () => context.onConvert(lead), disabledReason: convert },
   ]

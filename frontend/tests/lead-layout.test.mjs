@@ -28,7 +28,7 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
   transformers: { before: [() => file => ts.factory.updateSourceFile(file, file.statements.filter(node => !ts.isImportDeclaration(node)))] },
 }).outputText
-const componentNames = ['CampaignCell', 'ContactCell', 'CreatedCell', 'EducationCell', 'ExperienceCell', 'ExtraAnswerCell', 'FieldCell', 'LeadActions', 'LocationCell', 'NameCell', 'PositionCountryCell', 'ProfileCell', 'RemarksCell', 'ResumeCell', 'StateCell', 'StatusOwnerCell']
+const componentNames = ['CampaignCell', 'ContactCell', 'CreatedCell', 'EducationCell', 'ExperienceCell', 'ExtraAnswerCell', 'FieldCell', 'LeadActions', 'LocationCell', 'NameCell', 'PositionCountryCell', 'ProfileCell', 'ResumeCell', 'StateCell', 'StatusOwnerCell']
 const setup = `const React={createElement:(type,props)=>({type,props})};const workBlock=()=>null;
   const LEAD_HEADINGS=${JSON.stringify(model.LEAD_HEADINGS)},EXTRA_PREFIX=${JSON.stringify(model.EXTRA_PREFIX)},FIELD_PREFIX=${JSON.stringify(fields.FIELD_PREFIX)};
   const DEFAULT_COLUMN_FIELDS=new Set(${JSON.stringify([...fields.DEFAULT_COLUMN_FIELDS])});const LEAD_FIELD_DEFS=${JSON.stringify(fields.LEAD_FIELD_DEFS)};
@@ -43,7 +43,7 @@ test('lead table restores Actions and Created before the requested identity and 
   assert.deepEqual(visible.slice(0, 3).map(column => column.sticky), ['start', 'start', 'start'])
   assert.deepEqual(visible.slice(2, 9).map(column => column.key), requested)
   assert.deepEqual(visible.slice(2, 9).map(column => column.header), ['Name / Age / Contact', 'Job applied', 'Education', 'India experience', 'Abroad experience', 'Total experience', 'Location'])
-  assert.deepEqual(visible.slice(9).map(column => column.key), ['campaign', 'status', 'remarks', 'resume'])
+  assert.deepEqual(visible.slice(9).map(column => column.key), ['campaign', 'status', 'resume'])
   assert.equal(new Set(columns.map(column => column.key)).size, columns.length)
 })
 

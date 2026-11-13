@@ -172,15 +172,6 @@ export default function LeadsPage() {
     }
   }, [data, onGateRefusal])
 
-  // The table's columns are memoised, so the remark save reads the newest list/gate handlers through a ref.
-  const latest = useRef({ saveRemarks: async (_lead: Lead, _text: string) => {} })
-  latest.current.saveRemarks = async (lead, text) => {
-    try { await leadApi.update(lead.id, { notes: text }); data.refresh() } catch (error) {
-      const refused = gateFromRefusal(error)
-      if (refused) onGateRefusal(refused)
-      throw error
-    }
-  }
   const context: LeadColumnContext = {
     me: { id: me.id, role: me.role },
     gate: gateMode,
@@ -197,7 +188,6 @@ export default function LeadsPage() {
     onDelete: bulk.openDelete,
     onUnconvert: setUnconverting,
     onEdit: setEditing,
-    saveRemarks: (lead, text) => latest.current.saveRemarks(lead, text),
   }
   const allColumns = useMemo(() => leadColumns(context, extras), [me.id, me.role, gateMode, supervisor, store.users, extras]) // eslint-disable-line react-hooks/exhaustive-deps
   const fit = useMemo(() => fitColumns(allColumns, boxWidth, choices), [allColumns, boxWidth, choices])
@@ -339,7 +329,7 @@ export default function LeadsPage() {
         onClose={() => setOpen(null)} onChanged={() => data.refresh()}
         onLogCall={setCalling} onConvert={setConverting} onAssign={(lead) => setAssigning([lead.id])}
         onUploadResume={uploadResume} onGateRefusal={onGateRefusal}
-        canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo} onEdit={setEditing}
+        canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo}
       />
       </SafeBoundary>
       {bulk.overlays}

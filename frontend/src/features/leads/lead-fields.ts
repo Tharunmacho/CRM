@@ -61,7 +61,7 @@ export const LEAD_FIELD_DEFS: readonly LeadFieldDef[] = [
   { id: 'followUp', label: LEAD_HEADINGS.followup, group: 'Workflow', width: 110, value: (l) => when(l.nextFollowUpAt) },
   { id: 'lastContacted', label: 'Last contacted', group: 'Workflow', width: 110, value: (l) => when(l.lastContactedAt) },
   { id: 'calls', label: 'Calls made', group: 'Workflow', width: 80, value: (l) => (l.callCount ? String(l.callCount) : '') },
-  { id: 'notes', label: 'Remarks', group: 'Workflow', width: 180, value: (l) => text(l.notes) },
+  { id: 'notes', label: 'Notes', group: 'Workflow', width: 180, value: (l) => text(l.notes) },
 ]
 
 export const FIELD_PREFIX = 'f:'
@@ -71,7 +71,7 @@ export const fieldDef = (id: string) => LEAD_FIELD_DEFS.find((field) => field.id
 /** Fields that already have a column of their own in the default table (the Columns menu lists them once, under that column). */
 export const DEFAULT_COLUMN_FIELDS: ReadonlySet<string> = new Set([
   'created', 'name', 'gender', 'dob', 'age', 'phone', 'email', 'city', 'state', 'position', 'indiaYears', 'abroadYears', 'totalYears', 'educationLevel',
-  'platform', 'campaign', 'form', 'status', 'owner', 'notes',
+  'platform', 'campaign', 'form', 'status', 'owner',
 ])
 
 /** The sheet's own wording for a custom question: `which_position_are_you_applying_for?` becomes `Which position are you applying for`. */
