@@ -1618,6 +1618,12 @@ class Lead(Base, PkMixin, TimestampMixin):
     experience_restaurant_text: Mapped[str | None] = mapped_column(String(200))
     experience_total_years: Mapped[float | None] = mapped_column(Numeric(5, 1))
     experience_total_text: Mapped[str | None] = mapped_column(String(200))
+    # India/abroad experience normally come from the sheet's own question (raw). A recruiter's edit is stored here and wins;
+    # text '' with no years means the recruiter cleared it on purpose. Both NULL = show the sheet's answer.
+    experience_india_years: Mapped[float | None] = mapped_column(Numeric(5, 1))
+    experience_india_text: Mapped[str | None] = mapped_column(String(200), comment="Recruiter-edited India experience; NULL = use the sheet answer.")
+    experience_abroad_years: Mapped[float | None] = mapped_column(Numeric(5, 1))
+    experience_abroad_text: Mapped[str | None] = mapped_column(String(200), comment="Recruiter-edited abroad experience; NULL = use the sheet answer.")
     gender: Mapped[str | None] = mapped_column(String(20))
     marital_status: Mapped[str | None] = mapped_column(String(120))
     dob: Mapped[date | None] = mapped_column(Date)

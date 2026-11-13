@@ -1,10 +1,10 @@
-import { CheckCircle2, FileUp, PhoneCall, UserPlus } from 'lucide-react'
+import { CheckCircle2, FileUp, Pencil, PhoneCall, UserPlus } from 'lucide-react'
 import { useRef } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
 import { RowMenu } from '@/features/candidates/components/db-parts'
 import { createdParts, followUpLabel, followUpState, leadDate, type Lead } from '../lead-model'
-import { CampaignCell, EducationCell, ExperienceCell, LocationCell, NameCell, OwnerCell, PositionText, StatusText } from './lead-columns'
+import { CampaignCell, EducationCell, ExperienceCell, LocationCell, NameCell, OwnerCell, PositionText, RemarksCell, StatusText } from './lead-columns'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
 
 /** Stacked cards for narrow screens: the same lead facts and actions as the table row. */
@@ -54,9 +54,11 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
         <div><dt>Assigned to</dt><dd><OwnerCell lead={lead} userById={context.userById} /></dd></div>
         <div><dt>Follow-up</dt><dd className={cn(follow === 'overdue' && 'ld-late-text')}>{follow === 'none' || follow === 'closed' ? '–' : followUpLabel(lead.nextFollowUpAt)}</dd></div>
         <div><dt>Country</dt><dd>{lead.countryInterest || '–'}</dd></div>
+        <div className="ld-card-remarks" onClick={(event) => event.stopPropagation()}><dt>Remarks</dt><dd><RemarksCell lead={lead} context={context} /></dd></div>
       </dl>
       <div className="db-mini-foot" onClick={(event) => event.stopPropagation()}>
         <div className="db-acts">
+          {context.onEdit && <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Edit details'} onClick={() => context.onEdit?.(lead)}><Pencil size={14} /><span>Edit</span></button>}
           <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Log a call'} onClick={() => context.onLogCall(lead)}><PhoneCall size={14} /><span>Call</span></button>
           {lead.candidateId
             ? <span className="ld-got"><CheckCircle2 size={13} aria-hidden="true" />{lead.candidateRef || 'Candidate'}</span>

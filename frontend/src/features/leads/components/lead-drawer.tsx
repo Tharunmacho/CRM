@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ExternalLink, FileUp, Link2, Lock, MessageCircle, PhoneCall, Trash2, UserCheck, UserPlus, Loader2, Undo2 } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FileUp, Link2, Lock, MessageCircle, Pencil, PhoneCall, Trash2, UserCheck, UserPlus, Loader2, Undo2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { User } from '@/shared/model/types'
 import { Sheet } from '@/shared/ui/overlay'
@@ -38,6 +38,8 @@ interface Props {
   onUnconvert?: (lead: Lead) => void
   /** The status was saved from here: the screen offers an Undo toast. */
   onStatusChange?: (lead: Lead, from: string, to: string) => void
+  /** Opens the edit form for every fact of the lead. */
+  onEdit?: (lead: Lead) => void
 }
 
 const Row = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -70,7 +72,7 @@ function Timeline({ items }: { items: LeadActivity[] }) {
 }
 
 /** The side drawer of one lead: everything we know, what to do next, and the timeline. */
-export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUploadResume, onGateRefusal, canDelete, onDelete, onUnconvert, onStatusChange }: Props) {
+export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUploadResume, onGateRefusal, canDelete, onDelete, onUnconvert, onStatusChange, onEdit }: Props) {
   const navigate = useNavigate()
   const [detail, setDetail] = useState<LeadDetail | null>(null)
   const [error, setError] = useState('')
@@ -160,6 +162,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
 
         <div className="ld-d-actions">
           <Button variant="primary" icon={<PhoneCall className="h-4 w-4" />} disabled={Boolean(blocked)} title={blocked ?? undefined} onClick={() => onLogCall(shown)}>Log a call</Button>
+          {onEdit && <Button variant="secondary" icon={<Pencil className="h-4 w-4" />} disabled={Boolean(blocked)} title={blocked ?? 'Edit name, phone, job, experience, location and more'} onClick={() => onEdit(detail ?? shown)}>Edit details</Button>}
           <Button variant="secondary" icon={<UserPlus className="h-4 w-4" />} disabled={Boolean(blocked) || Boolean(shown.candidateId)} title={shown.candidateId ? 'This lead is already a candidate.' : blocked ?? undefined} onClick={() => onConvert(shown)}>Convert to candidate</Button>
           <label className={cn('ld-btn ld-file-btn', (blocked || uploading || shown.candidateId) && 'is-disabled')} title={blocked ?? (shown.candidateId ? 'This lead is already a candidate.' : 'Attach the updated resume')}>
             {uploading ? <Loader2 className="ld-spin h-4 w-4" /> : <FileUp className="h-4 w-4" />}{shown.hasResume ? 'Replace resume' : 'Upload resume'}
@@ -177,7 +180,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
         )}
 
         <section className="ld-dsec ld-edit">
-          <h3>Status, follow-up and notes</h3>
+          <h3>Status, follow-up and remarks</h3>
           <div className="ld-grid2">
             <Field label="Status">
               <Select aria-label="Status" value={status || shown.status} disabled={Boolean(blocked) || !detail || Boolean(shown.candidateId)} onChange={(event) => setStatus(event.target.value)}>
@@ -189,8 +192,8 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
               <Input type="datetime-local" value={follow} disabled={Boolean(blocked) || !detail} onChange={(event) => setFollow(event.target.value)} />
             </Field>
           </div>
-          <Field label="Notes">
-            <Textarea rows={3} value={notes} maxLength={4000} disabled={Boolean(blocked) || !detail} placeholder="Anything worth remembering about this person" onChange={(event) => setNotes(event.target.value)} />
+          <Field label="Remarks">
+            <Textarea rows={3} value={notes} maxLength={5000} disabled={Boolean(blocked) || !detail} placeholder="Anything worth remembering about this person" onChange={(event) => setNotes(event.target.value)} />
           </Field>
           {saveError && <p role="alert" className="ld-alert"><span>{saveError}</span></p>}
           <div className="ld-edit-foot"><Button variant="primary" disabled={!dirty || saving || Boolean(blocked)} title={blocked ?? undefined} onClick={() => void save()}>{saving ? 'Saving…' : 'Save changes'}</Button></div>

@@ -399,6 +399,28 @@ def test_call_outcomes_edit_log_and_validation(env):
     assert env.client.get("/api/leads/nope").status_code == 404
 
 
+def test_row_edit_of_every_table_field_and_remarks(env):
+    imported(env, meta_rows(0, 2))
+    lead_id = first_lead(env)["id"]
+    body = {"name": "Edited Name", "dob": "1995-05-06", "phone": "+91 98765 40000", "positionApplied": "Tandoor Chef",
+            "educationLevel": "Diploma", "experienceIndia": "4 years", "experienceAbroad": "6 months", "experienceTotal": "4.5",
+            "city": "Charummoodu", "state": "Kerala", "status": "contacted", "notes": "Prefers a call after 6 pm"}
+    edited = env.client.patch(f"/api/leads/{lead_id}", json=body)
+    assert edited.status_code == 200, edited.text
+    out = edited.json()
+    assert (out["name"], out["dob"], out["phone"], out["positionApplied"], out["educationLevel"]) == ("Edited Name", "1995-05-06", "+919876540000", "Tandoor Chef", "Diploma")
+    assert (out["experienceIndiaYears"], out["experienceIndiaText"], out["experienceIndiaQuestion"]) == (4.0, "4 years", None)
+    assert (out["experienceAbroadYears"], out["experienceAbroadText"]) == (0.5, "6 months")
+    assert (out["experienceTotalYears"], out["experienceTotalText"]) == (4.5, "4.5")
+    assert (out["city"], out["state"], out["status"], out["notes"]) == ("Charummoodu", "Kerala", "contacted", "Prefers a call after 6 pm")
+    listed = next(item for item in env.client.get("/api/leads").json()["items"] if item["id"] == lead_id)
+    assert listed["experienceIndiaText"] == "4 years" and listed["notes"] == "Prefers a call after 6 pm"
+    cleared = env.client.patch(f"/api/leads/{lead_id}", json={"experienceIndia": "", "experienceTotal": None, "notes": ""}).json()
+    assert cleared["experienceIndiaYears"] is None and cleared["experienceIndiaText"] is None and cleared["notes"] is None
+    assert cleared["experienceTotalYears"] is None and cleared["experienceTotalText"] is None
+    assert env.client.patch(f"/api/leads/{lead_id}", json={"experienceIndia": "x" * 201}).status_code == 422
+
+
 def test_assign_ids_auto_filter_and_permissions(env):
     imported(env, meta_rows(0, 12))
     ids = [row[0] for row in env.db.execute(text("SELECT id FROM crm_leads ORDER BY import_row"))]

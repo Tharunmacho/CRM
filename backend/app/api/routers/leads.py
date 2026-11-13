@@ -188,6 +188,10 @@ class LeadPatch(Wire):
     education_level: str | None = Field(default=None, max_length=200)
     experience_restaurant_years: float | None = Field(default=None, ge=0, le=60)
     experience_total_years: float | None = Field(default=None, ge=0, le=60)
+    experience_restaurant: str | None = Field(default=None, max_length=200)
+    experience_total: str | None = Field(default=None, max_length=200)
+    experience_india: str | None = Field(default=None, max_length=200)
+    experience_abroad: str | None = Field(default=None, max_length=200)
 
 
 @router.patch("/{lead_id}")

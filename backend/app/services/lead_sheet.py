@@ -177,6 +177,10 @@ def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=No
     geography = {f"experience{label}{suffix}": value
                  for label, scope in (("India", "india"), ("Abroad", "abroad"))
                  for suffix, value in geographic_experience(source, scope).items()}
+    for label, years, written in (("India", lead.experience_india_years, lead.experience_india_text),
+                                  ("Abroad", lead.experience_abroad_years, lead.experience_abroad_text)):
+        if years is not None or written is not None:  # a recruiter's edit wins over the sheet's answer ('' = cleared)
+            geography.update({f"experience{label}Years": iso(years), f"experience{label}Text": written or None, f"experience{label}Question": None})
     return {
         "id": lead.id, "externalId": lead.external_id, "batchId": lead.batch_id, "importRow": lead.import_row,
         "createdTime": iso(lead.created_time), "name": lead.name, "phone": lead.phone, "phoneCountryCode": lead.phone_country_code,
@@ -569,6 +573,22 @@ def patch_lead(db: Session, user: User, lead: Lead, body: dict) -> None:
         if key in body and body[key] != getattr(lead, column):
             setattr(lead, column, body[key])
             changes.append(key)
+    # Free-text experience answers ("3", "2.5 yrs", "6 months", "Yes"): the years are read from the text, as at import.
+    for key, prefix, label in (("experienceRestaurant", "experience_restaurant", "restaurant experience"),
+                               ("experienceTotal", "experience_total", "total experience"),
+                               ("experienceIndia", "experience_india", "India experience"),
+                               ("experienceAbroad", "experience_abroad", "abroad experience")):
+        if key not in body:
+            continue
+        years, written = lp.parse_experience(body[key]) if body[key] is not None else (None, None)
+        if written is None and key in ("experienceIndia", "experienceAbroad"):
+            written = ""  # cleared on purpose: do not fall back to the sheet's answer
+        before = (getattr(lead, f"{prefix}_years"), getattr(lead, f"{prefix}_text"))
+        before = (float(before[0]) if before[0] is not None else None, before[1])
+        if (years, written) != before:
+            setattr(lead, f"{prefix}_years", years)
+            setattr(lead, f"{prefix}_text", written)
+            changes.append(label)
     if changes:
         key_clash = None
         if {"phone", "email"} & set(changes):

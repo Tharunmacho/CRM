@@ -25,6 +25,7 @@ import { LeadsSkeleton, useDelayedFlag } from '@/features/leads/components/leads
 import { WaComposerHost } from '@/features/leads/components/wa-template'
 import { SKELETON_GRACE_MS, countText, listView, skeletonRows } from '@/features/leads/leads-view-model'
 import { CallDialog } from '@/features/leads/components/call-dialog'
+import { LeadEditDialog } from '@/features/leads/components/lead-edit-dialog'
 import { ConvertDialog } from '@/features/leads/components/convert-dialog'
 import { UnconvertDialog } from '@/features/leads/components/unconvert-dialog'
 import { AssignLeadsDialog } from '@/features/leads/components/assign-dialog'
@@ -67,6 +68,7 @@ export default function LeadsPage() {
   const [uploading, setUploading] = useState(location.pathname.endsWith('/import'))
   const [open, setOpen] = useState<Lead | null>(null)
   const [calling, setCalling] = useState<Lead | null>(null)
+  const [editing, setEditing] = useState<Lead | null>(null)
   const [converting, setConverting] = useState<Lead | null>(null)
   const [unconverting, setUnconverting] = useState<Lead | null>(null)
   const [assigning, setAssigning] = useState<string[] | null>(null)
@@ -170,6 +172,15 @@ export default function LeadsPage() {
     }
   }, [data, onGateRefusal])
 
+  // The table's columns are memoised, so the remark save reads the newest list/gate handlers through a ref.
+  const latest = useRef({ saveRemarks: async (_lead: Lead, _text: string) => {} })
+  latest.current.saveRemarks = async (lead, text) => {
+    try { await leadApi.update(lead.id, { notes: text }); data.refresh() } catch (error) {
+      const refused = gateFromRefusal(error)
+      if (refused) onGateRefusal(refused)
+      throw error
+    }
+  }
   const context: LeadColumnContext = {
     me: { id: me.id, role: me.role },
     gate: gateMode,
@@ -185,6 +196,8 @@ export default function LeadsPage() {
     canDelete: me.role === 'admin',
     onDelete: bulk.openDelete,
     onUnconvert: setUnconverting,
+    onEdit: setEditing,
+    saveRemarks: (lead, text) => latest.current.saveRemarks(lead, text),
   }
   const allColumns = useMemo(() => leadColumns(context, extras), [me.id, me.role, gateMode, supervisor, store.users, extras]) // eslint-disable-line react-hooks/exhaustive-deps
   const fit = useMemo(() => fitColumns(allColumns, boxWidth, choices), [allColumns, boxWidth, choices])
@@ -326,13 +339,15 @@ export default function LeadsPage() {
         onClose={() => setOpen(null)} onChanged={() => data.refresh()}
         onLogCall={setCalling} onConvert={setConverting} onAssign={(lead) => setAssigning([lead.id])}
         onUploadResume={uploadResume} onGateRefusal={onGateRefusal}
-        canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo}
+        canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo} onEdit={setEditing}
       />
       </SafeBoundary>
       {bulk.overlays}
       <WaComposerHost />
       <CallDialog lead={calling} onClose={() => setCalling(null)} blockedReason={calling ? workBlock(context, calling) : null} onGateRefusal={onGateRefusal}
         onSaved={() => { setCalling(null); flash('Call saved.'); data.refresh() }} />
+      <LeadEditDialog lead={editing} onClose={() => setEditing(null)} blockedReason={editing ? workBlock(context, editing) : null} onGateRefusal={onGateRefusal}
+        onSaved={(saved) => { setEditing(null); setOpen((current) => (current?.id === saved.id ? saved : current)); flash(`Changes to ${saved.name || 'the lead'} saved.`); data.refresh() }} />
       <ConvertDialog lead={converting} onClose={() => setConverting(null)} blockedReason={converting ? workBlock(context, converting) : null} onGateRefusal={onGateRefusal} onChanged={() => data.refresh()} />
       {me.role === 'admin' && <UnconvertDialog lead={unconverting} onClose={() => setUnconverting(null)} onSaved={(result) => {
         setUnconverting(null); setOpen((current) => current?.id === result.lead.id ? result.lead : current)
