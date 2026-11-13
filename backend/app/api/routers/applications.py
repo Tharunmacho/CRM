@@ -226,6 +226,11 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
              and attachment.slot in {expected, field})
             or (app.current_stage == 7 and field == "copy" and attachment.entity_type == "candidate"
                 and attachment.entity_id == app.candidate_id and attachment.slot == "passport")
+            # The candidate-document checklist is the canonical home for a
+            # ticket.  Stage 11 may reference that exact stored file rather
+            # than making staff upload a second copy merely to deploy.
+            or (app.current_stage == TOTAL_STAGES and field == "file" and attachment.entity_type == "candidate"
+                and attachment.entity_id == app.candidate_id and attachment.slot == "air_ticket")
         )
         if not owned:
             raise HTTPException(422, {"message": f"Choose an uploaded {field} belonging to this application and stage.", "missing": [field]})
@@ -440,7 +445,13 @@ def complete_stage(application_id: str, body: CompleteIn,
         _active(app)
         _check_version(app, body.lock_version)
         _owner(db, candidate)
-        data = _normalized_data(db, app, body.data if body.data is not None else app.draft or {})
+        # Deployment is the one irreversible workflow transition: make sure
+        # the ticket reference resolves to bytes that are still present, not
+        # merely an old attachment row.
+        data = _normalized_data(
+            db, app, body.data if body.data is not None else app.draft or {},
+            require_bytes=app.current_stage == TOTAL_STAGES,
+        )
         if not data.get("feedback", "").strip():
             raise HTTPException(422, {"message": "Write feedback before saving and moving this stage.", "missing": ["Feedback"]})
         definition = stage_by_no(app.current_stage)

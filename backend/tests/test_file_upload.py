@@ -262,6 +262,29 @@ def test_application_upload_uses_workflow_ownership(upload_environment):
     assert allowed.status_code == 201
 
 
+def test_stage_ticket_is_visible_once_in_the_candidate_air_ticket_field(upload_environment):
+    environment = upload_environment
+    payload = b"%PDF-1.7 confirmed ticket"
+
+    first = post_file(environment, payload, filename="confirmed-ticket.pdf",
+                      entity_type="application", entity_id="application-1", slot="stage_11_file")
+    assert first.status_code == 201, first.text
+    records = [row for row in environment.database.rows if isinstance(row, Attachment)]
+    stage_ticket = next(row for row in records if row.entity_type == "application")
+    candidate_ticket = next(row for row in records if row.entity_type == "candidate")
+    assert (candidate_ticket.entity_id, candidate_ticket.slot) == ("candidate-1", "air_ticket")
+    assert (candidate_ticket.object_key, candidate_ticket.content_hash) == (stage_ticket.object_key, stage_ticket.content_hash)
+
+    # Retrying the same stage upload creates its normal stage-history version,
+    # but never a duplicate candidate-document record for the same bytes.
+    second = post_file(environment, payload, filename="confirmed-ticket.pdf",
+                       entity_type="application", entity_id="application-1", slot="stage_11_file")
+    assert second.status_code == 201, second.text
+    records = [row for row in environment.database.rows if isinstance(row, Attachment)]
+    assert len([row for row in records if row.entity_type == "candidate" and row.slot == "air_ticket"]) == 1
+    assert len([row for row in records if row.entity_type == "application" and row.slot == "stage_11_file"]) == 2
+
+
 def test_having_entered_the_candidate_no_longer_allows_uploading_once_someone_else_owns_it(upload_environment):
     environment = upload_environment
     environment.user.role = Role.staff

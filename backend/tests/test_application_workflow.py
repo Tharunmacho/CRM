@@ -117,7 +117,8 @@ def payload(env, app_id, stage):
         5: {"obtained": "yes"}, 6: {"applied": "yes", "result": "fit"},
         7: {"collected": "yes", "heldBy": {"id": "staff", "name": "spoofed"}},
         8: {"collected": "yes", "amount": "1500.25", "amountCurrency": "INR", "mode": "upi"},
-        9: {"arrived": "yes", "googleReview": False}, 10: {"done": "yes"}, 11: {},
+        9: {"arrived": "yes", "googleReview": False}, 10: {"done": "yes"},
+        11: {"travelDate": "2026-11-15"},
     }[stage]
     if stage in (5, 10, 11):
         values["file"] = attachment(env, app_id, stage)
@@ -157,6 +158,36 @@ def test_full_eleven_stage_path_has_one_task_and_keeps_evidence(workflow):
         assert history[6].data["heldBy"] == {"id": "staff", "name": "staff"}
         assert history[7].amount_currency == "INR"
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_id == app_id)) == 23
+
+
+def test_final_stage_uses_candidate_air_ticket_but_never_deploys_without_travel_date(workflow):
+    env = workflow
+    app_id = mapped(env)
+    reach(env, app_id, 11)
+    # The ticket was uploaded once in the candidate's Documents section, not
+    # re-uploaded in a stage modal.  The final stage may use that exact file.
+    ticket = attachment(env, app_id, 11, entity_type="candidate", entity_id="candidate", slot="air_ticket")
+    blocked = save(env, app_id, {
+        "feedback": "Ticket received; confirming the departure date.",
+        "file": ticket,
+    })
+    assert blocked.status_code == 200, blocked.text
+    response = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": blocked.json()["lockVersion"]})
+    assert response.status_code == 422
+    assert response.json()["detail"]["missing"] == ["Travel date"]
+    with env.sessions() as db:
+        assert db.get(Application, app_id).status == ApplicationStatus.active
+        assert db.get(Candidate, "candidate").status == CandidateStatus.in_process
+
+    saved = save(env, app_id, {
+        "feedback": "Confirmed travel for 15 November with the candidate.",
+        "file": ticket,
+        "travelDate": "2026-11-15",
+    })
+    assert saved.status_code == 200, saved.text
+    deployed = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": saved.json()["lockVersion"]})
+    assert deployed.status_code == 200, deployed.text
+    assert deployed.json()["status"] == "deployed"
 
 
 @pytest.mark.parametrize(("stage", "data", "reason"), [

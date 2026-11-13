@@ -267,7 +267,16 @@ def _stage10(d: dict) -> Evaluation:
 
 
 def _stage11(d: dict) -> Evaluation:
-    return _ok("Booked") if _file(d, "file") else _ok("Completed manually")
+    # A candidate becomes deployed only after the actual travel ticket is on
+    # file and a travel date has been recorded.  Earlier stages can be moved
+    # manually when a recruiter has documented their work, but deployment is
+    # an operational status and must never be inferred from a note alone.
+    missing: list[str] = []
+    if not _file(d, "file"):
+        missing.append("Air ticket")
+    if not d.get("travelDate"):
+        missing.append("Travel date")
+    return _need(*missing) if missing else _ok("Booked")
 
 
 def _validated(stage: int, evaluate: Callable[[dict], Evaluation]):

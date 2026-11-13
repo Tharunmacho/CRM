@@ -604,11 +604,24 @@ function CurrentStage({
   // a dirty state and leaving with unsaved work is a deliberate act, not an accident.
   const candidate = store.candidate(app.candidateId)
   const profilePassport = newestFileVersions(candidate?.documents.find((document) => document.key === 'passport')?.versions ?? [])[0]
+  const profileAirTicket = newestFileVersions(candidate?.documents.find((document) => document.key === 'air_ticket')?.versions ?? [])[0]
+  const profilePassportId = profilePassport?.id
+  const profileAirTicketId = profileAirTicket?.id
   // Stage 7 starts from the passport copy already on the profile; the recruiter may replace it.
-  const withPassportCopy = (draft: Record<string, unknown>) => app.currentStage === 7 && !draft.copy && profilePassport
-    ? { ...draft, copy: { id: profilePassport.id, name: profilePassport.name, sizeKb: profilePassport.sizeKb, url: profilePassport.url, version: profilePassport.version } }
-    : draft
-  const [data, setData] = useState<Record<string, unknown>>(() => withPassportCopy(app.draft ?? {}))
+  // Stage 11 likewise starts from the Air ticket already saved in the
+  // candidate's Documents section. It is the same attachment, not a second
+  // upload, and the server still requires a travel date before deployment.
+  const withCandidateDocuments = (draft: Record<string, unknown>) => {
+    let prepared = draft
+    if (app.currentStage === 7 && !prepared.copy && profilePassport) {
+      prepared = { ...prepared, copy: { id: profilePassport.id, name: profilePassport.name, sizeKb: profilePassport.sizeKb, url: profilePassport.url, version: profilePassport.version } }
+    }
+    if (app.currentStage === 11 && !prepared.file && profileAirTicket) {
+      prepared = { ...prepared, file: { id: profileAirTicket.id, name: profileAirTicket.name, sizeKb: profileAirTicket.sizeKb, url: profileAirTicket.url, version: profileAirTicket.version } }
+    }
+    return prepared
+  }
+  const [data, setData] = useState<Record<string, unknown>>(() => withCandidateDocuments(app.draft ?? {}))
   const [lockVersion, setLockVersion] = useState(app.lockVersion ?? 0)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -629,8 +642,8 @@ function CurrentStage({
   }, [busy, uploading, remarkBusy, onBusyChange])
 
   useEffect(() => {
-    if (!dirty) { setData(withPassportCopy(app.draft ?? {})); setLockVersion(app.lockVersion ?? 0) }
-  }, [app.lockVersion, app.currentStage])
+    if (!dirty) { setData(withCandidateDocuments(app.draft ?? {})); setLockVersion(app.lockVersion ?? 0) }
+  }, [app.lockVersion, app.currentStage, profilePassportId, profileAirTicketId])
 
   const task = store.tasks.find(
     (t) => t.applicationId === app.id && t.stage === app.currentStage && !t.completedAt && !t.cancelledAt,

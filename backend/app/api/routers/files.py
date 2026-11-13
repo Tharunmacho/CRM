@@ -63,6 +63,18 @@ CONTENT_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
+# A workflow-stage upload is evidence for the candidate too.  Keep a candidate
+# document record that points to the *same immutable bytes*, so a recruiter can
+# always find the file in the candidate's Documents section without uploading
+# it again.  Stage 7 already uses the candidate passport directly and stage 8
+# has no corresponding candidate-document slot.
+_STAGE_FILE_DOCUMENT_SLOTS = {
+    "stage_5_file": "signed_offer",
+    "stage_9_file": "visa",
+    "stage_10_file": "visa_stamping",
+    "stage_11_file": "air_ticket",
+}
+
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -106,6 +118,45 @@ def _discard_uncommitted_file(target: Path) -> None:
 def _uploaded_file(row: Attachment) -> dict:
     return {"id": row.id, "name": row.file_name, "sizeKb": row.size_kb, "version": row.version,
             "key": row.object_key, "url": f"/api/files/{row.id}", "uploadedAt": row.uploaded_at.isoformat()}
+
+
+def _mirror_stage_document_on_candidate(db: Session, application: Application, row: Attachment, user: User) -> Attachment | None:
+    """Record a stage upload in the matching candidate document slot without copying its bytes.
+
+    The application attachment remains the immutable stage evidence.  This
+    second row gives the same file a stable, visible home under the candidate.
+    A matching candidate file is reused so retries never create duplicates.
+    """
+    candidate_slot = _STAGE_FILE_DOCUMENT_SLOTS.get(row.slot)
+    if candidate_slot is None:
+        return None
+    candidate = _entity(db, "candidate", application.candidate_id, lock=True)
+    matching = db.scalar(select(Attachment).where(
+        Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
+        Attachment.slot == candidate_slot, Attachment.content_hash == row.content_hash,
+    ).order_by(Attachment.version.desc()).limit(1))
+    if matching is not None:
+        return matching
+    previous = db.scalar(select(Attachment).where(
+        Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
+        Attachment.slot == candidate_slot,
+    ).order_by(Attachment.version.desc()).limit(1))
+    mirrored = Attachment(
+        id=str(uuid.uuid4()), entity_type="candidate", entity_id=candidate.id, slot=candidate_slot,
+        version=(previous.version if previous else 0) + 1,
+        file_name=row.file_name, size_kb=row.size_kb, content_type=row.content_type,
+        object_key=row.object_key, content_hash=row.content_hash,
+        uploaded_by=user.id, uploaded_at=row.uploaded_at,
+    )
+    db.add(mirrored)
+    db.add(AuditEntry(
+        actor_id=user.id, action="Linked stage document to candidate", target=row.file_name,
+        entity_type="candidate", entity_id=candidate.id,
+        meta={"attachment_id": mirrored.id, "slot": candidate_slot, "version": mirrored.version,
+              "stage_attachment_id": row.id},
+        at=row.uploaded_at,
+    ))
+    return mirrored
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -218,6 +269,8 @@ def upload(
                   **({"extraction_deferred": True} if deferred and entity_type == "candidate" and slot in ("resume", "passport", "aadhaar") else {})},
             at=row.uploaded_at,
         ))
+        if entity_type == "application":
+            _mirror_stage_document_on_candidate(db, record, row, user)
         if entity_type == "lead":
             lead_sheet.note_resume_uploaded(db, record, user, row)
         if entity_type == "candidate" and slot in ("resume", "passport", "aadhaar") and not deferred:

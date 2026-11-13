@@ -30,10 +30,10 @@ def test_feedback_is_required_even_when_stage_details_are_present(workflow, feed
         assert db.scalar(select(func.count()).select_from(Task).where(Task.application_id == app_id, Task.completed_at.is_(None))) == 1
 
 
-def test_all_eleven_stages_accept_feedback_only_and_keep_history_without_documents(workflow):
+def test_first_ten_stages_accept_feedback_only_but_deployment_requires_ticket_and_date(workflow):
     env = workflow
     app_id = mapped(env)
-    for stage in range(1, 12):
+    for stage in range(1, 11):
         lock = version(env, app_id)
         body = {"lock_version": lock, "data": {"feedback": f"  Stage {stage}: recruiter approved this move.  "}}
         response = env.client.post(f"/api/applications/{app_id}/complete", json=body)
@@ -45,13 +45,22 @@ def test_all_eleven_stages_accept_feedback_only_and_keep_history_without_documen
         if stage < 11:
             next_without_feedback = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": version(env, app_id)})
             assert next_without_feedback.status_code == 422
+    # A final-stage note is not evidence of travel.  The actual ticket and
+    # travel date are required before this candidate can become deployed.
+    blocked = env.client.post(f"/api/applications/{app_id}/complete", json={
+        "lock_version": version(env, app_id),
+        "data": {"feedback": "Ticket is still pending."},
+    })
+    assert blocked.status_code == 422
+    assert blocked.json()["detail"]["missing"] == ["Air ticket", "Travel date"]
     with env.sessions() as db:
         app = db.get(Application, app_id)
-        assert app.status == ApplicationStatus.deployed
-        assert db.get(Candidate, "candidate").status == CandidateStatus.deployed
+        assert app.status == ApplicationStatus.active
+        assert app.current_stage == 11
+        assert db.get(Candidate, "candidate").status == CandidateStatus.in_process
         assert not db.scalar(select(Attachment.id))
         records = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id == app_id).order_by(ApplicationStage.stage)))
-        assert len(records) == 11
+        assert len(records) == 10
         for stage, row in enumerate(records, 1):
             assert row.data["feedback"] == f"Stage {stage}: recruiter approved this move."
             assert row.outcome == "Completed manually" and row.completed_by == "staff"

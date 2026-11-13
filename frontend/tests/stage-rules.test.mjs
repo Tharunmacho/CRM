@@ -12,12 +12,12 @@ const feedback = 'Reviewed with the candidate and approved moving to the next st
 test('all eleven stages retain their recorded outcomes with feedback', () => {
   const values = [{ result: 'passed' }, { forwarded: 'yes' }, { scheduled: 'yes', date: '2026-11-02' },
     { result: 'selected', remarks: 'Approved' }, { obtained: 'yes', file }, { result: 'fit' },
-    { collected: 'yes' }, { collected: 'yes', amount: 20, receipt: file }, { arrived: 'yes' }, { done: 'yes', file }, { file }]
+    { collected: 'yes' }, { collected: 'yes', amount: 20, receipt: file }, { arrived: 'yes' }, { done: 'yes', file }, { file, travelDate: '2026-11-15' }]
   values.forEach((data, index) => assert.equal(stageByNo(index + 1).evaluate({ ...data, feedback }).canComplete, true, `stage ${index + 1}`))
 })
 
-test('all stages can be moved manually with only feedback and no documents or extra details', () => {
-  for (let stage = 1; stage <= TOTAL_STAGES; stage++) {
+test('the first ten stages can be moved manually, while deployment needs an actual ticket and travel date', () => {
+  for (let stage = 1; stage < TOTAL_STAGES; stage++) {
     const result = stageByNo(stage).evaluate({ feedback })
     assert.equal(result.canComplete, true, `stage ${stage}`)
     assert.equal(result.outcome, 'Completed manually')
@@ -25,6 +25,12 @@ test('all stages can be moved manually with only feedback and no documents or ex
     assert.equal(result.repeats, undefined)
     assert.ok(stageByNo(stage).fields.every((field) => field.type !== 'file' || !field.required))
   }
+  const missing = stageByNo(11).evaluate({ feedback })
+  assert.equal(missing.canComplete, false)
+  assert.deepEqual(missing.missing, ['Air ticket', 'Travel date'])
+  assert.equal(stageByNo(11).evaluate({ feedback, file }).canComplete, false)
+  assert.equal(stageByNo(11).evaluate({ feedback, travelDate: '2026-11-15' }).canComplete, false)
+  assert.equal(stageByNo(11).evaluate({ feedback, file, travelDate: '2026-11-15' }).outcome, 'Booked')
 })
 
 test('every stage requires new written feedback even when every other detail is filled', () => {

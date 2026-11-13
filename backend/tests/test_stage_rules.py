@@ -36,7 +36,7 @@ def test_invalid_values_never_complete(stage, data):
     (8, {"collected": "yes", "amount": 100, "receipt": {"id": "uploaded"}}),
     (9, {"arrived": "yes", "googleReview": False}),
     (10, {"done": "yes", "file": {"id": "uploaded"}}),
-    (11, {"file": {"id": "uploaded"}}),
+    (11, {"file": {"id": "uploaded"}, "travelDate": "2026-10-21"}),
 ])
 def test_prd_completion_columns_do_not_gain_extra_blockers(stage, data):
     assert stage_by_no(stage).evaluate(data).can_complete
@@ -71,7 +71,7 @@ def test_drafts_allow_incomplete_values_and_normalize_money_and_whitespace():
     assert validate_payload(8, {"amount": "10.25"}) == {"amount": 10.25, "amountCurrency": "INR"}
 
 
-@pytest.mark.parametrize("stage", range(1, 12))
+@pytest.mark.parametrize("stage", range(1, 11))
 def test_feedback_only_stage_move_never_invents_documents_results_or_dates(stage):
     data = validate_payload(stage, {"feedback": "  Recruiter confirmed this manual move.  "})
     assert data["feedback"] == "Recruiter confirmed this manual move."
@@ -87,11 +87,27 @@ def test_feedback_only_stage_move_never_invents_documents_results_or_dates(stage
     (5, {"obtained": "yes"}, "Obtained"),
     (8, {"collected": "yes"}, "Collected"),
     (10, {"done": "yes"}, "Stamped"),
-    (11, {}, "Completed manually"),
 ])
 def test_optional_documents_and_details_do_not_gate_a_manual_move(stage, data, outcome):
     result = stage_by_no(stage).evaluate(data)
     assert result.can_complete and result.outcome == outcome
+
+
+@pytest.mark.parametrize(("data", "missing"), [
+    ({}, ["Air ticket", "Travel date"]),
+    ({"file": {"id": "uploaded"}}, ["Travel date"]),
+    ({"travelDate": "2026-10-21"}, ["Air ticket"]),
+])
+def test_ticket_stage_requires_real_ticket_and_travel_date_before_deployment(data, missing):
+    result = stage_by_no(11).evaluate(data)
+    assert not result.can_complete
+    assert result.missing == missing
+
+
+def test_ticket_stage_deploys_only_with_real_ticket_and_travel_date():
+    result = stage_by_no(11).evaluate({"file": {"id": "uploaded"}, "travelDate": "2026-10-21"})
+    assert result.can_complete
+    assert result.outcome == "Booked"
 
 
 @pytest.mark.parametrize(("stage", "data"), [
