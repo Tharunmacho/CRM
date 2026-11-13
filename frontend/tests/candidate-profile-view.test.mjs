@@ -12,7 +12,7 @@ function moduleUrl(source) {
 
 const ocrViewUrl = moduleUrl(await readFile(new URL('../src/features/candidates/ocr-view.ts', import.meta.url), 'utf8'))
 const source = await readFile(new URL('../src/features/candidates/profile-view.ts', import.meta.url), 'utf8')
-const { buildProfileModel, dateKey, monthLabel, periodLabel } = await import(moduleUrl(source.replace("'./ocr-view'", `'${ocrViewUrl}'`)))
+const { buildProfileModel, dateKey, experienceLabel, monthLabel, periodLabel } = await import(moduleUrl(source.replace("'./ocr-view'", `'${ocrViewUrl}'`)))
 
 const fmt = { money: (n) => `AED ${n}`, date: (v) => `on ${v.slice(0, 10)}` }
 
@@ -149,4 +149,27 @@ test('summary and education grade come from the reading when it has them', () =>
   const model = buildProfileModel(candidate(), reading, fmt)
   assert.equal(model.summary, 'Seeking a site role.')
   assert.deepEqual(model.education, [{ degree: '8 Standard', institution: 'Islamia school', period: '', grade: 'A - Grade' }])
+})
+
+test('saved application-form fields win over stale OCR and render without a stored raw resume', () => {
+  const saved = candidate({
+    currentAddress: '99 Saved Road, Coimbatore', maritalStatus: 'Single', fatherName: 'Saved Parent',
+    experienceIndia: 3, totalExperience: 8, gulfExperience: 5,
+    education: [{ level: 'ITI Electrical', passedYear: 2015, institute: 'Saved Institute' }],
+    workHistory: [{ company: 'Saved Works', designation: 'Electrical Technician', country: 'India', period: '2016 - 2019' }],
+  })
+  const model = buildProfileModel(saved, veris, fmt)
+  const row = (rows, label) => rows.find((r) => r.label === label)?.value
+  assert.equal(row(model.details, 'Address'), '99 Saved Road, Coimbatore')
+  assert.equal(row(model.additional, 'Marital status'), 'Single')
+  assert.equal(row(model.additional, "Father's name"), 'Saved Parent')
+  assert.equal(row(model.additional, 'Experience in India'), '3 years')
+  assert.deepEqual(model.education, [{ degree: 'ITI Electrical', institution: 'Saved Institute', period: '2015', grade: '' }])
+  assert.deepEqual(model.jobs, [{ title: 'Electrical Technician', company: 'Saved Works', location: 'India', overseas: false, period: '2016 - 2019', duration: '', description: '' }])
+})
+
+test('an unconfirmed zero is never rendered as no experience', () => {
+  assert.equal(experienceLabel(0), 'Not confirmed')
+  assert.equal(experienceLabel(0, 'manual', 'overseas'), '0 years overseas')
+  assert.equal(experienceLabel(4, undefined, 'overseas'), '4 years overseas')
 })

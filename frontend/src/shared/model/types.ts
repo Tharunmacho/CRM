@@ -112,6 +112,11 @@ export interface Candidate {
   maritalStatus?: string | null
   currentAddress?: string | null
   experienceIndia?: number
+  /** Full form rows are returned by the individual profile endpoint, not the desk snapshot. */
+  education?: { level?: string | null; passedYear?: number | null; institute?: string | null }[]
+  workHistory?: { company?: string | null; designation?: string | null; country?: string | null; period?: string | null }[]
+  /** Optional provenance from the application-form read. It lets display code distinguish an unconfirmed default zero from a confirmed value. */
+  fieldSources?: Record<string, 'extracted' | 'manual'>
   nativePlace?: string | null
   familyMemberNumber?: string | null
   jobDurationPreference?: string | null

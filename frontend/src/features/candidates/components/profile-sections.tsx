@@ -7,7 +7,7 @@ import { BulletSection, FactGrid, ProfileCard, ProfileRows, type Fact } from './
 import type { AadhaarOcr, CandidateOcr, PassportOcr } from './ocr-types'
 import { AadhaarReading, PassportReading } from './ocr-sections'
 import { primaryDocument } from '../ocr-view'
-import { SOURCE_LABEL, type ProfileModel } from '../profile-view'
+import { experienceLabel, SOURCE_LABEL, type ProfileModel } from '../profile-view'
 import { sourceDetailLabel } from '../activity'
 
 export type { CandidateOcr, ResumeOcr } from './ocr-types'
@@ -33,9 +33,8 @@ function TabGroup({ id, label, children }: { id: string; label: string; children
  * salary (work profile) and where the candidate came from (source). Read from the saved record.
  */
 function workProfileFacts(cand: Candidate): Fact[] {
-  const years = (value: number | null | undefined) => (value == null ? 'Not recorded' : `${value} ${value === 1 ? 'year' : 'years'}`)
   return [
-    ['Gulf or overseas experience', years(cand.gulfExperience)],
+    ['Gulf or overseas experience', experienceLabel(cand.gulfExperience, cand.fieldSources?.['experience.experienceAbroad'], 'overseas')],
     ['Expected salary', cand.expectedSalary != null ? money(cand.expectedSalary) : 'Not recorded'],
     ['Source', SOURCE_LABEL[cand.source] ?? cand.source],
     ['More about the source', sourceDetailLabel(cand.sourceDetail) || 'Not recorded'],

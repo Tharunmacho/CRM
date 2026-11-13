@@ -125,6 +125,19 @@ const span = (months?: number, human?: string): string => (months && months > 0 
 
 const years = (n?: number): string => (typeof n === 'number' && n > 0 ? `${n} ${n === 1 ? 'year' : 'years'}` : '')
 
+/**
+ * A database default of zero does not mean the reader or a staff member confirmed
+ * that the candidate has no experience.  Only a positive number or an explicit
+ * field-source may be stated as a fact.  This keeps profile summaries from
+ * turning a missing extraction into the misleading phrase "No experience".
+ */
+export function experienceLabel(value: number | null | undefined, source?: 'extracted' | 'manual', qualifier = ''): string {
+  const tail = qualifier ? ` ${qualifier}` : ''
+  if (typeof value !== 'number' || value < 0) return 'Not confirmed'
+  if (value > 0) return `${value} ${value === 1 ? 'year' : 'years'}${tail}`
+  return source ? `0 years${tail}` : 'Not confirmed'
+}
+
 const digits = (v?: string | null) => (v ?? '').replace(/\D/g, '')
 
 const row = (label: string, value: string | null | undefined, kind: RowKind = 'text'): ProfileRow | null => {
@@ -150,7 +163,21 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
     .map((kind) => primaryDocument(ocr, kind)?.source.fileName ?? '')
     .find(Boolean) ?? ''
 
-  const jobs: JobView[] = [...(r?.experience ?? [])]
+  const savedHistory: JobView[] = (cand.workHistory ?? [])
+    .filter((j) => clean(j.designation) || clean(j.company))
+    .map((j) => {
+      const location = clean(j.country)
+      return {
+        title: clean(j.designation),
+        company: clean(j.company),
+        location,
+        overseas: Boolean(location && !/^india(?:n)?$/i.test(location)),
+        period: clean(j.period),
+        duration: '',
+        description: '',
+      }
+    })
+  const jobs: JobView[] = (savedHistory.length ? savedHistory : [...(r?.experience ?? [])]
     .filter((j) => clean(j.title) || clean(j.company))
     // Newest first; the current job ("Present") leads, an entry without a readable start sinks.
     .sort((a, b) => dateKey(b.start) - dateKey(a.start) || dateKey(b.end) - dateKey(a.end))
@@ -162,9 +189,15 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
       period: periodLabel(j.start, j.end),
       duration: span(j.duration_months, j.duration_human),
       description: clean(j.description),
-    }))
+    })))
 
-  const education: EducationView[] = (r?.education ?? [])
+  const savedEducation: EducationView[] = (cand.education ?? [])
+    .filter((e) => clean(e.level) || clean(e.institute))
+    .map((e) => ({
+      degree: clean(e.level), institution: clean(e.institute),
+      period: typeof e.passedYear === 'number' ? String(e.passedYear) : '', grade: '',
+    }))
+  const education: EducationView[] = savedEducation.length ? savedEducation : (r?.education ?? [])
     .filter((e) => clean(e.degree) || clean(e.institution))
     .map((e) => ({ degree: clean(e.degree), institution: clean(e.institution), period: periodLabel(e.start, e.end), grade: clean(e.grade) }))
 
@@ -177,7 +210,7 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
   const whatsapp = clean(cand.whatsapp) || clean(contact?.whatsapp)
   const phone = clean(cand.phone)
   const city = clean(cand.currentCity)
-  const address = clean(contact?.address)
+  const address = clean(cand.currentAddress) || clean(contact?.address)
 
   const contacts: ContactChip[] = []
   if (email) contacts.push({ kind: 'email', value: email })
@@ -196,8 +229,13 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
   const languages = cand.languages.length ? cand.languages : (personal?.languages_known ?? [])
   const dob = clean(cand.dob) || clean(personal?.date_of_birth)
 
-  const totalExperience = cand.totalExperience > 0 ? years(cand.totalExperience) : total
-  const overseasExperience = cand.gulfExperience > 0 ? years(cand.gulfExperience) : overseas
+  const totalConfirmed = cand.totalExperience > 0 || Boolean(cand.fieldSources?.['experience.totalExperience'])
+  const overseasConfirmed = cand.gulfExperience > 0 || Boolean(cand.fieldSources?.['experience.experienceAbroad'])
+  const indiaConfirmed = (cand.experienceIndia ?? 0) > 0 || Boolean(cand.fieldSources?.['experience.experienceIndia'])
+  const totalExperience = totalConfirmed ? experienceLabel(cand.totalExperience, cand.fieldSources?.['experience.totalExperience']) : total
+  const overseasExperience = overseasConfirmed ? experienceLabel(cand.gulfExperience, cand.fieldSources?.['experience.experienceAbroad']) : overseas
+  const indiaExperience = indiaConfirmed ? experienceLabel(cand.experienceIndia, cand.fieldSources?.['experience.experienceIndia'])
+    : span(r?.indian_experience_months, r?.indian_experience_human)
   const industry = clean(r?.industry)
   const qualification = clean(r?.highest_qualification)
 
@@ -227,12 +265,12 @@ export function buildProfileModel(cand: Candidate, ocr: CandidateOcr | null | un
     row('Date of birth', humanDate(dob)),
     row('Gender', capitalise(cand.gender) || capitalise(personal?.gender)),
     row('Nationality', clean(cand.nationality) || clean(personal?.nationality)),
-    row('Marital status', capitalise(personal?.marital_status)),
-    row("Father's name", personal?.father_name),
+    row('Marital status', capitalise(cand.maritalStatus) || capitalise(personal?.marital_status)),
+    row("Father's name", clean(cand.fatherName) || personal?.father_name),
     row("Mother's name", personal?.mother_name),
     row('Place of birth', personal?.place_of_birth),
     row('Religion', personal?.religion),
-    row('Experience in India', span(r?.indian_experience_months, r?.indian_experience_human)),
+    row('Experience in India', indiaExperience),
     row('Overseas experience', overseasExperience),
   ])
 

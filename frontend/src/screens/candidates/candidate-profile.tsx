@@ -27,7 +27,8 @@ import { ProfileCard } from '@/features/candidates/components/fact-section'
 import { CandidateEditDialog } from '@/features/candidates/components/candidate-edit-dialog'
 import { candidateReviewIssues } from '@/features/candidates/candidate-review'
 import { CandidateAssignmentHistory } from '@/features/candidates/components/assignment-history'
-import { buildProfileModel, SOURCE_LABEL, type ContactChip, type ProfileFormat } from '@/features/candidates/profile-view'
+import { buildProfileModel, experienceLabel, SOURCE_LABEL, type ContactChip, type ProfileFormat } from '@/features/candidates/profile-view'
+import { loadApplicationForm } from '@/features/application-form/form-api'
 import { buildActivity, type ActivityTone } from '@/features/candidates/activity'
 import { passportExpiryNotice } from '@/features/candidates/passport-expiry'
 import { EmailEvidenceHistory } from '@/features/inbox/email-evidence-history'
@@ -191,7 +192,7 @@ export default function CandidateProfilePage() {
   const [evidenceError, setEvidenceError] = useState('')
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [evidenceRetry, setEvidenceRetry] = useState(0)
-  const [fullText, setFullText] = useState<{ id: string; text: string; documents: Candidate['documents'] } | null>(null)
+  const [fullText, setFullText] = useState<{ id: string; text: string; documents: Candidate['documents']; candidate: Candidate } | null>(null)
   useEffect(() => {
     if (!id) return
     const controller = new AbortController()
@@ -199,8 +200,16 @@ export default function CandidateProfilePage() {
     Promise.all([
       api.get<Candidate>(`/candidates/${id}`, { signal: controller.signal }),
       api.get<CandidateOcr>(`/candidates/${id}/ocr`, { signal: controller.signal }),
-    ]).then(([profile, extracted]) => {
-      if (!controller.signal.aborted) { setFullText({ id, text: profile.resumeText, documents: profile.documents }); setOcr(extracted ?? {}) }
+      // Provenance is deliberately optional: an older server or a transient
+      // form read must never hide the profile. When present it prevents a
+      // default zero being displayed as a confirmed "No experience".
+      loadApplicationForm(id, {}, controller.signal).catch(() => null),
+    ]).then(([profile, extracted, form]) => {
+      if (!controller.signal.aborted) {
+        const detail = { ...profile, fieldSources: form?.fieldSources ?? profile.fieldSources }
+        setFullText({ id, text: profile.resumeText, documents: profile.documents, candidate: detail })
+        setOcr(extracted ?? {})
+      }
     }).catch(cause => {
       if (!controller.signal.aborted) setEvidenceError(cause instanceof Error ? cause.message : 'We could not load the documents. Please try again.')
     }).finally(() => { if (!controller.signal.aborted) setEvidenceLoading(false) })
@@ -235,7 +244,10 @@ export default function CandidateProfilePage() {
     return () => controller.abort()
   }, [id, cand?.whatsapp, cand?.ownerId])
 
-  const model = useMemo(() => (cand ? buildProfileModel(cand, ocr, FORMAT) : null), [cand, ocr])
+  const profileCandidate = useMemo(() => (cand && fullText?.id === id
+    ? { ...cand, ...fullText.candidate, documents: fullText.documents }
+    : cand), [cand, fullText, id])
+  const model = useMemo(() => (profileCandidate ? buildProfileModel(profileCandidate, ocr, FORMAT) : null), [profileCandidate, ocr])
   const bodyRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const { tabs, active: activeTab, go } = useProfileTabs(bodyRef, barRef)
@@ -253,6 +265,7 @@ export default function CandidateProfilePage() {
       />
     )
   }
+  const displayCandidate = profileCandidate ?? cand
 
   const owner = store.user(cand.ownerId)
   const apps = store.applicationsFor(cand.id)
@@ -280,8 +293,8 @@ export default function CandidateProfilePage() {
   const conversationId = whatsappConversation?.candidateId === cand.id ? whatsappConversation.conversationId : ''
   const photo = newestFileVersions(profileDocuments.find(document => document.key === 'photo')?.versions ?? [])[0]
   const unmapApp = apps.find((a) => a.id === unmapping)
-  const experience = cand.totalExperience > 0 ? `${cand.totalExperience} ${cand.totalExperience === 1 ? 'year' : 'years'}` : 'Not recorded'
-  const overseas = cand.gulfExperience > 0 ? `${cand.gulfExperience} ${cand.gulfExperience === 1 ? 'year' : 'years'} overseas` : 'No overseas experience'
+  const experience = experienceLabel(displayCandidate.totalExperience, displayCandidate.fieldSources?.['experience.totalExperience'])
+  const overseas = experienceLabel(displayCandidate.gulfExperience, displayCandidate.fieldSources?.['experience.experienceAbroad'], 'overseas')
   const pipelineLast = apps.length ? apps[apps.length - 1] : undefined
   const expiry = passportExpiryNotice(cand.passportExpiry)
   // The application the header's stage rail follows: the live one, else the most recent.
@@ -376,7 +389,7 @@ export default function CandidateProfilePage() {
               <Button className="mt-3" onClick={() => setEvidenceRetry(value => value + 1)}>Try again</Button>
             </Panel>
           )}
-          <CandidateSections cand={{ ...cand, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
+          <CandidateSections cand={{ ...displayCandidate, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
         </div>
         <section id="profile-recruitment" data-profile-tab="Recruitment" aria-label="Recruitment" className="cp-group">
           {(apps.length > 0 || !deployed) && <ProfileCard title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}` : undefined}>
