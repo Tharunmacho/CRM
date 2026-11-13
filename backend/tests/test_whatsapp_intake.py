@@ -99,7 +99,15 @@ def test_wrong_phone_account_does_not_receive_messages(setup):
 def test_original_and_selected_documents_candidate_owner_and_replay(setup):
     sessions, settings = setup
     message_id = receipt(sessions, settings)
-    output = extraction(fields={"name": "Document Identity", "phone": "9000000002", "email": "document@example.test"})
+    output = extraction(fields={
+        "name": "Document Identity", "phone": "9000000002", "email": "document@example.test",
+        "father_name": "Document Parent", "marital_status": "Married",
+        "current_address": "42 Document Road, Chennai", "languages": ["Tamil", "English"],
+        "experience_india": 4, "gulf_experience": 5, "total_experience": 9,
+        "expected_salary": 2500,
+        "education": [{"level": "ITI", "passedYear": 2015, "institute": "Document Institute"}],
+        "work_history": [{"company": "Document Works", "designation": "Technician", "country": "India", "period": "2016 - 2020"}],
+    })
     process_message(message_id, sessions=sessions, settings=settings, fetch_media=lambda *_: (ORIGINAL, "application/pdf"), extract=lambda *_, **__: deepcopy(output))
     with sessions() as db:
         row = db.get(WhatsAppMessage, message_id)
@@ -108,6 +116,13 @@ def test_original_and_selected_documents_candidate_owner_and_replay(setup):
         assert candidate.name == "Document Identity"
         assert candidate.phone == "9000000002"  # Sender is separate provenance.
         assert candidate.whatsapp == "919999999999"
+        assert candidate.father_name == "Document Parent" and candidate.marital_status == "Married"
+        assert candidate.current_address == "42 Document Road, Chennai"
+        assert candidate.languages == ["Tamil", "English"]
+        assert (candidate.experience_india, candidate.gulf_experience, candidate.total_experience) == (4, 5, 9)
+        assert candidate.expected_salary == 2500
+        assert candidate.education == output["extractions"]["resume"]["fields"]["education"]
+        assert candidate.work_history == output["extractions"]["resume"]["fields"]["work_history"]
         assert candidate.owner_id == candidate.intake_owner_id == "owner"
         assert candidate.source.value == "whatsapp"
         assert set(db.scalars(select(Attachment.slot).where(Attachment.entity_id == candidate.id))) == {"source_bundle", "resume"}

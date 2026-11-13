@@ -253,16 +253,30 @@ def _duplicates(db, fields):
 
 def candidate_values(fields: dict, raw: dict) -> dict:
     """Candidate columns from the merged OCR fields; the resume's own designation wording
-    is kept when no master title matched."""
+    is kept when no master title matched.
+
+    The merged ``fields`` object has already passed the single-person and
+    identity-conflict checks in :func:`combine_extractions`.  Keep every
+    validated application-form value from that object here as well: previously
+    the email / reviewed-bundle path silently dropped education, employment
+    history and India experience even though the reader had supplied them.
+    Raw OCR is deliberately *not* used as a fallback in this function.  A
+    reviewer may have quarantined it because it conflicts with a confirmed
+    identity, so only the already-vetted merged values may fill the profile.
+    """
     values = {}
     for name in ("name", "phone", "email", "whatsapp", "gender", "nationality", "current_city",
-                 "languages", "passport_no", "passport_place", "skills", "total_experience", "gulf_experience"):
+                 "languages", "passport_no", "passport_place", "skills", "total_experience", "gulf_experience",
+                 "experience_india", "expected_salary", "father_name", "marital_status", "current_address",
+                 "education", "work_history"):
         if fields.get(name) is not None:
             values[name] = fields[name]
     for name in ("dob", "passport_issue", "passport_expiry"):
         if fields.get(name):
             values[name] = parse_loose_date(str(fields[name]))
-    if fields.get("designation"):
+    if fields.get("designations"):
+        values["designations"] = fields["designations"]
+    elif fields.get("designation"):
         values["designations"] = [fields["designation"]]
     else:
         # No master title matched: keep the resume's own wording in the profile's free-text

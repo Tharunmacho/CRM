@@ -228,11 +228,18 @@ def test_reviewed_identity_conflict_replay_fills_only_resume_content():
     assert (c.name, c.dob, c.gender, c.passport_no, c.passport_place) == (
         "Arjun Menon", date(1980, 5, 25), "female", "R7654321", "Reviewer-selected place")
     assert c.phone == "" and c.email is None
-    assert c.father_name is None and c.current_address is None
+    # A confirmed-person review may safely restore non-identity profile fields,
+    # while family/identity fields remain withheld until directly reviewed.
+    assert c.father_name is None
+    assert c.marital_status == "Single"
+    # Both documents may offer a non-identity address. The later passport
+    # reading is the established precedence in a forced replay.
+    assert c.current_address == "HOUSE 12, GANDHI ROAD, KOCHI"
     # Work/profile content survives and remains available to the recruiters.
     assert c.education and c.work_history
     assert (c.total_experience, c.experience_india, c.gulf_experience) == (5, 2, 3)
     assert c.skills == ["AutoCAD", "Estimating"] and c.designations == ["Site Engineer"]
+    assert c.current_city == "Kochi" and c.languages == ["English", "Malayalam"]
     assert first.filled
 
     again = fx.apply_stored_ocr(c, force=True)

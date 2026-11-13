@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
-from app.api.routers import document_jobs
+from app.api.routers import candidates, document_jobs
 from app.db import models as m
 from test_candidate_workflows import db, make_client
 from test_database_naming import schema_database
@@ -115,6 +115,21 @@ def test_name_and_phone_from_a_document_creates_a_ready_candidate(db):
     assert created.status_code == 201, created.text
     db.expire_all()
     assert db.get(m.Candidate, created.json()['id']).name == 'Phone Person'
+
+
+def test_internal_reviewed_current_intake_can_defer_assignment(db):
+    """A verified packet may enter Data Bank before a recruiter is allocated."""
+    job = intake(db)
+    body = candidates.CandidateCreate(name='Waiting review', phone='9000000098', intake_group_id=job.group_id)
+
+    saved = candidates.create_candidate_record(body, db, db.get(m.User, 'admin'), defer_assignment=True)
+
+    db.expire_all()
+    candidate = db.get(m.Candidate, saved.id)
+    assert candidate.owner_id is None and candidate.intake_owner_id is None
+    assert candidate.needs_review and candidate.status == m.CandidateStatus.needs_review
+    assert db.scalar(select(func.count()).select_from(m.Task).where(m.Task.candidate_id == candidate.id)) == 0
+    assert db.get(m.DocumentExtractionJob, job.id).draft['savedCandidateId'] == candidate.id
 
 
 def test_passport_only_document_with_a_name_creates_a_candidate_and_without_a_name_does_not(db):

@@ -538,8 +538,15 @@ def create_candidate(
     return create_candidate_record(body, db, user)
 
 
-def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, commit: bool = True) -> CandidateOut:
-    """Shared transactional creation; lead conversion commits its verified source and link together."""
+def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, commit: bool = True,
+                            defer_assignment: bool = False) -> CandidateOut:
+    """Shared transactional creation; lead conversion commits its verified source and link together.
+
+    ``defer_assignment`` is deliberately internal-only.  A reviewed document
+    intake may be a real current candidate before a recruiter has been chosen;
+    it stays in Data Bank / needs review without an application, stage or task.
+    The public create endpoint retains its existing automatic assignment.
+    """
     pointer = lock_assignment_cursor(db)
     _check_form_choices(db, body)
     intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
@@ -570,7 +577,9 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
     requested = getattr(body, "assign_to", None)
     # Client staff routing (see services/client_routing.py): a designation that an open order of a client with allocated staff
     # asks for goes to the least-loaded of that staff. An admin's or manager's explicit choice always wins.
-    if user.role == Role.staff:
+    if defer_assignment:
+        owner = None
+    elif user.role == Role.staff:
         if requested and requested != user.id:
             raise HTTPException(403, "A candidate you add is assigned to you. Only a manager or an admin can choose another recruiter.")
         owner = client_routing.route_new_candidate(db, body.designations, keep_user_id=user.id) or user

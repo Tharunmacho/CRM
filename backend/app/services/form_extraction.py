@@ -103,7 +103,8 @@ NEW_COLUMNS = frozenset({"father_name", "marital_status", "current_address", "ed
 # discrepancy for staff to resolve.  In that narrow case raw OCR is retained, but
 # a later refresh may only fill content that cannot change the person's identity.
 REVIEWED_CONTENT_ONLY_COLUMNS = frozenset({"education", "work_history", "total_experience", "experience_india",
-                                           "gulf_experience", "skills", "designations"})
+                                           "gulf_experience", "expected_salary", "skills", "designations", "current_city",
+                                           "languages", "marital_status", "current_address"})
 
 
 # ------------------------------------------------------------------ tiny helpers

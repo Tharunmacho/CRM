@@ -10,9 +10,9 @@ from sqlalchemy.dialects.postgresql import insert
 from app.api.routers.candidates import lock_assignment_cursor, next_owner
 from app.db.models import Attachment, AuditEntry, Candidate, CandidateStatus, Designation, Notification, Role, Source, Task, TaskKind, User, WhatsAppChannel, WhatsAppMessage
 from app.integrations.ocr.inspection import restore_inspection
-from app.integrations.ocr.mapping import parse_loose_date, resume_text_from
+from app.integrations.ocr.mapping import resume_text_from
 from app.integrations.whatsapp import download_media, WhatsAppError, WhatsAppReviewError
-from app.services.candidate_identity import enrich_empty, identity_matches, normalize_candidate_values
+from app.services.candidate_identity import enrich_empty, identity_matches
 from app.services.document_extraction import extract_attachment, ExtractionPending, request_extraction_retry
 from app.services.document_storage import put_bytes, read_bytes
 
@@ -98,7 +98,13 @@ def attach_original(db, message, candidate):
 
 
 def commit_candidate(db, message, output):
-    from app.services.email_intake import combine_extractions, IntakeReviewError
+    # Keep WhatsApp aligned with email and reviewed document-bundle intake.
+    # `candidate_values` copies only values that survived the shared
+    # single-person / identity-conflict checks; duplicating a short allow-list
+    # here previously dropped address, marital status, education, work history,
+    # India experience and salary even when the document reader had verified
+    # them.
+    from app.services.email_intake import candidate_values, combine_extractions, IntakeReviewError
     fields, raw, review = combine_extractions([{**output, "source": {
         "channel": "whatsapp", "message_id": message.id, "file_name": message.file_name}}])
     pointer = lock_assignment_cursor(db)
@@ -110,11 +116,7 @@ def commit_candidate(db, message, output):
     matches = identity_matches(db, fields)
     if len(matches) > 1:
         raise IntakeReviewError("This document matches more than one candidate. Check it and choose the right profile.")
-    values = {key: fields[key] for key in ("name", "phone", "whatsapp", "email", "gender", "nationality", "current_city", "languages", "passport_no", "passport_place", "skills", "total_experience", "gulf_experience") if fields.get(key) is not None}
-    for key in ("dob", "passport_issue", "passport_expiry"):
-        if fields.get(key): values[key] = parse_loose_date(str(fields[key]))
-    if fields.get("designation"): values["designations"] = [fields["designation"]]
-    values = normalize_candidate_values(values)
+    values = candidate_values(fields, raw)
     if not matches:
         # Nothing is written for a document that gave no real identity (no placeholder rows).
         from app.services.candidate_review import candidate_refusal

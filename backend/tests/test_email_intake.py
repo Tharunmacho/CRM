@@ -315,6 +315,28 @@ def test_reviewed_demographic_opt_in_still_rejects_name_contact_and_passport_con
         ], allow_reviewed_demographic_conflicts=True, tolerated_conflicts=set())
 
 
+def test_candidate_values_keeps_vetted_application_form_content():
+    fields = {
+        "name": "Alex Example", "phone": "+91 90000 00001", "email": "alex@example.test",
+        "father_name": "Parent Example", "marital_status": "Married",
+        "current_address": "12 Review Street, Chennai", "experience_india": 4,
+        "total_experience": 9, "gulf_experience": 5, "expected_salary": 3200,
+        "education": [{"level": "ITI", "passedYear": 2015, "institute": "Technical Institute"}],
+        "work_history": [{"company": "Example Works", "designation": "Technician", "country": "India", "period": "2016 - 2020"}],
+        "designations": ["Electrical Technician"],
+    }
+
+    values = subject.candidate_values(fields, {"resume": {"designation": "Ignored fallback"}})
+
+    assert values["father_name"] == "Parent Example"
+    assert values["marital_status"] == "Married"
+    assert values["current_address"] == "12 Review Street, Chennai"
+    assert (values["total_experience"], values["experience_india"], values["gulf_experience"]) == (9, 4, 5)
+    assert values["expected_salary"] == 3200
+    assert values["education"] == fields["education"] and values["work_history"] == fields["work_history"]
+    assert values["designations"] == ["Electrical Technician"]
+
+
 def test_receipt_cursor_and_job_are_idempotent_and_account_scoped(intake, monkeypatch):
     calls = mailbox(monkeypatch)
     for account in ("account-a", "account-a", "account-b"):

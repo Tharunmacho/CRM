@@ -342,6 +342,32 @@ def test_manual_referral_source_and_dismissed_evidence_preserved_correctly(env):
         subject.ensure_single_person_source(db, "manual", group_id)
 
 
+def test_reviewer_can_save_all_verified_application_profile_fields(env):
+    """A page reviewer may retain every non-document form value they confirm."""
+    bundle = prepare(env)
+    data = payload(bundle)
+    data["groups"][0]["fields"].update({
+        "father_name": "Reviewed Parent", "marital_status": "Married",
+        "current_address": "14 Verified Street, Chennai", "experience_india": 4,
+        "expected_salary": 2500,
+        "education": [{"level": "ITI", "passedYear": 2015, "institute": "Verified Institute"}],
+        "work_history": [{"company": "Verified Works", "designation": "Technician", "country": "India", "period": "2016 - 2020"}],
+    })
+
+    saved = env.client.put('/api/document-bundles/' + bundle["id"] + '/review', json=data)
+    assert saved.status_code == 200, saved.text
+    completed = commit(env, saved.json())
+    assert completed.status_code == 200, completed.text
+
+    with env.sessions() as db:
+        candidate = db.scalar(select(Candidate).where(Candidate.name == "Alice Kumar"))
+        assert candidate.father_name == "Reviewed Parent" and candidate.marital_status == "Married"
+        assert candidate.current_address == "14 Verified Street, Chennai"
+        assert candidate.experience_india == 4 and candidate.expected_salary == 2500
+        assert candidate.education == data["groups"][0]["fields"]["education"]
+        assert candidate.work_history == data["groups"][0]["fields"]["work_history"]
+
+
 def test_reserved_manual_worker_does_not_restart_extraction(env, monkeypatch):
     from app.services import manual_extraction
     bundle = prepare(env)
@@ -445,7 +471,8 @@ def test_reviewed_group_dob_conflict_keeps_only_content_fields_and_raw_evidence(
                      "passport_no": "P0000000", "dob": "1990-01-01", "gender": "male",
                      "nationality": "Indian", "current_city": "Chennai", "languages": ["English"],
                      "designation": "Welder", "skills": ["Welding"], "total_experience": 8,
-                     "gulf_experience": 6}
+                     "gulf_experience": 6, "expected_salary": 2500, "marital_status": "Married",
+                     "current_address": "14 Review Street, Chennai", "father_name": "Do not replay"}
     output = {"warnings": [], "extractions": {
         "resume": {"fields": resume_fields, "raw": {"request_id": "resume", "pages": []}, "selected_pages": [1]},
         "passport": {"fields": {**resume_fields, "dob": "1991-01-01"},
@@ -462,7 +489,9 @@ def test_reviewed_group_dob_conflict_keeps_only_content_fields_and_raw_evidence(
     assert {"resume", "passport"} <= set(raw)
     assert any("date of birth" in warning for warning in warnings)
     assert fields == {"current_city": "Chennai", "languages": ["English"], "designation": "Welder",
-                      "skills": ["Welding"], "total_experience": 8, "gulf_experience": 6}
+                      "skills": ["Welding"], "total_experience": 8, "gulf_experience": 6,
+                      "expected_salary": 2500, "marital_status": "Married",
+                      "current_address": "14 Review Street, Chennai"}
 
 
 def test_confirmed_people_are_read_by_the_normal_extraction_and_reviewer_values_win(env, monkeypatch):

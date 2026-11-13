@@ -24,12 +24,14 @@ MAX_PAGES = 120
 KINDS = {"resume", "passport", "aadhaar", "photo", "education", "experience", "source_bundle"}
 FIELD_KEYS = {"name", "phone", "email", "whatsapp", "dob", "gender", "nationality", "current_city", "languages",
               "passport_no", "passport_issue", "passport_expiry", "passport_place", "designations", "skills",
-              "total_experience", "gulf_experience", "expected_salary", "source"}
+              "total_experience", "experience_india", "gulf_experience", "expected_salary", "father_name",
+              "marital_status", "current_address", "education", "work_history", "source"}
 # When a human-confirmed bundle has a conflicting DOB or gender, its OCR may
 # enrich only work/profile content.  The reviewed form fields remain the sole
 # source of identity and passport information.
 REVIEWED_CONTENT_FIELDS = frozenset({"education", "work_history", "skills", "designation", "designations",
-                                     "total_experience", "experience_india", "gulf_experience", "current_city", "languages"})
+                                     "total_experience", "experience_india", "gulf_experience", "expected_salary",
+                                     "current_city", "languages", "marital_status", "current_address"})
 
 
 def now():
