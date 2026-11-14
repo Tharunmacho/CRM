@@ -7,6 +7,7 @@ write here. See docs/workflows/application-form-contract.md for the wire format.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -25,7 +26,7 @@ from app.db.models import (
 from app.domain.stages import stage_by_no
 from app.services import form_assignment, form_feedback
 from app.services import form_extraction as fx
-from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_phone, normalized_labels
+from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_passport, normalize_phone, normalized_labels
 from app.services.parallel_reads import parallel_reads
 from app.services.reading_notes import plain_issues, plain_notes
 from app.services.document_status import ACTION as DOCUMENT_STATUS_ACTION, manual_document_statuses, read_manual_document_statuses
@@ -607,7 +608,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
     form = {
         "header": dict(HEADER),
         "capabilities": {"deferredDocumentReading": True},
-        "candidate": {"id": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "name": candidate.name if candidate.name != fx.UNNAMED else "",
+        "candidate": {"id": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "travellerId": candidate.traveller_id, "name": candidate.name if candidate.name != fx.UNNAMED else "",
                       "status": candidate.status.value, "needsReview": bool(candidate.needs_review), "ownerId": candidate.owner_id,
                       "ownerName": owner_name, "updatedAt": _iso(candidate.updated_at), "canEdit": can_edit(user, candidate)},
         "application": ({"id": application.id, "orderId": application.order_id, "orderRef": order.ref,
@@ -954,7 +955,8 @@ def requeue_failed(db: Session, candidate_id: str, attachment_id: str) -> bool:
     return True
 
 
-def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict, meta: dict) -> dict[str, str]:
+def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict, meta: dict, *,
+                           derive_source_slot: bool = False) -> dict[str, str]:
     """Link the checked PDFs from a combined upload to their actual document slots.
 
     The original remains in version history. A newer upload in another slot wins
@@ -970,7 +972,7 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
     attached = dict(meta.get("attachedDocuments") or {})
     for kind in output.get("extractions") or {}:
         document = documents.get(kind)
-        if kind not in fx.SLOT_KINDS or not document or (not mixed and kind == source.slot):
+        if kind not in fx.SLOT_KINDS or not document or (not mixed and kind == source.slot and not derive_source_slot):
             continue
         previous = db.scalar(select(Attachment).where(
             Attachment.entity_type == "candidate", Attachment.entity_id == job.candidate_id, Attachment.slot == kind)
@@ -1042,7 +1044,36 @@ def _without_ignored_fields(values, ignored: frozenset[str]) -> dict:
     return {key: value for key, value in (values or {}).items() if key not in ignored}
 
 
-def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> None:
+def _partial_resume_replay_ignores(extraction: object, candidate: Candidate | None = None) -> frozenset[str]:
+    """Withhold copied passport fields, placeholder text, and established profile values.
+
+    Without ``candidate`` this is the identity-check set: only fields which
+    cannot be trusted from the mixed source itself are omitted. With a
+    candidate, every value already present on that profile is also retained in
+    the ignored sidecar, so a later force-refresh cannot replace a verified or
+    manual value with the partial resume's older OCR.
+    """
+    extraction = extraction if isinstance(extraction, dict) else {}
+    raw = extraction.get("raw") if isinstance(extraction.get("raw"), dict) else {}
+    fields = extraction.get("fields") if isinstance(extraction.get("fields"), dict) else {}
+    ignored = set(fx.PASSPORT_DOCUMENT_COLUMNS)
+    values = fx.values_for("resume", raw)
+    address = values.get("current_address") or fields.get("current_address")
+    if isinstance(address, str) and re.search(
+            r"\[(?:illegible|unreadable|not readable|not legible)\]|\b(?:illegible|unreadable|not readable|not legible)\b",
+            address, re.I):
+        ignored.add("current_address")
+    if candidate is not None:
+        sources = fx.sources_of(candidate)
+        for column in values:
+            spec = fx.SPECS.get(column)
+            if spec and not fx._is_empty(spec, getattr(candidate, column), sources.get(spec.key)):
+                ignored.add(column)
+    return frozenset(ignored)
+
+
+def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
+                     _partial_verified_resume_replay: bool = False) -> None:
     """Called by the extraction worker in the transaction that completes a form-uploaded job.
 
     Stores the read documents on the candidate (`ocr_data`, like every other intake) and fills the form under the
@@ -1058,14 +1089,17 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
                           .with_for_update().execution_options(populate_existing=True))
     extractions = (output or {}).get("extractions") or {}
     from app.services.document_identity import identity_conflicts, IDENTITY_REVIEW_MESSAGE, IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION
-    resume_ignores = _mixed_resume_passport_ignores(candidate, output or {}, extractions) if candidate else frozenset()
+    identity_resume_ignores = (_partial_resume_replay_ignores(extractions.get("resume")) if _partial_verified_resume_replay else
+                               _mixed_resume_passport_ignores(candidate, output or {}, extractions)) if candidate else frozenset()
+    resume_ignores = (_partial_resume_replay_ignores(extractions.get("resume"), candidate) if _partial_verified_resume_replay else
+                      identity_resume_ignores) if candidate else frozenset()
     identity_problems = sorted({field for kind, extraction in extractions.items()
                                 for field in identity_conflicts(candidate, _without_ignored_fields(
-                                    extraction.get("fields") or {}, resume_ignores if kind == "resume" else frozenset()), db)}) if candidate else []
+                                    extraction.get("fields") or {}, identity_resume_ignores if kind == "resume" else frozenset()), db)}) if candidate else []
     if candidate and not identity_problems:
         identity_problems = sorted({field for kind, extraction in extractions.items()
                                     for field in identity_conflicts(candidate, _without_ignored_fields(
-                                        fx.values_for(kind, extraction.get("raw") or {}), resume_ignores if kind == "resume" else frozenset()), db)})
+                                        fx.values_for(kind, extraction.get("raw") or {}), identity_resume_ignores if kind == "resume" else frozenset()), db)})
     if identity_problems:
         # Store diagnostics on the job only. Nothing from this document may enter profile OCR/history/derived slots.
         from app.services.candidate_review import record_review_flag
@@ -1085,7 +1119,8 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
     # A saved, otherwise-complete output can be replayed after a narrowly
     # corrected identity rule. Resolution is appended only after the same
     # source has passed and its successful result is stored below.
-    resolving_identity_rejection = (job.status == "needs_review" and job.last_error == IDENTITY_REVIEW_MESSAGE
+    resolving_identity_rejection = (not _partial_verified_resume_replay and job.status == "needs_review"
+                                    and job.last_error == IDENTITY_REVIEW_MESSAGE
                                     and (output or {}).get("status") == "complete")
     # Raw warnings stay in the job state (diagnostics); the form shows them in plain words.
     warnings = plain_notes([w for w in (output or {}).get("warnings") or [] if isinstance(w, str)])
@@ -1107,7 +1142,9 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
             if ignored:
                 fx.remember_ignored_fields(candidate, kind, raw, ignored)
             if kind in fx.SLOT_KINDS:
-                result.merge(fx.apply_document(candidate, kind, raw, db, ignore_fields=ignored))
+                result.merge(fx.apply_document(
+                    candidate, kind, raw, db, ignore_fields=ignored,
+                    only_fill_empty=_partial_verified_resume_replay and kind == "resume"))
             if kind == "resume" and not candidate.resume_text:
                 candidate.resume_text = resume_text_from({"resume": raw})
         if result.filled:
@@ -1129,7 +1166,11 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
         message = None
     form = dict(meta)
     if candidate is not None:
-        form["attachedDocuments"] = _attach_read_documents(db, job, output, meta)
+        if _partial_verified_resume_replay:
+            form["attachedDocuments"] = _attach_read_documents(
+                db, job, output, meta, derive_source_slot=True)
+        else:
+            form["attachedDocuments"] = _attach_read_documents(db, job, output, meta)
     coverage = (output or {}).get("coverage") or {}
     form["result"] = {"status": status, "message": message, "kindsFound": found, "filled": result.filled, "kept": result.kept + result.conflicts,
                       "unmapped": coverage.get("unmapped") or [],
@@ -1148,6 +1189,212 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
         if resolve_document_review_flag(db, candidate, actor_id=job.owner_id, attachment_id=attachment_id,
                                         document_job_id=job.id):
             clear_resolved_document_review(db, candidate)
+
+
+_PARTIAL_RESUME_REPLAY_MESSAGE = (
+    "Some pages in this file remain unclassified. Verified resume pages were applied; "
+    "passport and other pages remain available for review."
+)
+
+
+class _PartialResumeReplayRejected(RuntimeError):
+    """A saved mixed packet does not meet the narrow, evidence-backed replay rule."""
+
+
+def _same_application_form_source(meta: object, *, candidate_id: str, attachment_id: str, slot: str) -> bool:
+    return isinstance(meta, dict) and meta.get("candidateId") == candidate_id \
+        and meta.get("attachmentId") == attachment_id and meta.get("slot") == slot
+
+
+def _has_unresolved_identity_rejection(db: Session, *, candidate_id: str, attachment_id: str, job_id: str) -> bool:
+    """Require the exact saved rejection, not a candidate-wide or attachment-only warning."""
+    from app.services.document_identity import IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION
+    rows = db.execute(select(AuditEntry.action, AuditEntry.meta).where(
+        AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate_id,
+        AuditEntry.action.in_((IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION)),
+    )).all()
+    rejected = resolved = False
+    for action, entry_meta in rows:
+        if not isinstance(entry_meta, dict) or entry_meta.get("attachment_id") != attachment_id \
+                or entry_meta.get("document_job_id") != job_id:
+            continue
+        if action == IDENTITY_REJECTED_ACTION:
+            rejected = True
+        elif action == IDENTITY_RESOLVED_ACTION:
+            resolved = True
+    return rejected and not resolved
+
+
+def _has_local_passport_anchor(candidate: Candidate, state: dict) -> bool:
+    """The local MRZ is evidence only when its number and checksums both passed."""
+    patterns = state.get("local_patterns") if isinstance(state, dict) else None
+    passport = patterns.get("passport") if isinstance(patterns, dict) else None
+    target = normalize_passport(getattr(candidate, "passport_no", None))
+    return bool(target and isinstance(passport, dict) and passport.get("number_ok")
+                and passport.get("mrz_checksums_valid")
+                and normalize_passport(passport.get("passport_number")) == target)
+
+
+def _has_separate_passport_anchor(db: Session, candidate: Candidate, source: Attachment) -> bool:
+    """A completed, candidate-owned passport job can anchor a different mixed resume packet."""
+    target = normalize_passport(getattr(candidate, "passport_no", None))
+    if not target:
+        return False
+    attachments = db.scalars(select(Attachment).where(
+        Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
+        Attachment.slot == "passport", Attachment.id != source.id,
+    )).all()
+    for attachment in attachments:
+        jobs = db.scalars(select(DocumentExtractionJob).where(
+            DocumentExtractionJob.candidate_id == candidate.id,
+            DocumentExtractionJob.attachment_id == attachment.id,
+            DocumentExtractionJob.kind == "passport",
+            DocumentExtractionJob.status == "completed",
+        )).all()
+        for passport_job in jobs:
+            meta = (passport_job.draft or {}).get("applicationForm") if isinstance(passport_job.draft, dict) else None
+            state = passport_job.state if isinstance(passport_job.state, dict) else {}
+            output = state.get("output") if isinstance(state.get("output"), dict) else None
+            extractions = output.get("extractions") if isinstance(output, dict) else None
+            extraction = extractions.get("passport") if isinstance(extractions, dict) else None
+            raw = extraction.get("raw") if isinstance(extraction, dict) else None
+            if not (_same_application_form_source(meta, candidate_id=candidate.id, attachment_id=attachment.id, slot="passport")
+                    and isinstance(output, dict) and output.get("status") == "complete" and isinstance(raw, dict)):
+                continue
+            if normalize_passport(fx.values_for("passport", raw).get("passport_no")) == target:
+                return True
+    return False
+
+
+def _resume_replay_identity_is_safe(db: Session, candidate: Candidate, resume: dict) -> bool:
+    """The resume itself must still pass normal identity validation after passport fields are withheld."""
+    from app.services.document_identity import identity_conflicts
+    fields = resume.get("fields") if isinstance(resume.get("fields"), dict) else {}
+    raw = resume.get("raw") if isinstance(resume.get("raw"), dict) else {}
+    ignored = _partial_resume_replay_ignores(resume)
+    checked_fields = _without_ignored_fields(fields, ignored)
+    checked_raw = _without_ignored_fields(fx.values_for("resume", raw), ignored)
+    return not identity_conflicts(candidate, checked_fields, db) and not identity_conflicts(candidate, checked_raw, db)
+
+
+def replay_saved_partial_resume(db: Session, *, candidate_id: str, job_id: str) -> bool:
+    """Safely apply only verified resume pages from a saved mixed packet.
+
+    This is a maintenance repair for a very narrow historical failure: a resume
+    packet was rejected because unrelated passport/unknown pages were included
+    in the same source file. The original packet and every unresolved page
+    remain in the saved job. Nothing is re-read, re-uploaded, or sent to a
+    provider. ``False`` means the evidence was incomplete and no row changed.
+    """
+    from app.services.document_identity import IDENTITY_REJECTED_ACTION, IDENTITY_REVIEW_MESSAGE, IDENTITY_RESOLVED_ACTION
+
+    # Session factories used by maintenance commands deliberately disable
+    # autoflush. A flush makes the exact audit check below see committed-or-
+    # pending evidence without weakening its scope.
+    db.flush()
+    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id)
+                          .options(undefer(Candidate.education), undefer(Candidate.work_history),
+                                   undefer(Candidate.field_sources), undefer(Candidate.ocr_data))
+                          .with_for_update().execution_options(populate_existing=True))
+    job = db.scalar(select(DocumentExtractionJob).where(
+        DocumentExtractionJob.id == job_id, DocumentExtractionJob.candidate_id == candidate_id,
+        DocumentExtractionJob.kind == "resume",
+    ).with_for_update().execution_options(populate_existing=True))
+    if candidate is None or job is None or job.status != "needs_review" or job.last_error != IDENTITY_REVIEW_MESSAGE:
+        return False
+    meta = (job.draft or {}).get("applicationForm") if isinstance(job.draft, dict) else None
+    attachment_id = job.attachment_id
+    if not isinstance(attachment_id, str) or not _same_application_form_source(
+            meta, candidate_id=candidate.id, attachment_id=attachment_id, slot="resume"):
+        return False
+    source = db.scalar(select(Attachment).where(Attachment.id == attachment_id).with_for_update())
+    if source is None or source.entity_type != "candidate" or source.entity_id != candidate.id \
+            or source.slot != "resume" or source.object_key != job.object_key \
+            or source.content_hash != job.content_hash:
+        return False
+    state = job.state if isinstance(job.state, dict) else {}
+    saved = state.get("output") if isinstance(state.get("output"), dict) else None
+    extractions = saved.get("extractions") if isinstance(saved, dict) else None
+    resume = extractions.get("resume") if isinstance(extractions, dict) else None
+    passport = extractions.get("passport") if isinstance(extractions, dict) else None
+    inspection = saved.get("inspection") if isinstance(saved, dict) else None
+    documents = state.get("documents") if isinstance(state.get("documents"), dict) else None
+    derived_resume = documents.get("resume") if isinstance(documents, dict) else None
+    derived_passport = documents.get("passport") if isinstance(documents, dict) else None
+    if not (isinstance(saved, dict) and saved.get("status") == "needs_review" and isinstance(resume, dict)
+            and isinstance(resume.get("raw"), dict) and isinstance(passport, dict)
+            and isinstance(inspection, dict) and isinstance(derived_resume, dict)):
+        return False
+    resume_pages = _page_numbers(inspection.get("resume_pages"))
+    passport_pages = _page_numbers(inspection.get("passport_pages"))
+    selected_resume_pages = _page_numbers(resume.get("selected_pages"))
+    selected_passport_pages = _page_numbers(passport.get("selected_pages"))
+    document_pages = _page_numbers(derived_resume.get("selected_pages"))
+    if not resume_pages or not passport_pages or resume_pages.intersection(passport_pages) \
+            or selected_resume_pages != resume_pages or selected_passport_pages != passport_pages \
+            or document_pages != resume_pages \
+            or (isinstance(derived_passport, dict)
+                and _page_numbers(derived_passport.get("selected_pages")) != passport_pages):
+        return False
+    if not all(isinstance(derived_resume.get(key), str) and derived_resume[key] for key in
+               ("object_key", "content_hash", "file_name", "content_type")):
+        return False
+    if not _has_unresolved_identity_rejection(
+            db, candidate_id=candidate.id, attachment_id=source.id, job_id=job.id):
+        return False
+    if not (_has_local_passport_anchor(candidate, state) or _has_separate_passport_anchor(db, candidate, source)):
+        return False
+    if not _resume_replay_identity_is_safe(db, candidate, resume):
+        return False
+
+    # Copy only the accepted resume reader result. Its inspection is similarly
+    # narrowed, so _attach_read_documents cannot derive the weak embedded
+    # passport section. The full output remains unchanged in ``job.state``.
+    partial_output = deepcopy(saved)
+    partial_output["extractions"] = {"resume": deepcopy(resume)}
+    partial_output["inspection"] = {"resume_pages": sorted(resume_pages)}
+    try:
+        with db.begin_nested():
+            apply_job_output(db, job, partial_output, _partial_verified_resume_replay=True)
+            form = (job.draft or {}).get("applicationForm") if isinstance(job.draft, dict) else None
+            result = form.get("result") if isinstance(form, dict) else None
+            attached = result is not None and form.get("attachedDocuments")
+            derived_id = attached.get("resume") if isinstance(attached, dict) else None
+            db.flush()
+            derived = db.get(Attachment, derived_id) if isinstance(derived_id, str) else None
+            if not (isinstance(result, dict) and result.get("status") == "needs_review" and derived is not None
+                    and derived.id != source.id and derived.entity_type == "candidate"
+                    and derived.entity_id == candidate.id and derived.slot == "resume"
+                    and derived.content_hash == derived_resume["content_hash"]):
+                raise _PartialResumeReplayRejected()
+
+            # The uploaded bundle is historical evidence, not a Resume. The
+            # newly derived Resume above contains only its checked resume pages.
+            previous_bundle = db.scalar(select(Attachment).where(
+                Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id,
+                Attachment.slot == "source_bundle",
+            ).order_by(Attachment.version.desc()).limit(1))
+            source.slot = "source_bundle"
+            source.version = (previous_bundle.version if previous_bundle else 0) + 1
+            db.add(AuditEntry(actor_id=job.owner_id, action="Retained mixed upload as source bundle",
+                              target=source.file_name, entity_type="candidate", entity_id=candidate.id,
+                              meta={"attachment_id": source.id, "document_job_id": job.id,
+                                    "derived_resume_attachment_id": derived.id,
+                                    "resume_pages": sorted(resume_pages)}))
+
+            result["status"] = "needs_review"
+            result["message"] = _PARTIAL_RESUME_REPLAY_MESSAGE
+            job.status, job.last_error = "needs_review", _PARTIAL_RESUME_REPLAY_MESSAGE
+            # Resolve only the exact old false-positive rejection. We
+            # intentionally do not resolve the candidate-wide OCR review flag:
+            # unknown pages remain visible for an administrator to inspect.
+            db.add(AuditEntry(actor_id=job.owner_id, action=IDENTITY_RESOLVED_ACTION,
+                              target=candidate.name, entity_type="candidate", entity_id=candidate.id,
+                              meta={"attachment_id": source.id, "document_job_id": job.id,
+                                    "resolves": IDENTITY_REJECTED_ACTION}))
+    except _PartialResumeReplayRejected:
+        return False
+    return True
 
 
 def apply_local_patterns(db: Session, candidate_id: str, patterns: dict) -> list[str]:

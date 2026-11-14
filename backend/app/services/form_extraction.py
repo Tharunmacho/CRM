@@ -573,7 +573,8 @@ def _conflicts(db: Session | None, candidate, column: str, value: Any) -> bool:
         return False
 
 
-def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | None = None, *, fill_all: bool = True) -> ApplyResult:
+def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | None = None, *, fill_all: bool = True,
+                 only_fill_empty: bool = False) -> ApplyResult:
     """Apply one document's values to a candidate under the fill rule. `kind` is resume | passport.
 
     With `fill_all=False` only the application-form-only columns (NEW_COLUMNS) are filled; every other column is merely
@@ -617,6 +618,10 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
                     from_aadhaar.add(spec.key)
             continue
         if kind == "aadhaar" and column in AADHAAR_FILLS_EMPTY_ONLY and not empty:
+            if not same:
+                result.kept.append(spec.key)
+            continue
+        if only_fill_empty and not empty:
             if not same:
                 result.kept.append(spec.key)
             continue
@@ -734,11 +739,12 @@ def mark_stored_applied(candidate) -> None:
             mark_applied(candidate, kind, raw)
 
 
-def apply_document(candidate, kind: str, raw: Any, db: Session | None = None, *, ignore_fields=()) -> ApplyResult:
+def apply_document(candidate, kind: str, raw: Any, db: Session | None = None, *, ignore_fields=(),
+                   only_fill_empty: bool = False) -> ApplyResult:
     """Apply a freshly read document, then remember it. Marks the candidate so the ocr_data hook does not repeat it."""
     ignored = frozenset(ignore_fields)
     values = {key: value for key, value in values_for(kind, raw).items() if key not in ignored}
-    result = apply_values(candidate, kind, values, db)
+    result = apply_values(candidate, kind, values, db, only_fill_empty=only_fill_empty)
     if kind == "aadhaar" and not result.conflicts:
         note_aadhaar(candidate, raw)
     mark_applied(candidate, kind, raw)
