@@ -200,7 +200,7 @@
 .ld-result h3 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.02em; color: var(--text-main); }
 .ld-result p { margin: 0; font-size: 14px; color: var(--text-muted); }
 .ld-result .ld-map-foot { margin-top: 12px; }
-.ld-batch-acts { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.ld-batch-acts { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
 
 /* ---------- Forms in dialogs ---------- */
 .ld-form { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -419,4 +419,28 @@
   .ld-sundo { flex-wrap: wrap; }
   .ld-sundo-btn { margin-left: auto; }
   .ld-rm-stat dd { white-space: normal; overflow: visible; }
+}
+
+/* ---------- Recruiter picker: tick the recruiters who share the leads equally ---------- */
+.ld-pick { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.ld-pick-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 500; color: var(--text-main); }
+.ld-pick-acts { display: inline-flex; gap: 4px; }
+.ld-pick-link { min-height: 28px; padding: 2px 8px; border: 0; border-radius: 6px; background: transparent; font-size: 12.5px; font-weight: 500; color: var(--primary); cursor: pointer; }
+.ld-pick-link:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.ld-pick-link:disabled { color: var(--text-muted); cursor: default; opacity: .6; }
+.ld-pick-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); }
+.ld-pick-row { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px 12px; font-size: 14px; color: var(--text-main); cursor: pointer; }
+.ld-pick-row + .ld-pick-row { border-top: 1px solid var(--border-main); }
+.ld-pick-row:hover { background: var(--tint-2); }
+.ld-pick-row.is-on { background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); }
+.ld-pick-row.is-leave { color: var(--text-muted); cursor: not-allowed; }
+.ld-pick-row.is-none { font-weight: 500; }
+.ld-pick-avatar { --av: hsl(222 70% 52%); display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--av) 16%, var(--bg-card)); color: color-mix(in srgb, var(--av) 72%, var(--text-main)); font-size: 11px; font-weight: 600; }
+.ld-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-pick-name em { font-style: normal; color: var(--text-muted); }
+.ld-pick-empty { margin: 0; padding: 14px 12px; font-size: 13px; color: var(--text-muted); }
+.ld-pick-sum { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+@media (max-width: 640px) {
+  .ld-pick-row { min-height: 44px; }
+  .ld-pick-link { min-height: 40px; }
 }

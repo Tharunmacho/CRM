@@ -52,6 +52,6 @@ export function liveDuplicateQuery(form: CandidateEntryForm) {
 }
 
 /** The existing candidate the server found for the typed phone, email or passport number. */
-export type DuplicateMatch = { id: string; ref: string; name: string; phone: string; ownerId: string | null; ownerName: string | null; matchedOn: string[]
+export type DuplicateMatch = { id: string; ref: string; careId?: string | null; name: string; phone: string; ownerId: string | null; ownerName: string | null; matchedOn: string[]
   /** False when the signed-in person may look at the candidate but not add to it (another recruiter's candidate). */
   canMerge?: boolean }

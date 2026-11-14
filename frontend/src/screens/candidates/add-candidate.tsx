@@ -34,6 +34,7 @@ import { MultiFileSlot } from '@/features/candidates/components/multi-file-slot'
 import { EntryAvatar } from '@/features/candidates/components/entry-avatar'
 import { DuplicateDialog } from '@/features/candidates/components/entry-dialogs'
 import { duplicateFromSaveError, finishSavedCandidate, freshWorkspace } from '@/features/candidates/save-flow'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import { fieldSources, liveDuplicateQuery, SCAN_KIND_LABEL, type DuplicateMatch } from '@/features/candidates/entry-signals'
 import { candidateEntryErrors, draftSnapshot, EMPTY_CANDIDATE_FORM as EMPTY } from '@/features/candidates/entry-model'
 import { educationPayload, historyPayload, previewFormFromEntry } from '@/features/application-form/entry-bridge'
@@ -357,15 +358,15 @@ export default function AddCandidatePage() {
 
   const commit = async (mergeId?: string) => {
     const created = mergeId
-      ? await api.post<{ id: string; ref?: string; name?: string; ownerName?: string | null }>(`/candidates/${mergeId}/merge`, payload())
+      ? await api.post<{ id: string; ref?: string; careId?: string | null; name?: string; ownerName?: string | null }>(`/candidates/${mergeId}/merge`, payload())
       // Only the admin may name the recruiter right here; a staff member's or manager's own entry is assigned to them (the server decides).
       // The workspace refresh is started after the documents are attached (uploadDocuments), not waited for here.
-      : await store.addCandidate({ ...payload(), ...(picksRecruiter && form.assignTo ? { assign_to: form.assignTo } : {}) }, { deferRefresh: true }) as { id: string; ref?: string; name?: string; ownerName?: string | null } | null
+      : await store.addCandidate({ ...payload(), ...(picksRecruiter && form.assignTo ? { assign_to: form.assignTo } : {}) }, { deferRefresh: true }) as { id: string; ref?: string; careId?: string | null; name?: string; ownerName?: string | null } | null
     if (!created) return
     const ownerName = created.ownerName ?? null
-    if (mergeId) store.notify(`Combined with ${created.ref ?? 'the existing candidate'}${ownerName ? `. This candidate stays with ${ownerName}` : ''}. Empty fields were filled in. No new task was created.`)
+    if (mergeId) store.notify(`Combined with ${primaryId(created) || 'the existing candidate'}${ownerName ? `. This candidate stays with ${ownerName}` : ''}. Empty fields were filled in. No new task was created.`)
     else { const notice = savedNotice(picksRecruiter, ownerName); store.notify(notice.text, notice.tone) }
-    setSavedResult({ ref: created.ref, name: created.name, ownerName, merged: Boolean(mergeId), at: Date.now() })
+    setSavedResult({ ref: primaryId(created) || undefined, name: created.name, ownerName, merged: Boolean(mergeId), at: Date.now() })
     setSavedCandidateId(created.id)
     setDuplicate(null)
     await uploadDocuments(created.id)
@@ -632,7 +633,7 @@ export default function AddCandidatePage() {
                     <EntryAvatar name={live.match.name} size="lg" />
                     <div className="ac-match-copy">
                       <p className="ac-match-title">Looks like {live.match.name} is already in the Data Bank</p>
-                      <p className="ac-match-sub"><span className="tnum">{live.match.ref}</span> · Same {live.match.matchedOn.join(' and ')} · Recruiter: {live.match.ownerName ?? 'not assigned yet'}</p>
+                      <p className="ac-match-sub"><span className="tnum">{primaryId(live.match)}</span> · Same {live.match.matchedOn.join(' and ')} · Recruiter: {live.match.ownerName ?? 'not assigned yet'}</p>
                     </div>
                     <div className="ac-match-actions">
                       <Button size="sm" onClick={() => navigate(`/candidates/${live.match!.id}`)}>Open candidate</Button>

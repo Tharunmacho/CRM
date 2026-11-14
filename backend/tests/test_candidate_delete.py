@@ -312,9 +312,9 @@ def test_a_deleted_candidates_files_can_be_read_again_and_the_reason_names_the_o
 
     found = processed_hashes(db, ["h-file", "h-mail", "h-wa"])
     assert {key: value["source"] for key, value in found.items()} == {"h-file": "candidate_file", "h-mail": "email", "h-wa": "whatsapp"}
-    assert all(value["candidateId"] == cid and value["candidateName"] == "Person dup" and value["candidateRef"] == "C-dup" for value in found.values())
+    assert all(value["candidateId"] == cid and value["candidateName"] == "Person dup" and value["candidateRef"] == "C-dup" and value["candidateCareId"] == "CI-001" for value in found.values())
     reason = duplicate_reason(found["h-mail"])
-    assert reason.startswith("Duplicate file") and "Person dup (C-dup)" in reason and "01 May 2026" in reason and "email" in reason
+    assert reason.startswith("Duplicate file") and "Person dup (CI-001)" in reason and "C-dup" not in reason   # the Care India ID, not the CRM reference and "01 May 2026" in reason and "email" in reason
 
     assert env.http().delete(f"/api/candidates/{cid}").status_code == 200
     db.expire_all()

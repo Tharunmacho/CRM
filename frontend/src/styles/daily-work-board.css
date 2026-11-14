@@ -1,0 +1,76 @@
+/*
+ * Tasks overview for admin and manager: the "at a glance" strip and the Recruiters board (one card per recruiter), shared by
+ * Today's candidates and Follow-up. Same flat look as the rest of the app (hairline borders, no shadows), tokens only, so light
+ * and dark both follow the theme. Numbers are tabular so they line up from card to card.
+ */
+
+/* ---------- Summary strip ---------- */
+.dwb-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
+.dwb-stats > li { display: flex; min-width: 0; }
+@media (min-width: 1100px) { .dwb-stats.has-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.dwb-stats.has-3 { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 720px) { .dwb-stats.has-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.dwb-stat { display: flex; flex: 1 1 auto; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); font: inherit; text-align: left; color: inherit; }
+.dwb-stat.is-action { cursor: pointer; transition: border-color .14s, background-color .14s; }
+.dwb-stat.is-action:hover { border-color: var(--border-hover); background: var(--tint-1); }
+.dwb-stat.is-active { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
+.dwb-stat:focus-visible, .dwb-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dwb-stat-icon { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary); }
+.dwb-stat-icon.tone-green { background: var(--success-fill); color: var(--success-ink); }
+.dwb-stat-icon.tone-amber { background: var(--warning-fill); color: var(--warning-ink); }
+.dwb-stat-icon.tone-red { background: var(--error-fill); color: var(--error-ink); }
+.dwb-stat-text { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; min-width: 0; }
+.dwb-stat-label { font-size: 13px; font-weight: 500; line-height: 1.3; color: var(--text-muted); }
+.dwb-stat-figure { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.dwb-stat-figure strong { font-size: 28px; font-weight: 600; line-height: 1.15; letter-spacing: -.03em; color: var(--text-main); }
+.dwb-stat-figure span { font-size: 13px; color: var(--text-muted); }
+.dwb-stat-detail { font-size: 12.5px; line-height: 1.35; color: var(--text-muted); }
+.dwb-meter { display: block; height: 6px; margin: 3px 0 1px; overflow: hidden; border-radius: 999px; background: var(--tint-3); }
+.dwb-meter i { display: block; height: 100%; border-radius: 999px; background: var(--success-ink); }
+@media (max-width: 520px) {
+  .dwb-stat { gap: 10px; padding: 12px; }
+  .dwb-stat-icon { width: 30px; height: 30px; }
+  .dwb-stat-figure strong { font-size: 24px; }
+}
+
+/* ---------- Recruiters board ---------- */
+.dwb-head { padding-bottom: 14px; }
+.dwb-head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dwb-head .tk-chip { min-height: 34px; padding: 0 14px; }
+.dwb-chip-x { gap: 6px; }
+.dwb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin: 0; padding: 0 20px 20px; list-style: none; }
+.dwb-cards > li { display: flex; min-width: 0; }
+.dwb-none { padding: 4px 20px 24px; font-size: 14px; color: var(--text-muted); }
+
+.dwb-card { position: relative; display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; width: 100%; min-width: 0; min-height: 112px; padding: 14px 16px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); font: inherit; text-align: left; color: var(--text-main); cursor: pointer; transition: border-color .14s, background-color .14s; }
+.dwb-card:hover { border-color: var(--border-hover); background: var(--tint-1); }
+.dwb-card.is-active { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+/* a thin edge says "look here" for the two statuses that need the admin; the chip says it in words */
+.dwb-card.is-idle::before, .dwb-card.is-behind::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+.dwb-card.is-idle::before { background: var(--error-ink); }
+.dwb-card.is-behind::before { background: var(--warning-ink); }
+.dwb-card-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dwb .dwb-avatar { flex: none; width: 36px; height: 36px; font-size: 12.5px; }
+.dwb-card-name { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; line-height: 1.3; }
+.dwb-card-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.dwb-card-name small { font-size: 12px; color: var(--text-muted); }
+.dwb-chip { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-2); font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; color: var(--text-muted); }
+.dwb-chip.is-idle { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+.dwb-chip.is-behind { border-color: var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); }
+.dwb-chip.is-on-track { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+.dwb-card-numbers { display: flex; align-items: baseline; gap: 6px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.dwb-card-numbers b { font-size: 18px; font-weight: 600; line-height: 1.2; color: var(--text-main); }
+.dwb-card-numbers i { font-style: normal; color: var(--text-light); }
+.dwb-card-numbers em { margin-left: auto; font-size: 13px; font-style: normal; font-weight: 600; color: var(--text-muted); }
+.dwb-card-empty { margin-top: auto; padding-bottom: 2px; font-size: 13px; color: var(--text-light); }
+.dwb-stack { display: flex; gap: 2px; width: 100%; height: 8px; margin-top: auto; overflow: hidden; border-radius: 999px; background: var(--tint-3); }
+.dwb-stack i { flex: 1 1 0; min-width: 4px; height: 100%; border-radius: 999px; }
+.dwb-stack i.is-done { background: var(--success-ink); }
+.dwb-stack i.is-todo { background: color-mix(in srgb, var(--primary) 55%, var(--tint-3)); }
+.dwb-card.is-none { background: var(--tint-1); }
+@media (max-width: 640px) {
+  .dwb-cards { grid-template-columns: minmax(0, 1fr); padding: 0 16px 16px; }
+  .dwb-card { min-height: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .dwb-card, .dwb-stat.is-action { transition: none; } }

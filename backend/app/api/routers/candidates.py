@@ -1119,7 +1119,7 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks,
                case((exists().where(AuditEntry.action.like("Imported candidate with documents%"),
                                     or_(and_(AuditEntry.entity_type == "candidate", AuditEntry.entity_id == Candidate.id),
                                         and_(AuditEntry.entity_type == "application", AuditEntry.entity_id == Application.id))), "Bulk import"),
-                    else_=Candidate.source_detail), Order.id)
+                    else_=Candidate.source_detail), Order.id, Candidate.care_id)
         .select_from(Candidate)
         .outerjoin(Application, Application.candidate_id == Candidate.id)
         .outerjoin(Order, Order.id == Application.order_id)
@@ -1129,7 +1129,7 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks,
     if not rows:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
 
-    placements = [(state, order_ref) for _, _, application_id, state, order_ref, _, _ in rows if application_id is not None]
+    placements = [(state, order_ref) for _, _, application_id, state, order_ref, _, _, _ in rows if application_id is not None]
     # An imported candidate without financial history can be taken back out (an import may need
     # redoing); anyone else on an order, or deployed, is kept on record.
     imported = rows[0][5] == "Bulk import"
@@ -1149,18 +1149,19 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks,
     if financial_history:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "This candidate has a reserved or issued invoice, or recorded payments. Keep the candidate and financial history on record.")
-    order_ids = {order_id for _, _, application_id, _, _, _, order_id in rows if application_id is not None and order_id}
+    order_ids = {order_id for _, _, application_id, _, _, _, order_id, _ in rows if application_id is not None and order_id}
 
     name, ref = rows[0][0], rows[0][1]
+    shown = rows[0][7] or ref      # people read the Care India ID; the CND reference is kept as the technical key
     audit_id = _uuid()
     withdrawn = tuple(sorted({order_ref for state, order_ref in placements
                               if state is ApplicationStatus.active and order_ref})) if withdraw_from_orders else ()
     documents, tasks, stored_keys = _delete_candidate_rows(
-        db, candidate_id, audit_id=audit_id, actor_id=user.id, target=f"{name} ({ref})", ref=ref, applications=len(placements),
+        db, candidate_id, audit_id=audit_id, actor_id=user.id, target=f"{name} ({shown})", ref=ref, applications=len(placements),
         withdrawn_from=withdrawn)
     # Imported: every order they were on. Otherwise only the order(s) just withdrawn from (a closed placement never counted).
     sync_ids = order_ids if imported else (
-        {order_id for _, _, application_id, state, _, _, order_id in rows
+        {order_id for _, _, application_id, state, _, _, order_id, _ in rows
          if application_id is not None and order_id and state is ApplicationStatus.active} if withdrawn else set())
     if sync_ids:
         # A placement that is gone no longer fills an opening: an order that was Filled by it opens again.

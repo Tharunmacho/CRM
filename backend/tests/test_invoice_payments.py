@@ -142,6 +142,7 @@ def test_reserved_pending_invoice_uses_reserved_rates_with_current_fee(ledger):
     assert data["total"] == "11000.00" and data["balance"] == "9000.00"
     report = ledger.client.get("/api/invoices/finance-summary").json()
     assert report["totals"]["agreedTotal"] == "11000.00"
+    assert report["rows"] and all("careId" in row for row in report["rows"])      # the Care India ID beside the CND ref
 
 
 def test_admin_void_retains_original_receipt_and_excludes_it_from_totals(ledger):

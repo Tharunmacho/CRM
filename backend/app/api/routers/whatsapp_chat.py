@@ -66,7 +66,7 @@ def conversations(response: Response, q: str = Query("", max_length=200), page: 
         conditions.append(or_(WhatsAppConversation.peer_number.ilike(pattern), WhatsAppConversation.display_name.ilike(pattern), Candidate.name.ilike(pattern)))
     base = select(WhatsAppConversation, Candidate, WhatsAppChannel).outerjoin(Candidate, Candidate.id == WhatsAppConversation.candidate_id).join(
         WhatsAppChannel, WhatsAppChannel.phone_number_id == WhatsAppConversation.phone_number_id).options(
-        load_only(Candidate.id, Candidate.ref, Candidate.name, Candidate.owner_id),
+        load_only(Candidate.id, Candidate.ref, Candidate.care_id, Candidate.name, Candidate.owner_id),
         load_only(WhatsAppChannel.phone_number_id, WhatsAppChannel.enabled))
     total, rows = parallel_reads(
         db,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { AlertTriangle, ArrowLeft, CheckCircle2, CloudUpload, Download, FileSpreadsheet, Loader2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { User } from '@/shared/model/types'
@@ -12,7 +12,9 @@ import {
   REPORT_BUTTON, allNewLine, invalidReason, leadFileError, sampleValues, setMappingOverride, splitMappings,
   type ColumnInfo, type DuplicateRow, type ImportCounts, type ImportResponse, type InvalidRow, type Lead,
 } from '../lead-model'
+import { ownersLine, uploadAssignment } from '../lead-bulk-model'
 import { CreatedCell, PositionText } from './lead-columns'
+import { RecruiterPicker } from './recruiter-picker'
 
 type Stage = 'choose' | 'checking' | 'preview' | 'importing' | 'result'
 type PreviewTab = 'rows' | 'ignored' | 'invalid'
@@ -52,8 +54,6 @@ interface Props {
   canReport?: boolean
 }
 
-const ASSIGN_KEEP = ''
-const ASSIGN_EVEN = 'auto'
 const PREVIEW_ROWS = 20
 
 /** Drag-and-drop zone for the lead file; a click opens the file picker as well. */
@@ -178,7 +178,9 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
   const [overrides, setOverrides] = useState<Record<string, string | null>>({})
   const [tab, setTab] = useState<PreviewTab>('rows')
   const [error, setError] = useState('')
-  const [assign, setAssign] = useState(ASSIGN_KEEP)
+  // Who gets the new leads: nobody yet (the default), the recruiters ticked (shared equally), or - nobody ticked - everyone available.
+  const [nobody, setNobody] = useState(true)
+  const [recruiters, setRecruiters] = useState<string[]>([])
   const [label, setLabel] = useState('')
   const [result, setResult] = useState<UploadResponse | null>(null)
   const [reporting, setReporting] = useState(false)
@@ -186,7 +188,7 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
 
   const reset = useCallback(() => {
     run.current += 1
-    setStage('choose'); setFile(null); setPreview(null); setOverrides({}); setTab('rows'); setError(''); setAssign(ASSIGN_KEEP); setLabel(''); setResult(null)
+    setStage('choose'); setFile(null); setPreview(null); setOverrides({}); setTab('rows'); setError(''); setNobody(true); setRecruiters([]); setLabel(''); setResult(null)
   }, [])
   useEffect(() => { if (!open) reset() }, [open, reset])
 
@@ -223,7 +225,7 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
     const mine = ++run.current
     setStage('importing'); setError('')
     try {
-      const data = await importLeads(file, { dryRun: false, mapping: overrides, label, assignTo: (canAssign && assign) || undefined })
+      const data = await importLeads(file, { dryRun: false, mapping: overrides, label, ...uploadAssignment(canAssign, nobody, recruiters) })
       if (mine !== run.current) return
       setResult(data); setStage('result'); onImported(data)
     } catch (e) {
@@ -238,7 +240,6 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
     try { await downloadBatchReport(batchId, kind) } catch (e) { setError(e instanceof Error ? e.message : 'We could not make the report.') } finally { setReporting(false) }
   }
 
-  const staff = useMemo(() => users.filter((user) => user.active && user.role !== 'admin'), [users])
   const busy = stage === 'checking' || stage === 'importing'
   const counts = preview ? countsOf(preview) : null
   const nothingNew = !!counts && counts.new === 0
@@ -295,14 +296,8 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
             {counts && <Counts counts={counts} />}
 
             <section className="ld-section ld-options">
-              {canAssign && <label className="ld-opt">
-                <span>Assign new leads to</span>
-                <Select aria-label="Assign new leads to" value={assign} disabled={busy} onChange={(event) => setAssign(event.target.value)}>
-                  <option value={ASSIGN_KEEP}>Nobody yet (assign later)</option>
-                  <option value={ASSIGN_EVEN}>Distribute evenly between available recruiters</option>
-                  {staff.map((user) => <option key={user.id} value={user.id}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
-                </Select>
-              </label>}
+              {canAssign && <RecruiterPicker users={users} selected={recruiters} onChange={setRecruiters} total={counts?.new ?? null} disabled={busy} label="Assign new leads to"
+                exclusive={{ label: 'Nobody yet (assign later)', summary: 'The new leads stay unassigned until you assign them.', active: nobody, onChange: setNobody }} />}
               <label className="ld-opt">
                 <span>Campaign name for rows without one <em>(optional)</em></span>
                 <Input value={label} maxLength={80} disabled={busy} placeholder="e.g. Dubai chef ads, week 45" onChange={(event) => setLabel(event.target.value)} />
@@ -342,7 +337,7 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
           <div className="ld-result" role="status">
             <span className="ld-result-icon"><CheckCircle2 size={34} aria-hidden="true" /></span>
             <h3>{resultCounts.new > 0 ? `${plural(resultCounts.new, 'new lead', 'new leads')} added` : 'No new leads were added'}</h3>
-            <p>{uploadSentence(resultCounts, 'result')}.{result.assignedCount ? ` ${result.assignedCount.toLocaleString()} assigned.` : ''}</p>
+            <p>{uploadSentence(resultCounts, 'result')}.{result.assignedCount ? ` ${result.assignedCount.toLocaleString()} assigned${(result.assignedOwners?.length ?? 0) > 1 ? `: ${ownersLine(result.assignedOwners)}` : ''}.` : ''}</p>
             <p className="ld-map-foot">{resultCounts.new === 0 && resultCounts.duplicate > 0 ? 'Every person in this file is already in the sheet, so nobody was added a second time.' : (skippedByLine(result.duplicatesByReason, resultCounts.duplicate) ?? allNewLine(resultCounts) ?? 'The report lists every row of the file with what happened to it.')}</p>
             <div className="ld-counts is-three">
               <div className="ld-count is-ok"><span>Added</span><strong className="tnum">{resultCounts.new.toLocaleString()}</strong><small>new leads</small></div>

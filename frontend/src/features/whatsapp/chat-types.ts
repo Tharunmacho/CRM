@@ -1,7 +1,7 @@
 export type ChatConversation = {
   id: string; phoneNumberId: string; peerNumber: string; displayName: string | null;
   lastInboundAt: string | null; lastMessageAt: string | null; lastPreview: string | null;
-  candidate: { id: string; ref: string; name: string; ownerId: string | null } | null;
+  candidate: { id: string; ref: string; careId?: string | null; name: string; ownerId: string | null } | null;
   canSend: boolean; readOnlyReason: string | null; serviceWindowOpen: boolean;
   serviceWindowExpiresAt: string | null; channelEnabled: boolean;
 }

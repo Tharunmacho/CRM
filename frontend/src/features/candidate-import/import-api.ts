@@ -72,6 +72,7 @@ export interface ImportResult {
   name?: string
   candidateId?: string
   ref?: string
+  careId?: string | null
   order?: string | null
   completedThrough?: number
   currentStage?: number | null

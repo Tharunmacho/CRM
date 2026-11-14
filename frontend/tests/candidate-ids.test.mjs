@@ -11,80 +11,83 @@ async function load(path) {
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8')
 
 const ids = await load('../src/features/candidates/candidate-ids.ts')
-const both = { ref: 'CND-01092', careId: 'CI-26-27-001', travellerId: 'CI-T-26-27-001' }
+const both = { ref: 'CND-01092', careId: 'CI-078', travellerId: 'CI-T-094' }
 
-test('the Care India ID is the primary identifier and the CRM reference is the second one', () => {
-  assert.equal(ids.primaryId(both), 'CI-26-27-001')
-  assert.equal(ids.secondaryId(both), 'CND-01092')
-  assert.equal(ids.idLine(both), 'CI-26-27-001 · CND-01092')
+test('the Data Bank ID is the ONE ID shown; the CND reference and the Traveller ID are never added to it', () => {
+  assert.equal(ids.primaryId(both), 'CI-078')
+  assert.equal(ids.idLine(both), 'CI-078')
+  assert.equal(ids.secondaryId, undefined, 'there is no second ID to show any more')
+  // Format-agnostic: whatever string the API sends is what is shown.
+  for (const careId of ['CI-078', 'CI-26-27-078', 'DB/2027/78']) assert.equal(ids.idLine({ ref: 'CND-01092', careId }), careId)
 })
 
-test('before a Care India ID exists the CRM reference leads, as before', () => {
+test('only a very old row with no Data Bank ID falls back to the CRM reference', () => {
   for (const careId of [undefined, null, '', '   ']) {
     const candidate = { ref: 'CND-01092', careId }
     assert.equal(ids.primaryId(candidate), 'CND-01092')
-    assert.equal(ids.secondaryId(candidate), '')
     assert.equal(ids.idLine(candidate), 'CND-01092')
   }
 })
 
-test('the same text is never shown twice, and missing candidates and fields do not throw', () => {
-  assert.equal(ids.secondaryId({ ref: 'ci-26-27-001', careId: 'CI-26-27-001' }), '')
-  assert.equal(ids.idLine({ careId: 'CI-26-27-001' }), 'CI-26-27-001')
+test('missing candidates and fields do not throw', () => {
+  assert.equal(ids.idLine({ careId: 'CI-078' }), 'CI-078')
   for (const empty of [null, undefined, {}]) {
     assert.equal(ids.primaryId(empty), '')
     assert.equal(ids.idLine(empty), '')
-    assert.equal(ids.travellerLabel(empty), '')
+    assert.equal(ids.travellerIdOf(empty), '')
     assert.equal(ids.idSearchText(empty), '')
     assert.equal(ids.paperIdLine(empty), '')
   }
 })
 
-test('the Traveller ID shows only for a candidate who has one', () => {
-  assert.equal(ids.travellerLabel(both), 'Traveller ID CI-T-26-27-001')
-  assert.equal(ids.travellerIdOf(both), 'CI-T-26-27-001')
-  for (const travellerId of [undefined, null, '', '  ']) assert.equal(ids.travellerLabel({ ref: 'CND-1', travellerId }), '')
+test('the Traveller ID is read as sent, and is empty for a candidate who has not travelled', () => {
+  assert.equal(ids.travellerIdOf(both), 'CI-T-094')
+  assert.equal(ids.travellerLabel, undefined, 'no Traveller ID label is added to other screens')
+  for (const travellerId of [undefined, null, '', '  ']) assert.equal(ids.travellerIdOf({ ref: 'CND-1', travellerId }), '')
 })
 
-test('search finds a candidate by either ID or the CRM reference, in any case', () => {
-  for (const text of ['ci-26-27-001', 'CI-T-26', 'cnd-01092', '27-001']) assert.equal(ids.matchesIdText(both, text), true, text)
-  assert.equal(ids.matchesIdText(both, 'CI-27-28'), false)
+test('search still finds a candidate by the Data Bank ID, the Traveller ID or the hidden CND reference, in any case', () => {
+  for (const text of ['ci-078', 'CI-T-09', 'cnd-01092', '078']) assert.equal(ids.matchesIdText(both, text), true, text)
+  assert.equal(ids.matchesIdText(both, 'CI-099'), false)
   assert.equal(ids.matchesIdText(both, ''), false)
   assert.equal(ids.matchesIdText({ ref: 'CND-1' }, 'CI-T'), false)
 })
 
-test('the paper form header names the Care India ID, the reference and the Traveller ID', () => {
-  assert.equal(ids.paperIdLine(both), 'Care India ID CI-26-27-001 · Reference CND-01092 · Traveller ID CI-T-26-27-001')
-  assert.equal(ids.paperIdLine({ ref: 'CND-01092', careId: 'CI-26-27-001' }), 'Care India ID CI-26-27-001 · Reference CND-01092')
+test('the paper form header names the Data Bank ID only; the reference stands in only without one', () => {
+  assert.equal(ids.paperIdLine(both), 'Care India ID CI-078')
+  assert.equal(ids.paperIdLine({ ref: 'CND-01092', careId: 'CI-078' }), 'Care India ID CI-078')
   assert.equal(ids.paperIdLine({ ref: 'CND-01092' }), 'Reference CND-01092')
   const readable = (reference) => (reference.length <= 14 ? reference : '')
-  assert.equal(ids.paperIdLine({ ref: 'CND-E-f238e22d89f44a5a8fd49f6be920a7a9', careId: 'CI-26-27-001' }, readable), 'Care India ID CI-26-27-001')
+  assert.equal(ids.paperIdLine({ ref: 'CND-E-f238e22d89f44a5a8fd49f6be920a7a9', careId: 'CI-078' }, readable), 'Care India ID CI-078')
+  assert.equal(ids.paperIdLine({ ref: 'CND-E-f238e22d89f44a5a8fd49f6be920a7a9' }, readable), '')
 })
 
-test('every screen that showed the CRM reference now leads with the Care India ID', async () => {
+test('every screen shows only the Data Bank ID (Travelled only the Traveller ID), never the CND reference beside it', async () => {
   const cell = await read('../src/features/candidates/components/data-bank-columns.tsx')
   assert.match(cell, /careIdOf\(candidate\)/)
   assert.match(cell, /className="cid-main"/)
-  assert.match(cell, /secondaryId\(candidate\)/)
+  assert.doesNotMatch(cell, /secondaryId|travellerLabel/)
 
   const profile = await read('../src/screens/candidates/candidate-profile.tsx')
   assert.match(profile, /primaryId\(cand\)/)
-  assert.match(profile, /<TravellerIdChip candidate=\{cand\} \/>/)
+  assert.doesNotMatch(profile, /secondaryId|TravellerIdChip|CRM reference/)
 
   const form = await read('../src/screens/candidates/application-form.tsx')
   assert.match(form, /careIdOf\(ids\)/)
-  assert.match(form, /<TravellerIdChip candidate=\{ids\} \/>/)
+  assert.doesNotMatch(form, /TravellerIdChip|secondaryId|travellerId/)
   const letterhead = await read('../src/features/application-form/components/letterhead.tsx')
   assert.match(letterhead, /paperIdLine\(candidate, readableReference\)/)
 
   const travelled = await read('../src/screens/travelled/travelled.tsx')
   assert.match(travelled, /<TravellerIdChip candidate=\{row\} \/>/)
-  assert.match(travelled, /primaryId\(row\)/)    // Traveller ID chip, then the Care India ID, then the CRM reference muted
-  assert.match(travelled, /secondaryId\(row\)/)
+  assert.doesNotMatch(travelled, /primaryId|careIdOf|secondaryId|candidate-ids/)
 
   const palette = await read('../src/app/layout/command-search.tsx')
   assert.match(palette, /idSearchText\(candidate\)/)
   assert.match(palette, /idLine\(candidate\)/)
+
+  const stage = await read('../src/features/workflow/components/stage-modal-body.tsx')
+  assert.doesNotMatch(stage, /label="Reference"|label="Traveller ID"/)
 })
 
 test('the API types and the form reader carry both IDs, optional and null-safe', async () => {

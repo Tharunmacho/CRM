@@ -34,7 +34,7 @@ export type LeadSummaryResponse = LeadSummary & { dailyWorkGate?: LeadGate | nul
 
 export interface ConvertResponse {
   lead: Lead
-  candidate: { id: string; ref: string; name: string; ownerId?: string | null; ownerName?: string | null; taskId?: string | null }
+  candidate: { id: string; ref: string; careId?: string | null; name: string; ownerId?: string | null; ownerName?: string | null; taskId?: string | null }
   resumeAttached: boolean
   resumeError?: string | null
 }
@@ -42,7 +42,7 @@ export interface ConvertResponse {
 export interface UnconvertCheck {
   allowed: boolean
   reason: string | null
-  candidate: { id: string; ref: string; name: string } | null
+  candidate: { id: string; ref: string; careId?: string | null; name: string } | null
   restoredStatus: string | null
 }
 
@@ -63,6 +63,7 @@ export const unconvertLead = (id: string, candidateId: string, reason: string) =
 export interface ExistingCandidate {
   id: string
   ref: string
+  careId?: string | null
   name: string
   phone?: string | null
   ownerId?: string | null
@@ -111,7 +112,9 @@ export const leadApi = {
     api.get<{ items: LeadBatch[]; total: number; page: number; pageSize: number }>(`/leads/batches?page=${page}&page_size=${pageSize}`, { signal }),
   update: (id: string, body: Record<string, unknown>) => api.patch<Lead>(`/leads/${enc(id)}`, body),
   logCall: (id: string, body: CallBody) => api.post<Lead>(`/leads/${enc(id)}/call`, body),
-  assign: (ids: string[], ownerId: string) => api.post<{ assigned: number; unassigned?: number; skipped: number }>('/leads/assign', { ids, ownerId }),
+  /** `{ ownerId }` is one recruiter or 'auto'; `{ assigneeIds }` shares the leads equally between exactly those recruiters (answered with the count each one got). */
+  assign: (ids: string[], choice: { ownerId: string } | { assigneeIds: string[] }) =>
+    api.post<{ assigned: number; unassigned?: number; skipped: number; owners?: { id: string; name: string; count: number }[] }>('/leads/assign', { ids, ...choice }),
   /** Admin only: take the leads back from their recruiter (ownerId "none"); status and history stay, nobody owns them afterwards. */
   unassign: (ids: string[]) => api.post<{ assigned: number; unassigned: number; skipped: number }>('/leads/assign', { ids, ownerId: 'none' }),
   linkCandidate: (id: string, candidateId: string) => api.post<Lead>(`/leads/${enc(id)}/link-candidate`, { candidateId }),
@@ -127,7 +130,7 @@ export const leadApi = {
 /** Dry run or real import of one file. Dry runs save nothing. */
 export async function importLeads(
   file: File,
-  options: { dryRun: boolean; mapping?: Record<string, string | null>; assignTo?: string; label?: string },
+  options: { dryRun: boolean; mapping?: Record<string, string | null>; assignTo?: string; assigneeIds?: string[]; label?: string },
 ): Promise<ImportResponse> {
   const form = new FormData()
   form.append('file', file)

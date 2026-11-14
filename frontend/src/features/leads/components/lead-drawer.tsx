@@ -6,6 +6,7 @@ import type { User } from '@/shared/model/types'
 import { Sheet } from '@/shared/ui/overlay'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { FileLink } from '@/shared/ui/file-drop'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import { gateFromRefusal, leadApi, type LeadActivity, type LeadDetail } from '../lead-api'
 import {
   PLATFORM_LABEL, RESUME_REQUIRED_REASON, SETTABLE_STATUSES, cleanPhone, createdParts, dobLabel, experienceLabel, followUpLabel, followUpState, fromLocalInput, leadDate, leadStatus, platformKind, toLocalInput, whatsappLink,
@@ -153,7 +154,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
       <div className="ld-drawer">
         <div className="ld-d-top">
           <span className={cn('db-tone', `is-${st.tone}`, 'ld-d-status')}>{st.label}</span>
-          {shown.candidateId && <button type="button" className="ld-cand" onClick={() => navigate(`/candidates/${shown.candidateId}`)}><span>Candidate</span><b>{shown.candidateRef || 'open'}</b></button>}
+          {shown.candidateId && <button type="button" className="ld-cand" onClick={() => navigate(`/candidates/${shown.candidateId}`)}><span>Candidate</span><b>{primaryId({ careId: shown.candidateCareId, ref: shown.candidateRef }) || 'open'}</b></button>}
           {followState !== 'none' && followState !== 'closed' && <span className={cn('ld-d-follow', followState === 'overdue' && 'is-late')}>Follow up: {followUpLabel(shown.nextFollowUpAt)}</span>}
         </div>
 
@@ -163,7 +164,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
         {shown.matchedCandidateId && !shown.candidateId && (
           <div className="ld-dup is-soft">
             <p className="ld-dup-title"><Link2 size={16} aria-hidden="true" />Already in the Data Bank</p>
-            <p>{shown.matchedCandidateName || 'A candidate'} {shown.matchedCandidateRef ? <span className="ident">{shown.matchedCandidateRef}</span> : null} has the same phone or email. Open them, or convert this lead to link it.</p>
+            <p>{shown.matchedCandidateName || 'A candidate'} {primaryId({ careId: shown.matchedCandidateCareId, ref: shown.matchedCandidateRef }) ? <span className="ident">{primaryId({ careId: shown.matchedCandidateCareId, ref: shown.matchedCandidateRef })}</span> : null} has the same phone or email. Open them, or convert this lead to link it.</p>
             <div className="ld-dup-actions"><Button variant="secondary" icon={<ExternalLink className="h-4 w-4" />} onClick={() => navigate(`/candidates/${shown.matchedCandidateId}`)}>Open that candidate</Button></div>
           </div>
         )}

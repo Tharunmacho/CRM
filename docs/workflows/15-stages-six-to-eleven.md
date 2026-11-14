@@ -40,22 +40,24 @@ The backend still locks and checks order capacity so concurrent candidates canno
 
 ## Two Care India ID series
 
-Both public IDs start with `CI` (the agency) and both follow the Indian April-March financial year, but they are different series with different counters. Neither replaces the long-lived `CND-*` reference (`ref`), which stays on every record and in links.
+Both public IDs start with `CI` (the agency), but they are two simple, separate, **continuous** series: no financial-year part, no restart each April, numbers never reused. Neither replaces the long-lived `CND-*` reference (`ref`), which stays on every record and in links, and in the search box, but people are shown only the Care India ID (notifications, Data Bank and Travelled exports, candidate record export, invoices).
 
 | | Data Bank ID | Traveller ID |
 | --- | --- | --- |
-| Example | `CI-26-27-001` | `CI-T-26-27-001` |
+| Example | `CI-001`, `CI-002`, ... `CI-152`, `CI-153` | `CI-T-001`, `CI-T-002`, ... `CI-T-116`, `CI-T-117` |
 | Field | `careId` (`crm_candidates.care_id`) | `travellerId` (`crm_candidates.traveller_id`) |
 | Numbers | everybody who enters the Data Bank | only people who travelled |
-| Year decided by | the day the candidate entered the CRM | the TRAVEL DATE (Asia/Kolkata) |
-| Counter | `crm_candidate_fiscal_counters` | `crm_traveller_fiscal_counters` |
-| Assigned | at intake (every intake path) | when the placement becomes Deployed |
+| Order | the order candidates are created | the order candidates become Deployed (not the travel date) |
+| Counter | `crm_candidate_id_counters` (single row `GLOBAL`) | `crm_traveller_id_counters` (single row `GLOBAL`) |
+| Assigned | at creation (every intake path), never later | when the placement becomes Deployed, never before |
 
-The serial is zero-padded to three digits and simply grows (`...-1000`) beyond 999. It restarts at 001 on 1 April (India time) of the travel date's year, so a candidate who flies on 31 March 2027 is `CI-T-26-27-nnn` and one who flies on 1 April 2027 is `CI-T-27-28-001`, whoever was recorded first. A placement with no usable travel date on file is numbered by the day its travel stage was completed. Both IDs are unique and immutable once assigned (a database trigger refuses any change). Reversing a deployment (admin reopen) keeps the Traveller ID, and completing the stage again, even with a travel date in another financial year, returns the same number and uses up no new one; a rolled-back transaction consumes no number.
+The serial is zero-padded to at least three digits and simply grows (`CI-1000`, `CI-T-1000`) beyond 999. The next number is always one more than the highest ever issued: if the last traveller is `CI-T-116` the next one is `CI-T-117`. Deleting a candidate leaves a hole; nobody is renumbered and the number is not issued again. Both IDs are unique and immutable once assigned (a database trigger refuses any change). Reversing a deployment (admin reopen) keeps the Traveller ID, and completing the stage again returns the same number and uses up no new one; a rolled-back transaction consumes no number. Concurrent intakes or completions serialise on the single counter row (one `INSERT .. ON CONFLICT DO UPDATE .. RETURNING`), so two people never get the same number.
 
-The Traveller ID is assigned explicitly in the same transaction that deploys the placement and under the candidate row lock: the stage-11 `/complete` endpoint, the bulk and historical (travelled) import, and the travelled reconciliation script. Migration 0041 numbered everyone already travelled (an application with status Deployed), ordered by travel date, then by when the candidate entered the CRM. The format lives in one place, [traveller_id.py](../../backend/app/services/traveller_id.py) (Data Bank ID: [care_india_id.py](../../backend/app/services/care_india_id.py)).
+The Traveller ID is assigned explicitly in the same transaction that deploys the placement and under the candidate row lock: the stage-11 `/complete` endpoint, the bulk and historical (travelled) import, and the travelled reconciliation script. Migration 0044 replaced the earlier financial-year formats (`CI-26-27-078`, `CI-T-26-27-012`, migrations 0040/0041): it renumbered every existing candidate contiguously from `CI-001` in their previous order (so a deleted candidate's gap closes) and every existing traveller from `CI-T-001` in their previous travel order, then set both counters to the new maximum. Its downgrade restores a valid financial-year numbering by `created_at` / travel date, but cannot recover the original numbers after rows were deleted or moved. The format lives in one place, [traveller_id.py](../../backend/app/services/traveller_id.py) (Data Bank ID: [care_india_id.py](../../backend/app/services/care_india_id.py)).
 
-`travellerId` (string or null) is returned wherever `careId` is: the desk bootstrap and candidate lists, the candidate profile, the application-form candidate block and, for the Travelled screen, every row of `GET /api/travelled` and a first "Traveller ID" column of its CSV/XLSX export. Data Bank search finds a candidate by either ID, and the Data Bank export has a "Traveller ID" column after "Care India ID".
+Every payload that names a candidate carries `careId` next to `ref` so screens can show only the Care India ID: lead rows (`candidateCareId`, `matchedCandidateCareId`), the lead convert / unconvert-check / `candidate_exists` candidate, duplicate matches, bulk-import results (`careId`, `duplicateOfCareId`), fee-collections rows, staff-report candidate and move rows, the WhatsApp conversation candidate and the document-bundle duplicate list. Server-written notification, activity and audit text (assignment notices, lead conversion, move back to Lead, candidate deletion, duplicate-file notes) quotes the Care India ID and falls back to the CND reference only when a candidate has none.
+
+`travellerId` (string or null) is returned wherever `careId` is: the desk bootstrap and candidate lists, the candidate profile, the application-form candidate block and, for the Travelled screen, every row of `GET /api/travelled`. The Travelled CSV/XLSX export has a first "Traveller ID" column and no Care India ID or CND reference column. Data Bank search finds a candidate by the CND reference (`CND-01096`), the Care India ID (`CI-096`, `ci-96`) or the bare serial (`96`), and a traveller by `CI-T-007`; the Data Bank export has a "Traveller ID" column after "Care India ID" and no CND reference column.
 
 ## Recovery and validation
 

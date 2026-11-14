@@ -60,7 +60,7 @@ import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-a
 import { shortRef } from '@/features/candidates/components/data-bank-columns'
 import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
-import { careIdOf, idLine, travellerIdOf } from '@/features/candidates/candidate-ids'
+import { careIdOf, idLine, primaryId } from '@/features/candidates/candidate-ids'
 
 /**
  * One scrolling application: completed sections keep their saved feedback,
@@ -397,9 +397,7 @@ function CandidateRecord({ app }: { app: Application }) {
     <div className="sm-record">
       <Segment icon={<User className="h-4 w-4" />} title="Personal information" subtitle="Basic details">
         <Fact label="Name" value={cand.name} />
-        {careIdOf(cand) && <Fact label="Care India ID" value={careIdOf(cand)} ident />}
-        {travellerIdOf(cand) && <Fact label="Traveller ID" value={travellerIdOf(cand)} ident />}
-        <Fact label="Reference" value={cand.ref} ident />
+        {primaryId(cand) && <Fact label="Care India ID" value={primaryId(cand)} ident />}
         <Fact label="Date of birth" value={dateLabel(cand.dob)} />
         <Fact label="Gender" value={cand.gender ?? 'Not provided'} className="capitalize" />
         <Fact label="Nationality" value={cand.nationality || 'Not provided'} />

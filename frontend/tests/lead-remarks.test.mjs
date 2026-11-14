@@ -59,7 +59,7 @@ test('timeline events read as plain English and never repeat the remark text', (
   const e = r.timelineEvent(call('c', 'interested', 'secret remark text', at(12, 9), { from: 'new', to: 'interested' }))
   assert.equal(e.icon, 'call')
   assert.equal(e.title, 'Called: they are interested')
-  assert.equal(e.detail, 'Remark added · Status New → Interested')
+  assert.equal(e.detail, 'Remark added · Status Not contacted → Interested')
   assert.ok(!JSON.stringify(e).includes('secret'))
   assert.equal(r.timelineEvent(call('c', 'no_answer', '', at(12, 9))).detail, '')
   assert.equal(r.timelineEvent({ id: 's', kind: 'status', summary: 'x', meta: { from: 'interested', to: 'resume_requested' }, createdAt: at(1, 1) }).title, 'Changed status from Interested to Resume requested')

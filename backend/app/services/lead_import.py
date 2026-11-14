@@ -129,6 +129,65 @@ def spread_evenly(staff: list[User], loads: dict[str, int], count: int) -> list[
     return owners
 
 
+MAX_CHOSEN_RECRUITERS = 100
+
+
+class RecruiterChoiceError(ValueError):
+    """The recruiters the admin picked cannot receive leads; the message is plain English for the screen."""
+
+
+def resolve_recruiters(db: Session, recruiter_ids: list[str]) -> list[User]:
+    """The chosen recruiters in a stable order (account creation, then id), each one an active recruiter who is not on leave.
+
+    Refuses an empty list, the same person twice, an unknown id, a manager or admin, an inactive account and anyone on leave
+    (the leave flag or today's attendance), naming the person so the admin knows who to untick."""
+    from app.services.attendance_availability import unavailable_staff_ids
+    cleaned = [str(i).strip() for i in recruiter_ids if str(i).strip()]
+    if not cleaned:
+        raise RecruiterChoiceError("Choose at least one recruiter.")
+    if len(cleaned) > MAX_CHOSEN_RECRUITERS:
+        raise RecruiterChoiceError(f"Choose at most {MAX_CHOSEN_RECRUITERS} recruiters.")
+    if len(set(cleaned)) != len(cleaned):
+        raise RecruiterChoiceError("The same recruiter was chosen twice. Choose each recruiter once.")
+    found = {u.id: u for u in db.scalars(select(User).where(User.id.in_(cleaned))).all()}
+    if any(i not in found for i in cleaned):
+        raise RecruiterChoiceError("One of the chosen recruiters was not found. Reload the page and choose again.")
+    absent = set(unavailable_staff_ids(db))
+    for person in found.values():
+        if person.role != Role.staff or not person.active:
+            raise RecruiterChoiceError(f"{person.name} is not an active recruiter, so leads cannot be assigned to them.")
+        if person.on_leave or person.id in absent:
+            raise RecruiterChoiceError(f"{person.name} is on leave, so leads cannot be assigned to them. Untick them or choose someone else.")
+    return sorted(found.values(), key=lambda u: (u.created_at, u.id))
+
+
+def split_equally(people: list[User], loads: dict[str, int], count: int) -> list[str]:
+    """Owner id for each of `count` leads, shared as equally as possible between exactly `people`.
+
+    Everyone gets count // n leads; the count % n left over go one each to the recruiters with the fewest open leads
+    (ties: the order of `people`). Handing out round-robin in that order gives exactly those sizes, mixes newer and older
+    leads between everyone, and is the same every time for the same input. The screen shows the same sizes."""
+    if not people:
+        return []
+    ranked = sorted(range(len(people)), key=lambda i: (loads.get(people[i].id, 0), i))
+    return [people[ranked[k % len(ranked)]].id for k in range(count)]
+
+
+def pick_owners(db: Session, owner_id: str | None, recruiter_ids: list[str] | None, count: int) -> tuple[dict[str, str], list[str]]:
+    """(names by id, owner id per lead) for `count` leads: the chosen recruiters share them equally, or `owner_id`
+    ("auto" = everyone available, balanced by workload; otherwise one recruiter). Raises RecruiterChoiceError."""
+    if recruiter_ids is not None:
+        people = resolve_recruiters(db, recruiter_ids)
+        return {u.id: u.name for u in people}, split_equally(people, open_lead_counts(db, [u.id for u in people]) if len(people) > 1 else {}, count)
+    if owner_id == "auto":
+        staff = eligible_staff(db)
+        if not staff:
+            raise RecruiterChoiceError("No recruiter is available for automatic assignment.")
+        return {u.id: u.name for u in staff}, spread_evenly(staff, open_lead_counts(db, [u.id for u in staff]), count)
+    person = resolve_recruiters(db, [owner_id or ""])[0]
+    return {person.id: person.name}, [person.id] * count
+
+
 def _find_stored(db: Session, ids: list[str], phones: list[str], emails: list[str]) -> tuple[dict, dict, dict]:
     by_id, by_phone, by_email = {}, {}, {}
     for start in range(0, max(len(ids), len(phones), len(emails)), LOOKUP_CHUNK):
@@ -180,7 +239,7 @@ def _same_file_out(row, user: User) -> dict:
 
 def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run: bool = False, mapping: dict | None = None,
                assign_to: str | None = None, campaign_label: str | None = None, fill_empty: bool = False,
-               source: str = "meta_ads") -> dict:
+               source: str = "meta_ads", assignee_ids: list[str] | None = None) -> dict:
     """Parse and (unless dry_run) store the file. Returns the response described in the contract. Caller does not commit."""
     try:
         table = lp.read_table(data, file_name)
@@ -278,21 +337,23 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
     # 5) owners
     owner_ids: list[str | None] = [None] * len(fresh)
     assigned_to = None
-    if assign_to and fresh:
-        if assign_to == "auto":
-            staff = eligible_staff(db)
-            if not staff:
-                raise ImportError_("invalid_request", "No recruiter is available for automatic assignment. Upload without assigning, or choose a person.")
-            owner_ids = spread_evenly(staff, open_lead_counts(db, [u.id for u in staff]), len(fresh))
-            assigned_to = "auto"
-        else:
-            from app.api.routers.candidates import ensure_assignable
-            try:
-                target = ensure_assignable(db, assign_to)
-            except Exception as exc:  # HTTPException 422
-                raise ImportError_("invalid_request", getattr(exc, "detail", "Choose an active recruiter who is not on leave")) from None
-            owner_ids = [target.id] * len(fresh)
-            assigned_to = target.id
+    owner_names: dict[str, str] = {}
+    if assign_to and assignee_ids:
+        raise ImportError_("invalid_request", "Choose either one way of assigning or a list of recruiters, not both.")
+    if (assign_to or assignee_ids is not None) and fresh:
+        try:
+            owner_names, picked = pick_owners(db, assign_to, assignee_ids, len(fresh))
+        except RecruiterChoiceError as exc:
+            hint = " Upload without assigning, or choose a person." if str(exc).startswith("No recruiter is available") else ""
+            raise ImportError_("invalid_request", f"{exc}{hint}") from None
+        owner_ids = list(picked)
+        # "auto" = everyone available; one id = that recruiter; "multiple" = the recruiters the admin ticked
+        assigned_to = "auto" if assign_to == "auto" else (next(iter(owner_names)) if len(owner_names) == 1 else "multiple")
+    chosen_counts: dict[str, int] = {}
+    for owner in owner_ids:
+        if owner:
+            chosen_counts[owner] = chosen_counts.get(owner, 0) + 1
+    assigned_owners = [{"id": o, "name": owner_names.get(o, ""), "count": n} for o, n in sorted(chosen_counts.items(), key=lambda kv: (-kv[1], owner_names.get(kv[0], ""), kv[0]))]
 
     def by_reason(extra_lead_id: int = 0) -> dict:
         counts = {"lead_id": extra_lead_id, "phone": 0, "email": 0}
@@ -309,7 +370,7 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
         "columns": columns.columns, "unmappedColumns": columns.unmapped,
         "duplicates": duplicates[:REPORT_RETURNED], "duplicatesTruncated": len(duplicates) > REPORT_RETURNED,
         "invalid": invalid[:REPORT_RETURNED], "invalidTruncated": len(invalid) > REPORT_RETURNED,
-        "assignedTo": assigned_to, "assignedCount": len(fresh) if assigned_to else 0,
+        "assignedTo": assigned_to, "assignedCount": len(fresh) if assigned_to else 0, "assignedOwners": assigned_owners,
     }
     if user.role != Role.admin:  # a manager learns THAT a stored lead matched, never which one (they see only their own leads)
         result["duplicates"] = [{**d, "existingLeadId": None} for d in result["duplicates"]]
@@ -324,7 +385,7 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
     batch = LeadBatch(
         id=str(uuid.uuid4()), file_name=file_name[:255] or "leads", file_size=len(data), file_sha256=file_hash, source=source,
         file_format=table.format, encoding=table.encoding, delimiter=table.delimiter, uploaded_by=user.id,
-        assigned_to=assigned_to if assigned_to and assigned_to != "auto" else None, campaign_label=campaign_label,
+        assigned_to=assigned_to if assigned_to and assigned_to not in ("auto", "multiple") else None, campaign_label=campaign_label,
         fill_empty=fill_empty, rows_total=len(rows), rows_new=0, rows_duplicate=len(duplicates), rows_invalid=len(invalid),
         rows_matched_candidates=matched, column_map=columns.as_map(),
         report={"duplicates": duplicates[:REPORT_STORED], "invalid": invalid[:REPORT_STORED],
@@ -352,7 +413,8 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
     result.update(batchId=batch.id, rowsNew=stored, rowsDuplicate=batch.rows_duplicate, rowsUpdated=updated,
                   duplicatesByReason=by_reason(len(fresh) - stored))
     if stored:
-        who = "automatically" if assigned_to == "auto" else ("to a recruiter" if assigned_to else "unassigned")
+        who = ("automatically" if assigned_to == "auto" else f"evenly between {len(owner_names)} recruiters" if assigned_to == "multiple"
+               else "to a recruiter" if assigned_to else "unassigned")
         db.execute(text("INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary) "
                         "SELECT md5(random()::text || clock_timestamp()::text || id)::uuid::text, id, :u, 'import', :s FROM crm_leads WHERE batch_id = :b"),
                    {"u": user.id, "s": f"Imported from {batch.file_name} ({who})", "b": batch.id})

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import csv
 import io
 import json
+import re
 import zipfile
 
 from fastapi import FastAPI
@@ -227,6 +228,7 @@ def test_existing_candidates_are_flagged_not_blocked(env):
     assert flagged == {"Test Lead 00002": "cand-9000000002", "Test Lead 00004": "cand-9222222222"}
     listing = env.client.get("/api/leads", params={"matched_candidate": "true"}).json()
     assert listing["total"] == 2 and listing["items"][0]["matchedCandidateRef"].startswith("CND-")
+    assert all(re.fullmatch(r"CI-\d{3}", item["matchedCandidateCareId"]) for item in listing["items"])   # the Care India ID travels with the CND ref
 
 
 def test_import_is_a_handful_of_statements_whatever_the_size(env):
@@ -537,6 +539,7 @@ def test_convert_creates_a_candidate_with_the_leads_data_and_resume(env):
     assert done.status_code == 200, done.text
     body = done.json()
     assert body["lead"]["status"] == "converted" and body["lead"]["candidateId"] == body["candidate"]["id"] and body["lead"]["candidateRef"].startswith("CND-")
+    assert re.fullmatch(r"CI-\d{3}", body["lead"]["candidateCareId"]) and body["candidate"]["careId"] == body["lead"]["candidateCareId"]
     assert body["resumeAttached"] is True and body["candidate"]["ownerId"] == "a"
     candidate = env.db.get(m.Candidate, body["candidate"]["id"])
     assert (candidate.name, candidate.phone, candidate.source, candidate.source_detail) == ("Test Lead 00001", "+919000000001", m.Source.other, f"lead_sheet:{lead_id}")
@@ -584,6 +587,7 @@ def test_convert_refuses_an_existing_candidate_and_link_connects_it(env):
     assert clash.status_code == 409
     detail = clash.json()["detail"]
     assert detail["code"] == "candidate_exists" and detail["candidate"]["id"] == existing.id and detail["candidate"]["ref"] == existing.ref
+    assert detail["candidate"]["careId"] == existing.care_id
     assert detail["candidate"]["ownerName"] == "Ravi"
     assert env.db.scalar(select(func.count()).select_from(m.Candidate)) == 1 and env.client.get(f"/api/leads/{lead_id}").json()["status"] == "new"
     linked = env.client.post(f"/api/leads/{lead_id}/link-candidate", json={"candidateId": existing.id})

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
 import { Dialog } from '@/shared/ui/overlay'
 import { whatsappHref } from '@/features/candidates/data-bank-view'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import { WhatsAppTemplateButton } from './wa-template'
 import { Avatar, RowMenu } from '@/features/candidates/components/db-parts'
 import {
@@ -227,20 +228,21 @@ export function ResumeCell({ lead, block, onUpload, onConvert }: { lead: Lead; b
   if (lead.candidateId) {
     return (
       <button type="button" className="ld-cand" title="Open the candidate" onClick={(event) => { event.stopPropagation(); navigate(`/candidates/${lead.candidateId}`) }}>
-        <span>Candidate</span><b>{lead.candidateRef || 'open'}</b>
+        <span>Candidate</span><b>{primaryId({ careId: lead.candidateCareId, ref: lead.candidateRef }) || 'open'}</b>
       </button>
     )
   }
-  if (isClosed(lead.status)) return <Dash />
+  // Not interested, not reachable and not contacted leads can still be sent a resume; only a converted lead (above) has nothing to upload.
+  const closed = isClosed(lead.status)
   const match = lead.matchedCandidateId
-    ? <button type="button" className="ld-match" title={`${lead.matchedCandidateName || 'A candidate'} with this phone or email is already in the Data Bank`} onClick={(event) => { event.stopPropagation(); navigate(`/candidates/${lead.matchedCandidateId}`) }}>In Data Bank {lead.matchedCandidateRef ?? ''}</button>
+    ? <button type="button" className="ld-match" title={`${lead.matchedCandidateName || 'A candidate'} with this phone or email is already in the Data Bank`} onClick={(event) => { event.stopPropagation(); navigate(`/candidates/${lead.matchedCandidateId}`) }}>In Data Bank {primaryId({ careId: lead.matchedCandidateCareId, ref: lead.matchedCandidateRef })}</button>
     : null
   if (lead.hasResume) {
     return (
       <span className="ld-resume">
         {match}
         <span className="ld-got" title="Resume received"><CheckCircle2 size={13} aria-hidden="true" /><span>Resume received</span></span>
-        <button type="button" className="ld-upload is-primary" disabled={Boolean(block)} title={block ?? 'Make this lead a candidate'} onClick={(event) => { event.stopPropagation(); onConvert(lead) }}>Convert</button>
+        {!closed && <button type="button" className="ld-upload is-primary" disabled={Boolean(block)} title={block ?? 'Make this lead a candidate'} onClick={(event) => { event.stopPropagation(); onConvert(lead) }}>Convert</button>}
       </span>
     )
   }

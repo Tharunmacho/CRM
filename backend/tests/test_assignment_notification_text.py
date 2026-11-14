@@ -26,7 +26,7 @@ def env(schema_database, tmp_path, monkeypatch):
                     m.User(id="a", name="Rina Recruiter", email="a@example.test", role=m.Role.staff),
                     m.User(id="b", name="Ravi Recruiter", email="b@example.test", role=m.Role.staff)])
         db.flush()
-        db.add(m.Candidate(id="cand-1", ref="CND-00042", care_id="CI-26-27-042", name="PRADEEP KUMAR", phone="9000000042",
+        db.add(m.Candidate(id="cand-1", ref="CND-00042", care_id="CI-042", name="PRADEEP KUMAR", phone="9000000042",
                            source=m.Source.other, owner_id="a"))
         db.commit()
         app = FastAPI()
@@ -52,7 +52,7 @@ def test_the_recruiter_is_told_who_assigned_which_candidate_with_both_ids(env):
     assert response.status_code == 200, response.text
     arrived = [row for row in notices(env, "b") if row.kind == "candidate_assigned"]
     assert len(arrived) == 1
-    assert arrived[0].detail == "Asha Admin assigned you PRADEEP KUMAR (CI-26-27-042 · CND-00042)."
+    assert arrived[0].detail == "Asha Admin assigned you PRADEEP KUMAR (CI-042)."
 
 
 def test_no_notification_text_says_reassigned(env):

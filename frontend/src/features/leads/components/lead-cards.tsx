@@ -3,6 +3,7 @@ import { useRef } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
 import { RowMenu } from '@/features/candidates/components/db-parts'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import { createdParts, followUpLabel, followUpState, leadDate, uploadedLabel, type Lead } from '../lead-model'
 import { CampaignCell, ContactStateText, EducationCell, ExperienceCell, LocationCell, NameCell, PositionText, ownerNameOf } from './lead-columns'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
@@ -62,7 +63,7 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
         <div className="db-acts">
           <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Add remarks'} onClick={() => context.onLogCall(lead)}><PhoneCall size={14} /><span>Remarks</span></button>
           {lead.candidateId
-            ? <span className="ld-got"><CheckCircle2 size={13} aria-hidden="true" />{lead.candidateRef || 'Candidate'}</span>
+            ? <span className="ld-got"><CheckCircle2 size={13} aria-hidden="true" />{primaryId({ careId: lead.candidateCareId, ref: lead.candidateRef }) || 'Candidate'}</span>
             : lead.hasResume
               ? <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Convert to candidate'} onClick={() => context.onConvert(lead)}><UserPlus size={14} /><span>Convert</span></button>
               : <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Attach the updated resume'} onClick={() => input.current?.click()}><FileUp size={14} /><span>Resume</span></button>}

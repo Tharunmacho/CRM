@@ -197,6 +197,7 @@ def test_duplicate_requires_explicit_merge_and_retains_owner_work(env):
     assert first.status_code == 409, first.text
     duplicates = first.json()["detail"]["duplicates"]
     assert len(duplicates) == 1 and duplicates[0]["candidateId"] == identifier
+    assert duplicates[0]["ref"] == "EXISTING" and duplicates[0]["careId"].startswith("CI-")     # the Care India ID beside the CND ref
     choice = {"groupId": duplicates[0]["groupId"], "candidateId": identifier}
     response = commit(env, bundle, duplicateDecisions=[choice]); assert response.status_code == 200, response.text
     with env.sessions() as db:

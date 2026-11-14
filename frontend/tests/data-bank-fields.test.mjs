@@ -45,14 +45,15 @@ test('the registry covers every candidate field the list API returns', async () 
   const server = await readFile(new URL('../../backend/app/api/schemas.py', import.meta.url), 'utf8')
   const block = server.slice(server.indexOf('class CandidateOut(Wire):'), server.indexOf('class CandidateWithFormOut'))
   const covered = {
-    id: null, care_id: 'careId', traveller_id: 'travellerId', owner_id: 'owner', phone: 'phone', whatsapp: 'whatsapp', email: 'email', dob: 'dob', gender: 'gender', nationality: 'nationality',
+    // traveller_id and ref are deliberately not Data Bank fields: one ID per person here, the Data Bank ID (care_id).
+    id: null, care_id: 'careId', traveller_id: null, owner_id: 'owner', phone: 'phone', whatsapp: 'whatsapp', email: 'email', dob: 'dob', gender: 'gender', nationality: 'nationality',
     current_city: 'currentCity', languages: 'languages', passport_no: 'passportNo', passport_issue: 'passportIssue', passport_expiry: 'passportExpiry',
     passport_place: 'passportPlace', designations: 'designations', total_experience: 'totalExperience', gulf_experience: 'abroadExperience', skills: 'skills',
     expected_salary: 'expectedSalary', father_name: 'fatherName', marital_status: 'maritalStatus', current_address: 'currentAddress',
     experience_india: 'indiaExperience', native_place: 'nativePlace', family_member_number: 'familyNumber', job_duration_preference: 'jobDuration',
     country_preference: 'countryPreference', best_time_to_contact: 'bestTime', service_charges_status: 'serviceCharges', interest_level: 'interestLevel',
     next_follow_up_date: 'followUp', source: 'source', source_detail: 'agent', status: 'status', needs_review: 'status', added_at: 'added',
-    resume_text: null, photo_tone: null, documents: 'documents', call_outcome: 'callOutcome', ref: 'ref', name: 'name',
+    resume_text: null, photo_tone: null, documents: 'documents', call_outcome: 'callOutcome', ref: null, name: 'name',
   }
   const apiFields = [...block.matchAll(/^    (\w+):/gm)].map((match) => match[1])
   assert.ok(apiFields.length > 30)
@@ -75,8 +76,8 @@ test('every field of a full candidate is written, with the exact headings the PR
   const rows = Object.fromEntries(fields.bankFieldRows(candidate, context).map((row) => [row.key, row]))
   assert.equal(rows.careId.label, 'Care India ID')
   assert.equal(rows.careId.value, 'CI-26-27-001')
-  assert.equal(rows.travellerId.label, 'Traveller ID')
-  assert.equal(rows.travellerId.value, 'CI-T-26-27-001')
+  assert.equal(rows.travellerId, undefined, 'the Traveller ID is shown on the Travelled screen only')
+  assert.equal(rows.ref, undefined, 'the CND reference is never a visible Data Bank field')
   assert.equal(rows.dob.value, '05 Jan 1990')
   assert.equal(rows.gender.value, 'Male')
   assert.equal(rows.passportExpiry.value, '02 Feb 2030')
@@ -107,9 +108,10 @@ test('a sparse candidate leaves every field listed but empty (the row shows a da
   const rows = fields.bankFieldRows(sparse, context)
   assert.equal(rows.length, fields.BANK_FIELD_DEFS.length)
   const filled = rows.filter((row) => row.value).map((row) => row.key).sort()
-  assert.deepEqual(filled, ['name', 'phone', 'ref', 'source', 'status'])
+  assert.deepEqual(filled, ['name', 'phone', 'source', 'status'])
   assert.equal(fields.DEFAULT_COLUMN_FIELDS.has('careId'), true, 'the Care India ID already shows under the name; it is not an extra column')
-  assert.equal(fields.DEFAULT_COLUMN_FIELDS.has('travellerId'), false, 'the Traveller ID is a pickable column')
+  assert.equal(fields.bankFieldDef('travellerId'), undefined)
+  assert.equal(fields.bankFieldDef('ref'), undefined)
 })
 
 test('education and work history are never values of the list: they are pointers to the profile', () => {

@@ -360,39 +360,38 @@ class Order(Base, PkMixin, TimestampMixin):
 
 # ---------------------------------------------------------------- candidates
 
-class CandidateFiscalCounter(Base):
-    """One transaction-safe public-ID counter for each Care India financial year.
+class CandidateIdCounter(Base):
+    """The one continuous counter behind the Care India candidate ID (``CI-001``, ``CI-002`` ...).
 
-    Candidate references remain on ``crm_candidates.ref``.  This small table is
-    intentionally separate so an April--March public sequence can be reserved
-    atomically without changing, deriving from, or renumbering legacy CND refs.
+    A single row keyed ``GLOBAL``; reserved with one upsert (``app.services.care_india_id``), so concurrent intakes
+    serialise on that row and never share a number.  It only grows: numbers are never reused or restarted.
     """
 
-    __tablename__ = "crm_candidate_fiscal_counters"
+    __tablename__ = "crm_candidate_id_counters"
 
-    fiscal_year: Mapped[str] = mapped_column(String(9), primary_key=True)
+    series: Mapped[str] = mapped_column(String(16), primary_key=True)
     last_serial: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     __table_args__ = (
-        CheckConstraint("last_serial >= 0", name="ck_crm_candidate_fiscal_counters_last_serial"),
-        {"comment": "Per-financial-year counters for immutable Care India public candidate IDs."},
+        CheckConstraint("last_serial >= 0", name="ck_crm_candidate_id_counters_last_serial"),
+        {"comment": "Single continuous counter (row GLOBAL) for immutable Care India candidate IDs: CI-001, CI-002, ... Never restarts, never reused."},
     )
 
 
-class TravellerFiscalCounter(Base):
-    """Per-financial-year serial counter for the TRAVELLER ID, a series separate from the Data Bank Care India ID.
+class TravellerIdCounter(Base):
+    """The one continuous counter behind the TRAVELLER ID (``CI-T-001``, ``CI-T-002`` ...), a series separate from the candidate ID.
 
-    Keyed by the April--March year of the travel date; see ``app.services.traveller_id``.
+    A single row keyed ``GLOBAL``; see ``app.services.traveller_id``.
     """
 
-    __tablename__ = "crm_traveller_fiscal_counters"
+    __tablename__ = "crm_traveller_id_counters"
 
-    fiscal_year: Mapped[str] = mapped_column(String(9), primary_key=True)
+    series: Mapped[str] = mapped_column(String(16), primary_key=True)
     last_serial: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     __table_args__ = (
-        CheckConstraint("last_serial >= 0", name="ck_crm_traveller_fiscal_counters_last_serial"),
-        {"comment": "Per-financial-year counters for immutable Care India traveller IDs (CI-T-YY-YY-NNN), keyed by travel date."},
+        CheckConstraint("last_serial >= 0", name="ck_crm_traveller_id_counters_last_serial"),
+        {"comment": "Single continuous counter (row GLOBAL) for immutable Care India traveller IDs: CI-T-001, CI-T-002, ... Never restarts, never reused."},
     )
 
 
@@ -400,11 +399,11 @@ class Candidate(Base, PkMixin, TimestampMixin):
     __tablename__ = "crm_candidates"
 
     ref: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
-    # Public, immutable Care India fiscal-year identity.  The legacy ``ref``
-    # remains the technical CRM reference used by existing links and history.
+    # Public, immutable Care India candidate ID: CI-001, CI-002, ... one continuous series given at creation (migration
+    # 0044).  The legacy ``ref`` remains the technical CRM reference used by existing links and history.
     care_id: Mapped[str | None] = mapped_column(String(40))
-    # Second, separate immutable series for people who travelled: CI-T-YY-YY-NNN, numbered by the financial year of the
-    # travel date (migration 0041, ``app.services.traveller_id``). Null until the placement is deployed.
+    # Second, separate immutable series for people who travelled: CI-T-001, CI-T-002, ... one continuous series, given
+    # once when the placement is deployed (``app.services.traveller_id``). Null until then.
     traveller_id: Mapped[str | None] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -492,13 +491,11 @@ class Candidate(Base, PkMixin, TimestampMixin):
     __table_args__ = (
         # Duplicate detection on ingest runs against these three.
         CheckConstraint(
-            PostgresOnly("care_id IS NULL OR (care_id ~ '^[C][I]-[0-9]{2}-[0-9]{2}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$' "
-            "AND ((substring(care_id from 4 for 2)::integer + 1) % 100) = substring(care_id from 7 for 2)::integer)"),
+            PostgresOnly("care_id IS NULL OR care_id ~ '^[C][I]-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$'"),
             name="ck_crm_candidates_care_id_format",
         ),
         CheckConstraint(
-            PostgresOnly("traveller_id IS NULL OR (traveller_id ~ '^[C][I]-[T]-[0-9]{2}-[0-9]{2}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$' "
-            "AND ((substring(traveller_id from 6 for 2)::integer + 1) % 100) = substring(traveller_id from 9 for 2)::integer)"),
+            PostgresOnly("traveller_id IS NULL OR traveller_id ~ '^[C][I]-[T]-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$'"),
             name="ck_crm_candidates_traveller_id_format",
         ),
         Index("ix_crm_candidates_phone", "phone"),

@@ -3,7 +3,7 @@ import type { User } from '@/shared/model/types'
 import { gateFromRefusal, leadApi } from './lead-api'
 import { bulkErrorMessage, downloadSelectedLeads, leadBulkApi } from './lead-bulk-api'
 import {
-  EMPTY_SELECTION, bulkBody, changeSelection, filterFromQuery, resultToast, resultVerb, selectAllMatching, selectionCount, statusToast, undoAlive, undoBody, undoEntry, undoneToast, visibleSelected,
+  EMPTY_SELECTION, assignToast, bulkBody, changeSelection, filterFromQuery, isUnassign, resultToast, resultVerb, selectAllMatching, selectionCount, statusToast, undoAlive, undoBody, undoEntry, undoneToast, visibleSelected,
   type BulkAction, type BulkOptions, type Selection, type UndoEntry,
 } from './lead-bulk-model'
 import { leadStatus, type Lead } from './lead-model'
@@ -96,7 +96,7 @@ export function useLeadBulk(params: Params) {
     if (!action) return
     const result = await leadBulkApi.run(bulkBody(selection, filter, total, action, options))
     setAction(null); setSelection(EMPTY_SELECTION)
-    flash(resultToast(result, resultVerb(action, options.ownerId)))
+    flash(action === 'assign' && !isUnassign(options.ownerId) ? assignToast(result, resultVerb(action, options.ownerId)) : resultToast(result, resultVerb(action, options.ownerId)))
     refresh()
   }
 

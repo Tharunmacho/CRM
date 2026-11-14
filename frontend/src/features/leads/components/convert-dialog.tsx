@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Link2, Lock, UserPlus } from 'lucide-react'
 import { Dialog } from '@/shared/ui/overlay'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import { Button, Field, Input } from '@/shared/ui/primitives'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
@@ -140,7 +141,7 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
         <div className="ld-done" role="status">
           <span className="ld-result-icon"><CheckCircle2 size={34} aria-hidden="true" /></span>
           <h3>{candidate.name}</h3>
-          <p className="ld-done-ref">{candidate.ref}</p>
+          <p className="ld-done-ref">{primaryId(candidate)}</p>
           <p>{done ? 'This lead is now a candidate in the Data Bank.' : 'This lead is now linked to the candidate who was already in the Data Bank.'}</p>
           {done && done.resumeAttached && <p className="ld-done-note">The resume was attached. Open the application form to check its reading progress and saved details.</p>}
           {done && !done.resumeAttached && !done.resumeError && <p className="ld-done-note">No resume was attached yet. You can add it from the candidate's page.</p>}
@@ -165,7 +166,7 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
         {existing && (
           <div className="ld-dup" role="alert">
             <p className="ld-dup-title"><AlertTriangle size={16} aria-hidden="true" />This person is already a candidate</p>
-            <p><strong>{existing.name}</strong> <span className="ident">{existing.ref}</span>{existing.phone ? ` · ${existing.phone}` : ''}{existing.ownerName ? ` · looked after by ${existing.ownerName}` : ''}. Same {(existing.matchedOn ?? ['phone or email']).join(' and ')}. Nothing was created.</p>
+            <p><strong>{existing.name}</strong> <span className="ident">{primaryId(existing)}</span>{existing.phone ? ` · ${existing.phone}` : ''}{existing.ownerName ? ` · looked after by ${existing.ownerName}` : ''}. Same {(existing.matchedOn ?? ['phone or email']).join(' and ')}. Nothing was created.</p>
             <div className="ld-dup-actions">
               <Button variant="secondary" onClick={() => { onClose(); navigate(`/candidates/${existing.id}`) }}>Open that candidate</Button>
               <Button variant="primary" icon={<Link2 className="h-4 w-4" />} disabled={busy || Boolean(blockedReason)} title={blockedReason ?? undefined} onClick={() => void link()}>Link this lead</Button>

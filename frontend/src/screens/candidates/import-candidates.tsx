@@ -6,6 +6,7 @@ import { ApiError } from '@/shared/api/client'
 import { cn } from '@/shared/lib/cn'
 import { Badge, PageHeader, Panel, PanelHeader, type Tone } from '@/shared/ui/display'
 import { Button, Field, Select } from '@/shared/ui/primitives'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import {
   fileTooLarge, groupPicked, importApi,
   type CheckResponse, type ImportPlan, type ImportResult, type PickedFolders, type SheetRows,
@@ -341,7 +342,7 @@ export default function ImportCandidatesPage() {
                     {state?.status === 'done' ? (
                       <span className="flex items-center gap-2 text-[13px] text-[color:var(--success-ink,#15803d)]">
                         <CheckCircle2 className="h-4 w-4" />
-                        <Link to={`/candidates/${state.result?.candidateId}`} className="underline">{state.result?.ref}</Link>
+                        <Link to={`/candidates/${state.result?.candidateId}`} className="underline">{primaryId(state.result)}</Link>
                         {state.result?.action === 'deploy' && <Plane className="h-4 w-4" aria-label="Deployed" />}
                       </span>
                     ) : state?.status === 'running' || state?.status === 'waiting' ? (

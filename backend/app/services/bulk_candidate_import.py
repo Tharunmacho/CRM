@@ -629,7 +629,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
         elif name:  # no phone yet: the same name is the best sign this person is already in
             duplicate = db.scalar(select(Candidate).where(func.lower(func.trim(Candidate.name)) == name.lower()).limit(1))
         if duplicate is not None:
-            issues.append({"level": "error", "message": f"Already in the CRM as {duplicate.ref} ({duplicate.name}). Nothing is imported for this folder."})
+            issues.append({"level": "error", "message": f"Already in the CRM as {duplicate.care_id or duplicate.ref} ({duplicate.name}). Nothing is imported for this folder."})
     owner = ctx.recruiter(row.get("recruiter"))
     if owner is None:
         issues.append({"level": "error", "message": f"Recruiter '{row['recruiter']}' was not found among active users." if row.get("recruiter")
@@ -693,6 +693,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
         "files": planned_files, "issues": issues, "stages": report if action != "documents_only" else [], "level": level,
         "completedThrough": completed if action in {"in_progress", "deploy"} else 0, "currentStage": current if action == "in_progress" else None,
         "missingDocuments": [gap["label"] for gap in gaps], "action": action, "duplicateOf": duplicate.ref if duplicate else None,
+        "duplicateOfCareId": duplicate.care_id if duplicate else None,
     }
 
 
@@ -837,7 +838,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     db.flush()
     queue_reads(db, user, candidate, stored)
 
-    result = {"candidateId": candidate.id, "ref": candidate.ref, "name": candidate.name, "action": plan["action"], "issues": plan["issues"],
+    result = {"candidateId": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "name": candidate.name, "action": plan["action"], "issues": plan["issues"],
               "files": len(uploads), "order": None, "completedThrough": 0, "currentStage": None}
 
     if order is None:
@@ -887,9 +888,8 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
             amount=data.get("amount") if number == 8 else None, amount_currency=data.get("amountCurrency") if number == 8 else None))
     if deploy:
         _sync_order(db, locked)
-        # They have travelled: number them in the traveller series by the financial year of the travel date. A person the
-        # office only says has flown (no date on the sheet) is numbered by the day their travel stage is recorded.
-        assign_traveller_id(db, candidate, built[11].get("travelDate"), when[11])
+        # They have travelled: they get the next number in the traveller series (CI-T-001, CI-T-002 ...).
+        assign_traveller_id(db, candidate)
     else:
         # The stage the recruiter continues at: its task, and what the sheet already says as the saved draft.
         if current <= plan["level"]:

@@ -13,6 +13,7 @@ import { LeadExpanded, ownerNameOf } from '@/features/leads/components/lead-colu
 import { leadColumns } from '@/features/leads/components/lead-column-definitions'
 import { workBlock, type LeadColumnContext } from '@/features/leads/components/lead-actions'
 import { FIELD_GROUPS } from '@/features/leads/lead-fields'
+import { ownersLine } from '@/features/leads/lead-bulk-model'
 import { LeadCards } from '@/features/leads/components/lead-cards'
 import { LeadFiltersBar } from '@/features/leads/components/lead-filters'
 import { GateBanner } from '@/features/leads/components/gate-banner'
@@ -354,7 +355,7 @@ export default function LeadsPage() {
       }} />}
       <AssignLeadsDialog ids={assigning} users={store.users} onClose={() => setAssigning(null)}
         fromName={assignFrom ? ownerNameOf(assignFrom, store.user) || null : null}
-        onSaved={(assigned, skipped) => { setAssigning(null); bulk.clear(); flash(`${assigned} ${assigned === 1 ? 'lead' : 'leads'} assigned${skipped ? `, ${skipped} skipped` : ''}.`); data.refresh({ facets: true }) }} />
+        onSaved={(assigned, skipped, owners) => { setAssigning(null); bulk.clear(); flash(`${assigned} ${assigned === 1 ? 'lead' : 'leads'} assigned${skipped ? `, ${skipped} skipped` : ''}.${owners && owners.length > 1 ? ` ${ownersLine(owners)}.` : ''}`); data.refresh({ facets: true }) }} />
       {me.role === 'admin' && <UnassignLeadDialog lead={unassigning} ownerName={unassigning ? ownerNameOf(unassigning, store.user) : ''} onClose={() => setUnassigning(null)}
         onSaved={(unassigned, skipped) => {
           const name = unassigning?.name || 'The lead'

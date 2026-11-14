@@ -487,7 +487,7 @@ def reconcile(db, user, settings, placements, documents, decisions, approved_pla
         db.add(stage)
         candidate.status = CandidateStatus.deployed
         from app.services.traveller_id import assign_traveller_id
-        assign_traveller_id(db, candidate, data.get("travelDate"), now)   # numbered by the financial year of the travel date
+        assign_traveller_id(db, candidate)   # the next number in the continuous traveller series
         for task in db.scalars(select(Task).where(Task.candidate_id == candidate.id, Task.completed_at.is_(None), Task.cancelled_at.is_(None))):
             task.cancelled_at = now
         for allocation in db.scalars(select(DailyWorkItem).where(DailyWorkItem.candidate_id == candidate.id, DailyWorkItem.status == "open")):

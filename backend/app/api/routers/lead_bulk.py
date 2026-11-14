@@ -26,6 +26,7 @@ class BulkBody(Wire):
     ids: list[str] | None = Field(default=None, max_length=100_000)
     filter: dict | None = None
     owner_id: str | None = Field(default=None, max_length=36)
+    assignee_ids: list[str] | None = Field(default=None, max_length=100)  # assign: the recruiters who share the leads equally
     status: str | None = Field(default=None, max_length=20)
     only_unassigned: bool = False
     confirm: str | None = Field(default=None, max_length=20)
@@ -36,7 +37,7 @@ class BulkBody(Wire):
 
 @router.post("/bulk")
 def bulk(body: BulkBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    camel = {"ownerId": body.owner_id, "onlyUnassigned": body.only_unassigned, "expectedCount": body.expected_count}
+    camel = {"ownerId": body.owner_id, "assigneeIds": body.assignee_ids, "onlyUnassigned": body.only_unassigned, "expectedCount": body.expected_count}
     request = {"action": body.action, "ids": body.ids, "filter": body.filter, "status": body.status, "confirm": body.confirm,
                "sort": body.sort, "direction": body.direction, **camel}
     try:

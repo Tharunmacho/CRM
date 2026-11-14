@@ -41,6 +41,8 @@ def test_reverse_keeps_original_lead_evidence_and_is_retry_safe(env, monkeypatch
     monkeypatch.setattr(candidates, "_remove_stored_files", lambda *args: cleanup.append(args))
     check = env.client.get(f"/api/leads/{lid}/unconvert-check")
     assert check.status_code == 200 and check.json()["allowed"] and check.json()["restoredStatus"] == "new", check.text
+    care_id = env.db.get(m.Candidate, cid).care_id
+    assert check.json()["candidate"]["careId"] == care_id and care_id.startswith("CI-")      # the Care India ID, beside the CND ref
     result = undo(env, lid, cid)
     assert result.status_code == 200, result.text
     assert result.json()["lead"]["candidateId"] is None and result.json()["restoredStatus"] == "new"
@@ -51,6 +53,8 @@ def test_reverse_keeps_original_lead_evidence_and_is_retry_safe(env, monkeypatch
     assert (lead.name, lead.phone, lead.email, lead.notes, lead.owner_id) == before
     assert env.db.scalar(select(func.count()).select_from(m.LeadActivity).where(m.LeadActivity.lead_id == lid)) == activities_before + 1
     assert undo(env, lid, cid).json()["alreadyReversed"] is True and len(cleanup) == 1
+    note = env.db.scalar(select(m.LeadActivity.summary).where(m.LeadActivity.lead_id == lid).order_by(m.LeadActivity.created_at.desc()).limit(1))
+    assert note.startswith(f"Moved {care_id} back to Lead.") and "CND-" not in note                # people read the Care India ID
 
 
 @pytest.mark.parametrize("work", ["completed", "remark", "event", "daily_work", "new_task"])

@@ -9,7 +9,6 @@ import { FillRows } from './fill-rows'
 import { PhotoTile } from './fill-photo'
 import { PassportDetailsFields, PassportStatusChip } from './passport-details'
 import { PassportUpload } from './passport-upload'
-import { ExperienceReadingWarning } from './experience-reading-warning'
 import {
   EDUCATION_COLUMNS_FILL,
   EXPERIENCE_COLUMNS_FILL,
@@ -93,7 +92,7 @@ export function FillView({ ctx, canWork, upload, busyKinds, onExtract }: {
       <PassportDetailsFields ctx={ctx} canWork={canWork} />
     </>
     if (card.kind === 'education') return education
-    if (card.kind === 'experience') return <><ExperienceReadingWarning slot={form.documents.resume} />{grid}{experienceRows}</>
+    if (card.kind === 'experience') return <>{grid}{experienceRows}</>
     return grid
   }
 

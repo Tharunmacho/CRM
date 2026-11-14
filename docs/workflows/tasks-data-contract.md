@@ -41,7 +41,7 @@ Tasks opens on **Today's candidates**, ONE flat list of the signed-in recruiter'
                "stage": 1, "waiting": true, "status": "open|done", "completedAt": null,
                "client": "...", "clientContact": "...", "country": "...", "countrySource": "order|preference|null", "countryIsPreferred": false,
                "locationHint": null, "position": "...", "positionSource": "order|preference|skill|null", "positionIsPreferred": false,
-               "candidate": "...", "candidateRef": "CND-01092", "candidateCareId": "CI-26-27-001", "orderRef": null,
+               "candidate": "...", "candidateRef": "CND-01092", "candidateCareId": "CI-001", "orderRef": null,
                "referral": { "source": "...", "label": "...", "detail": null }, "remark": null } ],
   "staff": [ { "userId": "...", "name": "...", "active": true, "summary": { "total": 4, "toWork": 3, "doneToday": 1 } } ] }
 ```

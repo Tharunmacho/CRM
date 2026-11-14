@@ -10,7 +10,7 @@ async function load(path) {
 }
 
 const b = await load('../src/features/leads/lead-bulk-model.ts')
-const labelOf = (status) => ({ contacted: 'Contacted', not_interested: 'Not interested', new: 'New' })[status] ?? status
+const labelOf = (status) => ({ contacted: 'Contacted', not_interested: 'Not interested', new: 'Not contacted' })[status] ?? status
 
 test('selection survives page changes and the table reports exactly what is ticked', () => {
   let selection = b.EMPTY_SELECTION
@@ -121,7 +121,7 @@ test('undo: remembers the previous status, restores it with the previous value, 
   assert.equal(b.statusToast('not_interested', labelOf), 'Marked not interested.')
   assert.equal(b.statusToast('contacted', labelOf), 'Status changed to Contacted.')
   assert.deepEqual(b.undoBody(entry), { status: 'new' })
-  assert.equal(b.undoneToast(entry, labelOf), 'Status restored to New.')
+  assert.equal(b.undoneToast(entry, labelOf), 'Status restored to Not contacted.')
   assert.equal(b.undoAlive(entry, 1000 + b.UNDO_MS - 1), true)
   assert.equal(b.undoAlive(entry, 1000 + b.UNDO_MS), false)
   assert.equal(b.undoAlive(null), false)

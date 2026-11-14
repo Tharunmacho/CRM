@@ -183,7 +183,7 @@ def manifest(inspection: Inspection) -> dict:
                   "current": entry["current"], "versions": entry["versions"]}
                  for slot, entry in slots.items()]
     return {
-        "candidateId": inspection.candidate.id, "reference": inspection.candidate.ref, "candidateName": inspection.candidate.name,
+        "candidateId": inspection.candidate.id, "reference": inspection.candidate.care_id or inspection.candidate.ref, "candidateName": inspection.candidate.name,
         "generatedAt": datetime.now(timezone.utc).isoformat(), "selectedApplication": form.get("application"),
         "scope": "This candidate's documents and documents from every one of their applications.",
         "filePolicy": "Latest document per record and slot; all passport and Aadhaar files, Other documents" + (" and all invoice versions" if INVOICE_SLOT in slots else "") + ". Older normal-document version metadata is retained in this manifest.",
@@ -206,12 +206,12 @@ def workbook(inspection: Inspection, listing: dict | None = None) -> bytes:
         if detail.startswith(prefix):
             source["sourceDetail"] = label
     sections = [
-        ("About", [["Field", "Value"], ["Candidate", candidate.name], ["Reference", candidate.ref],
+        ("About", [["Field", "Value"], ["Candidate", candidate.name], ["Care India ID", candidate.care_id or candidate.ref],
                    ["Generated at (UTC)", listing["generatedAt"]], ["Scope", listing["scope"]], ["Document policy", listing["filePolicy"]],
                    ["Document status", "Attached files and explicit manual confirmations are identified separately. A manual confirmation does not create a downloadable file. The ZIP verifies every included file can be read."],
                    ["Task visibility", "Task history includes tasks visible to the exporting user: all candidate tasks for managers and administrators, or the recruiter's own tasks."],
                    ["Missing before deployment", ", ".join(item["label"] for item in listing["missingRequiredBeforeDeployment"])]]),
-        ("Personal", [["Field", "Value"], *details({**{key: value for key, value in form["candidate"].items() if key != "canEdit"},
+        ("Personal", [["Field", "Value"], *details({**{key: value for key, value in form["candidate"].items() if key not in ("canEdit", "ref")},   # people quote the Care India ID, not the CND reference
                     **form["personal"], "createdAt": plain(candidate.created_at)})]),
         ("Contact", [["Field", "Value"], *details({key: form["personal"].get(key) for key in
                   ("mobileNumber", "whatsapp", "email", "currentAddress", "currentCity")}),

@@ -4,6 +4,7 @@ import { ExternalLink } from 'lucide-react'
 import { Sheet } from '@/shared/ui/overlay'
 import { useStore } from '@/shared/state/crm-store'
 import { LEAD_REPORT_TOPICS, useReportData } from '@/features/reports/report-api'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import { staffReportPath } from './staff-report-api'
 import {
   CLOSURE_LABEL, STATE_LABEL, clockTime, filterCandidates, formatHours, formatPercent, formatSeconds, leadsCalledText, rangeLabel, scoreTone, stateTone,
@@ -117,7 +118,7 @@ export function StaffDrawer({ row, report, onClose }: { row: StaffRow; report: S
           {shown.length === 0 ? <p className="sw-empty">No candidates match this filter.</p> : <div className="sw-scroll"><table className="sw-table sw-candidates">
             <thead><tr><th>Candidate</th><th>Order</th><th>Progress through the 11 stages</th><th>Now</th><th className="num">Days there</th><th className="num">Moved</th></tr></thead>
             <tbody>{shown.map(item => <tr key={item.applicationId} className={item.status === 'active' && (item.daysInStage ?? 0) >= report.thresholds.stuckDays ? 'is-flag' : undefined}>
-              <td><button type="button" className="sw-link" onClick={() => navigate(`/candidates/${item.candidateId}`)}>{item.candidate}<ExternalLink size={12} aria-hidden="true" /></button><small>{item.ref}</small></td>
+              <td><button type="button" className="sw-link" onClick={() => navigate(`/candidates/${item.candidateId}`)}>{item.candidate}<ExternalLink size={12} aria-hidden="true" /></button><small>{primaryId(item)}</small></td>
               <td>{item.order}<small>{item.designation} - {item.client}</small></td>
               <td><Track item={item} labels={labels} /></td>
               <td>{item.status === 'deployed' ? <span className="sw-chip is-good">Deployed</span> : item.status === 'closed' ? <span className="sw-chip is-bad" title={item.closureReason ? CLOSURE_LABEL[item.closureReason] : undefined}>Closed</span> : item.stageLabel}

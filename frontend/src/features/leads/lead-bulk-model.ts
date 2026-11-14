@@ -74,13 +74,14 @@ export function filterFromQuery(query: string): Record<string, string | string[]
   return out
 }
 
-export interface BulkOptions { ownerId?: string; status?: string; confirm?: string; sort?: string; direction?: 'asc' | 'desc' }
+export interface BulkOptions { ownerId?: string; assigneeIds?: string[]; status?: string; confirm?: string; sort?: string; direction?: 'asc' | 'desc' }
 
 /** The POST /api/leads/bulk body. A filter selection also sends the count the person saw, so a list that changed meanwhile is refused. */
 export function bulkBody(selection: Selection, filter: Record<string, string | string[]>, matchingTotal: number, action: BulkAction, options: BulkOptions = {}): Record<string, unknown> {
   const body: Record<string, unknown> = { action }
   if (selection.allMatching) { body.filter = filter; body.expectedCount = matchingTotal } else body.ids = selection.ids
-  if (options.ownerId) body.ownerId = options.ownerId
+  if (options.assigneeIds?.length) body.assigneeIds = options.assigneeIds
+  else if (options.ownerId) body.ownerId = options.ownerId
   if (options.status && action === 'status') body.status = options.status
   if (options.confirm) body.confirm = options.confirm
   if (options.sort) body.sort = options.sort
@@ -101,6 +102,8 @@ export interface ConfirmInput {
   allMatching: boolean
   /** The chosen recruiter's name, or 'auto'. */
   ownerName?: string
+  /** Several recruiters chosen: the leads are shared equally between exactly these people (names in the order shown). */
+  recruiterNames?: string[]
   /** Label of the chosen status. */
   statusLabel?: string
 }
@@ -123,7 +126,10 @@ export function confirmCopy(input: ConfirmInput): ConfirmCopy {
           confirmLabel: `Make ${what} unassigned`, danger: false, typed: false,
         }
       }
-      const who = input.ownerName === 'auto' || !input.ownerName ? 'the available recruiters, spread evenly' : input.ownerName
+      const names = input.recruiterNames ?? []
+      const who = names.length > 1 ? `${joinNames(names)}, shared equally (${splitSizes(n, names.length).map(count).join(', ')})`
+        : names.length === 1 ? names[0]
+        : input.ownerName === 'auto' || !input.ownerName ? 'the available recruiters, spread evenly' : input.ownerName
       return { title: `Assign ${what}`, lines: [`${scope} will be assigned to ${who}.`, 'Converted leads are never moved. Leads that already belong to that person are skipped.'], confirmLabel: `Assign ${what}`, danger: false, typed: false }
     }
     case 'status':
@@ -141,6 +147,64 @@ export function confirmCopy(input: ConfirmInput): ConfirmCopy {
         confirmLabel: `Delete ${what}`, danger: true, typed: n > TYPED_CONFIRM_OVER,
       }
   }
+}
+
+/* ------------------------------------------------- several recruiters, one split */
+
+/**
+ * How many of `total` leads each of `recruiters` people gets when the leads are shared as equally as possible, biggest share
+ * first: 10 leads over 3 recruiters is [4, 3, 3]. The server (backend/app/services/lead_import.py split_equally) gives everyone
+ * total // n and the total % n left over one each to the recruiters with the fewest open leads, so the sizes are the same
+ * whatever the workloads; only WHO gets the extra lead depends on them.
+ */
+export function splitSizes(total: number, recruiters: number): number[] {
+  if (!Number.isFinite(total) || !Number.isFinite(recruiters) || recruiters < 1) return []
+  const whole = Math.max(0, Math.floor(total))
+  const people = Math.floor(recruiters)
+  const base = Math.floor(whole / people)
+  const extra = whole % people
+  return Array.from({ length: people }, (_, index) => base + (index < extra ? 1 : 0))
+}
+
+/** "Asha, Ravi and Mina". */
+export const joinNames = (names: string[]): string => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`)
+
+/** What the picker says under the list: "10 leads over 3 recruiters: 4, 3, 3". `total` null = not known yet. */
+export function splitSummary(total: number | null, chosen: number, available: number): string {
+  const what = total === null ? 'the leads' : `${count(total)} ${leads(total)}`
+  if (chosen === 0) {
+    return available > 0
+      ? `Nobody ticked, so ${what} will be spread between all ${available} available ${available === 1 ? 'recruiter' : 'recruiters'}, balancing their current workload.`
+      : 'No recruiter is available right now.'
+  }
+  if (chosen === 1) return `${what[0].toUpperCase()}${what.slice(1)} to 1 recruiter.`
+  return total === null ? `The leads will be shared equally between ${chosen} recruiters.` : `${what[0].toUpperCase()}${what.slice(1)} over ${chosen} recruiters: ${splitSizes(total, chosen).map(count).join(', ')}`
+}
+
+/** The request fields for the recruiters ticked: nothing ticked is the "spread evenly" shortcut, one or more are shared equally. */
+export const assignChoice = (assigneeIds: string[]): { ownerId: string } | { assigneeIds: string[] } => {
+  const unique = [...new Set(assigneeIds)]
+  return unique.length ? { assigneeIds: unique } : { ownerId: 'auto' }
+}
+
+/** The import fields for the upload dialog's "Assign new leads to": nothing, the recruiters ticked (shared equally), or all available ones. */
+export const uploadAssignment = (canAssign: boolean, nobody: boolean, recruiters: string[]): { assignTo?: string; assigneeIds?: string[] } =>
+  !canAssign || nobody ? {} : recruiters.length ? { assigneeIds: [...new Set(recruiters)] } : { assignTo: 'auto' }
+
+/** Tick or untick one person. */
+export const toggleRecruiter = (selected: string[], id: string, on: boolean): string[] => (on ? (selected.includes(id) ? selected : [...selected, id]) : selected.filter((item) => item !== id))
+
+/** Everyone who can take leads now: active recruiters who are not on leave. */
+export const availableRecruiters = <T extends { id: string; role: string; active: boolean; onLeave: boolean }>(users: T[]): T[] =>
+  users.filter((user) => user.active && user.role === 'staff' && !user.onLeave)
+
+/** "Sangeetha 4, Yuvaraj 3, Mina 3" from the server's per-recruiter counts. */
+export const ownersLine = (owners: { name: string; count: number }[] | undefined): string => (owners ?? []).filter((o) => o.count > 0).map((o) => `${o.name} ${count(o.count)}`).join(', ')
+
+/** The toast after assigning: the usual "N leads assigned, K skipped" plus who got how many when it was shared. */
+export function assignToast(result: Pick<BulkResult, 'updated' | 'skipped' | 'skippedReasons' | 'owners'>, verb = 'assigned'): string {
+  const line = result.owners && result.owners.length > 1 ? ownersLine(result.owners) : ''
+  return line ? `${resultToast(result, verb)} ${line}.` : resultToast(result, verb)
 }
 
 /** The owner choice that means "nobody": the server reads `ownerId: 'none'` as taking the leads back. */

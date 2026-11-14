@@ -18,7 +18,7 @@ def _admin(user):
 
 
 def _check(db: Session, lead: Lead, candidate: Candidate | None):
-    result = {"allowed": False, "reason": None, "candidate": {"id": candidate.id, "name": candidate.name, "ref": candidate.ref} if candidate else None,
+    result = {"allowed": False, "reason": None, "candidate": {"id": candidate.id, "name": candidate.name, "ref": candidate.ref, "careId": candidate.care_id} if candidate else None,
               "restoredStatus": None}
     def refuse(message):
         result["reason"] = message
@@ -91,18 +91,18 @@ def reverse(db: Session, user: User, lead_id: str, candidate_id: str, reason: st
     outcome = _check(db, lead, candidate)
     if not outcome["allowed"]:
         raise HTTPException(409, outcome["reason"])
-    ref, name = candidate.ref, candidate.name
+    ref, name, shown = candidate.ref, candidate.name, candidate.care_id or candidate.ref
     lead.status, lead.candidate_id = outcome["restoredStatus"], None
     lead.updated_at = datetime.now(timezone.utc)
     lead_matching.clear_self_match(lead)
     db.flush()
     audit_id = str(uuid.uuid4())
     documents, _tasks, keys = _delete_candidate_rows(db, candidate_id, audit_id=audit_id, actor_id=user.id,
-                                                   target=f"{name} ({ref})", ref=ref, applications=0)
-    details = {"action": "unconvert", "removedCandidateId": candidate_id, "candidateRef": ref, "from": "converted",
+                                                   target=f"{name} ({shown})", ref=ref, applications=0)
+    details = {"action": "unconvert", "removedCandidateId": candidate_id, "candidateRef": ref, "candidateCareId": candidate.care_id, "from": "converted",
                "to": lead.status, "reason": reason, "removedCandidateDocuments": documents}
-    lead_sheet.log_activity(db, lead_id, user.id, "note", f"Moved {ref} back to Lead. {reason}", details)
-    db.add(AuditEntry(actor_id=user.id, action=ACTION, target=ref, entity_type="lead", entity_id=lead_id, meta=details))
+    lead_sheet.log_activity(db, lead_id, user.id, "note", f"Moved {shown} back to Lead. {reason}", details)
+    db.add(AuditEntry(actor_id=user.id, action=ACTION, target=shown, entity_type="lead", entity_id=lead_id, meta=details))
     lead_followups.sync(db, [lead_id])
     db.commit()
     if keys:

@@ -139,15 +139,16 @@ def test_someone_who_has_flown_is_recorded_as_travelled_even_without_the_offer_c
              ("Air ticket.pdf", ["air_ticket"])]
     result = _historical_import(env, "Ravi", files, {"order": "ORD-2", "travel_date": "09/05/2026", "airline": "Air Arabia G9472", "pnr": "6ZA8JH"})
     assert (result["action"], result["completedThrough"]) == ("deploy", 11)
+    assert result["careId"] == "CI-001"
     application, stages = _stage_rows(env, result["candidateId"])
     assert application.status == ApplicationStatus.deployed and [s.stage for s in stages] == list(range(1, 12))
     assert stages[10].data["travelDate"] == "2026-05-09" and stages[10].data["pnr"] == "6ZA8JH"
     assert "file" not in stages[4].data and "receipt" not in stages[7].data and "file" not in stages[9].data   # nothing invented for the missing papers
     assert "amount" not in stages[7].data
     assert '"id": "history"' not in json.dumps([s.data for s in stages])                                       # the stand-in is never stored
-    with env.sessions() as db:   # travelled on 9 May 2026: the Traveller ID of financial year 2026-27, separate from the Care India ID
+    with env.sessions() as db:   # travelled: the first Traveller ID of the continuous series, separate from the Care India ID
         candidate = db.get(Candidate, result["candidateId"])
-        assert candidate.traveller_id == "CI-T-26-27-001" and candidate.care_id.startswith("CI-") and not candidate.care_id.startswith("CI-T-")
+        assert candidate.traveller_id == "CI-T-001" and candidate.care_id == "CI-001"
 
 
 def test_someone_the_office_says_has_flown_but_has_no_ticket_is_travelled_with_the_date_left_blank(env):
@@ -161,8 +162,8 @@ def test_someone_the_office_says_has_flown_but_has_no_ticket_is_travelled_with_t
     application, stages = _stage_rows(env, flown["candidateId"])
     assert application.status == ApplicationStatus.deployed
     assert "travelDate" not in stages[10].data and "file" not in stages[10].data and '"id": "history"' not in json.dumps([s.data for s in stages])
-    with env.sessions() as db:   # no travel date on file: numbered by the day the travel stage is recorded
-        assert db.get(Candidate, flown["candidateId"]).traveller_id.startswith("CI-T-")
+    with env.sessions() as db:   # no travel date on file: still numbered, as the next traveller
+        assert db.get(Candidate, flown["candidateId"]).traveller_id == "CI-T-001"
 
 
 def test_a_complete_folder_becomes_a_deployed_candidate_with_all_eleven_stages(env):
@@ -171,7 +172,7 @@ def test_a_complete_folder_becomes_a_deployed_candidate_with_all_eleven_stages(e
     with env.sessions() as db:
         candidate = db.get(Candidate, result["candidateId"])
         assert (candidate.name, candidate.status, candidate.owner_id) == ("Rahul Kumar", CandidateStatus.deployed, "staff")
-        assert candidate.traveller_id == "CI-T-25-26-001"   # flew 20 March 2026: still financial year 2025-26
+        assert candidate.traveller_id == "CI-T-001"   # numbering follows the order people become travellers, not the travel date
         assert candidate.designations == ["Welder"]
         application = db.scalar(select(Application).where(Application.candidate_id == candidate.id))
         assert application.status == ApplicationStatus.deployed and application.current_stage == 11

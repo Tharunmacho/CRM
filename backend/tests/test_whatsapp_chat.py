@@ -324,6 +324,7 @@ def test_bounded_conversation_and_message_paging_avoids_candidate_ocr(setup, mon
             assert response.status_code == 200, response.text
             assert response.json()["total"] == 1
             assert response.json()["conversations"][0]["candidate"]["ownerId"] == "owner"
+            assert "careId" in response.json()["conversations"][0]["candidate"]
             assert not any("crm_candidates.resume_text" in statement for statement in statements)
             first = client.get("/api/whatsapp/conversations/conversation/messages?limit=2").json()
             assert [r["body"] for r in first["messages"]] == ["Message 3", "Message 4"]

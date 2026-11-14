@@ -82,6 +82,7 @@ export interface CandidateRow {
   candidateId: string
   candidate: string
   ref: string
+  careId?: string | null
   order: string
   designation: string
   client: string

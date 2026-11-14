@@ -11,7 +11,7 @@ import io
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import Candidate, Lead, LeadBatch, User
@@ -70,14 +70,14 @@ def collect(db: Session, batch: LeadBatch) -> dict:
         if len(invalid) < batch.rows_invalid:
             notes.append(f"Only the first {len(invalid):,} of {batch.rows_invalid:,} invalid rows were stored.")
     added = db.execute(
-        select(Lead.import_row, Lead.name, Lead.phone, Lead.email, Lead.city, Lead.position_applied, Lead.campaign_name, Candidate.ref)
+        select(Lead.import_row, Lead.name, Lead.phone, Lead.email, Lead.city, Lead.position_applied, Lead.campaign_name, func.coalesce(Candidate.care_id, Candidate.ref))
         .outerjoin(Candidate, Candidate.id == Lead.matched_candidate_id).where(Lead.batch_id == batch.id).order_by(Lead.import_row)).all()
     # stored leads the ignored rows matched (one statement)
     ids = sorted({d["existingLeadId"] for d in duplicates if d.get("existingLeadId")})
     stored = {}
     if ids:
         for lead_id, name, phone, created, ref in db.execute(
-                select(Lead.id, Lead.name, Lead.phone, Lead.created_at, Candidate.ref).outerjoin(Candidate, Candidate.id == Lead.matched_candidate_id)
+                select(Lead.id, Lead.name, Lead.phone, Lead.created_at, func.coalesce(Candidate.care_id, Candidate.ref)).outerjoin(Candidate, Candidate.id == Lead.matched_candidate_id)
                 .where(Lead.id.in_(ids))).all():
             stored[lead_id] = (name, phone, created, ref)
     rows: dict[int, dict] = {}

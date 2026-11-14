@@ -399,12 +399,12 @@ def test_an_unmatched_candidates_row_falls_back_on_the_form_preferences_and_says
 def test_a_matched_candidate_keeps_the_orders_values_whatever_the_form_prefers(desk):
     mapped_candidates(desk, 1)
     with desk.sessions() as db:
-        db.execute(text("UPDATE crm_candidates SET country_preference = 'Oman', designations = '[\"Mason\"]'::jsonb, care_id = 'CI-26-27-001' WHERE id = 'c0'"))
+        db.execute(text("UPDATE crm_candidates SET country_preference = 'Oman', designations = '[\"Mason\"]'::jsonb, care_id = 'CI-001' WHERE id = 'c0'"))
         db.commit()
     row = listing(desk, "asha")["items"][0]
     assert (row["kind"], row["client"], row["country"], row["position"]) == ("stage", "Gulf Builders", "Qatar", "Welder")
     assert (row["countrySource"], row["countryIsPreferred"], row["positionSource"], row["positionIsPreferred"], row["locationHint"]) == ("order", False, "order", False, None)
-    assert (row["candidateCareId"], row["candidateRef"]) == ("CI-26-27-001", "CND-000")  # Care India ID primary, CRM reference second
+    assert (row["candidateCareId"], row["candidateRef"]) == ("CI-001", "CND-000")  # Care India ID primary, CRM reference second
 
 
 def test_a_row_cap_only_trims_the_rows_the_counts_stay_exact(desk, monkeypatch):

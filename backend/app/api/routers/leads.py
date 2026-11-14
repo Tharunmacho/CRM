@@ -44,10 +44,19 @@ def lead_filters(q: str = Query(default="", max_length=500), status: list[str] =
 
 @router.post("/import")
 def import_leads(file: UploadFile = File(...), dry_run: bool = Form(False), mapping: str | None = Form(None), assign_to: str | None = Form(None),
+                 assignee_ids: str | None = Form(None),
                  campaign_label: str | None = Form(None), fill_empty: bool = Form(False), source: Literal["meta_ads", "other"] = Form("meta_ads"),
                  db: Session = Depends(get_db), user: User = Depends(supervisors)):
-    if (assign_to or "").strip() and user.role != Role.admin:
+    if ((assign_to or "").strip() or (assignee_ids or "").strip()) and user.role != Role.admin:
         raise fail(403, "forbidden_role", "Only the admin can assign leads. Upload without choosing a person.")
+    recruiters = None
+    if (assignee_ids or "").strip():
+        try:
+            recruiters = json.loads(assignee_ids)
+            if not isinstance(recruiters, list) or not all(isinstance(i, str) for i in recruiters):
+                raise ValueError()
+        except ValueError:
+            raise fail(422, "invalid_request", 'assignee_ids must be a JSON list of recruiter ids like ["id1", "id2"].') from None
     data = file.file.read(lead_parsing.MAX_UPLOAD + 1)
     if len(data) > lead_parsing.MAX_UPLOAD:
         raise fail(413, "file_too_large", "Lead sheets must be under 25 MB. Split the file and upload the parts.")
@@ -62,7 +71,7 @@ def import_leads(file: UploadFile = File(...), dry_run: bool = Form(False), mapp
     try:
         result = lead_import.run_import(db, user, data, (file.filename or "leads").rsplit("/", 1)[-1].rsplit("\\", 1)[-1], dry_run=dry_run,
                                         mapping=override, assign_to=(assign_to or "").strip() or None, campaign_label=campaign_label,
-                                        fill_empty=fill_empty, source=source)
+                                        fill_empty=fill_empty, source=source, assignee_ids=recruiters)
     except lead_import.ImportError_ as exc:
         db.rollback()
         raise fail(exc.status, exc.code, exc.message) from None
@@ -234,13 +243,14 @@ class AssignBody(Wire):
     model_config = ConfigDict(alias_generator=Wire.model_config["alias_generator"], populate_by_name=True, extra="forbid")
     ids: list[str] | None = Field(default=None, max_length=20000)
     filter: dict | None = None
-    owner_id: str = Field(min_length=1, max_length=36)
+    owner_id: str | None = Field(default=None, min_length=1, max_length=36)
+    assignee_ids: list[str] | None = Field(default=None, max_length=100)  # the recruiters who share the leads equally
     only_unassigned: bool = False
 
 
 @router.post("/assign")
 def assign(body: AssignBody, db: Session = Depends(get_db), user: User = Depends(admin_only)):
-    result = lead_sheet.assign_leads(db, user, body.ids, body.filter, body.owner_id, body.only_unassigned)
+    result = lead_sheet.assign_leads(db, user, body.ids, body.filter, body.owner_id, body.only_unassigned, body.assignee_ids)
     db.commit()
     return result
 

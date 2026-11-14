@@ -127,7 +127,7 @@ def _read_all(db, start, end, first, last, now, staff_id):
     last_move = (select(AS.application_id, func.max(AS.completed_at).label("last_at"))
                  .where(_clean_stage()).group_by(AS.application_id).subquery("last_move"))
     since = func.coalesce(last_move.c.last_at, A.created_at)
-    stuck_base = (select(A.id.label("application_id"), A.candidate_id, C.name, C.ref, owner.label("owner"),
+    stuck_base = (select(A.id.label("application_id"), A.candidate_id, C.name, C.ref, C.care_id, owner.label("owner"),
                          A.current_stage, since.label("since"))
                   .join(C, C.id == A.candidate_id).outerjoin(last_move, last_move.c.application_id == A.id)
                   .where(A.status == m.ApplicationStatus.active, since < stuck_before))
@@ -153,7 +153,7 @@ def _read_all(db, start, end, first, last, now, staff_id):
 
     def moves(session):
         query = (select(AS.application_id, AS.stage, AS.attempt, AS.outcome, AS.owner_id, AS.completed_by,
-                        AS.completed_at, A.candidate_id, C.name, C.ref, C.owner_id.label("candidate_owner"))
+                        AS.completed_at, A.candidate_id, C.name, C.ref, C.care_id, C.owner_id.label("candidate_owner"))
                  .join(A, A.id == AS.application_id).join(C, C.id == A.candidate_id)
                  .where(AS.completed_at >= start, AS.completed_at < end, _clean_stage()))
         if staff_id:
@@ -224,7 +224,7 @@ def _candidate_rows(db, staff_id, start, end, now):
     owner = _candidate_owner()
     total = db.scalar(select(func.count()).select_from(A).join(C, C.id == A.candidate_id).where(owner == staff_id)) or 0
     apps = db.execute(
-        select(A.id, A.candidate_id, C.name, C.ref, A.status, A.closure_reason, A.current_stage, A.created_at, A.updated_at,
+        select(A.id, A.candidate_id, C.name, C.ref, C.care_id, A.status, A.closure_reason, A.current_stage, A.created_at, A.updated_at,
                O.ref.label("order_ref"), m.Designation.title.label("designation"), m.Client.name.label("client"))
         .join(C, C.id == A.candidate_id).join(O, O.id == A.order_id)
         .join(m.Designation, m.Designation.id == O.designation_id)
@@ -244,7 +244,7 @@ def _candidate_rows(db, staff_id, start, end, now):
         since = last_at or row.created_at
         status = getattr(row.status, "value", row.status)
         out.append({
-            "applicationId": row.id, "candidateId": row.candidate_id, "candidate": row.name, "ref": row.ref,
+            "applicationId": row.id, "candidateId": row.candidate_id, "candidate": row.name, "ref": row.ref, "careId": row.care_id,
             "order": row.order_ref, "designation": row.designation, "client": row.client,
             "status": status, "closureReason": getattr(row.closure_reason, "value", row.closure_reason),
             "stage": row.current_stage, "stageLabel": STAGE_LABELS[row.current_stage - 1],
@@ -318,7 +318,7 @@ def build_report(db, from_date: date | None, to_date: date | None, zone: str, *,
     stuck_names = defaultdict(list)
     for row in data["stuck_list"]:
         if len(stuck_names[row.owner]) < 5:
-            stuck_names[row.owner].append({"candidateId": row.candidate_id, "candidate": row.name, "ref": row.ref,
+            stuck_names[row.owner].append({"candidateId": row.candidate_id, "candidate": row.name, "ref": row.ref, "careId": row.care_id,
                                            "stage": row.current_stage, "stageLabel": STAGE_LABELS[row.current_stage - 1],
                                            "days": (now - row.since).days})
     event_counts = defaultdict(lambda: defaultdict(int))
@@ -388,7 +388,7 @@ def build_report(db, from_date: date | None, to_date: date | None, zone: str, *,
         "summary": summary, "staff": staff_rows, "funnel": funnel, "highlights": highlights, "notes": notes,
         **({"candidates": candidate_block,
             "moves": [{"at": r.completed_at, "stage": r.stage, "stageLabel": STAGE_LABELS[r.stage - 1], "outcome": r.outcome,
-                       "candidateId": r.candidate_id, "candidate": r.name, "ref": r.ref}
+                       "candidateId": r.candidate_id, "candidate": r.name, "ref": r.ref, "careId": r.care_id}
                       for r in data["moves"][:300]]} if candidate_block is not None else {}),
     }
 

@@ -1,17 +1,19 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CheckCircle2, ListChecks, RefreshCw, TriangleAlert, Users } from 'lucide-react'
+import { CheckCircle2, Layers, ListChecks, RefreshCw, TriangleAlert, UserX, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader } from '@/shared/ui/display'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
-import { splitItems, summaryLine } from '@/features/daily-work/daily-work-model'
-import { useDailyWork } from '@/features/daily-work/use-daily-work'
+import { listTitle, splitItems, statusCounts, summaryLine, teamTotals } from '@/features/daily-work/daily-work-model'
+import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
 import { DailyTable, type DailyGroup } from './daily-table'
 import { StaffBoard } from './daily-staff-board'
-import { TasksTabs } from './tasks-tabs'
+import { StatStrip, type StatTileData } from './daily-stat-strip'
+import { TasksTabs, useOpenBucket } from './tasks-tabs'
 import '@/styles/daily-work.css'
+import '@/styles/daily-work-board.css'
 
 /**
  * The recruiter's own candidates that are still being worked, as one flat list: no daily quota, no morning/evening, no hourly
@@ -25,6 +27,10 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const supervisor = store.can('all_reports')
   const staffFilter = supervisor ? params.get('staff') || 'all' : undefined
   const { data, error, loading, refresh } = useDailyWork({ staff: staffFilter })
+  // The follow-up total for the summary strip: the whole team's, whichever recruiter the list below is showing (same request the tab counts make).
+  const followUp = useFollowUp({ staff: 'all', enabled: supervisor })
+  const openBucket = useOpenBucket()
+  const [idleOnly, setIdleOnly] = useState(false)
   const [openApp, setOpenApp] = useState<{ id: string; stage?: number } | null>(null)
   const zone = store.agencyTimezone
 
@@ -53,11 +59,23 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
 
   const summary = data.summary
   const mine = !supervisor
-  const person = supervisor && staffFilter && staffFilter !== 'all' ? store.user(staffFilter)?.name ?? 'Recruiter' : ''
-  const title = mine ? "Today's candidates" : person ? `${person}'s candidates today` : "Everyone's candidates today"
+  const roster = data.staff ?? []
+  const person = supervisor && staffFilter && staffFilter !== 'all' ? roster.find((s) => s.userId === staffFilter)?.name ?? store.user(staffFilter)?.name ?? 'Recruiter' : ''
+  const title = mine ? "Today's candidates" : listTitle(person)
+  // The strip is always the whole team (the per-recruiter list covers everyone), so picking a recruiter below never changes it.
+  const team = teamTotals(roster)
+  const counts = statusCounts(roster)
+  const tiles: StatTileData[] = [
+    { key: 'to-work', label: 'Candidates to work today', value: team.toWork, icon: ListChecks, detail: `Across ${roster.length} ${roster.length === 1 ? 'recruiter' : 'recruiters'}` },
+    { key: 'done', label: 'Done today', value: team.doneToday, unit: `of ${team.total}`, icon: CheckCircle2, tone: 'green', progress: { done: team.doneToday, total: team.total } },
+    { key: 'follow-up', label: 'Follow-up candidates', value: followUp.data?.summary.total ?? '–', icon: Layers, detail: 'Selected and still moving', actionLabel: 'Open Follow-up', onSelect: () => openBucket('follow-up') },
+    { key: 'idle', label: 'Nothing done yet', value: counts.idle, unit: counts.idle === 1 ? 'recruiter' : 'recruiters', icon: UserX, tone: counts.idle > 0 ? 'red' : 'green',
+      detail: counts.idle > 0 ? (idleOnly ? 'Showing them above' : 'Select to see who') : 'Everyone has started',
+      ...(counts.idle > 0 ? { onSelect: () => { setIdleOnly((v) => !v); document.getElementById('recruiters')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, active: idleOnly, actionLabel: 'Show only these recruiters' } : {}) },
+  ]
 
   return (
-    <div className="tk dw">
+    <div className="tk dw dwb">
       <PageHeader
         title="Tasks"
         description={mine
@@ -77,7 +95,8 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         {error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({error}). Showing the last version.</p>}
       </div>
 
-      {supervisor && <StaffBoard staff={data.staff ?? []} selected={staffFilter ?? 'all'} onSelect={setStaff} />}
+      {supervisor && <StatStrip tiles={tiles} label="Today at a glance, whole team" />}
+      {supervisor && <StaffBoard staff={roster} selected={staffFilter ?? 'all'} onSelect={setStaff} idleOnly={idleOnly} onClearIdle={() => setIdleOnly(false)} />}
 
       <section className="dw-panel" aria-label="Today's candidates">
         <div className="dw-panel-head">
@@ -90,10 +109,12 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         </div>
 
         {data.items.length === 0 ? (
-          <EmptyState title={mine ? 'No candidates to work' : 'No candidates for this selection'}
+          <EmptyState title={mine ? 'No candidates to work' : person ? `${person} has no candidates today` : 'No candidates to work today'}
             description={mine
               ? 'Candidates assigned to you appear here until prescreening is finished. Nothing needs prescreening right now.'
-              : 'Candidates appear here once they are assigned to a recruiter and still need prescreening.'} />
+              : person ? 'Nothing is assigned to this recruiter that still needs prescreening. Pick another recruiter, or show everyone.'
+                : 'Candidates appear here once they are assigned to a recruiter and still need prescreening.'}
+            action={person ? <Button onClick={() => setStaff('all')}>Show all recruiters</Button> : undefined} />
         ) : (
           <DailyTable groups={groups} zone={zone} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
             canWork={(item) => !!item.taskId && (store.can('work_any_candidate') || item.ownerId === store.me.id)}

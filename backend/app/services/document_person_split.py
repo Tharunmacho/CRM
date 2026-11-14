@@ -657,7 +657,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 raise HTTPException(422, f"{group.label}: {unreadable}")
         refusal = candidate_work_refusal(db, target, user) if target else None
         if target and decisions.get(group.id) != target.id:
-            duplicates.append({"groupId": group.id, "label": group.label, "candidateId": target.id, "name": target.name, "ref": target.ref,
+            duplicates.append({"groupId": group.id, "label": group.label, "candidateId": target.id, "name": target.name, "ref": target.ref, "careId": target.care_id,
                                "phone": target.phone, "matchedOn": matches[0][1], "canMerge": refusal is None,
                                "ownerName": db.scalar(select(User.name).where(User.id == target.owner_id)) if target.owner_id else None,
                                **({"refusal": refusal} if refusal else {})})

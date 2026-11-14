@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Loader2, Undo2 } from 'lucide-react'
 import { Dialog } from '@/shared/ui/overlay'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import { Button, Field, Textarea } from '@/shared/ui/primitives'
 import { checkLeadUnconversion, unconvertLead, type UnconvertCheck, type UnconvertResponse } from '../lead-api'
 import { leadStatus, type Lead } from '../lead-model'
@@ -60,7 +61,7 @@ export function UnconvertDialog({ lead, onClose, onSaved }: {
         {loading && <p className="ld-hint" role="status">Checking the linked candidate and saved work…</p>}
         {check?.allowed && candidate && <>
           <div className="ld-confirm-lines" role="group" aria-label="What will happen">
-            <p><b>{candidate.name}</b> <span className="ident">{candidate.ref}</span> will be removed from the Data Bank.</p>
+            <p><b>{candidate.name}</b> <span className="ident">{primaryId(candidate)}</span> will be removed from the Data Bank.</p>
             <p>The lead, its files and its history will remain. Its status will return to <b>{leadStatus(check.restoredStatus).label}</b>.</p>
             <p>Use this to correct a conversion made by mistake.</p>
           </div>

@@ -44,9 +44,12 @@ export interface Lead {
   notes?: string | null
   candidateId?: string | null
   candidateRef?: string | null
+  /** The Data Bank ID of the linked candidate: the one ID screens show; the reference above is only the fallback for a row without one. */
+  candidateCareId?: string | null
   /** A Data Bank candidate with the same phone or email, found at import; not yet linked. */
   matchedCandidateId?: string | null
   matchedCandidateRef?: string | null
+  matchedCandidateCareId?: string | null
   matchedCandidateName?: string | null
   hasResume?: boolean
   resumeReceivedAt?: string | null
@@ -153,7 +156,7 @@ export type LeadTone = 'ok' | 'warn' | 'bad' | 'info' | 'quiet'
 
 /** The statuses a lead moves through, in the order a recruiter works them (the server's list). `tone` colours the bold status word. */
 export const LEAD_STATUSES: { value: string; label: string; tone: LeadTone }[] = [
-  { value: 'new', label: 'New', tone: 'info' },
+  { value: 'new', label: 'Not contacted', tone: 'info' },
   { value: 'contacted', label: 'Contacted', tone: 'info' },
   { value: 'interested', label: 'Interested', tone: 'ok' },
   { value: 'resume_requested', label: 'Resume requested', tone: 'warn' },
@@ -172,7 +175,7 @@ const humanize = (value: string) => { const text = value.replace(/_/g, ' ').trim
 /** Label and tone of a stored status; an unknown one reads as plain text rather than breaking the row. */
 export function leadStatus(value?: string | null): { value: string; label: string; tone: LeadTone } {
   const key = (value ?? '').trim()
-  return LEAD_STATUSES.find((status) => status.value === key) ?? { value: key, label: key ? humanize(key) : 'New', tone: 'quiet' }
+  return LEAD_STATUSES.find((status) => status.value === key) ?? { value: key, label: key ? humanize(key) : 'Not contacted', tone: 'quiet' }
 }
 
 /** Call outcomes the "Add remarks" form offers (the server's list) and what each one does to the status. */
@@ -287,7 +290,7 @@ export function activePreset(filters: Pick<LeadFilters, 'from' | 'to'>, now: Dat
 }
 
 /** What the "uploaded in 24 hrs" card is called, and what it counts. */
-export const NEW_CARD_LABEL = 'Uploaded in 24 hrs'
+export const NEW_CARD_LABEL = 'Uploaded today'
 export const NEW_CARD_DETAIL = 'Uploaded in the last 24 hours'
 
 /** Query string for GET /leads (and the export): only the filters that are set, so equal views give equal strings. */
@@ -724,8 +727,11 @@ export interface ImportResponse {
   invalid: InvalidRow[]
   invalidTruncated?: boolean
   sample?: (Partial<Lead> & { outcome?: 'new' | 'duplicate' | 'invalid' })[]
+  /** A recruiter's id, 'auto', or 'multiple' when the leads were shared between several recruiters. */
   assignedTo?: string | null
   assignedCount?: number
+  /** Who got how many of the new leads. */
+  assignedOwners?: { id: string; name: string; count: number }[]
 }
 
 export const countsOf = (data: Pick<ImportResponse, 'rowsTotal' | 'rowsNew' | 'rowsDuplicate' | 'rowsInvalid' | 'rowsMatchedCandidates' | 'rowsUpdated'>): ImportCounts => ({
@@ -782,10 +788,11 @@ export const INVALID_REASON: Record<string, string> = {
 export const invalidReason = (row: Pick<InvalidRow, 'reason' | 'message'>): string => row.message || INVALID_REASON[row.reason] || row.reason
 
 /** What the importer sends with the file (form fields as the API expects them). */
-export function importFormFields(options: { dryRun: boolean; mapping?: Record<string, string | null>; assignTo?: string; label?: string }): Record<string, string> {
+export function importFormFields(options: { dryRun: boolean; mapping?: Record<string, string | null>; assignTo?: string; assigneeIds?: string[]; label?: string }): Record<string, string> {
   const fields: Record<string, string> = { dry_run: options.dryRun ? 'true' : 'false' }
   if (options.mapping && Object.keys(options.mapping).length) fields.mapping = JSON.stringify(options.mapping)
-  if (options.assignTo) fields.assign_to = options.assignTo
+  if (options.assigneeIds?.length) fields.assignee_ids = JSON.stringify([...new Set(options.assigneeIds)])  // shared equally between exactly these recruiters
+  else if (options.assignTo) fields.assign_to = options.assignTo
   if (options.label?.trim()) fields.campaign_label = options.label.trim()
   return fields
 }

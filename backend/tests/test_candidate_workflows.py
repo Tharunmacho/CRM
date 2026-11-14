@@ -71,7 +71,7 @@ def test_manual_assignment_snapshot_due_time_notifications_and_sequence(db):
     assert task.owner_id == 'a'
     assert candidate.ref.startswith('CND-')
     assert response.care_id == candidate.care_id
-    assert re.fullmatch(r'CI-\d{2}-\d{2}-001', candidate.care_id or '')
+    assert candidate.care_id == 'CI-001'
     # Only the new owner is told: the admin who made the candidate is not notified of their own action and gets no copy.
     assert set(db.scalars(select(m.Notification.user_id))) == {'a'}
 
@@ -167,7 +167,7 @@ def test_manual_creation_persists_phone_normalization_used_by_duplicate_lookup(d
     })
     assert first.status_code == 201, first.text
     assert first.json()['ref'].startswith('CND-')
-    assert re.fullmatch(r'CI-\d{2}-\d{2}-\d+', first.json()['careId'])
+    assert first.json()['careId'] == 'CI-001'
     candidate = db.get(m.Candidate, first.json()['id'])
     assert candidate.phone == '9000000001' and candidate.whatsapp == '9000000002'
     duplicate = make_client(db).post('/api/candidates', json={'name': 'Same number', 'phone': '9000000001'})

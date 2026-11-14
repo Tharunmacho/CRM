@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/travelled", tags=["travelled"])
 
 NOT_RECORDED = "Not recorded"   # the label for a placement with no agency (or no country) on file; it can be filtered on too
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-EXPORT_COLUMNS = ("Traveller ID", "Travel date", "Candidate", "Ref", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
+EXPORT_COLUMNS = ("Traveller ID", "Travel date", "Candidate", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
                   "PNR", "Recruiter", "Status", "Missing documents", "Passport")
 
 
@@ -120,7 +120,7 @@ class Filters:
         if self.q:
             needle = self.q.lower()
             if not any(needle in (row[key] or "").lower() for key in (
-                    "name", "ref", "travellerId", "passportNumber", "orderRef", "pnr", "client", "job", "agency", "country", "airline")):
+                    "name", "ref", "travellerId", "careId", "passportNumber", "orderRef", "pnr", "client", "job", "agency", "country", "airline")):
                 return False
         return True
 
@@ -264,7 +264,7 @@ def _cell(value):
 
 def export_table(rows: list[dict]) -> list[list]:
     return [list(EXPORT_COLUMNS)] + [[_cell(v) for v in (
-        r["travellerId"] or "", r["travelDate"] or "", r["name"], r["ref"], r["client"], r["country"] or "", r["job"], r["orderRef"], r["agency"] or "",
+        r["travellerId"] or "", r["travelDate"] or "", r["name"], r["client"], r["country"] or "", r["job"], r["orderRef"], r["agency"] or "",
         r["airline"] or "", r["pnr"] or "", r["recruiter"] or "", r["status"], ", ".join(r["documents"]["missing"]),
         r["passportNumber"] or "")] for r in rows]
 

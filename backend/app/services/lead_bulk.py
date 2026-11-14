@@ -138,8 +138,9 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
             raise fail(422, "invalid_request", f"status must be one of: {', '.join(LEAD_STATUSES)}.")
         if target_status == "converted":
             raise fail(422, "invalid_request", "Use Convert to turn a lead into a candidate.")
-    if action == "assign" and not owner_id:
-        raise fail(422, "invalid_request", "Choose who the leads go to (ownerId, or auto).")
+    assignees = body.get("assigneeIds")
+    if action == "assign" and ((owner_id and assignees is not None) or (not owner_id and assignees is None)):
+        raise fail(422, "invalid_request", "Choose who the leads go to: one recruiter, several recruiters (assigneeIds), or automatic.")
 
     if action == "export":
         return export_selected(db, user, body)
@@ -161,7 +162,7 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
     if action in ("status", "not_interested"):
         result = _change_status(db, user, rows, target_status, skipped)
     elif action == "assign":
-        result = _assign(db, user, rows, owner_id, body.get("onlyUnassigned", False), skipped)
+        result = _assign(db, user, rows, owner_id, body.get("onlyUnassigned", False), skipped, assignees)
     else:
         result = _delete(db, user, rows, skipped, bulk=True)
     result.update(action=action, requested=requested, skipped=sum(skipped.values()), skippedReasons=reasons_out(skipped))
@@ -204,9 +205,10 @@ def _labels_json() -> str:
 
 # ------------------------------------------------------------------ assign
 
-def _assign(db: Session, user: User, rows: list[tuple], owner_id: str, only_unassigned: bool, skipped: dict) -> dict:
-    """Assign, reassign or (ownerId "none") take the selected leads back from their recruiter."""
-    from app.services.lead_import import eligible_staff, open_lead_counts, spread_evenly
+def _assign(db: Session, user: User, rows: list[tuple], owner_id: str | None, only_unassigned: bool, skipped: dict,
+            recruiter_ids: list[str] | None = None) -> dict:
+    """Assign, reassign or (ownerId "none") take the selected leads back from their recruiter; `recruiter_ids` share them equally."""
+    from app.services.lead_import import RecruiterChoiceError, pick_owners
     unassign = owner_id in lead_sheet.UNASSIGN
     candidates: list[tuple[str, str | None]] = []
     for row in rows:
@@ -220,19 +222,11 @@ def _assign(db: Session, user: User, rows: list[tuple], owner_id: str, only_unas
             candidates.append((row[0], row[2]))
     if unassign:
         names, picks = {}, [None] * len(candidates)
-    elif owner_id == "auto":
-        staff = eligible_staff(db)
-        if not staff:
-            raise fail(422, "invalid_request", "No recruiter is available for automatic assignment.")
-        names = {u.id: u.name for u in staff}
-        picks = spread_evenly(staff, open_lead_counts(db, [u.id for u in staff]), len(candidates))
     else:
-        from app.api.routers.candidates import ensure_assignable
         try:
-            person = ensure_assignable(db, owner_id)
-        except HTTPException as exc:
-            raise fail(422, "invalid_request", str(exc.detail)) from None
-        names, picks = {person.id: person.name}, [person.id] * len(candidates)
+            names, picks = pick_owners(db, owner_id, recruiter_ids, len(candidates))
+        except RecruiterChoiceError as exc:
+            raise fail(422, "invalid_request", str(exc)) from None
     move: dict[str | None, list[str]] = {}
     for (lead_id, current), new_owner in zip(candidates, picks):
         if current == new_owner:

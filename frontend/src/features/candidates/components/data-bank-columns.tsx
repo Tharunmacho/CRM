@@ -22,7 +22,7 @@ import { bankApplication, bankFormApplication } from '@/features/candidates/data
 import { BANK_TABLE_COLUMNS, PLACEHOLDER_NAME, agentLabel, bankColumnWidth, candidateSubline, isPlaceholderName, sourceProvenance } from '@/features/candidates/data-bank-table'
 import '@/styles/data-bank-table.css'
 import '@/styles/candidate-ids.css'
-import { careIdOf, idLine, secondaryId, travellerLabel } from '@/features/candidates/candidate-ids'
+import { careIdOf, idLine } from '@/features/candidates/candidate-ids'
 
 export const SOURCE_LABEL: Record<string, string> = {
   email: 'Email',
@@ -209,17 +209,17 @@ interface CellProps {
 const plain = (text: string): ReactNode => text
 
 /**
- * Name in bold over the Care India ID (darker), then the CRM reference and date of birth in muted text. Before a candidate has
- * a Care India ID the reference leads, as it always did. A name the intake could not read shows muted and italic with a "Needs review" pill.
+ * Name in bold over the ONE ID the candidate has here, the Data Bank ID (darker), then the date of birth in muted text. The CRM
+ * reference (CND-...) is never shown while a Data Bank ID exists; a very old row without one shows the reference instead.
+ * A name the intake could not read shows muted and italic with a "Needs review" pill.
  */
 export function CandidateCell({ candidate, mark = plain }: CellProps) {
   const dob = dobParts(candidate.dob)
   const care = careIdOf(candidate)
-  const rest = candidateSubline(care ? secondaryId(candidate) : candidate.ref, dob?.label)
+  const rest = candidateSubline(care ? '' : candidate.ref, dob?.label)
   const unread = isPlaceholderName(candidate.name)
-  const traveller = travellerLabel(candidate)
   return (
-    <span className="dbt-stack" title={`${unread ? PLACEHOLDER_NAME : candidate.name}${dob ? ` · born ${dob.label} (${dob.age} years)` : ''} · ${idLine(candidate)}${traveller ? ` · ${traveller}` : ''}`}>
+    <span className="dbt-stack" title={`${unread ? PLACEHOLDER_NAME : candidate.name}${dob ? ` · born ${dob.label} (${dob.age} years)` : ''} · ${idLine(candidate)}`}>
       <span className="dbt-line">
         {unread
           ? <em className="dbt-main is-unread">Name missing or unreadable</em>

@@ -75,10 +75,10 @@ test('the table has the agreed sheet columns and no Deadline column; the Recruit
   assert.doesNotMatch(table, /Referral|'S\.No'/)
   assert.match(table, /key: 'staff', title: 'Recruiter', width: \d+, supervisor: true/)
   assert.doesNotMatch(table, /Deadline|countdown|overdue|Postponed|sessionLabel|slotNo|dueAt/i)
-  // The Care India ID leads, the CND reference follows muted (the same helpers as the rest of the app).
-  assert.match(table, /careIdOf, secondaryId/)
+  // ONE ID per candidate: the Data Bank ID (the shared helper); the CND reference is not rendered next to it.
+  assert.match(table, /import \{ primaryId \} from/)
   assert.match(table, /cid-main/)
-  assert.match(table, /cid-ref/)
+  assert.doesNotMatch(table, /secondaryId|cid-ref/)
   // Open goes to the application form, the row menu keeps both entries, remarks stay.
   const screen = await code('../src/screens/tasks/daily-work.tsx')
   assert.match(screen, /navigate\(applicationFormHref\(item\.candidateId\)\)/)
@@ -95,11 +95,48 @@ test('the screen has no morning/evening, postponed, quota, goals or hourly check
     assert.doesNotMatch(text, /All staff|Filter by staff/)
   }
   assert.match(screen, /Today's candidates/)
-  assert.match(screen, /Everyone's candidates/)
+  assert.match(screen, /listTitle\(person\)/)
   assert.match(screen, /All recruiters/)
   assert.match(screen, /Done today/)
   assert.match(screen, /summaryLine\(summary\)/)
-  assert.match(board, /staffSummaryLine/)
+  assert.match(board, /staffByAttention/)
+  assert.match(board, /recruiterStatus/)
+})
+
+test('the status chip rule: no candidates, all done, idle (nothing done), behind (under a third done), on track', () => {
+  const s = (toWork, doneToday) => m.recruiterStatus({ toWork, doneToday })
+  assert.equal(s(0, 0), 'none')
+  assert.equal(s(0, 8), 'on-track') // everything on the list is done
+  assert.equal(s(31, 0), 'idle') // something to work, nothing done
+  assert.equal(s(24, 3), 'behind') // 3 of 27 = 11%
+  assert.equal(s(20, 9), 'behind') // 9 of 29 = 31%
+  assert.equal(s(20, 10), 'on-track') // exactly a third (10 of 30) is on track
+  assert.equal(s(6, 6), 'on-track')
+  assert.deepEqual(['idle', 'behind', 'on-track', 'none'].map((k) => m.STATUS_LABEL[k]), ['Idle', 'Behind', 'On track', 'No candidates'])
+  assert.equal(m.donePercent({ toWork: 17, doneToday: 10 }), 37)
+  assert.equal(m.donePercent({ toWork: 0, doneToday: 0 }), 0)
+})
+
+test('recruiters who need attention come first: idle, behind, on track, then no candidates; the biggest backlog first inside a status', () => {
+  const row = (name, toWork, doneToday) => ({ userId: name, name, active: true, summary: { total: toWork + doneToday, toWork, doneToday } })
+  const staff = [row('Rohit', 0, 0), row('Divya', 0, 8), row('Gayathri', 17, 10), row('Priya', 12, 0), row('Arjun', 24, 3), row('Sana', 31, 0), row('Anil', 12, 0)]
+  assert.deepEqual(m.staffByAttention(staff).map((x) => x.name), ['Sana', 'Anil', 'Priya', 'Arjun', 'Gayathri', 'Divya', 'Rohit'])
+  assert.deepEqual(m.staffByAttention([]), [])
+  assert.deepEqual(m.statusCounts(staff), { idle: 3, behind: 1, 'on-track': 2, none: 1 })
+  assert.deepEqual(m.teamTotals(staff), { total: 117, toWork: 96, doneToday: 21 })
+  // sorting never mutates the server's list
+  assert.equal(staff[0].name, 'Rohit')
+})
+
+test('list titles name the first name of the picked recruiter, else everyone', () => {
+  assert.equal(m.listTitle(''), "Everyone's candidates")
+  assert.equal(m.listTitle('Gayathri Nair'), "Gayathri's candidates")
+  assert.equal(m.listTitle('Gayathri Nair', 'follow-up candidates'), "Gayathri's follow-up candidates")
+  assert.deepEqual(m.followUpByCount([
+    { userId: 'a', name: 'Asha', active: true, summary: { total: 0 } },
+    { userId: 'b', name: 'Bala', active: true, summary: { total: 6 } },
+    { userId: 'c', name: 'Chitra', active: true, summary: { total: 6 } },
+  ]).map((x) => x.name), ['Bala', 'Chitra', 'Asha'])
 })
 
 test('the "complete your tasks first" banner is gone from every page', async () => {

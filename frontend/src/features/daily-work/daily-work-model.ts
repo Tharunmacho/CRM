@@ -32,9 +32,9 @@ export interface DailyItem {
   /** Current city/address, sent only when no country is known, so the screen can still recognise one in it. */
   locationHint: string | null
   candidate: string
-  /** The CRM reference (CND-01092): shown second and muted next to the Care India ID. */
+  /** The CRM reference (CND-01092): never shown while a Data Bank ID exists; only the fallback for a row without one. */
   candidateRef: string
-  /** The Care India ID (CI-26-27-001): the primary identifier; null on an older record. */
+  /** The Data Bank ID (CI-078): the one ID shown; null on an older record. */
   candidateCareId: string | null
   /** The order's position, else the candidate's first preferred job, else their first skill. */
   position: string | null
@@ -161,6 +161,76 @@ export function staffSummaryLine(summary: DailySummary): string {
 /** Who has the most left to work first (then the most done today, then by name); recruiters with no candidates last. */
 export function staffByWorkLeft(staff: DailyStaffSummary[]): DailyStaffSummary[] {
   return [...staff].sort((a, b) => b.summary.toWork - a.summary.toWork || b.summary.doneToday - a.summary.doneToday || a.name.localeCompare(b.name))
+}
+
+// ------------------------------------------------------------------------------------------------ recruiter board
+
+export type RecruiterStatus = 'idle' | 'behind' | 'on-track' | 'none'
+
+/** A recruiter counts as On track once at least this share of today's list (done + to work) is done. */
+export const ON_TRACK_SHARE = 1 / 3
+
+/**
+ * The status chip on a recruiter's card. There is no quota, deadline or time of day in the product, so the rule only reads the two
+ * numbers the API sends (to work, done today), in this order:
+ *   1. No candidates at all (to work 0, done 0)                 -> "No candidates"
+ *   2. Nothing left to work (everything on the list is done)   -> "On track"
+ *   3. Something to work and nothing done today               -> "Idle"
+ *   4. Done share (done / (done + to work)) below one third    -> "Behind"
+ *   5. Done share of one third or more                          -> "On track"
+ * Early in the day most recruiters are therefore Idle; that is the honest answer to "has this person started yet?".
+ */
+export function recruiterStatus(summary: Pick<DailySummary, 'toWork' | 'doneToday'>): RecruiterStatus {
+  const { toWork, doneToday } = summary
+  if (toWork + doneToday === 0) return 'none'
+  if (toWork === 0) return 'on-track'
+  if (doneToday === 0) return 'idle'
+  return doneToday / (toWork + doneToday) < ON_TRACK_SHARE ? 'behind' : 'on-track'
+}
+
+export const STATUS_LABEL: Record<RecruiterStatus, string> = { idle: 'Idle', behind: 'Behind', 'on-track': 'On track', none: 'No candidates' }
+
+/** Done today as a whole percent of today's list (done + to work); 0 for an empty list. */
+export function donePercent(summary: Pick<DailySummary, 'toWork' | 'doneToday'>): number {
+  const total = summary.toWork + summary.doneToday
+  return total === 0 ? 0 : Math.round((summary.doneToday / total) * 100)
+}
+
+const ATTENTION_RANK: Record<RecruiterStatus, number> = { idle: 0, behind: 1, 'on-track': 2, none: 3 }
+
+/**
+ * Who needs attention first: Idle, then Behind, then On track, then recruiters with no candidates. Inside a status the one with the
+ * most still to work comes first (then the lowest done share, then by name), so the biggest backlog is on top.
+ */
+export function staffByAttention(staff: DailyStaffSummary[]): DailyStaffSummary[] {
+  const rank = (s: DailyStaffSummary) => ATTENTION_RANK[recruiterStatus(s.summary)]
+  return [...staff].sort((a, b) => rank(a) - rank(b) || b.summary.toWork - a.summary.toWork
+    || donePercent(a.summary) - donePercent(b.summary) || a.name.localeCompare(b.name))
+}
+
+/** The team's numbers added up from the per-recruiter list (it always covers everyone, whatever recruiter the list below is filtered to). */
+export function teamTotals(staff: DailyStaffSummary[]): DailySummary {
+  const toWork = staff.reduce((sum, s) => sum + s.summary.toWork, 0)
+  const doneToday = staff.reduce((sum, s) => sum + s.summary.doneToday, 0)
+  return { total: toWork + doneToday, toWork, doneToday }
+}
+
+/** How many recruiters are in each status. */
+export function statusCounts(staff: DailyStaffSummary[]): Record<RecruiterStatus, number> {
+  const counts: Record<RecruiterStatus, number> = { idle: 0, behind: 0, 'on-track': 0, none: 0 }
+  for (const s of staff) counts[recruiterStatus(s.summary)] += 1
+  return counts
+}
+
+/** The list's title for the current filter: "Everyone's candidates" / "Gayathri's candidates" (the first name only reads best). */
+export function listTitle(person: string, noun = 'candidates'): string {
+  const first = person.trim().split(/\s+/)[0]
+  return first ? `${first}'s ${noun}` : `Everyone's ${noun}`
+}
+
+/** Follow-up board: the recruiter with the most candidates first (then by name); recruiters with none last. */
+export function followUpByCount(staff: { userId: string; name: string; active: boolean; summary: { total: number } }[]) {
+  return [...staff].sort((a, b) => b.summary.total - a.summary.total || a.name.localeCompare(b.name))
 }
 
 export interface DailyGroupSet { toWork: DailyItem[]; done: DailyItem[] }

@@ -208,7 +208,7 @@ def finance_summary(db, user, *, search="", status="all", limit=50, offset=0):
     name = func.coalesce(Candidate.name, CandidateInvoice.snapshot["recipient"]["name"].astext, "Deleted candidate")
     ref = func.coalesce(Candidate.ref, CandidateInvoice.snapshot["recipient"]["ref"].astext, "")
     query = select(CandidateInvoice.id.label("invoiceId"), CandidateInvoice.candidate_id.label("candidateId"),
-        CandidateInvoice.application_id.label("applicationId"), name.label("name"), ref.label("ref"),
+        CandidateInvoice.application_id.label("applicationId"), name.label("name"), ref.label("ref"), Candidate.care_id.label("careId"),
         CandidateInvoice.number.label("invoiceNo"), CandidateInvoice.status.label("status"),
         payment_status.label("paymentStatus"), fee.label("fee"), (central + state_tax).label("gst"), gross.label("total"),
         case((issued, gross), else_=0).label("totalInvoiced"), received.label("received"), balance.label("balance"), credit.label("credit"),
@@ -218,7 +218,7 @@ def finance_summary(db, user, *, search="", status="all", limit=50, offset=0):
     search = search.strip()
     if search:
         escaped = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        query = query.where(or_(name.ilike(escaped, escape="\\"), ref.ilike(escaped, escape="\\"),
+        query = query.where(or_(name.ilike(escaped, escape="\\"), ref.ilike(escaped, escape="\\"), Candidate.care_id.ilike(escaped, escape="\\"),
                                CandidateInvoice.number.ilike(escaped, escape="\\")))
     if status != "all":
         query = query.where(payment_status == status)

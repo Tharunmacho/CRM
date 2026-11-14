@@ -2,7 +2,7 @@
 
 Every notice goes to the one person who has to act on it and says what happened, to what, and who did it:
 
-  * the NEW owner:      "Administrator assigned you SUBRAMANIAN (CI-26-27-045 · CND-0012). Reason: ..."
+  * the NEW owner:      "Administrator assigned you SUBRAMANIAN (CI-045). Reason: ..."
   * the PREVIOUS owner: "SUBRAMANIAN (...) was moved from you to Gayathri by Administrator."
   * nobody else. The person who made the change is never notified of their own action, and administrators do not
     get a copy of routine assignments (they only hear about things an admin must do: a candidate nobody could take,
@@ -23,9 +23,10 @@ NAMES_SHOWN = 3
 
 
 def candidate_label(name, care_id=None, ref=None) -> str:
-    """'NAME (CI-26-27-045 · CND-0012)', with whichever of the two identifiers is known."""
-    parts = [part for part in (care_id, ref) if part]
-    return f"{name} ({' · '.join(parts)})" if parts else str(name)
+    """'NAME (CI-045)': people see only the Care India ID. The CND reference is shown only as a last resort, for a
+    candidate that somehow has no Care India ID, so the label never loses its identifier."""
+    shown = care_id or ref
+    return f"{name} ({shown})" if shown else str(name)
 
 
 def typed_reason(reason) -> str | None:

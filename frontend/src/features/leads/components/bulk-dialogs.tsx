@@ -4,11 +4,18 @@ import type { User } from '@/shared/model/types'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { bulkErrorMessage } from '../lead-bulk-api'
-import { UNASSIGNED, confirmCopy, deleteOneCopy, typedConfirmOk, type BulkAction, type BulkOptions } from '../lead-bulk-model'
+import { UNASSIGNED, assignChoice, confirmCopy, deleteOneCopy, typedConfirmOk, type BulkAction, type BulkOptions } from '../lead-bulk-model'
 import { SETTABLE_STATUSES, leadStatus, type Lead } from '../lead-model'
+import { RecruiterPicker } from './recruiter-picker'
 import '@/styles/lead-bulk.css'
 
 type Written = Exclude<BulkAction, 'export'>
+
+/** The BulkOptions for the recruiters ticked (see lead-bulk-model assignChoice). */
+const assignChoiceOptions = (ids: string[]): Pick<BulkOptions, 'ownerId' | 'assigneeIds'> => {
+  const choice = assignChoice(ids)
+  return 'assigneeIds' in choice ? { assigneeIds: choice.assigneeIds } : { ownerId: choice.ownerId }
+}
 
 /**
  * The one dialog before any bulk write: it states the exact number of leads and the action, asks for the missing choice
@@ -22,24 +29,25 @@ export function BulkDialog({ action, count, allMatching, users, onClose, onConfi
   onClose: () => void
   onConfirm: (options: BulkOptions) => Promise<void>
 }) {
-  const [owner, setOwner] = useState('auto')
+  const [chosen, setChosen] = useState<string[]>([])  // recruiters ticked; none = spread evenly between everyone available
+  const [nobody, setNobody] = useState(false)          // "Nobody: make unassigned"
   const [status, setStatus] = useState('contacted')
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => { if (action) { setOwner('auto'); setStatus('contacted'); setTyped(''); setError(''); setBusy(false) } }, [action])
+  useEffect(() => { if (action) { setChosen([]); setNobody(false); setStatus('contacted'); setTyped(''); setError(''); setBusy(false) } }, [action])
   if (!action) return null
-  const staff = users.filter((user) => user.active && user.role === 'staff')
+  const names = chosen.map((id) => users.find((user) => user.id === id)?.name).filter((name): name is string => Boolean(name))
   const copy = confirmCopy({
     action, count, allMatching,
-    ownerName: owner === 'auto' || owner === UNASSIGNED ? owner : users.find((user) => user.id === owner)?.name,
+    ownerName: nobody ? UNASSIGNED : names.length ? names[0] : 'auto', recruiterNames: nobody ? undefined : names,
     statusLabel: leadStatus(status).label,
   })
   const ready = !busy && count > 0 && (!copy.typed || typedConfirmOk(typed))
   const go = async () => {
     setBusy(true); setError('')
     try {
-      await onConfirm({ ownerId: action === 'assign' ? owner : undefined, status: action === 'status' ? status : undefined, confirm: copy.typed ? typed.trim() : undefined })
+      await onConfirm({ ...(action === 'assign' ? (nobody ? { ownerId: UNASSIGNED } : assignChoiceOptions(chosen)) : {}), status: action === 'status' ? status : undefined, confirm: copy.typed ? typed.trim() : undefined })
     } catch (e) { setError(bulkErrorMessage(e)); setBusy(false) }
   }
   return (
@@ -50,14 +58,8 @@ export function BulkDialog({ action, count, allMatching, users, onClose, onConfi
       </>}>
       <div className="ld-form">
         {action === 'assign' && (
-          <label className="ld-opt">
-            <span>Assign to</span>
-            <Select aria-label="Assign to" value={owner} onChange={(event) => setOwner(event.target.value)}>
-              <option value="auto">Distribute evenly between available recruiters</option>
-              {staff.map((user) => <option key={user.id} value={user.id} disabled={user.onLeave}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
-              <option value={UNASSIGNED}>Nobody: make unassigned</option>
-            </Select>
-          </label>
+          <RecruiterPicker users={users} selected={chosen} onChange={setChosen} total={count} disabled={busy} label="Assign to"
+            exclusive={{ label: 'Nobody: make unassigned', summary: 'The leads are taken back from their recruiters and nobody owns them.', active: nobody, onChange: setNobody }} />
         )}
         {action === 'status' && (
           <label className="ld-opt">

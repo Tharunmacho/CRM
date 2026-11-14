@@ -6,7 +6,7 @@ import { countryCode, flagSrc } from '@/shared/lib/country-flag'
 import { Button, Textarea } from '@/shared/ui/primitives'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
-import { careIdOf, secondaryId } from '@/features/candidates/candidate-ids'
+import { primaryId } from '@/features/candidates/candidate-ids'
 import {
   advanceLabel, clientCell, clockTime, countryCell, countryShort, countryTone, positionCell, rowAction,
   type DailyItem,
@@ -18,21 +18,30 @@ export interface DailyGroup { key: string; title: string; hint: string; icon: Re
 /**
  * The agreed column format, in this order for everyone (it mirrors the agency's sheet). The Recruiter column is added after the
  * candidate for supervisors only; the trailing actions column has no visible title (Open / Complete and the row menu live there).
- * Pixel widths: the table scrolls sideways below their sum. No deadline column.
+ * Widths are the column plan in px: the table is fixed-layout and each column gets its share of the table width (see
+ * columnLayout), so at or above the sum they fill the panel exactly and below it the table scrolls sideways with the actions
+ * column kept in view (sticky). Text columns (client, candidate, recruiter, job, remarks) are left-aligned in header and cell;
+ * the rest (S NO, REF, STAGE, AMOUNT, GOOGLE REVIEW, actions) are centred. No deadline column.
  */
 const COLUMNS = [
-  { key: 'no', title: 'S NO', width: 48 },
-  { key: 'client', title: 'CLIENT / COUNTRY', width: 138 },
-  { key: 'candidate', title: 'CANDIDATE NAME', width: 168, left: true },
-  { key: 'staff', title: 'Recruiter', width: 96, supervisor: true },
-  { key: 'position', title: 'JOB', width: 96 },
-  { key: 'ref', title: 'REF', width: 96 },
-  { key: 'stage', title: 'STAGE', width: 120 },
-  { key: 'remarks', title: 'REMARKS', width: 160, left: true },
+  { key: 'no', title: 'S NO', width: 44 },
+  { key: 'client', title: 'CLIENT / COUNTRY', width: 124, left: true },
+  { key: 'candidate', title: 'CANDIDATE NAME', width: 164, left: true },
+  { key: 'staff', title: 'Recruiter', width: 124, supervisor: true, left: true },
+  { key: 'position', title: 'JOB', width: 100, left: true },
+  { key: 'ref', title: 'REF', width: 124 },
+  { key: 'stage', title: 'STAGE', width: 108 },
+  { key: 'remarks', title: 'REMARKS', width: 136, left: true },
   { key: 'amount', title: 'AMOUNT', width: 96 },
-  { key: 'review', title: 'GOOGLE REVIEW', width: 96 },
+  { key: 'review', title: 'GOOGLE REVIEW', width: 84 },
   { key: 'actions', title: 'Actions', width: 128, quiet: true },
 ] as const
+
+/** Fixed-layout plan for a column list: the table's minimum width (the sum) and each column's percentage share of the table. */
+export function columnLayout(columns: ReadonlyArray<{ width: number }>) {
+  const total = columns.reduce((sum, c) => sum + c.width, 0)
+  return { minWidth: total, share: (c: { width: number }) => `${((c.width / total) * 100).toFixed(3)}%` }
+}
 
 /** Wraps a wide table: a soft shadow shows on whichever side still has columns scrolled out of view. */
 export function ScrollEdges({ children, label = 'Daily candidates, scroll sideways for more columns' }: { children: ReactNode; label?: string }) {
@@ -73,12 +82,13 @@ export interface DailyTableProps {
 /** The daily list in the reference style: centred columns, hairline dividers, 76px rows, a "To work" band and a "Done today" band. */
 export function DailyTable({ groups, zone, supervisor, staffName, canWork, onOpen, onProfile, onRemark }: DailyTableProps) {
   const columns = COLUMNS.filter((c) => supervisor || !('supervisor' in c))
+  const layout = columnLayout(columns)
   let serial = 0
   return (
     <ScrollEdges>
-      <table className="dw-table dw-main" aria-label="Daily candidates" style={{ minWidth: columns.reduce((sum, c) => sum + c.width, 0) }}>
-        <colgroup>{columns.map((c) => <col key={c.key} style={{ width: c.width }} />)}</colgroup>
-        <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
+      <table className="dw-table dw-main" aria-label="Daily candidates" style={{ minWidth: layout.minWidth }}>
+        <colgroup>{columns.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
+        <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left', c.key === 'actions' && 'is-actions')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
           {groups.map((g) => <Fragment key={g.key}>
             <tr className={cn('dw-group', g.tone === 'done' && 'is-done')}>
@@ -109,10 +119,10 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
   return (
     <tr className={cn('dw-row', done && 'is-done', serial % 2 === 0 && 'is-alt')}>
       <td className="is-num tnum" data-label="S NO">{serial}</td>
-      <td data-label="CLIENT / COUNTRY"><ClientCountryCell item={item} onAdd={onProfile} /></td>
+      <td data-label="CLIENT / COUNTRY" className="is-left"><ClientCountryCell item={item} onAdd={onProfile} /></td>
       <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
-      {showStaff && <td data-label="Recruiter">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">Not assigned</span>}</td>}
-      <td data-label="JOB"><PositionCellView item={item} /></td>
+      {showStaff && <td data-label="Recruiter" className="is-left">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">Not assigned</span>}</td>}
+      <td data-label="JOB" className="is-left"><PositionCellView item={item} /></td>
       <td data-label="REF"><OrderRefCell item={item} /></td>
       <td data-label="STAGE"><StageCell item={item} /></td>
       <td data-label="REMARKS" className="is-left"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
@@ -134,16 +144,10 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
   )
 }
 
-/** The Care India ID first and darker, the CRM reference (CND-...) second and muted; the reference alone before an ID exists. */
+/** The ONE ID of the candidate: the Data Bank ID. The CRM reference (CND-...) shows only for an old row that has no Data Bank ID. */
 export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId' | 'candidateRef'> }) {
-  const ids = { careId: item.candidateCareId, ref: item.candidateRef }
-  const care = careIdOf(ids)
-  const ref = care ? secondaryId(ids) : item.candidateRef
-  return (
-    <span title={[care, item.candidateRef].filter(Boolean).join(' · ')}>
-      {care && <b className="cid-main">{care}</b>}{care && ref && ' · '}{ref && <span className={care ? 'cid-ref' : undefined}>{ref}</span>}
-    </span>
-  )
+  const id = primaryId({ careId: item.candidateCareId, ref: item.candidateRef })
+  return <span title={id}>{id && <b className="cid-main">{id}</b>}</span>
 }
 
 /** CLIENT / COUNTRY in one cell: the client's name, the country pill (flag and short name) under it. */

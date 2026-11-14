@@ -24,7 +24,7 @@ from app.services import lead_followups, lead_matching, lead_parsing as lp
 from app.services.candidate_search import agency_midnight, literal_contains, search_terms
 
 STATUS_LABELS = {
-    "new": "New", "contacted": "Contacted", "interested": "Interested", "resume_requested": "Resume requested",
+    "new": "Not contacted", "contacted": "Contacted", "interested": "Interested", "resume_requested": "Resume requested",
     "resume_received": "Resume received", "converted": "Converted", "not_interested": "Not interested",
     "invalid": "Not reachable", "wrong_number": "Wrong number",
 }
@@ -146,7 +146,7 @@ def geographic_experience(source: dict, scope: str) -> dict:
 
 
 def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=None, matched_name=None, has_resume=False,
-              experience_source=None) -> dict:
+              experience_source=None, candidate_care_id=None, matched_care_id=None) -> dict:
     source = experience_source if isinstance(experience_source, dict) else {}
     geography = {f"experience{label}{suffix}": value
                  for label, scope in (("India", "india"), ("Abroad", "abroad"))
@@ -174,8 +174,9 @@ def lead_dict(lead: Lead, *, owner_name=None, candidate_ref=None, matched_ref=No
         "formId": lead.form_id, "formName": lead.form_name,
         "status": lead.status, "ownerId": lead.owner_id, "ownerName": owner_name, "assignedAt": iso(lead.assigned_at),
         "lastContactedAt": iso(lead.last_contacted_at), "nextFollowUpAt": iso(lead.next_follow_up_at), "callCount": lead.call_count,
-        "notes": lead.notes, "candidateId": lead.candidate_id, "candidateRef": candidate_ref,
-        "matchedCandidateId": lead.matched_candidate_id, "matchedCandidateRef": matched_ref, "matchedCandidateName": matched_name,
+        "notes": lead.notes, "candidateId": lead.candidate_id, "candidateRef": candidate_ref, "candidateCareId": candidate_care_id,
+        "matchedCandidateId": lead.matched_candidate_id, "matchedCandidateRef": matched_ref, "matchedCandidateCareId": matched_care_id,
+        "matchedCandidateName": matched_name,
         "hasResume": bool(has_resume), "resumeReceivedAt": iso(lead.resume_received_at),
         "createdAt": iso(lead.created_at), "updatedAt": iso(lead.updated_at),
     }
@@ -201,7 +202,7 @@ def _base_query():
         .select_from(keys).where(or_(mapping[keys.c.key].astext.in_(("experienceRestaurant", "experienceTotal")), possible_geography, question_companion))
         .correlate(Lead, LeadBatch).scalar_subquery())
     query = (select(Lead, owner.name, cand.ref, matched.ref, matched.name, has_resume.label("has_resume"),
-                    experience_source.label("experience_source"))
+                    experience_source.label("experience_source"), cand.care_id, matched.care_id)
              .outerjoin(owner, owner.id == Lead.owner_id)
              .outerjoin(cand, cand.id == Lead.candidate_id)
              .outerjoin(matched, matched.id == Lead.matched_candidate_id)
@@ -210,9 +211,9 @@ def _base_query():
 
 
 def _row_out(row) -> dict:
-    lead, owner_name, cand_ref, matched_ref, matched_name, has_resume, experience_source = row
+    lead, owner_name, cand_ref, matched_ref, matched_name, has_resume, experience_source, cand_care, matched_care = row
     return lead_dict(lead, owner_name=owner_name, candidate_ref=cand_ref, matched_ref=matched_ref, matched_name=matched_name,
-                     has_resume=has_resume, experience_source=experience_source)
+                     has_resume=has_resume, experience_source=experience_source, candidate_care_id=cand_care, matched_care_id=matched_care)
 
 
 # ------------------------------------------------------------------ search and filters
@@ -636,8 +637,12 @@ def note_resume_uploaded(db: Session, lead: Lead, user: User, attachment) -> Non
 
 # ------------------------------------------------------------------ assignment
 
-def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict | None, owner_id: str, only_unassigned: bool) -> dict:
-    from app.services.lead_import import eligible_staff, open_lead_counts, spread_evenly
+def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict | None, owner_id: str | None, only_unassigned: bool,
+                 recruiter_ids: list[str] | None = None) -> dict:
+    """Hand the leads to `owner_id` (a recruiter, "auto", or "none" to take them back) or share them equally between `recruiter_ids`."""
+    from app.services.lead_import import RecruiterChoiceError, pick_owners
+    if (owner_id and recruiter_ids is not None) or (not owner_id and recruiter_ids is None):
+        raise fail(422, "invalid_request", "Choose who the leads go to: one recruiter, several recruiters, or automatic.")
     if not ids and filters is None:
         raise fail(422, "invalid_request", "Choose the leads to assign (ids) or give a filter.")
     query = select(Lead.id, Lead.owner_id).where(Lead.status != "converted", visible_leads(user))
@@ -657,19 +662,11 @@ def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict |
         raise fail(422, "invalid_request", "That filter matches more than 20,000 leads. Narrow it down first.")
     if owner_id in UNASSIGN:
         names, picks = {}, [None] * len(target)
-    elif owner_id == "auto":
-        staff = eligible_staff(db)
-        if not staff:
-            raise fail(422, "invalid_request", "No recruiter is available for automatic assignment.")
-        names = {u.id: u.name for u in staff}
-        picks = spread_evenly(staff, open_lead_counts(db, [u.id for u in staff]), len(target))
     else:
-        from app.api.routers.candidates import ensure_assignable
         try:
-            person = ensure_assignable(db, owner_id)
-        except HTTPException as exc:
-            raise fail(422, "invalid_request", str(exc.detail)) from None
-        names, picks = {person.id: person.name}, [person.id] * len(target)
+            names, picks = pick_owners(db, owner_id, recruiter_ids, len(target))
+        except RecruiterChoiceError as exc:
+            raise fail(422, "invalid_request", str(exc)) from None
     move: dict[str | None, list[str]] = {}
     skipped = 0
     for (lead_id, current), new_owner in zip(target, picks):
@@ -813,8 +810,8 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
     lead.updated_at = datetime.now(timezone.utc)
     provenance = {"leadId": lead.id, "campaignId": lead.campaign_id, "campaignName": lead.campaign_name,
                   "formName": lead.form_name, "platform": lead.platform}
-    log_activity(db, lead.id, user.id, "convert", f"Converted to candidate {candidate.ref}",
-                 {**provenance, "candidateId": candidate.id, "candidateRef": candidate.ref,
+    log_activity(db, lead.id, user.id, "convert", f"Converted to candidate {candidate.care_id or candidate.ref}",
+                 {**provenance, "candidateId": candidate.id, "candidateRef": candidate.ref, "candidateCareId": candidate.care_id,
                   "from": lead_status_before, "resumeAttached": resume_attached, "initialTaskId": created.task_id})
     db.add(AuditEntry(actor_id=user.id, action="Converted lead to candidate", target=candidate.name,
                       entity_type="candidate", entity_id=candidate.id, meta=provenance))
@@ -822,7 +819,7 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
     lead_followups.sync(db, [lead.id])
     db.commit()
     return {"lead": lead_response(db, lead.id),
-            "candidate": {"id": created.id, "ref": created.ref, "name": created.name, "ownerId": created.owner_id,
+            "candidate": {"id": created.id, "ref": created.ref, "careId": created.care_id, "name": created.name, "ownerId": created.owner_id,
                           "ownerName": created.owner_name, "taskId": created.task_id},
             "resumeAttached": resume_attached, "resumeError": resume_error}
 
@@ -836,8 +833,8 @@ def link_candidate(db: Session, user: User, lead: Lead, candidate_id: str) -> No
     before = lead.status
     lead.status, lead.candidate_id = "converted", candidate.id
     lead.updated_at = datetime.now(timezone.utc)
-    log_activity(db, lead.id, user.id, "convert", f"Linked to existing candidate {candidate.ref}",
-                 {"candidateId": candidate.id, "candidateRef": candidate.ref, "from": before, "linked": True})
+    log_activity(db, lead.id, user.id, "convert", f"Linked to existing candidate {candidate.care_id or candidate.ref}",
+                 {"candidateId": candidate.id, "candidateRef": candidate.ref, "candidateCareId": candidate.care_id, "from": before, "linked": True})
     lead_matching.clear_self_match(lead)
     lead_followups.sync(db, [lead.id])
 

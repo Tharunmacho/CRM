@@ -331,6 +331,7 @@ def test_detail_lists_each_candidate_end_to_end(desk):
     assert items["c1"]["stageLabel"] == "Interview scheduling" and items["c1"]["movedInRange"] == 2
     assert items["c3"]["daysInStage"] == 20 and items["c3"]["order"] == "ORD-1" and items["c3"]["client"] == "Mr Contact"
     assert len(data["moves"]) == 5 and data["moves"][0]["stage"] == 11  # newest first
+    assert all(row["careId"] and row["careId"].startswith("CI-") for row in [*items.values(), *data["moves"]])   # Care India ID beside the CND ref
 
 
 # ------------------------------------------------------------------ daily tasks

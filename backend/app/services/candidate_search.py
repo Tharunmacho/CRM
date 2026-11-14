@@ -14,6 +14,8 @@ from app.core.config import get_settings
 from app.db.models import Application, ApplicationStatus, Attachment, AuditEntry, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
 from app.domain.stages import STAGES
 from app.services.candidate_identity import normalized_labels
+from app.services.care_india_id import format_care_id
+from app.services.traveller_id import format_traveller_id
 from app.services.agency_display import agency_display_expression
 from app.services.parallel_reads import parallel_reads
 from app.services.report_exports import xlsx_rows
@@ -168,6 +170,13 @@ def search_statement(filters: Search):
         digits = re.sub(r"\D", "", term)
         if len(digits) >= 4 and re.fullmatch(r"[\d\s+\-()]+", term):  # a phone typed with spaces or a country code
             clauses += [literal_contains(func.regexp_replace(field, r"\D", "", "g"), digits) for field in (Candidate.phone, Candidate.whatsapp)]
+        # "CI-96", "ci 96" and a bare "96" all find CI-096; "CI-T-7" finds CI-T-007 (the stored IDs are zero-padded).
+        care_serial = re.fullmatch(r"(?:ci[-\s]?)?(\d{1,6})", lowered)
+        traveller_serial = re.fullmatch(r"ci[-\s]?t[-\s]?(\d{1,6})", lowered)
+        if care_serial and int(care_serial.group(1)) >= 1:
+            clauses.append(Candidate.care_id == format_care_id(int(care_serial.group(1))))
+        if traveller_serial and int(traveller_serial.group(1)) >= 1:
+            clauses.append(Candidate.traveller_id == format_traveller_id(int(traveller_serial.group(1))))
         sources = [Source(key) for key, label in SOURCE_LABELS.items() if lowered in label.lower() or lowered in key.replace("_", " ")]
         if sources:
             clauses.append(Candidate.source.in_(sources))
@@ -403,7 +412,7 @@ def export_candidates(db, filters):
         Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
     ).distinct()):
         (rejected_files if rejected else uploaded).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
-    rows = [["Care India ID", "Traveller ID", "CRM reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned recruiter", "Mapped order", "Stage", "Status", "Added at",
+    rows = [["Care India ID", "Traveller ID", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned recruiter", "Mapped order", "Stage", "Status", "Added at",
              "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level", "Agency", "Profile review issues",
              *[label + " document" for _slot, label in required], "Missing mandatory documents"]]
     for candidate in candidates:
@@ -425,7 +434,7 @@ def export_candidates(db, filters):
             if not review:
                 review.append("Profile check pending")
         exact = "; ".join(f"{key}: {value}" for key, value in sorted((candidate.source_claims or {}).items()))
-        rows.append([candidate.care_id or "", candidate.traveller_id or "", candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
+        rows.append([candidate.care_id or "", candidate.traveller_id or "", candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
                      candidate.total_experience, exact, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
                      candidate.status.value, candidate.created_at.isoformat(),
@@ -434,9 +443,9 @@ def export_candidates(db, filters):
                      *["Uploaded" if slot in saved else "Wrong document" if slot in wrong else "Marked manually (no file attached)" if slot in marked else "Missing" for slot, _label in required],
                      ", ".join(label for slot, label in required if slot not in saved | marked)])
     from app.services.application_form import SLOT_LABELS
-    confirmations = [["Care India ID", "CRM reference", "Document", "Manual status", "Marked by", "Marked at", "Note"]]
+    confirmations = [["Care India ID", "Document", "Manual status", "Marked by", "Marked at", "Note"]]
     for candidate in candidates:
-        confirmations.extend([candidate.care_id or "", candidate.ref, SLOT_LABELS.get(slot, slot), "Uploaded" if record["uploaded"] else "Pending",
+        confirmations.extend([candidate.care_id or "", SLOT_LABELS.get(slot, slot), "Uploaded" if record["uploaded"] else "Pending",
                               record["by"]["name"], record["at"], record["note"]]
                              for slot, record in manual_records.get(candidate.id, {}).items())
     return xlsx_rows([("Candidates", rows), ("Filters", [[key, str(val)] for key, val in vars(filters).items()]),

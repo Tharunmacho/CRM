@@ -130,7 +130,7 @@ def test_a_staff_request_notifies_every_active_admin_and_is_audited(env):
     assert all(row.title == "A recruiter is asking for a candidate" and row.link_to == "/candidates/theirs/application" and not row.read
                for row in rows)
     # The label carries the Care India ID (allocated on insert) and the CND reference.
-    assert re.search(r"Asha asked you to assign Person theirs \(CI-\d{2}-\d{2}-\d{3} · REF-theirs\) to them\.", rows[0].detail)
+    assert re.search(r"Asha asked you to assign Person theirs \(CI-\d{3}\) to them\.", rows[0].detail)
     assert "The candidate is with Ravi now." in rows[0].detail
     [entry] = requests_logged(env, "theirs")
     assert entry.actor_id == "a" and entry.entity_type == "candidate" and entry.target == "Person theirs"

@@ -2,6 +2,7 @@ import { AlertTriangle } from 'lucide-react'
 import { Badge } from '@/shared/ui/display'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
+import { primaryId } from '../candidate-ids'
 import type { CandidateEntryForm } from '../entry-model'
 import type { DuplicateMatch } from '../entry-signals'
 import { EntryAvatar } from './entry-avatar'
@@ -55,7 +56,7 @@ export function DuplicateDialog({ duplicate, form, saving, error, onCancel, onOp
               <p className="ac-dup-name">{duplicate.candidate.name}</p>
               <p className="ac-dup-meta ident" title={duplicate.candidate.phone}>{duplicate.candidate.phone}</p>
               <div className="ac-dup-badges">
-                <Badge>{duplicate.candidate.ref}</Badge>
+                <Badge>{primaryId(duplicate.candidate)}</Badge>
                 <Badge>Recruiter: {duplicate.candidate.ownerName ?? 'Not assigned yet'}</Badge>
                 {duplicate.matchedOn.map((field) => <Badge key={field} tone="amber">Same {field}</Badge>)}
               </div>

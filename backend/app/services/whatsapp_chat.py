@@ -61,7 +61,7 @@ def window(conversation, at=None):
 
 
 def conversation_json(db, row, actor, settings=None, *, at=None, candidate=None, channel=None):
-    candidate = candidate or (db.scalar(select(Candidate).options(load_only(Candidate.id, Candidate.ref, Candidate.name, Candidate.owner_id)).where(Candidate.id == row.candidate_id)) if row.candidate_id else None)
+    candidate = candidate or (db.scalar(select(Candidate).options(load_only(Candidate.id, Candidate.ref, Candidate.care_id, Candidate.name, Candidate.owner_id)).where(Candidate.id == row.candidate_id)) if row.candidate_id else None)
     channel = channel or _channel(db, row.phone_number_id)
     can_send = bool(actor.active and (actor.role in (Role.admin, Role.manager) or
         (actor.role == Role.staff and candidate and candidate.owner_id == actor.id)))
@@ -72,7 +72,7 @@ def conversation_json(db, row, actor, settings=None, *, at=None, candidate=None,
     opened, expiry = window(row, at)
     return {"id": row.id, "phoneNumberId": row.phone_number_id, "peerNumber": row.peer_number,
         "displayName": row.display_name, "lastInboundAt": row.last_inbound_at, "lastMessageAt": row.last_message_at,
-        "lastPreview": row.last_preview, "candidate": {"id": candidate.id, "ref": candidate.ref,
+        "lastPreview": row.last_preview, "candidate": {"id": candidate.id, "ref": candidate.ref, "careId": candidate.care_id,
             "name": candidate.name, "ownerId": candidate.owner_id} if candidate else None,
         "canSend": can_send, "readOnlyReason": reason, "channelEnabled": bool(connected),
         "serviceWindowOpen": opened, "serviceWindowExpiresAt": expiry}

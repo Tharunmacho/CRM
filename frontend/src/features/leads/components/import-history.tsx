@@ -60,12 +60,12 @@ export function ImportHistory({ supervisor, canAdmin, onViewBatch, refreshKey, o
   const actions = (batch: LeadBatch) => <span className="ld-batch-acts">
     <Button variant="secondary" icon={<Eye className="h-4 w-4" />} onClick={() => onViewBatch(batch.id)}>View</Button>
     {supervisor && <Button variant="secondary" icon={busyId === batch.id ? <Loader2 className="ld-spin h-4 w-4" /> : <Download className="h-4 w-4" />} disabled={busyId === batch.id} onClick={() => void report(batch)}>Report (Excel)</Button>}
-    {canAdmin && <Button variant="secondary" icon={<Trash2 className="h-4 w-4" />} aria-label={`Permanently delete upload ${batch.fileName}`} onClick={() => setDeleting(batch)}>Delete upload</Button>}
+    {canAdmin && <Button variant="secondary" icon={<Trash2 className="h-4 w-4" />} aria-label={`Permanently delete upload ${batch.fileName}`} onClick={() => setDeleting(batch)}>Delete</Button>}
   </span>
 
   const columns: DbColumn<LeadBatch>[] = [
     {
-      key: 'file', header: 'File', width: 260, align: 'left',
+      key: 'file', header: 'File', width: 300, align: 'left',
       render: (b) => (
         <span className="ld-file-cell" title={b.fileName}>
           <span className="ld-file-icon is-small" aria-hidden="true"><FileSpreadsheet size={16} /></span>
@@ -73,17 +73,17 @@ export function ImportHistory({ supervisor, canAdmin, onViewBatch, refreshKey, o
         </span>
       ),
     },
-    { key: 'by', header: 'Uploaded by', width: 140, render: (b) => <span className="db-clamp">{b.uploadedByName || '–'}</span> },
+    { key: 'by', header: 'Uploaded by', width: 140, align: 'left', render: (b) => <span className="db-clamp">{b.uploadedByName || '–'}</span> },
     {
-      key: 'when', header: 'Uploaded', width: 112,
+      key: 'when', header: 'Uploaded', width: 110, align: 'left',
       render: (b) => { const parts = createdParts(b.createdAt); return parts ? <span className="db-2l" title={new Date(b.createdAt).toLocaleString()}><strong className="db-num">{parts.day}</strong><small>{parts.year}</small></span> : <span className="db-muted">–</span> },
     },
-    { key: 'total', header: 'Rows', width: 80, render: (b) => <span className="tnum db-num">{b.rowsTotal.toLocaleString()}</span> },
-    { key: 'new', header: 'New', width: 80, render: (b) => <span className="db-tone is-ok tnum">{b.rowsNew.toLocaleString()}</span> },
-    { key: 'dup', header: 'Duplicates', width: 96, render: (b) => <span className={`db-tone tnum ${b.rowsDuplicate ? 'is-warn' : 'is-quiet'}`}>{b.rowsDuplicate.toLocaleString()}</span> },
-    { key: 'invalid', header: 'Invalid', width: 80, render: (b) => <span className={`db-tone tnum ${b.rowsInvalid ? 'is-bad' : 'is-quiet'}`}>{b.rowsInvalid.toLocaleString()}</span> },
+    { key: 'total', header: 'Rows', width: 70, align: 'right', render: (b) => <span className="tnum db-num">{b.rowsTotal.toLocaleString()}</span> },
+    { key: 'new', header: 'New', width: 70, align: 'right', render: (b) => <span className="db-tone is-ok tnum">{b.rowsNew.toLocaleString()}</span> },
+    { key: 'dup', header: 'Duplicates', width: 96, align: 'right', render: (b) => <span className={`db-tone tnum ${b.rowsDuplicate ? 'is-warn' : 'is-quiet'}`}>{b.rowsDuplicate.toLocaleString()}</span> },
+    { key: 'invalid', header: 'Invalid', width: 76, align: 'right', render: (b) => <span className={`db-tone tnum ${b.rowsInvalid ? 'is-bad' : 'is-quiet'}`}>{b.rowsInvalid.toLocaleString()}</span> },
     {
-      key: 'actions', header: 'Actions', width: canAdmin ? 370 : 220, sticky: 'end', render: actions,
+      key: 'actions', header: 'Actions', width: canAdmin ? 330 : 220, align: 'right', render: actions,
     },
   ]
 
@@ -100,7 +100,7 @@ export function ImportHistory({ supervisor, canAdmin, onViewBatch, refreshKey, o
         <dl><div><dt>New leads</dt><dd>{batch.rowsNew.toLocaleString()}</dd></div><div><dt>Duplicates</dt><dd>{batch.rowsDuplicate.toLocaleString()}</dd></div><div><dt>Invalid</dt><dd>{batch.rowsInvalid.toLocaleString()}</dd></div></dl>
         {actions(batch)}
       </li>)}
-    </ul> : <div className="db-box ld-batches"><DbTable<LeadBatch> variant="grid" label="Uploads" rows={data.items} columns={columns} rowKey={batch => batch.id} /></div>}
+    </ul> : <div className="db-box ld-batches"><DbTable<LeadBatch> variant="grid" fit label="Uploads" rows={data.items} columns={columns} rowKey={batch => batch.id} /></div>}
     <Pager page={page} pageSize={pageSize} total={data.total} noun="uploads" onPage={setPage} onPageSize={size => { setPageSize(size); setPage(0) }} />
   </>
   return (

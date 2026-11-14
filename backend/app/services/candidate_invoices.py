@@ -267,7 +267,7 @@ def _issue(db, candidate_id, user, identifier):
     sums = amounts(row.service_fee, config.cgst_rate, config.sgst_rate)
     snapshot = {"number": number, "date": at.astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat(),
         "issuer": {key: values[key] for key in TEMPLATE},
-        "recipient": {"name": candidate.name, "ref": candidate.ref, "address": candidate.current_address or "",
+        "recipient": {"name": candidate.name, "ref": candidate.care_id or candidate.ref, "address": candidate.current_address or "",
                       "passport": candidate.passport_no or ""},
         "orderRef": order.ref if order else "", "applicationId": app.id, "amounts": sums,
         "description": "Recruitment service fee" + (" - " + ", ".join(value for value in (
@@ -299,7 +299,7 @@ def _issue(db, candidate_id, user, identifier):
     # An explicitly edited pending fee uses its existing reserved number and issuer rates.
     reserved = row.snapshot["amounts"]
     snapshot["amounts"] = sums = amounts(row.service_fee, reserved["cgstRate"], reserved["sgstRate"])
-    snapshot["recipient"] = {"name": candidate.name, "ref": candidate.ref, "address": candidate.current_address or "",
+    snapshot["recipient"] = {"name": candidate.name, "ref": candidate.care_id or candidate.ref, "address": candidate.current_address or "",
                              "passport": candidate.passport_no or ""}
     payload = invoice_pdf.render(snapshot)
     config_for_storage = get_settings()

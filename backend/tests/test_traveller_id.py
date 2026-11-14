@@ -1,6 +1,7 @@
-"""Care India TRAVELLER IDs (CI-T-YY-YY-NNN): a series separate from the Data Bank Care India ID, numbered by the
-financial year of the travel date, assigned when the placement is deployed (stage 11) and immutable afterwards."""
+"""Care India TRAVELLER IDs (CI-T-001, CI-T-002 ...): one continuous series separate from the Data Bank Care India ID,
+assigned dynamically when the placement is deployed (stage 11), never before, never reused, immutable afterwards."""
 import json
+import re
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -10,79 +11,59 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Candidate, Role
-from app.services.care_india_id import allocate_care_id, fiscal_key
-from app.services.traveller_id import (
-    allocate_traveller_id, assign_traveller_id, format_traveller_id, travel_moment,
-)
+from app.services.care_india_id import allocate_care_id
+from app.services.traveller_id import allocate_traveller_id, assign_traveller_id, format_traveller_id
 from test_application_workflow import complete, concurrent, mapped, payload, reach, save, subject, version, workflow  # noqa: F401
 from test_database_naming import _migrate, schema_database  # noqa: F401
 
 
 class CounterSession:
-    """Stands in for the database: one serial counter per (table, financial year), like the real upserts."""
+    """Stands in for the database: one serial counter per counter table, like the real upserts."""
 
     def __init__(self):
-        self.serials: dict[tuple[str, str], int] = {}
+        self.serials: dict[str, int] = {}
         self.calls = []
 
     def execute(self, statement, params):
         sql = str(statement)
-        table = "traveller" if "crm_traveller_fiscal_counters" in sql else "candidate"
-        key = (table, params["fiscal_year"])
-        self.serials[key] = self.serials.get(key, 0) + 1
+        table = "traveller" if "crm_traveller_id_counters" in sql else "candidate"
+        self.serials[table] = self.serials.get(table, 0) + 1
         self.calls.append((sql, params))
-        return SimpleNamespace(scalar_one=lambda value=self.serials[key]: value)
+        return SimpleNamespace(scalar_one=lambda value=self.serials[table]: value)
 
 
-def test_format_is_ci_t_with_two_fiscal_years_and_a_serial_that_grows_past_three_digits():
-    assert format_traveller_id("2026-2027", 1) == "CI-T-26-27-001"
-    assert format_traveller_id("2026-2027", 42) == "CI-T-26-27-042"
-    assert format_traveller_id("2026-2027", 1234) == "CI-T-26-27-1234"
-    assert format_traveller_id("2099-2100", 7) == "CI-T-99-00-007"
+def test_format_is_ci_t_and_a_serial_that_grows_past_three_digits():
+    assert format_traveller_id(1) == "CI-T-001"
+    assert format_traveller_id(42) == "CI-T-042"
+    assert format_traveller_id(116) == "CI-T-116"
+    assert format_traveller_id(999) == "CI-T-999"
+    assert format_traveller_id(1234) == "CI-T-1234"
     with pytest.raises(ValueError):
-        format_traveller_id("2026-2027", 0)
+        format_traveller_id(0)
 
 
-def test_financial_year_comes_from_the_travel_date_on_the_april_boundary_in_india():
-    # A plain travel date is already an agency-local day.
-    assert fiscal_key(travel_moment(date(2027, 3, 31))) == "2026-2027"
-    assert fiscal_key(travel_moment("2027-04-01")) == "2027-2028"
-    # A timestamp (the fallback when no date is on file) is read in Asia/Kolkata: 18:29 UTC is still 31 March there.
-    assert fiscal_key(travel_moment(None, datetime(2027, 3, 31, 18, 29, tzinfo=timezone.utc))) == "2026-2027"
-    assert fiscal_key(travel_moment(None, datetime(2027, 3, 31, 18, 30, tzinfo=timezone.utc))) == "2027-2028"
-    # A blank, malformed or impossible date counts as absent; the date wins over the fallback when it is real.
-    fallback = datetime(2027, 6, 1, 6, 0, tzinfo=timezone.utc)
-    for bad in ("", "  ", "15/11/2026", "2026-02-31", None):
-        assert travel_moment(bad, fallback) is fallback
-    assert travel_moment("2026-11-15", fallback) == date(2026, 11, 15)
-
-
-def test_serial_restarts_each_april_and_is_independent_of_the_data_bank_care_id():
+def test_serial_is_one_continuous_series_independent_of_the_data_bank_care_id():
     db = CounterSession()
-    assert allocate_traveller_id(db, date(2026, 4, 1)) == "CI-T-26-27-001"
-    assert allocate_traveller_id(db, date(2027, 3, 31)) == "CI-T-26-27-002"
-    assert allocate_traveller_id(db, date(2027, 4, 1)) == "CI-T-27-28-001"      # new financial year, new 001
-    assert allocate_traveller_id(db, date(2026, 11, 15)) == "CI-T-26-27-003"
+    assert [allocate_traveller_id(db) for _ in range(3)] == ["CI-T-001", "CI-T-002", "CI-T-003"]   # no restart, whatever the date
     # The Data Bank counter is a different table with its own serials: using one never moves the other.
-    assert allocate_care_id(db, date(2026, 4, 1)) == "CI-26-27-001"
-    assert allocate_traveller_id(db, date(2026, 4, 2)) == "CI-T-26-27-004"
-    assert allocate_care_id(db, date(2026, 4, 2)) == "CI-26-27-002"
-    tables = [("crm_traveller_fiscal_counters" in sql, "crm_candidate_fiscal_counters" in sql) for sql, _ in db.calls]
-    assert tables == [(True, False)] * 4 + [(False, True), (True, False), (False, True)]
+    assert allocate_care_id(db) == "CI-001"
+    assert allocate_traveller_id(db) == "CI-T-004"
+    assert allocate_care_id(db) == "CI-002"
+    tables = [("crm_traveller_id_counters" in sql, "crm_candidate_id_counters" in sql) for sql, _ in db.calls]
+    assert tables == [(True, False)] * 3 + [(False, True), (True, False), (False, True)]
+    assert {params["series"] for _, params in db.calls} == {"GLOBAL"}
 
 
 def test_assignment_is_idempotent_and_never_renumbers():
     db = CounterSession()
     person = SimpleNamespace(traveller_id=None)
-    first = assign_traveller_id(db, person, "2026-11-15", datetime(2026, 11, 14, tzinfo=timezone.utc))
-    assert first == person.traveller_id == "CI-T-26-27-001"
-    # Reversed and completed again, with a travel date in another financial year: the number stays and none is consumed.
-    assert assign_traveller_id(db, person, "2027-05-01") == first
-    assert assign_traveller_id(db, person, None, datetime(2030, 1, 1, tzinfo=timezone.utc)) == first
+    first = assign_traveller_id(db, person)
+    assert first == person.traveller_id == "CI-T-001"
+    # Reversed and completed again: the number stays and none is consumed.
+    assert assign_traveller_id(db, person) == first
+    assert assign_traveller_id(db, person) == first
     assert len(db.calls) == 1
-    # No usable travel date: the moment the stage was completed decides the year.
-    other = SimpleNamespace(traveller_id=None)
-    assert assign_traveller_id(db, other, "not a date", datetime(2027, 3, 31, 19, 0, tzinfo=timezone.utc)) == "CI-T-27-28-001"
+    assert assign_traveller_id(db, SimpleNamespace(traveller_id=None)) == "CI-T-002"
 
 
 # --------------------------------------------------------------- migration backfill
@@ -93,7 +74,7 @@ CANDIDATES = {   # id: (created_at, deployed application? ...) built below
 }
 
 
-def test_migration_backfills_travelled_candidates_by_travel_date_and_guards_the_number(schema_database):
+def test_migration_backfills_travelled_candidates_by_travel_date_then_renumbers_them_continuously(schema_database):
     engine = schema_database
     _migrate(engine, "0040_care_india_candidate_ids")
     with engine.begin() as connection:
@@ -123,41 +104,46 @@ def test_migration_backfills_travelled_candidates_by_travel_date_and_guards_the_
                 connection.execute(text("INSERT INTO crm_application_stages (id, application_id, stage, attempt, data, completed_at) "
                                         "VALUES (:id, :id, 11, 1, CAST(:data AS jsonb), :completed)"),
                                    {"id": key, "data": json.dumps(stage), "completed": completed})
+    _migrate(engine, "0043_stage_stop_exits")
+    with engine.begin() as connection:   # 0041 numbered them by the financial year of the travel date
+        assert dict(connection.execute(text("SELECT id, traveller_id FROM crm_candidates WHERE traveller_id IS NOT NULL")).all()) == {
+            "a": "CI-T-25-26-001", "c": "CI-T-26-27-001", "b": "CI-T-26-27-002", "f": "CI-T-26-27-003", "d": "CI-T-26-27-004",
+            "g": "CI-T-26-27-005", "e": "CI-T-27-28-001"}
     _migrate(engine, "head")
 
+    # 0044 renumbers them contiguously in that same travel order, with no financial year in the number.
     expected = {
-        "a": "CI-T-25-26-001",
-        "c": "CI-T-26-27-001", "b": "CI-T-26-27-002", "f": "CI-T-26-27-003", "d": "CI-T-26-27-004", "g": "CI-T-26-27-005",
-        "e": "CI-T-27-28-001",
+        "a": "CI-T-001", "c": "CI-T-002", "b": "CI-T-003", "f": "CI-T-004", "d": "CI-T-005", "g": "CI-T-006", "e": "CI-T-007",
         "h": None, "never": None,
     }
     with engine.begin() as connection:
         assert dict(connection.execute(text("SELECT id, traveller_id FROM crm_candidates")).all()) == expected
-        # The Data Bank ID is a different series and was not touched by this migration.
-        assert all(care.startswith("CI-") and not care.startswith("CI-T-") for (care,) in connection.execute(text("SELECT care_id FROM crm_candidates")).all())
-        assert dict(connection.execute(text("SELECT fiscal_year, last_serial FROM crm_traveller_fiscal_counters")).all()) == {
-            "2025-2026": 1, "2026-2027": 5, "2027-2028": 1}
+        # The Data Bank ID is a different series: CI-001.. for every candidate, no CI-T- ones.
+        assert sorted(care for (care,) in connection.execute(text("SELECT care_id FROM crm_candidates")).all()) == [f"CI-{n:03d}" for n in range(1, 10)]
+        assert dict(connection.execute(text("SELECT series, last_serial FROM crm_traveller_id_counters")).all()) == {"GLOBAL": 7}
 
         # Newly travelled people continue after the backfill.
-        connection.execute(text("UPDATE crm_candidates SET traveller_id = 'CI-T-26-27-006' WHERE id = 'h'"))   # NULL -> value is allowed once
+        connection.execute(text("UPDATE crm_candidates SET traveller_id = 'CI-T-008' WHERE id = 'h'"))   # NULL -> value is allowed once
         for statement in (
-            "UPDATE crm_candidates SET traveller_id = 'CI-T-26-27-007' WHERE id = 'h'",                         # changing it
+            "UPDATE crm_candidates SET traveller_id = 'CI-T-009' WHERE id = 'h'",                              # changing it
             "UPDATE crm_candidates SET traveller_id = NULL WHERE id = 'a'",                                    # removing it
-            "UPDATE crm_candidates SET traveller_id = 'CI-T-26-27-001' WHERE id = 'never'",                    # a duplicate
-            "UPDATE crm_candidates SET traveller_id = 'CI-T-26-28-001' WHERE id = 'never'",                    # years that do not follow
-            "UPDATE crm_candidates SET traveller_id = 'CI-26-27-001' WHERE id = 'never'",                      # the Data Bank format
-            "UPDATE crm_candidates SET traveller_id = 'CI-T-26-27-000' WHERE id = 'never'",                    # serial must be positive
+            "UPDATE crm_candidates SET traveller_id = 'CI-T-001' WHERE id = 'never'",                          # a duplicate
+            "UPDATE crm_candidates SET traveller_id = 'CI-T-26-27-001' WHERE id = 'never'",                    # the old financial-year format
+            "UPDATE crm_candidates SET traveller_id = 'CI-001' WHERE id = 'never'",                            # the Data Bank format
+            "UPDATE crm_candidates SET traveller_id = 'CI-T-000' WHERE id = 'never'",                          # serial must be positive
+            "UPDATE crm_candidates SET traveller_id = 'CI-T-1' WHERE id = 'never'",                            # at least three digits
         ):
             with pytest.raises(IntegrityError):
                 with connection.begin_nested():
                     connection.execute(text(statement))
-        assert connection.execute(text("SELECT traveller_id FROM crm_candidates WHERE id = 'h'")).scalar_one() == "CI-T-26-27-006"
+        assert connection.execute(text("SELECT traveller_id FROM crm_candidates WHERE id = 'h'")).scalar_one() == "CI-T-008"
 
     # The backfill is deterministic: removing it and applying it again gives every person the same number.
     _migrate(engine, "0040_care_india_candidate_ids", downgrade=True)
     with engine.begin() as connection:
         assert connection.execute(text("SELECT count(*) FROM information_schema.columns WHERE table_name = 'crm_candidates' AND column_name = 'traveller_id'")).scalar_one() == 0
         assert connection.execute(text("SELECT to_regclass('crm_traveller_fiscal_counters')")).scalar_one() is None
+        assert connection.execute(text("SELECT to_regclass('crm_traveller_id_counters')")).scalar_one() is None
     _migrate(engine, "head")
     with engine.begin() as connection:
         assert dict(connection.execute(text("SELECT id, traveller_id FROM crm_candidates")).all()) == {**expected, "h": None}
@@ -179,37 +165,40 @@ def ids(env):
         return {c.id: (c.care_id, c.traveller_id) for c in db.scalars(select(Candidate))}
 
 
-def test_completing_stage_11_numbers_the_traveller_by_the_financial_year_of_the_travel_date(workflow):
+def test_completing_stage_11_gives_the_next_traveller_number_in_the_order_people_travel(workflow):
     env = workflow
     assert all(traveller is None for _care, traveller in ids(env).values())     # nobody has one before travelling
     travel(env, "candidate", "order", "2027-03-31")
     travel(env, "second-candidate", "order", "2027-04-01")
     travel(env, "third-candidate", "other-order", "2026-11-15")
     found = ids(env)
-    assert found["candidate"][1] == "CI-T-26-27-001"
-    assert found["second-candidate"][1] == "CI-T-27-28-001"      # 1 April: the serial restarts
-    assert found["third-candidate"][1] == "CI-T-26-27-002"       # numbered by travel date, not by who finished first
+    # One continuous series: numbered as each placement is deployed, whatever the travel date, with no restart on 1 April.
+    assert found["candidate"][1] == "CI-T-001"
+    assert found["second-candidate"][1] == "CI-T-002"
+    assert found["third-candidate"][1] == "CI-T-003"
     # The Data Bank ID is untouched and a different number in a different series.
-    assert all(care and care.startswith("CI-") and not care.startswith("CI-T-") for care, _ in found.values())
+    assert all(care and re.fullmatch(r"CI-\d{3}", care) for care, _ in found.values())
     assert len({care for care, _ in found.values()}) == 3
 
 
 def test_a_reversed_placement_keeps_its_traveller_id_when_completed_again(workflow):
     env = workflow
     app_id = travel(env, "candidate", "order", "2026-11-15")
-    assert ids(env)["candidate"][1] == "CI-T-26-27-001"
+    assert ids(env)["candidate"][1] == "CI-T-001"
     env.actor = SimpleNamespace(id="admin", role=Role.admin)
     response = env.client.post(f"/api/applications/{app_id}/reopen", json={
         "stage": 11, "reason": "Ticket corrected", "lock_version": version(env, app_id)})
     assert response.status_code == 200, response.text
-    assert ids(env)["candidate"][1] == "CI-T-26-27-001"          # reversed from travelled: the number stays
+    assert ids(env)["candidate"][1] == "CI-T-001"                # reversed from travelled: the number stays
     env.actor = SimpleNamespace(id="staff", role=Role.staff)
     draft = env.client.get(f"/api/applications/{app_id}/draft").json()["draft"]
-    complete(env, app_id, {**draft, "travelDate": "2027-05-01"})  # now a later financial year
-    assert ids(env)["candidate"][1] == "CI-T-26-27-001"          # never renumbered
+    complete(env, app_id, {**draft, "travelDate": "2027-05-01"})  # a later date
+    assert ids(env)["candidate"][1] == "CI-T-001"                # never renumbered
     with env.sessions() as db:
-        counters = dict(db.execute(text("SELECT fiscal_year, last_serial FROM crm_traveller_fiscal_counters")).all())
-    assert counters == {"2026-2027": 1}                          # and the second completion consumed no number
+        counters = dict(db.execute(text("SELECT series, last_serial FROM crm_traveller_id_counters")).all())
+    assert counters == {"GLOBAL": 1}                             # and the second completion consumed no number
+    travel(env, "second-candidate", "order", "2027-06-01")
+    assert ids(env)["second-candidate"][1] == "CI-T-002"         # the next traveller continues the series
 
 
 def test_concurrent_completions_get_distinct_traveller_numbers(workflow):
@@ -227,14 +216,33 @@ def test_concurrent_completions_get_distinct_traveller_numbers(workflow):
             subject.complete_stage(app_ids[index], subject.CompleteIn(lock_version=locks[index]), db, env.actor)
 
     assert concurrent(lambda: finish(0), lambda: finish(1)) == [200, 200]
-    assert sorted(traveller for _care, traveller in ids(env).values() if traveller) == ["CI-T-26-27-001", "CI-T-26-27-002"]
+    assert sorted(traveller for _care, traveller in ids(env).values() if traveller) == ["CI-T-001", "CI-T-002"]
 
 
 def test_a_rolled_back_transaction_does_not_consume_a_traveller_number(schema_database):
     _migrate(schema_database, "head")
     with sessionmaker(bind=schema_database)() as db:
-        assert allocate_traveller_id(db, date(2026, 11, 15)) == "CI-T-26-27-001"
+        assert allocate_traveller_id(db) == "CI-T-001"
         db.rollback()
-        assert db.scalar(text("SELECT count(*) FROM crm_traveller_fiscal_counters")) == 0
-        assert allocate_traveller_id(db, date(2026, 11, 16)) == "CI-T-26-27-001"
+        assert db.scalar(text("SELECT last_serial FROM crm_traveller_id_counters WHERE series = 'GLOBAL'")) == 0
+        assert allocate_traveller_id(db) == "CI-T-001"
         db.commit()
+
+
+def test_deleting_a_traveller_never_frees_their_number_for_the_next_one(schema_database):
+    _migrate(schema_database, "head")
+    with sessionmaker(bind=schema_database)() as db:
+        for key in ("one", "two", "three"):
+            person = Candidate(id=key, ref=f"CND-{key}", name=key, phone=f"9000000{len(key)}{ord(key[0])}", source="walk_in", care_id=allocate_care_id(db))
+            db.add(person)
+            db.flush()
+            assign_traveller_id(db, person)
+        db.commit()
+        assert [c.traveller_id for c in db.scalars(select(Candidate).order_by(Candidate.id))] == ["CI-T-001", "CI-T-003", "CI-T-002"]  # ids sort one, three, two
+        db.delete(db.get(Candidate, "three"))                 # the highest number leaves ...
+        db.commit()
+        fresh = Candidate(id="four", ref="CND-four", name="four", phone="90000009999", source="walk_in", care_id=allocate_care_id(db))
+        db.add(fresh)
+        db.flush()
+        assert assign_traveller_id(db, fresh) == "CI-T-004"    # ... and CI-T-003 is not issued again
+        assert fresh.care_id == "CI-004"

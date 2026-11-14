@@ -27,16 +27,16 @@ def processed_hashes(db, hashes, *, exclude_mail_message_id=None, exclude_whatsa
     found: dict[str, dict] = {}
     if not wanted:
         return found
-    for digest, row_id, candidate_id, name, ref, at in db.execute(
-        select(Attachment.content_hash, Attachment.id, Candidate.id, Candidate.name, Candidate.ref, Attachment.uploaded_at)
+    for digest, row_id, candidate_id, name, ref, care_id, at in db.execute(
+        select(Attachment.content_hash, Attachment.id, Candidate.id, Candidate.name, Candidate.ref, Candidate.care_id, Attachment.uploaded_at)
         .join(Candidate, Candidate.id == Attachment.entity_id)
         .where(Attachment.entity_type == "candidate", Attachment.content_hash.in_(wanted))
         .order_by(Attachment.uploaded_at, Attachment.id)
     ):
         found.setdefault(digest, {"source": "candidate_file", "id": row_id, "candidateId": candidate_id,
-                                  "candidateName": name, "candidateRef": ref, "at": at.isoformat() if at else None})
-    for digest, row_id, candidate_id, name, ref, at in db.execute(
-        select(MailAttachment.content_hash, MailAttachment.message_id, Candidate.id, Candidate.name, Candidate.ref, MailMessage.received_at)
+                                  "candidateName": name, "candidateRef": ref, "candidateCareId": care_id, "at": at.isoformat() if at else None})
+    for digest, row_id, candidate_id, name, ref, care_id, at in db.execute(
+        select(MailAttachment.content_hash, MailAttachment.message_id, Candidate.id, Candidate.name, Candidate.ref, Candidate.care_id, MailMessage.received_at)
         .join(MailMessage, MailMessage.id == MailAttachment.message_id)
         .join(Candidate, Candidate.id == MailMessage.candidate_id)
         .join(EmailIngestionJob, EmailIngestionJob.message_id == MailAttachment.message_id)
@@ -45,16 +45,16 @@ def processed_hashes(db, hashes, *, exclude_mail_message_id=None, exclude_whatsa
         .order_by(MailMessage.received_at, MailAttachment.id)
     ):
         found.setdefault(digest, {"source": "email", "id": row_id, "candidateId": candidate_id,
-                                  "candidateName": name, "candidateRef": ref, "at": at.isoformat() if at else None})
-    for digest, row_id, candidate_id, name, ref, at in db.execute(
-        select(WhatsAppMessage.content_hash, WhatsAppMessage.id, Candidate.id, Candidate.name, Candidate.ref, WhatsAppMessage.received_at)
+                                  "candidateName": name, "candidateRef": ref, "candidateCareId": care_id, "at": at.isoformat() if at else None})
+    for digest, row_id, candidate_id, name, ref, care_id, at in db.execute(
+        select(WhatsAppMessage.content_hash, WhatsAppMessage.id, Candidate.id, Candidate.name, Candidate.ref, Candidate.care_id, WhatsAppMessage.received_at)
         .join(Candidate, Candidate.id == WhatsAppMessage.candidate_id)
         .where(WhatsAppMessage.content_hash.in_(wanted), WhatsAppMessage.status == "completed",
                WhatsAppMessage.id != (exclude_whatsapp_id or ""))
         .order_by(WhatsAppMessage.received_at, WhatsAppMessage.id)
     ):
         found.setdefault(digest, {"source": "whatsapp", "id": row_id, "candidateId": candidate_id,
-                                  "candidateName": name, "candidateRef": ref, "at": at.isoformat() if at else None})
+                                  "candidateName": name, "candidateRef": ref, "candidateCareId": care_id, "at": at.isoformat() if at else None})
     return found
 
 
@@ -74,7 +74,7 @@ def duplicate_reason(matches) -> str:
         seen.add(key)
         who = info.get("candidateName") or "a candidate"
         if info.get("candidateRef"):
-            who = f"{who} ({info['candidateRef']})"
+            who = f"{who} ({info.get('candidateCareId') or info['candidateRef']})"
         try:
             stamp = f" on {datetime.fromisoformat(info['at']):%d %b %Y}" if info.get("at") else ""
         except (TypeError, ValueError):

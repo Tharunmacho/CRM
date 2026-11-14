@@ -66,7 +66,7 @@ def test_domain_names_cover_renamed_models_and_documented_intake_extension():
     expected |= {"crm_client_staff", "crm_reference_agencies"}
     expected |= {"crm_application_feedback"}
     expected |= {"crm_worker_heartbeats"}
-    expected |= {"crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_fiscal_counters", "crm_traveller_fiscal_counters"}
+    expected |= {"crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_id_counters", "crm_traveller_id_counters"}
     assert set(Base.metadata.tables) == expected
     assert len(Base.metadata.tables) == 69
     for table in Base.metadata.tables.values():

@@ -1,15 +1,19 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ListChecks, RefreshCw, TriangleAlert, Users } from 'lucide-react'
+import { Clock, ListChecks, RefreshCw, TriangleAlert, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader } from '@/shared/ui/display'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
+import { listTitle, staleLabel } from '@/features/daily-work/daily-work-model'
 import { useFollowUp, useTicker } from '@/features/daily-work/use-daily-work'
 import { FollowUpTable } from './follow-up-table'
+import { FollowUpBoard } from './daily-staff-board'
+import { StatStrip, type StatTileData } from './daily-stat-strip'
 import { TasksTabs } from './tasks-tabs'
 import '@/styles/daily-work.css'
+import '@/styles/daily-work-board.css'
 
 /**
  * Follow-up: the candidates a recruiter owns whose application is active at stage 2 to 11 (selected and still moving), the stalest
@@ -40,12 +44,24 @@ export function FollowUp({ onOpenAll }: { onOpenAll: () => void }) {
       <Button variant="primary" onClick={() => void refresh()}>Try again</Button></section></div>
   if (!data) return null
 
-  const person = supervisor && staffFilter && staffFilter !== 'all' ? store.user(staffFilter)?.name ?? 'Recruiter' : ''
-  const title = !supervisor ? 'Follow-up' : person ? `${person}'s follow-up` : "Everyone's follow-up"
+  const roster = data.staff ?? []
+  const person = supervisor && staffFilter && staffFilter !== 'all' ? roster.find((s) => s.userId === staffFilter)?.name ?? store.user(staffFilter)?.name ?? 'Recruiter' : ''
+  const title = !supervisor ? 'Follow-up' : listTitle(person, 'follow-up candidates')
   const total = data.summary.total
+  // The strip is the whole team (the per-recruiter list covers everyone); the stalest update is of the list shown, which is sorted stalest first.
+  const teamTotal = roster.reduce((sum, s) => sum + s.summary.total, 0)
+  const holding = roster.filter((s) => s.summary.total > 0).length
+  const stalest = data.items[0]
+  const tiles: StatTileData[] = [
+    { key: 'total', label: 'Follow-up candidates', value: teamTotal, icon: ListChecks, detail: 'Selected and still moving' },
+    { key: 'holding', label: 'Recruiters with follow-ups', value: holding, unit: `of ${roster.length}`, icon: Users, detail: holding === roster.length ? 'Everyone has some' : `${roster.length - holding} with none` },
+    { key: 'stalest', label: 'Longest without an update', value: stalest ? staleLabel(stalest.lastUpdateAt, now) : '–', icon: Clock,
+      tone: stalest && now - new Date(stalest.lastUpdateAt).getTime() >= 3 * 86_400_000 ? 'amber' : 'blue',
+      detail: stalest ? `${stalest.candidate}${store.user(stalest.ownerId)?.name ? ` · ${store.user(stalest.ownerId)?.name}` : ''}` : person ? `${person}'s list` : 'Nothing to follow up' },
+  ]
 
   return (
-    <div className="tk dw">
+    <div className="tk dw dwb">
       <PageHeader
         title="Tasks"
         description={supervisor
@@ -63,6 +79,9 @@ export function FollowUp({ onOpenAll }: { onOpenAll: () => void }) {
           Only the first {data.items.length} of {total} candidates are listed. {supervisor ? 'Pick a recruiter to see all of theirs.' : ''}</p>}
         {error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({error}). Showing the last version.</p>}
       </div>
+
+      {supervisor && <StatStrip tiles={tiles} label="Follow-up at a glance" />}
+      {supervisor && <FollowUpBoard staff={roster} selected={staffFilter ?? 'all'} onSelect={setStaff} />}
 
       <section className="dw-panel" aria-label="Follow-up">
         <div className="dw-panel-head">
