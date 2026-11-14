@@ -11,7 +11,7 @@ import { PanelHead, failureText } from './user-ui'
 
 /**
  * Users > Agency settings > Assignment (admins change it): whether new candidates are given to a free recruiter automatically.
- * Off by default, so a new candidate waits until an admin or a manager picks a recruiter. It is saved at once with the settings
+ * Off by default, so a new candidate waits until the admin picks a recruiter. It is saved at once with the settings
  * the server already holds (the save endpoint takes the whole profile), and shown disabled on a server that does not report it yet.
  */
 export function AutoAssignCard() {

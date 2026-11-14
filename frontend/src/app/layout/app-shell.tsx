@@ -34,6 +34,7 @@ import {
 import { cn } from '@/shared/lib/cn'
 import { ago, initials, slaState } from '@/shared/lib/format'
 import { useTheme } from '@/shared/lib/theme'
+import { brandLogoSrc, brandMarkSrc, LOGO_HEIGHT, LOGO_WIDTH, MARK_HEIGHT, MARK_WIDTH } from '@/shared/lib/brand-images'
 import { useStore } from '@/shared/state/crm-store'
 import { taskClockStart } from '@/shared/lib/task-time'
 import { useAgency } from '@/shared/state/use-agency'
@@ -42,7 +43,6 @@ import { DailyWorkPrompt } from '@/features/daily-work/daily-work-prompt'
 import { PageLoading } from '@/shared/ui/page-loading'
 import type { Capability } from '@/shared/state/crm-store'
 import { AttendanceProvider } from '@/features/attendance/attendance-context'
-import { AttendanceClock } from '@/features/attendance/components/attendance-clock'
 import { CommandSearch } from './command-search'
 import { GATE_REASON, gateBlocks, gateState, readGate, subscribeGate } from '@/features/leads/lead-gate'
 import '@/styles/shell.css'
@@ -90,15 +90,14 @@ const COLLAPSE_KEY = 'crm-rail-collapsed'
 
 /**
  * The Care India Overseas logo for the attached header box: the full logo (figure, name, "Overseas Pvt.Ltd") and, for
- * the 72px icon rail, the figure alone. Light and dark variants are both in the markup; CSS shows the one for the theme.
+ * the 72px icon rail, the figure alone. Only the artwork for the current theme is rendered, so the browser never downloads the hidden twin.
  */
 export function BrandLogo() {
+  const { theme } = useTheme()
   return (
     <>
-      <img className="rail-logo-full is-light-only" src="/brand/care-india-logo-tight.png" alt="" width={768} height={400} decoding="async" draggable={false} />
-      <img className="rail-logo-full is-dark-only" src="/brand/care-india-logo-tight-dark.png" alt="" width={768} height={400} decoding="async" draggable={false} />
-      <img className="rail-logo-mark is-light-only" src="/brand/care-india-mark-fit.png" alt="" width={116} height={233} decoding="async" draggable={false} />
-      <img className="rail-logo-mark is-dark-only" src="/brand/care-india-mark-dark-fit.png" alt="" width={116} height={233} decoding="async" draggable={false} />
+      <img className="rail-logo-full" src={brandLogoSrc(theme)} alt="" width={LOGO_WIDTH} height={LOGO_HEIGHT} decoding="async" draggable={false} />
+      <img className="rail-logo-mark" src={brandMarkSrc(theme)} alt="" width={MARK_WIDTH} height={MARK_HEIGHT} decoding="async" draggable={false} />
     </>
   )
 }
@@ -463,7 +462,6 @@ function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: R
         </div>
       </div>
       <div className="topbar-actions">
-        <AttendanceClock compact />
         <button type="button" className="topbar-icon-btn topbar-mail-btn" aria-label={inboxUnread > 0 ? `Open messages, ${inboxUnread} unread` : 'Open messages'} onClick={() => navigate('/inbox')}>
           <Mail size={18} strokeWidth={1.75} />
           {inboxUnread > 0 && <span className="topbar-badge">{inboxUnread > 9 ? '9+' : inboxUnread}</span>}
@@ -500,7 +498,7 @@ function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: R
                     }}
                     className={cn('notif-row flex w-full gap-2.5 border-b border-rule-soft px-3 py-2.5 text-left last:border-0 hover:bg-field', !n.read && 'bg-field/60')}
                   >
-                    <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', (n.kind === 'escalation' || n.kind === 'daily_work') ? 'bg-stamp-600' : n.kind === 'reminder' ? 'bg-amber-600' : n.read ? 'bg-ink-300' : 'bg-navy-600')} />
+                    <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', n.kind === 'candidate_request' && !n.read ? 'bg-stamp-600' : n.read ? 'bg-ink-300' : 'bg-navy-600')} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
                         <span className="notif-title text-xs font-medium text-ink">{n.title}</span>

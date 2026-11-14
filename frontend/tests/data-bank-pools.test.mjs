@@ -66,3 +66,31 @@ test('only a string conversation id produces the WhatsApp button', () => {
   assert.equal(actions.linkedConversationId(null), '')
   assert.equal(actions.linkedConversationId({ conversation: { id: 7 } }), '')
 })
+
+test('only the admin can make a candidate who has a recruiter unassigned', () => {
+  assert.equal(pools.canUnassignCandidate('admin', 'u1'), true)
+  assert.equal(pools.canUnassignCandidate('admin', null), false, 'nobody to take them back from')
+  assert.equal(pools.canUnassignCandidate('admin', '  '), false)
+  assert.equal(pools.canUnassignCandidate('manager', 'u1'), false)
+  assert.equal(pools.canUnassignCandidate('staff', 'u1'), false)
+  assert.equal(pools.canUnassignCandidate(undefined, 'u1'), false)
+})
+
+test('the unassign confirmation names the recruiter and what follows; the toast tells what stayed and why', () => {
+  const one = pools.unassignCopy(1, 'Ravi Kumar', 'Asha Nair')
+  assert.equal(one.title, 'Make this candidate unassigned')
+  assert.equal(one.confirmLabel, 'Make unassigned')
+  assert.match(one.lines[0], /^Ravi Kumar will be taken back from Asha Nair and will not be assigned to anyone\.$/)
+  assert.match(one.lines[1], /back to Not assigned.*Assign waiting candidates/)
+  assert.match(one.lines[2], /on an order or have open stage work stay with their recruiter/)
+  const many = pools.unassignCopy(4)
+  assert.equal(many.title, 'Make 4 candidates unassigned')
+  assert.equal(many.confirmLabel, 'Make 4 unassigned')
+  assert.match(many.lines[0], /^4 candidates will be taken back from their recruiter/)
+
+  assert.deepEqual(pools.unassignMessage({ unassigned: 2, alreadyUnassigned: 0, refused: [] }), { text: '2 candidates made unassigned.', tone: 'ok' })
+  const partial = pools.unassignMessage({ unassigned: 1, alreadyUnassigned: 1, refused: [{ id: 'c', name: 'Mapped One', reason: 'Mapped One is mapped to ORD-1: reassign them to another recruiter instead.' }] })
+  assert.equal(partial.tone, 'warn')
+  assert.equal(partial.text, '1 candidate made unassigned. 1 candidate had no recruiter already. Mapped One is mapped to ORD-1: reassign them to another recruiter instead.')
+  assert.deepEqual(pools.unassignMessage({ unassigned: 0, alreadyUnassigned: 1, refused: [] }), { text: 'Nobody was changed. 1 candidate had no recruiter already.', tone: 'warn' })
+})

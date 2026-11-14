@@ -1,5 +1,7 @@
 import { Component, useEffect, useState, type ReactNode } from 'react'
 import { useAgency } from '@/shared/state/use-agency'
+import { useTheme } from '@/shared/lib/theme'
+import { brandLogoSrc, LOGO_HEIGHT, LOGO_WIDTH } from '@/shared/lib/brand-images'
 
 function Bone({ className = '' }: { className?: string }) {
   return <span className={`sk ${className}`} aria-hidden="true" />
@@ -58,6 +60,7 @@ export function SnapshotState({ error, onRetry, retryLabel = 'Try again', varian
 export function PageLoading({ fullScreen = false, onRetry, retryLabel = 'Retry connection' }: { fullScreen?: boolean; onRetry?: () => void; retryLabel?: string }) {
   const [slow, setSlow] = useState(false)
   const agency = useAgency()
+  const { theme } = useTheme()
   useEffect(() => {
     const timer = window.setTimeout(() => setSlow(true), 6_000)
     return () => window.clearTimeout(timer)
@@ -69,8 +72,7 @@ export function PageLoading({ fullScreen = false, onRetry, retryLabel = 'Retry c
     <div role="status" aria-label="Opening your workspace" className="workspace-loading is-fullscreen">
       <div className="splash">
         <span className="splash-logo" role="img" aria-label={agency.name}>
-          <img className="splash-logo-light" src="/brand/care-india-logo-tight.png" alt="" width={768} height={400} decoding="async" />
-          <img className="splash-logo-dark" src="/brand/care-india-logo-tight-dark.png" alt="" width={768} height={400} decoding="async" />
+          <img src={brandLogoSrc(theme)} alt="" width={LOGO_WIDTH} height={LOGO_HEIGHT} decoding="async" />
         </span>
         <div className="splash-track" aria-hidden="true"><span /></div>
         <p className={`splash-note ${slow ? 'is-visible' : ''}`}>{slow ? 'This is taking longer than usual. Your saved work is safe.' : ' '}</p>

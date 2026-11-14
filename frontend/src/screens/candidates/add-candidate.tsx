@@ -72,7 +72,7 @@ const VALIDATION_MESSAGE = 'Please fix the fields marked in red, then save again
 
 export default function AddCandidatePage() {
   const store = useStore()
-  // Admin and manager choose the recruiter; a staff member who adds a candidate keeps it.
+  // Only the admin chooses the recruiter; a staff member or manager who adds a candidate keeps it.
   const picksRecruiter = choosesRecruiter(store.me.role)
   const navigate = useNavigate()
   const intake = useDocumentIntake(store.me!.id)
@@ -358,7 +358,7 @@ export default function AddCandidatePage() {
   const commit = async (mergeId?: string) => {
     const created = mergeId
       ? await api.post<{ id: string; ref?: string; name?: string; ownerName?: string | null }>(`/candidates/${mergeId}/merge`, payload())
-      // An admin or manager may name the recruiter right here; a staff member's own entry is assigned to that staff member (the server decides).
+      // Only the admin may name the recruiter right here; a staff member's or manager's own entry is assigned to them (the server decides).
       // The workspace refresh is started after the documents are attached (uploadDocuments), not waited for here.
       : await store.addCandidate({ ...payload(), ...(picksRecruiter && form.assignTo ? { assign_to: form.assignTo } : {}) }, { deferRefresh: true }) as { id: string; ref?: string; name?: string; ownerName?: string | null } | null
     if (!created) return
@@ -405,7 +405,7 @@ export default function AddCandidatePage() {
     if (savedCandidateId) document.querySelector('.ac-saved')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }, [savedCandidateId])
 
-  // The recruiter an admin or a manager picked (nobody until they do); a staff member's own candidate needs no pick.
+  // The recruiter the admin picked (nobody until they do); a staff member's or manager's own candidate needs no pick.
   const chosenRecruiterName = picksRecruiter && form.assignTo ? store.user(form.assignTo)?.name ?? null : null
   const saveLabel = saveButtonLabel(picksRecruiter, chosenRecruiterName)
   const busyAny = saving || reading || intake.uploading
@@ -481,7 +481,7 @@ export default function AddCandidatePage() {
   const skillSuggestions = useMemo(() => served.skills.length ? served.skills : frequentValues(store.candidates.flatMap((candidate) => candidate.skills ?? []), 200), [served.skills, store.candidates])
   const companySuggestions = useMemo(() => served.companies.length ? served.companies : frequentValues(store.companies.map((company) => company.name)), [served.companies, store.companies])
   const designationSuggestions = useMemo(() => served.jobPreferences.length ? served.jobPreferences : store.designations.map((designation) => designation.title), [served.jobPreferences, store.designations])
-  // Staff and managers an admin or a manager may hand the candidate to; nobody is chosen unless they pick.
+  // Staff and managers the admin may hand the candidate to; nobody is chosen unless they pick.
   const recruiterOptions = useMemo(() => recruiterChoices(store.users), [store.users])
   return (
     <>

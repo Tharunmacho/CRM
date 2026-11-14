@@ -300,12 +300,14 @@ test('an older server sends no assignment: the block is built from the workspace
   assert.equal(model.jobUnavailableReason(noor.jobs[1]), 'Filled')
 })
 
-test('without a way to work the candidate nothing is editable; managers and admins also pick the recruiter', () => {
+test('without a way to work the candidate nothing is editable; managers edit the rest but only the admin picks the recruiter', () => {
   const form = model.normalizeForm(base())
   const staff = fallback.completeAssignment(form.assignment, { ...workspace(), canEdit: false })
   assert.deepEqual(staff.can, { job: false, source: false, agency: false, recruiter: false })
   const manager = fallback.completeAssignment(form.assignment, { ...workspace(), canEdit: false, me: { id: 'u2', role: 'manager' } })
-  assert.deepEqual(manager.can, { job: true, source: true, agency: true, recruiter: true })
+  assert.deepEqual(manager.can, { job: true, source: true, agency: true, recruiter: false })
+  const admin = fallback.completeAssignment(form.assignment, { ...workspace(), canEdit: false, me: { id: 'u1', role: 'admin' } })
+  assert.equal(admin.can.recruiter, true)
   assert.deepEqual(manager.options.recruiters.map((item) => item.name), ['Meena', 'Ravi'])
 })
 

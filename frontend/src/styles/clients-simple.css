@@ -181,3 +181,35 @@
   .clients-simple .cs-pillbtn:hover svg { transform: none; }
   .clients-simple .cs-skel { animation: none; }
 }
+
+/* ---------- Touch screens and phones (mobile pass): 40px targets, 16px fields so the page does not zoom on focus ---------- */
+@media (max-width: 1023px), (pointer: coarse) {
+  .clients-simple .cs-search input { font-size: 16px; }
+  .clients-simple .cs-search-clear { width: 40px; height: 40px; right: 4px; }
+  .clients-simple .cs-seg button { height: 40px; }
+  .clients-simple .cs-layout button { width: 40px; height: 40px; }
+  .clients-simple .cs-textbtn { display: inline-flex; align-items: center; min-height: 40px; padding: 4px 8px; }
+  .clients-simple .cs-icon-act { width: 40px; height: 40px; }
+  .clients-simple .cs-row-actions { gap: 8px; }
+  .clients-simple .cs-pill { height: 40px; }
+  .clients-simple .cs-add { height: 44px; }
+  .clients-simple .cs-round-btn { width: 40px; height: 40px; }
+  .clients-simple .cs-wide { height: 40px; }
+  .clients-simple .cs-picker-search input { height: 44px; font-size: 16px; }
+  .clients-simple .cs-rec { min-height: 48px; }
+  .clients-simple .cs-rec input { width: 22px; height: 22px; }
+}
+@media (max-width: 760px) {
+  .clients-simple .cs-state { padding: 32px 16px; }
+  .clients-simple .cs-hero { min-height: 0; }
+  .clients-simple .cs-state-actions > * { flex: 1 1 100%; }
+  .clients-simple .cs-sec-count { white-space: nowrap; }
+  .clients-simple .cs-card > footer { flex-wrap: wrap; }
+  .clients-simple .cs-card > footer > * { flex: 1 1 120px; }
+  .clients-simple .cs-title h3, .clients-simple .cs-title p { white-space: normal; overflow-wrap: anywhere; }
+  .clients-simple .cs-resultbar { flex-wrap: wrap; }
+  .clients-simple .cs-staff-fields { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .clients-simple.cs-page { overflow-x: clip; padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
+}

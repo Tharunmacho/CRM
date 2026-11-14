@@ -9,7 +9,7 @@ import { DbTable, useElementWidth } from '@/features/candidates/components/db-ta
 import { CHOICE_COMPACT, fitColumns } from '@/features/candidates/components/column-fit'
 import { ColumnMenu, useColumnChoices } from '@/features/candidates/components/column-menu'
 import { KpiCards, Pager, ViewToggle, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
-import { LeadExpanded } from '@/features/leads/components/lead-columns'
+import { LeadExpanded, ownerNameOf } from '@/features/leads/components/lead-columns'
 import { leadColumns } from '@/features/leads/components/lead-column-definitions'
 import { workBlock, type LeadColumnContext } from '@/features/leads/components/lead-actions'
 import { FIELD_GROUPS } from '@/features/leads/lead-fields'
@@ -19,6 +19,7 @@ import { GateBanner } from '@/features/leads/components/gate-banner'
 import { UploadLeadsDialog } from '@/features/leads/components/upload-dialog'
 import { ImportHistory } from '@/features/leads/components/import-history'
 import { LeadDrawer } from '@/features/leads/components/lead-drawer'
+import { LeadRemarksSheet } from '@/features/leads/components/lead-remarks'
 import { SafeBoundary } from '@/features/leads/components/safe-boundary'
 import { CampaignsTab } from '@/features/leads/components/campaigns-tab'
 import { LeadsSkeleton, useDelayedFlag } from '@/features/leads/components/leads-skeleton'
@@ -28,7 +29,7 @@ import { CallDialog } from '@/features/leads/components/call-dialog'
 import { LeadEditDialog } from '@/features/leads/components/lead-edit-dialog'
 import { ConvertDialog } from '@/features/leads/components/convert-dialog'
 import { UnconvertDialog } from '@/features/leads/components/unconvert-dialog'
-import { AssignLeadsDialog } from '@/features/leads/components/assign-dialog'
+import { AssignLeadsDialog, UnassignLeadDialog } from '@/features/leads/components/assign-dialog'
 import { useLeadBulk } from '@/features/leads/use-lead-bulk'
 import { downloadLeadExport, gateFromRefusal, leadApi, uploadLeadResume, type UploadDeletionResult } from '@/features/leads/lead-api'
 import { useLeadData } from '@/features/leads/use-leads'
@@ -56,6 +57,8 @@ export default function LeadsPage() {
   const [params, setParams] = useSearchParams()
   const me = store.me
   const supervisor = isSupervisor(me)
+  /** Only an admin hands out leads (managers and staff see just the leads assigned to them). */
+  const canAssign = me.role === 'admin'
 
   const [filters, setFilters] = useState<LeadFilters>(() => ({ ...EMPTY_FILTERS, batchId: params.get('batch') ?? '' }))
   const [sort, setSort] = useState({ key: 'created', dir: 'desc' as 'asc' | 'desc' })
@@ -67,11 +70,13 @@ export default function LeadsPage() {
   const [moreOpen, setMoreOpen] = useState(false)
   const [uploading, setUploading] = useState(location.pathname.endsWith('/import'))
   const [open, setOpen] = useState<Lead | null>(null)
+  const [remarksFor, setRemarksFor] = useState<Lead | null>(null)
   const [calling, setCalling] = useState<Lead | null>(null)
   const [editing, setEditing] = useState<Lead | null>(null)
   const [converting, setConverting] = useState<Lead | null>(null)
   const [unconverting, setUnconverting] = useState<Lead | null>(null)
   const [assigning, setAssigning] = useState<string[] | null>(null)
+  const [unassigning, setUnassigning] = useState<Lead | null>(null)
   const [forcedGate, setForcedGate] = useState<LeadGate | null>(null)
   const [fresh, setFresh] = useState('')
   const [historyKey, setHistoryKey] = useState(0)
@@ -89,12 +94,14 @@ export default function LeadsPage() {
   const { summary } = data
 
   // The custom question columns of the stored sheets (of the filtered campaign or upload when one is chosen); they follow new uploads.
+  // They are re-read when the campaigns or uploaded forms change (a new sheet), not whenever a lead event hands over a new facets object.
   const columnsKey = columnsQuery(filters)
+  const sheetsSignature = useMemo(() => JSON.stringify([data.facets?.campaigns ?? null, data.facets?.forms ?? null]), [data.facets])
   useEffect(() => {
     const controller = new AbortController()
     leadApi.columns(columnsKey, controller.signal).then((result) => { if (!controller.signal.aborted) setExtras(result.columns ?? []) }).catch(() => { /* the core columns stay */ })
     return () => controller.abort()
-  }, [columnsKey, data.facets])
+  }, [columnsKey, sheetsSignature])
 
   // The daily-work gate: the server's answer, replaced at once by a refusal the server just gave, until the next summary arrives.
   useEffect(() => { setForcedGate(null) }, [summary])
@@ -116,7 +123,7 @@ export default function LeadsPage() {
   const highlight = (batchId: string) => { setFresh(batchId); window.clearTimeout(freshTimer.current); freshTimer.current = window.setTimeout(() => setFresh(''), FRESH_MS) }
   useEffect(() => () => window.clearTimeout(freshTimer.current), [])
 
-  const refreshAll = () => { bulk.clear(); data.refresh(); setHistoryKey((value) => value + 1) }
+  const refreshAll = () => { bulk.clear(); data.refresh({ facets: true }); setHistoryKey((value) => value + 1) }
   const flash = (text: string) => { setMessage(text); window.setTimeout(() => setMessage((current) => (current === text ? '' : current)), 4_000) }
   // /leads?lead=<id> (the follow-up to-do, the candidate's "From lead sheet" badge) opens that lead's drawer.
   const leadParam = params.get('lead')
@@ -133,7 +140,7 @@ export default function LeadsPage() {
   }, [leadParam]) // eslint-disable-line react-hooks/exhaustive-deps
   const bulk = useLeadBulk({
     query, sort, pageSize, rows: data.page?.items ?? [], total: data.page?.total ?? 0, users: store.users, supervisor, isAdmin: me.role === 'admin',
-    refresh: data.refresh, flash, onGateRefusal, onDeleted: (lead) => setOpen((current) => (current?.id === lead.id ? null : current)),
+    refresh: () => data.refresh({ facets: true }), flash, onGateRefusal, onDeleted: (lead) => setOpen((current) => (current?.id === lead.id ? null : current)),
   })
 
   const viewBatch = (batchId: string) => {
@@ -158,7 +165,7 @@ export default function LeadsPage() {
       next.delete('lead')
       return next
     }, { replace: true })
-    setPage(0); setOpen(null); setCalling(null); setConverting(null); setUnconverting(null); setAssigning(null); setExpanded([]); setFresh('')
+    setPage(0); setOpen(null); setRemarksFor(null); setEditing(null); setCalling(null); setConverting(null); setUnconverting(null); setAssigning(null); setUnassigning(null); setExpanded([]); setFresh('')
     refreshAll()
     flash(`Upload permanently deleted. ${result.deletedLeads.toLocaleString()} ${result.deletedLeads === 1 ? 'lead removed' : 'leads removed'}.${result.duplicateRows > 0 ? ' Existing leads from other uploads were kept.' : ''}`)
   }
@@ -176,20 +183,13 @@ export default function LeadsPage() {
     me: { id: me.id, role: me.role },
     gate: gateMode,
     userById: store.user,
-    canAssign: supervisor,
     onOpen: setOpen,
+    onViewRemarks: setRemarksFor,
     onLogCall: setCalling,
     onConvert: setConverting,
     onUploadResume: (lead, file) => { void uploadResume(lead, file).catch(() => {}) },
-    onAssign: (lead) => setAssigning([lead.id]),
-    onNotInterested: (lead) => { void bulk.quickStatus(lead, 'not_interested') },
-    onChangeStatus: bulk.openStatus,
-    canDelete: me.role === 'admin',
-    onDelete: bulk.openDelete,
-    onUnconvert: setUnconverting,
-    onEdit: setEditing,
   }
-  const allColumns = useMemo(() => leadColumns(context, extras), [me.id, me.role, gateMode, supervisor, store.users, extras]) // eslint-disable-line react-hooks/exhaustive-deps
+  const allColumns = useMemo(() => leadColumns(context, extras), [me.id, me.role, gateMode, supervisor, canAssign, store.users, extras]) // eslint-disable-line react-hooks/exhaustive-deps
   const fit = useMemo(() => fitColumns(allColumns, boxWidth, choices), [allColumns, boxWidth, choices])
   const shownKeys = fit.keys
   const columns = useMemo(() => allColumns.filter((column) => shownKeys.includes(column.key)), [allColumns, shownKeys])
@@ -214,15 +214,15 @@ export default function LeadsPage() {
   const slowFilter = useDelayedFlag(data.loading && data.stale, SKELETON_GRACE_MS)
   const listState = listView({ loading: data.loading, stale: data.stale, hasPage: Boolean(data.page), error: data.error, rows: rows.length, slow: slowFilter })
   const allOpen = rows.length > 0 && rows.every((row) => expanded.includes(row.id))
+  const remarksLive = remarksFor ? rows.find((row) => row.id === remarksFor.id) ?? remarksFor : null
   const openLive = open ? rows.find((row) => row.id === open.id) ?? open : null
+  const assignFrom = assigning?.length === 1 ? rows.find((row) => row.id === assigning[0]) ?? (openLive?.id === assigning[0] ? openLive : undefined) : undefined
 
   const fmt = (value?: number) => (value === undefined ? '–' : value.toLocaleString())
   const kpis = [
     { label: 'Total leads', value: fmt(summary?.total), detail: summary?.scope === 'mine' ? 'Assigned to you' : 'Everyone who answered your ads', icon: Users, active: card === 'total', onSelect: () => pickCard('total') },
-    { label: 'New today', value: fmt(summary?.newToday), detail: 'Arrived today', icon: CalendarPlus, active: card === 'new_today', onSelect: () => pickCard('new_today') },
     { label: 'Not contacted', value: fmt(summary?.uncontacted), detail: 'Nobody has called yet', icon: PhoneOff, tone: 'warn' as const, active: card === 'not_contacted', onSelect: () => pickCard('not_contacted') },
-    { label: 'Interested', value: fmt(summary?.interested), detail: 'Said yes on the phone', icon: ThumbsUp, tone: 'ok' as const, active: card === 'interested', onSelect: () => pickCard('interested') },
-    { label: 'Resume received', value: fmt(summary?.resumeReceived), detail: 'Ready to convert', icon: FileCheck2, tone: 'ok' as const, active: card === 'resume_received', onSelect: () => pickCard('resume_received') },
+    { label: 'Interested', value: fmt(summary ? summary.interested + summary.resumeReceived : undefined), detail: 'Said yes, or sent a resume', icon: ThumbsUp, tone: 'ok' as const, active: card === 'interested', onSelect: () => pickCard('interested') },
     { label: 'Converted', value: fmt(summary?.converted), detail: 'Now candidates', icon: UserRoundCheck, tone: 'quiet' as const, active: card === 'converted', onSelect: () => pickCard('converted') },
     { label: 'Follow-ups due', value: fmt(summary?.followUpsDueMine), detail: 'Yours, due today or overdue', icon: BellRing, tone: 'warn' as const, active: card === 'follow_ups', onSelect: () => pickCard('follow_ups') },
   ]
@@ -233,7 +233,7 @@ export default function LeadsPage() {
     : hasFilters
       ? <EmptyState title={data.loading ? 'Searching leads…' : 'No matching leads'} description="Try another search or filter, or clear the filters to see every lead." action={<Button onClick={clearFilters}>Clear filters</Button>} />
       : neverUploaded
-        ? <EmptyState title="No leads yet" description={supervisor ? 'Upload the sheet your ad platform gave you (CSV or Excel). Every person is stored once, so you can keep uploading new sheets.' : 'When a manager uploads a lead sheet and assigns leads to you, they appear here.'} action={supervisor ? <Button variant="primary" icon={<Upload className="h-4 w-4" />} onClick={() => setUploading(true)}>Upload leads</Button> : undefined} />
+        ? <EmptyState title="No leads yet" description={canAssign ? 'Upload the sheet your ad platform gave you (CSV or Excel). Every person is stored once, so you can keep uploading new sheets.' : 'Leads appear here when the admin assigns them to you.'} action={supervisor ? <Button variant="primary" icon={<Upload className="h-4 w-4" />} onClick={() => setUploading(true)}>Upload leads</Button> : undefined} />
         : <EmptyState title={data.loading ? 'Loading leads…' : 'No leads to show'} description="Nothing matches yet." />
 
   return (
@@ -259,13 +259,13 @@ export default function LeadsPage() {
         <div className="ld-tabs-bar" role="tablist" aria-label="Lead sheet">
           <button type="button" role="tab" aria-selected={tab === 'leads'} className={cn(tab === 'leads' && 'is-on')} onClick={() => setTab('leads')}>Leads</button>
           <button type="button" role="tab" aria-selected={tab === 'campaigns'} className={cn(tab === 'campaigns' && 'is-on')} onClick={() => setTab('campaigns')}>Campaigns</button>
-          {supervisor && <button type="button" role="tab" aria-selected={tab === 'uploads'} className={cn(tab === 'uploads' && 'is-on')} onClick={() => setTab('uploads')}>Uploads</button>}
+          {canAssign && <button type="button" role="tab" aria-selected={tab === 'uploads'} className={cn(tab === 'uploads' && 'is-on')} onClick={() => setTab('uploads')}>Uploads</button>}
         </div>
 
         {tab === 'campaigns' ? (
           <CampaignsTab refreshKey={historyKey} onPickCampaign={viewCampaign} canAdmin={me.role === 'admin'} onManageUploads={() => setTab('uploads')} />
-        ) : tab === 'uploads' && supervisor ? (
-          <ImportHistory supervisor={supervisor} canAdmin={me.role === 'admin'} refreshKey={historyKey} onViewBatch={viewBatch} onUpload={() => setUploading(true)} onDeleted={uploadDeleted} />
+        ) : tab === 'uploads' && canAssign ? (
+          <ImportHistory supervisor={canAssign} canAdmin={me.role === 'admin'} refreshKey={historyKey} onViewBatch={viewBatch} onUpload={() => setUploading(true)} onDeleted={uploadDeleted} />
         ) : (
           <>
             <div className="db-panel-head">
@@ -291,7 +291,7 @@ export default function LeadsPage() {
             </div>
             <p className="dbp-tip ld-tip">{searchHint(filters.q)}</p>
 
-            <LeadFiltersBar filters={filters} facets={data.facets} users={store.users} meId={me.id} supervisor={supervisor} onChange={patchFilters}
+            <LeadFiltersBar filters={filters} facets={data.facets} users={store.users} meId={me.id} canAssign={canAssign} onChange={patchFilters}
               moreOpen={moreOpen} onMoreToggle={() => setMoreOpen((value) => !value)} canClear={hasFilters} onClear={clearFilters} />
 
             {fit.hidden > 0 && !showCards && <p className="ld-fitnote" role="status">{fit.hidden} {fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Open a row (the arrow at its start) to see every field, or choose Columns.</p>}
@@ -312,32 +312,35 @@ export default function LeadsPage() {
             </div>
             {rows.length > 0 && <Pager page={data.page?.page ?? page} pageSize={pageSize} total={total} noun="leads" sizes={PAGE_SIZES} allowAll filtered={hasFilters} onPage={setPage} onPageSize={setPageSize} />}
             <p className="db-hint ld-hint">{footerHint({
-              supervisor, lockReason: blockedAll ? GATE_REASON : null, matching: total, total: summary?.total ?? total, filtersOn: hasFilters,
-              assignedToMe: supervisor ? undefined : summary?.total, unassigned: supervisor ? summary?.unassigned : undefined,
+              supervisor, canAssign, lockReason: blockedAll ? GATE_REASON : null, matching: total, total: summary?.total ?? total, filtersOn: hasFilters,
+              assignedToMe: canAssign ? undefined : summary?.total, unassigned: canAssign ? summary?.unassigned : undefined,
             })}{hasFilters && <> <button type="button" className="ld-linkbtn" onClick={clearFilters}>Clear filters</button></>}</p>
           </>
         )}
       </Panel>
 
-      <UploadLeadsDialog open={uploading} users={store.users} onClose={() => { setUploading(false); if (location.pathname.endsWith('/import')) navigate('/leads', { replace: true }) }}
+      <UploadLeadsDialog open={uploading} users={store.users} canAssign={canAssign} canReport={canAssign} onClose={() => { setUploading(false); if (location.pathname.endsWith('/import')) navigate('/leads', { replace: true }) }}
         onImported={(result) => { if (result.batchId) highlight(result.batchId); refreshAll() }} onViewBatch={viewBatch} />
 
       <SafeBoundary what="this lead" resetKey={openLive?.id} onRetry={() => setOpen(null)}>
       <LeadDrawer
-        lead={openLive} me={{ id: me.id, role: me.role }} users={store.users} gate={gateMode} version={data.page} canAssign={supervisor}
+        lead={openLive} me={{ id: me.id, role: me.role }} users={store.users} gate={gateMode} version={data.page} canAssign={canAssign}
         workRefusal={openLive ? workBlock({ me: { id: me.id, role: me.role }, gate: 'open', userById: store.user }, openLive) : null}
         onClose={() => setOpen(null)} onChanged={() => data.refresh()}
-        onLogCall={setCalling} onConvert={setConverting} onAssign={(lead) => setAssigning([lead.id])}
+        onLogCall={setCalling} onConvert={setConverting} onAssign={(lead) => setAssigning([lead.id])} onUnassign={me.role === 'admin' ? setUnassigning : undefined}
         onUploadResume={uploadResume} onGateRefusal={onGateRefusal}
         canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo}
+        onEdit={setEditing} onChangeStatus={bulk.openStatus} onNotInterested={(lead) => { void bulk.quickStatus(lead, 'not_interested') }}
       />
       </SafeBoundary>
+      <LeadRemarksSheet lead={remarksLive} ownerName={remarksLive ? ownerNameOf(remarksLive, store.user) : ''}
+        onClose={() => setRemarksFor(null)} onOpenLead={(lead) => { setRemarksFor(null); setOpen(lead) }} />
       {bulk.overlays}
       <WaComposerHost />
       <CallDialog lead={calling} onClose={() => setCalling(null)} blockedReason={calling ? workBlock(context, calling) : null} onGateRefusal={onGateRefusal}
-        onSaved={() => { setCalling(null); flash('Call saved.'); data.refresh() }} />
+        onSaved={() => { setCalling(null); flash('Remarks saved.'); data.refresh() }} />
       <LeadEditDialog lead={editing} onClose={() => setEditing(null)} blockedReason={editing ? workBlock(context, editing) : null} onGateRefusal={onGateRefusal}
-        onSaved={(saved) => { setEditing(null); setOpen((current) => (current?.id === saved.id ? saved : current)); flash(`Changes to ${saved.name || 'the lead'} saved.`); data.refresh() }} />
+        onSaved={(saved) => { setEditing(null); setOpen((current) => (current?.id === saved.id ? saved : current)); flash(`Changes to ${saved.name || 'the lead'} saved.`); data.refresh({ facets: true }) }} />
       <ConvertDialog lead={converting} onClose={() => setConverting(null)} blockedReason={converting ? workBlock(context, converting) : null} onGateRefusal={onGateRefusal} onChanged={() => data.refresh()} />
       {me.role === 'admin' && <UnconvertDialog lead={unconverting} onClose={() => setUnconverting(null)} onSaved={(result) => {
         setUnconverting(null); setOpen((current) => current?.id === result.lead.id ? result.lead : current)
@@ -345,7 +348,14 @@ export default function LeadsPage() {
         void store.refresh({ keepCurrent: true }).catch(() => store.notify('Moved back to Lead. Reload the workspace to see the latest candidate list.', 'warn'))
       }} />}
       <AssignLeadsDialog ids={assigning} users={store.users} onClose={() => setAssigning(null)}
-        onSaved={(assigned, skipped) => { setAssigning(null); bulk.clear(); flash(`${assigned} ${assigned === 1 ? 'lead' : 'leads'} assigned${skipped ? `, ${skipped} skipped` : ''}.`); data.refresh() }} />
+        fromName={assignFrom ? ownerNameOf(assignFrom, store.user) || null : null}
+        onSaved={(assigned, skipped) => { setAssigning(null); bulk.clear(); flash(`${assigned} ${assigned === 1 ? 'lead' : 'leads'} assigned${skipped ? `, ${skipped} skipped` : ''}.`); data.refresh({ facets: true }) }} />
+      {me.role === 'admin' && <UnassignLeadDialog lead={unassigning} ownerName={unassigning ? ownerNameOf(unassigning, store.user) : ''} onClose={() => setUnassigning(null)}
+        onSaved={(unassigned, skipped) => {
+          const name = unassigning?.name || 'The lead'
+          setUnassigning(null); bulk.clear(); data.refresh({ facets: true })
+          flash(unassigned > 0 ? `${name} is now unassigned. Nobody owns it until you assign it again.` : skipped > 0 ? `${name} was not changed: it is converted or already unassigned.` : `${name} was not changed.`)
+        }} />}
     </div>
   )
 }

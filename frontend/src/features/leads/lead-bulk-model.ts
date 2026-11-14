@@ -116,6 +116,13 @@ export function confirmCopy(input: ConfirmInput): ConfirmCopy {
   const scope = input.allMatching ? `All ${what} that match the current search and filters (not only the ones on this page)` : `${what[0].toUpperCase()}${what.slice(1)}`
   switch (input.action) {
     case 'assign': {
+      if (isUnassign(input.ownerName)) {
+        return {
+          title: `Make ${what} unassigned`,
+          lines: [`${scope} will be taken back from their recruiter and will not be assigned to anyone.`, 'The recruiter no longer sees them, their follow-up reminders go, and the status and history stay. Assign them again from the Unassigned filter. Converted leads are never moved and leads nobody owns are skipped.'],
+          confirmLabel: `Make ${what} unassigned`, danger: false, typed: false,
+        }
+      }
       const who = input.ownerName === 'auto' || !input.ownerName ? 'the available staff, spread evenly' : input.ownerName
       return { title: `Assign ${what}`, lines: [`${scope} will be assigned to ${who}.`, 'Converted leads are never moved. Leads that already belong to that person are skipped.'], confirmLabel: `Assign ${what}`, danger: false, typed: false }
     }
@@ -133,6 +140,24 @@ export function confirmCopy(input: ConfirmInput): ConfirmCopy {
         ],
         confirmLabel: `Delete ${what}`, danger: true, typed: n > TYPED_CONFIRM_OVER,
       }
+  }
+}
+
+/** The owner choice that means "nobody": the server reads `ownerId: 'none'` as taking the leads back. */
+export const UNASSIGNED = 'none'
+export const isUnassign = (ownerId?: string | null): boolean => ownerId === UNASSIGNED
+
+/** The confirmation of taking one lead back from its recruiter (the drawer's "Make unassigned"). */
+export function unassignOneCopy(name: string, ownerName: string): ConfirmCopy {
+  const who = ownerName || 'the current recruiter'
+  return {
+    title: 'Make this lead unassigned',
+    lines: [
+      `${name || 'This lead'} will be taken back from ${who} and will not be assigned to anyone.`,
+      `${who} no longer sees it and their follow-up reminder for it goes. The status and history stay.`,
+      'You can assign it to someone again later. A converted lead cannot be moved.',
+    ],
+    confirmLabel: 'Make unassigned', danger: false, typed: false,
   }
 }
 
@@ -170,7 +195,8 @@ export function resultToast(result: Pick<BulkResult, 'updated' | 'skipped' | 'sk
 }
 
 /** The verb of the toast for an action. */
-export const resultVerb = (action: BulkAction): string => (action === 'delete' ? 'deleted' : action === 'assign' ? 'assigned' : 'updated')
+export const resultVerb = (action: BulkAction, ownerId?: string | null): string =>
+  (action === 'delete' ? 'deleted' : action === 'assign' ? (isUnassign(ownerId) ? 'made unassigned' : 'assigned') : 'updated')
 
 /* -------------------------------------------------------------------- undo */
 

@@ -111,7 +111,9 @@ export const leadApi = {
     api.get<{ items: LeadBatch[]; total: number; page: number; pageSize: number }>(`/leads/batches?page=${page}&page_size=${pageSize}`, { signal }),
   update: (id: string, body: Record<string, unknown>) => api.patch<Lead>(`/leads/${enc(id)}`, body),
   logCall: (id: string, body: CallBody) => api.post<Lead>(`/leads/${enc(id)}/call`, body),
-  assign: (ids: string[], ownerId: string) => api.post<{ assigned: number; skipped: number }>('/leads/assign', { ids, ownerId }),
+  assign: (ids: string[], ownerId: string) => api.post<{ assigned: number; unassigned?: number; skipped: number }>('/leads/assign', { ids, ownerId }),
+  /** Admin only: take the leads back from their recruiter (ownerId "none"); status and history stay, nobody owns them afterwards. */
+  unassign: (ids: string[]) => api.post<{ assigned: number; unassigned: number; skipped: number }>('/leads/assign', { ids, ownerId: 'none' }),
   linkCandidate: (id: string, candidateId: string) => api.post<Lead>(`/leads/${enc(id)}/link-candidate`, { candidateId }),
   deleteBatch: (id: string) => api.del<{ deleted: number; kept: number }>(`/leads/batches/${enc(id)}`),
   deletionPreview: (id: string, signal?: AbortSignal) =>
@@ -171,6 +173,12 @@ export function existingCandidateFrom(error: unknown): ExistingCandidate | null 
   if (!(error instanceof ApiError) || error.status !== 409) return null
   const detail = detailOf(error)
   return detail?.code === 'candidate_exists' && detail.candidate ? detail.candidate : null
+}
+
+/** True when the server refused a conversion because the lead has no resume yet (409 `resume_required`). */
+export function resumeRequiredFrom(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 409) return false
+  return detailOf(error)?.code === 'resume_required'
 }
 
 /** The gate carried by a 403 `daily_work_pending`, or null when the error is something else. */

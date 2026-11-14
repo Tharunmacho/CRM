@@ -96,7 +96,7 @@ export function useLeadBulk(params: Params) {
     if (!action) return
     const result = await leadBulkApi.run(bulkBody(selection, filter, total, action, options))
     setAction(null); setSelection(EMPTY_SELECTION)
-    flash(resultToast(result, resultVerb(action)))
+    flash(resultToast(result, resultVerb(action, options.ownerId)))
     refresh()
   }
 
@@ -117,7 +117,7 @@ export function useLeadBulk(params: Params) {
   }
 
   const bar: ReactNode = supervisor
-    ? <BulkBar selection={selection} matchingTotal={total} canDelete={isAdmin} busy={Boolean(action)} exporting={exporting}
+    ? <BulkBar selection={selection} matchingTotal={total} canAssign={isAdmin} canDelete={isAdmin} busy={Boolean(action)} exporting={exporting}
         onSelectAll={() => setSelection(selectAllMatching(selection))} onClear={clear}
         onAction={(next) => { if (next === 'export') void exportSelected(); else setAction(next) }} />
     : null

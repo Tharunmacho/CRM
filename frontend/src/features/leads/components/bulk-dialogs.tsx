@@ -4,7 +4,7 @@ import type { User } from '@/shared/model/types'
 import { Dialog } from '@/shared/ui/overlay'
 import { Button, Input, Select } from '@/shared/ui/primitives'
 import { bulkErrorMessage } from '../lead-bulk-api'
-import { confirmCopy, deleteOneCopy, typedConfirmOk, type BulkAction, type BulkOptions } from '../lead-bulk-model'
+import { UNASSIGNED, confirmCopy, deleteOneCopy, typedConfirmOk, type BulkAction, type BulkOptions } from '../lead-bulk-model'
 import { SETTABLE_STATUSES, leadStatus, type Lead } from '../lead-model'
 import '@/styles/lead-bulk.css'
 
@@ -29,10 +29,10 @@ export function BulkDialog({ action, count, allMatching, users, onClose, onConfi
   const [error, setError] = useState('')
   useEffect(() => { if (action) { setOwner('auto'); setStatus('contacted'); setTyped(''); setError(''); setBusy(false) } }, [action])
   if (!action) return null
-  const staff = users.filter((user) => user.active && user.role !== 'admin')
+  const staff = users.filter((user) => user.active && user.role === 'staff')
   const copy = confirmCopy({
     action, count, allMatching,
-    ownerName: owner === 'auto' ? 'auto' : users.find((user) => user.id === owner)?.name,
+    ownerName: owner === 'auto' || owner === UNASSIGNED ? owner : users.find((user) => user.id === owner)?.name,
     statusLabel: leadStatus(status).label,
   })
   const ready = !busy && count > 0 && (!copy.typed || typedConfirmOk(typed))
@@ -54,7 +54,8 @@ export function BulkDialog({ action, count, allMatching, users, onClose, onConfi
             <span>Assign to</span>
             <Select aria-label="Assign to" value={owner} onChange={(event) => setOwner(event.target.value)}>
               <option value="auto">Distribute evenly between available staff</option>
-              {staff.map((user) => <option key={user.id} value={user.id}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
+              {staff.map((user) => <option key={user.id} value={user.id} disabled={user.onLeave}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
+              <option value={UNASSIGNED}>Nobody: make unassigned</option>
             </Select>
           </label>
         )}

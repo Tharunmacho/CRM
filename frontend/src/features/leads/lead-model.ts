@@ -37,6 +37,7 @@ export interface Lead {
   status: string
   ownerId?: string | null
   ownerName?: string | null
+  assignedAt?: string | null
   nextFollowUpAt?: string | null
   lastContactedAt?: string | null
   callCount?: number | null
@@ -119,7 +120,7 @@ export interface LeadFacets {
 export const LEAD_HEADINGS = {
   actions: 'Actions', created: 'Created', name: 'Name / Age / Contact', contact: 'Contact', position: 'Job applied', experience: 'Total experience',
   experienceIndia: 'India experience', experienceAbroad: 'Abroad experience', education: 'Education', state: 'State',
-  location: 'Location', campaign: 'Campaign', country: 'Country', status: 'Status', followup: 'Follow‑up', resume: 'Resume',
+  location: 'Location', campaign: 'Campaign', country: 'Country', status: 'Assigned to', followup: 'Follow‑up', resume: 'Resume',
 } as const
 
 /** A custom question column the stored sheets contain (GET /leads/columns). */
@@ -149,7 +150,7 @@ export const LEAD_STATUSES: { value: string; label: string; tone: LeadTone }[] =
   { value: 'contacted', label: 'Contacted', tone: 'info' },
   { value: 'interested', label: 'Interested', tone: 'ok' },
   { value: 'resume_requested', label: 'Resume requested', tone: 'warn' },
-  { value: 'resume_received', label: 'Resume received', tone: 'ok' },
+  { value: 'resume_received', label: 'Interested (resume in)', tone: 'ok' },
   { value: 'converted', label: 'Converted', tone: 'ok' },
   { value: 'not_interested', label: 'Not interested', tone: 'quiet' },
   { value: 'invalid', label: 'Invalid', tone: 'bad' },
@@ -167,7 +168,7 @@ export function leadStatus(value?: string | null): { value: string; label: strin
   return LEAD_STATUSES.find((status) => status.value === key) ?? { value: key, label: key ? humanize(key) : 'New', tone: 'quiet' }
 }
 
-/** Call outcomes the "Log a call" form offers (the server's list) and what each one does to the status. */
+/** Call outcomes the "Add remarks" form offers (the server's list) and what each one does to the status. */
 export const CALL_OUTCOMES: { value: string; label: string; effect: string }[] = [
   { value: 'answered', label: 'Spoke to them', effect: 'Moves a new lead to Contacted' },
   { value: 'interested', label: 'Interested', effect: 'Moves the lead to Interested' },
@@ -212,6 +213,8 @@ export const normalizeSearch = (query: string): string => searchTerms(query).joi
 /** A short line under the search box that reacts to what was typed. */
 export interface FooterHintInput {
   supervisor: boolean
+  /** Only an admin hands out leads; a manager sees and works just the leads assigned to them. Unset = same as `supervisor`. */
+  canAssign?: boolean
   /** The daily-work lock's reason when the sheet is read-only for this person. */
   lockReason?: string | null
   /** Leads assigned to the viewer (staff) / waiting for a recruiter (managers). */
@@ -229,9 +232,11 @@ export function footerHint(input: FooterHintInput): string {
   const parts: string[] = []
   if (input.filtersOn) parts.push(`Filters are on: showing ${input.matching.toLocaleString()} of ${input.total.toLocaleString()} ${input.total === 1 ? 'lead' : 'leads'}.`)
   if (input.total === 0) {
-    parts.push(input.supervisor ? 'Upload a lead sheet to start.' : 'Leads appear here when a manager assigns them to you.')
-  } else if (input.supervisor) {
+    parts.push(input.supervisor ? 'Upload a lead sheet to start.' : 'Leads appear here when the admin assigns them to you.')
+  } else if (input.supervisor && input.canAssign !== false) {
     parts.push(`Click a row to open the lead. You can work, assign and export any lead${count(input.unassigned, 'unassigned')}.`)
+  } else if (input.supervisor) {
+    parts.push(`Click a row to open the lead. You can work and export the leads assigned to you${count(input.assignedToMe, 'assigned to you')}.`)
   } else {
     parts.push(`Click a row to see everything about the lead. You can work the leads assigned to you${count(input.assignedToMe, 'assigned to you')}.`)
   }
@@ -295,7 +300,7 @@ export function cardFilters(card: LeadCard, now: Date = new Date()): Partial<Lea
   switch (card) {
     case 'new_today': return { status: '', from: today, to: today }
     case 'not_contacted': return { status: 'new', from: '', to: '' }
-    case 'interested': return { status: 'interested', from: '', to: '' }
+    case 'interested': return { status: 'interested,resume_received', from: '', to: '' }  // said yes, or the resume has arrived
     case 'resume_received': return { status: 'resume_received', from: '', to: '' }
     case 'converted': return { status: 'converted', from: '', to: '' }
     case 'follow_ups': return { status: '', from: '', to: '', followUp: 'due' }
@@ -310,7 +315,7 @@ export function activeCard(filters: LeadFilters, now: Date = new Date()): LeadCa
   if (!filters.status && filters.from === today && filters.to === today) return 'new_today'
   if (filters.from || filters.to) return ''
   if (filters.status === 'new') return 'not_contacted'
-  if (filters.status === 'interested') return 'interested'
+  if (filters.status === 'interested' || filters.status === 'interested,resume_received') return 'interested'
   if (filters.status === 'resume_received') return 'resume_received'
   if (filters.status === 'converted') return 'converted'
   if (!filters.status) return 'total'
@@ -481,18 +486,18 @@ export interface LeadActor { id: string; role: string }
 const SUPERVISORS = ['admin', 'manager']
 export const isSupervisor = (me?: LeadActor | null) => !!me && SUPERVISORS.includes(me.role)
 
-/** Admin and manager work any lead; staff only the leads assigned to them. */
+/** Admin works any lead; managers and staff only the leads assigned to them. */
 export function canWorkLead(me: LeadActor | null | undefined, lead: Pick<Lead, 'ownerId'> | null | undefined): boolean {
   if (!me || !lead) return false
-  if (isSupervisor(me)) return true
+  if (me.role === 'admin') return true
   return Boolean(lead.ownerId) && lead.ownerId === me.id
 }
 
 /** Why an action is unavailable, or null when the person may work this lead. Mirrors candidate-access.ts wording. */
 export function leadRefusal(me: LeadActor | null | undefined, lead: Pick<Lead, 'ownerId'> | null | undefined, ownerName?: string | null): string | null {
   if (canWorkLead(me, lead)) return null
-  if (!lead?.ownerId) return 'This lead has no recruiter yet. Only a manager or an admin can work on it.'
-  return `This lead is assigned to ${ownerName || 'another recruiter'}. Only they, a manager or an admin can work on it.`
+  if (!lead?.ownerId) return 'This lead has no recruiter yet. Only the admin can assign it.'
+  return `This lead is assigned to ${ownerName || 'another recruiter'}. Only they or the admin can work on it.`
 }
 
 /** Convert needs the lead to be workable and not converted already. */
@@ -502,6 +507,9 @@ export function convertRefusal(me: LeadActor | null | undefined, lead: Pick<Lead
   if (lead?.candidateId) return 'This lead is already a candidate.'
   return null
 }
+
+/** Why Convert to candidate is unavailable before the resume arrives (also the server's `resume_required` refusal). */
+export const RESUME_REQUIRED_REASON = 'Upload the resume first. A lead becomes a candidate only after the resume is received.'
 
 /* ------------------------------------------------------------- file checks */
 
@@ -650,7 +658,7 @@ export interface ImportResponse {
   fileName: string
   fileSize: number
   fileSha256: string
-  sameFileBefore?: { batchId: string; uploadedAt: string; rowsNew: number } | null
+  sameFileBefore?: { batchId: string | null; uploadedAt: string | null; rowsNew: number | null } | null  // details are null for someone who did not upload that earlier file
   format?: string
   encoding?: string
   delimiter?: string

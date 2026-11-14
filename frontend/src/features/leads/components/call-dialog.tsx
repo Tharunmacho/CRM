@@ -19,7 +19,7 @@ interface Props {
 
 const addDays = (days: number) => { const date = new Date(); date.setDate(date.getDate() + days); date.setHours(10, 0, 0, 0); return toLocalInput(date.toISOString()) }
 
-/** Log a call: what happened, a note, and when to call again. The server moves the status (shown before saving). */
+/** Add remarks: what happened, a note, and when to call again. The server moves the status (shown before saving). */
 export function CallDialog({ lead, onClose, onSaved, blockedReason, onGateRefusal }: Props) {
   const [outcome, setOutcome] = useState('answered')
   const [remarks, setRemarks] = useState('')
@@ -45,16 +45,16 @@ export function CallDialog({ lead, onClose, onSaved, blockedReason, onGateRefusa
     } catch (e) {
       const gate = gateFromRefusal(e)
       if (gate) onGateRefusal(gate)
-      setError(e instanceof Error ? e.message : 'The call was not saved. Please try again.')
+      setError(e instanceof Error ? e.message : 'The remarks were not saved. Please try again.')
     } finally { setBusy(false) }
   }
 
   return (
-    <Dialog open onClose={onClose} title="Log a call" width="md"
+    <Dialog open onClose={onClose} title="Add remarks" width="md"
       description={`${lead.name || 'Lead'}${lead.phone ? ` · ${cleanPhone(lead.phone)}` : ''}`}
       footer={<>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={busy || Boolean(blockedReason)} title={blockedReason ?? undefined} icon={<PhoneCall className="h-4 w-4" />} onClick={() => void save()}>{busy ? 'Saving…' : 'Save call'}</Button>
+        <Button variant="primary" disabled={busy || Boolean(blockedReason)} title={blockedReason ?? undefined} icon={<PhoneCall className="h-4 w-4" />} onClick={() => void save()}>{busy ? 'Saving…' : 'Save remarks'}</Button>
       </>}>
       <div className="ld-form">
         {blockedReason && <p className="ld-locked" role="alert"><Lock size={15} aria-hidden="true" />{blockedReason}</p>}

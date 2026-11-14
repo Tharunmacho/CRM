@@ -21,3 +21,8 @@
   .ld-bulk { padding: 10px 12px; }
   .ld-sundo { right: 12px; left: 12px; bottom: 12px; max-width: none; }
 }
+
+@media (max-width: 760px) {
+  .ld-bulk-who, .ld-bulk-acts { width: 100%; }
+  .ld-bulk-acts > .ui-button { flex: 1 1 auto; }
+}

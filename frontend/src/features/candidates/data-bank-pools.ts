@@ -72,12 +72,46 @@ export function assignWaitingMessage(result: AssignWaitingResult): { text: strin
   return { text: `Assigned ${plural(result.assigned, 'waiting candidate')}.${rest}`, tone: result.remaining > 0 ? 'warn' : 'ok' }
 }
 
+/** What POST /api/candidates/unassign answers. */
+export interface UnassignResult {
+  unassigned: number
+  alreadyUnassigned: number
+  refused: { id: string; name: string; reason: string }[]
+}
+
+/** Only the admin takes a candidate back from a recruiter, and only one who has a recruiter. */
+export const canUnassignCandidate = (role: string | undefined, ownerId: string | null | undefined): boolean => role === 'admin' && Boolean(ownerId?.trim())
+
+/** The confirmation before making candidates "Not assigned": who they leave and what follows. */
+export function unassignCopy(count: number, name?: string, ownerName?: string): { title: string; lines: string[]; confirmLabel: string } {
+  const one = count === 1
+  const who = one ? (name || 'This candidate') : plural(count, 'candidate')
+  const from = one && ownerName ? ownerName : 'their recruiter'
+  return {
+    title: one ? 'Make this candidate unassigned' : `Make ${count} candidates unassigned`,
+    lines: [
+      `${who} will be taken back from ${from} and will not be assigned to anyone.`,
+      `They go back to Not assigned, where you can choose a recruiter or use Assign waiting candidates. Follow-up reminders and untouched initial calls of ${one && ownerName ? ownerName : 'the recruiter'} are removed.`,
+      'Candidates who are on an order or have open stage work stay with their recruiter: reassign them instead.',
+    ],
+    confirmLabel: one ? 'Make unassigned' : `Make ${count} unassigned`,
+  }
+}
+
+/** The toast after the server answered: what was freed and what stayed, with the server's reasons. */
+export function unassignMessage(result: UnassignResult): { text: string; tone: 'ok' | 'warn' } {
+  const done = result.unassigned > 0 ? `${plural(result.unassigned, 'candidate')} made unassigned.` : 'Nobody was changed.'
+  const already = result.alreadyUnassigned > 0 ? ` ${plural(result.alreadyUnassigned, 'candidate')} had no recruiter already.` : ''
+  const refused = result.refused.length > 0 ? ` ${result.refused.map((item) => item.reason).join(' ')}` : ''
+  return { text: `${done}${already}${refused}`, tone: result.refused.length > 0 || result.unassigned === 0 ? 'warn' : 'ok' }
+}
+
 export function emptyPoolCopy(pool: DataBankPool): { title: string; description: string } | null {
   switch (pool) {
     case 'not_interested':
       return { title: 'Nobody is marked not interested', description: 'Candidates who are not interested show up here, so you can offer them another order later.' }
     case 'unassigned':
-      return { title: 'No candidates are waiting for a recruiter', description: 'New candidates stay here until an admin or a manager assigns a recruiter.' }
+      return { title: 'No candidates are waiting for a recruiter', description: 'New candidates stay here until the admin assigns a recruiter.' }
     case 'needs_review':
       return { title: 'Nothing needs review', description: 'Candidates with missing details or document problems show up here until a recruiter checks them.' }
     default:

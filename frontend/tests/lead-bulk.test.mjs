@@ -126,3 +126,27 @@ test('undo: remembers the previous status, restores it with the previous value, 
   assert.equal(b.undoAlive(entry, 1000 + b.UNDO_MS), false)
   assert.equal(b.undoAlive(null), false)
 })
+
+test('make unassigned: ownerId "none", its own confirmation and toast wording', () => {
+  assert.equal(b.UNASSIGNED, 'none')
+  assert.deepEqual(b.bulkBody({ ids: ['a', 'b'], allMatching: false }, {}, 2, 'assign', { ownerId: b.UNASSIGNED }), { action: 'assign', ids: ['a', 'b'], ownerId: 'none' })
+  const copy = b.confirmCopy({ action: 'assign', count: 3, allMatching: false, ownerName: 'none' })
+  assert.equal(copy.title, 'Make 3 leads unassigned')
+  assert.equal(copy.confirmLabel, 'Make 3 leads unassigned')
+  assert.match(copy.lines[0], /^3 leads will be taken back from their recruiter and will not be assigned to anyone\.$/)
+  assert.match(copy.lines[1], /status and history stay/)
+  assert.equal(copy.danger, false)
+  assert.equal(b.resultVerb('assign', 'none'), 'made unassigned')
+  assert.equal(b.resultVerb('assign', 'u1'), 'assigned')
+  assert.equal(b.resultToast({ updated: 2, skipped: 1, skippedReasons: [{ code: 'already_unassigned', count: 1, message: 'already not assigned to anyone' }] }, b.resultVerb('assign', 'none')),
+    '2 leads made unassigned, 1 skipped (1 already not assigned to anyone).')
+})
+
+test('make unassigned for one lead names the person it is taken from', () => {
+  const copy = b.unassignOneCopy('Priya Nair', 'Asha Nair')
+  assert.equal(copy.title, 'Make this lead unassigned')
+  assert.equal(copy.confirmLabel, 'Make unassigned')
+  assert.match(copy.lines[0], /^Priya Nair will be taken back from Asha Nair and will not be assigned to anyone\.$/)
+  assert.match(copy.lines[1], /^Asha Nair no longer sees it/)
+  assert.match(b.unassignOneCopy('', '').lines[0], /^This lead will be taken back from the current recruiter/)
+})

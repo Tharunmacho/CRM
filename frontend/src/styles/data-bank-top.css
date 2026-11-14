@@ -69,3 +69,21 @@
   .dbt-bar > .custom-select { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .dbs-card { transition: none; } }
+
+/* ---- staff scope switch: "My new candidates" / "All candidates" */
+.dbt-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 16px 22px 0; }
+.dbt-scope .db-seg { max-width: 100%; }
+.dbt-scope .db-seg-btn { width: auto; min-width: 0; height: 36px; padding: 0 14px; font-size: 13px; font-weight: 500; line-height: 1; white-space: nowrap; }
+.dbt-scope-note { margin: 0; min-width: 0; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
+@media (max-width: 640px) {
+  .dbt-scope { padding: 14px 16px 0; }
+  .dbt-scope .db-seg { width: 100%; }
+  .dbt-scope .db-seg-btn { flex: 1 1 0; height: 44px; padding: 0 8px; }
+}
+
+@media (max-width: 640px) {
+  .dbt-toolbar .dbp-mode { width: 100%; height: auto; }
+  .dbt-toolbar .dbp-mode button { flex: 1 1 0; height: 44px; }
+  .dbt-subtools { flex-wrap: wrap; }
+  .dbt-subbar .db-seg { max-width: 100%; }
+}

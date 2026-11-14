@@ -73,9 +73,6 @@ html:has(.lg-page), body:has(.lg-page) { height: 100dvh; overflow: hidden; backg
 .lg-top { grid-area: top; display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; max-width: 420px; justify-self: center; min-width: 0; margin: 0 0 clamp(14px, 3dvh, 30px); }
 .lg-logo { display: block; min-width: 0; }
 .lg-logo-img { display: block; width: auto; height: var(--lg-logo-h); max-width: 100%; object-fit: contain; }
-.lg-logo-dark { display: none; }
-[data-theme="dark"] .lg-logo-light { display: none; }
-[data-theme="dark"] .lg-logo-dark { display: block; }
 .lg-theme { display: grid; place-items: center; flex: none; align-self: flex-start; width: 44px; height: 44px; border: 1px solid var(--lg-border); border-radius: 12px; background: var(--bg-card); color: var(--lg-muted); cursor: pointer; transition: background-color .14s, color .14s, border-color .14s, transform .14s; }
 .lg-theme:hover { border-color: var(--lg-blue); background: color-mix(in srgb, var(--lg-blue) 8%, var(--bg-card)); color: var(--lg-blue); }
 .lg-theme:active { transform: scale(.94); }

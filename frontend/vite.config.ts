@@ -73,6 +73,25 @@ function earlyChunks(apiBase = ''): Plugin {
   }
 }
 
+type ModuleLookup = (id: string) => { importedIds: readonly string[] } | null
+
+/** Every module the entry bundle imports statically (directly or through others), found once per build from `src/main.tsx`. */
+let entryGraph: Set<string> | null = null
+function inEntryGraph(id: string, getModuleInfo: ModuleLookup): boolean {
+  if (!entryGraph) {
+    const seen = new Set<string>()
+    const pending = [path.resolve(__dirname, 'src/main.tsx').split(path.sep).join('/')]
+    while (pending.length) {
+      const next = pending.pop() as string
+      if (seen.has(next)) continue
+      seen.add(next)
+      pending.push(...(getModuleInfo(next)?.importedIds ?? []))
+    }
+    entryGraph = seen
+  }
+  return entryGraph.has(id)
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, 'API_')
   const apiBase = loadEnv(mode, __dirname, 'VITE_').VITE_API_URL ?? ''
@@ -86,12 +105,17 @@ export default defineConfig(({ mode }) => {
           // Libraries change far less often than the app, so keeping them in their own files means a deploy
           // does not make every returning visitor download React again; charts stay out of every screen
           // except Reports.
-          manualChunks(id) {
+          manualChunks(id, { getModuleInfo }) {
             if (!id.includes('node_modules')) return undefined
             // clsx and tailwind-merge are used by every screen. Left unassigned, clsx was pulled into the charts chunk
             // (its other importer), so the entry bundle statically imported 375 KB of recharts on every page load.
             if (/node_modules\/(react|react-dom|scheduler|clsx|tailwind-merge)\//.test(id)) return 'vendor-react'
             if (/node_modules\/(react-router|react-router-dom|@remix-run)\//.test(id)) return 'vendor-router'
+            // lucide-react is one module per icon; left alone Rollup made a tiny chunk per icon (about 60), and every screen
+            // modulepreloaded the ones it uses. The icons the screens use go into one shared chunk (one request, cached across
+            // screens). Anything the entry bundle already imports stays with the entry, so first load does not download icons
+            // that only lazy screens use.
+            if (/node_modules\/lucide-react\//.test(id)) return inEntryGraph(id, getModuleInfo) ? undefined : 'vendor-icons'
             if (/node_modules\/(recharts|d3-[^/]+|victory-vendor|recharts-scale|internmap|decimal\.js-light)\//.test(id)) return 'vendor-charts'
             return undefined
           },

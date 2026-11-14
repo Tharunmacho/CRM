@@ -29,10 +29,10 @@ export interface AssignmentSources {
 
 const isManager = (role: string) => role === 'admin' || role === 'manager'
 
-/** Who may change what, by the rules of the contract: job, source and agency by an admin, a manager or the person working the candidate; the recruiter by an admin or a manager. */
+/** Who may change what, by the rules of the contract: job, source and agency by an admin, a manager or the person working the candidate; the recruiter by the admin only. */
 export function fallbackCan(me: { role: string }, canEdit: boolean): AssignmentData['can'] {
   const mayEdit = isManager(me.role) || canEdit
-  return { job: mayEdit, source: mayEdit, agency: mayEdit, recruiter: isManager(me.role) }
+  return { job: mayEdit, source: mayEdit, agency: mayEdit, recruiter: me.role === 'admin' }
 }
 
 /** Every client with its jobs (title, reference, openings, status), built from the workspace. Inactive clients only when they are the current one. */

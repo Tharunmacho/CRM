@@ -465,3 +465,16 @@
 .db-mini .db-mini-foot .db-act.is-label { flex: 1 1 auto; min-width: max-content; }
 
 .db-act.is-danger:hover:not(:disabled) { color: var(--error-ink); border-color: var(--error-edge); background: var(--error-fill); }
+
+/* The row menu never outgrows a short window: it scrolls inside itself (position is also nudged on screen by RowMenu). */
+.db-menu { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; }
+/* Phones: numbered pager buttons and the go-to-page box are thumb sized */
+@media (max-width: 640px), (pointer: coarse) {
+  .db-pager-num { min-width: 40px; height: 40px; }
+  .db .db-pager-go input { width: 72px; height: 44px; font-size: 16px; }
+  .db-pager-go { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .db-review-trigger { min-height: 40px; padding: 6px 10px; }
+  .db-review-popover header button { width: 40px; height: 40px; margin: -8px -8px 0 0; }
+}

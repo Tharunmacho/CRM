@@ -150,7 +150,7 @@
 :root:root .companies-v2 .record-avatar, :root:root .cd-head > .cl-avatar { background: color-mix(in srgb, var(--av, var(--primary)) 26%, var(--bg-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--av, var(--primary)) 28%, transparent); }
 /* Other round icon badges become rounded squares too. */
 :root:root :is(
-  .rv-icon, .mb-intake-icon, .mb-draft-icon, .dr-intake-icon, .staff-ownership-icon, .att-clock-icon, .att-chip-icon, .tk-meter-icon,
+  .rv-icon, .mb-intake-icon, .mb-draft-icon, .dr-intake-icon, .staff-ownership-icon, .att-clock-icon, .tk-meter-icon,
   .jv-icon-tile, .jv-option-icon, .dr-empty > span, .metric-icon, .mb-prov, .uv-state-icon
 ) { border-radius: 10px; }
 :root:root :is(.wa-welcome-icon) { border-radius: 20px; }
@@ -162,7 +162,7 @@
   border-radius: 8px; background: color-mix(in srgb, var(--b-dot, var(--text-light)) 6%, transparent); color: var(--b-ink);
 }
 :root:root .ui-badge-dot[data-tone='ink'] { border-color: var(--text-main); background: var(--text-main); color: var(--on-primary); }
-:root:root :is(.ui-badge-chip, .mb-chip, .staff-tag, .att-chip) { border-radius: 8px; }
+:root:root :is(.ui-badge-chip, .mb-chip, .staff-tag) { border-radius: 8px; }
 :root:root .ui-badge-mark { width: 7px; height: 7px; border-radius: 50%; }
 :root:root :is(.db-pill, .dr-pill, .tk-pill, .cl-pill, .att-pill, .ac .ac-pill, .ac-dup .ac-pill, .jv-status, .td-chip, .td-chips .td-prio-pill, .dr-count, .att-count) {
   border: 1px solid color-mix(in srgb, currentColor 38%, transparent); border-radius: 8px; background: color-mix(in srgb, currentColor 6%, transparent);

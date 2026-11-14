@@ -14,8 +14,8 @@ interface Props {
   onMoreToggle: () => void
   canClear: boolean
   onClear: () => void
-  /** Staff only see their own leads in the "assigned" filter choices that make sense. */
-  supervisor: boolean
+  /** Only an admin sees every lead, so only an admin gets the "Unassigned" and per-recruiter choices; managers and staff see only their own leads. */
+  canAssign: boolean
 }
 
 /** Keep a value the data no longer offers visible, so a saved filter never silently disappears. */
@@ -25,7 +25,7 @@ const withCurrent = (list: string[] | undefined, current: string) => (current &&
  * The filter row of white selects (campaign, position, country, status, platform, assigned to) and a "More filters"
  * drawer for the date range. Same markup and styles as the Data Bank's filters, so the two screens read alike.
  */
-export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpen, onMoreToggle, canClear, onClear, supervisor }: Props) {
+export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpen, onMoreToggle, canClear, onClear, canAssign }: Props) {
   const today = todayKey()
   const choice = (key: keyof LeadFilters, label: string, any: string, options: [string, string][]) => (
     <span className="db-sel">
@@ -48,10 +48,10 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
         {choice('platform', 'Filter by platform', 'Any platform', withCurrent(facets?.platforms, filters.platform).map((item) => [item, `${PLATFORM_LABEL[platformKind(item)]}${platformKind(item) === 'other' ? ` (${item})` : ''}`]))}
         <span className="db-sel">
           <Select aria-label="Filter by who the lead is assigned to" value={filters.assigned} onChange={(event) => onChange({ assigned: event.target.value })}>
-            <option value="">{supervisor ? 'All leads' : 'All leads'}</option>
+            <option value="">All leads</option>
             <option value="me">Assigned to me</option>
-            {supervisor && <option value="none">Unassigned</option>}
-            {supervisor && users.filter((user) => user.role !== 'admin' && user.id !== meId).map((user) => <option key={user.id} value={user.id}>{user.name}{!user.active ? ' (inactive)' : ''}</option>)}
+            {canAssign && <option value="none">Unassigned</option>}
+            {canAssign && users.filter((user) => user.role !== 'admin' && user.id !== meId).map((user) => <option key={user.id} value={user.id}>{user.name}{!user.active ? ' (inactive)' : ''}</option>)}
           </Select>
         </span>
         <span className="db-more-cell">

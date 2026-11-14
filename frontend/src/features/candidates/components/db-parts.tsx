@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, MoreHorizontal, Rows3, type LucideIcon } from 'lucide-react'
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
@@ -248,6 +248,15 @@ export function RowMenu({ label, items }: { label: string; items: RowMenuItem[] 
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState({ top: 0, left: 0 })
   const trigger = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  /* The menu is as tall and wide as its labels need (44px rows on touch screens): once drawn, nudge it back inside the window so no item is ever cut off. */
+  useLayoutEffect(() => {
+    if (!open || !menu.current) return
+    const rect = menu.current.getBoundingClientRect()
+    const left = Math.max(8, Math.min(at.left, window.innerWidth - 8 - rect.width))
+    const top = Math.max(8, Math.min(at.top, window.innerHeight - 8 - rect.height))
+    if (left !== at.left || top !== at.top) setAt({ top, left })
+  }, [open, at.left, at.top])
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
@@ -278,7 +287,7 @@ export function RowMenu({ label, items }: { label: string; items: RowMenuItem[] 
         <MoreHorizontal size={16} />
       </button>
       {open && createPortal(
-        <div className="db-menu" role="menu" style={{ top: at.top, left: at.left }}>
+        <div ref={menu} className="db-menu" role="menu" style={{ top: at.top, left: at.left }}>
           {items.map(({ label: text, icon: Icon, onSelect, disabledReason }) => (
             <button key={text} type="button" role="menuitem" className="db-menu-item" disabled={Boolean(disabledReason)} title={disabledReason} onClick={(event) => { event.stopPropagation(); setOpen(false); onSelect() }}><Icon size={15} aria-hidden="true" />{text}</button>
           ))}

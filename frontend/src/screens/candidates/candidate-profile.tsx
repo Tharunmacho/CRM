@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Trash2, Unlink, UserCog, UserPlus, ListChecks, Lock } from 'lucide-react'
+import { ArrowLeft, BookUser, Briefcase, ChevronDown, Download, FileText, GitBranch, History, Link2, Mail, MapPin, MessageCircle, Pencil, Phone, PhoneCall, Trash2, Unlink, UserCog, UserMinus, UserPlus, ListChecks, Lock } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateLabel, dateTimeLabel, money, smartTime } from '@/shared/lib/format'
 import { DOCUMENT_HELP, newestFileVersions } from '@/shared/lib/document-files'
@@ -35,6 +35,8 @@ import { EmailEvidenceHistory } from '@/features/inbox/email-evidence-history'
 import { CandidateIntakeEvidence } from '@/features/candidates/components/candidate-intake-evidence'
 import { DocumentList } from '@/features/candidates/components/profile-documents'
 import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
+import { UnassignCandidatesDialog } from '@/features/staff/unassign-candidates-dialog'
+import { canUnassignCandidate } from '@/features/candidates/data-bank-pools'
 import { canDeleteCandidate, linkedConversationId, mapToOrderBlocker } from '@/features/candidates/profile-actions'
 import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-access'
 import { DeleteCandidateDialog } from '@/features/candidates/components/delete-candidate-dialog'
@@ -164,6 +166,7 @@ export default function CandidateProfilePage() {
   const [mapping, setMapping] = useState(false)
   const [editing, setEditing] = useState(false)
   const [reassigning, setReassigning] = useState(false)
+  const [unassigning, setUnassigning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [unmapping, setUnmapping] = useState<string | null>(null)
   const [unmapSaving, setUnmapSaving] = useState(false)
@@ -177,7 +180,7 @@ export default function CandidateProfilePage() {
   useEffect(() => {
     let live = true
     setLoadedId(null); setLoadError('')
-    setOpenApp(null); setCalling(false); setMapping(false); setEditing(false); setReassigning(false); setDeleting(false); setUnmapping(null)
+    setOpenApp(null); setCalling(false); setMapping(false); setEditing(false); setReassigning(false); setUnassigning(false); setDeleting(false); setUnmapping(null)
     const request = retry ? refresh.current.refresh({ keepCurrent: true }) : refresh.current.ensureFresh()
     request.then(() => {
       if (live) setLoadedId(id ?? null)
@@ -218,7 +221,7 @@ export default function CandidateProfilePage() {
   useEffect(() => { setOcr({}); setFullText(null) }, [id])
   // Live updates already refresh `cand` underneath an open form without touching what was typed (each dialog keeps
   // its own state). If a change from the server altered this candidate while a dialog is open, say so once.
-  const dialogOpen = editing || calling || mapping || reassigning || deleting || openApp !== null || unmapping !== null
+  const dialogOpen = editing || calling || mapping || reassigning || unassigning || deleting || openApp !== null || unmapping !== null
   const dialogOpenRef = useRef(dialogOpen)
   dialogOpenRef.current = dialogOpen
   const liveChangeAt = useRef(0)
@@ -389,7 +392,7 @@ export default function CandidateProfilePage() {
               <Button className="mt-3" onClick={() => setEvidenceRetry(value => value + 1)}>Try again</Button>
             </Panel>
           )}
-          <CandidateSections cand={{ ...displayCandidate, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={canAssign} />
+          <CandidateSections cand={{ ...displayCandidate, resumeText: fullText?.id === id ? fullText.text : '' }} model={model} ocr={ocr} canViewFullIdNumbers={store.can('work_any_candidate')} />
         </div>
         <section id="profile-recruitment" data-profile-tab="Recruitment" aria-label="Recruitment" className="cp-group">
           {(apps.length > 0 || !deployed) && <ProfileCard title="Recruitment pipeline" icon={<GitBranch size={17} />} meta={apps.length ? `${apps.length} ${apps.length === 1 ? 'order' : 'orders'}` : undefined}>
@@ -466,7 +469,10 @@ export default function CandidateProfilePage() {
            
             title="Recruiter"
             icon={<UserCog size={17} />}
-            action={canAssign && <Button size="sm" onClick={() => setReassigning(true)}>{cand.ownerId ? 'Reassign' : 'Assign'}</Button>}
+            action={canAssign && <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={() => setReassigning(true)}>{cand.ownerId ? 'Reassign' : 'Assign'}</Button>
+              {canUnassignCandidate(store.me.role, cand.ownerId) && <Button size="sm" variant="secondary" icon={<UserMinus />} onClick={() => setUnassigning(true)}>Make unassigned</Button>}
+            </div>}
           >
             <div className="cp-owner">
               {owner ? <RecordIdentity name={owner.name} detail={ownerRole} /> : <RecordIdentity name="Not assigned" detail="Choose a recruiter to start the initial call" icon={UserCog} />}
@@ -517,6 +523,7 @@ export default function CandidateProfilePage() {
       {deleting && <DeleteCandidateDialog open candidateId={cand.id} name={cand.name} onClose={() => setDeleting(false)}
         onDeleted={() => { navigate('/data-bank', { replace: true }) }} />}
       {mapping && <MapToOrderDialog open onClose={() => setMapping(false)} candidateId={cand.id} />}
+      {unassigning && <UnassignCandidatesDialog candidateIds={[cand.id]} onClose={() => setUnassigning(false)} />}
       {reassigning && <ReassignCandidatesDialog candidateIds={[cand.id]} onClose={() => setReassigning(false)} description={cand.ownerId ? 'Change the recruiter responsible for this candidate and their open tasks.' : 'Choose a recruiter. Once assigned, the initial call task starts.'} />}
       <Dialog
         open={!!unmapApp}

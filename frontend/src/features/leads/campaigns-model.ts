@@ -121,6 +121,6 @@ export function campaignFilterFor(row: Pick<CampaignRow, 'campaign' | 'isTotal'>
 /** The empty-state wording by role. */
 export function emptyCampaigns(scope: 'all' | 'mine' | undefined): { title: string; description: string } {
   return scope === 'mine'
-    ? { title: 'No campaigns yet', description: 'When a manager assigns leads to you, the campaigns they came from are listed here with your own counts.' }
+    ? { title: 'No campaigns yet', description: 'When the admin assigns leads to you, the campaigns they came from are listed here with your own counts.' }
     : { title: 'No campaigns yet', description: 'Upload a lead sheet and every ad campaign in it gets a row here with its counts and conversion rate.' }
 }

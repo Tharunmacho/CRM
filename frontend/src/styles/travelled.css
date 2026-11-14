@@ -103,3 +103,33 @@
 @media (max-width: 420px) {
   .tv-filter-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Touch screens: 40px targets, 8px apart, 16px fields (no zoom on focus), cards that never push the page wider. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .tv-quick-btn, .tv-toggle { min-height: 40px; }
+  .tv-chip { min-height: 36px; }
+  .tv-clear, .tv-more { min-height: 40px; }
+  .tv-crumbs button, .tv-crumbs .is-here { min-height: 36px; display: inline-flex; align-items: center; padding: 2px 8px; }
+  .tv-bars button { min-height: 44px; }
+  .tv-breakdown-panel > summary { display: flex; align-items: center; min-height: 40px; }
+  .tv-doc-details > summary { display: inline-flex; align-items: center; min-height: 40px; }
+  .tv-filter-grid :is(input, select, textarea, .ui-input, .custom-select-trigger, .date-picker-trigger) { font-size: 16px; }
+  .tv-filter-grid :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { min-height: 44px; }
+}
+@media (max-width: 720px) {
+  .tv { overflow-x: clip; }
+  .tv-alert { padding: 10px 12px; }
+  .tv-break { padding: 14px 16px 12px; }
+  .tv-toggle { width: 100%; justify-content: center; }
+  .tv-table td { overflow-wrap: anywhere; }
+  .tv-table td::before { margin-bottom: 2px; }
+  .tv-table a { display: inline-flex; align-items: center; min-height: 40px; }
+  .tv-table .tv-hint { margin-left: 4px; }
+  .tv-foot { padding: 12px 16px; }
+  .tv-doc-details ul { min-width: 0; }
+}
+@media (max-width: 420px) {
+  .tv-quick { gap: 8px; }
+  .tv-quick-btn { flex: 1 1 calc(50% - 4px); justify-content: center; }
+  .tv-bars.is-days { grid-template-columns: minmax(0, 1fr); }
+}

@@ -9,7 +9,7 @@ import { CountryPills } from '@/features/candidates/components/data-bank-columns
 import { downloadBatchReport, importLeads } from '../lead-api'
 import {
   CONFIDENCE_LABEL, EXTRA_FIELD, LEAD_ACCEPT, LEAD_FIELDS, LEAD_MAX_BYTES, applyOverrides, confidenceKind, countsOf, duplicateReason, duplicateTargets, fieldLabel, formatBytes,
-  REPORT_BUTTON, allNewLine, invalidReason, leadFileError, resultSummary, sampleValues, setMappingOverride, splitMappings,
+  REPORT_BUTTON, allNewLine, invalidReason, leadFileError, sampleValues, setMappingOverride, splitMappings,
   type ColumnInfo, type DuplicateRow, type ImportCounts, type ImportResponse, type InvalidRow, type Lead,
 } from '../lead-model'
 import { CreatedCell, PositionText } from './lead-columns'
@@ -17,6 +17,26 @@ import { CreatedCell, PositionText } from './lead-columns'
 type Stage = 'choose' | 'checking' | 'preview' | 'importing' | 'result'
 type PreviewTab = 'rows' | 'ignored' | 'invalid'
 type SampleRow = NonNullable<ImportResponse['sample']>[number]
+/** How many skipped rows matched an already stored (or earlier) lead by lead ID, phone number or e-mail. */
+type SkippedBy = { lead_id?: number; phone?: number; email?: number }
+type UploadResponse = ImportResponse & { duplicatesByReason?: SkippedBy }
+
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`
+
+/** The one plain sentence for a check or a result, e.g. "12 new leads added, 80 already in the sheet (skipped), 2 invalid rows". */
+function uploadSentence(counts: ImportCounts, tense: 'preview' | 'result'): string {
+  const parts = [tense === 'result' ? `${plural(counts.new, 'new lead', 'new leads')} added` : `${plural(counts.new, 'new lead', 'new leads')} will be added`,
+    `${counts.duplicate.toLocaleString()} already in the sheet (${tense === 'result' ? 'skipped, not added again' : 'will be skipped'})`]
+  if (counts.invalid > 0) parts.push(`${plural(counts.invalid, 'invalid row', 'invalid rows')} (${tense === 'result' ? 'not added' : 'will not be added'})`)
+  return parts.join(', ')
+}
+
+/** "Matched by: 78 lead ID, 2 phone number" for the skipped rows, or null when none were skipped. */
+function skippedByLine(by: SkippedBy | undefined, duplicate: number): string | null {
+  if (!duplicate || !by) return null
+  const parts = ([['lead_id', 'lead ID'], ['phone', 'phone number'], ['email', 'e-mail']] as const).filter(([key]) => (by[key] ?? 0) > 0).map(([key, label]) => `${(by[key] ?? 0).toLocaleString()} by ${label}`)
+  return parts.length ? `Already in the sheet, matched ${parts.join(', ')}. Nothing stored was changed.` : null
+}
 
 interface Props {
   open: boolean
@@ -26,6 +46,10 @@ interface Props {
   onImported: (result: ImportResponse) => void
   /** "View new leads": close the dialog and filter the table to the batch. */
   onViewBatch: (batchId: string) => void
+  /** Only an admin hands out leads; for everyone else the "Assign new leads to" choice is hidden. */
+  canAssign?: boolean
+  /** The import report downloads are admin-only on the server; for everyone else they are hidden. */
+  canReport?: boolean
 }
 
 const ASSIGN_KEEP = ''
@@ -57,8 +81,8 @@ function Counts({ counts }: { counts: ImportCounts }) {
   const cards: { label: string; value: number; note: string; tone: string }[] = [
     { label: 'Rows in file', value: counts.total, note: 'people found', tone: '' },
     { label: 'New', value: counts.new, note: 'will be added', tone: 'ok' },
-    { label: 'Already stored', value: counts.duplicate, note: 'will be ignored', tone: counts.duplicate ? 'warn' : '' },
-    { label: 'Invalid', value: counts.invalid, note: 'no usable phone or email', tone: counts.invalid ? 'bad' : '' },
+    { label: 'Already in the sheet', value: counts.duplicate, note: 'will be skipped', tone: counts.duplicate ? 'warn' : '' },
+    { label: 'Invalid', value: counts.invalid, note: 'not added: no usable phone or email', tone: counts.invalid ? 'bad' : '' },
     { label: 'In the Data Bank', value: counts.existingCandidate, note: 'already candidates', tone: counts.existingCandidate ? 'info' : '' },
   ]
   return (
@@ -129,7 +153,7 @@ const previewColumns: DbColumn<SampleRow>[] = [
   { key: 'country', header: 'Country interest', width: 108, render: (l) => <CountryPills value={l.countryInterest} /> },
   {
     key: 'outcome', header: 'Result', width: 92,
-    render: (l) => <span className={cn('db-tone', l.outcome === 'new' ? 'is-ok' : l.outcome === 'invalid' ? 'is-bad' : 'is-warn')}>{l.outcome === 'new' ? 'Will be added' : l.outcome === 'invalid' ? 'Invalid' : 'Ignored'}</span>,
+    render: (l) => <span className={cn('db-tone', l.outcome === 'new' ? 'is-ok' : l.outcome === 'invalid' ? 'is-bad' : 'is-warn')}>{l.outcome === 'new' ? 'Will be added' : l.outcome === 'invalid' ? 'Invalid' : 'Already in sheet'}</span>,
   },
 ]
 
@@ -137,7 +161,7 @@ const duplicateColumns: DbColumn<DuplicateRow>[] = [
   { key: 'row', header: 'Row', width: 64, render: (r) => <span className="tnum db-num">{r.row}</span> },
   { key: 'name', header: 'Name', width: 160, render: (r) => <strong className="db-clamp">{r.name || 'Unnamed'}</strong> },
   { key: 'phone', header: 'Phone', width: 160, render: (r) => <span className="ident db-num">{r.phone || '–'}</span> },
-  { key: 'reason', header: 'Why it was ignored', width: 280, render: (r) => <span className="db-tone is-warn">{duplicateReason(r)}</span> },
+  { key: 'reason', header: 'Why it will be skipped', width: 280, render: (r) => <span className="db-tone is-warn">{duplicateReason(r)}</span> },
 ]
 
 const invalidColumns: DbColumn<InvalidRow>[] = [
@@ -147,16 +171,16 @@ const invalidColumns: DbColumn<InvalidRow>[] = [
   { key: 'reason', header: 'Problem', width: 280, render: (r) => <span className="db-tone is-bad">{invalidReason(r)}</span> },
 ]
 
-export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatch }: Props) {
+export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatch, canAssign = true, canReport = false }: Props) {
   const [stage, setStage] = useState<Stage>('choose')
   const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<ImportResponse | null>(null)
+  const [preview, setPreview] = useState<UploadResponse | null>(null)
   const [overrides, setOverrides] = useState<Record<string, string | null>>({})
   const [tab, setTab] = useState<PreviewTab>('rows')
   const [error, setError] = useState('')
   const [assign, setAssign] = useState(ASSIGN_KEEP)
   const [label, setLabel] = useState('')
-  const [result, setResult] = useState<ImportResponse | null>(null)
+  const [result, setResult] = useState<UploadResponse | null>(null)
   const [reporting, setReporting] = useState(false)
   const run = useRef(0)
 
@@ -199,7 +223,7 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
     const mine = ++run.current
     setStage('importing'); setError('')
     try {
-      const data = await importLeads(file, { dryRun: false, mapping: overrides, label, assignTo: assign || undefined })
+      const data = await importLeads(file, { dryRun: false, mapping: overrides, label, assignTo: (canAssign && assign) || undefined })
       if (mine !== run.current) return
       setResult(data); setStage('result'); onImported(data)
     } catch (e) {
@@ -223,8 +247,8 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
   const footer = stage === 'result' && result && resultCounts ? (
     <>
       <Button variant="secondary" onClick={reset}>Upload another file</Button>
-      {result.batchId && <Button variant="secondary" icon={<Download className="h-4 w-4" />} disabled={reporting} onClick={() => void report(result.batchId as string)}>{reporting ? 'Preparing…' : REPORT_BUTTON}</Button>}
-      {result.batchId && <Button variant="secondary" disabled={reporting} onClick={() => void report(result.batchId as string, 'csv')}>CSV</Button>}
+      {canReport && result.batchId && <Button variant="secondary" icon={<Download className="h-4 w-4" />} disabled={reporting} onClick={() => void report(result.batchId as string)}>{reporting ? 'Preparing…' : REPORT_BUTTON}</Button>}
+      {canReport && result.batchId && <Button variant="secondary" disabled={reporting} onClick={() => void report(result.batchId as string, 'csv')}>CSV</Button>}
       {result.batchId && <Button variant="primary" onClick={() => onViewBatch(result.batchId as string)}>View new leads</Button>}
     </>
   ) : stage === 'preview' || stage === 'importing' || (stage === 'checking' && preview) ? (
@@ -241,7 +265,7 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
   const sample = (preview?.sample ?? []).slice(0, PREVIEW_ROWS)
   return (
     <Dialog open={open} onClose={() => { if (stage !== 'importing') onClose() }} title="Upload leads" width="xl"
-      description={stage === 'result' ? undefined : 'Add the sheet your ad platform gave you. We check it first and save nothing until you confirm. People who are already stored are skipped, so nobody is added twice.'}
+      description={stage === 'result' ? undefined : 'Add the sheet your ad platform gave you. We check it first and save nothing until you confirm. Only new people are added: anyone already in the sheet (same lead ID, phone number or e-mail) is skipped and never added twice or changed.'}
       footer={footer}>
       <div className="ld-upload-body">
         {error && <p role="alert" className="ld-alert"><AlertTriangle size={16} aria-hidden="true" /><span>{error}</span></p>}
@@ -264,20 +288,21 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
             </div>
 
             {preview.sameFileBefore && (
-              <p className="ld-warn is-block" role="alert"><AlertTriangle size={16} aria-hidden="true" /><span><strong>This exact file was uploaded before</strong> ({new Date(preview.sameFileBefore.uploadedAt).toLocaleDateString()}). You can still import it, but it will add no new leads.</span></p>
+              <p className="ld-warn is-block" role="alert"><AlertTriangle size={16} aria-hidden="true" /><span><strong>This exact file was uploaded before</strong> {preview.sameFileBefore.uploadedAt ? <>({new Date(preview.sameFileBefore.uploadedAt).toLocaleDateString()})</> : null}. You can still import it, but nothing new will be added.</span></p>
             )}
 
+            {counts && <p className="ld-map-foot" role="status"><strong>{uploadSentence(counts, 'preview')}.</strong>{skippedByLine(preview.duplicatesByReason, counts.duplicate) ? ` ${skippedByLine(preview.duplicatesByReason, counts.duplicate)}` : ''}</p>}
             {counts && <Counts counts={counts} />}
 
             <section className="ld-section ld-options">
-              <label className="ld-opt">
+              {canAssign && <label className="ld-opt">
                 <span>Assign new leads to</span>
                 <Select aria-label="Assign new leads to" value={assign} disabled={busy} onChange={(event) => setAssign(event.target.value)}>
                   <option value={ASSIGN_KEEP}>Nobody yet (assign later)</option>
                   <option value={ASSIGN_EVEN}>Distribute evenly between available staff</option>
                   {staff.map((user) => <option key={user.id} value={user.id}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
                 </Select>
-              </label>
+              </label>}
               <label className="ld-opt">
                 <span>Campaign name for rows without one <em>(optional)</em></span>
                 <Input value={label} maxLength={80} disabled={busy} placeholder="e.g. Dubai chef ads, week 45" onChange={(event) => setLabel(event.target.value)} />
@@ -292,7 +317,7 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
             <section className="ld-section">
               <div className="ld-tabs" role="tablist" aria-label="Preview">
                 <button type="button" role="tab" aria-selected={tab === 'rows'} className={cn(tab === 'rows' && 'is-on')} onClick={() => setTab('rows')}>First {Math.min(PREVIEW_ROWS, sample.length)} rows</button>
-                <button type="button" role="tab" aria-selected={tab === 'ignored'} className={cn(tab === 'ignored' && 'is-on')} onClick={() => setTab('ignored')}>Ignored rows <span className="tnum">{preview.rowsDuplicate}</span></button>
+                <button type="button" role="tab" aria-selected={tab === 'ignored'} className={cn(tab === 'ignored' && 'is-on')} onClick={() => setTab('ignored')}>Already in the sheet <span className="tnum">{preview.rowsDuplicate}</span></button>
                 {preview.rowsInvalid > 0 && <button type="button" role="tab" aria-selected={tab === 'invalid'} className={cn(tab === 'invalid' && 'is-on')} onClick={() => setTab('invalid')}>Invalid <span className="tnum">{preview.rowsInvalid}</span></button>}
               </div>
               <div className="db ld-preview-table">
@@ -300,8 +325,8 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
                   ? <DbTable<SampleRow> variant="grid" label="First rows of the file" rows={sample} columns={previewColumns} rowKey={(l) => `${l.externalId ?? ''}-${l.phone ?? ''}-${l.email ?? ''}-${l.name ?? ''}-${l.createdTime ?? ''}`} />
                   : <p className="ld-empty">No rows to show.</p>)}
                 {tab === 'ignored' && (preview.duplicates.length
-                  ? <DbTable<DuplicateRow> variant="grid" label="Rows that will be ignored" rows={preview.duplicates} columns={duplicateColumns} rowKey={(r) => String(r.row)} />
-                  : <p className="ld-empty">Nothing will be ignored. Every row in the file is new.</p>)}
+                  ? <DbTable<DuplicateRow> variant="grid" label="Rows that will be skipped" rows={preview.duplicates} columns={duplicateColumns} rowKey={(r) => String(r.row)} />
+                  : <p className="ld-empty">None of these people are in the sheet yet. Every row in the file is new.</p>)}
                 {tab === 'invalid' && <DbTable<InvalidRow> variant="grid" label="Invalid rows" rows={preview.invalid} columns={invalidColumns} rowKey={(r) => String(r.row)} />}
               </div>
               {tab === 'ignored' && preview.duplicatesTruncated && <p className="ld-map-foot">Showing the first {preview.duplicates.length}. The full list is in the report after the import.</p>}
@@ -316,13 +341,13 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
         {stage === 'result' && result && resultCounts && (
           <div className="ld-result" role="status">
             <span className="ld-result-icon"><CheckCircle2 size={34} aria-hidden="true" /></span>
-            <h3>{resultCounts.new > 0 ? `${resultCounts.new.toLocaleString()} new ${resultCounts.new === 1 ? 'lead' : 'leads'} added` : 'No new leads were added'}</h3>
-            <p>{resultSummary(resultCounts)}.{result.assignedCount ? ` ${result.assignedCount.toLocaleString()} assigned.` : ''}</p>
-            <p className="ld-map-foot">{allNewLine(resultCounts) ?? 'The report lists every row of the file with what happened to it.'}</p>
+            <h3>{resultCounts.new > 0 ? `${plural(resultCounts.new, 'new lead', 'new leads')} added` : 'No new leads were added'}</h3>
+            <p>{uploadSentence(resultCounts, 'result')}.{result.assignedCount ? ` ${result.assignedCount.toLocaleString()} assigned.` : ''}</p>
+            <p className="ld-map-foot">{resultCounts.new === 0 && resultCounts.duplicate > 0 ? 'Every person in this file is already in the sheet, so nobody was added a second time.' : (skippedByLine(result.duplicatesByReason, resultCounts.duplicate) ?? allNewLine(resultCounts) ?? 'The report lists every row of the file with what happened to it.')}</p>
             <div className="ld-counts is-three">
               <div className="ld-count is-ok"><span>Added</span><strong className="tnum">{resultCounts.new.toLocaleString()}</strong><small>new leads</small></div>
-              <div className={cn('ld-count', resultCounts.duplicate && 'is-warn')}><span>Duplicates ignored</span><strong className="tnum">{resultCounts.duplicate.toLocaleString()}</strong><small>already stored</small></div>
-              <div className={cn('ld-count', resultCounts.invalid && 'is-bad')}><span>Invalid</span><strong className="tnum">{resultCounts.invalid.toLocaleString()}</strong><small>skipped</small></div>
+              <div className={cn('ld-count', resultCounts.duplicate && 'is-warn')}><span>Already in the sheet</span><strong className="tnum">{resultCounts.duplicate.toLocaleString()}</strong><small>skipped, not added again</small></div>
+              <div className={cn('ld-count', resultCounts.invalid && 'is-bad')}><span>Invalid</span><strong className="tnum">{resultCounts.invalid.toLocaleString()}</strong><small>not added</small></div>
             </div>
             {resultCounts.existingCandidate > 0 && <p className="ld-map-foot">{resultCounts.existingCandidate} of the new leads already match a candidate in the Data Bank. Open the lead to link it.</p>}
           </div>

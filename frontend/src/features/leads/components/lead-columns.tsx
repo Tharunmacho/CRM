@@ -139,27 +139,47 @@ export function StatusText({ lead }: { lead: Lead }) {
   return <span className={cn('db-tone', `is-${status.tone}`)} title={status.label}>{status.label}</span>
 }
 
+/** Under the recruiter's name: once the resume is in the lead is clearly interested, and the Resume column already says the resume is in, so this line reads "Interested". */
+export function ContactStateText({ lead }: { lead: Lead }) {
+  if (lead.status !== 'resume_received') return <StatusText lead={lead} />
+  return <span className="db-tone is-ok" title="Interested: the resume has been received">Interested</span>
+}
+
+/** The assigned recruiter's full name ('' when nobody is assigned). */
+export const ownerNameOf = (lead: Lead, userById: LeadColumnContext['userById']) => (lead.ownerId ? (userById(lead.ownerId)?.name ?? lead.ownerName ?? 'Staff') : '')
+
 export function OwnerCell({ lead, userById }: { lead: Lead; userById: LeadColumnContext['userById'] }) {
-  const name = lead.ownerId ? (userById(lead.ownerId)?.name ?? lead.ownerName ?? 'Staff') : ''
+  const name = ownerNameOf(lead, userById)
   return name
-    ? <span className="db-owner" title={name}><Avatar name={name} size="sm" /><span>{name.split(' ')[0]}</span></span>
+    ? <span className="db-owner" title={name}><Avatar name={name} size="sm" /><span>{name}</span></span>
     : <span className="db-owner is-empty" title="Waiting for a recruiter"><UserCheck size={14} aria-hidden="true" /><span>Unassigned</span></span>
 }
 
-/** The status word over who is working the lead, and the next follow-up as a third line only when one is set. */
-export function StatusOwnerCell({ lead, userById }: { lead: Lead; userById: LeadColumnContext['userById'] }) {
+/** "Assigned to": the recruiter's full name (wrapping at spaces), the lead status under it, and the next follow-up as a third line only when one is set. */
+export function StatusOwnerCell({ lead, userById, onViewRemarks }: { lead: Lead; userById: LeadColumnContext['userById']; onViewRemarks?: (lead: Lead) => void }) {
   const state = followUpState(lead.nextFollowUpAt, lead.status)
   const due = state !== 'none' && state !== 'closed'
-  return (
-    <span className="db-2l ld-statown">
-      <StatusText lead={lead} />
-      <OwnerCell lead={lead} userById={userById} />
+  const name = ownerNameOf(lead, userById)
+  const body = (
+    <>
+      {name
+        ? <strong className="ld-owner-name" title={name}>{name}</strong>
+        : <strong className="ld-owner-name is-empty" title="Waiting for a recruiter">Unassigned</strong>}
+      <ContactStateText lead={lead} />
       {due && (
         <small className={cn('ld-follow', state === 'overdue' && 'is-late', state === 'today' && 'is-today')} title={`Follow up ${new Date(lead.nextFollowUpAt as string).toLocaleString()}`}>
           <BellRing size={11} aria-hidden="true" /> {followUpLabel(lead.nextFollowUpAt)}
         </small>
       )}
-    </span>
+    </>
+  )
+  // Only an assigned lead has a history to show; "Unassigned" and every other cell keep the row's click (opens the drawer).
+  if (!name || !onViewRemarks) return <span className="db-2l ld-statown">{body}</span>
+  return (
+    <button type="button" className="db-2l ld-statown ld-statown-btn" title={`See remarks and what ${name} did`} aria-label={`${name}, ${leadStatus(lead.status).label}. See remarks and what ${name} did on this lead`} aria-haspopup="dialog"
+      onClick={(event) => { event.stopPropagation(); onViewRemarks(lead) }}>
+      {body}
+    </button>
   )
 }
 
@@ -211,7 +231,7 @@ export function ResumeCell({ lead, block, onUpload, onConvert }: { lead: Lead; b
     return (
       <span className="ld-resume">
         {match}
-        <span className="ld-got" title="Resume received"><CheckCircle2 size={13} aria-hidden="true" />Resume in</span>
+        <span className="ld-got" title="Resume received"><CheckCircle2 size={13} aria-hidden="true" /><span>Resume received</span></span>
         <button type="button" className="ld-upload is-primary" disabled={Boolean(block)} title={block ?? 'Make this lead a candidate'} onClick={(event) => { event.stopPropagation(); onConvert(lead) }}>Convert</button>
       </span>
     )
@@ -276,7 +296,7 @@ export function LeadExpanded({ lead, extras, context }: { lead: Lead; extras: Ex
       </dl>
       <div className="ld-xacts">
         <button type="button" className="ld-btn" onClick={() => context.onOpen(lead)}>Open lead</button>
-        <button type="button" className="ld-btn" disabled={Boolean(workBlock(context, lead))} title={workBlock(context, lead) ?? undefined} onClick={() => context.onLogCall(lead)}>Log a call</button>
+        <button type="button" className="ld-btn" disabled={Boolean(workBlock(context, lead))} title={workBlock(context, lead) ?? undefined} onClick={() => context.onLogCall(lead)}>Add remarks</button>
       </div>
     </div>
   )

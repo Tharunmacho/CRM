@@ -21,8 +21,9 @@ interface Params {
 
 /**
  * The lead list, the key figures and the filter choices. A new search keeps showing the previous page until the answer
- * arrives. The "leads" and "tasks" live topics reload everything without a page refresh (coalesced); a task change
- * only needs the figures, because the daily-work gate rides on them.
+ * arrives. The "leads" live topic reloads the list and the figures without a page refresh (coalesced). The filter
+ * choices (campaigns, forms, owners...) change only when leads are uploaded, assigned or removed, so they are read on
+ * the first load, after a resync, on an explicit `refresh({ facets: true })` and on the slow safety poll, not on every lead event.
  */
 export function useLeadData({ query, page, pageSize, scope: summaryScope, enabled = true }: Params) {
   const [snapshot, setSnapshot] = useState<{ data: LeadPage; scope: string } | null>(null)
@@ -31,6 +32,7 @@ export function useLeadData({ query, page, pageSize, scope: summaryScope, enable
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [token, setToken] = useState(0)
+  const [facetToken, setFacetToken] = useState(0)
   const scope = `${query}|${page}|${pageSize}`
   const scopeRef = useRef({ query, page, pageSize, summaryScope })
   scopeRef.current = { query, page, pageSize, summaryScope }
@@ -73,29 +75,41 @@ export function useLeadData({ query, page, pageSize, scope: summaryScope, enable
     if (!enabled) return
     const controller = new AbortController()
     void loadSummary(controller.signal)
+    return () => controller.abort()
+  }, [enabled, token, summaryScope, loadSummary])
+
+  // The filter choices: the first load, and when the caller says leads were uploaded, assigned or removed.
+  useEffect(() => {
+    if (!enabled) return
+    const controller = new AbortController()
     void loadFacets(controller.signal)
     return () => controller.abort()
-  }, [enabled, token, summaryScope, loadSummary, loadFacets])
+  }, [enabled, facetToken, loadFacets])
 
-  // Live: a lead change reloads list and figures; a task change (the daily-work gate) only the figures.
+  // Live: a lead change reloads the list and the figures. The safety poll (every two minutes while the stream is up) also
+  // re-reads the filter choices, and so does a resync after an outage, because events may have been missed.
   useEffect(() => {
     if (!enabled) return
     return liveInterval(
-      () => Promise.all([loadList(), loadSummary()]),
+      () => Promise.all([loadList(), loadSummary(), loadFacets()]),
       60_000,
-      ['leads', 'tasks'],
+      ['leads'],
       {
         debounceMs: 500,
         onChange: (change) => {
-          const leads = change.resync || change.topics.includes('leads') || change.topics.includes('*')
           void loadSummary()
-          if (leads) { void loadList(); void loadFacets() }
+          void loadList()
+          if (change.resync) void loadFacets()
         },
       },
     )
   }, [enabled, loadList, loadSummary, loadFacets])
 
-  const refresh = useCallback(() => setToken((value) => value + 1), [])
+  /** Reload the list and the figures; `facets: true` also re-reads the filter choices (after an upload, an assignment, a delete). */
+  const refresh = useCallback((options?: { facets?: boolean }) => {
+    setToken((value) => value + 1)
+    if (options?.facets) setFacetToken((value) => value + 1)
+  }, [])
   const stale = !!snapshot && snapshot.scope !== scope
   return { page: snapshot?.data ?? null, summary, facets, loading, error, stale, refresh, reloadSummary: loadSummary, reloadList: loadList }
 }

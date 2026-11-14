@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
@@ -21,6 +21,8 @@ export interface DbColumn<T> {
   off?: boolean
   /** Columns menu group. */
   group?: string
+  /** Extra class on the column's header and body cells (a screen's own alignment tweaks). */
+  className?: string
   render: (row: T) => ReactNode
 }
 
@@ -80,6 +82,73 @@ function useScrollEdges(active: boolean) {
   return [ref, edges] as const
 }
 
+/** Add `id` to the ticked rows, or take it away when it is already ticked. */
+export function toggleId(selected: readonly string[], id: string): string[] {
+  return selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id]
+}
+
+/** The table geometry a row needs; one object per columns/scroll-edge change, so rows can be memoised. */
+interface RowLayout<T> {
+  selectable: boolean
+  merged: boolean
+  expandable: boolean
+  checkPinned: boolean
+  cellClass: (column: DbColumn<T>) => string
+  cellStyle: (column: DbColumn<T>) => CSSProperties | undefined
+}
+
+interface RowProps<T> {
+  row: T
+  id: string
+  selected: boolean
+  open: boolean
+  extraClass?: string
+  columns: DbColumn<T>[]
+  layout: RowLayout<T>
+  clickable: boolean
+  onRowClick: (row: T) => void
+  onToggleExpand: (id: string) => void
+  onToggleSelect: (id: string) => void
+}
+
+/**
+ * One body row. Memoised on the row, whether it is ticked or open, and the (stable) columns/layout/handlers: ticking one
+ * checkbox or opening a popover re-renders that row, not every row on the page.
+ */
+function DbRowView<T>({ row, id, selected, open, extraClass, columns, layout, clickable, onRowClick, onToggleExpand, onToggleSelect }: RowProps<T>) {
+  const { selectable, merged, expandable, checkPinned, cellClass, cellStyle } = layout
+  return (
+    <tr className={cn(clickable && 'is-clickable', selected && 'is-selected', open && 'is-open', extraClass)}
+      onClick={() => onRowClick(row)}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={event => { if (clickable && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onRowClick(row) } }}>
+      {selectable && !merged && (
+        <td className={cn('db-td-check', checkPinned && 'is-pin-start')} style={checkPinned ? { left: 0 } : undefined} onClick={event => event.stopPropagation()}>
+          <Checkbox checked={selected} aria-label="Select this row" onChange={() => onToggleSelect(id)} />
+        </td>
+      )}
+      {columns.map((column, index) => (
+        <td key={column.key} className={cn(cellClass(column), (merged || expandable) && index === 0 && 'is-select')} style={cellStyle(column)}>
+          {(merged || expandable) && index === 0
+            ? (
+              <span className="db-selcell" onClick={event => event.stopPropagation()}>
+                {expandable && (
+                  <button type="button" className={cn('db-expand', open && 'is-open')} aria-expanded={open} aria-label={open ? 'Hide all fields' : 'Show all fields'} title={open ? 'Hide all fields' : 'Show all fields'} onClick={() => onToggleExpand(id)}>
+                    <ChevronRight size={15} aria-hidden="true" />
+                  </button>
+                )}
+                {merged && <Checkbox checked={selected} aria-label="Select this row" onChange={() => onToggleSelect(id)} />}
+                {column.render(row)}
+              </span>
+            )
+            : column.render(row)}
+        </td>
+      ))}
+    </tr>
+  )
+}
+export const DbRow = memo(DbRowView) as typeof DbRowView
+
 /**
  * One grid for header and body. Classic: fixed layout, equal cell padding, no inner horizontal scroll, long values truncate
  * in their own cell. Grid: see `variant`. Rows are keyboard-focusable and open on Enter or Space when `onRowClick` is set.
@@ -91,43 +160,60 @@ export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, se
   const merged = grid && fit && !!selectable  // fit mode: the checkbox lives inside the first column
   const expandable = grid && fit && !!renderExpanded && !!onToggleExpand
   const [scrollRef, edges] = useScrollEdges(grid)
-  const ids = rows.map(rowKey)
+  const ids = useMemo(() => rows.map(rowKey), [rows, rowKey])
   const checkWidth = merged ? 0 : grid ? GRID_CHECK : CHECK
   const total = columns.reduce((sum, column) => sum + column.width, selectable ? checkWidth : 0)
   const share = (width: number) => `${((width / total) * 100).toFixed(3)}%`
-  const allSelected = ids.length > 0 && ids.every(id => selected.includes(id))
-  const someSelected = !allSelected && ids.some(id => selected.includes(id))
+  const selectedSet = useMemo(() => new Set(selected), [selected])
+  const allSelected = ids.length > 0 && ids.every(id => selectedSet.has(id))
+  const someSelected = !allSelected && ids.some(id => selectedSet.has(id))
 
-  // Pinned columns: the left ones sit after the checkbox, the right ones count from the far edge.
-  // Left columns are only pinned while they leave most of the scroll box free (about 45%), so a narrow screen never loses the table to them.
-  const starts: DbColumn<T>[] = []
-  let pinned = selectable ? checkWidth : 0
-  for (const column of columns) {
-    if (fit || column.sticky !== 'start' || (edges.width > 0 && pinned + column.width > edges.width * 0.45)) break
-    starts.push(column)
-    pinned += column.width
-  }
-  const ends = fit ? [] : columns.filter(column => column.sticky === 'end')
-  const offsets = new Map<string, number>()
-  let left = selectable && grid && starts.length ? checkWidth : 0
-  for (const column of starts) { offsets.set(column.key, left); left += column.width }
-  let right = 0
-  for (const column of [...ends].reverse()) { offsets.set(column.key, right); right += column.width }
-  const lastStart = starts[starts.length - 1]?.key
-  const firstEnd = ends[0]?.key
-  const checkPinned = grid && !!selectable && !merged && starts.length > 0
-  const cellClass = (column: DbColumn<T>) => cn(
-    column.align === 'right' && 'is-right',
-    grid && (column.align ?? 'center') === 'center' && 'is-center',
-    grid && starts.includes(column) && 'is-pin-start',
-    grid && !fit && column.sticky === 'end' && 'is-pin-end',
-    grid && edges.start && column.key === lastStart && 'is-edge',
-    grid && edges.end && column.key === firstEnd && 'is-edge',
-  )
-  const cellStyle = (column: DbColumn<T>): CSSProperties | undefined => {
-    if (!grid || !offsets.has(column.key)) return undefined
-    return column.sticky === 'start' ? { left: offsets.get(column.key) } : { right: offsets.get(column.key) }
-  }
+  // Everything the rows need from the table's geometry, built once per columns/scroll-edge change so a row can be memoised.
+  const layout = useMemo<RowLayout<T>>(() => {
+    // Pinned columns: the left ones sit after the checkbox, the right ones count from the far edge.
+    // Left columns are only pinned while they leave most of the scroll box free (about 45%), so a narrow screen never loses the table to them.
+    const starts: DbColumn<T>[] = []
+    let pinned = selectable ? checkWidth : 0
+    for (const column of columns) {
+      if (fit || column.sticky !== 'start' || (edges.width > 0 && pinned + column.width > edges.width * 0.45)) break
+      starts.push(column)
+      pinned += column.width
+    }
+    const ends = fit ? [] : columns.filter(column => column.sticky === 'end')
+    const offsets = new Map<string, number>()
+    let left = selectable && grid && starts.length ? checkWidth : 0
+    for (const column of starts) { offsets.set(column.key, left); left += column.width }
+    let right = 0
+    for (const column of [...ends].reverse()) { offsets.set(column.key, right); right += column.width }
+    const lastStart = starts[starts.length - 1]?.key
+    const firstEnd = ends[0]?.key
+    return {
+      selectable: !!selectable, merged, expandable, checkPinned: grid && !!selectable && !merged && starts.length > 0,
+      cellClass: (column: DbColumn<T>) => cn(
+        column.className,
+        column.align === 'right' && 'is-right',
+        grid && (column.align ?? 'center') === 'center' && 'is-center',
+        grid && starts.includes(column) && 'is-pin-start',
+        grid && !fit && column.sticky === 'end' && 'is-pin-end',
+        grid && edges.start && column.key === lastStart && 'is-edge',
+        grid && edges.end && column.key === firstEnd && 'is-edge',
+      ),
+      cellStyle: (column: DbColumn<T>): CSSProperties | undefined => {
+        if (!grid || !offsets.has(column.key)) return undefined
+        return column.sticky === 'start' ? { left: offsets.get(column.key) } : { right: offsets.get(column.key) }
+      },
+    }
+  }, [columns, fit, grid, selectable, merged, expandable, checkWidth, edges.width, edges.start, edges.end])
+  const { checkPinned, cellClass, cellStyle } = layout
+
+  // Handlers the memoised rows hold. They read the newest props through a ref, so their identity never changes and a
+  // selection toggle or a new onRowClick does not re-render every row.
+  const latest = useRef({ selected, onSelectedChange, onRowClick, onToggleExpand })
+  latest.current = { selected, onSelectedChange, onRowClick, onToggleExpand }
+  const toggleSelect = useCallback((id: string) => latest.current.onSelectedChange?.(toggleId(latest.current.selected, id)), [])
+  const clickRow = useCallback((row: T) => latest.current.onRowClick?.(row), [])
+  const toggleExpand = useCallback((id: string) => latest.current.onToggleExpand?.(id), [])
+  const clickable = !!onRowClick
 
   const table = (
     <table className={cn('db-tbl', grid && 'is-grid', fit && grid && 'is-fit', flush && 'is-bank')} aria-label={label} style={grid && !fit ? { minWidth: total } : undefined}>
@@ -167,41 +253,12 @@ export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, se
         </tr>
       </thead>
       <tbody>
-        {rows.map(row => {
-          const id = rowKey(row)
+        {rows.map((row, index) => {
+          const id = ids[index]
           const open = expandable && !!expandedIds?.includes(id)
           return [
-            <tr key={id} className={cn(onRowClick && 'is-clickable', selected.includes(id) && 'is-selected', open && 'is-open', rowClassName?.(row))}
-              onClick={() => onRowClick?.(row)}
-              tabIndex={onRowClick ? 0 : undefined}
-              onKeyDown={event => { if (onRowClick && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onRowClick(row) } }}>
-              {selectable && !merged && (
-                <td className={cn('db-td-check', checkPinned && 'is-pin-start')} style={checkPinned ? { left: 0 } : undefined} onClick={event => event.stopPropagation()}>
-                  <Checkbox checked={selected.includes(id)} aria-label="Select this row"
-                    onChange={() => onSelectedChange?.(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])} />
-                </td>
-              )}
-              {columns.map((column, index) => (
-                <td key={column.key} className={cn(cellClass(column), (merged || expandable) && index === 0 && 'is-select')} style={cellStyle(column)}>
-                  {(merged || expandable) && index === 0
-                    ? (
-                      <span className="db-selcell" onClick={event => event.stopPropagation()}>
-                        {expandable && (
-                          <button type="button" className={cn('db-expand', open && 'is-open')} aria-expanded={open} aria-label={open ? 'Hide all fields' : 'Show all fields'} title={open ? 'Hide all fields' : 'Show all fields'} onClick={() => onToggleExpand?.(id)}>
-                            <ChevronRight size={15} aria-hidden="true" />
-                          </button>
-                        )}
-                        {merged && (
-                          <Checkbox checked={selected.includes(id)} aria-label="Select this row"
-                            onChange={() => onSelectedChange?.(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])} />
-                        )}
-                        {column.render(row)}
-                      </span>
-                    )
-                    : column.render(row)}
-                </td>
-              ))}
-            </tr>,
+            <DbRow key={id} row={row} id={id} selected={selectedSet.has(id)} open={open} extraClass={rowClassName?.(row)} columns={columns} layout={layout}
+              clickable={clickable} onRowClick={clickRow} onToggleExpand={toggleExpand} onToggleSelect={toggleSelect} />,
             open ? (
               <tr key={`${id}:more`} className="db-xrow">
                 <td colSpan={columns.length + (selectable && !merged ? 1 : 0)}>{renderExpanded!(row)}</td>

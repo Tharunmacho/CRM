@@ -189,3 +189,34 @@
   .aff :is(input, select, textarea, .ui-input, .custom-select-trigger, .date-picker-trigger) { font-size: 16px; }
   .aff .ac-phone { grid-template-columns: minmax(88px, 112px) minmax(0, 1fr); }
 }
+
+/* ---------- Touch screens and phones: 40px targets, 16px fields (no zoom on focus), full-width upload buttons ---------- */
+@media (max-width: 767px), (pointer: coarse) {
+  .aff .aff-small-btn { height: auto; min-height: 40px; padding-block: 6px; }
+  .aff .aff-photo-btn { height: 44px; }
+  .aff .aff-add { height: 48px; }
+  .aff .aff-row-head { min-height: 40px; }
+  .aff .aff-row-ctl { gap: 8px; }
+  .aff .aff-row-ctl .ui-icon-button { width: 40px; height: 40px; }
+  .aff .ac-tag { height: 32px; line-height: 32px; padding-right: 2px; }
+  .aff .ac-tag button { position: relative; width: 28px; height: 28px; }
+  .aff .ac-tag button::after { content: ''; position: absolute; inset: -6px; }
+  .aff .aff-passport-files summary { display: flex; align-items: center; min-height: 40px; }
+  .aff .aff-passport-files a { align-items: center; min-height: 40px; }
+  .aff .aff-link { display: inline-flex; align-items: center; min-height: 40px; }
+}
+@media (max-width: 767px) {
+  .aff :is(input, select, textarea, .ui-input, .custom-select-trigger, .date-picker-trigger) { font-size: 16px; }
+  .aff .ac-tags input { min-height: 32px; font-size: 16px; }
+  .aff .aff-card-head { gap: 8px 12px; }
+  .aff .aff-reading-warning { padding: 12px; }
+}
+@container aff (max-width: 479px) {
+  .aff .aff-grid { gap: 16px; }
+  .aff .aff-row { padding: 12px; }
+  .aff .aff-row-head { margin-bottom: 8px; }
+  .aff .aff-passport-upload > .aff-small-btn { flex: 1 1 100%; justify-content: center; margin-left: 0; }
+  .aff .aff-grid > .aff-photo { gap: 12px; }
+  .aff .aff-photo-btn { flex: 1 1 140px; min-width: 0; }
+  .aff .aff-count, .aff .aff-status { max-width: 100%; height: auto; min-height: 24px; white-space: normal; }
+}

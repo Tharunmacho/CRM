@@ -82,7 +82,14 @@ export function FillView({ ctx, canWork, upload, busyKinds, onExtract }: {
       </div>
     )
     if (card.kind === 'passport') return <>
-      <PassportUpload slot={form.documents.passport} canWork={canWork} busy={busyKinds.includes('passport')} upload={upload} onExtract={onExtract} />
+      <PassportUpload
+        slot={form.documents.passport}
+        hasSavedDetails={Boolean(form.passport.passportNumber || form.passport.placeOfIssue || form.passport.issueDate || form.passport.expiryDate)}
+        canWork={canWork}
+        busy={busyKinds.includes('passport')}
+        upload={upload}
+        onExtract={onExtract}
+      />
       <PassportDetailsFields ctx={ctx} canWork={canWork} />
     </>
     if (card.kind === 'education') return education

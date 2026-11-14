@@ -116,10 +116,13 @@ test('footer hint: worded for who is looking and what the list shows', () => {
   assert.equal(staff, 'Click a row to see everything about the lead. You can work the leads assigned to you (12 assigned to you).')
   const admin = model.footerHint({ supervisor: true, unassigned: 4, matching: 30, total: 30, filtersOn: false })
   assert.equal(admin, 'Click a row to open the lead. You can work, assign and export any lead (4 unassigned).')
+  const manager = model.footerHint({ supervisor: true, canAssign: false, assignedToMe: 5, unassigned: 9, matching: 5, total: 5, filtersOn: false })
+  assert.doesNotMatch(manager, /assign and export any lead|unassigned/)
+  assert.match(manager, /work and export the leads assigned to you \(5 assigned to you\)/)
   assert.match(model.footerHint({ supervisor: true, matching: 3, total: 30, filtersOn: true }), /^Filters are on: showing 3 of 30 leads\./)
   assert.match(model.footerHint({ supervisor: false, assignedToMe: 2, matching: 2, total: 2, filtersOn: false, lockReason: 'Finish your daily tasks first.' }), /Finish your daily tasks first\. The sheet is read-only until then\.$/)
   assert.match(model.footerHint({ supervisor: true, matching: 0, total: 0, filtersOn: false }), /Upload a lead sheet/)
-  assert.match(model.footerHint({ supervisor: false, matching: 0, total: 0, filtersOn: false }), /manager assigns them to you/)
+  assert.match(model.footerHint({ supervisor: false, matching: 0, total: 0, filtersOn: false }), /admin assigns them to you/)
 })
 
 test('fields: one registry drives labels, groups, values and the opened row', () => {
@@ -127,7 +130,9 @@ test('fields: one registry drives labels, groups, values and the opened row', ()
   assert.equal(new Set(ids).size, ids.length, 'ids are unique')
   assert.ok(fields.LEAD_FIELD_DEFS.every((f) => f.label && fields.FIELD_GROUPS.includes(f.group) && f.width > 0))
   assert.equal(fields.fieldDef('country').label, model.LEAD_HEADINGS.country)
-  assert.equal(fields.fieldDef('status').label, model.LEAD_HEADINGS.status)
+  // The table column is "Assigned to" (recruiter over status); the status field on its own keeps its plain label.
+  assert.equal(model.LEAD_HEADINGS.status, 'Assigned to')
+  assert.equal(fields.fieldDef('status').label, 'Status')
   assert.equal(fields.fieldDef('followUp').label, model.LEAD_HEADINGS.followup)
   const lead = { id: '1', name: 'Test Person', status: 'new', phone: 'p:+919000000001', dob: '1990-03-27', experienceTotalYears: 3, extra: { which_shift: 'night', empty: '' } }
   const rows = fields.leadFieldRows(lead, [{ key: 'which_shift', label: 'Which shift', count: 1 }])

@@ -21,3 +21,15 @@
 .document-extraction-action svg { width: 15px; height: 15px; flex: none; }
 .document-extraction-action .is-error { flex-basis: 100%; color: var(--error-ink); }
 .document-identity-error { margin: 6px 0; color: var(--error-ink); font-size: 12px; line-height: 1.5; }
+
+/* Touch screens and phones (mobile pass): the retry/clear and "Read details" buttons are real 40-44px targets. */
+@media (max-width: 767px), (pointer: coarse) {
+  .document-upload-queue { padding: 12px; }
+  .document-upload-queue button { min-height: 40px; padding-inline: 8px; }
+  .document-upload-queue :is(b, small) { font-size: 12.5px; }
+  .document-extraction-action button { min-height: 44px; padding: 8px 14px; }
+}
+@media (max-width: 480px) {
+  .document-extraction-action { flex-direction: column; align-items: stretch; }
+  .document-extraction-action button { width: 100%; }
+}

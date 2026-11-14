@@ -9,11 +9,12 @@ import { incompleteReadingText } from '@/features/candidates/read-report'
 import type { DocumentKind, DocumentSlot } from '../types'
 
 /**
- * The passport document in the header of section 2: a small status chip (Uploaded / Not uploaded) and an Upload passport /
+ * The passport document in the header of section 2: a small status chip (Uploaded / details saved, scan not uploaded /
+ * scan not uploaded) and an Upload passport /
  * Replace button. It is the same `passport` slot as the Passport row of the Documents list, so uploading from either place
  * shows in both; reading the passport then fills these fields.
  */
-export function PassportUpload({ slot, canWork, busy, upload, onExtract }: { slot: DocumentSlot | undefined; canWork: boolean; busy: boolean; upload: (kind: DocumentKind, file: File) => Promise<void>; onExtract?: (attachmentIds: string[]) => Promise<void> }) {
+export function PassportUpload({ slot, hasSavedDetails, canWork, busy, upload, onExtract }: { slot: DocumentSlot | undefined; hasSavedDetails: boolean; canWork: boolean; busy: boolean; upload: (kind: DocumentKind, file: File) => Promise<void>; onExtract?: (attachmentIds: string[]) => Promise<void> }) {
   const input = useRef<HTMLInputElement>(null)
   const queue = useDocumentUploadQueue((file) => upload('passport', file), { multiple: true, disabled: busy || !canWork })
   const working = busy || queue.busy
@@ -24,7 +25,7 @@ export function PassportUpload({ slot, canWork, busy, upload, onExtract }: { slo
     <div className="aff-passport-upload" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (canWork && !working) void queue.take(event.dataTransfer.files) }}>
       <span className={cn('aff-doc', working ? 'is-busy' : rejectedOnly ? 'is-pending' : uploaded ? 'is-done' : 'is-pending')} role="status">
         {working ? <Loader2 aria-hidden="true" /> : uploaded && !rejectedOnly ? <Check aria-hidden="true" /> : null}
-        {working ? 'Uploading…' : rejectedOnly ? 'Wrong document · Add correct passport' : uploaded ? `Uploaded · ${files.length} ${files.length === 1 ? 'file' : 'files'}` : slot?.manualStatus?.uploaded ? 'Passport marked manually' : 'Passport not uploaded'}
+        {working ? 'Uploading…' : rejectedOnly ? 'Wrong document · Add correct passport' : uploaded ? `Uploaded · ${files.length} ${files.length === 1 ? 'file' : 'files'}` : slot?.manualStatus?.uploaded ? 'Passport marked manually' : hasSavedDetails ? 'Passport details saved · scan not uploaded' : 'Passport scan not uploaded'}
       </span>
       {canWork && (
         <>

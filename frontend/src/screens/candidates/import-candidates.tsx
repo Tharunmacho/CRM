@@ -79,7 +79,8 @@ function IssueList({ issues }: { issues: ImportPlan['issues'] }) {
 
 export default function ImportCandidatesPage() {
   const { me, users, orders, orderLabel, refresh, notify } = useStore()
-  const isStaff = me.role === 'staff'
+  /** Only the admin chooses the recruiter; a staff member or manager imports for themselves (the server enforces it). */
+  const importsForSelf = me.role !== 'admin'
   const folderInput = useRef<HTMLInputElement>(null)
   const sheetInput = useRef<HTMLInputElement>(null)
 
@@ -87,7 +88,7 @@ export default function ImportCandidatesPage() {
   const [sheet, setSheet] = useState<{ name: string; data: SheetRows } | null>(null)
   const [sheetError, setSheetError] = useState('')
   const [order, setOrder] = useState('')
-  const [recruiter, setRecruiter] = useState(isStaff ? me.id : '')
+  const [recruiter, setRecruiter] = useState(importsForSelf ? me.id : '')
   const [withoutJob, setWithoutJob] = useState(false)
   /** A job chosen for one candidate (order reference by the candidate's key in the list). */
   const [jobs, setJobs] = useState<Record<string, string>>({})
@@ -221,7 +222,7 @@ export default function ImportCandidatesPage() {
               {openOrders.map((o) => <option key={o.id} value={o.id}>{o.ref} · {orderLabel(o.id)}</option>)}
             </Select>
           </Field>
-          {isStaff ? (
+          {importsForSelf ? (
             <Field label="Recruiter" hint="Candidates you import are assigned to you.">
               <Select value={me.id} disabled><option value={me.id}>{me.name}</option></Select>
             </Field>
@@ -377,12 +378,12 @@ export default function ImportCandidatesPage() {
                       )}
                       <IssueList issues={expanded ? plan.issues : plan.issues.filter((i) => i.level === 'error')} />
                       {expanded && (
-                        <table className="mt-3 w-full max-w-3xl text-[13px]">
+                        <div className="mt-3 max-w-3xl overflow-x-auto"><table className="w-full min-w-[20rem] text-[13px]">
                           <thead><tr className="text-left text-ink-500"><th className="py-1 pr-3 font-medium">File</th><th className="py-1 font-medium">Treated as</th></tr></thead>
                           <tbody>
                             {plan.files.map((file) => (
                               <tr key={file.path} className="border-t border-rule-soft">
-                                <td className="max-w-[22rem] truncate py-1.5 pr-3" title={file.path}>{file.path}</td>
+                                <td className="max-w-[12rem] truncate py-1.5 pr-3 sm:max-w-[22rem]" title={file.path}>{file.path}</td>
                                 <td className="py-1.5">
                                   {file.skipped || fileTooLarge(pickedFor(plan)?.files.find((f) => f.path === file.path)?.file ?? new File([], 'x'))
                                     ? <span className="text-ink-500">{file.problem ?? 'Over 25 MB, left out'}</span>
@@ -397,7 +398,7 @@ export default function ImportCandidatesPage() {
                               </tr>
                             ))}
                           </tbody>
-                        </table>
+                        </table></div>
                       )}
                     </div>
                   )}

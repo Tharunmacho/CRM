@@ -182,9 +182,12 @@ const admin = { id: 'a', role: 'admin' }
 const manager = { id: 'm', role: 'manager' }
 const staff = { id: 's1', role: 'staff' }
 
-test('permissions: staff only work their own leads, admin and manager work any, converted leads cannot convert again', () => {
+test('permissions: managers and staff only work their own leads, admin works any, converted leads cannot convert again', () => {
   assert.equal(m.canWorkLead(admin, { ownerId: null }), true)
-  assert.equal(m.canWorkLead(manager, { ownerId: 's2' }), true)
+  assert.equal(m.canWorkLead(manager, { ownerId: 's2' }), false)
+  assert.equal(m.canWorkLead(manager, { ownerId: 'm' }), true)
+  assert.equal(m.canWorkLead(manager, { ownerId: null }), false)
+  assert.match(m.leadRefusal(manager, { ownerId: 's2' }, 'Asha'), /assigned to Asha/)
   assert.equal(m.canWorkLead(staff, { ownerId: 's1' }), true)
   assert.equal(m.canWorkLead(staff, { ownerId: 's2' }), false)
   assert.equal(m.canWorkLead(staff, { ownerId: null }), false)

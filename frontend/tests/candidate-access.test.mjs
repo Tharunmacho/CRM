@@ -53,9 +53,9 @@ test('the refusal names the owner and matches the server wording', async () => {
   assert.ok(server.includes('This candidate has no recruiter yet. Only a manager or an admin can work on it.'))
 })
 
-test('only admin and manager choose the recruiter when they add a candidate', () => {
+test('only the admin chooses the recruiter when adding a candidate; a manager keeps their own add', () => {
   assert.equal(choosesRecruiter('admin'), true)
-  assert.equal(choosesRecruiter('manager'), true)
+  assert.equal(choosesRecruiter('manager'), false)
   assert.equal(choosesRecruiter('staff'), false)
   assert.equal(choosesRecruiter(undefined), false)
 })

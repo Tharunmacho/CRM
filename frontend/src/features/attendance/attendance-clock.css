@@ -1,20 +1,4 @@
-/* The attendance clock: the top-bar chip and the "Your attendance today" card. Tokens only. */
-
-/* ---- top bar chip: same height and radius as the neighbouring 36px icon buttons ---- */
-.att-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--border-main); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); font-size: 13px; line-height: 1.2; white-space: nowrap; transition: border-color .14s, background-color .14s; }
-.att-chip:hover { border-color: var(--border-hover); background: var(--tint-1); }
-.att-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.att-chip > svg { flex: none; margin-left: 4px; }
-.att-chip-icon { position: relative; display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--tint-2); color: var(--text-muted); }
-.att-chip[data-state='in'] .att-chip-icon { background: var(--success-fill); color: var(--success-ink); }
-.att-chip[data-state='in'] .att-chip-icon::after { content: ''; position: absolute; right: -1px; top: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--success-ink); border: 2px solid var(--bg-card); }
-.att-chip[data-state='error'] .att-chip-icon { background: var(--warning-fill); color: var(--warning-ink); }
-.att-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.att-chip-text strong { color: var(--text-main); font-weight: 600; font-variant-numeric: tabular-nums; }
-.att-chip-extra { display: inline-flex; align-items: center; }
-.att-chip-warn { color: var(--warning-ink); font-size: 12px; }
-@media (max-width: 1100px) { .att-chip-extra { display: none; } }
-@media (max-width: 639px) { .att-chip-text { display: none; } .att-chip { padding: 0 6px; } }
+/* The attendance clock: the "Your attendance today" card. Tokens only. */
 
 /* ---- the full card ---- */
 .att-clock { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px 28px; margin-bottom: 20px; padding: 20px 24px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }

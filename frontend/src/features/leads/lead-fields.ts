@@ -56,7 +56,7 @@ export const LEAD_FIELD_DEFS: readonly LeadFieldDef[] = [
   { id: 'form', label: 'Form name', group: 'Campaign & ad', width: 150, value: (l) => text(l.formName) },
   { id: 'organic', label: 'Organic', group: 'Campaign & ad', width: 80, value: (l) => (l.isOrganic === true ? 'Yes' : l.isOrganic === false ? 'No' : '') },
   { id: 'sourceStatus', label: 'Lead status (in the sheet)', group: 'Campaign & ad', width: 120, value: (l) => text(l.leadStatusSource) },
-  { id: 'status', label: LEAD_HEADINGS.status, group: 'Workflow', width: 110, value: (l) => leadStatus(l.status).label },
+  { id: 'status', label: 'Status', group: 'Workflow', width: 110, value: (l) => leadStatus(l.status).label },
   { id: 'owner', label: 'Assigned to', group: 'Workflow', width: 110, value: (l) => text(l.ownerName) },
   { id: 'followUp', label: LEAD_HEADINGS.followup, group: 'Workflow', width: 110, value: (l) => when(l.nextFollowUpAt) },
   { id: 'lastContacted', label: 'Last contacted', group: 'Workflow', width: 110, value: (l) => when(l.lastContactedAt) },

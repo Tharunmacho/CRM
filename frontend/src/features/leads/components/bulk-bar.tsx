@@ -8,10 +8,12 @@ import '@/styles/lead-bulk.css'
  * actions. It sticks to the top of the card while the table scrolls. Actions are chosen here; the dialog that confirms the
  * exact count and does the work is BulkDialog.
  */
-export function BulkBar({ selection, matchingTotal, canDelete, busy, exporting, onSelectAll, onClear, onAction }: {
+export function BulkBar({ selection, matchingTotal, canAssign, canDelete, busy, exporting, onSelectAll, onClear, onAction }: {
   selection: Selection
   /** Leads the current search and filters match, across every page. */
   matchingTotal: number
+  /** Only an admin hands out leads. */
+  canAssign: boolean
   canDelete: boolean
   busy: boolean
   exporting: boolean
@@ -34,7 +36,7 @@ export function BulkBar({ selection, matchingTotal, canDelete, busy, exporting, 
         {overCap && <span className="ld-bulk-note is-warn" role="alert">{tooMany}</span>}
       </div>
       <div className="ld-bulk-acts">
-        <Button size="sm" variant="secondary" icon={<UserCheck />} disabled={busy || Boolean(overCap)} onClick={() => onAction('assign')}>Assign to…</Button>
+        {canAssign && <Button size="sm" variant="secondary" icon={<UserCheck />} disabled={busy || Boolean(overCap)} onClick={() => onAction('assign')}>Assign to…</Button>}
         <Button size="sm" variant="secondary" disabled={busy || Boolean(overCap)} onClick={() => onAction('status')}>Change status…</Button>
         <Button size="sm" variant="secondary" icon={<UserRoundX />} disabled={busy || Boolean(overCap)} onClick={() => onAction('not_interested')}>Mark not interested</Button>
         <Button size="sm" variant="secondary" icon={<Download />} disabled={busy || exporting || Boolean(overCap)} onClick={() => onAction('export')}>{exporting ? 'Preparing…' : 'Export selected'}</Button>

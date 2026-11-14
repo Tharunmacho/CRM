@@ -20,9 +20,6 @@
 /* The full Care India Overseas logo (the dark theme gets the dark variant), gently pulsing while the workspace opens. */
 .splash-logo { display: block; width: min(100%, 240px); animation: splash-pulse 1.8s ease-in-out infinite; }
 .splash-logo > img { display: block; width: 100%; height: auto; }
-.splash-logo-dark { display: none !important; }
-[data-theme="dark"] .splash-logo-light { display: none !important; }
-[data-theme="dark"] .splash-logo-dark { display: block !important; }
 .splash-track { width: 120px; height: 3px; margin-top: 20px; background: var(--tint-2); overflow: hidden; border-radius: 3px; }
 .splash-track > span { display: block; height: 100%; width: 40%; background: var(--primary); border-radius: inherit; animation: splash-slide 1.2s cubic-bezier(.4,0,.2,1) infinite; }
 .splash-note { margin-top: 16px; min-height: 22px; color: var(--text-muted); font-size: 13px; text-align: center; opacity: 0; transition: opacity 300ms; }

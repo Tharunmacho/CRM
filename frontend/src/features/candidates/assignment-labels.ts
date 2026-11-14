@@ -1,6 +1,6 @@
 /**
- * The words around choosing a recruiter. A candidate is never given to anyone automatically: an admin or a manager picks a
- * recruiter (or leaves the candidate unassigned), and a staff member who adds a candidate by hand owns it. Plain text in,
+ * The words around choosing a recruiter. A candidate is never given to anyone automatically: the admin picks a
+ * recruiter (or leaves the candidate unassigned), and a staff member or manager who adds a candidate by hand owns it. Plain text in,
  * plain text out, so the labels are tested without a browser.
  */
 import type { AgencySettings } from '@/shared/model/types'
@@ -8,7 +8,7 @@ import type { AgencySettings } from '@/shared/model/types'
 /** What an empty recruiter reads as, everywhere a candidate's recruiter is shown. Muted, never a name. */
 export const NOT_ASSIGNED = 'Not assigned'
 
-/** The first option of the Recruiter dropdown on the Add candidate screen (admin and manager). */
+/** The first option of the Recruiter dropdown on the Add candidate screen (admin only). */
 export const NOT_ASSIGNED_YET = 'Not assigned yet'
 
 /** The recruiter's name for an owner that may be missing. */
@@ -22,7 +22,7 @@ const firstName = (name?: string | null): string => name?.trim().split(/\s+/)[0]
 export interface RecruiterChoice { id: string; name: string; role: string; active?: boolean; onLeave?: boolean }
 
 /**
- * The people an admin or a manager can hand a new candidate to: active staff and managers, A to Z. Someone on leave is still
+ * The people the admin can hand a new candidate to: active staff and managers, A to Z. Someone on leave is still
  * listed (a deliberate manual hand-over is allowed), marked in the label.
  */
 export function recruiterChoices(users: readonly RecruiterChoice[]): { id: string; label: string }[] {
@@ -46,7 +46,7 @@ export function savebarStatus(picksRecruiter: boolean, recruiterName?: string | 
   return name ? `${name} will own this candidate.` : 'No recruiter is chosen. An admin can assign one later.'
 }
 
-/** The hint under the Recruiter field (admin and manager only; a staff member does not see the field). */
+/** The hint under the Recruiter field (admin only; staff and managers do not see the field). */
 export const RECRUITER_FIELD_HINT = 'Optional. Leave on Not assigned to choose later.'
 
 /** The hint under the follow-up date: it only reaches a to-do list once somebody owns the candidate. */
@@ -67,12 +67,12 @@ export function saveStep(picksRecruiter: boolean, recruiterName?: string | null)
 /** The message after saving. */
 export function savedNotice(picksRecruiter: boolean, ownerName: string | null): { text: string; tone?: 'warn' } {
   if (ownerName) return { text: `Saved. ${picksRecruiter ? `Assigned to ${ownerName}` : 'Assigned to you'}. The initial call is due within 48 hours.` }
-  return { text: 'Saved. No recruiter is assigned yet. An admin or a manager can assign one.', tone: 'warn' }
+  return { text: 'Saved. No recruiter is assigned yet. The admin can assign one.', tone: 'warn' }
 }
 
 /** The note under the recruiter on the saved result card. */
 export function savedOwnerNote(picksRecruiter: boolean, ownerName: string | null, merged: boolean): string {
-  if (!ownerName) return 'No recruiter is assigned yet. An admin or a manager can assign one.'
+  if (!ownerName) return 'No recruiter is assigned yet. The admin can assign one.'
   if (merged) return 'Combining does not change who owns this candidate.'
   return picksRecruiter ? 'The recruiter you picked.' : 'A candidate you add is yours.'
 }

@@ -6,6 +6,7 @@ import type { Client, Company, ReferenceAgency } from '@/shared/model/types'
 import { initials } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
+import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
 import { Panel } from '@/shared/ui/display'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { ClientDialog } from '@/features/clients/components/client-dialog'
@@ -133,7 +134,7 @@ const tel = (phone: string, query: string) => phone ? <a href={`tel:${phone.repl
 const mail = (email: string, name: string, query: string) => email ? <><a href={`mailto:${email}`} title={email}><Hi text={email} query={query} /></a><CopyButton value={email} label={`Copy email of ${name}`} /></> : <Quiet />
 const place = (address: string, query: string) => address ? <span title={address}><Hi text={address} query={query} /></span> : <Quiet />
 
-function ClientCards({ rows, query, onOpen, onEdit }: { rows: ClientRow[]; query: string; onOpen: (c: Client) => void; onEdit?: (c: Client) => void }) {
+function ClientCards({ rows, query, onOpen, onEdit, onDelete }: { rows: ClientRow[]; query: string; onOpen: (c: Client) => void; onEdit?: (c: Client) => void; onDelete?: (c: Client) => void }) {
   return <div className="cs-grid">{rows.map((row) => {
     const name = row.agencyName || row.client.name
     return <RecordCard key={row.client.id} title={name} contact={row.client.name}
@@ -147,6 +148,7 @@ function ClientCards({ rows, query, onOpen, onEdit }: { rows: ClientRow[]; query
       actions={<>
         <button type="button" className="cl-open cs-wide" onClick={() => onOpen(row.client)} aria-label={`Open ${name}`}>Open<ArrowRight size={14} aria-hidden="true" /></button>
         {onEdit && <button type="button" className="cl-open cs-wide" onClick={() => onEdit(row.client)} aria-label={`Edit ${name}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
+        {onDelete && <button type="button" className="cl-open cs-wide is-danger" onClick={() => onDelete(row.client)} aria-label={`Delete ${name}`}><Trash2 size={13} aria-hidden="true" />Delete</button>}
       </>} />
   })}</div>
 }
@@ -169,16 +171,17 @@ function AgencyCards({ rows, query, onEdit, onDelete }: { rows: AgencyRow[]; que
 }
 
 /** The tables use the shared DataTable (the old directory's look and column alignment); on a phone it stacks into labelled rows. */
-function ClientTable({ rows, query, loading, onOpen, onEdit }: { rows: ClientRow[]; query: string; loading: boolean; onOpen: (c: Client) => void; onEdit?: (c: Client) => void }) {
+function ClientTable({ rows, query, loading, onOpen, onEdit, onDelete }: { rows: ClientRow[]; query: string; loading: boolean; onOpen: (c: Client) => void; onEdit?: (c: Client) => void; onDelete?: (c: Client) => void }) {
   const columns: Column<ClientRow>[] = [
     { key: 'agency', header: 'Company', width: '24%', minWidth: '12rem', render: (row) => <Identity name={row.agencyName || row.client.name} query={query} /> },
     { key: 'contact', header: 'Contact person', width: '25%', align: 'left', render: (row) => <ContactCell name={row.client.name} phone={row.phone} email={row.email} query={query} /> },
     { key: 'location', header: 'Location', width: '17%', align: 'left', render: (row) => <Location {...clientPlace(row)} query={query} /> },
     { key: 'staff', header: 'Recruiter', width: '18%', align: 'left', render: (row) => <StaffStack staff={row.staff} query={query} /> },
     {
-      key: 'actions', header: 'Actions', actions: true, minWidth: '10.5rem',
+      key: 'actions', header: 'Actions', actions: true, minWidth: onDelete ? '12.5rem' : '10.5rem',
       render: (row) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cs-icon-act" onClick={(event) => { event.stopPropagation(); onEdit(row.client) }} aria-label={`Edit ${row.agencyName || row.client.name}`} title="Edit"><Pencil size={14} aria-hidden="true" /></button>}
+        {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={(event) => { event.stopPropagation(); onDelete(row.client) }} aria-label={`Delete ${row.agencyName || row.client.name}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
         <button type="button" className="cl-open" onClick={(event) => { event.stopPropagation(); onOpen(row.client) }} aria-label={`Open ${row.agencyName || row.client.name}`}>Open<ArrowRight size={14} aria-hidden="true" /></button>
       </span>,
     },
@@ -234,6 +237,7 @@ export default function ClientsPage() {
   const [layout, setLayoutState] = useState<Layout>(readLayout)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Client | null>(null)
+  const [deletingClient, setDeletingClient] = useState<Client | null>(null)
   const [addingAgency, setAddingAgency] = useState(false)
   const [importingAgencies, setImportingAgencies] = useState(false)
   const [editingAgency, setEditingAgency] = useState<ReferenceAgency | null>(null)
@@ -244,6 +248,8 @@ export default function ClientsPage() {
   const agencies = useReferenceAgencies(side === 'agencies')
   // Same roles that may create clients may change them; everyone else reads.
   const canEdit = store.can('manage_records')
+  // Deleting a client is for the supervisors who may delete any master record; the server enforces the same rule.
+  const canDelete = store.can('delete_records')
 
   const patch = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(params)
@@ -363,8 +369,8 @@ export default function ClientsPage() {
       const rows = matched as ClientRow[]
       const open = (client: Client) => navigate(`/clients/${client.id}`)
       return layout === 'table'
-        ? <ClientTable rows={rows} query={query} loading={false} onOpen={open} onEdit={canEdit ? setEditing : undefined} />
-        : <ClientCards rows={rows} query={query} onOpen={open} onEdit={canEdit ? setEditing : undefined} />
+        ? <ClientTable rows={rows} query={query} loading={false} onOpen={open} onEdit={canEdit ? setEditing : undefined} onDelete={canDelete ? setDeletingClient : undefined} />
+        : <ClientCards rows={rows} query={query} onOpen={open} onEdit={canEdit ? setEditing : undefined} onDelete={canDelete ? setDeletingClient : undefined} />
     }
     const rows = matched as AgencyRow[]
     const props = { rows, query, onEdit: canEdit ? setEditingAgency : undefined, onDelete: canEdit ? setDeleting : undefined }
@@ -410,6 +416,7 @@ export default function ClientsPage() {
 
       {adding && <ClientDialog onClose={() => setAdding(false)} />}
       {editing && <ClientDialog client={editing} onClose={() => setEditing(null)} />}
+      {deletingClient && <DeleteRecordDialog kind="client" id={deletingClient.id} open onClose={() => setDeletingClient(null)} onEdit={() => setEditing(deletingClient)} />}
       {addingAgency && <AgencyDialog onClose={() => setAddingAgency(false)} onSaved={agencies.refresh} />}
       {editingAgency && <AgencyDialog agency={editingAgency} onClose={() => setEditingAgency(null)} onSaved={agencies.refresh} />}
       {importingAgencies && <AgencyImportDialog onClose={() => setImportingAgencies(false)} onImported={() => { agencies.refresh(); setText(''); patch({ view: 'agencies', all: '1', q: null }) }} />}

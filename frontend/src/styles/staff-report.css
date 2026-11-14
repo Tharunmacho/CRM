@@ -210,3 +210,38 @@
 .sw-facts dd.is-bad { color: var(--sw-bad); }
 /* Eight team cards (the two lead cards make it eight) sit four across rather than squeezing every label */
 @media (min-width: 900px) { .sw .workspace-summary:has(> :nth-child(7)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* ---------- Phones: 40px tap targets, 16px fields, sort buttons you can hit ---------- */
+@media (max-width: 640px) {
+  .sw :is(input, select, textarea) { font-size: 16px; }
+  .sw-pills button { min-height: 40px; padding: 4px 14px; }
+  .sw-link { min-height: 40px; }
+  .sw-table thead th button { min-height: 40px; }
+  .sw-weeklabel { min-width: 0; }
+  .sw-custom label { flex-basis: 100%; }
+  .sw-drawer { padding: 14px 16px 24px; }
+}
+
+/* Touch screens and phones (mobile pass): 40px targets, 16px fields, wide tables scroll inside their own box. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .sw-pills { gap: 8px; }
+  .sw-pills button { min-height: 40px; padding: 4px 14px; }
+  .sw-link { min-height: 40px; }
+  .sw-how summary { display: flex; align-items: center; min-height: 40px; }
+  .sw-table thead th button { min-height: 40px; }
+  .sw-custom :is(input, .ui-input) { font-size: 16px; min-height: 44px; }
+  .sw-scroll { overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+}
+@media (max-width: 560px) {
+  .sw-head { flex-wrap: wrap; }
+  .sw-picker { gap: 12px; }
+  .sw-weekpick { gap: 8px; }
+  .sw-weeklabel strong { font-size: 14px; }
+  .sw-drawer { padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); gap: 18px; }
+  .sw-facts, .sw-facts.sw-lead-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sw-section-head { align-items: flex-start; }
+  .sw-live { max-width: 100%; }
+}
+@media (max-width: 359px) {
+  .sw-facts, .sw-facts.sw-lead-facts, .sw-skeleton > div { grid-template-columns: minmax(0, 1fr); }
+}

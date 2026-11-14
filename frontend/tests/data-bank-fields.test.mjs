@@ -45,7 +45,7 @@ test('the registry covers every candidate field the list API returns', async () 
   const server = await readFile(new URL('../../backend/app/api/schemas.py', import.meta.url), 'utf8')
   const block = server.slice(server.indexOf('class CandidateOut(Wire):'), server.indexOf('class CandidateWithFormOut'))
   const covered = {
-    id: null, owner_id: 'owner', phone: 'phone', whatsapp: 'whatsapp', email: 'email', dob: 'dob', gender: 'gender', nationality: 'nationality',
+    id: null, care_id: null, owner_id: 'owner', phone: 'phone', whatsapp: 'whatsapp', email: 'email', dob: 'dob', gender: 'gender', nationality: 'nationality',
     current_city: 'currentCity', languages: 'languages', passport_no: 'passportNo', passport_issue: 'passportIssue', passport_expiry: 'passportExpiry',
     passport_place: 'passportPlace', designations: 'designations', total_experience: 'totalExperience', gulf_experience: 'abroadExperience', skills: 'skills',
     expected_salary: 'expectedSalary', father_name: 'fatherName', marital_status: 'maritalStatus', current_address: 'currentAddress',

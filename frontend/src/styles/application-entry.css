@@ -199,3 +199,25 @@
   .ac .ac-form-card .ac-savebar-actions .ui-button { flex: none; width: 100%; min-height: 44px; }
   .ac .ac-sec .ac-match-actions { width: 100%; }
 }
+
+/* ---------- Phones (the page's own box 639px and narrower): 40px+ targets, 16px fields, no clipped labels ---------- */
+@container ac (max-width: 639px) {
+  .ac .ac-sec :is(.ui-input, .custom-select-trigger, .date-picker-trigger, textarea.ui-input) { font-size: 16px; }
+  .ac .ac-sec :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { height: 44px; min-height: 44px; }
+  .ac .ac-tags input, .ac .ac-lang-input { font-size: 16px; }
+  .ac .ac-photo-btn { height: 40px; font-size: 13px; }
+  .ac .ac-photo-btn.is-quiet { width: 100%; }
+  .ac .ac-photo-actions { width: 100%; max-width: 200px; }
+  .ac .ac-row-remove { width: 40px; height: 40px; }
+  .ac .ac-prog-groups button { min-height: 36px; padding: 0 12px; }
+  .ac .ac-prog-prompt button { height: auto; }
+  .ac .ac-same { min-height: 36px; }
+  .ac .ac-lab label, .ac .ac-lab .ac-tag-label { white-space: normal; }
+  .ac .ac-rows-bar { flex-wrap: wrap; }
+  .ac .ac-interest-card { min-height: 56px; }
+  .ac .ac-sec-head { align-items: flex-start; }
+}
+@container ac (max-width: 400px) {
+  .ac .ac-photo-box { flex-direction: column; align-items: flex-start; }
+  .ac .ac-phone { grid-template-columns: minmax(88px, 112px) minmax(0, 1fr); }
+}

@@ -252,3 +252,24 @@
 .dw-stat .dw-quota-total { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-main); font-size: 12px; color: var(--text-light); }
 .dw-team-total { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin: 0 20px 20px; padding: 10px 14px; border: 1px dashed var(--border-main); border-radius: 10px; background: var(--tint-1); font-size: 12.5px; color: var(--text-muted); }
 .dw-team-total b { font-size: 12.5px; font-weight: 600; color: var(--text-main); }
+
+/* ---------- Phones and touch screens: 44px buttons, 16px remark box (no iOS zoom), menus kept inside the window ---------- */
+@media (max-width: 640px), (pointer: coarse) {
+  .dw-more-btn { width: 44px; height: 44px; }
+  .dw-actions { gap: 8px; }
+  .dw-actions .dw-act { min-height: 44px; }
+  .dw-menu { max-width: calc(100vw - 16px); }
+  .dw-menu-item { height: 44px; }
+  .dw .dw-remark textarea { height: 44px; min-height: 44px; padding: 10px 46px 10px 12px; font-size: 16px; }
+  .dw-remark-save { width: 36px; height: 36px; right: 4px; }
+  .dw-prompt-go { height: 44px; }
+  .dw-prompt-x { width: 44px; height: 44px; }
+  .dw-add { display: inline-flex; align-items: center; min-height: 40px; }
+}
+@media (max-width: 640px) {
+  .dw-panel-head { padding-inline: 16px; }
+  .dw-panel-head .tk-select { min-width: 0; width: 100%; }
+  .dw-goal-grid { padding: 0 16px 16px; }
+  .dw-team-total { margin: 0 16px 16px; }
+  .dw-stat { padding: 14px 16px; }
+}

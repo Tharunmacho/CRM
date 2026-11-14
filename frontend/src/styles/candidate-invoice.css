@@ -64,3 +64,18 @@
   .af .af-payment-history li, .af .af-payment-advances li { flex-wrap: wrap; }
   .af .af-payment-form { padding: 12px; }
 }
+
+/* Phones (mobile pass): 44px buttons that use the full width, 40px disclosure rows, fields that never overflow. */
+@media (max-width: 700px) {
+  .af .af-invoice-link { min-height: 44px; }
+  .af .af-invoice-actions > :is(a, button, .ui-button) { flex: 1 1 140px; min-height: 44px; }
+  .af .af-invoice-heading-actions > :is(a, button, .ui-button) { min-height: 44px; }
+  .af .af-invoice-heading > div { min-width: 0; }
+  .af .af-invoice-heading p { overflow-wrap: anywhere; }
+  .af .af-payment-form > .ui-button { width: 100%; min-height: 44px; }
+  .af .af-invoice-settings footer .ui-button { width: 100%; min-height: 44px; }
+  .af :is(.af-payment-history, .af-payment-advances) summary { display: flex; align-items: center; min-height: 40px; }
+  .af .af-payment-form > header, .af .af-invoice-settings > header { flex-wrap: wrap; }
+  .af .af-invoice-totals { padding: 12px; }
+  .af .af-invoice :is(.ui-input, .custom-select-trigger, .date-picker-trigger) { width: 100%; }
+}

@@ -1,7 +1,7 @@
 /**
  * The Data Bank's three stat cards and the filters shown beside the search, as plain functions (no React), so they are unit-tested.
  *
- * Cards: Resumes (everyone on file), Not assigned (no recruiter yet: the pool an admin or manager assigns by hand, so staff never see it)
+ * Cards: Resumes (everyone on file), Not assigned (no recruiter yet: the pool the admin assigns by hand, so staff never see it)
  * and Needs review. Each card is also a filter: pressing it applies its pool, pressing the active one again returns to everyone.
  * The other pools (No order yet, Not interested, Deployed...) stay available as filters, not as cards.
  */
@@ -21,7 +21,7 @@ export interface StatCard {
   active: boolean
 }
 
-/** Admin and manager hand candidates to recruiters; staff only see their own work. */
+/** Admin and manager see the whole bank and its pools; only the admin hands candidates to recruiters. Staff only see their own work. */
 export const isSupervisor = (role: string | null | undefined): boolean => role === 'admin' || role === 'manager'
 
 export function statCards(counts: Pick<PoolCounts, 'all' | 'unassigned' | 'needs_review'>, pool: DataBankPool, role: string | null | undefined): StatCard[] {

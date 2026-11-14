@@ -97,3 +97,22 @@
 .jobs-simple .js-tag button { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .jobs-simple .js-tag button:hover:not(:disabled) { background: var(--tint-2); color: var(--text-main); }
 .jobs-simple .js-fields textarea.ui-input { height: auto; min-height: 88px; }
+
+/* ---------- Touch screens and phones (mobile pass): 16px fields, 40px+ targets, sheets that stay inside the screen ---------- */
+@media (max-width: 1023px), (pointer: coarse) {
+  .jobs-simple .js-trigger, .jobs-simple .js-search input, .jobs-simple .js-control-input { font-size: 16px; }
+  .jobs-simple .js-search input { height: 44px; }
+  .jobs-simple .js-tag { height: 32px; }
+  .jobs-simple .js-tag button { position: relative; width: 28px; height: 28px; }
+  .jobs-simple .js-tag button::after { content: ''; position: absolute; inset: -6px; }
+  .jobs-simple :is(.js-panel, .js-combo-list) li[role='option'] { min-height: 44px; }
+  .jobs-simple .js-control.is-tags .js-control-input { height: 32px; }
+}
+@media (max-width: 760px) {
+  .jobs-simple .js-picker.is-compact .js-trigger { min-height: 48px; }
+  .jobs-simple .js-picker.is-popover .js-panel { width: 100%; max-width: 100%; }
+  .jobs-simple .js-panel ul[role='listbox'] { max-height: min(232px, 40dvh); }
+  .jobs-simple .js-combo-list { max-height: min(208px, 40dvh); }
+  .jobs-simple .js-facts > div { grid-template-columns: 72px minmax(0, 1fr); }
+  .jobs-simple .js-openings { max-width: none; }
+}

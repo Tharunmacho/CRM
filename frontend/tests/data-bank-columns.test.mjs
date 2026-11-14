@@ -26,9 +26,8 @@ const statusJs = ts.transpileModule(statusSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
 }).outputText
 const status = {}
-new Function('exports', 'React', 'StatusDot', 'candidateReviewIssues', 'CandidateReviewPopover', statusJs)(status, React,
-  ({ tone, title, children }) => React.createElement('span', { 'data-tone': tone, title }, children), candidateReviewIssues,
-  ({ issues }) => React.createElement('button', { 'data-issues': issues.map(issue => issue.label).join('; ') }, `${issues.length} ${issues.length === 1 ? 'issue' : 'issues'}`))
+new Function('exports', 'React', 'StatusDot', 'candidateReviewIssues', statusJs)(status, React,
+  ({ tone, title, children }) => React.createElement('span', { 'data-tone': tone, title }, children), candidateReviewIssues)
 const renderStatus = candidate => renderToStaticMarkup(React.createElement(status.StatusText, { candidate: { name: 'Test Candidate', ownerId: 'recruiter', ...candidate } }))
 
 // Render the real shared assignment cells used by table rows, cards and the field registry.
@@ -73,42 +72,32 @@ test('a candidate with no current or deployed placement keeps blank stage and or
   assert.match(renderToStaticMarkup(placement.StageCell({ candidate: { id: 'candidate' }, store })), /aria-label="None"/)
 })
 
-test('a deployed candidate keeps a compact issue control carrying the missing-phone reason', () => {
-  const candidate = { status: 'deployed', needsReview: true, phone: '  ' }
-  assert.deepEqual(status.candidateStatus(candidate), { label: 'Deployed', tone: 'ok' })
-  const html = renderStatus(candidate)
-  assert.match(html, /data-tone="ok"[^>]*>Deployed<\/span>/)
-  assert.match(html, /data-issues="Phone number missing"[^>]*>1 issue<\/button>/)
-  assert.doesNotMatch(html, />Phone number missing</)
-  assert.doesNotMatch(html, />Needs review</)
-})
-
-test('a review flag does not replace another pipeline status or claim a saved phone is missing', () => {
-  const candidate = { status: 'in_process', needsReview: true, phone: '9999999999' }
-  assert.deepEqual(status.candidateStatus(candidate), { label: 'In process', tone: 'info' })
-  const html = renderStatus(candidate)
-  assert.match(html, />In process<\/span>/)
-  assert.match(html, /data-issues="Profile check pending"/)
-  assert.doesNotMatch(html, /Phone number missing/)
-})
-
-test('a primary review status explains the issue once and unflagged candidates keep a single status', () => {
-  for (const needsReview of [true, false]) {
-    const html = renderStatus({ status: 'needs_review', needsReview, phone: '' })
-    assert.equal((html.match(/>1 issue<\/button>/g) ?? []).length, 1)
-    assert.doesNotMatch(html, />Needs review</)
+test('the Status cell is only the status chip, never a profile-issue link', () => {
+  for (const candidate of [{ status: 'deployed', needsReview: true, phone: '  ' }, { status: 'in_process', needsReview: true, phone: '9999999999' },
+    { status: 'needs_review', needsReview: true, phone: '', name: 'Name needs review' }]) {
+    const html = renderStatus(candidate)
+    assert.equal((html.match(/data-tone=/g) ?? []).length, 1)
+    assert.doesNotMatch(html, /issue|<button|Needs review|Phone number missing/)
   }
-  const html = renderStatus({ status: 'deployed', needsReview: false, phone: '' })
-  assert.match(html, />Deployed<\/span>/)
-  assert.doesNotMatch(html, /Needs review|Phone number missing/)
+  assert.deepEqual(status.candidateStatus({ status: 'deployed' }), { label: 'Deployed', tone: 'ok' })
+  assert.deepEqual(status.candidateStatus({ status: 'in_process' }), { label: 'In process', tone: 'info' })
+  assert.match(renderStatus({ status: 'deployed', needsReview: false, phone: '' }), /^<span[^>]*>Deployed<\/span>$/)
 })
 
-test('all known profile gaps retain exact reasons and the relevant staff action', () => {
+test('a needs-review candidate reads as New without a recruiter and In process with one', () => {
+  assert.deepEqual(status.candidateStatus({ status: 'needs_review', ownerId: null }), { label: 'New', tone: 'info' })
+  assert.deepEqual(status.candidateStatus({ status: 'needs_review', ownerId: '' }), { label: 'New', tone: 'info' })
+  assert.deepEqual(status.candidateStatus({ status: 'needs_review', ownerId: 'recruiter' }), { label: 'In process', tone: 'info' })
+  assert.match(renderStatus({ status: 'needs_review', ownerId: null }), /data-tone="info"[^>]*>New<\/span>/)
+  assert.match(renderStatus({ status: 'needs_review', ownerId: 'recruiter' }), />In process<\/span>/)
+  assert.match(renderStatus({ status: 'new', ownerId: null }), />New<\/span>/)
+})
+
+test('all known profile gaps keep exact reasons and the relevant staff action for the profile screens', () => {
   const candidate = { status: 'needs_review', name: 'Name needs review', phone: ' ', ownerId: null }
   const issues = candidateReviewIssues(candidate)
   assert.deepEqual(issues.map(issue => issue.label), ['Name missing or unreadable', 'Phone number missing', 'Recruiter not assigned'])
   assert.match(issues.find(issue => issue.key === 'recruiter').action, /Use Assign recruiter/)
-  assert.match(renderStatus(candidate), />3 issues<\/button>/)
 })
 
 test('fixing a field removes that reason; explicit profile review remains pending until saved', () => {

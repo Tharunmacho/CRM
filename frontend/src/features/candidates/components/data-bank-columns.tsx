@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ClipboardList, FileSearch, Footprints, Link2, Mail, MessageCircle, Pencil, Trash2, UserCheck, UserPlus, type LucideIcon } from 'lucide-react'
+import { ClipboardList, FileSearch, Footprints, Link2, Mail, MessageCircle, Pencil, Trash2, UserCheck, UserMinus, UserPlus, type LucideIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { countryCode } from '@/shared/lib/country-flag'
@@ -7,13 +7,14 @@ import { labelFor, type FormOptions } from '@/features/form-options/form-options
 import { countryTone, dobParts, splitCountries, whatsappHref } from '@/features/candidates/data-bank-view'
 import { stageByNo } from '@/shared/workflow/stages'
 import type { Candidate } from '@/shared/model/types'
-import { ownerLabel } from '@/features/candidates/data-bank-pools'
+import { canUnassignCandidate, ownerLabel } from '@/features/candidates/data-bank-pools'
 import { candidateReviewIssues } from '@/features/candidates/candidate-review'
-import { CandidateReviewPopover } from '@/features/candidates/components/candidate-review-popover'
 import { Avatar, RowMenu, StageTracker, StatusDot, type DotTone, type RowMenuItem } from '@/features/candidates/components/db-parts'
 import type { DbColumn } from '@/features/candidates/components/db-table'
 import { canDeleteCandidate } from '@/features/candidates/profile-actions'
 import { DeleteCandidateDialog } from '@/features/candidates/components/delete-candidate-dialog'
+import { RequestAllocationButton } from '@/features/candidates/components/request-allocation-button'
+import { UnassignCandidatesDialog } from '@/features/staff/unassign-candidates-dialog'
 import type { useStore } from '@/shared/state/crm-store'
 import { workRefusal } from '@/features/candidates/candidate-access'
 import { BANK_FIELD_DEFS, DEFAULT_COLUMN_FIELDS, FIELD_PREFIX, type BankContext, type BankFieldDef } from '@/features/candidates/data-bank-fields'
@@ -44,6 +45,9 @@ type Store = ReturnType<typeof useStore>
 /** Pipeline status stays visible even when profile details need a separate review. */
 export function candidateStatus(candidate: Candidate): { label: string; tone: DotTone } {
   const key = candidate.status
+  // "Needs review" is a data-quality flag, not a pipeline stage: the chip reads as a status first.
+  // A candidate waiting for a recruiter is New; one that has a recruiter is being worked, so In process.
+  if (key === 'needs_review') return candidate.ownerId ? STATUS_VIEW.in_process : STATUS_VIEW.new
   return STATUS_VIEW[key] ?? { label: key, tone: 'quiet' }
 }
 
@@ -78,19 +82,16 @@ export function SourceIcon({ source }: { source: string }) {
   return <span className={`db-icon-chip db-source is-${source}`} title={`Source: ${label}`}><Icon size={15} aria-hidden="true" /><span className="sr-only">{label}</span></span>
 }
 
+/** The status chip only. Profile-check reasons are shown on the candidate's own screens, not in the table. */
 export function StatusText({ candidate }: { candidate: Candidate }) {
   const status = candidateStatus(candidate)
-  const issues = candidateReviewIssues(candidate)
-  const primary = <StatusDot tone={status.tone} title={status.label}>{status.label}</StatusDot>
-  if (!issues.length) return primary
-  return <span className="db-status-summary">
-    {candidate.status !== 'needs_review' && primary}
-    <CandidateReviewPopover candidateId={candidate.id} name={candidate.name} issues={issues} />
-  </span>
+  return <StatusDot tone={status.tone} title={status.label}>{status.label}</StatusDot>
 }
 
-export function OwnerText({ candidate, store }: { candidate: Candidate; store: Store }) {
+export function OwnerText({ candidate, store, pending = false }: { candidate: Candidate; store: Store; pending?: boolean }) {
   const owner = candidate.ownerId ? store.user(candidate.ownerId) : undefined
+  // The recruiter directory is still loading: a candidate with a recruiter is not "unassigned", so show a quiet placeholder.
+  if (!owner && candidate.ownerId && pending) return <span className="db-owner is-empty" title="Loading the recruiter" aria-busy="true"><span>…</span></span>
   return owner
     ? <span className="db-owner" title={owner.name}><Avatar name={owner.name} size="sm" /><span>{owner.name.split(' ')[0]}</span></span>
     : <span className="db-owner is-empty" title="No recruiter assigned yet"><UserCheck size={14} aria-hidden="true" /><span>{ownerLabel(null)}</span></span>
@@ -110,6 +111,8 @@ interface ColumnContext extends Handlers {
   onOpenStage: (applicationId: string) => void
   /** The admin's form-option labels (service charges, interest level...), for the registry columns; the stored value is shown when absent. */
   options?: FormOptions
+  /** The recruiter directory is still loading: recruiter cells show a placeholder instead of "Unassigned". */
+  directoryPending?: boolean
 }
 
 const humanize = (value: string) => { const text = value.replace(/_/g, ' ').trim(); return text.charAt(0).toUpperCase() + text.slice(1) }
@@ -153,35 +156,43 @@ export function ApplicationFormAction({ candidate, store, label = 'Application f
 
 /** Cards and the expanded row: labelled Open, Application form and Assign plus an edit icon (all with tooltips). */
 export function CandidateActions({ candidate, store, onOpen, onReassign, onEdit }: Handlers & { candidate: Candidate; store: Store }) {
+  const [unassigning, setUnassigning] = useState(false)
   const refusal = workRefusal(store.me, candidate, store.user(candidate.ownerId)?.name)
   return (
     <div className="db-acts" onClick={(event) => event.stopPropagation()}>
       <button type="button" className="db-act is-label" title={`Open ${candidate.name}'s profile`} aria-label={`Open ${candidate.name}`} onClick={() => onOpen(candidate)}><FileSearch size={14} /><span>Open</span></button>
       <ApplicationFormAction candidate={candidate} store={store} />
-      {store.can('reassign') && <button type="button" className="db-act is-label" title={`Assign ${candidate.name} to a recruiter`} aria-label={`Reassign ${candidate.name}`} onClick={() => onReassign(candidate)}><UserCheck size={14} /><span>Assign</span></button>}
+      <RequestAllocationButton candidate={candidate} store={store} labelled />
+      {store.can('reassign') && <button type="button" className="db-act is-label" title={candidate.ownerId ? `Hand ${candidate.name} to another recruiter` : `Assign ${candidate.name} to a recruiter`} aria-label={`Reassign ${candidate.name}`} onClick={() => onReassign(candidate)}><UserCheck size={14} /><span>{candidate.ownerId ? 'Reassign' : 'Assign'}</span></button>}
+      {canUnassignCandidate(store.me.role, candidate.ownerId) && <button type="button" className="db-act" title={`Make ${candidate.name} unassigned: take them back from their recruiter`} aria-label={`Make ${candidate.name} unassigned`} onClick={() => setUnassigning(true)}><UserMinus size={14} /></button>}
+      {unassigning && <UnassignCandidatesDialog candidateIds={[candidate.id]} onClose={() => setUnassigning(false)} />}
       <button type="button" className="db-act" disabled={Boolean(refusal)} title={refusal ?? `Edit ${candidate.name}'s profile`} aria-label={`Edit ${candidate.name}`} onClick={() => onEdit(candidate)}><Pencil size={14} /></button>
     </div>
   )
 }
 
-/** Table and job-group rows: an "open profile" icon button and one "..." menu holding Application form, Assign and Edit. */
+/** Table and job-group rows: the Application form icon button, Request (staff, candidates that are not theirs), Delete (admin) and one "..." menu. */
 export function RowActions({ candidate, store, onOpen, onReassign, onEdit }: Handlers & { candidate: Candidate; store: Store }) {
   const navigate = useNavigate()
   const [deleting, setDeleting] = useState(false)
+  const [unassigning, setUnassigning] = useState(false)
   const refusal = workRefusal(store.me, candidate, store.user(candidate.ownerId)?.name)
   const items: RowMenuItem[] = [
     { label: 'Open profile', icon: FileSearch, onSelect: () => navigate(`/candidates/${candidate.id}`) },
   ]
-  if (store.can('reassign')) items.push({ label: 'Assign to a recruiter', icon: UserCheck, onSelect: () => onReassign(candidate) })
+  if (store.can('reassign')) items.push({ label: candidate.ownerId ? 'Reassign to another recruiter' : 'Assign to a recruiter', icon: UserCheck, onSelect: () => onReassign(candidate) })
+  if (canUnassignCandidate(store.me.role, candidate.ownerId)) items.push({ label: 'Make unassigned', icon: UserMinus, onSelect: () => setUnassigning(true) })
   items.push({ label: 'Edit profile', icon: Pencil, onSelect: () => onEdit(candidate), disabledReason: refusal ?? undefined })
   return (
     <div className="db-acts is-grid" onClick={(event) => event.stopPropagation()}>
-      <button type="button" className="db-act" title={`Open ${candidate.name}'s application form`} aria-label={`Open application form for ${candidate.name}`} onClick={() => onOpen(candidate)}><ClipboardList size={15} aria-hidden="true" /></button>
+      <button type="button" className="db-act is-form-icon" title="Application form" aria-label={`Open application form for ${candidate.name}`} onClick={() => onOpen(candidate)}><ClipboardList size={15} aria-hidden="true" /></button>
+      <RequestAllocationButton candidate={candidate} store={store} />
       {canDeleteCandidate(store.me.role) && (
         <button type="button" className="db-act is-danger" title={`Delete ${candidate.name}`} aria-label={`Delete ${candidate.name}`} onClick={() => setDeleting(true)}><Trash2 size={15} aria-hidden="true" /></button>
       )}
       <RowMenu label={`More actions for ${candidate.name}`} items={items} />
       {deleting && <DeleteCandidateDialog open candidateId={candidate.id} name={candidate.name} onClose={() => setDeleting(false)} onDeleted={() => setDeleting(false)} />}
+      {unassigning && <UnassignCandidatesDialog candidateIds={[candidate.id]} onClose={() => setUnassigning(false)} />}
     </div>
   )
 }
@@ -271,24 +282,30 @@ export function WhatsAppLink({ candidate }: { candidate: Candidate }) {
   )
 }
 
+/** The whole fixed front cell: expand arrow, checkbox, and three 32px buttons with 4px gaps (Application form, Request (staff) or Delete (admin), and the menu). Fixed, so no row ever wraps or clips them. */
+export const ROW_BUTTONS_WIDTH = 190
+
 /**
- * The Data Bank table: Candidate, Contact, Source, Agent, Recruiter, Status, Actions. The widths come from one list
- * (data-bank-table.ts) that the job groups and the cards read too. Every column is left-aligned (Actions right) with the
- * same padding in the header and the body. Everything else the profile holds (preferred country, passport, job, documents on
+ * The Data Bank table: Actions (the row buttons, first, right after the expand arrow and checkbox), Candidate, Contact, Source,
+ * Agent, Recruiter, Status. The widths come from one list (data-bank-table.ts) that the job groups and the cards read too.
+ * Every column is left-aligned with the same padding in the header and the body. Everything else the profile holds (preferred country, passport, job, documents on
  * file ...) is in the expanded row, and in the Columns menu as columns that start switched off.
  */
-export function dataBankColumns({ store, onOpen, onReassign, onEdit, options }: ColumnContext): DbColumn<Candidate>[] {
+export function dataBankColumns({ store, onOpen, onReassign, onEdit, options, directoryPending = false }: ColumnContext): DbColumn<Candidate>[] {
   const context = bankContext(store, options)
   const spec = Object.fromEntries(BANK_TABLE_COLUMNS.map((column) => [column.key, column]))
   const base = (key: (typeof BANK_TABLE_COLUMNS)[number]['key']) => ({ key, header: spec[key].header, sortKey: spec[key].sortKey, width: bankColumnWidth(spec[key]), align: spec[key].align })
+  const rowButtons: DbColumn<Candidate> = {
+    ...base('actions'), width: ROW_BUTTONS_WIDTH, align: 'left', group: undefined,
+    render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} />,
+  }
   const core: DbColumn<Candidate>[] = [
     { ...base('candidate'), group: 'Person', render: (c) => <CandidateCell candidate={c} /> },
     { ...base('contact'), group: 'Contact', render: (c) => <ContactLines candidate={c} /> },
     { ...base('source'), group: 'Workflow', render: (c) => <SourceLine candidate={c} /> },
     { ...base('agent'), group: 'Workflow', render: (c) => <AgentLine candidate={c} /> },
-    { ...base('owner'), group: 'Workflow', render: (c) => <OwnerText candidate={c} store={store} /> },
+    { ...base('owner'), group: 'Workflow', render: (c) => <OwnerText candidate={c} store={store} pending={directoryPending} /> },
     { ...base('status'), group: 'Workflow', render: (c) => <StatusText candidate={c} /> },
-    { ...base('actions'), render: (c) => <RowActions candidate={c} store={store} onOpen={onOpen} onReassign={onReassign} onEdit={onEdit} /> },
   ]
   // Preferred country is off the default table; it stays one click away in the Columns menu and always in the expanded row.
   const country: DbColumn<Candidate> = {
@@ -300,7 +317,6 @@ export function dataBankColumns({ store, onOpen, onReassign, onEdit, options }: 
     key: `${FIELD_PREFIX}${field.id}`, header: field.label, sortKey: field.sortKey, group: field.group, width: field.width, align: 'left' as const, optional: 20 + index, off: true,
     render: (c: Candidate) => <FieldCell candidate={c} field={field} context={context} />,
   }))
-  // Actions stays the last column whatever the person switches on.
-  const actions = core.pop()!
-  return [...core, country, ...fields, actions]
+  // The row buttons stay the FIRST column (right after the expand arrow and checkbox) whatever the person switches on.
+  return [rowButtons, ...core, country, ...fields]
 }

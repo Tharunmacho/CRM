@@ -5,7 +5,7 @@
  *
  * Seeing a candidate is open to everyone signed in (the Data Bank is shared); working one belongs to the
  * recruiter the candidate is assigned to. Admin and manager may work any candidate (PRD role table), and
- * only they can hand a candidate to someone else.
+ * only the admin can hand a candidate to someone else.
  */
 export interface AccessActor { id: string; role: string }
 export interface AccessCandidate { ownerId: string | null }
@@ -25,5 +25,5 @@ export function workRefusal(me: AccessActor | null | undefined, candidate: Acces
   return `This candidate is assigned to ${ownerName || 'another recruiter'}. Only they, a manager or an admin can work on it.`
 }
 
-/** A staff member who adds a candidate keeps it; admin and manager choose the recruiter (or leave it to the next free one). */
-export const choosesRecruiter = (role: string | undefined): boolean => role !== undefined && SUPERVISOR_ROLES.includes(role)
+/** A staff member or manager who adds a candidate keeps it; only the admin chooses the recruiter (or leaves it to the next free one). */
+export const choosesRecruiter = (role: string | undefined): boolean => role === 'admin'

@@ -226,13 +226,16 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
       // A server that has no such route yet answers 404 or 405: one calm sentence, and the old value is back (the draft is cleared below).
       const outdated = cause instanceof ApiError && (cause.status === 405 || (cause.status === 404 && /^not found$/i.test(cause.message.trim())))
       setAssignmentErrors((errors) => ({ ...errors, [field]: outdated ? RESTART_MESSAGE : messageOf(cause, 'This change could not be saved.') }))
+      // A timeout or a dropped connection does not say whether the server saved the change before the browser gave up:
+      // read the form again so the block shows what is really stored, not the value it fell back to.
+      if (cause instanceof ApiError && cause.status === 0) void reload(true)
       return null
     } finally {
       assignmentInFlight.current -= 1
       if (assignmentInFlight.current === 0) setAssignmentDraft(null)
       setAssignmentSaving((saving) => ({ ...saving, [field]: false }))
     }
-  }, [candidateId, apply, assignmentDraft])
+  }, [candidateId, apply, assignmentDraft, reload])
 
   const sendFeedback = useCallback(async (note: FeedbackDraft): Promise<boolean> => {
     setFeedbackBusy(true); setFeedbackError('')

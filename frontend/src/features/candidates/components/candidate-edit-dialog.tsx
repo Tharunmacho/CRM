@@ -13,7 +13,7 @@ import { normalizedSkills } from '../candidate-skills'
 import { candidateReviewIssues } from '../candidate-review'
 import { candidateEntryErrors, EMPTY_CANDIDATE_FORM } from '../entry-model'
 
-export function CandidateEditDialog({ candidate, onClose }: { candidate: Candidate; onClose: () => void }) {
+export function CandidateEditDialog({ candidate, onClose, onSaved }: { candidate: Candidate; onClose: () => void; onSaved?: () => void }) {
   const store = useStore()
   const [form, setForm] = useState({
     name: candidate.name, phone: candidate.phone, whatsapp: candidate.whatsapp || '', email: candidate.email || '',
@@ -68,7 +68,7 @@ export function CandidateEditDialog({ candidate, onClose }: { candidate: Candida
       committed = true
       setSaved(true)
       await store.refresh({ keepCurrent: true })
-      if (store.isCurrentSession()) onClose()
+      if (store.isCurrentSession()) { onSaved?.(); onClose() }
     } catch (error) {
       if (store.isCurrentSession()) setError(committed
         ? 'Your changes are saved. Refresh the profile to see them. You do not need to save again.'

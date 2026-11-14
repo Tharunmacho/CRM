@@ -26,3 +26,19 @@
 .fee-collection-table footer > div { display: flex; gap: 8px; }
 .fee-collection-empty { text-align: center; padding-block: 32px !important; color: var(--text-muted); }
 @media (max-width: 700px) { .fee-collection-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }.fee-collection-totals > div { padding: 14px; }.fee-collection-totals dd { font-size: 18px; }.fee-collection-controls { padding: 14px; }.fee-collection-controls > label { flex-basis: 100%; }.fee-collection-controls > .custom-select { flex: 1 1 190px; min-width: 190px; }.fee-collection-table footer { flex-wrap: wrap; } }
+
+/* Fee collections on phones: the table scrolls in its own box, controls are 44px, paging buttons are 40px. */
+@media (max-width: 700px) {
+  .fee-collection-controls > .custom-select { flex: 1 1 100%; min-width: 0; }
+  .fee-collection-controls :is(input, .ui-input, .custom-select-trigger) { font-size: 16px; }
+  .fee-collection-controls :is(.ui-input:not(textarea), .custom-select-trigger) { min-height: 44px; }
+  .fee-collection-scroll { overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .fee-collection-table th, .fee-collection-table td { padding: 12px; }
+  .fee-collection-table footer { padding: 12px 14px; }
+  .fee-collection-table footer > div { width: 100%; }
+  .fee-collection-table footer > div > .ui-button { flex: 1 1 0; min-height: 40px; }
+  .fee-manage-link { display: inline-flex; align-items: center; min-height: 40px; }
+}
+@media (max-width: 380px) {
+  .fee-collection-totals { grid-template-columns: minmax(0, 1fr); }
+}

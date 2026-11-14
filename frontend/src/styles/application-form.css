@@ -622,3 +622,42 @@ body.af-open { overflow: hidden; }
 
 /* The loading skeleton keeps the ring and its lines side by side. */
 .af-card.af-complete:has(> .af-sk-ring) { flex-direction: row; align-items: center; gap: 16px; }
+
+/* ------------------------------------------------------------ Touch screens and phones (mobile pass)
+ * 40px targets 8px apart, 16px fields so iOS does not zoom on focus, room above the home indicator. Desktop is untouched. */
+@media screen and (max-width: 1023px), (pointer: coarse) {
+  .af-bar-back { height: 40px; min-width: 40px; justify-content: center; }
+  .af .af-docbtn { height: 40px; }
+  .af .af-docbtn.is-icon { width: 40px; }
+  .af .af-docfile-actions { grid-template-columns: 40px 40px 128px; gap: 8px; }
+  .af .af-kind { height: 40px; }
+  .af-missing button { height: 40px; }
+  .af-banner-link { display: inline-flex; align-items: center; min-height: 40px; }
+  .af-rowtable-ctl button { min-width: 40px; min-height: 40px; }
+  .af-nav button { min-height: 44px; }
+}
+@media screen and (max-width: 760px) {
+  .af-bar { padding-top: max(8px, env(safe-area-inset-top)); padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  .af-layout { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+  .af-drawer { width: 100vw; }
+  .af-drawer-head .ui-button { height: 44px; }
+  .af-drawer-body { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .af :is(.ui-input, .custom-select-trigger, .date-picker-trigger, textarea.ui-input, .af-lang-input) { font-size: 16px; }
+  .af :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { height: 44px; min-height: 44px; }
+  .af :is(input, select, textarea):not([type='checkbox'], [type='radio'], [type='file']) { font-size: 16px; }
+  .af-doc-meta, .af .af-docfile small { font-size: 12px; }
+  .af .af-docfile-actions { grid-template-columns: 40px 40px minmax(0, 1fr); width: 100%; }
+  .af .af-docfile-actions > :last-child { width: auto; }
+  .af .af-docrow-actions > .af-docbtn:not(.is-icon) { flex: 1 1 auto; }
+  .af .af-composer-foot .ui-button { width: 100%; min-height: 44px; }
+  .af .af-ask-form .ui-button { min-height: 44px; }
+  .af-complete-main { gap: 12px; }
+  .af-error-actions > .ui-button { flex: 1 1 140px; min-height: 44px; }
+}
+@media screen and (max-width: 380px) {
+  .af-bar-actions > .ui-button { flex: 1 1 100%; }
+  .af-cells, .af-cells-3 > .af-cell, .af-received { grid-template-columns: 96px minmax(0, 1fr); }
+  .af-rowtable-cell { grid-template-columns: 92px minmax(0, 1fr); }
+  .af .af-docs-progress .af-docs-bar { width: 56px; }
+  .af-sheet { padding-left: 8px; padding-right: 8px; }
+}

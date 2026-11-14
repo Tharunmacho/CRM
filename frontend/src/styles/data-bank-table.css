@@ -92,3 +92,13 @@ strong.dbt-main { font-weight: 600; }
 .db-mini-meta dd .dbt-stack { gap: 1px; }
 .db-mini-meta dd .db-track { width: 100%; }
 .db-mini-meta dd .db-track-bar { max-width: 140px; }
+
+/* ---- the row buttons are the first column: Application form, Request (staff), Delete (admin), menu. Fixed 32px buttons, 4px gaps, one line. */
+:root:root .db-tbl.is-bank .db-acts.is-grid { flex-wrap: nowrap; justify-content: flex-start; align-items: center; gap: 4px; width: 100%; }
+:root:root .db-tbl.is-bank .db-acts.is-grid > * { flex: none; }
+.db-act.is-form-icon { color: var(--primary); }
+.db-act.is-request { color: var(--text-main); }
+.db-act.is-request[aria-disabled="true"], .db-act.is-request.is-done { opacity: 1; cursor: default; border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+.db-act.is-request[aria-disabled="true"]:hover, .db-act.is-request.is-done:hover { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+.db-act.is-request[aria-disabled="true"]:not(.is-done) { opacity: .6; }
+.db-mini .db-act.is-request.is-label { gap: 6px; white-space: nowrap; }

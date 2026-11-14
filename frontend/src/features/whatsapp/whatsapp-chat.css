@@ -120,3 +120,18 @@
   .wa-window > span:not(.ui-badge) { min-width: 0; flex: 1 1 0; }
   .wa-win-left { display: block; margin-left: 0; }
 }
+
+/* ---------- Phones (mobile pass): 16px search, roomy tap rows, composer above the home indicator ---------- */
+@media (max-width: 760px) {
+  .wa-list-search :is(input, .ui-input) { font-size: 16px; min-height: 44px; }
+  .wa-list-heading { padding: 10px 16px; }
+  .wa-composer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); max-height: 55dvh; }
+  .wa-composer :is(select, input:not([type='file']), .ui-input, .custom-select-trigger) { font-size: 16px; }
+  .wa-composer :is(select, .ui-input:not(textarea), .custom-select-trigger) { min-height: 44px; }
+  .wa-send-row > .ui-button { min-height: 44px; }
+  .wa-message { max-width: 94%; }
+  .wa-send-error { max-width: 100%; }
+  .wa-file { min-height: 44px; }
+  .wa-thread-heading h2, .wa-thread-heading p { overflow-wrap: anywhere; }
+  .wa-welcome { min-height: 0; }
+}

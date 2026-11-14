@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ExternalLink, FileUp, Link2, Lock, MessageCircle, PhoneCall, Trash2, UserCheck, UserPlus, Loader2, Undo2 } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FileUp, Link2, ListChecks, Lock, Pencil, MessageCircle, PhoneCall, Trash2, UserCheck, UserMinus, UserPlus, UserRoundX, Loader2, Undo2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { User } from '@/shared/model/types'
 import { Sheet } from '@/shared/ui/overlay'
@@ -8,7 +8,7 @@ import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { FileLink } from '@/shared/ui/file-drop'
 import { gateFromRefusal, leadApi, type LeadActivity, type LeadDetail } from '../lead-api'
 import {
-  PLATFORM_LABEL, SETTABLE_STATUSES, cleanPhone, createdParts, dobLabel, experienceLabel, followUpLabel, followUpState, fromLocalInput, leadDate, leadStatus, platformKind, toLocalInput, whatsappLink,
+  PLATFORM_LABEL, RESUME_REQUIRED_REASON, SETTABLE_STATUSES, cleanPhone, createdParts, dobLabel, experienceLabel, followUpLabel, followUpState, fromLocalInput, leadDate, leadStatus, platformKind, toLocalInput, whatsappLink,
   type Lead, type LeadActor,
 } from '../lead-model'
 import { GATE_REASON, gateBlocks, type GateState, type LeadGate } from '../lead-gate'
@@ -30,12 +30,20 @@ interface Props {
   onLogCall: (lead: Lead) => void
   onConvert: (lead: Lead) => void
   onAssign: (lead: Lead) => void
+  /** Admin only: take the lead back from its recruiter (asks for confirmation first). */
+  onUnassign?: (lead: Lead) => void
   onUploadResume: (lead: Lead, file: File) => Promise<void>
   onGateRefusal: (gate: LeadGate) => void
   /** Admin only: delete this lead (asks for confirmation first). */
   canDelete?: boolean
   onDelete?: (lead: Lead) => void
   onUnconvert?: (lead: Lead) => void
+  /** Opens the edit form with every fact of this lead. */
+  onEdit?: (lead: Lead) => void
+  /** Opens the status dialog for this lead (an undo toast follows). */
+  onChangeStatus?: (lead: Lead) => void
+  /** Marks this lead "Not interested" at once (an undo toast follows). */
+  onNotInterested?: (lead: Lead) => void
   /** The status was saved from here: the screen offers an Undo toast. */
   onStatusChange?: (lead: Lead, from: string, to: string) => void
 }
@@ -47,7 +55,8 @@ const Section = ({ title, children }: { title: string; children: ReactNode }) =>
   <section className="ld-dsec"><h3>{title}</h3><dl className="ld-dl">{children}</dl></section>
 )
 
-const KIND_LABEL: Record<string, string> = { call: 'Call', note: 'Note', status: 'Status', assign: 'Assigned', import: 'Imported', convert: 'Converted', unconvert: 'Moved back to Lead', resume: 'Resume', edit: 'Edited' }
+const CONVERTED_REASON = 'This lead is already a candidate.'
+const KIND_LABEL: Record<string, string> = { call: 'Remarks', note: 'Note', status: 'Status', assign: 'Assigned', import: 'Imported', convert: 'Converted', unconvert: 'Moved back to Lead', resume: 'Resume', edit: 'Edited' }
 
 function Timeline({ items }: { items: LeadActivity[] }) {
   if (items.length === 0) return <p className="ld-hint">Nothing has happened with this lead yet.</p>
@@ -70,7 +79,7 @@ function Timeline({ items }: { items: LeadActivity[] }) {
 }
 
 /** The side drawer of one lead: everything we know, what to do next, and the timeline. */
-export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUploadResume, onGateRefusal, canDelete, onDelete, onUnconvert, onStatusChange }: Props) {
+export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUnassign, onUploadResume, onGateRefusal, canDelete, onDelete, onUnconvert, onEdit, onChangeStatus, onNotInterested, onStatusChange }: Props) {
   const navigate = useNavigate()
   const [detail, setDetail] = useState<LeadDetail | null>(null)
   const [error, setError] = useState('')
@@ -116,6 +125,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
   const created = createdParts(date?.value)
   const followState = followUpState(shown.nextFollowUpAt, shown.status)
   const platform = platformKind(shown.platform)
+  const converted = Boolean(shown.candidateId) || shown.status === 'converted'
   const extra = Object.entries(detail?.extra ?? {}).filter(([, value]) => value && String(value).trim())
 
   const save = async () => {
@@ -159,17 +169,26 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
         )}
 
         <div className="ld-d-actions">
-          <Button variant="primary" icon={<PhoneCall className="h-4 w-4" />} disabled={Boolean(blocked)} title={blocked ?? undefined} onClick={() => onLogCall(shown)}>Log a call</Button>
-          <Button variant="secondary" icon={<UserPlus className="h-4 w-4" />} disabled={Boolean(blocked) || Boolean(shown.candidateId)} title={shown.candidateId ? 'This lead is already a candidate.' : blocked ?? undefined} onClick={() => onConvert(shown)}>Convert to candidate</Button>
+          <Button variant="primary" icon={<PhoneCall className="h-4 w-4" />} disabled={Boolean(blocked)} title={blocked ?? undefined} onClick={() => onLogCall(shown)}>Add remarks</Button>
+          <Button variant="secondary" icon={<UserPlus className="h-4 w-4" />} disabled={Boolean(blocked) || Boolean(shown.candidateId) || !shown.hasResume} title={shown.candidateId ? 'This lead is already a candidate.' : blocked ?? (shown.hasResume ? undefined : RESUME_REQUIRED_REASON)} onClick={() => onConvert(shown)}>Convert to candidate</Button>
+          {onEdit && <Button variant="secondary" icon={<Pencil className="h-4 w-4" />} disabled={Boolean(blocked)} title={blocked ?? undefined} onClick={() => onEdit(shown)}>Edit</Button>}
           <label className={cn('ld-btn ld-file-btn', (blocked || uploading || shown.candidateId) && 'is-disabled')} title={blocked ?? (shown.candidateId ? 'This lead is already a candidate.' : 'Attach the updated resume')}>
             {uploading ? <Loader2 className="ld-spin h-4 w-4" /> : <FileUp className="h-4 w-4" />}{shown.hasResume ? 'Replace resume' : 'Upload resume'}
             <input type="file" className="sr-only" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp" disabled={Boolean(blocked) || uploading || Boolean(shown.candidateId)}
               onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void attach(file) }} />
           </label>
-          {canAssign && <Button variant="secondary" icon={<UserCheck className="h-4 w-4" />} onClick={() => onAssign(shown)}>Assign</Button>}
-          {me.role === 'admin' && shown.candidateId && onUnconvert && <Button variant="secondary" icon={<Undo2 className="h-4 w-4" />} onClick={() => onUnconvert(shown)}>Move back to Lead</Button>}
-          {canDelete && onDelete && <Button variant="dangerGhost" icon={<Trash2 className="h-4 w-4" />} disabled={Boolean(shown.candidateId)} title={shown.candidateId ? 'This lead was converted to a candidate, so it cannot be deleted.' : undefined} onClick={() => onDelete(shown)}>Delete lead</Button>}
-          {wa && <button type="button" className="ld-btn ld-wa-btn" aria-haspopup="dialog" onClick={(event) => openWhatsApp({ id: shown.id, name: shown.name, phone, positionApplied: shown.positionApplied }, event.currentTarget)}><MessageCircle className="h-4 w-4" />WhatsApp</button>}
+        </div>
+
+        <div className="ld-d-more" role="group" aria-label="More actions">
+          <span className="ld-d-more-label">More actions</span>
+          <Button size="sm" variant="secondary" icon={<MessageCircle className="h-4 w-4" />} disabled={!wa} title={wa ? undefined : 'No valid phone number'} aria-haspopup="dialog"
+            onClick={(event) => { if (wa) openWhatsApp({ id: shown.id, name: shown.name, phone, positionApplied: shown.positionApplied }, event.currentTarget) }}>WhatsApp message</Button>
+          {onChangeStatus && <Button size="sm" variant="secondary" icon={<ListChecks className="h-4 w-4" />} disabled={Boolean(blocked) || converted} title={blocked ?? (converted ? CONVERTED_REASON : undefined)} onClick={() => onChangeStatus(shown)}>Change status</Button>}
+          {onNotInterested && <Button size="sm" variant="secondary" icon={<UserRoundX className="h-4 w-4" />} disabled={Boolean(blocked) || converted} title={blocked ?? (converted ? CONVERTED_REASON : undefined)} onClick={() => onNotInterested(shown)}>Not interested</Button>}
+          {canAssign && <Button size="sm" variant="secondary" icon={<UserCheck className="h-4 w-4" />} disabled={converted} title={converted ? CONVERTED_REASON : shown.ownerId ? 'Hand this lead to another recruiter' : undefined} onClick={() => onAssign(shown)}>{shown.ownerId ? 'Reassign' : 'Assign'}</Button>}
+          {canAssign && onUnassign && shown.ownerId && <Button size="sm" variant="secondary" icon={<UserMinus className="h-4 w-4" />} disabled={converted} title={converted ? CONVERTED_REASON : 'Take this lead back from its recruiter so nobody owns it'} onClick={() => onUnassign(shown)}>Make unassigned</Button>}
+          {me.role === 'admin' && shown.candidateId && onUnconvert && <Button size="sm" variant="secondary" icon={<Undo2 className="h-4 w-4" />} onClick={() => onUnconvert(shown)}>Move back to Lead</Button>}
+          {canDelete && onDelete && <Button size="sm" variant="dangerGhost" icon={<Trash2 className="h-4 w-4" />} disabled={Boolean(shown.candidateId)} title={shown.candidateId ? 'This lead was converted to a candidate, so it cannot be deleted.' : undefined} onClick={() => onDelete(shown)}>Delete lead</Button>}
         </div>
 
         {detail?.resume && (

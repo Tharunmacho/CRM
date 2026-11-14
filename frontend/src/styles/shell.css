@@ -1,6 +1,6 @@
 /*
  * Application shell: an attached navigation panel (white in the light theme, near-black in the dark one) that rests as a
- * 72px icon rail and "peeks" open over the page on hover or keyboard focus, a slim top bar (greeting, attendance, mail,
+ * 72px icon rail and "peeks" open over the page on hover or keyboard focus, a slim top bar (greeting, mail,
  * notifications, profile), the workspace and the command palette. Everything is written against the --nav-* tokens in
  * theme.css. The panel fits without scrolling down to about 600px tall (items shrink 44px -> 32px); only shorter windows
  * scroll inside the list.
@@ -40,9 +40,6 @@ html body .rail :is(a, button):focus-visible { outline: 2px solid var(--primary)
 .rail-logo-full, .rail-logo-mark { position: absolute; left: 50%; top: 50%; width: auto; object-fit: contain; transform: translate(-50%, -50%); transition: opacity .2s ease; }
 .rail-logo-full { height: var(--rail-logo-h); max-width: calc(100% - 32px); opacity: 1; }
 .rail-logo-mark { height: var(--rail-mark-h); opacity: 0; }
-.is-dark-only { display: none !important; }
-[data-theme='dark'] .is-light-only { display: none !important; }
-[data-theme='dark'] .is-dark-only { display: block !important; }
 .rail-toggle { position: absolute; top: 6px; right: 6px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--nav-border); border-radius: 8px; background: var(--nav-bg); color: var(--nav-muted); cursor: pointer; transition: background-color .15s ease, color .15s ease, border-color .15s ease, opacity .2s ease; }
 .rail-toggle:hover { background: var(--nav-hover-bg); color: var(--nav-text); border-color: var(--nav-muted); }
 .rail-mobile-close { display: none; }
@@ -163,7 +160,6 @@ html body .rail .rail-dock-btn:hover { background: var(--nav-hover-bg); border-c
 .topbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .topbar-icon-btn { position: relative; display: grid; flex: none; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); color: var(--text-main); cursor: pointer; transition: border-color .15s, background-color .15s; }
 .topbar-icon-btn:hover { border-color: var(--border-hover); background: var(--tint-1); }
-.topbar .att-chip { flex: none; height: 40px; border-radius: 10px; }
 .topbar-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #dc2626; color: #fff; font-size: 10px; font-weight: 600; line-height: 1; border: 2px solid var(--bg-card); box-sizing: content-box; }
 .topbar-profile-trigger { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 4px 0 0; border: 0; border-radius: 12px; background: transparent; color: var(--text-main); cursor: pointer; }
 .topbar-profile-avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--primary); color: var(--on-primary); font-size: 13px; font-weight: 600; letter-spacing: .02em; transition: box-shadow .15s; }
@@ -174,9 +170,7 @@ html body .rail .rail-dock-btn:hover { background: var(--nav-hover-bg); border-c
 .topbar-profile-trigger > svg { color: var(--text-muted); }
 @media (min-width: 1536px) { .topbar-welcome { font-size: 24px; } }
 @media (max-width: 1359px) { .topbar-profile-trigger > svg { display: none; } }
-/* Narrower than 1440 the presence badge leaves the attendance chip; narrower than 1200 the chip keeps its icon and time only. */
-@media (max-width: 1439px) { .topbar .att-chip-extra { display: none; } }
-@media (max-width: 1199px) { .topbar .att-chip-text { font-size: 0; } .topbar .att-chip-text strong { font-size: 13px; } .topbar-profile-copy { display: none; } }
+@media (max-width: 1199px) { .topbar-profile-copy { display: none; } }
 
 /* ---------- Workspace ---------- */
 .workspace { flex: 1; min-width: 0; padding: 22px 32px 48px; background: var(--bg-main); }
@@ -232,11 +226,18 @@ html body .rail .rail-dock-btn:hover { background: var(--nav-hover-bg); border-c
   .topbar-actions { gap: 8px; }
   .topbar-profile-trigger { padding: 0; }
 }
+/* Responsive pass: tablets get more breathing room; drawer group headers are a full touch target on touch-sized screens. */
+@media (min-width: 641px) and (max-width: 1023px) {
+  .topbar { padding: 0 24px; }
+  .workspace { padding: 20px 24px 40px; }
+}
+@media (max-width: 1023px) {
+  .rail-section-label { height: 36px; }
+  .rail-section-label::after { top: 50%; }
+  html, body { overflow-x: clip; }
+}
 @keyframes rail-item-in { from { opacity: 0; transform: translateX(-12px); } }
 @keyframes rail-fade { from { opacity: 0; } }
-@media (max-width: 760px) {
-  .topbar .att-chip { min-width: 40px; justify-content: center; padding: 0 10px; }
-}
 @media (max-width: 640px) {
   /* Phones: a short greeting, "Hi, Priya", with the menu button beside it. */
   .welcome-long { display: none; }

@@ -4,7 +4,7 @@ import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
 import { RowMenu } from '@/features/candidates/components/db-parts'
 import { createdParts, followUpLabel, followUpState, leadDate, type Lead } from '../lead-model'
-import { CampaignCell, EducationCell, ExperienceCell, LocationCell, NameCell, OwnerCell, PositionText, StatusText } from './lead-columns'
+import { CampaignCell, ContactStateText, EducationCell, ExperienceCell, LocationCell, NameCell, PositionText, ownerNameOf } from './lead-columns'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
 
 /** Stacked cards for narrow screens: the same lead facts and actions as the table row. */
@@ -27,6 +27,7 @@ export function LeadCards({ rows, context, onOpen, selectable, selected, onSelec
 function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh }: { lead: Lead; context: LeadColumnContext; onOpen: (lead: Lead) => void; selectable: boolean; selected: string[]; onSelect: (ids: string[]) => void; fresh: boolean }) {
   const input = useRef<HTMLInputElement>(null)
   const block = workBlock(context, lead)
+  const owner = ownerNameOf(lead, context.userById)
   const date = leadDate(lead)
   const created = createdParts(date?.value)
   const follow = followUpState(lead.nextFollowUpAt, lead.status)
@@ -41,7 +42,7 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
             {created && <small className="ld-card-sub">{date?.label === 'Imported' ? 'Imported ' : ''}{created.day} {created.year}</small>}
           </div>
         </div>
-        <StatusText lead={lead} />
+        <ContactStateText lead={lead} />
       </div>
       <dl className="db-mini-meta">
         <div><dt>Job</dt><dd><PositionText value={lead.positionApplied} /></dd></div>
@@ -51,13 +52,13 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
         <div><dt>Total experience</dt><dd><ExperienceCell lead={lead} kind="total" /></dd></div>
         <div><dt>Location</dt><dd><LocationCell lead={lead} /></dd></div>
         <div><dt>Campaign</dt><dd><CampaignCell lead={lead} /></dd></div>
-        <div><dt>Assigned to</dt><dd><OwnerCell lead={lead} userById={context.userById} /></dd></div>
+        <div><dt>Assigned to</dt><dd>{owner ? <strong className="ld-owner-name" title={owner}>{owner}</strong> : <strong className="ld-owner-name is-empty" title="Waiting for a recruiter">Unassigned</strong>}</dd></div>
         <div><dt>Follow-up</dt><dd className={cn(follow === 'overdue' && 'ld-late-text')}>{follow === 'none' || follow === 'closed' ? '–' : followUpLabel(lead.nextFollowUpAt)}</dd></div>
         <div><dt>Country</dt><dd>{lead.countryInterest || '–'}</dd></div>
       </dl>
       <div className="db-mini-foot" onClick={(event) => event.stopPropagation()}>
         <div className="db-acts">
-          <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Log a call'} onClick={() => context.onLogCall(lead)}><PhoneCall size={14} /><span>Call</span></button>
+          <button type="button" className="db-act is-label" disabled={Boolean(block)} title={block ?? 'Add remarks'} onClick={() => context.onLogCall(lead)}><PhoneCall size={14} /><span>Remarks</span></button>
           {lead.candidateId
             ? <span className="ld-got"><CheckCircle2 size={13} aria-hidden="true" />{lead.candidateRef || 'Candidate'}</span>
             : lead.hasResume

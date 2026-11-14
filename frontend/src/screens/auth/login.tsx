@@ -4,6 +4,7 @@ import { AlertCircle, Briefcase, Eye, EyeOff, Globe2, LoaderCircle, Lock, Mail, 
 import { ApiError } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
 import { useTheme } from '@/shared/lib/theme'
+import { brandLogoSrc, LOGO_HEIGHT, LOGO_WIDTH } from '@/shared/lib/brand-images'
 import { STAGES } from '@/shared/workflow/stages'
 import { useAgency } from '@/shared/state/use-agency'
 import '@/styles/login.css'
@@ -197,8 +198,7 @@ export default function LoginPage() {
     <main className="lg-page">
       <header className="lg-top">
         <span className="lg-logo" role="img" aria-label={`${agency.name}, Overseas Pvt.Ltd`}>
-          <img className="lg-logo-img lg-logo-light" src="/brand/care-india-logo-tight.png" alt="" width={768} height={400} decoding="async" draggable={false} />
-          <img className="lg-logo-img lg-logo-dark" src="/brand/care-india-logo-tight-dark.png" alt="" width={768} height={400} decoding="async" draggable={false} />
+          <img className="lg-logo-img" src={brandLogoSrc(theme)} alt="" width={LOGO_WIDTH} height={LOGO_HEIGHT} decoding="async" draggable={false} />
         </span>
         <button type="button" className="lg-theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}

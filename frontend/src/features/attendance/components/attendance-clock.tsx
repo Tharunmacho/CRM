@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Clock3, LogIn, LogOut } from 'lucide-react'
 import { Badge } from '@/shared/ui/display'
 import { Button } from '@/shared/ui/primitives'
@@ -15,11 +14,11 @@ export function PresenceBadge({ status }: { status: PresenceStatus }) {
 }
 
 /**
- * The attendance clock. `compact` is the top-bar chip (a link to the attendance page); the full
- * version is the "Your attendance today" card with the check in / check out button and, when the
- * workday length is known, how much of it has been covered.
+ * The attendance clock: the "Your attendance today" card on the attendance page, with the check in /
+ * check out button and, when the workday length is known, how much of it has been covered. (The top-bar
+ * chip that used to link here was removed; the page itself is unchanged.)
  */
-export function AttendanceClock({ compact = false, targetMinutes }: { compact?: boolean; targetMinutes?: number }) {
+export function AttendanceClock({ targetMinutes }: { targetMinutes?: number }) {
   const { me, agencyTimezone } = useStore()
   const { own, loading, error, presenceError, busy, pendingKind, refreshedAt, refresh, clock } = useAttendance()
   const [now, setNow] = useState(performance.now())
@@ -31,13 +30,7 @@ export function AttendanceClock({ compact = false, targetMinutes }: { compact?: 
   const action = pendingKind ?? (checkedIn ? 'check-out' : 'check-in')
   const label = (pendingKind && !busy ? 'Retry ' : '') + (action === 'check-out' ? 'Check out' : 'Check in')
 
-  if (me.role === 'admin') return compact ? <Link to="/attendance" className="att-chip" aria-label="Open team attendance"><Clock3 size={16} aria-hidden="true" /><span className="att-chip-text">Attendance</span></Link> : null
-
-  if (compact) return <Link to="/attendance" className="att-chip" data-state={error ? 'error' : checkedIn ? 'in' : 'out'} aria-label="Open attendance">
-    <span className="att-chip-icon" aria-hidden="true"><Clock3 size={15} /></span>
-    <span className="att-chip-text">{error ? <span>Attendance not available</span> : loading ? <span>Attendance…</span> : checkedIn ? <><strong>{durationLabel(seconds)}</strong> checked in</> : <span>Checked out</span>}</span>
-    {me.role === 'staff' && presenceError ? <span className="att-chip-extra att-chip-warn">Update delayed</span> : me.role === 'staff' && own && <span className="att-chip-extra"><PresenceBadge status={own.presence.status} /></span>}
-  </Link>
+  if (me.role === 'admin') return null
 
   const percent = targetMinutes && targetMinutes > 0 ? Math.min(100, Math.round((seconds / 60 / targetMinutes) * 100)) : null
   return <section className="att-clock" aria-label="Your attendance today" data-state={checkedIn ? 'in' : 'out'}>

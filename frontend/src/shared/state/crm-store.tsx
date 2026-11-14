@@ -20,6 +20,7 @@ import { dropDeleted, markCandidateDeleted, removeCandidate, restoreCandidate, u
 import { forgetSnapshots, persistSoon, readPersisted, signedInUserHint } from './snapshot-cache'
 import { live, liveInterval } from './live'
 import { matchDoneMessage } from '@/features/candidates/initial-call'
+import { unassignMessage, type UnassignResult } from '@/features/candidates/data-bank-pools'
 import type {
   AgencySettings,
   Application,
@@ -103,7 +104,8 @@ const MATRIX: Record<Capability, Role[]> = {
   delete_records: ['admin', 'manager'],
   map_candidates: ['admin', 'manager', 'staff'],
   work_any_candidate: ['admin', 'manager'],
-  reassign: ['admin', 'manager'],
+  // Only the admin assigns, reassigns and unassigns candidates; managers work the candidates assigned to them.
+  reassign: ['admin'],
   reopen_stage: ['admin'],
   todo_list: ['admin', 'manager'],
   user_management: ['admin'],
@@ -185,6 +187,8 @@ interface StoreValue extends Data {
   toggleTodo: (id: string) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
   reassign: (candidateIds: string[], toUserId: string, reason: string, restartClockReason?: string) => Promise<void>
+  /** Admin only: take candidates back from their recruiter (they wait in "Not assigned"). Toasts what happened; throws the server's refusal. */
+  unassign: (candidateIds: string[]) => Promise<UnassignResult>
 }
 
 const Ctx = createContext<StoreValue | null>(null)
@@ -198,11 +202,15 @@ const NOTIFICATIONS_POLL_MS = 30_000
 
 /** Everything the workspace snapshot (/bootstrap) is built from, except notifications, which have their own cheap read. */
 const WORKSPACE_TOPICS = ['candidates', 'applications', 'tasks', 'clients', 'companies', 'orders', 'designations', 'users', 'todos', 'settings'] as const
-/** Route-entry revalidation window: short when polling is all we have, longer when the stream keeps the snapshot current. */
 /** Changes arriving within this window are fetched together; kept short because this is the visible latency. */
 const WORKSPACE_LIVE_WINDOW_MS = 200
+/**
+ * Route-entry revalidation window: short when polling is all we have. While the live stream is up every workspace change
+ * announces itself and marks the snapshot stale at once (below), so an unchanged snapshot can be trusted much longer; the
+ * remaining risk is a missed event, which a reconnect (resync) or this window running out at the next route entry covers.
+ */
 const FRESH_MS = 5_000
-const FRESH_WHILE_LIVE_MS = 30_000
+const FRESH_WHILE_LIVE_MS = 5 * 60_000
 
 /**
  * The last workspace this tab saw for the person the browser says is signed in, if any. It is painted
@@ -425,8 +433,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const version = authVersion.current
     const controller = new AbortController()
     let running = false
+    let again = false
     const check = async () => {
-      if (running || document.visibilityState !== 'visible') return
+      if (document.visibilityState !== 'visible') return
+      // A notice that lands while a read is in flight (an allocation request sent just now) must not be dropped:
+      // that read may have started before the commit, so ask once more when it finishes.
+      if (running) { again = true; return }
       running = true
       try {
         const items = await api.get<Notification[]>('/notifications', { signal: controller.signal })
@@ -442,7 +454,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         if (!controller.signal.aborted && error instanceof ApiError && error.isUnauthorised) void loadWorkspace(false, false, true).catch(() => {})
-      } finally { running = false }
+      } finally {
+        running = false
+        if (again && !controller.signal.aborted) { again = false; void check() }
+      }
     }
     const stopLive = liveInterval(() => void check(), NOTIFICATIONS_POLL_MS, ['notifications'])
     return () => { controller.abort(); stopLive() }
@@ -475,7 +490,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (again) { again = false; reload() }
       })
     }
-    return live.subscribe(WORKSPACE_TOPICS, reload, { debounceMs: WORKSPACE_LIVE_WINDOW_MS })
+    // The snapshot is stale the moment the server says so, not 200 ms later when the read starts: a route entered in that gap must reload.
+    const stopStale = live.subscribe(WORKSPACE_TOPICS, () => { lastLoadedAt.current = 0 }, { debounceMs: 0 })
+    const stopReload = live.subscribe(WORKSPACE_TOPICS, reload, { debounceMs: WORKSPACE_LIVE_WINDOW_MS })
+    return () => { stopStale(); stopReload() }
   }, [me?.id, ready, loadWorkspace])
 
   const queueAuthWrite = useCallback((write: () => Promise<unknown>) => {
@@ -727,6 +745,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       reassign: async (candidateIds, toUserId, reason, restartClockReason) => {
         await run(() => api.post('/candidates/reassign', { candidateIds, toUserId, reason, ...(restartClockReason ? { restartClock: true, restartReason: restartClockReason } : {}) }), 'Reassigned')
+      },
+      unassign: async (candidateIds) => {
+        const result = await run(() => api.post<UnassignResult>('/candidates/unassign', { candidateIds }))
+        const answer = result ?? { unassigned: 0, alreadyUnassigned: 0, refused: [] }
+        if (result) { const message = unassignMessage(answer); notify(message.text, message.tone) }
+        return answer
       },
     }
   }, [data, index, me, ready, loadError, publicAgency, retryStartup, inboxUnread, toast, signIn, signOut, refresh, ensureFresh, notify, run])

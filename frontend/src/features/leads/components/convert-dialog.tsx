@@ -5,8 +5,8 @@ import { Dialog } from '@/shared/ui/overlay'
 import { Button, Field, Input } from '@/shared/ui/primitives'
 import { FileDrop } from '@/shared/ui/file-drop'
 import { ApplicationFormButton } from '@/features/application-form/components/application-form-button'
-import { checkLeadResume, readLeadResumeCheck, convertLead, existingCandidateFrom, gateFromRefusal, leadApi, type ConvertResponse, type ExistingCandidate, type LeadResumeCheck } from '../lead-api'
-import { cleanPhone, dobLabel, type Lead } from '../lead-model'
+import { checkLeadResume, readLeadResumeCheck, convertLead, existingCandidateFrom, gateFromRefusal, leadApi, resumeRequiredFrom, type ConvertResponse, type ExistingCandidate, type LeadResumeCheck } from '../lead-api'
+import { cleanPhone, dobLabel, RESUME_REQUIRED_REASON, type Lead } from '../lead-model'
 import type { LeadGate } from '../lead-gate'
 
 interface Props {
@@ -109,6 +109,7 @@ export function ConvertDialog({ lead, onClose, onChanged, blockedReason, onGateR
     } catch (e) {
       const duplicate = existingCandidateFrom(e)
       if (duplicate) setExisting(duplicate)
+      else if (resumeRequiredFrom(e)) setError(RESUME_REQUIRED_REASON)
       else {
         const gate = gateFromRefusal(e)
         if (gate) onGateRefusal(gate)

@@ -88,6 +88,8 @@ export interface DocumentSlot {
 export interface Candidate {
   id: string
   ref: string
+  /** Immutable public ID, sequenced for the Care India April--March financial year. */
+  careId?: string | null
   name: string
   phone: string
   whatsapp?: string
@@ -354,7 +356,7 @@ export interface MailMessage {
 export interface Notification {
   id: string
   /** Every kind the backend writes: workflow scheduler, assignments, intake and attendance. */
-  kind: 'assignment' | 'candidate_assignment' | 'attendance' | 'escalation' | 'reminder' | 'todo' | 'daily_work'
+  kind: 'assignment' | 'candidate_assignment' | 'candidate_request' | 'lead_assignment' | 'attendance' | 'escalation' | 'reminder' | 'todo' | 'daily_work'
   title: string
   detail: string
   createdAt: string

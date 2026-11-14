@@ -41,7 +41,7 @@
         } catch (e) {}
       })()
     </script>
-    <style>[data-theme="dark"] .pre-splash{background:#0a0a0b!important}[data-theme="dark"] .pre-logo-light{display:none!important}[data-theme="dark"] .pre-logo-dark{display:block!important}[data-theme="dark"] .pre-splash p{color:#a1a1aa!important}</style>
+    <style>[data-theme="dark"] .pre-splash{background:#0a0a0b!important}[data-theme="dark"] .pre-splash p{color:#a1a1aa!important}</style>
     <!-- The three weights every screen paints first (body 400, labels 500, headings 600); the rest load on use, all with font-display: swap. -->
     <link rel="preload" href="/fonts/poppins-regular.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/poppins-medium.woff2" as="font" type="font/woff2" crossorigin />
@@ -51,8 +51,8 @@
     <div id="root">
       <div class="pre-splash" role="status" aria-label="Loading" style="display:grid;min-height:100vh;place-items:center;margin:0;font-family:system-ui,sans-serif;background:#fff">
         <div style="display:flex;flex-direction:column;align-items:center">
-          <img class="pre-logo-light" src="/brand/care-india-logo-tight.png" alt="Care India Overseas" width="240" height="125" style="display:block;width:240px;height:auto" />
-          <img class="pre-logo-dark" src="/brand/care-india-logo-tight-dark.png" alt="Care India Overseas" width="240" height="125" style="display:none;width:240px;height:auto" />
+          <img id="pre-logo" alt="Care India Overseas" width="240" height="125" style="display:block;width:240px;height:auto" />
+          <script>document.getElementById('pre-logo').src='/brand/care-india-logo-tight-'+(document.documentElement.dataset.theme==='dark'?'dark-':'')+'480.webp'</script>
           <p style="margin:18px 0 0;font-size:14px;font-weight:500;color:#64748b">Loading…</p>
         </div>
       </div>
