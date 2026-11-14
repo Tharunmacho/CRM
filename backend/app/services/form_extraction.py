@@ -89,6 +89,11 @@ BY_KEY = {spec.key: spec for spec in SPECS.values()}
 # Identity and passport fields: the passport outranks a resume for these.
 PASSPORT_AUTHORITY = frozenset({"name", "dob", "gender", "nationality", "father_name",
                                 "passport_no", "passport_place", "passport_issue", "passport_expiry"})
+# A resume can quote passport details, but those values are not proof of the
+# passport itself.  In a mixed packet the separately classified passport pages
+# remain the authority; this narrow set lets the caller prevent a noisy resume
+# OCR read from blocking all of the otherwise usable resume details.
+PASSPORT_DOCUMENT_COLUMNS = frozenset({"passport_no", "passport_place", "passport_issue", "passport_expiry"})
 # Identity fields an Aadhaar card outranks a resume for (the passport outranks both).
 AADHAAR_AUTHORITY = frozenset({"name", "dob", "gender", "father_name"})
 # An Aadhaar address is the registered one, not necessarily where the person lives now: it fills only an empty current address.
@@ -673,6 +678,38 @@ def document_id(raw: Any) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:20]
 
 
+_IGNORED_DOCUMENT_FIELDS = "_document_apply_ignores"
+
+
+def ignored_fields_for(ocr_data: Any, kind: str, raw: Any) -> frozenset[str]:
+    """Fields deliberately withheld from one stored OCR document.
+
+    The raw provider result remains verbatim in ``ocr_data`` for audit and
+    replay.  This tiny, internal sidecar records only that selected candidate
+    columns must not be applied from that particular result.
+    """
+    by_kind = _dict(_dict(_dict(ocr_data).get(_IGNORED_DOCUMENT_FIELDS)).get(kind))
+    fields = _list(by_kind.get(document_id(raw)))
+    return frozenset(field for field in fields if field in SPECS)
+
+
+def remember_ignored_fields(candidate, kind: str, raw: Any, fields) -> None:
+    """Persist a narrow, replay-safe field exclusion for a stored OCR result."""
+    kept = sorted({field for field in fields if field in SPECS})
+    if not kept:
+        return
+    data = copy.deepcopy(_dict(getattr(candidate, "ocr_data", None)))
+    all_ignores = _dict(data.get(_IGNORED_DOCUMENT_FIELDS))
+    by_kind = _dict(all_ignores.get(kind))
+    identifier = document_id(raw)
+    if by_kind.get(identifier) == kept:
+        return
+    by_kind[identifier] = kept
+    all_ignores[kind] = by_kind
+    data[_IGNORED_DOCUMENT_FIELDS] = all_ignores
+    candidate.ocr_data = data
+
+
 def mark_applied(candidate, kind: str, raw: Any) -> None:
     sources = sources_of(candidate)
     applied = {k: list(v) for k, v in _dict(sources.get("_applied")).items() if isinstance(v, list)}
@@ -697,9 +734,11 @@ def mark_stored_applied(candidate) -> None:
             mark_applied(candidate, kind, raw)
 
 
-def apply_document(candidate, kind: str, raw: Any, db: Session | None = None) -> ApplyResult:
+def apply_document(candidate, kind: str, raw: Any, db: Session | None = None, *, ignore_fields=()) -> ApplyResult:
     """Apply a freshly read document, then remember it. Marks the candidate so the ocr_data hook does not repeat it."""
-    result = apply_values(candidate, kind, values_for(kind, raw), db)
+    ignored = frozenset(ignore_fields)
+    values = {key: value for key, value in values_for(kind, raw).items() if key not in ignored}
+    result = apply_values(candidate, kind, values, db)
     if kind == "aadhaar" and not result.conflicts:
         note_aadhaar(candidate, raw)
     mark_applied(candidate, kind, raw)
@@ -752,6 +791,9 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
             if not force and already_applied(candidate, kind, raw):
                 continue
             values = values_for(kind, raw)
+            ignored = ignored_fields_for(ocr_data, kind, raw)
+            if ignored:
+                values = {key: value for key, value in values.items() if key not in ignored}
             if content_only:
                 values = {key: value for key, value in values.items() if key in REVIEWED_CONTENT_ONLY_COLUMNS}
             applied = apply_values(candidate, kind, values, db, fill_all=fill_all)

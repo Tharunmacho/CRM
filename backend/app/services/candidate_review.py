@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from app.db.models import AuditEntry, Candidate, CandidateStatus, Notification, Role, Task, TaskKind, User
 
 OCR_FLAG_ACTION = "Flagged for document review"
+OCR_FLAG_RESOLVED_ACTION = "Resolved document review flag"
 UNNAMED = "Name needs review"
 NO_NAME_REASON = "We could not read a name from this file. Open it and enter the details, or upload a clearer copy."
 NO_CONTACT_REASON = ("We could not read a phone number or email from this file. "
@@ -63,20 +64,81 @@ def profile_gaps(candidate) -> set[str]:
     return gaps
 
 
-def record_review_flag(db, candidate, *, ocr_warning: bool) -> None:
+def _document_review_scope(meta) -> tuple[str, str] | None:
+    """Return an exact document-review scope, never a best-effort match.
+
+    Old generic OCR flags deliberately remain unscoped. They cannot be
+    automatically cleared by a later document replay because doing so could
+    hide an unrelated warning for the same candidate.
+    """
+    meta = meta if isinstance(meta, dict) else {}
+    attachment_id, document_job_id = meta.get("attachment_id"), meta.get("document_job_id")
+    if not isinstance(attachment_id, str) or not attachment_id.strip():
+        return None
+    if not isinstance(document_job_id, str) or not document_job_id.strip():
+        return None
+    return attachment_id, document_job_id
+
+
+def record_review_flag(db, candidate, *, ocr_warning: bool, attachment_id: str | None = None,
+                       document_job_id: str | None = None) -> None:
     """Remember that the documents, not the missing owner, need a person's attention."""
     if ocr_warning:
+        meta = {"reasons": ["ocr_warning"]}
+        scope = _document_review_scope({"attachment_id": attachment_id, "document_job_id": document_job_id})
+        if scope:
+            meta.update({"attachment_id": scope[0], "document_job_id": scope[1]})
         db.add(AuditEntry(action=OCR_FLAG_ACTION, target=candidate.name, entity_type="candidate",
-                          entity_id=candidate.id, meta={"reasons": ["ocr_warning"]}))
+                          entity_id=candidate.id, meta=meta))
+
+
+def resolve_document_review_flag(db, candidate, *, actor_id: str | None, attachment_id: str | None,
+                                 document_job_id: str | None) -> bool:
+    """Append evidence that one specific OCR warning was resolved by a safe replay."""
+    scope = _document_review_scope({"attachment_id": attachment_id, "document_job_id": document_job_id})
+    if not scope:
+        return False
+    db.add(AuditEntry(actor_id=actor_id, action=OCR_FLAG_RESOLVED_ACTION, target=candidate.name,
+                      entity_type="candidate", entity_id=candidate.id,
+                      meta={"attachment_id": scope[0], "document_job_id": scope[1],
+                            "resolves": OCR_FLAG_ACTION}))
+    return True
 
 
 def review_reasons(db, candidates) -> dict[str, set[str]]:
     """Quality reasons still blocking each candidate, excluding the missing owner."""
     ids = [candidate.id for candidate in candidates]
-    flagged = set(db.scalars(select(AuditEntry.entity_id).where(
-        AuditEntry.entity_type == "candidate", AuditEntry.action == OCR_FLAG_ACTION, AuditEntry.entity_id.in_(ids)))) if ids else set()
+    flags, resolutions = set(), set()
+    if ids:
+        # Some worker sessions intentionally disable autoflush. A just-added
+        # resolution must be visible before deciding whether a candidate can
+        # leave review, while the surrounding transaction remains atomic.
+        db.flush()
+        rows = db.execute(select(AuditEntry.entity_id, AuditEntry.action, AuditEntry.meta).where(
+            AuditEntry.entity_type == "candidate", AuditEntry.action.in_((OCR_FLAG_ACTION, OCR_FLAG_RESOLVED_ACTION)),
+            AuditEntry.entity_id.in_(ids))).all()
+        for candidate_id, action, meta in rows:
+            scope = _document_review_scope(meta)
+            if action == OCR_FLAG_RESOLVED_ACTION and scope:
+                resolutions.add((candidate_id, *scope))
+            elif action == OCR_FLAG_ACTION:
+                flags.add((candidate_id, *scope) if scope else (candidate_id, None, None))
+    flagged = {candidate_id for candidate_id, attachment_id, document_job_id in flags
+               if attachment_id is None or (candidate_id, attachment_id, document_job_id) not in resolutions}
     return {candidate.id: profile_gaps(candidate) | ({"ocr_warning"} if candidate.id in flagged else set())
             for candidate in candidates}
+
+
+def clear_resolved_document_review(db, candidate) -> bool:
+    """Lift only a resolved, document-caused review state.
+
+    Ownerless candidates remain in review for assignment. Any remaining
+    profile gap, legacy generic flag, or different scoped document warning
+    also keeps the review state intact.
+    """
+    if not candidate.needs_review or not getattr(candidate, "owner_id", None):
+        return False
+    return release_ownership_review(candidate, review_reasons(db, [candidate]).get(candidate.id, set()))
 
 
 def release_ownership_review(candidate, reasons: set[str]) -> bool:

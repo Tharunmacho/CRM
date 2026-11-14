@@ -116,7 +116,7 @@ def enrich_empty(candidate, values, ocr_data=None):
     return changed
 
 
-_RESERVED = {"_sources", "additional_documents"}
+_RESERVED = {"_sources", "additional_documents", "_document_apply_ignores"}
 
 
 def _provenance(data, source):

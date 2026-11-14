@@ -997,6 +997,44 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
     return attached
 
 
+def _page_numbers(value) -> set[int]:
+    return {number for number in (value or []) if type(number) is int and number > 0}
+
+
+def _mixed_resume_passport_ignores(candidate: Candidate, output: dict, extractions: dict) -> frozenset[str]:
+    """Passport fields from a resume are not evidence when a packet has separate passport pages.
+
+    A scanned packet can contain a resume followed by a passport page.  The
+    provider occasionally reads one character differently in the resume's
+    copied ``passport_details`` section than it reads from the passport page.
+    Keep the normal identity guard for the actual passport extraction, while
+    allowing the resume's personal, education and work details to be applied.
+    This is intentionally limited to packets with *separate* classified pages
+    and a passport number extracted from the dedicated passport pages.
+    """
+    resume = extractions.get("resume") if isinstance(extractions, dict) else None
+    passport = extractions.get("passport") if isinstance(extractions, dict) else None
+    if not isinstance(resume, dict) or not isinstance(passport, dict):
+        return frozenset()
+    inspection = output.get("inspection") if isinstance(output, dict) else {}
+    inspection = inspection if isinstance(inspection, dict) else {}
+    resume_pages = _page_numbers(inspection.get("resume_pages")) or _page_numbers(resume.get("selected_pages"))
+    passport_pages = _page_numbers(inspection.get("passport_pages")) or _page_numbers(passport.get("selected_pages"))
+    # A page sent to both readers is not a separate source.  Do not weaken its
+    # normal identity check merely because it has two classifications.
+    if not (resume_pages - passport_pages and passport_pages - resume_pages):
+        return frozenset()
+    passport_fields = passport.get("fields") if isinstance(passport.get("fields"), dict) else {}
+    passport_values = fx.values_for("passport", passport.get("raw") or {})
+    if not (passport_values.get("passport_no") or passport_fields.get("passport_no")):
+        return frozenset()
+    return fx.PASSPORT_DOCUMENT_COLUMNS
+
+
+def _without_ignored_fields(values, ignored: frozenset[str]) -> dict:
+    return {key: value for key, value in (values or {}).items() if key not in ignored}
+
+
 def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> None:
     """Called by the extraction worker in the transaction that completes a form-uploaded job.
 
@@ -1012,28 +1050,36 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
                           .options(undefer(Candidate.education), undefer(Candidate.work_history), undefer(Candidate.field_sources), undefer(Candidate.ocr_data))
                           .with_for_update().execution_options(populate_existing=True))
     extractions = (output or {}).get("extractions") or {}
-    from app.services.document_identity import identity_conflicts, IDENTITY_REVIEW_MESSAGE
-    identity_problems = sorted({field for extraction in extractions.values()
-                                for field in identity_conflicts(candidate, extraction.get("fields") or {}, db)}) if candidate else []
+    from app.services.document_identity import identity_conflicts, IDENTITY_REVIEW_MESSAGE, IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION
+    resume_ignores = _mixed_resume_passport_ignores(candidate, output or {}, extractions) if candidate else frozenset()
+    identity_problems = sorted({field for kind, extraction in extractions.items()
+                                for field in identity_conflicts(candidate, _without_ignored_fields(
+                                    extraction.get("fields") or {}, resume_ignores if kind == "resume" else frozenset()), db)}) if candidate else []
     if candidate and not identity_problems:
         identity_problems = sorted({field for kind, extraction in extractions.items()
-                                    for field in identity_conflicts(candidate, fx.values_for(kind, extraction.get("raw") or {}), db)})
+                                    for field in identity_conflicts(candidate, _without_ignored_fields(
+                                        fx.values_for(kind, extraction.get("raw") or {}), resume_ignores if kind == "resume" else frozenset()), db)})
     if identity_problems:
         # Store diagnostics on the job only. Nothing from this document may enter profile OCR/history/derived slots.
         from app.services.candidate_review import record_review_flag
         candidate.needs_review = True
-        record_review_flag(db, candidate, ocr_warning=True)
+        record_review_flag(db, candidate, ocr_warning=True, attachment_id=meta.get("attachmentId"), document_job_id=job.id)
         job.status, job.last_error = "needs_review", IDENTITY_REVIEW_MESSAGE
         form = {**dict(meta), "result": {"status": "needs_review", "message": IDENTITY_REVIEW_MESSAGE,
                 "kindsFound": list(extractions), "filled": [], "kept": [], "identityMismatch": True,
                 "coverage": {**((output or {}).get("coverage") or {}), "complete": False,
                              "issues": [IDENTITY_REVIEW_MESSAGE]}}}
         job.draft = {**dict(job.draft or {}), "applicationForm": form}
-        db.add(AuditEntry(actor_id=job.owner_id, action="Rejected document autofill: identity mismatch",
+        db.add(AuditEntry(actor_id=job.owner_id, action=IDENTITY_REJECTED_ACTION,
                          target=candidate.name, entity_type="candidate", entity_id=candidate.id,
                          meta={"attachment_id": meta.get("attachmentId"), "document_job_id": job.id,
                                "conflicting_fields": identity_problems}))
         return
+    # A saved, otherwise-complete output can be replayed after a narrowly
+    # corrected identity rule. Resolution is appended only after the same
+    # source has passed and its successful result is stored below.
+    resolving_identity_rejection = (job.status == "needs_review" and job.last_error == IDENTITY_REVIEW_MESSAGE
+                                    and (output or {}).get("status") == "complete")
     # Raw warnings stay in the job state (diagnostics); the form shows them in plain words.
     warnings = plain_notes([w for w in (output or {}).get("warnings") or [] if isinstance(w, str)])
     result = fx.ApplyResult()
@@ -1050,8 +1096,11 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
             if extraction.get("source"):
                 incoming["_sources"] = {kind: extraction["source"]}
             candidate.ocr_data = merge_ocr_data(candidate.ocr_data, incoming)
+            ignored = resume_ignores if kind == "resume" else frozenset()
+            if ignored:
+                fx.remember_ignored_fields(candidate, kind, raw, ignored)
             if kind in fx.SLOT_KINDS:
-                result.merge(fx.apply_document(candidate, kind, raw, db))
+                result.merge(fx.apply_document(candidate, kind, raw, db, ignore_fields=ignored))
             if kind == "resume" and not candidate.resume_text:
                 candidate.resume_text = resume_text_from({"resume": raw})
         if result.filled:
@@ -1065,7 +1114,7 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
     elif slot in fx.SLOT_KINDS and slot not in found:
         status = "needs_review"
         message = f"This file holds a {' and '.join(found)}, not a {slot}. It was read for what it contains."
-    elif job.status == "needs_review":
+    elif job.status == "needs_review" and not resolving_identity_rejection:
         status = "needs_review"
         message = warnings[0] if warnings else "Some pages could not be read. Check the details against the original."
     else:
@@ -1081,6 +1130,17 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict) -> N
                                    "issues": plain_issues(coverage.get("issues") or []), "notes": plain_notes(coverage.get("notes") or []),
                                    "kinds": coverage.get("kinds"), "complete": coverage.get("complete")} if coverage else None}
     job.draft = {**dict(job.draft or {}), "applicationForm": form}
+    if resolving_identity_rejection and status == "done" and candidate is not None:
+        job.status, job.last_error = "completed", None
+        attachment_id = meta.get("attachmentId")
+        db.add(AuditEntry(actor_id=job.owner_id, action=IDENTITY_RESOLVED_ACTION,
+                          target=candidate.name, entity_type="candidate", entity_id=candidate.id,
+                          meta={"attachment_id": attachment_id, "document_job_id": job.id,
+                                "resolves": IDENTITY_REJECTED_ACTION}))
+        from app.services.candidate_review import clear_resolved_document_review, resolve_document_review_flag
+        if resolve_document_review_flag(db, candidate, actor_id=job.owner_id, attachment_id=attachment_id,
+                                        document_job_id=job.id):
+            clear_resolved_document_review(db, candidate)
 
 
 def apply_local_patterns(db: Session, candidate_id: str, patterns: dict) -> list[str]:

@@ -3,15 +3,34 @@ from app.services.candidate_identity import identity_matches, name_relation, nor
 from app.services.candidate_review import UNNAMED
 
 IDENTITY_REVIEW_MESSAGE = "This document appears to belong to another person. No details were filled. Upload the correct document."
+IDENTITY_REJECTED_ACTION = "Rejected document autofill: identity mismatch"
+IDENTITY_RESOLVED_ACTION = "Resolved document identity mismatch"
 
 
 def rejected_expression():
-    """A retained wrong-person file is review evidence, not an accepted checklist document."""
+    """A retained wrong-person file is review evidence, not an accepted checklist document.
+
+    A later successful replay resolves only the exact candidate, attachment and
+    extraction job that was originally rejected. Other rejected files, and
+    legacy rows without a job scope, remain blocked.
+    """
     from sqlalchemy import select
+    from sqlalchemy.orm import aliased
     from app.db.models import Attachment, AuditEntry
-    identifier = AuditEntry.meta["attachment_id"].astext
-    rejected = select(identifier).where(AuditEntry.action == "Rejected document autofill: identity mismatch",
-        AuditEntry.entity_type == "candidate", identifier.is_not(None))
+    rejected_entry = aliased(AuditEntry)
+    resolved_entry = aliased(AuditEntry)
+    identifier = rejected_entry.meta["attachment_id"].astext
+    document_job_id = rejected_entry.meta["document_job_id"].astext
+    resolved = select(resolved_entry.id).where(
+        resolved_entry.action == IDENTITY_RESOLVED_ACTION,
+        resolved_entry.entity_type == "candidate",
+        resolved_entry.entity_id == rejected_entry.entity_id,
+        resolved_entry.meta["attachment_id"].astext == identifier,
+        resolved_entry.meta["document_job_id"].astext == document_job_id,
+    ).correlate(rejected_entry).exists()
+    rejected = select(identifier).where(
+        rejected_entry.action == IDENTITY_REJECTED_ACTION,
+        rejected_entry.entity_type == "candidate", identifier.is_not(None), ~resolved)
     return Attachment.id.in_(rejected).label("identity_mismatch")
 
 
