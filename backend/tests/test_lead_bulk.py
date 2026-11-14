@@ -175,7 +175,7 @@ def test_undo_is_a_patch_with_the_previous_status_and_logs_both(env):
     assert summaries == ["Status changed from New to Not interested", "Status changed from Not interested to New"]
 
 
-def test_staff_may_only_change_the_status_of_their_own_leads_when_unlocked(env):
+def test_staff_and_managers_may_only_change_the_status_of_their_own_leads(env):
     imported(env, meta_rows(0, 4), assign_to="a")
     imported(env, meta_rows(4, 6), assign_to="b")
     imported(env, meta_rows(6, 7))
@@ -192,14 +192,22 @@ def test_staff_may_only_change_the_status_of_their_own_leads_when_unlocked(env):
     env.db.rollback()
     assert env.db.scalar(select(func.count()).select_from(m.Lead).where(m.Lead.owner_id.is_(None), m.Lead.status == "new")) == 1
     assert env.db.scalar(select(func.count()).select_from(m.Lead).where(m.Lead.status == "interested", m.Lead.owner_id == "a")) == 4
-    # the daily work gate applies to a recruiter's bulk status change too
+    # open daily tasks never lock the lead sheet: a recruiter's bulk status change on their own leads goes through
     daily_item(env, "a", key="bulk")
-    locked = bulk(env, action="status", status="contacted", ids=mine)
-    assert locked.status_code == 403 and locked.json()["detail"]["code"] == "daily_work_pending"
+    daily_item(env, "a", days_ago=1, key="bulk-late")
+    unlocked = bulk(env, action="status", status="contacted", ids=mine)
+    assert unlocked.status_code == 200 and unlocked.json()["updated"] == 4, unlocked.text
+    # a manager, like staff, changes only the leads assigned to them, by ids or by filter
     act_as(env, "manager")
-    assert bulk(env, action="status", status="contacted", ids=ids).json()["updated"] == 7
-    act_as(env, "manager")
+    none_mine = bulk(env, action="status", status="interested", ids=ids)
+    assert none_mine.status_code == 422 and none_mine.json()["detail"]["code"] == "invalid_request", "none of these leads exist for the manager"
+    env.db.execute(text("UPDATE crm_leads SET owner_id = 'manager' WHERE id = :i"), {"i": mine[0]}); env.db.commit()
+    one = bulk(env, action="status", status="interested", ids=ids).json()
+    assert one["updated"] == 1 and {r["code"]: r["count"] for r in one["skippedReasons"]} == {"not_yours": 6}
+    assert bulk(env, action="status", status="not_interested", filter={}, expectedCount=1).json()["updated"] == 1
     assert bulk(env, action="delete", ids=ids).status_code == 403, "delete is admin only"
+    act_as(env, "admin")  # the admin reaches every lead
+    assert bulk(env, action="status", status="resume_requested", ids=ids).json()["updated"] == 7
 
 
 # ------------------------------------------------------------------ caps

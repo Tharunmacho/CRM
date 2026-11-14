@@ -38,6 +38,10 @@ def test_migration_seeds_equal_the_service_defaults_and_every_category_is_regist
     spec.loader.exec_module(module)
     migrated = [{"category": category, "value": value, "label": label, "hint": hint, "tone": tone, "sort_order": position * 10}
                 for category, rows in module.SEEDS for position, (value, label, hint, tone) in enumerate(rows, start=1)]
+    # 0022 is an applied migration and keeps the label it seeded; the default was reworded later (the UI maps the legacy label).
+    renamed = {("candidate_source", "referral"): ("Referral / agent", "Referral / agency")}
+    migrated = [{**row, "label": renamed[(row["category"], row["value"])][1]} if (row["category"], row["value"]) in renamed
+                and row["label"] == renamed[(row["category"], row["value"])][0] else row for row in migrated]
     assert migrated == service.DEFAULT_OPTIONS
     assert {row["category"] for row in service.DEFAULT_OPTIONS} == set(service.CATEGORIES)
     assert {row["value"] for row in service.DEFAULT_OPTIONS if row["category"] == "candidate_source"} == {s.value for s in m.Source}

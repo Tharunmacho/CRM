@@ -128,6 +128,7 @@ def test_two_people_atomic_commit_correct_pages_tasks_and_replay(env):
     with env.sessions() as db:
         candidates = list(db.scalars(select(Candidate).order_by(Candidate.name)))
         assert len(candidates) == 2 and {row.owner_id for row in candidates} == {env.staff, env.other}
+        assert len({row.care_id for row in candidates}) == 2 and all(row.care_id.startswith("CI-") for row in candidates)
         tasks = list(db.scalars(select(Task)))
         assert len(tasks) == 2 and all((task.due_at - task.sla_started_at).total_seconds() == 48 * 3600 for task in tasks)
         attachments = list(db.scalars(select(Attachment)))

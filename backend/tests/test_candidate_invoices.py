@@ -11,7 +11,7 @@ from app.api.routers import candidate_invoices as routes
 from app.db.models import Application, ApplicationStatus, Attachment, CandidateInvoice, InvoiceSettings, Role
 from app.services import candidate_invoices as service
 from test_application_form import as_user, desk, form, upload
-from test_application_workflow import complete, mapped
+from test_application_workflow import complete, mapped, save
 from test_database_naming import schema_database
 from test_document_extraction import pdf
 
@@ -179,9 +179,15 @@ def test_ambiguous_candidate_ticket_cannot_invoice_another_placement(billing):
 def test_completion_without_ticket_never_creates_an_invoice(billing):
     app = mapped(billing)
     configure(billing)
-    for stage in range(1, 12):
+    for stage in range(1, 11):
         complete(billing, app, {"feedback": f"Move stage {stage} manually"})
+    # Deployment cannot be moved manually any more: it needs the ticket and the travel date, so no invoice can follow from a note.
+    saved = save(billing, app, {"feedback": "Move stage 11 manually"})
+    assert saved.status_code == 200, saved.text
+    refused = billing.client.post(f"/api/applications/{app}/complete", json={"lock_version": saved.json()["lockVersion"]})
+    assert refused.status_code == 422 and refused.json()["detail"]["missing"] == ["Air ticket", "Travel date"], refused.text
     with billing.sessions() as db:
+        assert db.get(Application, app).status == ApplicationStatus.active
         assert db.scalar(select(func.count()).select_from(CandidateInvoice)) == 0
     assert read(billing)["status"] == "pending_ticket"
 

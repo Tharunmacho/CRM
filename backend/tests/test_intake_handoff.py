@@ -175,7 +175,7 @@ def test_combined_form_upload_populates_each_document_slot_and_preserves_origina
     original_id = response.json()["document"]["current"]["attachmentId"]
     process_pending(desk)
     result = form(desk)
-    assert result["personal"]["candidateName"] == "Candidate"  # manually entered name wins
+    assert result["personal"]["candidateName"] == "Alex Example"  # the saved candidate name is kept
     for kind in ("resume", "passport"):
         item = result["documents"][kind]
         assert item["uploaded"] and item["extraction"]["status"] == "done"

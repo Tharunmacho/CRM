@@ -71,9 +71,13 @@ def test_export_has_the_same_extra_columns_with_the_labels_admins_set(grid):
     with ZipFile(BytesIO(export_candidates(grid, Search(sort='name', direction='asc')))) as archive:
         sheet = ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
     rows = [[''.join(cell.itertext()) for cell in row.findall('{*}c')] for row in sheet.findall('{*}sheetData/{*}row')]
-    header, body = rows[0], {row[1]: row for row in rows[1:]}
-    assert header[14:19] == ['Date of birth', 'WhatsApp', 'Preferred country', 'Service charges', 'Interest level']
-    assert body['Ravi Kumar'][14:17] == ['1994-03-12', '+91 98765 43210', 'Saudi Arabia, UAE']
+    header = rows[0]
+    # The sheet opens with the public Care India ID and the CRM reference, then the candidate's name.
+    assert header[:3] == ['Care India ID', 'CRM reference', 'Name']
+    body = {row[header.index('Name')]: row for row in rows[1:]}
+    start = header.index('Date of birth')
+    assert header[start:start + 5] == ['Date of birth', 'WhatsApp', 'Preferred country', 'Service charges', 'Interest level']
+    assert body['Ravi Kumar'][start:start + 3] == ['1994-03-12', '+91 98765 43210', 'Saudi Arabia, UAE']
     assert body['Ravi Kumar'][header.index('Service charges')] in ('Agreed', 'Agreed to pay')
     assert body['Ravi Kumar'][header.index('Interest level')] == 'More interested'
     assert body['Nobody Noted'][header.index('Service charges')] == 'Not discussed'

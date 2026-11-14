@@ -171,6 +171,13 @@ def preview_summary(table, columns) -> dict:
             "columns": columns.columns, "unmappedColumns": columns.unmapped}
 
 
+def _same_file_out(row, user: User) -> dict:
+    """Only the admin (or the uploader) sees which earlier batch held this file and when; anyone else just learns that one exists."""
+    if user.role == Role.admin or row[3] == user.id:
+        return {"batchId": row[0], "uploadedAt": row[1].isoformat(), "rowsNew": row[2]}
+    return {"batchId": None, "uploadedAt": None, "rowsNew": None}
+
+
 def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run: bool = False, mapping: dict | None = None,
                assign_to: str | None = None, campaign_label: str | None = None, fill_empty: bool = False,
                source: str = "meta_ads") -> dict:
@@ -196,7 +203,7 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
     if not dry_run:
         db.execute(text("SELECT pg_advisory_xact_lock(hashtext('crm_lead_import'))"))
 
-    same_file = db.execute(text("SELECT id, created_at, rows_new FROM crm_lead_batches WHERE file_sha256 = :h AND status = 'completed' "
+    same_file = db.execute(text("SELECT id, created_at, rows_new, uploaded_by FROM crm_lead_batches WHERE file_sha256 = :h AND status = 'completed' "
                                 "ORDER BY created_at DESC LIMIT 1"), {"h": file_hash}).first()
 
     # 2) in-file duplicates
@@ -287,17 +294,25 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
             owner_ids = [target.id] * len(fresh)
             assigned_to = target.id
 
+    def by_reason(extra_lead_id: int = 0) -> dict:
+        counts = {"lead_id": extra_lead_id, "phone": 0, "email": 0}
+        for item in duplicates:
+            counts[item["reason"]] += 1
+        return counts
+
     result = {
         "dryRun": dry_run, "batchId": None, "fileName": file_name, "fileSize": len(data), "fileSha256": file_hash,
-        "sameFileBefore": ({"batchId": same_file[0], "uploadedAt": same_file[1].isoformat(), "rowsNew": same_file[2]} if same_file else None),
+        "sameFileBefore": (_same_file_out(same_file, user) if same_file else None),
         "format": table.format, "encoding": table.encoding, "delimiter": table.delimiter, "source": source,
         "rowsTotal": len(rows), "rowsNew": len(fresh), "rowsDuplicate": len(duplicates), "rowsInvalid": len(invalid),
-        "rowsMatchedCandidates": matched, "rowsUpdated": 0,
+        "rowsMatchedCandidates": matched, "rowsUpdated": 0, "duplicatesByReason": by_reason(),
         "columns": columns.columns, "unmappedColumns": columns.unmapped,
         "duplicates": duplicates[:REPORT_RETURNED], "duplicatesTruncated": len(duplicates) > REPORT_RETURNED,
         "invalid": invalid[:REPORT_RETURNED], "invalidTruncated": len(invalid) > REPORT_RETURNED,
         "assignedTo": assigned_to, "assignedCount": len(fresh) if assigned_to else 0,
     }
+    if user.role != Role.admin:  # a manager learns THAT a stored lead matched, never which one (they see only their own leads)
+        result["duplicates"] = [{**d, "existingLeadId": None} for d in result["duplicates"]]
     if dry_run:
         by_number = dict(rows)
         result["sample"] = [
@@ -334,7 +349,8 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
     batch.rows_new = stored
     batch.rows_duplicate = len(duplicates) + (len(fresh) - stored)
     batch.rows_updated = updated
-    result.update(batchId=batch.id, rowsNew=stored, rowsDuplicate=batch.rows_duplicate, rowsUpdated=updated)
+    result.update(batchId=batch.id, rowsNew=stored, rowsDuplicate=batch.rows_duplicate, rowsUpdated=updated,
+                  duplicatesByReason=by_reason(len(fresh) - stored))
     if stored:
         who = "automatically" if assigned_to == "auto" else ("to a staff member" if assigned_to else "unassigned")
         db.execute(text("INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary) "

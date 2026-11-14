@@ -75,14 +75,31 @@ def leads_for(desk, user, staff_id=None):
 
 # ------------------------------------------------------------------ the numbers
 
-def test_team_numbers_for_admin_and_manager(desk):
+def test_team_numbers_are_admin_only(desk):
     team = leads_for(desk, ADMIN)
     assert team["scope"] == "team" and team["staffId"] is None
     assert (team["newToday"], team["notContacted"], team["followUpsDue"], team["resumesReceived"]) == (3, 2, 1, 1)
     assert team["converted"] == {"week": 1, "month": 1, "quarter": 2, "year": 2, "all": 2}
     assert (team["total"], team["assigned"], team["convertedTotal"], team["conversionPercent"]) == (10, 8, 2, 25.0)
     assert team["unassigned"] == 1  # L7 (L8 is invalid, so closed)
-    assert leads_for(desk, MANAGER) == team
+    # a manager counts only the leads assigned to them (none in this seed), like staff: no team numbers, no pool
+    manager = leads_for(desk, MANAGER)
+    assert manager["scope"] == "mine" and manager["staffId"] == "manager" and manager["unassigned"] is None
+    assert (manager["total"], manager["assigned"], manager["newToday"], manager["notContacted"]) == (0, 0, 0, 0)
+    assert manager["converted"]["all"] == 0
+
+
+def test_managers_count_only_the_leads_assigned_to_them(desk):
+    with desk.sessions() as db:
+        for key in ("L5", "L9"):  # one new today, one converted 40 days ago
+            db.get(m.Lead, key).owner_id = "manager"
+        db.commit()
+    manager = leads_for(desk, MANAGER)
+    assert manager["scope"] == "mine" and (manager["total"], manager["newToday"], manager["notContacted"]) == (2, 1, 1)
+    assert manager["converted"] == {"week": 0, "month": 0, "quarter": 1, "year": 1, "all": 1}  # L9, now the manager's
+    # naming a staff member does not widen a manager's numbers
+    assert leads_for(desk, MANAGER, "ann") == manager
+    assert leads_for(desk, ADMIN, "manager")["total"] == 2
 
 
 def test_staff_see_only_their_own_leads_and_no_unassigned_card(desk):
@@ -103,7 +120,8 @@ def test_admin_can_narrow_to_one_person_and_unassigned_stays_global(desk):
     assert bob["scope"] == "person" and bob["staffId"] == "bob"
     assert (bob["newToday"], bob["notContacted"], bob["total"]) == (1, 1, 3)
     assert bob["unassigned"] == 1
-    assert leads_for(desk, MANAGER, "ann")["resumesReceived"] == 1
+    assert leads_for(desk, ADMIN, "ann")["resumesReceived"] == 1
+    assert leads_for(desk, MANAGER, "ann")["resumesReceived"] == 0, "a manager cannot narrow to someone else's leads"
 
 
 def test_lists_behind_the_cards_match_the_counts_and_scope(desk):
@@ -173,9 +191,13 @@ def test_staff_cannot_widen_the_leads_by_naming_someone_else(api):
     own = api.client.get("/api/dashboard/leads?card=followUpsDue&staff_id=ann")
     assert own.status_code == 200 and [row["id"] for row in own.json()["items"]] == ["L2"]
     assert api.client.get("/api/dashboard/leads?card=bogus").status_code == 422
-    as_user(api, MANAGER)
+    as_user(api, ADMIN)
     narrowed = api.client.get("/api/dashboard?staff_id=bob").json()["leads"]
     assert narrowed["staffId"] == "bob" and narrowed["total"] == 3
+    as_user(api, MANAGER)  # a manager's lead numbers stay their own, whoever they name
+    managed = api.client.get("/api/dashboard?staff_id=bob").json()["leads"]
+    assert managed["staffId"] == "manager" and managed["scope"] == "mine" and managed["total"] == 0
+    assert api.client.get("/api/dashboard/leads?card=notContacted&staff_id=bob").json()["total"] == 0
 
 
 def test_cache_keeps_people_apart_and_is_dropped_by_the_leads_topic(api, monkeypatch):

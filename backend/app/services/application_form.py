@@ -237,12 +237,19 @@ def completeness_payload(form: dict) -> dict:
     filled = len(items) - len(missing)
     counted = [entry for entry in form["documents"].values() if entry["required"]]
     total = len(items) + len(counted)
+    passport_details_saved = any(
+        _present(passport.get(key))
+        for key in ("passportNumber", "placeOfIssue", "issueDate", "expiryDate")
+    )
     for entry in counted:
         if entry["uploaded"]:
             filled += 1
         else:
+            message = f"{entry['label']} not uploaded"
+            if entry["slot"] == "passport" and passport_details_saved:
+                message = "Passport scan not uploaded (passport details are saved)"
             missing.append({"key": f"documents.{entry['slot']}", "label": entry["label"], "section": "documents", "kind": "document",
-                            "message": f"{entry['label']} not uploaded"})
+                            "message": message})
     optional_documents = [{"slot": e["slot"], "label": e["label"], "uploaded": e["uploaded"]}
                           for e in form["documents"].values() if e["optional"]]
     screening = form["screening"]
@@ -600,7 +607,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
     form = {
         "header": dict(HEADER),
         "capabilities": {"deferredDocumentReading": True},
-        "candidate": {"id": candidate.id, "ref": candidate.ref, "name": candidate.name if candidate.name != fx.UNNAMED else "",
+        "candidate": {"id": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "name": candidate.name if candidate.name != fx.UNNAMED else "",
                       "status": candidate.status.value, "needsReview": bool(candidate.needs_review), "ownerId": candidate.owner_id,
                       "ownerName": owner_name, "updatedAt": _iso(candidate.updated_at), "canEdit": can_edit(user, candidate)},
         "application": ({"id": application.id, "orderId": application.order_id, "orderRef": order.ref,

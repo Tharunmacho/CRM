@@ -86,7 +86,7 @@ def log_whatsapp(lead_id: str, body: WhatsAppLog, db: Session = Depends(get_db),
 @router.get("/for-candidate/{candidate_id}")
 def leads_of_candidate(candidate_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """The lead-sheet entries a candidate came from (converted or linked) or matches by phone / e-mail: `{leads: [{id, name, campaignName, ...}]}`."""
-    rows = db.scalars(select(Lead).where((Lead.candidate_id == candidate_id) | (Lead.matched_candidate_id == candidate_id))
+    rows = db.scalars(select(Lead).where((Lead.candidate_id == candidate_id) | (Lead.matched_candidate_id == candidate_id), lead_sheet.visible_leads(user))
                       .order_by(Lead.created_time.desc().nulls_last(), Lead.id).limit(5)).all()
     return {"leads": [{"id": lead.id, "name": lead.name, "campaignName": lead.campaign_name, "formName": lead.form_name,
                        "status": lead.status, "converted": lead.candidate_id == candidate_id} for lead in rows]}

@@ -157,7 +157,7 @@ def test_sweep_stops_cleanly_when_nobody_is_eligible(setup):
         assert assign_waiting_candidates(db, "admin", "Admin") == {"assigned": 0, "reviewCleared": 0, "remaining": 2}
 
 
-def test_assign_waiting_endpoint_is_supervisor_only_and_reports_counts(setup):
+def test_assign_waiting_endpoint_is_admin_only_and_reports_counts(setup):
     sessions, _ = setup
     add_waiting(sessions, 2)
     with sessions() as db:
@@ -175,7 +175,9 @@ def test_assign_waiting_endpoint_is_supervisor_only_and_reports_counts(setup):
         return TestClient(app)
 
     assert client("owner").post("/api/candidates/assign-waiting").status_code == 403
-    response = client("manager").post("/api/candidates/assign-waiting")
+    assert client("manager").post("/api/candidates/assign-waiting").status_code == 403, "only the admin hands out candidates"
+    assert client("manager").get("/api/candidates/pool-counts").json()["unassigned"] == 2  # a manager still sees how many wait
+    response = client("admin").post("/api/candidates/assign-waiting")
     assert response.status_code == 200 and response.json() == {"assigned": 2, "reviewCleared": 2, "remaining": 0}
     counts = client("manager").get("/api/candidates/pool-counts").json()
     assert counts["unassigned"] == 0 and counts["needs_review"] == 0

@@ -132,7 +132,8 @@ def commit_candidate(db, message, output):
         # Client staff routing first (designation match); otherwise the ordinary round-robin.
         from app.services import client_routing
         owner = client_routing.route_new_candidate(db, values.get("designations")) or next_owner(db, pointer=pointer)
-        candidate = Candidate(ref=f"CND-W-{message.id.replace('-', '')}", source=Source.whatsapp,
+        from app.services.care_india_id import allocate_care_id
+        candidate = Candidate(ref=f"CND-W-{message.id.replace('-', '')}", care_id=allocate_care_id(db), source=Source.whatsapp,
             source_detail=f"whatsapp_message:{message.id}", owner_id=owner.id if owner else None, intake_owner_id=owner.id if owner else None,
             name=values.pop("name"), phone=values.pop("phone", None) or "",
             needs_review=review or owner is None, status=CandidateStatus.needs_review if review or owner is None else CandidateStatus.new,

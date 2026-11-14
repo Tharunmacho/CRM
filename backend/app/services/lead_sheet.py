@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import and_, case, cast, exists, func, or_, select, text, String
+from sqlalchemy import and_, case, cast, exists, func, or_, select, text, true, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, aliased, undefer
 
@@ -49,52 +49,23 @@ def iso(value):
 
 # ------------------------------------------------------------------ the daily-work gate
 
-def gate_message(open_: int, postponed: int) -> str:
-    left = f"{open_} daily {'task' if open_ == 1 else 'tasks'} left"
-    if postponed:
-        left += f" ({postponed} postponed)"
-    return f"Finish today's tasks first. You have {left}. Then you can work the lead sheet."
-
-
 def daily_work_gate(db: Session, user: User, now: datetime | None = None) -> dict:
-    """Is this person locked out of the lead sheet by unfinished daily work? Only staff are ever locked.
+    """The lead sheet is never locked by unfinished daily tasks: staff work their assigned leads whenever they choose.
 
-    Reads workflow_daily_work_items (migrations 0020/0023): open items allocated today or earlier (postponed ones are
-    the earlier days). Nothing allocated means unlocked. One statement; never cached.
+    Kept (always unlocked) because the screens and the API still carry the `dailyWorkGate` shape.
     """
-    unlocked = {"locked": False, "open": 0, "total": 0, "postponed": 0, "nextDueAt": None, "message": None}
-    if user.role != Role.staff:
-        return unlocked
-    from app.services.daily_work import agency_today
-    today = agency_today(now or datetime.now(timezone.utc))
-    row = db.execute(text(
-        "SELECT count(*) FILTER (WHERE status = 'open'), count(*) FILTER (WHERE status = 'open' AND work_date < :today), "
-        "count(*) FILTER (WHERE status = 'open' OR (status = 'completed' AND work_date = :today)), "
-        "min(due_at) FILTER (WHERE status = 'open') FROM workflow_daily_work_items "
-        "WHERE owner_id = :u AND work_date <= :today AND status IN ('open', 'completed')"), {"u": user.id, "today": today}).one()
-    open_, postponed, total, due = int(row[0] or 0), int(row[1] or 0), int(row[2] or 0), row[3]
-    if not open_:
-        return {**unlocked, "total": total}
-    return {"locked": True, "open": open_, "total": total, "postponed": postponed,
-            "nextDueAt": iso(due), "message": gate_message(open_, postponed)}
+    return {"locked": False, "open": 0, "total": 0, "postponed": 0, "nextDueAt": None, "message": None}
 
 
 def lead_work_refusal(db: Session, lead: Lead, user: User, gate: dict | None = None) -> HTTPException | None:
     """Why `user` may not work this lead (call, edit, convert, link, upload a resume), or None.
 
-    Admin and manager work any lead and are never gated. Staff work only the leads assigned to them, and only once their
-    daily tasks are finished.
+    Admin works any lead. Managers and staff work only the leads assigned to them (no daily-task lock).
     """
-    if user.role in (Role.admin, Role.manager):
+    if user.role == Role.admin:
         return None
-    if lead.owner_id != user.id:
-        if lead.owner_id is None:
-            return fail(403, "lead_not_yours", "This lead has no owner yet. Only a manager or an admin can assign it.")
-        name = db.scalar(select(User.name).where(User.id == lead.owner_id))
-        return fail(403, "lead_not_yours", f"This lead is assigned to {name or 'another recruiter'}. Only they, a manager or an admin can work on it.")
-    gate = gate or daily_work_gate(db, user)
-    if gate["locked"]:
-        return fail(403, "daily_work_pending", gate["message"], dailyWorkGate=gate)
+    if lead.owner_id != user.id:  # same answer as the detail view: a lead that is not yours does not exist for you (no owner name)
+        return fail(404, "not_found", "This lead was not found.")
     return None
 
 
@@ -250,8 +221,27 @@ def _csv_param(value) -> list[str]:
     return items
 
 
+def sees_all_leads(user: User) -> bool:
+    """Only an admin sees every lead (and assigns them). Managers and staff see only the leads assigned to them."""
+    return user.role == Role.admin
+
+
+def visible_leads(user: User):
+    """SQL condition: the leads `user` may see (always true for an admin)."""
+    return true() if sees_all_leads(user) else Lead.owner_id == user.id
+
+
+def ensure_can_see_lead(lead: Lead, user: User) -> None:
+    """A lead not assigned to a manager/staff member does not exist for them (404, so its existence is not revealed)."""
+    if not sees_all_leads(user) and lead.owner_id != user.id:
+        raise fail(404, "not_found", "This lead was not found.")
+
+
 def apply_filters(query, owner, has_resume, user: User, f: dict):
-    """The list/export/assign filters (all optional, AND-ed). `f` holds the snake_case query parameters."""
+    """The list/export/assign filters (all optional, AND-ed). `f` holds the snake_case query parameters.
+
+    Always narrowed to the leads `user` may see: managers and staff only ever get the leads assigned to them."""
+    query = query.where(visible_leads(user))
     effective_time = func.coalesce(Lead.created_time, Lead.created_at)
 
     def term_matches(term: str):
@@ -341,7 +331,7 @@ def pretty_header(key: str) -> str:
     return (words[:1].upper() + words[1:])[:80] if words else ""
 
 
-def extra_columns(db: Session, filters: dict | None = None) -> list[dict]:
+def extra_columns(db: Session, filters: dict | None = None, user: User | None = None) -> list[dict]:
     """The custom question columns found in the stored sheets: `{key, label, count}`, most answered first.
 
     Every ad form asks its own questions and the importer keeps the answers it has no lead field for in `extra`
@@ -358,6 +348,9 @@ def extra_columns(db: Session, filters: dict | None = None) -> list[dict]:
     if filters.get("batch_id"):
         where.append("l.batch_id = :batch_id")
         params["batch_id"] = filters["batch_id"]
+    if user is not None and not sees_all_leads(user):
+        where.append("l.owner_id = :me")
+        params["me"] = user.id
     rows = db.execute(text(
         "SELECT k.key, count(*) AS n FROM crm_leads l CROSS JOIN LATERAL jsonb_each_text(l.extra) AS k(key, value) "
         f"WHERE {' AND '.join(where)} AND btrim(k.value) <> '' GROUP BY k.key ORDER BY n DESC, k.key LIMIT 60"), params).all()
@@ -390,7 +383,7 @@ def search_leads(db: Session, user: User, filters: dict, page: int, page_size: i
 
 def get_lead_detail(db: Session, user: User, lead_id: str) -> dict:
     query, _, _ = _base_query()
-    row = db.execute(query.where(Lead.id == lead_id).options()).first()
+    row = db.execute(query.where(Lead.id == lead_id, visible_leads(user)).options()).first()
     if row is None:
         raise fail(404, "not_found", "This lead was not found.")
     lead = row[0]
@@ -427,9 +420,11 @@ def lead_response(db: Session, lead_id: str) -> dict:
 # ------------------------------------------------------------------ summary and facets
 
 def summary(db: Session, user: User, scope: str | None = None) -> dict:
-    scope = scope or ("all" if user.role in (Role.admin, Role.manager) else "mine")
+    scope = scope or ("all" if sees_all_leads(user) else "mine")
     if scope not in ("mine", "all"):
         raise fail(422, "invalid_request", "scope must be mine or all.")
+    if not sees_all_leads(user):
+        scope = "mine"  # managers and staff count only the leads assigned to them
     from app.services.daily_work import agency_today
     from app.services.candidate_search import agency_midnight as midnight
     today_start = midnight(agency_today(datetime.now(timezone.utc)).isoformat(), "Today")
@@ -453,6 +448,8 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
     for status, campaign, n, new_today, due, matched, with_resume, uncontacted, last_import in rows:
         if status == "__meta__":
             out["unassigned"], out["lastImportAt"], out["followUpsDueMine"] = int(n), iso(last_import), int(due)  # due: the viewer's own follow-ups due today or overdue
+            if not sees_all_leads(user):
+                out["unassigned"] = 0  # unassigned leads are the admin's to hand out; nobody else sees them
             continue
         out["total"] += n
         out["newToday"] += new_today
@@ -474,14 +471,17 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
     return out
 
 
-def facets(db: Session) -> dict:
+def facets(db: Session, user: User) -> dict:
+    # Filter choices come only from the leads the viewer may see (managers and staff: their own).
     rows = db.execute(text(
-        "SELECT 'campaign' AS k, campaign_name AS v, NULL AS id, count(*) FROM crm_leads WHERE campaign_name IS NOT NULL GROUP BY campaign_name "
-        "UNION ALL SELECT 'form', form_name, NULL, count(*) FROM crm_leads WHERE form_name IS NOT NULL GROUP BY form_name "
-        "UNION ALL SELECT 'position', position_applied, NULL, count(*) FROM crm_leads WHERE position_applied IS NOT NULL GROUP BY position_applied "
-        "UNION ALL SELECT 'country', country_interest, NULL, count(*) FROM crm_leads WHERE country_interest IS NOT NULL GROUP BY country_interest "
-        "UNION ALL SELECT 'platform', platform, NULL, count(*) FROM crm_leads WHERE platform IS NOT NULL GROUP BY platform "
-        "UNION ALL SELECT 'owner', u.name, l.owner_id, count(*) FROM crm_leads l JOIN auth_users u ON u.id = l.owner_id GROUP BY l.owner_id, u.name")).all()
+        "WITH v AS (SELECT * FROM crm_leads WHERE :everyone OR owner_id = :me) "
+        "SELECT 'campaign' AS k, campaign_name AS v, NULL AS id, count(*) FROM v WHERE campaign_name IS NOT NULL GROUP BY campaign_name "
+        "UNION ALL SELECT 'form', form_name, NULL, count(*) FROM v WHERE form_name IS NOT NULL GROUP BY form_name "
+        "UNION ALL SELECT 'position', position_applied, NULL, count(*) FROM v WHERE position_applied IS NOT NULL GROUP BY position_applied "
+        "UNION ALL SELECT 'country', country_interest, NULL, count(*) FROM v WHERE country_interest IS NOT NULL GROUP BY country_interest "
+        "UNION ALL SELECT 'platform', platform, NULL, count(*) FROM v WHERE platform IS NOT NULL GROUP BY platform "
+        "UNION ALL SELECT 'owner', u.name, l.owner_id, count(*) FROM v l JOIN auth_users u ON u.id = l.owner_id GROUP BY l.owner_id, u.name"),
+        {"everyone": sees_all_leads(user), "me": user.id}).all()
     out = {"campaigns": [], "forms": [], "positions": [], "countries": [], "platforms": [], "owners": []}
     plural = {"campaign": "campaigns", "form": "forms", "position": "positions", "country": "countries", "platform": "platforms"}
     for kind, value, owner_id, count in sorted(rows, key=lambda r: (str(r[1]).lower(), r[0])):
@@ -617,7 +617,7 @@ def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict |
     from app.services.lead_import import eligible_staff, open_lead_counts, spread_evenly
     if not ids and filters is None:
         raise fail(422, "invalid_request", "Choose the leads to assign (ids) or give a filter.")
-    query = select(Lead.id, Lead.owner_id).where(Lead.status != "converted")
+    query = select(Lead.id, Lead.owner_id).where(Lead.status != "converted", visible_leads(user))
     if ids:
         if len(ids) > 20000:
             raise fail(422, "invalid_request", "Assign at most 20,000 leads at a time.")
@@ -628,10 +628,13 @@ def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict |
         query = select(Lead.id, Lead.owner_id).where(Lead.id.in_(select(filtered.with_only_columns(Lead.id).subquery().c.id)), Lead.status != "converted")
     if only_unassigned:
         query = query.where(Lead.owner_id.is_(None))
-    target = db.execute(query.order_by(Lead.created_time.desc().nulls_last(), Lead.id).limit(20001)).all()
+    # FOR UPDATE, in the bulk path's order: a double click waits for the first one and then finds nothing left to move (no duplicate history)
+    target = db.execute(query.order_by(Lead.created_time.desc().nulls_last(), Lead.id).limit(20001).with_for_update()).all()
     if len(target) > 20000:
         raise fail(422, "invalid_request", "That filter matches more than 20,000 leads. Narrow it down first.")
-    if owner_id == "auto":
+    if owner_id in UNASSIGN:
+        names, picks = {}, [None] * len(target)
+    elif owner_id == "auto":
         staff = eligible_staff(db)
         if not staff:
             raise fail(422, "invalid_request", "No staff member is available for automatic assignment.")
@@ -644,24 +647,58 @@ def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict |
         except HTTPException as exc:
             raise fail(422, "invalid_request", str(exc.detail)) from None
         names, picks = {person.id: person.name}, [person.id] * len(target)
-    move: dict[str, list[str]] = {}
+    move: dict[str | None, list[str]] = {}
     skipped = 0
     for (lead_id, current), new_owner in zip(target, picks):
         if current == new_owner:
             skipped += 1
         else:
             move.setdefault(new_owner, []).append(lead_id)
+    apply_owner_changes(db, user, move, names, bulk=False)
+    owners = [{"id": o, "name": names[o], "count": len(l)} for o, l in move.items() if o is not None]
+    return {"assigned": sum(len(l) for o, l in move.items() if o is not None), "unassigned": len(move.get(None, [])),
+            "skipped": skipped, "owners": owners}
+
+
+UNASSIGN = ("none", "unassigned")  # `ownerId` meaning "take the leads back from their recruiter (nobody owns them)"
+
+
+def apply_owner_changes(db: Session, user: User, move: dict[str | None, list[str]], names: dict[str, str], *, bulk: bool) -> None:
+    """Write the new owners: `move` maps the new owner (None = unassigned) to the lead ids. Set-based, in the caller's transaction.
+
+    Every moved lead gets a history entry; a lead that had a recruiter before gets an audit entry (reassigned / unassigned);
+    the new recruiter is told. Taking a lead back from its recruiter clears `assigned_at`, keeps the status, and the old
+    owner's follow-up to-do goes away with it (lead_followups.sync removes the to-do of a lead without an owner).
+    The previous recruiter is not notified (same as a reassignment): the lead simply leaves their list."""
     for new_owner, lead_ids in move.items():
+        ids = {"ids": lead_ids, "u": user.id, "bulk": bulk}
+        if new_owner is None:
+            db.execute(text("INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary, meta) "
+                            "SELECT gen_random_uuid()::text, l.id, :u, 'assign', 'Unassigned from ' || coalesce(o.name, 'the previous recruiter'), "
+                            "jsonb_build_object('from', l.owner_id, 'unassigned', true, 'bulk', CAST(:bulk AS boolean)) "
+                            "FROM crm_leads l LEFT JOIN auth_users o ON o.id = l.owner_id WHERE l.id = ANY(CAST(:ids AS text[]))"), ids)
+            _audit_owner_change(db, ids, "Lead unassigned", None)
+            db.execute(text("UPDATE crm_leads SET owner_id = NULL, assigned_at = NULL, updated_at = now() WHERE id = ANY(CAST(:ids AS text[]))"), {"ids": lead_ids})
+            continue
+        _audit_owner_change(db, ids, "Lead reassigned", new_owner)
         db.execute(text("UPDATE crm_leads SET owner_id = :o, assigned_at = now(), updated_at = now() WHERE id = ANY(CAST(:ids AS text[]))"),
                    {"o": new_owner, "ids": lead_ids})
-        db.execute(text("INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary) "
-                        "SELECT md5(random()::text || clock_timestamp()::text || x)::uuid::text, x, :u, 'assign', :s FROM unnest(CAST(:ids AS text[])) AS x"),
-                   {"u": user.id, "s": f"Assigned to {names[new_owner]}", "ids": lead_ids})
+        db.execute(text("INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary, meta) "
+                        "SELECT gen_random_uuid()::text, x, :u, 'assign', CAST(:s AS text), jsonb_build_object('owner', CAST(:o AS text), 'bulk', CAST(:bulk AS boolean)) "
+                        "FROM unnest(CAST(:ids AS text[])) AS x"),
+                   {"u": user.id, "s": f"Assigned to {names[new_owner]}", "o": new_owner, "ids": lead_ids, "bulk": bulk})
         db.add(Notification(user_id=new_owner, kind="lead_assignment", title="New leads assigned",
                             detail=f"{len(lead_ids)} {'lead' if len(lead_ids) == 1 else 'leads'} to call", link_to="/leads"))
-    lead_followups.sync(db, [i for ids_ in move.values() for i in ids_])  # a reassigned lead's follow-up to-do moves to the new owner
-    owners = [{"id": o, "name": names[o], "count": len(l)} for o, l in move.items()]
-    return {"assigned": sum(len(l) for l in move.values()), "skipped": skipped, "owners": owners}
+    lead_followups.sync(db, [i for ids_ in move.values() for i in ids_])  # a moved lead's follow-up to-do follows its owner (or goes when nobody owns it)
+
+
+def _audit_owner_change(db: Session, params: dict, action: str, new_owner: str | None) -> None:
+    """One audit entry per lead that had a recruiter before (must run before the owner column is rewritten)."""
+    db.execute(text("INSERT INTO system_audit_log (id, actor_id, action, target, entity_type, entity_id, meta) "
+                    "SELECT gen_random_uuid()::text, :u, CAST(:action AS text), left(coalesce(l.name, l.phone, l.email, 'Lead'), 300), 'lead', l.id, "
+                    "jsonb_build_object('fromUserId', l.owner_id, 'toUserId', CAST(:to AS text), 'bulk', CAST(:bulk AS boolean)) "
+                    "FROM crm_leads l WHERE l.id = ANY(CAST(:ids AS text[])) AND l.owner_id IS NOT NULL AND l.owner_id IS DISTINCT FROM CAST(:to AS text)"),
+               {**params, "action": action, "to": new_owner})
 
 
 # ------------------------------------------------------------------ convert / link
@@ -705,9 +742,11 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
     if lead.status == "converted":
         raise fail(409, "already_converted", "This lead is already converted to a candidate.")
     from app.services import lead_resume_check
+    if lead_resume_check.source_attachment(db, lead) is None and not (resume is not None and resume.filename):
+        raise fail(409, "resume_required", "Get this person's resume first. A lead becomes a candidate only once the resume is received.")
     verified_job_id = lead_resume_check.require_verified(db, user, lead, resume, resume_check_id, overrides)
     assign_to = None
-    if user.role in (Role.admin, Role.manager):
+    if user.role == Role.admin:  # only the admin picks the recipient; a manager's conversion stays with the manager
         wanted = overrides.get("assignTo") or lead.owner_id
         if wanted:
             try:

@@ -1,6 +1,7 @@
 """Manual identity, correction, bounded search and export on a guarded test database."""
 from datetime import date, datetime, timezone
 from io import BytesIO
+import re
 from types import SimpleNamespace
 from zipfile import ZipFile
 
@@ -69,6 +70,8 @@ def test_manual_assignment_snapshot_due_time_notifications_and_sequence(db):
     assert (task.due_at - task.sla_started_at).total_seconds() == 48 * 3600
     assert task.owner_id == 'a'
     assert candidate.ref.startswith('CND-')
+    assert response.care_id == candidate.care_id
+    assert re.fullmatch(r'CI-\d{2}-\d{2}-001', candidate.care_id or '')
     assert set(db.scalars(select(m.Notification.user_id))) == {'a', 'admin'}
 
 
@@ -159,6 +162,8 @@ def test_manual_creation_persists_phone_normalization_used_by_duplicate_lookup(d
         'whatsapp': '\uff19\uff10\uff10\uff10\uff10\uff10\uff10\uff10\uff10\uff12',
     })
     assert first.status_code == 201, first.text
+    assert first.json()['ref'].startswith('CND-')
+    assert re.fullmatch(r'CI-\d{2}-\d{2}-\d+', first.json()['careId'])
     candidate = db.get(m.Candidate, first.json()['id'])
     assert candidate.phone == '9000000001' and candidate.whatsapp == '9000000002'
     duplicate = make_client(db).post('/api/candidates', json={'name': 'Same number', 'phone': '9000000001'})

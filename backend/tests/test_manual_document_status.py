@@ -110,7 +110,7 @@ def test_exports_distinguish_manual_confirmation_and_do_not_invent_zip_files(exp
     with exports.sessions() as db:
         table = sheets(candidate_search.export_candidates(db, candidate_search.Search()))
     rows = table["Candidates"]
-    candidate = next(row for row in rows[1:] if row[0] == "candidate")
+    candidate = next(row for row in rows[1:] if row[rows[0].index("CRM reference")] == "candidate")
     assert candidate[rows[0].index("Passport document")] == "Marked manually (no file attached)"
     assert "Passport" not in candidate[rows[0].index("Missing mandatory documents")]
     assert table["Manual document confirmations"][1][-1] == "Checked paper copy =1+1"

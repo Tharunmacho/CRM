@@ -390,3 +390,41 @@ def test_call_can_be_recorded_after_matching_without_changing_order_work(desk):
         assert db.get(Candidate, 'free').status == CandidateStatus.not_interested
     desk.actor = SimpleNamespace(id='other', role=Role.staff)
     assert desk.client.post('/api/candidates/matched/call', json={'called': True, 'interested': 'yes'}).status_code == 403
+
+
+@pytest.mark.parametrize('kind', ['clients', 'companies', 'orders'])
+def test_only_admin_or_manager_may_delete_client_chain_records(desk, kind):
+    contact, company, _, order, _ = setup_order(desk)
+    identifier = {'clients': contact['id'], 'companies': company['id'], 'orders': order['id']}[kind]
+    assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == 403  # staff may edit, not delete
+    with desk.sessions() as db:
+        assert db.get(Client, contact['id']) and db.get(Company, company['id']) and db.get(Order, order['id'])
+    desk.actor = SimpleNamespace(id='manager', role=Role.manager)
+    assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == 200
+
+
+def test_deleting_a_client_is_audited_and_names_the_candidate_that_blocks_it(desk):
+    contact, company, _, order, _ = setup_order(desk)
+    with desk.sessions() as db:
+        db.add(Candidate(id='placed-candidate', ref='PLACED', name='Placed Person', phone='9000000002', source=Source.walk_in, owner_id='staff'))
+        db.flush()
+        db.add(Application(id='placed-application', candidate_id='placed-candidate', order_id=order['id'], status=ApplicationStatus.active))
+        db.commit()
+    desk.actor = SimpleNamespace(id='admin', role=Role.admin)
+    refused = desk.client.delete(f"/api/clients/{contact['id']}")
+    assert refused.status_code == 409
+    detail = refused.json()['detail']
+    assert 'Placed Person' in detail['message'] and 'Unmap' in detail['message']
+    assert detail['blockers'][0]['status'] == 'active'
+    with desk.sessions() as db:
+        assert db.get(Client, contact['id'])
+        db.get(Application, 'placed-application').status = ApplicationStatus.deployed
+        db.commit()
+    deployed = desk.client.delete(f"/api/clients/{contact['id']}")
+    assert deployed.status_code == 409 and 'deployed' in deployed.json()['detail']['message']
+    with desk.sessions() as db:
+        db.delete(db.get(Application, 'placed-application')); db.commit()
+    assert desk.client.delete(f"/api/clients/{contact['id']}").status_code == 200
+    with desk.sessions() as db:
+        entry = db.scalar(select(AuditEntry).where(AuditEntry.action == 'Deleted client'))
+        assert entry.actor_id == 'admin' and entry.entity_id == contact['id'] and entry.meta == {'companies': 1, 'orders': 1}

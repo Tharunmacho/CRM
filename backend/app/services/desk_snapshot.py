@@ -22,6 +22,7 @@ from app.db.models import (
     Currency, Designation, JobCategory, Notification, Order, Remark, Role, Task, TodoItem, User,
 )
 from app.services import agency_settings
+from app.services.notification_scope import visible_notifications
 from app.services.ingestion_revision import revision_expression
 from app.services.document_status import latest_statement as manual_documents_statement
 
@@ -137,7 +138,7 @@ def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = 
         _rows("todos", _fields(TodoItem, TodoOut).where(TodoItem.owner_id == user_id)),
         _rows(
             "notifications",
-            _fields(Notification, NotificationOut).where(Notification.user_id == user_id),
+            _fields(Notification, NotificationOut).where(Notification.user_id == user_id, visible_notifications(user_id)),
             ("created_at", True), ("id", False),
         ),
         *settings_columns,

@@ -207,6 +207,7 @@ Response `200` (the same shape for a dry run; `batchId` is null and nothing was 
 * `duplicates` / `invalid` hold the first 200 in this response; `GET /batches/{id}/report.csv` has up to 5,000 of each.
 * `reason` for duplicates: `lead_id`, `phone`, `email`. `scope`: `file` (an earlier row of this file; then `existingRow` is its row) or `database` (a stored lead; `existingLeadId`).
 * `reason` for invalid: `no_contact` (no usable phone and no e-mail), `bad_phone` (a phone was given but is not 7 to 15 digits, and there is no e-mail).
+* `duplicatesByReason`: `{lead_id, phone, email}` counts of the skipped rows (all of them, not only the first 200 listed); the three add up to `rowsDuplicate`.
 * Re-uploading the very same file stores 0 new leads. `sameFileBefore` (matching SHA-256) lets the UI warn first.
 * A real import is one transaction under an advisory lock (two simultaneous imports cannot both insert the same person).
 
@@ -381,9 +382,12 @@ Uploading alone does not read a lead's resume. **Check resume** reads and verifi
   More than 10 digits: the country code is read from a list of common calling codes (`91`, `971`, `966`, `974`, `965`, `968`, `973`, `977`, `94`, `880`, `92`, `44`, `1` ...; else the digits before the last 10)
   (`+919876543210` → code `91`, `+971501234567` → `971`).
   Exactly 11 digits starting with `0`: the trunk `0` is dropped. `phone` is shown as `+<code><national>` when a code is present, else the digits. A bare `p:` counts as empty.
+  An Excel/CSV number written as `9000000123.0` or `9.000000123E9` is read as the whole number; digits in other scripts are read as 0-9; `tel:` / `p:` prefixes are dropped;
+  a number made of one repeated digit (`0000000000`, `9999999999`) is a placeholder: no key, and with no e-mail the row is `bad_phone`.
   **Matching uses the last 10 digits** (all digits when fewer than 10; made for Indian 10-digit numbers), so `+91 98765 43210`, `098765 43210` and `9876543210` are the same person.
-* **E-mail** (`email`, key `email_key`): trimmed, lowercased, must contain `@`.
-* **Lead id** (`externalId`): Meta's `l:179…` without the `l:` prefix; ids of ads/forms/campaigns keep their value without the 1-2 letter prefix (`ag:`, `as:`, `c:`, `f:`).
+* **E-mail** (`email`, key `email_key`): trimmed, lowercased (exact compare: Gmail dots and `+tags` are different addresses), `mailto:` / `<...>` removed, must contain `@`.
+  Fillers (`na`, `none`, `na@gmail.com`, `none@none.com` ...) are no e-mail, so they never match anyone.
+* **Lead id** (`externalId`): an id Excel already rounded (`1.795E+15`) is no id (many leads would share it); `123.0` is `123`. Meta's `l:179…` without the `l:` prefix; ids of ads/forms/campaigns keep their value without the 1-2 letter prefix (`ag:`, `as:`, `c:`, `f:`).
 * **Dates**: `createdTime` ISO with offset (naive values are taken in the agency timezone). `dob`: ISO `YYYY-MM-DD`; `MM/DD/YYYY` (Meta) unless the first number
   is above 12, then `DD/MM/YYYY`; `DD-MM-YYYY`; Excel serials; unparseable or future/before 1920 → null (the raw text stays in `raw`).
 * **Experience**: `10+ years` → 10, `1-3 years` → 1 (the minimum), `22` → 22, `6 months` → 0.5, free text with no number → null, a number above 60 → null; the text is kept in `…Text`.

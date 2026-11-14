@@ -102,7 +102,7 @@ def campaigns(db: Session, user: User, now: datetime | None = None) -> dict:
     from app.services.candidate_search import agency_midnight
     now = now or datetime.now(timezone.utc)
     today = agency_midnight(agency_today(now).isoformat(), "Today")
-    everyone = user.role in (Role.admin, Role.manager)
+    everyone = user.role == Role.admin  # managers and staff: only the leads assigned to them
     rows = db.execute(_SQL, {"everyone": everyone, "me": user.id, "today": today, "week": today - timedelta(days=6)}).all()
 
     leaves: dict[tuple, dict] = {}

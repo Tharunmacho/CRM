@@ -76,8 +76,8 @@ class SpecIn(BaseModel):
 
 
 def _own(user: User) -> User | None:
-    """A staff member imports for themselves, like adding a candidate by hand; an admin or manager may choose the recruiter."""
-    return user if user.role == Role.staff else None
+    """A staff member or manager imports for themselves, like adding a candidate by hand; only the admin may choose the recruiter."""
+    return user if user.role != Role.admin else None
 
 
 def _row_values(row: dict) -> dict:

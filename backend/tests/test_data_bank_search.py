@@ -248,7 +248,7 @@ def test_displayed_placement_prefers_active_then_latest_deployed_and_never_dupli
         sheet = ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
     rows = [[''.join(cell.itertext()) for cell in row.findall('{*}c')] for row in sheet.findall('{*}sheetData/{*}row')]
     header = rows[0]
-    body = {row[1]: row for row in rows[1:]}
+    body = {row[header.index('Name')]: row for row in rows[1:]}
     assert len(body) == 4
     for identifier, order, stage in [('history', 'ORD-ELEC', '11'), ('active', 'ORD-WELD', '4'), ('closed', '', ''), ('unplaced', '', '')]:
         assert body[identifier][header.index('Mapped order')] == order

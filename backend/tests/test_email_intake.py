@@ -438,6 +438,7 @@ def test_candidate_evidence_assignment_task_and_notifications_commit_once(intake
         assert candidate.id == job.candidate_id == db.get(MailMessage, job.message_id).candidate_id
         assert candidate.ref == f"CND-E-{job_id.replace('-', '')}"
         assert len(candidate.ref) == 38
+        assert candidate.care_id.startswith("CI-")
         assert candidate.owner_id == "staff-a"
         assert candidate.source == Source.email and candidate.status == CandidateStatus.new
         task = db.scalar(select(Task))

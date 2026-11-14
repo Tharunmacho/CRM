@@ -142,7 +142,7 @@ def test_a_single_page_that_failed_falls_back_to_its_duplicate_scan(world):
     assert sent_pages(state) == [3] and output["status"] == "complete"
 
 
-def test_retry_clears_a_stale_late_part_and_records_the_pages_the_reader_failed_on():
+def test_retry_keeps_an_accepted_late_part_and_records_the_pages_the_reader_failed_on():
     state = {
         "provider_jobs": {
             "passport": {"status": "failed", "selected_pages": [8, 9], "idempotency_key": "a"},
@@ -151,9 +151,12 @@ def test_retry_clears_a_stale_late_part_and_records_the_pages_the_reader_failed_
         },
     }
     assert subject.request_extraction_retry(state) == ["passport"]
-    assert set(state["provider_jobs"]) == {"resume"}
-    assert state["passport_plan"]["tried"] == [[8, 9, 10, 11, 12]]
-    assert [r["selected_pages"] for r in state["provider_job_history"]["passport+"]] == [[10, 11, 12]]
+    # Retrying one part never discards the accepted late part (_split_parts rejoins every saved part), so only the
+    # pages the failed part itself was sent are recorded as tried.
+    assert set(state["provider_jobs"]) == {"passport+", "resume"}
+    assert state["provider_jobs"]["passport+"]["selected_pages"] == [10, 11, 12]
+    assert state["passport_plan"]["tried"] == [[8, 9]]
+    assert "passport+" not in state["provider_job_history"]
     assert state["provider_generations"] == {"passport": 1}
 
 
@@ -202,14 +205,14 @@ def test_the_second_scan_is_read_when_the_first_result_lacks_the_birth_date(worl
     data = pdf(CV, data_page(1), PRINTED_DATA_PAGE)  # (the default fake result has no birth date)
     output = world.extract(data)
     assert output["status"] == "complete" and len(passport_submissions(world)) == 2
-    assert "passport_skipped" not in world.state
+    assert not world.state.get("passport_skipped")  # (an empty list after the state reset)
 
 
 def test_the_address_page_is_always_read_even_when_the_data_page_gave_everything(world):
     read_in_full(world)
     output = world.extract(pdf(CV, data_page(1), PASSPORT_ADDRESS))
     assert output["status"] == "complete" and len(passport_submissions(world)) == 2
-    assert "passport_skipped" not in world.state
+    assert not world.state.get("passport_skipped")  # (an empty list after the state reset)
 
 
 def test_a_second_scan_waits_while_the_first_is_still_running_and_is_skipped_when_it_is_in(world):

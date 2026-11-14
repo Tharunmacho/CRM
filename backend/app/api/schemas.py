@@ -157,6 +157,7 @@ class CallOutcomeOut(Wire):
 class CandidateOut(Wire):
     id: str
     ref: str
+    care_id: str | None = None
     name: str
     phone: str
     whatsapp: str | None = None

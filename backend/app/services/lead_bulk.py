@@ -34,6 +34,7 @@ REASONS = {
     "converted": "converted or linked to a candidate",
     "already_set": "already had that status",
     "already_owner": "already assigned to that person",
+    "already_unassigned": "already not assigned to anyone",
     "not_yours": "not assigned to you",
     "gone": "not found (deleted meanwhile)",
     "changed": "changed while the action ran",
@@ -71,15 +72,15 @@ def resolve(db: Session, user: User, ids: list[str] | None, filt: dict | None, *
         if len(ids) > BULK_LIMIT:
             raise too_many(len(ids))
         statement = (select(Lead.id, Lead.status, Lead.owner_id, Lead.candidate_id)
-                     .where(Lead.id == any_(literal(ids, ARRAY(String)))).order_by(*_order_resolving()))
+                     .where(Lead.id == any_(literal(ids, ARRAY(String))), lead_sheet.visible_leads(user)).order_by(*_order_resolving()))
         if lock:
             statement = statement.with_for_update()
         return [tuple(r) for r in db.execute(statement).all()], False
     if filt is None:
         raise fail(422, "invalid_request", "Choose the leads (ids) or give a filter.")
     filt = clean_filter(filt)
-    if user.role == Role.staff:
-        filt["owner"] = "me"  # a recruiter's selection never reaches beyond their own leads
+    if not lead_sheet.sees_all_leads(user):
+        filt["owner"] = "me"  # a manager's or recruiter's selection never reaches beyond their own leads
     base, owner, has_resume = lead_sheet._base_query()
     statement = (lead_sheet.apply_filters(base, owner, has_resume, user, filt)
                  .with_only_columns(Lead.id, Lead.status, Lead.owner_id, Lead.candidate_id)
@@ -125,12 +126,10 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
     supervisor = user.role in (Role.admin, Role.manager)
     if action == "delete" and user.role != Role.admin:
         raise fail(403, "forbidden_role", "Only an admin can delete leads.")
-    if action in ("assign", "export") and not supervisor:
-        raise fail(403, "forbidden_role", "Only a manager or an admin can " + ("assign" if action == "assign" else "export") + " leads.")
-    if action in ("status", "not_interested") and not supervisor:
-        gate = lead_sheet.daily_work_gate(db, user)
-        if gate["locked"]:
-            raise fail(403, "daily_work_pending", gate["message"], dailyWorkGate=gate)
+    if action == "assign" and user.role != Role.admin:
+        raise fail(403, "forbidden_role", "Only the admin can assign leads.")
+    if action == "export" and not supervisor:
+        raise fail(403, "forbidden_role", "Only a manager or an admin can export leads.")
 
     target_status = "not_interested" if action == "not_interested" else body.get("status")
     owner_id = body.get("ownerId")
@@ -156,7 +155,9 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
         raise fail(422, "confirmation_required", f"Deleting {len(rows):,} leads needs the word DELETE typed to confirm.", count=len(rows))
 
     requested = len(set(body["ids"])) if body.get("ids") else len(rows)
-    skipped = {"gone": max(0, requested - len(rows)) if body.get("ids") else 0}
+    missing = max(0, requested - len(rows)) if body.get("ids") else 0
+    # Managers and staff never see leads that are not theirs: a selected id that did not resolve is "not yours" to them.
+    skipped = {"gone": missing} if lead_sheet.sees_all_leads(user) else {"not_yours": missing}
     if action in ("status", "not_interested"):
         result = _change_status(db, user, rows, target_status, skipped)
     elif action == "assign":
@@ -173,7 +174,7 @@ def _change_status(db: Session, user: User, rows: list[tuple], target: str, skip
     todo: list[tuple[str, str]] = []
     for row in rows:
         lead_id, status, owner, _ = row
-        if user.role == Role.staff and owner != user.id:
+        if not lead_sheet.sees_all_leads(user) and owner != user.id:
             skipped["not_yours"] = skipped.get("not_yours", 0) + 1
         elif is_linked(row):
             skipped["converted"] = skipped.get("converted", 0) + 1
@@ -204,16 +205,22 @@ def _labels_json() -> str:
 # ------------------------------------------------------------------ assign
 
 def _assign(db: Session, user: User, rows: list[tuple], owner_id: str, only_unassigned: bool, skipped: dict) -> dict:
+    """Assign, reassign or (ownerId "none") take the selected leads back from their recruiter."""
     from app.services.lead_import import eligible_staff, open_lead_counts, spread_evenly
+    unassign = owner_id in lead_sheet.UNASSIGN
     candidates: list[tuple[str, str | None]] = []
     for row in rows:
         if is_linked(row):
             skipped["converted"] = skipped.get("converted", 0) + 1
         elif only_unassigned and row[2] is not None:
             skipped["already_owner"] = skipped.get("already_owner", 0) + 1
+        elif unassign and row[2] is None:
+            skipped["already_unassigned"] = skipped.get("already_unassigned", 0) + 1
         else:
             candidates.append((row[0], row[2]))
-    if owner_id == "auto":
+    if unassign:
+        names, picks = {}, [None] * len(candidates)
+    elif owner_id == "auto":
         staff = eligible_staff(db)
         if not staff:
             raise fail(422, "invalid_request", "No staff member is available for automatic assignment.")
@@ -226,26 +233,21 @@ def _assign(db: Session, user: User, rows: list[tuple], owner_id: str, only_unas
         except HTTPException as exc:
             raise fail(422, "invalid_request", str(exc.detail)) from None
         names, picks = {person.id: person.name}, [person.id] * len(candidates)
-    move: dict[str, list[str]] = {}
+    move: dict[str | None, list[str]] = {}
     for (lead_id, current), new_owner in zip(candidates, picks):
         if current == new_owner:
             skipped["already_owner"] = skipped.get("already_owner", 0) + 1
         else:
             move.setdefault(new_owner, []).append(lead_id)
-    for new_owner, lead_ids in move.items():
-        db.execute(text("UPDATE crm_leads SET owner_id = :o, assigned_at = now(), updated_at = now() WHERE id = ANY(CAST(:ids AS text[]))"),
-                   {"o": new_owner, "ids": lead_ids})
-        db.execute(text("INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary, meta) "
-                        "SELECT gen_random_uuid()::text, x, :u, 'assign', CAST(:s AS text), jsonb_build_object('owner', CAST(:o AS text), 'bulk', true) "
-                        "FROM unnest(CAST(:ids AS text[])) AS x"),
-                   {"u": user.id, "s": f"Assigned to {names[new_owner]}", "o": new_owner, "ids": lead_ids})
-        db.add(Notification(user_id=new_owner, kind="lead_assignment", title="New leads assigned",
-                            detail=f"{len(lead_ids)} {_plural(len(lead_ids))} to call", link_to="/leads"))
-    lead_followups.sync(db, [i for ids in move.values() for i in ids])  # follow-up to-dos move to the new owner
+    lead_sheet.apply_owner_changes(db, user, move, names, bulk=True)  # follow-up to-dos move to the new owner (or go when nobody owns the lead)
+    freed = len(move.get(None, []))
     updated = sum(len(ids) for ids in move.values())
-    if updated:
-        _summary_audit(db, user, "Bulk lead assignment", updated, {"owners": {names[o]: len(ids) for o, ids in move.items()}})
-    return {"updated": updated, "assigned": updated, "owners": [{"id": o, "name": names[o], "count": len(ids)} for o, ids in move.items()]}
+    if freed:
+        _summary_audit(db, user, "Bulk lead unassign", freed, {"count": freed})
+    if updated - freed:
+        _summary_audit(db, user, "Bulk lead assignment", updated - freed, {"owners": {names[o]: len(ids) for o, ids in move.items() if o is not None}})
+    return {"updated": updated, "assigned": updated - freed, "unassigned": freed,
+            "owners": [{"id": o, "name": names[o], "count": len(ids)} for o, ids in move.items() if o is not None]}
 
 
 # ------------------------------------------------------------------ delete
@@ -319,7 +321,8 @@ def export_selected(db: Session, user: User, body: dict) -> tuple[bytes, int]:
         ids = list(dict.fromkeys(body["ids"]))
         if len(ids) > BULK_LIMIT:
             raise too_many(len(ids))
-        query = query.where(Lead.id == any_(literal(ids, ARRAY(String))))
+        # ids that are not the caller's own never resolve (a manager's export holds only their leads; X-Lead-Count says how many)
+        query = query.where(Lead.id == any_(literal(ids, ARRAY(String))), lead_sheet.visible_leads(user))
     elif body.get("filter") is not None:
         filt = clean_filter(body["filter"])
         if user.role == Role.staff:

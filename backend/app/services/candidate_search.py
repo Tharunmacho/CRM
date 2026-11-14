@@ -11,7 +11,7 @@ from sqlalchemy.orm import aliased, defer, undefer
 from sqlalchemy.orm.attributes import set_committed_value
 from app.api.schemas import CandidateOut
 from app.core.config import get_settings
-from app.db.models import Application, Attachment, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
+from app.db.models import Application, Attachment, AuditEntry, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
 from app.domain.stages import STAGES
 from app.services.candidate_identity import normalized_labels
 from app.services.agency_display import agency_display_expression
@@ -61,6 +61,8 @@ class Search:
     sort: str = "new_first"
     direction: str = "desc"
     staff: str | None = None
+    # Only candidates still at the "New" status (not yet mapped to an order or worked): the staff default view.
+    fresh: bool = False
     designation: str = ""
     min_experience: float | None = None
     passport: str = "any"
@@ -123,7 +125,13 @@ def search_statement(filters: Search):
         "added": Candidate.created_at, "country": Candidate.country_preference,
     }
     # Sorted by meaning, not alphabet (Agreed before Pending; More interested before Not interested). Sort only: not column filters.
+    # When the current recruiter was given the candidate: the latest reassignment to the current owner, otherwise the day the
+    # candidate arrived (intake assigns at creation and writes no reassignment entry).
+    assigned_at = select(func.max(AuditEntry.at)).where(
+        AuditEntry.entity_type == "candidate", AuditEntry.entity_id == Candidate.id,
+        AuditEntry.meta["toUserId"].astext == Candidate.owner_id).correlate(Candidate).scalar_subquery()
     ranks = {
+        "assigned": func.coalesce(assigned_at, Candidate.created_at),
         "service": case(*((Candidate.service_charges_status == value, rank) for rank, value in enumerate(SERVICE_CHARGE_ORDER, 1)), else_=len(SERVICE_CHARGE_ORDER) + 1),
         "interest": case(*((Candidate.interest_level == value, rank) for rank, value in enumerate(INTEREST_ORDER, 1)), else_=len(INTEREST_ORDER) + 1),
     }
@@ -137,7 +145,7 @@ def search_statement(filters: Search):
     def term_matches(term: str):
         """True when this one term appears (any case) in at least one of the candidate's details."""
         lowered = term.lower()
-        text_fields = [Candidate.name, Candidate.phone, Candidate.whatsapp, Candidate.email, Candidate.passport_no, Candidate.ref, Candidate.nationality,
+        text_fields = [Candidate.name, Candidate.phone, Candidate.whatsapp, Candidate.email, Candidate.passport_no, Candidate.ref, Candidate.care_id, Candidate.nationality,
                        Candidate.current_city, Candidate.country_preference, cast(Candidate.skills, String), cast(Candidate.designations, String), agent, User.name, intake.name,
                        Order.ref, Designation.title, Company.name, Client.name, Order.country, Order.city]
         clauses = [literal_contains(field, term) for field in text_fields]
@@ -165,6 +173,8 @@ def search_statement(filters: Search):
         return or_(*clauses)
     if filters.staff:
         query = query.where(Candidate.owner_id == filters.staff)
+    if filters.fresh:
+        query = query.where(Candidate.status == CandidateStatus.new)
     if filters.order_id == "none":
         query = query.where(app.c.candidate_id.is_(None))
     elif filters.order_id:
@@ -375,7 +385,7 @@ def export_candidates(db, filters):
         Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
     ).distinct()):
         (rejected_files if rejected else uploaded).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
-    rows = [["Reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
+    rows = [["Care India ID", "CRM reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
              "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level", "Agency", "Profile review issues",
              *[label + " document" for _slot, label in required], "Missing mandatory documents"]]
     for candidate in candidates:
@@ -397,7 +407,7 @@ def export_candidates(db, filters):
             if not review:
                 review.append("Profile check pending")
         exact = "; ".join(f"{key}: {value}" for key, value in sorted((candidate.source_claims or {}).items()))
-        rows.append([candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
+        rows.append([candidate.care_id or "", candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
                      candidate.total_experience, exact, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
                      candidate.status.value, candidate.created_at.isoformat(),
@@ -406,9 +416,9 @@ def export_candidates(db, filters):
                      *["Uploaded" if slot in saved else "Wrong document" if slot in wrong else "Marked manually (no file attached)" if slot in marked else "Missing" for slot, _label in required],
                      ", ".join(label for slot, label in required if slot not in saved | marked)])
     from app.services.application_form import SLOT_LABELS
-    confirmations = [["Candidate reference", "Document", "Manual status", "Marked by", "Marked at", "Note"]]
+    confirmations = [["Care India ID", "CRM reference", "Document", "Manual status", "Marked by", "Marked at", "Note"]]
     for candidate in candidates:
-        confirmations.extend([candidate.ref, SLOT_LABELS.get(slot, slot), "Uploaded" if record["uploaded"] else "Pending",
+        confirmations.extend([candidate.care_id or "", candidate.ref, SLOT_LABELS.get(slot, slot), "Uploaded" if record["uploaded"] else "Pending",
                               record["by"]["name"], record["at"], record["note"]]
                              for slot, record in manual_records.get(candidate.id, {}).items())
     return xlsx_rows([("Candidates", rows), ("Filters", [[key, str(val)] for key, val in vars(filters).items()]),

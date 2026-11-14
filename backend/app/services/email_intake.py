@@ -322,8 +322,10 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
         owner = client_routing.route_new_candidate(db, values.get("designations")) or next_owner(db, pointer=pointer)
         # A source-derived reference is stable across retries and cannot collide with
         # the legacy manual count-based CND-1001 references.
+        from app.services.care_india_id import allocate_care_id
         candidate = Candidate(
             ref=f"CND-E-{job.id.replace('-', '')}", name=values.pop("name"),
+            care_id=allocate_care_id(db),
             phone=values.pop("phone", None) or "", source=Source.email,
             source_detail=f"email_message:{message.id}", owner_id=owner.id if owner else None,
             intake_owner_id=owner.id if owner else None,

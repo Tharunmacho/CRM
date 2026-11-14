@@ -19,3 +19,18 @@ def checked_resume(env, lead_id, payload, *, owner=None, name=None, filename="cv
                  "sourceAttachmentId": attachment.id if attachment else None}})
     env.db.add(job); env.db.commit()
     return job
+
+
+RESUME = b"%PDF-1.7 synthetic resume"
+
+
+def convert_with_resume(env, lead_id, *, overrides=None, payload=RESUME, filename="cv.pdf"):
+    """Convert a lead the way the screen does once a resume is in hand: the resume rides with the request together with
+    a completed, matching resume check (conversion needs a resume; a lead without one is refused with resume_required)."""
+    import json
+    job = checked_resume(env, lead_id, payload, filename=filename, overrides=overrides,
+                         name=(overrides or {}).get("name"))
+    data = {"resume_check_id": job.id}
+    if overrides:
+        data["overrides"] = json.dumps(overrides)
+    return env.client.post(f"/api/leads/{lead_id}/convert", files={"resume": (filename, payload, "application/pdf")}, data=data)

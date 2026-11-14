@@ -468,3 +468,13 @@ def test_event_stream_end_to_end(feed, monkeypatch):
         finally:
             for s in streams:
                 s.__exit__(None, None, None)
+
+
+def test_lead_ids_go_to_the_admin_only():
+    payload = {"t": ["leads", "candidates"], "ids": {"leads": ["l1"], "candidates": ["c1"]}, "at": 3}
+    assert visible_to(payload, "admin", "root")["ids"] == {"leads": ["l1"], "candidates": ["c1"]}
+    boss = visible_to(payload, "manager", "boss")
+    assert boss["topics"] == ["leads", "candidates"] and boss["ids"] == {"candidates": ["c1"]}  # the topic still goes out: the client refetches
+    only_leads = visible_to({"t": ["leads"], "ids": {"leads": ["l1"]}, "at": 4}, "manager", "boss")
+    assert only_leads == {"topics": ["leads"], "at": 4}
+    assert "ids" not in visible_to(payload, "staff", "alice")

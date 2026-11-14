@@ -221,7 +221,7 @@ def enrich_fixture(engine):
             [
                 {
                     "id": "manager-new-notification", "user_id": "schema-user",
-                    "kind": "reminder", "title": "New manager notification",
+                    "kind": "lead_assignment", "title": "New manager notification",
                     "created_at": STAMP + timedelta(hours=1), "read": True,
                 },
                 {

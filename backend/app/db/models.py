@@ -37,7 +37,29 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.expression import ColumnElement
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class PostgresOnly(ColumnElement):
+    """A check that only PostgreSQL can express (regex operators): SQLite, used by a few unit tests, gets a no-op instead."""
+
+    inherit_cache = True
+    type = Boolean()
+
+    def __init__(self, sql: str):
+        self.sql = sql
+
+
+@compiles(PostgresOnly)
+def _compile_postgres_only(element, compiler, **kw):
+    return compiler.post_process_text(element.sql)
+
+
+@compiles(PostgresOnly, "sqlite")
+def _compile_postgres_only_sqlite(element, compiler, **kw):
+    return "1 = 1"
 
 
 class Base(DeclarativeBase):
@@ -327,10 +349,32 @@ class Order(Base, PkMixin, TimestampMixin):
 
 # ---------------------------------------------------------------- candidates
 
+class CandidateFiscalCounter(Base):
+    """One transaction-safe public-ID counter for each Care India financial year.
+
+    Candidate references remain on ``crm_candidates.ref``.  This small table is
+    intentionally separate so an April--March public sequence can be reserved
+    atomically without changing, deriving from, or renumbering legacy CND refs.
+    """
+
+    __tablename__ = "crm_candidate_fiscal_counters"
+
+    fiscal_year: Mapped[str] = mapped_column(String(9), primary_key=True)
+    last_serial: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("last_serial >= 0", name="ck_crm_candidate_fiscal_counters_last_serial"),
+        {"comment": "Per-financial-year counters for immutable Care India public candidate IDs."},
+    )
+
+
 class Candidate(Base, PkMixin, TimestampMixin):
     __tablename__ = "crm_candidates"
 
     ref: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    # Public, immutable Care India fiscal-year identity.  The legacy ``ref``
+    # remains the technical CRM reference used by existing links and history.
+    care_id: Mapped[str | None] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str] = mapped_column(String(40), nullable=False)
     whatsapp: Mapped[str | None] = mapped_column(String(40))
@@ -386,7 +430,7 @@ class Candidate(Base, PkMixin, TimestampMixin):
     # (for example "14 years 4 months" or an expected salary recorded as "Negotiable").
     # The numeric fields remain the source for filtering and matching; this compact, bounded
     # evidence record prevents a reviewer from having to round or discard what the document says.
-    source_claims: Mapped[dict | None] = mapped_column(JSONB, server_default=text("'{}'::jsonb"), deferred=True)
+    source_claims: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), deferred=True)
     # Screening details from the telemarketer's intake form (also migration 0021). Job preference is `designations`,
     # the agent is `source_detail`, the assigned staff `owner_id`, the telemarketer notes `call_remarks`.
     native_place: Mapped[str | None] = mapped_column(String(120))
@@ -416,11 +460,17 @@ class Candidate(Base, PkMixin, TimestampMixin):
 
     __table_args__ = (
         # Duplicate detection on ingest runs against these three.
+        CheckConstraint(
+            PostgresOnly("care_id IS NULL OR (care_id ~ '^[C][I]-[0-9]{2}-[0-9]{2}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$' "
+            "AND ((substring(care_id from 4 for 2)::integer + 1) % 100) = substring(care_id from 7 for 2)::integer)"),
+            name="ck_crm_candidates_care_id_format",
+        ),
         Index("ix_crm_candidates_phone", "phone"),
         Index("ix_crm_candidates_email_lower", func.lower(email)),
         Index("ix_crm_candidates_passport_upper", func.upper(passport_no)),
         Index("ix_crm_candidates_resume_tsv", "resume_tsv", postgresql_using="gin"),
         Index("ix_crm_candidates_follow_up", "next_follow_up_date", postgresql_where=text("next_follow_up_date IS NOT NULL")),
+        Index("uq_crm_candidates_care_id", "care_id", unique=True, postgresql_where=text("care_id IS NOT NULL")),
         {"comment": "Recruitment candidate profiles, ownership, contact details and extracted document data."},
     )
 

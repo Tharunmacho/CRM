@@ -17,6 +17,7 @@ from app.core.deps import current_user
 from app.db import models as m
 from app.db.session import get_db
 from app.services import lead_followups, lead_matching, lead_templates
+from lead_resume_fixtures import convert_with_resume
 from lead_sheet_fixtures import lead_row
 from test_database_naming import _migrate, schema_database  # noqa: F401  (fixture)
 from test_lead_sheet import act_as, imported
@@ -211,7 +212,7 @@ def test_follow_up_todo_moves_with_the_owner_and_dies_with_the_candidate_convers
     assert len(moved) == 1 and moved[0].owner_id == "b"
     assert open_todos(env, two)[0].owner_id == "a"
     # converting the lead closes its reminder
-    done = env.client.post(f"/api/leads/{two}/convert")
+    done = convert_with_resume(env, two)
     assert done.status_code == 200, done.text
     assert open_todos(env, two) == []
 
@@ -339,7 +340,7 @@ def test_converting_a_lead_leaves_no_self_match(env):
     imported(env, [lead_row(1)], assign_to="a")
     lead_id = lead_id_of(env, 1)
     act_as(env, "a")
-    done = env.client.post(f"/api/leads/{lead_id}/convert")
+    done = convert_with_resume(env, lead_id)
     assert done.status_code == 200, done.text
     body = env.client.get(f"/api/leads/{lead_id}").json()
     assert body["candidateId"] and body["matchedCandidateId"] is None
@@ -383,7 +384,7 @@ def test_whatsapp_open_is_logged_in_the_history_for_people_who_can_work_the_lead
     imported(env, [lead_row(1)], assign_to="a")
     lead_id = lead_id_of(env, 1)
     act_as(env, "b")
-    assert env.client.post(f"/api/leads/{lead_id}/whatsapp", json={"template": "first_contact", "message": "Hello"}).status_code == 403
+    assert env.client.post(f"/api/leads/{lead_id}/whatsapp", json={"template": "first_contact", "message": "Hello"}).status_code == 404
     act_as(env, "a")
     assert env.client.post(f"/api/leads/{lead_id}/whatsapp", json={"template": "first_contact", "message": "Hello   Test\nLead"}).json() == {"ok": True}
     detail = env.client.get(f"/api/leads/{lead_id}").json()

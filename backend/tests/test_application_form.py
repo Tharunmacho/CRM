@@ -46,7 +46,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     _migrate(engine, "head")
     columns = {c["name"]: c for c in inspect(engine).get_columns("crm_candidates")}
     assert FORM_COLUMNS <= set(columns)
-    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments"}
+    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_fiscal_counters"}
     with engine.connect() as connection:
         row = connection.execute(text("SELECT name, total_experience, father_name, experience_india, education, work_history, field_sources, source_claims "
                                       "FROM crm_candidates WHERE id='old'")).one()
@@ -570,3 +570,13 @@ def test_passport_available_is_derived_from_number_or_scan(desk):
     assert desk.client.put(url(), json={"passport": {"passportNumber": "K1234567"}}).json()["passport"]["available"] is True
     assert form(desk, candidate="second-candidate")["passport"]["available"] is False
     assert upload(desk, "passport", pdf(PASSPORT), candidate="candidate").status_code == 202
+
+
+def test_saved_passport_details_distinguish_a_missing_scan_without_changing_completeness(desk):
+    before = form(desk)
+    data = desk.client.put(url(), json={"passport": {"passportNumber": "K1234567"}}).json()
+    missing = {item["key"]: item for item in data["completeness"]["missing"]}
+
+    assert data["documents"]["passport"]["uploaded"] is False
+    assert data["completeness"]["total"] == before["completeness"]["total"]
+    assert missing["documents.passport"]["message"] == "Passport scan not uploaded (passport details are saved)"

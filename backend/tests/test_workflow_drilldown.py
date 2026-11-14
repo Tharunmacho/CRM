@@ -64,6 +64,8 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
     history_client.cookies.set(SESSION_COOKIE, 'history-owner')
     assert history_client.post('/api/candidates/reassign', json={**payload, 'reason': 'Staff cannot reassign'}).status_code == 403
     history_client.cookies.set(SESSION_COOKIE, 'history-manager')
+    assert history_client.post('/api/candidates/reassign', json={**payload, 'reason': 'Only the admin assigns candidates'}).status_code == 403
+    history_client.cookies.set(SESSION_COOKIE, 'history-admin')
     response = history_client.post('/api/candidates/reassign', json={**payload, 'reason': '  Rebalance recruitment work  '})
     assert response.status_code == 200, response.text
     with workspace() as db:
@@ -83,7 +85,7 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
     assert history.status_code == 200
     assert history.headers['Cache-Control'] == 'private, no-store'
     row, = history.json()['items']
-    assert (row['fromName'], row['toName'], row['actorName'], row['reason']) == ('Owner', 'Other', 'Manager', 'Rebalance recruitment work')
+    assert (row['fromName'], row['toName'], row['actorName'], row['reason']) == ('Owner', 'Other', 'Admin', 'Rebalance recruitment work')
     assert 'meta' not in row
     history_client.cookies.clear()
     assert history_client.get('/api/candidates/candidate/assignment-history').status_code == 401
@@ -180,9 +182,9 @@ def test_manager_reassignment_preserves_candidate_progress_and_every_task_deadli
         db.flush()
         db.add(Remark(id='remark', task_id='open-one', author_id='owner', body='Waiting for interview details', created_at=NOW))
         db.commit()
-    history_client.cookies.set(SESSION_COOKIE, 'history-manager')
+    history_client.cookies.set(SESSION_COOKIE, 'history-admin')  # assigning candidates is the admin's action
     response = history_client.post('/api/candidates/reassign', json={
-        'candidateIds': ['candidate'], 'toUserId': 'other', 'reason': 'Manager follow-up from escalation'})
+        'candidateIds': ['candidate'], 'toUserId': 'other', 'reason': 'Admin follow-up from escalation'})
     assert response.status_code == 200, response.text
     with workspace() as db:
         candidate = db.get(Candidate, 'candidate')

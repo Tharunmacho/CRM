@@ -23,6 +23,7 @@ from app.services.lead_sheet import fail
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 supervisors = require_role(Role.admin, Role.manager)
+admin_only = require_role(Role.admin)  # import history, reports and assigning: the admin hands out and oversees all leads
 
 
 def lead_filters(q: str = Query(default="", max_length=500), status: list[str] = Query(default=[]), campaign: list[str] = Query(default=[]),
@@ -42,6 +43,8 @@ def lead_filters(q: str = Query(default="", max_length=500), status: list[str] =
 def import_leads(file: UploadFile = File(...), dry_run: bool = Form(False), mapping: str | None = Form(None), assign_to: str | None = Form(None),
                  campaign_label: str | None = Form(None), fill_empty: bool = Form(False), source: Literal["meta_ads", "other"] = Form("meta_ads"),
                  db: Session = Depends(get_db), user: User = Depends(supervisors)):
+    if (assign_to or "").strip() and user.role != Role.admin:
+        raise fail(403, "forbidden_role", "Only the admin can assign leads. Upload without choosing a person.")
     data = file.file.read(lead_parsing.MAX_UPLOAD + 1)
     if len(data) > lead_parsing.MAX_UPLOAD:
         raise fail(413, "file_too_large", "Lead sheets must be under 25 MB. Split the file and upload the parts.")
@@ -71,23 +74,23 @@ def import_leads(file: UploadFile = File(...), dry_run: bool = Form(False), mapp
 
 @router.get("/batches")
 def batches(page: int = Query(default=0, ge=0), page_size: int = Query(default=20, ge=1, le=100),
-            db: Session = Depends(get_db), user: User = Depends(current_user)):
+            db: Session = Depends(get_db), user: User = Depends(admin_only)):
     return lead_sheet.list_batches(db, page, page_size)
 
 
 @router.get("/batches/{batch_id}")
-def batch_detail(batch_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+def batch_detail(batch_id: str, db: Session = Depends(get_db), user: User = Depends(admin_only)):
     return lead_sheet.get_batch(db, batch_id)
 
 
 @router.get("/batches/{batch_id}/report.csv")
-def batch_report(batch_id: str, db: Session = Depends(get_db), user: User = Depends(supervisors)):
+def batch_report(batch_id: str, db: Session = Depends(get_db), user: User = Depends(admin_only)):
     return Response(lead_report.report_csv(db, batch_id), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{lead_report.download_name(db, batch_id, "csv")}"', "Cache-Control": "private, no-store"})
 
 
 @router.get("/batches/{batch_id}/report.xlsx")
-def batch_report_excel(batch_id: str, db: Session = Depends(get_db), user: User = Depends(supervisors)):
+def batch_report_excel(batch_id: str, db: Session = Depends(get_db), user: User = Depends(admin_only)):
     """The default import report: Summary, All rows and Ignored & invalid, as an Excel workbook."""
     return Response(lead_report.report_workbook(db, batch_id), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{lead_report.download_name(db, batch_id, "xlsx")}"', "Cache-Control": "private, no-store"})
@@ -145,14 +148,14 @@ def lead_summary(scope: Literal["mine", "all"] | None = None, db: Session = Depe
 
 @router.get("/facets")
 def lead_facets(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return lead_sheet.facets(db)
+    return lead_sheet.facets(db, user)
 
 
 @router.get("/columns")
 def lead_columns(campaign: list[str] = Query(default=[]), form: list[str] = Query(default=[]), batch_id: str | None = Query(default=None, max_length=36),
                  db: Session = Depends(get_db), user: User = Depends(current_user)):
     """The custom question columns of the stored sheets (optionally of one campaign, form or upload): `{columns: [{key, label, count}]}`."""
-    return {"columns": lead_sheet.extra_columns(db, {"campaign": campaign, "form": form, "batch_id": batch_id})}
+    return {"columns": lead_sheet.extra_columns(db, {"campaign": campaign, "form": form, "batch_id": batch_id}, user)}
 
 
 @router.get("/export.{fmt}")
@@ -233,7 +236,7 @@ class AssignBody(Wire):
 
 
 @router.post("/assign")
-def assign(body: AssignBody, db: Session = Depends(get_db), user: User = Depends(supervisors)):
+def assign(body: AssignBody, db: Session = Depends(get_db), user: User = Depends(admin_only)):
     result = lead_sheet.assign_leads(db, user, body.ids, body.filter, body.owner_id, body.only_unassigned)
     db.commit()
     return result

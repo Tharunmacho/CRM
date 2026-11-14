@@ -212,7 +212,7 @@ def upload(
             # Having entered the candidate no longer counts: an admin may have given it to someone else since.
             ensure_can_work_candidate(record, user, db)
         if entity_type == "lead":
-            # A lead's resume: only the assigned staff member (once the daily tasks are done), a manager or an admin.
+            # A lead's resume: only the lead's assigned recruiter (staff or manager) or an admin.
             from app.services import lead_sheet
             if slot != "resume":
                 raise HTTPException(422, "Only a resume can be added to a lead.")
@@ -334,6 +334,12 @@ def _own_stage_files_only(db: Session, entity_type: str, entity_id: str, user: U
         application = db.get(Application, entity_id)
         if application is not None:
             ensure_can_work(db, application, user)
+    elif entity_type == "lead":
+        # A lead's files follow the lead: managers and staff only see the leads assigned to them.
+        from app.services import lead_sheet
+        lead = db.get(Lead, entity_id)
+        if lead is not None:
+            lead_sheet.ensure_can_see_lead(lead, user)
 
 
 @router.get("/{attachment_id}")

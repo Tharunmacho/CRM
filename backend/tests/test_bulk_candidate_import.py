@@ -209,7 +209,7 @@ def test_only_what_the_folder_proves_is_recorded_and_the_rest_is_done_on_the_sta
     # ... and the recruiter carries on exactly as for any other candidate.
     with env.sessions() as db:
         application_id = db.scalar(select(Application.id).where(Application.candidate_id == result["candidateId"]))
-    done = env.client.post(f"/api/applications/{application_id}/complete", json={"lock_version": 0, "data": {"applied": "yes", "result": "fit"}})
+    done = env.client.post(f"/api/applications/{application_id}/complete", json={"lock_version": 0, "data": {"applied": "yes", "result": "fit", "feedback": "Medical done; fit."}})
     assert done.status_code == 200, done.text
     assert done.json()["currentStage"] == 7
 
@@ -223,6 +223,7 @@ def test_no_order_means_documents_and_an_initial_call_only(env):
     result = send(env, "Dev", ["Resume.pdf", "Passport.pdf"], {"phone": "9876500004"})
     assert result["action"] == "documents_only"
     with env.sessions() as db:
+        assert db.get(Candidate, result["candidateId"]).care_id.startswith("CI-")
         assert db.scalar(select(func.count()).select_from(Application).where(Application.candidate_id == result["candidateId"])) == 0
         assert db.scalar(select(Task.kind).where(Task.candidate_id == result["candidateId"])) == TaskKind.initial_call
 
@@ -264,6 +265,16 @@ def test_a_staff_member_imports_for_themselves_whatever_the_sheet_says(env):
         assert db.get(Candidate, result["candidateId"]).owner_id == "other"
 
 
+def test_a_manager_imports_for_themselves_too_only_the_admin_chooses_the_recruiter(env):
+    with env.sessions() as db:
+        db.add(User(id="mgr", name="Mgr", email="mgr@example.test", role=Role.manager, active=True))
+        db.commit()
+    env.actor = SimpleNamespace(id="mgr", role=Role.manager, name="Mgr")
+    result = send(env, "Jay", ["Resume.pdf"], {"phone": "9876500011", "recruiter": "staff@example.test"})
+    with env.sessions() as db:
+        assert db.get(Candidate, result["candidateId"]).owner_id == "mgr"
+
+
 def test_check_matches_sheet_rows_to_folders_and_reports_unmatched_rows(env):
     body = {"folders": [{"folder": "Kiran", "files": [{"path": "Resume.pdf"}, {"path": "Visa Stamping.pdf"}, {"path": "notes.txt"}]}],
             "rows": [{"name": "Kiran", "phone": "9876500011", "order": "ORD-1", "rowNumber": 2}, {"name": "Nobody", "phone": "1234567890", "rowNumber": 3}],
@@ -289,7 +300,11 @@ def test_the_downloadable_sheet_reads_back(env):
 
 def test_the_folder_alone_is_enough_no_sheet_no_phone(env):
     """Documents and a job order are all the screen asks for; the reading of the resume and passport fills in the rest."""
-    result = send(env, "Mohan Raj", ALL_DOCUMENTS, None, default_order="ORD-1", recruiter=None)
+    # A travel date is the one thing a folder cannot give: the ticket alone no longer deploys (stage 11 needs the ticket and its date).
+    without_date = send(env, "Mohan Das", ALL_DOCUMENTS, None, default_order="ORD-1", recruiter=None)
+    assert (without_date["action"], without_date["completedThrough"], without_date["currentStage"]) == ("in_progress", 10, 11)
+    assert any("Travel date" in i["message"] for i in without_date["issues"])
+    result = send(env, "Mohan Raj", ALL_DOCUMENTS, {"travel_date": "20/03/2026"}, default_order="ORD-1", recruiter=None)
     assert (result["action"], result["completedThrough"]) == ("deploy", 11)
     assert any("interview date" in i["message"] for i in result["issues"])
     with env.sessions() as db:
@@ -427,13 +442,16 @@ def test_what_the_local_reading_verifies_fills_the_form_at_once(env):
                 "resume": {"email": "mohan@example.com", "mobile": "9840012345"}}
     with env.sessions() as db:
         filled = apply_local_patterns(db, result["candidateId"], patterns)
-    assert {"passport.passportNumber", "personal.dateOfBirth", "passport.expiryDate", "personal.mobileNumber", "personal.email"} <= set(filled)
+    assert {"passport.passportNumber", "personal.dateOfBirth", "passport.expiryDate"} <= set(filled)
+    # contacts printed on a resume cannot identify their owner, so the local reading never files them (the online reader
+    # does, after its identity check)
+    assert not {"personal.mobileNumber", "personal.email"} & set(filled)
     with env.sessions() as db:
         candidate = db.get(Candidate, result["candidateId"])
         assert (candidate.passport_no, str(candidate.dob), str(candidate.passport_expiry)) == ("M1234567", "1990-05-17", "2031-01-01")
-        assert candidate.phone and candidate.email == "mohan@example.com" and candidate.name == "Mohan Lal"
-        assert not candidate.needs_review                      # the phone was the only gap
-        assert (candidate.field_sources or {}).get("personal.mobileNumber") == "extracted"   # the online reader may still improve on it
+        assert not candidate.phone and not candidate.email and candidate.name == "Mohan Lal"
+        assert candidate.needs_review                          # the phone is still the gap: a resume's own contacts are not used here
+        assert (candidate.field_sources or {}).get("passport.passportNumber") == "extracted"   # the online reader may still improve on it
     # a check digit that fails is not trusted
     with env.sessions() as db:
         assert apply_local_patterns(db, result["candidateId"], {"passport": {"passport_number": "X9999999", "number_ok": False}}) == []

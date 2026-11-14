@@ -498,7 +498,7 @@ def test_explicit_agency_takes_precedence_over_an_import_label(desk, registered)
     assert assignment(desk)["agency"] == {"id": "agency" if registered else None, "name": "Bulk import"}
 
 
-def test_recruiter_changes_are_for_admins_and_managers_only(desk):
+def test_recruiter_changes_are_for_the_admin_only(desk):
     app_id = mapped(desk)
     refused = put_assignment(desk, {"recruiterId": "other"})
     assert refused.status_code == 403
@@ -519,6 +519,9 @@ def test_recruiter_changes_are_for_admins_and_managers_only(desk):
         assert db.scalar(select(func.count()).select_from(Notification).where(Notification.user_id == "other")) >= 1
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_id == "candidate", AuditEntry.action.like("%eassign%"))) >= 1
     as_user(desk, "manager", Role.manager)
+    assert put_assignment(desk, {"recruiterId": "staff"}).status_code == 403  # a manager works candidates but does not hand them out
+    assert assignment(desk)["can"]["recruiter"] is False and assignment(desk)["options"]["recruiters"] == []
+    as_user(desk, "admin", Role.admin)
     assert put_assignment(desk, {"recruiterId": "staff"}).status_code == 200
     with desk.sessions() as db:
         db.add(User(id="gone", name="Gone", email="gone@example.test", role=Role.staff, active=False))
@@ -778,7 +781,10 @@ def at_final_stage(env):
     app_id = mapped(env)
     for stage in range(1, 11):
         complete(env, app_id, payload(env, app_id, stage))
-    saved = save(env, app_id, {"feedback": "Travel confirmed by recruiter; missing files will be collected."})
+    # Deployment needs the ticket (kept as the stage's own evidence, so the candidate's document checklist is untouched) and the
+    # travel date; the other required candidate documents may still be missing.
+    saved = save(env, app_id, {"feedback": "Travel confirmed by recruiter; missing files will be collected.",
+                               "travelDate": "2026-11-15", "file": attachment(env, app_id, 11)})
     assert saved.status_code == 200, saved.text
     return app_id, saved.json()["lockVersion"]
 

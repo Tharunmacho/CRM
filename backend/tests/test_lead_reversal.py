@@ -8,13 +8,14 @@ from app.api.routers import candidates
 from app.db import models as m
 from test_database_naming import schema_database  # noqa: F401
 from test_lead_sheet import act_as, add_candidate, env, first_lead, imported  # noqa: F401
+from lead_resume_fixtures import convert_with_resume
 from lead_sheet_fixtures import meta_rows
 
 
 def converted(env):
     imported(env, meta_rows(0, 1), assign_to="a")
     lead = first_lead(env)
-    response = env.client.post(f"/api/leads/{lead['id']}/convert")
+    response = convert_with_resume(env, lead["id"])  # a lead becomes a candidate only with a checked resume
     assert response.status_code == 200, response.text
     return lead["id"], response.json()["candidate"]["id"]
 
@@ -28,10 +29,14 @@ def test_reverse_keeps_original_lead_evidence_and_is_retry_safe(env, monkeypatch
     lead = env.db.get(m.Lead, lid)
     before = (lead.name, lead.phone, lead.email, lead.notes, lead.owner_id)
     activities_before = env.db.scalar(select(func.count()).select_from(m.LeadActivity).where(m.LeadActivity.lead_id == lid))
-    for identifier, entity, target in (("lead-resume", "lead", lid), ("candidate-resume", "candidate", cid)):
-        env.db.add(m.Attachment(id=identifier, entity_type=entity, entity_id=target, slot="resume", version=1,
-                               file_name="Synthetic.pdf", size_kb=1, object_key="synthetic/shared.pdf", uploaded_by="admin"))
-    env.db.commit()
+    # the conversion kept the checked resume on the lead and attached the same stored file to the candidate
+    from app.services import lead_resume_check
+    lead_resume = lead_resume_check.source_attachment(env.db, lead)
+    candidate_resume = env.db.scalar(select(m.Attachment).where(m.Attachment.entity_type == "candidate", m.Attachment.entity_id == cid,
+                                                                m.Attachment.slot == "resume"))
+    assert lead_resume is not None and candidate_resume is not None
+    shared_key, lead_resume_id, candidate_resume_id = candidate_resume.object_key, lead_resume.id, candidate_resume.id
+    assert lead_resume.object_key == shared_key
     cleanup = []
     monkeypatch.setattr(candidates, "_remove_stored_files", lambda *args: cleanup.append(args))
     check = env.client.get(f"/api/leads/{lid}/unconvert-check")
@@ -40,8 +45,8 @@ def test_reverse_keeps_original_lead_evidence_and_is_retry_safe(env, monkeypatch
     assert result.status_code == 200, result.text
     assert result.json()["lead"]["candidateId"] is None and result.json()["restoredStatus"] == "new"
     env.db.expire_all()
-    assert env.db.get(m.Candidate, cid) is None and env.db.get(m.Attachment, "candidate-resume") is None
-    assert env.db.get(m.Attachment, "lead-resume").object_key == "synthetic/shared.pdf"
+    assert env.db.get(m.Candidate, cid) is None and env.db.get(m.Attachment, candidate_resume_id) is None
+    assert env.db.get(m.Attachment, lead_resume_id).object_key == shared_key, "the lead's own resume evidence is kept"
     lead = env.db.get(m.Lead, lid)
     assert (lead.name, lead.phone, lead.email, lead.notes, lead.owner_id) == before
     assert env.db.scalar(select(func.count()).select_from(m.LeadActivity).where(m.LeadActivity.lead_id == lid)) == activities_before + 1

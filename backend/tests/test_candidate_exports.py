@@ -314,7 +314,7 @@ def test_data_bank_export_has_twelve_shared_document_columns_in_one_metadata_que
     rows = sheets(payload)["Candidates"]
     headings = rows[0]
     assert headings[-12:-1] == [label + " document" for _slot, label in required_for_deployment()]
-    person = next(row for row in rows[1:] if row[0] == "candidate")
+    person = next(row for row in rows[1:] if row[headings.index("CRM reference")] == "candidate")
     assert person[headings.index("Resume document")] == "Uploaded"
     assert person[headings.index("Invoice document")] == "Uploaded"
     assert person[headings.index("Passport document")] == "Missing"
@@ -331,13 +331,13 @@ def test_data_bank_export_names_agency_and_the_actual_profile_issue(exports):
         db.commit()
         rows = sheets(export_candidates(db, Search()))["Candidates"]
         headings = rows[0]
-        person = next(row for row in rows[1:] if row[0] == "candidate")
+        person = next(row for row in rows[1:] if row[headings.index("CRM reference")] == "candidate")
         assert person[headings.index("Agency")] == ""
         assert person[headings.index("Profile review issues")] == "Phone number missing"
         candidate.source_detail = "Example Referral Agency"
         db.commit()
         rows = sheets(export_candidates(db, Search()))["Candidates"]
-        person = next(row for row in rows[1:] if row[0] == "candidate")
+        person = next(row for row in rows[1:] if row[headings.index("CRM reference")] == "candidate")
         assert person[headings.index("Agency")] == "Example Referral Agency"
 
 
@@ -347,7 +347,7 @@ def test_exports_keep_exact_reviewed_source_wording(exports):
         db.commit()
         bank = sheets(export_candidates(db, Search()))["Candidates"]
         headings = bank[0]
-        person = next(row for row in bank[1:] if row[0] == "candidate")
+        person = next(row for row in bank[1:] if row[headings.index("CRM reference")] == "candidate")
         assert person[headings.index("Exact source wording")] == "expectedSalary: Negotiable; experienceIndia: 1.5 years"
     response = get(exports)
     assert response.status_code == 200, response.text

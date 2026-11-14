@@ -70,9 +70,14 @@ logger = logging.getLogger(__name__)
 def candidate_filters(q: str = Query(default="", max_length=500), pool: Pool = "all",
                       skills: list[str] = Query(default=[]), skill_mode: Literal["all", "any"] = "all", missing_skills: bool = False,
                       column_filters: str = Query(default="{}", max_length=5000), sort: str = "new_first", direction: Literal["asc", "desc"] = "desc",
-                      staff: str | None = Query(default=None, max_length=36), position_id: str = Query(default="", max_length=36)):
+                      staff: str | None = Query(default=None, max_length=36), position_id: str = Query(default="", max_length=36),
+                      mine_new: bool = False, user: User = Depends(current_user)):
     if len(skills) > 50 or any(len(skill) > 200 for skill in skills):
         raise HTTPException(422, "Select at most 50 skills of at most 200 characters each.")
+    if mine_new:
+        # "My new candidates": the ones assigned to the signed-in person that are still New. A view, not a permission:
+        # leaving the flag out shows the whole shared Data Bank exactly as before.
+        return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, user.id, fresh=True, order_id=position_id)
     return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, staff or None, order_id=position_id)
 
 
@@ -138,7 +143,7 @@ def candidate_pool_counts(response: Response, staff: str | None = Query(default=
 
 
 @router.post("/assign-waiting")
-def assign_waiting(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
+def assign_waiting(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
     """Give every owner-less candidate to the next eligible recruiter (round-robin).
 
     Intake leaves a candidate unassigned when nobody is eligible; this is the sweep that
@@ -445,6 +450,7 @@ class DuplicateLookup(CandidateIn):
 class DuplicateMatch(Wire):
     id: str
     ref: str
+    care_id: str | None = None
     name: str
     phone: str
     dob: date | None
@@ -458,6 +464,7 @@ class DuplicateMatch(Wire):
 class CandidateOut(Wire):
     id: str
     ref: str
+    care_id: str | None = None
     name: str
     owner_id: str | None
     owner_name: str | None
@@ -474,7 +481,7 @@ def duplicate_match(db: Session, existing: Candidate, fields: list[str], user: U
     """The existing candidate as the duplicate dialog shows it, including who owns it and whether `user` may combine into it."""
     owner = db.get(User, existing.owner_id) if existing.owner_id else None
     return DuplicateMatch(
-        id=existing.id, ref=existing.ref, name=existing.name, phone=existing.phone, dob=existing.dob,
+        id=existing.id, ref=existing.ref, care_id=existing.care_id, name=existing.name, phone=existing.phone, dob=existing.dob,
         owner_name=owner.name if owner else None, owner_id=existing.owner_id, matched_on=fields,
         can_merge=candidate_work_refusal(db, existing, user) is None,
     ).model_dump(by_alias=True, mode="json")
@@ -592,7 +599,7 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
     if recovered is not None:
         owner = db.get(User, recovered.owner_id) if recovered.owner_id else None
         task_id = db.scalar(select(Task.id).where(Task.candidate_id == recovered.id, Task.kind == TaskKind.initial_call))
-        return CandidateOut(id=recovered.id, ref=recovered.ref, name=recovered.name,
+        return CandidateOut(id=recovered.id, ref=recovered.ref, care_id=recovered.care_id, name=recovered.name,
                             owner_id=recovered.owner_id, owner_name=owner.name if owner else None, task_id=task_id)
     match = find_duplicate(db, body.phone, body.dob, body.passport_no, body.email)
     if match is not None:
@@ -611,15 +618,15 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, refusal)
 
     # Who gets the candidate. A staff member who adds a candidate works it: it is assigned to them and the
-    # round-robin is left alone. Admin and manager may name a recruiter, or leave it to the next free one.
+    # round-robin is left alone (a manager's add works the same way). Only the admin may name a recruiter, or leave it to the next free one.
     requested = getattr(body, "assign_to", None)
     # Client staff routing (see services/client_routing.py): a designation that an open order of a client with allocated staff
     # asks for goes to the least-loaded of that staff. An admin's or manager's explicit choice always wins.
     if defer_assignment:
         owner = None
-    elif user.role == Role.staff:
+    elif user.role != Role.admin:  # only the admin hands a candidate to someone else; a manager's or recruiter's own add is theirs
         if requested and requested != user.id:
-            raise HTTPException(403, "A candidate you add is assigned to you. Only a manager or an admin can choose another recruiter.")
+            raise HTTPException(403, "A candidate you add is assigned to you. Only the admin can choose another recruiter.")
         owner = client_routing.route_new_candidate(db, body.designations, keep_user_id=user.id) or user
     elif requested:
         owner = ensure_assignable(db, requested)
@@ -630,8 +637,10 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
     # Saved from a document that gave a name and an email or passport but no phone: kept, and flagged for a person to complete.
     incomplete = not body.phone
 
+    from app.services.care_india_id import allocate_care_id
     candidate = Candidate(
         ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}",
+        care_id=allocate_care_id(db),
         name=body.name.strip(),
         phone=body.phone,
         dob=body.dob,
@@ -722,6 +731,7 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
     return CandidateOut(
         id=candidate.id,
         ref=candidate.ref,
+        care_id=candidate.care_id,
         name=candidate.name,
         owner_id=owner.id if owner else None,
         owner_name=owner.name if owner else None,
@@ -838,6 +848,47 @@ def ensure_candidate_edit(candidate, user):
     ensure_can_work_candidate(candidate, user)
 
 
+ALLOCATION_REQUEST_ACTION = "Requested candidate allocation"
+ALLOCATION_REQUEST_WINDOW = timedelta(hours=24)
+ALLOCATION_REQUESTS_PER_HOUR = 30  # new requests one staff member may send across all candidates
+
+
+@router.post("/{candidate_id}/request-allocation")
+def request_allocation(candidate_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.staff))):
+    """A staff member asks the admins for a candidate who is not theirs (unassigned, or another recruiter's).
+
+    Every active admin gets one in-app notice linking to the candidate, and the request is written to the audit trail.
+    The admin then allocates through the ordinary Assign flow. The same person asking again for the same candidate within
+    24 hours changes nothing and answers `alreadyRequested: true`, so a double click or an impatient staff member cannot spam."""
+    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
+    if candidate is None:
+        raise HTTPException(404, "Candidate not found")
+    if candidate.owner_id == user.id:
+        raise HTTPException(409, "This candidate is already assigned to you.")
+    since = datetime.now(timezone.utc) - ALLOCATION_REQUEST_WINDOW
+    already = db.scalar(select(AuditEntry.id).where(
+        AuditEntry.actor_id == user.id, AuditEntry.action == ALLOCATION_REQUEST_ACTION,
+        AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate.id, AuditEntry.at >= since).limit(1))
+    if already:
+        return {"requested": True, "alreadyRequested": True, "notified": 0}
+    admins = list(db.scalars(select(User.id).where(User.active.is_(True), User.role == Role.admin).order_by(User.id)))
+    if not admins:  # nothing is written, so a request made once an admin exists is not answered "already requested"
+        raise HTTPException(503, "No admin is available to receive requests right now. Try again later.")
+    hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    if (db.scalar(select(func.count()).select_from(AuditEntry).where(
+            AuditEntry.actor_id == user.id, AuditEntry.action == ALLOCATION_REQUEST_ACTION, AuditEntry.at >= hour_ago)) or 0) >= ALLOCATION_REQUESTS_PER_HOUR:
+        raise HTTPException(429, "You have sent a lot of requests in the last hour. Wait a little before asking for more candidates.")
+    holder = db.scalar(select(User.name).where(User.id == candidate.owner_id)) if candidate.owner_id else None
+    for admin_id in admins:
+        db.add(Notification(user_id=admin_id, kind="candidate_request", title="Candidate requested",
+                            detail=f"{user.name} requested {candidate.name} ({candidate.ref})" + (f" · now with {holder}" if holder else " · not assigned yet"),
+                            link_to=f"/candidates/{candidate.id}"))
+    db.add(AuditEntry(actor_id=user.id, action=ALLOCATION_REQUEST_ACTION, target=candidate.name, entity_type="candidate", entity_id=candidate.id,
+                      meta={"requestedBy": user.id, "currentOwnerId": candidate.owner_id, "notified": len(admins)}))
+    db.commit()
+    return {"requested": True, "alreadyRequested": False, "notified": len(admins)}
+
+
 @router.post("/{candidate_id}/merge", response_model=CandidateOut)
 def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
     lock_assignment_cursor(db)
@@ -855,7 +906,7 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
         raise HTTPException(409, "These documents already belong to another saved candidate.")
     if recovered_id is not None:
         owner = db.get(User, candidate.owner_id) if candidate.owner_id else None
-        return CandidateOut(id=candidate.id, ref=candidate.ref, name=candidate.name, owner_id=candidate.owner_id,
+        return CandidateOut(id=candidate.id, ref=candidate.ref, care_id=candidate.care_id, name=candidate.name, owner_id=candidate.owner_id,
                             owner_name=owner.name if owner else None, task_id=None)
     matches = identity_matches(db, body.model_dump())
     if len(matches) != 1 or matches[0][0].id != candidate.id:
@@ -877,7 +928,7 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
                       meta={"filled_fields": changed, "merged_by": user.name, "owner_id": candidate.owner_id}))
     db.commit()
     owner_user = db.get(User, candidate.owner_id) if candidate.owner_id else None
-    return CandidateOut(id=candidate.id, ref=candidate.ref, name=candidate.name, owner_id=candidate.owner_id,
+    return CandidateOut(id=candidate.id, ref=candidate.ref, care_id=candidate.care_id, name=candidate.name, owner_id=candidate.owner_id,
                         owner_name=owner_user.name if owner_user else None, task_id=None)
 
 

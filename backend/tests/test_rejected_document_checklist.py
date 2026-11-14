@@ -50,7 +50,7 @@ def test_rejected_identity_file_is_retained_and_excluded_from_every_checklist(ex
         travelled._add_documents(db, rows)
         assert "Resume" in rows[0]["documents"]["missing"]
         bank = sheets(candidate_search.export_candidates(db, candidate_search.Search()))["Candidates"]
-        person = next(item for item in bank[1:] if item[0] == "candidate")
+        person = next(item for item in bank[1:] if item[bank[0].index("CRM reference")] == "candidate")
         assert person[bank[0].index("Resume document")] == "Wrong document"
     response = get(env, "documents.zip")
     assert response.status_code == 200

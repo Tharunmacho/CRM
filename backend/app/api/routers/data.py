@@ -49,6 +49,7 @@ from app.db.models import (
     Remark,
     Role,
     Task,
+    TaskEvent,
     TaskKind,
     TodoItem,
     User,
@@ -1068,7 +1069,7 @@ class ReassignIn(BaseModel):
 
 
 @router.post("/candidates/reassign")
-def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
+def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
     reason = body.reason.strip()
     if not reason:
         raise HTTPException(422, "Give a reason for moving these candidates to another person")
@@ -1157,3 +1158,90 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
     )
     db.commit()
     return {"count": len(ids), "toUserId": target.id}
+
+
+class UnassignIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidateIds: list[str] = Field(max_length=2000)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+def unassign_refusals(db: Session, candidates: list[Candidate]) -> dict[str, str]:
+    """{candidate id: why this candidate must stay with their recruiter (work is under way on an order)}; the others may be freed.
+
+    Two statements for the whole selection, not three per candidate."""
+    ids = [c.id for c in candidates if c.status != CandidateStatus.deployed]
+    mapped: dict[str, str] = {}
+    staged: set[str] = set()
+    if ids:
+        for candidate_id, ref in db.execute(select(Application.candidate_id, Order.ref).join(Order, Application.order_id == Order.id).where(
+                Application.candidate_id.in_(ids), Application.status == ApplicationStatus.active).order_by(Order.ref)):
+            mapped.setdefault(candidate_id, ref)
+        staged = set(db.scalars(select(Task.candidate_id).where(
+            Task.candidate_id.in_(ids), Task.kind != TaskKind.initial_call, Task.completed_at.is_(None), Task.cancelled_at.is_(None)).distinct()))
+    out: dict[str, str] = {}
+    for c in candidates:
+        if c.status == CandidateStatus.deployed:
+            out[c.id] = "is deployed and stays with their recruiter"
+        elif c.id in mapped:
+            out[c.id] = f"is mapped to {mapped[c.id]}: reassign them to another recruiter instead"
+        elif c.id in staged:
+            out[c.id] = "has open stage work: reassign them to another recruiter instead"
+    return out
+
+
+@router.post("/candidates/unassign")
+def unassign(body: UnassignIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+    """Admin only: take candidates back from their recruiter (owner none). They are waiting for a recruiter again ("Not assigned",
+    and the admin's "Assign waiting candidates").
+
+    The recruiter's follow-up reminder goes, an untouched initial-call task is removed (a fresh one starts when the candidate is assigned
+    again); one with remarks, SLA events, an escalation or a recorded call is cancelled, keeping its history. A candidate who is deployed, mapped to an order or has
+    open stage work is refused with the reason, and a candidate without a recruiter is skipped."""
+    ids = sorted(set(body.candidateIds))
+    if not ids:
+        raise HTTPException(422, "Select at least one candidate")
+    from app.api.routers.candidates import lock_assignment_cursor
+    lock_assignment_cursor(db)
+    candidates = list(db.scalars(select(Candidate).where(Candidate.id.in_(ids)).order_by(Candidate.id).with_for_update()))
+    if len(candidates) != len(ids):
+        raise HTTPException(404, "One or more candidates no longer exist")
+    reason = (body.reason or "").strip() or f"Allocation removed by {user.name}"
+    todo, refused, already = [], [], 0
+    reasons = unassign_refusals(db, [c for c in candidates if c.owner_id is not None])
+    for c in candidates:
+        if c.owner_id is None:
+            already += 1
+        elif c.id in reasons:
+            refused.append({"id": c.id, "name": c.name, "reason": f"{c.name} {reasons[c.id]}."})
+        else:
+            todo.append(c)
+    if refused and not todo:
+        raise HTTPException(409, refused[0]["reason"] if len(refused) == 1 else f"{len(refused)} candidates cannot be unassigned. {refused[0]['reason']}")
+    from app.services.application_form import sync_follow_up_todo
+    now = datetime.now(timezone.utc)
+    for c in todo:
+        previous = c.owner_id
+        c.owner_id = None
+        db.add(AuditEntry(actor_id=user.id, action="Candidate unassigned", target=c.name, entity_type="candidate", entity_id=c.id, at=now,
+                          meta={"fromUserId": previous, "toUserId": None, "reason": reason}))
+        if c.next_follow_up_date:
+            sync_follow_up_todo(db, c)  # the reminder belonged to the old recruiter
+    open_tasks = list(db.scalars(select(Task).where(Task.candidate_id.in_([c.id for c in todo]), Task.completed_at.is_(None), Task.cancelled_at.is_(None))
+                                 .order_by(Task.id).with_for_update())) if todo else []
+    touched: set[str] = set()  # tasks whose SLA history (remarks, events) must survive: cancelled, never deleted
+    if open_tasks:
+        task_ids = [t.id for t in open_tasks]
+        touched |= set(db.scalars(select(Remark.task_id).where(Remark.task_id.in_(task_ids))))
+        touched |= set(db.scalars(select(TaskEvent.task_id).where(TaskEvent.task_id.in_(task_ids))))
+    called = {c.id for c in todo if c.call_recorded_at}
+    for task in open_tasks:
+        if task.id in touched or task.candidate_id in called or task.escalated or task.escalated_at:
+            task.cancelled_at = now
+        else:
+            db.delete(task)  # truly untouched: a fresh one starts when the candidate is assigned again
+    if todo:
+        db.add(AuditEntry(actor_id=user.id, action="Unassigned candidates", target=f"{len(todo)} candidates", entity_type="candidate",
+                          meta={"candidateIds": [c.id for c in todo], "reason": reason}))
+    db.commit()
+    return {"count": len(todo), "unassigned": len(todo), "alreadyUnassigned": already, "refused": refused}

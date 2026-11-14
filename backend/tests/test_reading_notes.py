@@ -160,7 +160,7 @@ class _NoCandidateDb:
 
 
 def _job(draft_slot="passport"):
-    return SimpleNamespace(candidate_id="c1", owner_id="u1", status="needs_review", draft={"applicationForm": {"slot": draft_slot}})
+    return SimpleNamespace(candidate_id="c1", owner_id="u1", status="needs_review", last_error=None, draft={"applicationForm": {"slot": draft_slot}})
 
 
 def test_application_form_result_shows_plain_notes_and_keeps_raw_in_the_output():

@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import and_, or_, select
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -29,10 +30,9 @@ SOURCE_DETAIL_LIMIT = 255
 
 
 def can_change(user: User, candidate) -> dict:
-    """What THIS user may change. Job, source and agency follow the application form's edit rule; the recruiter is supervisors only."""
+    """What THIS user may change. Job, source and agency follow the application form's edit rule; the recruiter is the admin only."""
     editable = user.role in (Role.admin, Role.manager) or (user.role == Role.staff and candidate.owner_id == user.id)
-    supervisor = user.role in (Role.admin, Role.manager)
-    return {"job": editable, "source": editable, "agency": editable, "recruiter": supervisor}
+    return {"job": editable, "source": editable, "agency": editable, "recruiter": user.role == Role.admin}
 
 
 # ------------------------------------------------------------------ reads (run in the form's parallel round)
@@ -160,12 +160,16 @@ def apply(db: Session, user: User, candidate_id: str, fields: dict) -> dict:
 
     if db.get(Candidate, candidate_id) is None:
         raise HTTPException(404, "Candidate not found")
-    if "recruiterId" in fields and user.role not in (Role.admin, Role.manager):
-        raise HTTPException(403, "Only a manager or an admin can change the recruiter.")
+    if "recruiterId" in fields and user.role != Role.admin:
+        raise HTTPException(403, "Only the admin can change the recruiter.")
     changed: list[str] = []
     shown: str | None = None
     wants_job = "orderId" in fields
     if wants_job or "recruiterId" in fields:
+        # Wait for the shared assignment cursor for a few seconds only. If another transaction (a bulk import, a stuck connection)
+        # holds it, the person gets the calm "another change is being saved" answer from the caller instead of a screen that hangs
+        # until the browser gives up after 30 s with "The server took too long to respond".
+        db.execute(sql_text("SET LOCAL lock_timeout = '10s'"))
         lock_assignment_cursor(db)  # before the candidate / order rows, like every other owner change
 
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update().execution_options(populate_existing=True))

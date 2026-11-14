@@ -48,7 +48,8 @@ def _value(raw):
 
 
 def sees_team(user) -> bool:
-    return _value(user.role) in ("admin", "manager")
+    """Lead numbers of everybody: admin only. Managers and staff count only the leads assigned to them."""
+    return _value(user.role) == "admin"
 
 
 def _aware(moment: datetime) -> datetime:

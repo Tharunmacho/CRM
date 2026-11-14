@@ -614,16 +614,48 @@ def digits_of(value) -> str:
 CALLING_CODES = {"91", "971", "966", "974", "965", "968", "973", "977", "94", "880", "92", "63", "62", "60", "65", "44", "1", "61", "49", "33"}
 
 
+_EXCEL_NUMBER = re.compile(r"^[+]?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?$")
+
+
+def _plain_number_text(raw: str) -> str:
+    """Excel and CSV round trips write 9000000123 as `9000000123.0` or `9.000000123E9`; give back the whole number.
+
+    Only a value that is purely a number is touched (a phone with spaces, dashes or a `+91 ` prefix never matches), and only
+    when it is a whole number, so `9.99` stays what it was and is then rejected as too short.
+    """
+    if not _EXCEL_NUMBER.match(raw) or not re.search(r"[.eE]", raw):
+        return raw
+    try:
+        value = Decimal(raw.lstrip("+"))
+    except InvalidOperation:
+        return raw
+    if value != value.to_integral_value() or not 0 <= value < Decimal(10) ** 16:
+        return raw
+    whole = str(int(value))
+    # A spreadsheet that rounded the number for display (9.99E+09 for 9000000123) kept only a few real digits and padded the rest
+    # with zeros: that is not the person's number, and it would merge different people. Give nothing back (-> invalid phone).
+    if whole.endswith("00000") or (re.search(r"[eE]", raw) and len(re.split(r"[eE]", raw.lstrip("+"))[0].replace(".", "").strip("0")) < 10):
+        return ""
+    return ("+" if raw.startswith("+") else "") + whole
+
+
+def _ascii_digits(value: str) -> str:
+    """Digits of the text with Arabic-Indic / Devanagari digits turned into 0-9 (an Indian sheet may be typed in either)."""
+    return "".join(str(unicodedata.digit(ch)) for ch in value if ch.isdecimal())
+
+
 def parse_phone(value) -> dict:
     """{phone, country_code, key, valid, given}. See the contract for the rule."""
-    raw = re.sub(r"^\s*p\s*:", "", clean_cell(value), flags=re.I).strip()
+    raw = re.sub(r"^\s*(?:tel|phone|mobile|whatsapp|p)\s*:", "", clean_cell(value), flags=re.I).strip()
     given = bool(raw)
-    digits = digits_of(raw)
+    digits = _ascii_digits(_plain_number_text(raw))
     if digits.startswith("00"):
         digits = digits[2:]
     if len(digits) == 11 and digits.startswith("0"):
         digits = digits[1:]
-    if not 7 <= len(digits) <= 15:
+    national_only = digits[2:] if len(digits) == 12 and digits.startswith("91") else digits
+    if not 7 <= len(digits) <= 15 or len(set(national_only)) == 1:
+        # too short / too long, or a placeholder such as 0000000000 / 9999999999 (the whole number is one repeated digit) that would merge different people
         return {"phone": None, "country_code": None, "key": None, "valid": False, "given": given}
     code = ""
     if len(digits) > 10:
@@ -636,16 +668,32 @@ def parse_phone(value) -> dict:
 _EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 
 
+# "na@gmail.com" style fillers people type when a form insists on an address; they must never make two people "the same".
+PLACEHOLDER_EMAIL_NAMES = {"na", "none", "null", "nil", "no", "noemail", "nomail", "notavailable", "notapplicable", "unknown", "nothing"}
+
+
 def parse_email(value) -> str | None:
-    text = clean_cell(value).lower()
-    return text if text and _EMAIL.match(text) else None
+    """Trimmed, lower-cased address. Exact compare: Gmail dots and `+tags` are NOT merged. Placeholders give None."""
+    text = clean_cell(value).lower().strip(" <>\"'")
+    text = re.sub(r"^mailto:", "", text).strip(" <>\"'")
+    if not text or not _EMAIL.match(text):
+        return None
+    if re.sub(r"[._-]", "", text.split("@", 1)[0]) in PLACEHOLDER_EMAIL_NAMES:
+        return None
+    return text
 
 
 _ID_PREFIX = re.compile(r"^[A-Za-z]{1,2}:")
+_ROUNDED_ID = re.compile(r"^\d+(?:\.\d*)?[eE][+-]?\d+$")
 
 
 def parse_id(value) -> str | None:
+    """Platform id without its 1-2 letter prefix. An id Excel already rounded (`1.795E+15`) is not an id: many leads share it."""
     text = _ID_PREFIX.sub("", clean_cell(value), count=1).strip()
+    if _ROUNDED_ID.match(text):
+        return None
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
     return text or None
 
 
@@ -834,6 +882,8 @@ def normalise_row(headers: list[str], cells: list[str], columns: ColumnMap, *, c
 
     phone = parse_phone(cell("phone"))
     whatsapp = parse_phone(cell("whatsapp"))
+    if not phone["valid"] and whatsapp["valid"]:  # a placeholder or broken phone beside a real WhatsApp number: that number is the contact
+        phone = whatsapp
     email = parse_email(cell("email"))
     name = smart_name(cell("name")) or smart_name(" ".join(p for p in (cell("firstName"), cell("lastName")) if p))
     exp_restaurant = parse_experience(cell("experienceRestaurant"))

@@ -505,7 +505,8 @@ def for_rules(number: int, data: dict, historical: bool = False, travel_confirme
 
     For someone who has already travelled (`historical`), the later stages prove the earlier ones happened, so the files
     those earlier stages would normally need (offer copy, advance receipt and amount, stamped visa) may be missing too. The
-    ticket (stage 11) is never waived: it is the proof of travel.
+    ticket and its date (stage 11) are never waived by the folder alone: they are the proof of travel. Only the office's own word
+    that the person has flown (`travel_confirmed`) stands in for them, and then both stay blank in the stored record.
     """
     if number == 3 and data.get("scheduled") and not data.get("date"):
         return {**data, "date": "2000-01-01"}
@@ -518,18 +519,25 @@ def for_rules(number: int, data: dict, historical: bool = False, travel_confirme
             return {**data, "amount": data.get("amount") or "1", "receipt": data.get("receipt") or HISTORY_FILE}
         if number == 10 and data.get("done") and not data.get("file"):
             return {**data, "file": HISTORY_FILE}
-        if number == 11 and travel_confirmed and not data.get("file"):
-            return {**data, "file": HISTORY_FILE}
+        if number == 11 and travel_confirmed and not (data.get("file") and data.get("travelDate")):
+            # The office's word that they flew stands in for the ticket and its date; both stay blank in the stored record.
+            return {**data, "file": data.get("file") or HISTORY_FILE, "travelDate": data.get("travelDate") or "2000-01-01"}
     return data
 
 
-def evaluate_stages(stages: dict[int, dict], options: StageOptions, historical: bool = False, travel_confirmed: bool = False) -> list[dict]:
-    """[{stage, title, ok, missing}] - the same completion rules the stage screens apply."""
+def evaluate_stages(stages: dict[int, dict], options: StageOptions, historical: bool = False, travel_confirmed: bool = False,
+                    level: int = 11) -> list[dict]:
+    """[{stage, title, ok, missing}] - the same completion rules the stage screens apply.
+
+    Staff may move a stage "manually" on the stage screen, so an empty stage passes the rules; here an empty stage above
+    `level` (the furthest stage the folder and sheet give evidence for) is never recorded as done.
+    """
     report = []
     for number in range(1, 12):
         definition = stage_by_no(number)
         result = definition.evaluate(for_rules(number, stages[number], historical, travel_confirmed), options if number == 8 else None)
-        report.append({"stage": number, "title": definition.title, "ok": bool(result.can_complete and not result.closes and not result.repeats),
+        report.append({"stage": number, "title": definition.title,
+                       "ok": number <= level and bool(result.can_complete and not result.closes and not result.repeats),
                        "missing": result.missing})
     return report
 
@@ -630,7 +638,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
     built, problems = stage_inputs(row, refs, ctx.options)
     issues.extend(problems)
     shown = {number: (built[number] if number <= level else {}) for number in range(1, 12)}
-    report = evaluate_stages(shown, ctx.options, ctx.historical, ctx.travel_confirmed)
+    report = evaluate_stages(shown, ctx.options, ctx.historical, ctx.travel_confirmed, level)
     completed = 0
     for item in report:
         if not item["ok"]:
@@ -762,6 +770,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     from app.api.routers.candidates import lock_assignment_cursor
     from app.api.routers.files import _safe_name
     from app.db.models import Designation
+    from app.services.care_india_id import allocate_care_id
     from app.services.lead_xlsx import agency_zone
     settings = get_settings()
 
@@ -778,6 +787,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     phone = plan["phone"] or ""
     candidate = Candidate(
         ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}",
+        care_id=allocate_care_id(db),
         name=plan["name"], phone=phone, email=plan["email"], passport_no=plan["passportNo"],
         father_name=None, marital_status=None, current_address=None, education=[], work_history=[], experience_india=0,
         native_place=None, family_member_number=None, job_duration_preference=None, country_preference=None,

@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, Notification, Role, Task, TaskEvent, User, WorkflowSettings
 from app.db.session import get_db
+from app.services.notification_scope import visible_notifications
 from app.services.workflow_scheduler import add_event, restart_sla, settings_row
 
 router = APIRouter(prefix="/api", tags=["workflow"])
@@ -71,7 +72,7 @@ def missed_updates(day: date, staff: str | None = None, db: Session = Depends(ge
 
 @router.get("/notifications")
 def notifications(limit: int = 100, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    rows = db.scalars(select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc(), Notification.id).limit(max(1, min(limit, 200))))
+    rows = db.scalars(select(Notification).where(Notification.user_id == user.id, visible_notifications(user.id)).order_by(Notification.created_at.desc(), Notification.id).limit(max(1, min(limit, 200))))
     return [NotificationOut.model_validate(row) for row in rows]
 
 

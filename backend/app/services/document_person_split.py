@@ -706,7 +706,8 @@ def commit_review(db, identifier, user, revision, decisions, settings):
             from app.services import client_routing
             own = bundle.source_type == "manual" and user.role == Role.staff
             owner = client_routing.route_new_candidate(db, values.get("designations"), keep_user_id=user.id if own else None)                 or (user if own else next_owner(db, pointer=pointer))
-            candidate = Candidate(ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}", **values,
+            from app.services.care_india_id import allocate_care_id
+            candidate = Candidate(ref=f"CND-{db.scalar(select(func.nextval('crm_candidate_reference_seq'))):05d}", care_id=allocate_care_id(db), **values,
                 source=Source.email if bundle.source_type == "email" else Source.whatsapp if bundle.source_type == "whatsapp" else Source(group.fields.get("source", "walk_in")),
                 source_detail=f"person_review:{bundle.id}", created_by=user.id,
                 owner_id=owner.id if owner else None, intake_owner_id=owner.id if owner else None,

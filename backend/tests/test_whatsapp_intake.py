@@ -114,6 +114,7 @@ def test_original_and_selected_documents_candidate_owner_and_replay(setup):
         assert row.status == "completed", row.last_error
         candidate = db.get(Candidate, row.candidate_id)
         assert candidate.name == "Document Identity"
+        assert candidate.care_id.startswith("CI-")
         assert candidate.phone == "9000000002"  # Sender is separate provenance.
         assert candidate.whatsapp == "919999999999"
         assert candidate.father_name == "Document Parent" and candidate.marital_status == "Married"

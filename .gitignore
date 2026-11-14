@@ -47,3 +47,7 @@ Thumbs.db
 # Exported lead sheets contain personal data and must never be committed
 *_Leads_*.csv
 *_Leads_*.xlsx
+
+# Throwaway local audit output and one-off prod-ops scratch scripts (may hold personal data / infra details)
+/.tmp*/
+/scratch/

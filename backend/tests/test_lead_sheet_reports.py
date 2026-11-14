@@ -48,6 +48,8 @@ def sheets_of(book) -> list:
 def test_report_of_a_clean_upload_has_a_summary_and_every_row(env):
     batch = imported(env, meta_rows(1, 31))
     act_as(env, "manager")
+    assert env.client.get(f"/api/leads/batches/{batch['batchId']}/report.xlsx").status_code == 403
+    act_as(env, "admin")
     response = env.client.get(f"/api/leads/batches/{batch['batchId']}/report.xlsx")
     assert response.status_code == 200 and response.headers["content-type"].startswith(XLSX)
     disposition = response.headers["content-disposition"]
