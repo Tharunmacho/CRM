@@ -6,7 +6,8 @@ Definitions live here so the dashboard, the report, the Excel export and the tes
 17-reports.md, lead-sheet-contract.md):
 
   Dashboard (role scoped like the rest of the page: staff their own leads, admin/manager the team or the chosen person)
-    newToday         leads that arrived today (the lead's own created time, else when it was stored)
+    newToday         leads UPLOADED (stored in the CRM) in the last 24 hours, a rolling window: `created_at`, never the ad platform's own
+                     created time, so a sheet of older leads uploaded just now still counts
     notContacted     assigned, status still `new` and never called (same rule as the Lead sheet's "Not contacted")
     followUpsDue     open leads whose follow-up date has arrived
     resumesReceived  leads sitting at `resume_received` (waiting to be converted)
@@ -39,6 +40,7 @@ log = logging.getLogger(__name__)
 
 CLOSED = "('converted','not_interested','invalid','wrong_number')"
 CARDS = ("newToday", "notContacted", "followUpsDue", "resumesReceived", "converted", "unassigned")
+NEW_WINDOW_HOURS = 24  # "New" = uploaded within this many hours (rolling), see lead_sheet.NEW_WINDOW_HOURS
 PERIODS = ("week", "month", "quarter", "year", "all")
 ITEM_LIMIT = 8
 
@@ -71,6 +73,7 @@ def _windows(now: datetime, zone: str) -> dict:
     today = datetime.combine(local.date(), time.min, tz)
     return {
         "today": today.astimezone(timezone.utc),
+        "since": _aware(now) - timedelta(hours=NEW_WINDOW_HOURS),
         "week": _aware(now) - timedelta(days=7), "month": _aware(now) - timedelta(days=30),
         "quarter": _aware(now) - timedelta(days=90),
         "year": datetime(local.year, 1, 1, tzinfo=tz).astimezone(timezone.utc),
@@ -90,7 +93,7 @@ SELECT l.new_today, l.not_contacted, l.due, l.resumes, l.total, l.assigned, l.co
        CASE WHEN :team THEN (SELECT count(*) FROM crm_leads WHERE owner_id IS NULL AND status NOT IN {CLOSED}) END AS unassigned,
        c.c_week, c.c_month, c.c_quarter, c.c_year, c.c_all
 FROM (
-  SELECT count(*) FILTER (WHERE coalesce(created_time, created_at) >= :today) AS new_today,
+  SELECT count(*) FILTER (WHERE created_at >= :since) AS new_today,
          count(*) FILTER (WHERE status = 'new' AND call_count = 0 AND owner_id IS NOT NULL) AS not_contacted,
          count(*) FILTER (WHERE next_follow_up_at <= :now AND status NOT IN {CLOSED}) AS due,
          count(*) FILTER (WHERE status = 'resume_received') AS resumes,
@@ -115,7 +118,7 @@ def dashboard_leads(db, user, staff_id, zone: str, now: datetime) -> dict | None
     team = sees_team(user)
     w = _windows(now, zone)
     try:
-        row = db.execute(_CARD_SQL, {"everyone": scope is None, "scope": scope or "", "team": team, "today": w["today"], "now": w["now"],
+        row = db.execute(_CARD_SQL, {"everyone": scope is None, "scope": scope or "", "team": team, "since": w["since"], "now": w["now"],
                                       "week": w["week"], "month": w["month"], "quarter": w["quarter"], "year": w["year"]}).one()
     except (SQLAlchemyError, AttributeError) as failure:  # an older database, or a stand-in session in a unit test
         if isinstance(failure, ProgrammingError) and hasattr(db, "rollback"):
@@ -138,7 +141,7 @@ def dashboard_leads(db, user, staff_id, zone: str, now: datetime) -> dict | None
 # ------------------------------------------------------------------ the list behind a card
 
 _CARD_ROWS = {
-    "newToday": ("coalesce(l.created_time, l.created_at) >= :today", "coalesce(l.created_time, l.created_at) DESC", "created"),
+    "newToday": ("l.created_at >= :since", "l.created_at DESC, l.id", "uploaded"),
     "notContacted": ("l.status = 'new' AND l.call_count = 0 AND l.owner_id IS NOT NULL", "l.assigned_at ASC NULLS LAST, l.id", "assigned"),
     "followUpsDue": (f"l.next_follow_up_at <= :now AND l.status NOT IN {CLOSED}", "l.next_follow_up_at ASC, l.id", "followUp"),
     "resumesReceived": ("l.status = 'resume_received'", "l.resume_received_at DESC NULLS LAST, l.id", "resume"),
@@ -150,7 +153,7 @@ def dashboard_lead_items(db, user, staff_id, card: str, period: str, zone: str, 
     """The few leads behind one dashboard card (newest or most urgent first) and the full count."""
     scope = dashboard_scope(user, staff_id)
     w = _windows(now, zone)
-    params = {"everyone": scope is None, "scope": scope or "", "today": w["today"], "now": w["now"], "limit": limit}
+    params = {"everyone": scope is None, "scope": scope or "", "since": w["since"], "now": w["now"], "limit": limit}
     scope_sql = "(:everyone OR l.owner_id = :scope)"
     if card == "unassigned":
         if not sees_team(user):
@@ -168,7 +171,7 @@ def dashboard_lead_items(db, user, staff_id, card: str, period: str, zone: str, 
         kind = "converted"
     else:
         where, order, kind = _CARD_ROWS[card]
-        at = {"created": "coalesce(l.created_time, l.created_at)", "assigned": "l.assigned_at", "followUp": "l.next_follow_up_at",
+        at = {"created": "coalesce(l.created_time, l.created_at)", "uploaded": "l.created_at", "assigned": "l.assigned_at", "followUp": "l.next_follow_up_at",
               "resume": "l.resume_received_at"}[kind]
         sql = (f"SELECT l.id, l.name, l.position_applied, l.country_interest, l.status, u.name AS owner_name, l.call_count, "
                f"l.next_follow_up_at, {at} AS at, count(*) OVER () AS total FROM crm_leads l LEFT JOIN auth_users u ON u.id = l.owner_id "

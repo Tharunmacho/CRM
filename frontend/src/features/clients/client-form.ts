@@ -117,7 +117,7 @@ export function validateParty(fields: PartyFields, rows: StaffRow[]): FieldError
   if (!trim(fields.agencyName)) errors.agencyName = 'Enter the name of the agency.'
   const phone = phoneProblem(fields.phone); if (phone) errors.phone = phone
   const email = emailProblem(fields.email); if (email) errors.email = email
-  if (rows.filter((row) => !isEmptyStaffRow(row)).length > MAX_STAFF_ROWS) errors.staff = `You can add up to ${MAX_STAFF_ROWS} staff.`
+  if (rows.filter((row) => !isEmptyStaffRow(row)).length > MAX_STAFF_ROWS) errors.staff = `You can add up to ${MAX_STAFF_ROWS} recruiters.`
   rows.forEach((row, index) => {
     if (isEmptyStaffRow(row)) return
     if (!trim(row.name)) errors[`staff.${index}.name`] = 'Enter this person’s name, or remove the row.'

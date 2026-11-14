@@ -43,6 +43,10 @@ import { DeleteCandidateDialog } from '@/features/candidates/components/delete-c
 import { conversationHref } from '@/features/whatsapp/chat-types'
 import { LeadOriginBadge } from '@/features/leads/components/lead-origin-badge'
 import '@/styles/candidate-v2.css'
+import '@/styles/candidate-ids.css'
+import { primaryId, secondaryId } from '@/features/candidates/candidate-ids'
+import { roleLabel } from '@/shared/model/role-labels'
+import { TravellerIdChip } from '@/features/candidates/components/candidate-id-chip'
 
 const FORMAT: ProfileFormat = { money: (amount) => money(amount), date: (value) => dateLabel(value) }
 
@@ -304,7 +308,7 @@ export default function CandidateProfilePage() {
   const tracked = active ?? pipelineLast
   const trackedOrder = tracked ? store.order(tracked.orderId) : undefined
   const trackedReached = tracked ? [...new Set(tracked.stages.filter(record => !record.reopenedReason).map(record => record.stage))] : undefined
-  const ownerRole = owner ? `${owner.role[0].toUpperCase()}${owner.role.slice(1)}` : ''
+  const ownerRole = owner ? roleLabel(owner.role) : ''
   const stats = [
     { label: 'Recruiter', value: owner?.name || 'Not assigned', detail: owner ? `${ownerRole}${initialTask ? ' · initial call to do' : ''}` : 'Needs a recruiter', icon: UserCog, tone: owner ? undefined : 'amber' as const },
     { label: 'Progress', value: active ? `Stage ${active.currentStage} of ${STAGES.length}` : deployed ? 'Deployed' : 'No order yet', detail: active ? `${stageByNo(active.currentStage).title} · ${store.orderLabel(active.orderId)}` : pipelineLast?.closureReason ? `Last: ${closureLabels[pipelineLast.closureReason]}` : deployed ? 'Recruitment finished' : 'Match to an open order', icon: GitBranch, tone: deployed ? 'green' as const : undefined },
@@ -328,10 +332,11 @@ export default function CandidateProfilePage() {
           <div className="cp-id">
             <PersonAvatar name={cand.name} photoUrl={photo?.url} size={72} />
             <div className="cp-id-copy">
-              <p className="cp-eyebrow">Candidate · <span className="tnum">{cand.ref}</span></p>
+              <p className="cp-eyebrow">Candidate · <span className="cid-main">{primaryId(cand)}</span>{secondaryId(cand) && <> · <span className="cid-ref tnum" title="CRM reference">{secondaryId(cand)}</span></>}</p>
               <h1>{cand.name}</h1>
               {(model.designation || model.meta.length > 0) && <p className="cp-sub">{[model.designation, ...model.meta].filter(Boolean).join(' · ')}</p>}
               <div className="cp-pills">
+                <TravellerIdChip candidate={cand} />
                 {cand.status !== 'needs_review' && <StatusPill status={cand.status} />}
                 {candidateReviewIssues(cand).map(issue => <span key={issue.key} title={issue.action}><Badge tone="amber" variant="dot">{issue.label}</Badge></span>)}
                 {expiry && <Badge tone={expiry.tone === 'expired' ? 'stamp' : 'amber'} variant="dot">{expiry.text}</Badge>}

@@ -31,8 +31,8 @@ import { Pager, ViewToggle, readView, saveView, type DbView } from '@/features/c
 import { normalizeSearch } from '@/features/candidates/data-bank-search'
 import { ALL_CANDIDATES_LABEL, MY_NEW_LABEL, SHOW_ALL_LABEL, countLine, myNewEmptyCopy, myNewNote, startsOnMyNew } from '@/features/candidates/data-bank-scope'
 import {
-  activeFilterCount, assignWaitingLabel, assignWaitingMessage, canAssignWaiting, canUnassignCandidate, emptyPoolCopy, poolCountsPath,
-  type AssignWaitingResult, type DataBankPool, type PoolCounts,
+  activeFilterCount, assignWaitingLabel, assignWaitingMessage, canAssignWaiting, canUnassignCandidate, emptyPoolCopy, parseTravel, poolCountsPath,
+  type AssignWaitingResult, type DataBankPool, type PoolCounts, type TravelFilter,
 } from '@/features/candidates/data-bank-pools'
 import '@/styles/data-bank-v2.css'
 import '@/styles/data-bank-top.css'
@@ -67,6 +67,20 @@ export default function DataBankPage() {
     const next = new URLSearchParams(previous)
     if (staff) next.set('staff', staff)
     else next.delete('staff')
+    return next
+  })
+  // Travel (any / travelled / not travelled) lives in the link like the staff filter, so a refresh or a shared link keeps it.
+  const travelled = parseTravel(searchParams.get('travelled'))
+  const changeTravel = (travel: TravelFilter) => setSearchParams(previous => {
+    const next = new URLSearchParams(previous)
+    if (travel) next.set('travelled', travel)
+    else next.delete('travelled')
+    return next
+  })
+  // Two link parameters cleared in ONE update (router updates in the same tick do not stack).
+  const clearLinkFilters = (keys: string[]) => setSearchParams(previous => {
+    const next = new URLSearchParams(previous)
+    keys.forEach(key => next.delete(key))
     return next
   })
   const [query, setQuery] = useState('')
@@ -122,21 +136,22 @@ export default function DataBankPage() {
   // recruiter names (and stage chips), which show a placeholder meanwhile.
   const directoryError = directoryRead?.key === staffScopeKey ? directoryRead.error : ''
   const ownedCandidates = useMemo(() => store.candidates.filter(candidate => !staffFilter || candidate.ownerId === staffFilter), [store.candidates, staffFilter])
-  const showMyNew = () => { setMineNew(true); setPool('all'); changeStaff(''); setSort({ key: 'assigned', dir: 'desc' }) }
+  const showMyNew = () => { setMineNew(true); setPool('all'); clearLinkFilters(['staff', 'travelled']); setSort({ key: 'assigned', dir: 'desc' }) }
   const showAll = () => { setMineNew(false); setSort(current => (current.key === 'assigned' ? { key: 'new_first', dir: 'desc' } : current)) }
   // Any choice that names another list (a pool card, a recruiter) leaves "my new candidates" instead of silently emptying it.
-  useEffect(() => { if (mineNew && (staffFilter || pool !== 'all')) showAll() }, [staffFilter, pool])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (mineNew && (staffFilter || pool !== 'all' || travelled)) showAll() }, [staffFilter, pool, travelled])  // eslint-disable-line react-hooks/exhaustive-deps
   const facetParams = new URLSearchParams({ pool, ...(mineNew ? { staff: store.me.id } : staffFilter ? { staff: staffFilter } : {}) }).toString()
   const coverage = useSkillFacets(facetParams, `${refreshToken}:${reload.n}`)
-  const filterCount = activeFilterCount(columnFilters, staffFilter, skills, skillStatus)
+  const filterCount = activeFilterCount(columnFilters, staffFilter, skills, skillStatus, travelled)
   const hasFilters = filterCount > 0 || Boolean(query.trim()) || pool !== 'all'
   const setColumnFilter = (key: string, value: string) => setColumnFilters(previous => ({ ...previous, [key]: value }))
-  const resetFilters = () => { setQuery(''); setPool('all'); setSkills([]); setSkillStatus('all'); setSkillMode('all'); setColumnFilters({}); changeStaff('') }
+  const resetFilters = () => { setQuery(''); setPool('all'); setSkills([]); setSkillStatus('all'); setSkillMode('all'); setColumnFilters({}); clearLinkFilters(['staff', 'travelled']) }
 
   const searched = normalizeSearch(query)
   const params = new URLSearchParams({ q: searched, pool, skill_mode: skillMode, missing_skills: String(skillStatus === 'missing'), column_filters: JSON.stringify(columnFilters), sort: sort.key, direction: sort.dir })
   if (mineNew) params.set('mine_new', 'true')
   else if (staffFilter) params.set('staff', staffFilter)
+  if (travelled) params.set('travelled', travelled)
   skills.forEach(skill => params.append('skills', skill))
   const filterQuery = params.toString()
   // Keep showing the previous page while a new search loads, so the list never blinks empty and the filters keep their place.
@@ -335,6 +350,8 @@ export default function DataBankPage() {
           onPool={setPool}
           staff={staffFilter}
           onStaff={changeStaff}
+          travel={travelled}
+          onTravel={changeTravel}
           users={store.users}
           skills={skills}
           onSkills={setSkills}

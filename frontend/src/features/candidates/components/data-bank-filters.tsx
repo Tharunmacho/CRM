@@ -4,7 +4,7 @@ import { cn } from '@/shared/lib/cn'
 import { stageByNo } from '@/shared/workflow/stages'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Select } from '@/shared/ui/primitives'
-import { PRD_COLUMNS, type DataBankPool } from '@/features/candidates/data-bank-pools'
+import { PRD_COLUMNS, TRAVEL_CHOICES, parseTravel, type DataBankPool, type TravelFilter } from '@/features/candidates/data-bank-pools'
 import { poolChoices, scopeValue, staffForScope, visibleFilters } from '@/features/candidates/data-bank-stats'
 import { SOURCE_LABEL } from '@/features/candidates/components/data-bank-columns'
 import type { SkillCoverage } from '@/features/candidates/use-skill-facets'
@@ -34,6 +34,9 @@ interface Props {
   onPool: (pool: DataBankPool) => void
   staff: string
   onStaff: (staff: string) => void
+  /** Any travel / Travelled / Not travelled (the server's `travelled` filter). */
+  travel: TravelFilter
+  onTravel: (travel: TravelFilter) => void
   users: User[]
   skills: string[]
   onSkills: (skills: string[]) => void
@@ -49,11 +52,11 @@ interface Props {
 }
 
 /**
- * One row of equal selects: Everyone / My candidates, Source, Status and (admin, manager) Staff. "More filters" holds the rest: the pool
+ * One row of equal selects: Everyone / My candidates, Source, Status, Travel and (admin, manager) Staff. "More filters" holds the rest: the pool
  * list, stage, passport, name, phone, job title, experience, mapped order, date added and skills. Every PRD column stays filterable.
  */
 export function DataBankFilters(props: Props) {
-  const { me, filters, onFilter, pool, onPool, staff, onStaff, users, skills, onSkills, skillMode, onSkillMode, skillStatus, onSkillStatus, coverage, moreOpen, onMoreToggle, canClear, onClear } = props
+  const { me, filters, onFilter, pool, onPool, staff, onStaff, travel, onTravel, users, skills, onSkills, skillMode, onSkillMode, skillStatus, onSkillStatus, coverage, moreOpen, onMoreToggle, canClear, onClear } = props
   const facets = coverage.data?.skills ?? []
   const moreActive = hasMoreFilters(filters, skills, skillStatus, pool)
   const shown = visibleFilters(me.role)
@@ -88,14 +91,19 @@ export function DataBankFilters(props: Props) {
           <Select aria-label="Whose candidates" value={scope} onChange={(event) => onStaff(staffForScope(event.target.value, me.id))}>
             <option value="everyone">Everyone</option>
             <option value="mine">My candidates</option>
-            {scope === 'other' && <option value="other" disabled>Chosen staff member</option>}
+            {scope === 'other' && <option value="other" disabled>Chosen recruiter</option>}
           </Select>
         )}
         {shown.includes('source') && choice('source', 'Any source', Object.values(SOURCE_LABEL).map((label) => [label, label]))}
         {shown.includes('status') && choice('status', 'Any status', Object.entries(STATUS_LABEL))}
+        {shown.includes('travel') && (
+          <Select aria-label="Filter by travel" value={travel} onChange={(event) => onTravel(parseTravel(event.target.value))}>
+            {TRAVEL_CHOICES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </Select>
+        )}
         {shown.includes('staff') && (
-          <Select aria-label="Filter by assigned staff" value={staff} onChange={(event) => onStaff(event.target.value)}>
-            <option value="">All staff</option>
+          <Select aria-label="Filter by assigned recruiter" value={staff} onChange={(event) => onStaff(event.target.value)}>
+            <option value="">All recruiters</option>
             {users.filter((user) => user.role !== 'admin' || user.id === staff).map((user) => <option key={user.id} value={user.id}>{user.name}{!user.active ? ' (inactive)' : ''}</option>)}
           </Select>
         )}

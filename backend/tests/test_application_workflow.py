@@ -114,7 +114,7 @@ def payload(env, app_id, stage):
         1: {"result": "passed"}, 2: {"forwarded": "yes"},
         3: {"scheduled": "yes", "date": "2026-11-02", "time": "09:30", "mode": "online"},
         4: {"result": "selected", "remarks": "Client approved"},
-        5: {"obtained": "yes"}, 6: {"applied": "yes", "result": "fit"},
+        5: {"result": "agreed"}, 6: {"applied": "yes", "result": "fit"},
         7: {"collected": "yes", "heldBy": {"id": "staff", "name": "spoofed"}},
         8: {"collected": "yes", "amount": "1500.25", "amountCurrency": "INR", "mode": "upi"},
         9: {"arrived": "yes", "googleReview": False}, 10: {"done": "yes"},
@@ -195,7 +195,10 @@ def test_final_stage_uses_candidate_air_ticket_but_never_deploys_without_travel_
     (2, {"forwarded": "no", "reason": "not_interested"}, "not_interested"),
     (2, {"forwarded": "no", "reason": "resume_not_received"}, "resume_not_received"),
     (4, {"result": "rejected", "remarks": "Rejected by client"}, "interview_rejected"),
+    (5, {"result": "declined"}, "offer_declined"),
+    (5, {"result": "not_received"}, "offer_not_received"),
     (6, {"result": "unfit", "reapplying": "no"}, "medical_unfit"),
+    (6, {"result": "unfit"}, "medical_unfit"),
 ])
 def test_negative_outcomes_close_tasks_and_allow_fresh_mapping(workflow, stage, data, reason):
     env = workflow
@@ -241,9 +244,9 @@ def test_strict_values_and_real_document_ownership_before_advancing(workflow):
     wrong_owner = attachment(env, other, 5)
     wrong_stage = attachment(env, app_id, 9)
     for file in ("invented", {"id": "missing"}, wrong_owner, wrong_stage):
-        assert save(env, app_id, {"obtained": "yes", "file": file}).status_code == 422
+        assert save(env, app_id, {"result": "agreed", "file": file}).status_code == 422
     own = attachment(env, app_id, 5)
-    response = save(env, app_id, {"obtained": "yes", "file": own, "feedback": "Offer confirmed; replacement file pending."})
+    response = save(env, app_id, {"result": "agreed", "file": own, "feedback": "Offer confirmed; replacement file pending."})
     assert response.status_code == 200
     with env.sessions() as db:
         stored = db.get(Attachment, own["id"])

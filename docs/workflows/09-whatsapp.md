@@ -36,7 +36,7 @@ If the provider or media download fails, the durable receipt explains the proces
 - [ ] Confirm source-health timestamps and failure links reflect the actual worker.
 - [ ] Send text and an attachment within the reply window; verify signed sent/delivered/read updates and replay the same request without a duplicate.
 - [ ] Outside the reply window, select an approved template, review filled parameters and confirm the saved message text matches the provider template.
-- [ ] Verify only supervisors or the explicitly linked candidate's assigned Staff can send, including after reassignment.
+- [ ] Verify only supervisors or the explicitly linked candidate's assigned Recruiter can send, including after reassignment.
 - [ ] Interrupt a send response, recover the same request after reload and confirm uncertain provider outcomes are not automatically retried.
 - [ ] Review a multi-person source, save each candidate's own pages and find every resulting profile from the source receipt.
 

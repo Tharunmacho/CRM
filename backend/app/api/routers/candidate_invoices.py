@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
-from app.core.deps import current_user, require_role
-from app.db.models import Role, User
+from app.db.models import User
 from app.db.session import get_db
 from app.services import candidate_invoices as service
+from app.services.invoice_access import invoice_admin
 
 router = APIRouter(prefix="/api", tags=["candidate-invoices"])
 
@@ -60,14 +60,14 @@ def _private(response):
 
 @router.get("/candidates/{candidate_id}/invoice")
 def read_invoice(candidate_id: str, response: Response, applicationId: str | None = Query(default=None, max_length=36),
-                 db: Session = Depends(get_db), user: User = Depends(current_user)):
+                 db: Session = Depends(get_db), user: User = Depends(invoice_admin)):
     _private(response)
     return service.state(db, candidate_id, user, applicationId)
 
 
 @router.put("/candidates/{candidate_id}/invoice")
 def save_fee(candidate_id: str, body: FeeIn, response: Response, applicationId: str | None = Query(default=None, max_length=36),
-             db: Session = Depends(get_db), user: User = Depends(current_user)):
+             db: Session = Depends(get_db), user: User = Depends(invoice_admin)):
     _private(response)
     if body.applicationId and applicationId and body.applicationId != applicationId:
         raise HTTPException(422, "Choose one application for this invoice")
@@ -76,18 +76,18 @@ def save_fee(candidate_id: str, body: FeeIn, response: Response, applicationId: 
 
 @router.post("/candidates/{candidate_id}/invoice/reconcile")
 def reconcile(candidate_id: str, body: ReconcileIn, response: Response,
-              db: Session = Depends(get_db), user: User = Depends(current_user)):
+              db: Session = Depends(get_db), user: User = Depends(invoice_admin)):
     _private(response)
     return service.reconcile(db, candidate_id, user, body.applicationId)
 
 
 @router.get("/invoice-settings")
-def read_settings(response: Response, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def read_settings(response: Response, db: Session = Depends(get_db), user: User = Depends(invoice_admin)):
     _private(response)
     return service.settings_state(db, user)
 
 
 @router.put("/invoice-settings")
-def save_settings(body: SettingsIn, response: Response, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def save_settings(body: SettingsIn, response: Response, db: Session = Depends(get_db), user: User = Depends(invoice_admin)):
     _private(response)
     return service.save_settings(db, user, body.model_dump(exclude={"lockVersion"}), body.lockVersion)

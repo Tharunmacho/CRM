@@ -70,11 +70,29 @@ export interface StageDef {
   /** One line telling staff what this stage is for. */
   summary: string
   fields: StageField[]
-  /** Only stages 1, 2, 4 and 6 can close an application. */
+  /** Every stage can close an application: through its own answers (stages 1, 2, 4, 5, 6) or the stopping exit below. */
   closer: boolean
+  /** The stopping exit: instead of moving on, the application closes here. Same list as the server's STOP_EXITS. */
+  stops?: { value: string; label: string }[]
   /** Stage 6 can repeat after an unfit result. */
   repeatable?: boolean
+  /**
+   * Stages 4, 5 and 6 are decisions: the recruiter must choose an outcome (it is not an optional detail) and only the
+   * positive one moves the candidate on. `fields` are the names shown together as the choice, outside the optional details.
+   */
+  decision?: DecisionDef
   evaluate: (d: Record<string, any>) => StageEvaluation
+}
+
+export interface DecisionDef {
+  field: string
+  /** What is missing while nothing is chosen: the same label the server reports. */
+  prompt: string
+  /** The sentence shown while the choice has not been made. */
+  message: string
+  fields: string[]
+  /** The choices after which the candidate goes to the next stage; every other choice stops them here. */
+  advances: string[]
 }
 
 const YES_NO = [
@@ -86,6 +104,33 @@ const need = (d: Record<string, any>, keys: [string, string][]) =>
   keys.filter(([k]) => d[k] == null || (typeof d[k] === 'string' ? !d[k].trim() : !d[k] && d[k] !== 0)).map(([, label]) => label)
 
 const manual = (outcome = 'Completed manually'): StageEvaluation => ({ canComplete: true, missing: [], outcome })
+
+/**
+ * The stopping exit of every stage (mirrors STOP_EXITS in backend/app/domain/stages.py): choice -> closure reason, closure label
+ * and the outcome written on the stage record. Rejected and Declined are offered at stages 1-10, each stage adds its own wording,
+ * and stage 11 only has Not travelling (completing it is the one way to Deployed). An explicit stop wins over the stage's answers.
+ */
+type StopExit = { value: string; label: string; reason: ClosureReason; closure: string; outcome: string }
+const GENERIC_STOPS: StopExit[] = [
+  { value: 'rejected', label: 'Rejected', reason: 'stage_rejected', closure: 'Rejected', outcome: 'Rejected' },
+  { value: 'declined', label: 'Declined', reason: 'stage_declined', closure: 'Candidate declined', outcome: 'Declined' },
+]
+const OWN_STOPS: Record<number, StopExit[]> = {
+  1: [{ value: 'rejected', label: 'Rejected', reason: 'prescreen_failed', closure: 'Failed prescreening', outcome: 'Failed' }],
+  3: [{ value: 'not_possible', label: 'Interview not possible', reason: 'interview_not_possible', closure: 'Interview not possible', outcome: 'Interview not possible' }],
+  4: [{ value: 'rejected', label: 'Rejected', reason: 'interview_rejected', closure: 'Rejected at interview', outcome: 'Rejected' }],
+  5: [{ value: 'declined', label: 'Declined', reason: 'offer_declined', closure: 'Offer declined', outcome: 'Declined' }],
+  7: [{ value: 'not_available', label: 'Passport not available', reason: 'passport_not_available', closure: 'Passport not available', outcome: 'Passport not available' }],
+  8: [{ value: 'not_paid', label: 'Not paid', reason: 'advance_not_paid', closure: 'Advance not paid', outcome: 'Not paid' }],
+  9: [{ value: 'visa_rejected', label: 'Visa rejected', reason: 'visa_rejected', closure: 'Visa rejected', outcome: 'Visa rejected' }],
+  10: [{ value: 'refused', label: 'Visa stamping refused', reason: 'visa_stamping_refused', closure: 'Visa stamping refused', outcome: 'Stamping refused' }],
+  11: [{ value: 'not_travelling', label: 'Not travelling', reason: 'not_travelling', closure: 'Not travelling', outcome: 'Not travelling' }],
+}
+export const stopExits = (no: number): StopExit[] => {
+  if (no === 11) return OWN_STOPS[11]
+  const own = OWN_STOPS[no] ?? []
+  return [...GENERIC_STOPS.map((generic) => own.find((item) => item.value === generic.value) ?? generic), ...own.filter((item) => !GENERIC_STOPS.some((generic) => generic.value === item.value))]
+}
 
 export const STAGES: StageDef[] = [
   {
@@ -227,11 +272,18 @@ export const STAGES: StageDef[] = [
     taskTitle: 'Record the interview result',
     summary: 'Record what the client decided, with their reasoning.',
     closer: true,
+    decision: {
+      field: 'result',
+      prompt: 'Interview result',
+      message: 'Choose the interview result, Selected or Rejected, before moving this candidate.',
+      fields: ['result'],
+      advances: ['selected'],
+    },
     fields: [
       {
         name: 'result',
         required: true,
-        label: 'Result',
+        label: 'Interview result',
         type: 'radio',
         options: [
           { value: 'selected', label: 'Selected' },
@@ -240,7 +292,6 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'remarks',
-        required: true,
         label: 'Interview remarks',
         type: 'textarea',
         placeholder: 'What the client said',
@@ -254,7 +305,8 @@ export const STAGES: StageDef[] = [
           closes: { reason: 'interview_rejected', label: 'Rejected at interview' },
           outcome: 'Rejected',
         }
-      return manual(d.result === 'selected' ? 'Selected' : undefined)
+      if (d.result === 'selected') return manual('Selected')
+      return { canComplete: false, missing: ['Interview result'], outcome: '' }
     },
   },
   {
@@ -262,20 +314,38 @@ export const STAGES: StageDef[] = [
     key: 'offer_letter',
     title: 'Offer letter',
     taskTitle: 'Obtain the offer letter',
-    summary: 'Collect the signed offer from the employer and file it.',
-    closer: false,
+    summary: 'Record whether the offer came and whether the candidate accepted it, and file the letter.',
+    closer: true,
+    decision: {
+      field: 'result',
+      prompt: 'Offer letter result',
+      message: 'Choose the offer letter result, Agreed, Declined or Not received, before moving this candidate.',
+      fields: ['result'],
+      advances: ['agreed'],
+    },
     fields: [
-      { name: 'obtained', required: true, label: 'Offer letter obtained', type: 'radio', options: YES_NO },
       {
-        name: 'file',
+        name: 'result',
         required: true,
-        label: 'Offer letter',
-        type: 'file',
-        showWhen: { field: 'obtained', in: ['yes'] },
+        label: 'Offer letter result',
+        type: 'radio',
+        options: [
+          { value: 'agreed', label: 'Agreed' },
+          { value: 'declined', label: 'Declined' },
+          { value: 'not_received', label: 'Not received' },
+        ],
       },
+      { name: 'file', label: 'Offer letter', type: 'file' },
+      // Written before the result existed. Never offered on a new record; shown only where an older record holds it.
+      { name: 'obtained', label: 'Offer letter obtained (earlier record)', type: 'radio', options: YES_NO, showWhen: { field: 'obtained', in: ['yes', 'no'] } },
     ],
     evaluate: (d) => {
-      return manual(d.obtained === 'yes' ? 'Obtained' : undefined)
+      if (d.result === 'declined')
+        return { canComplete: true, missing: [], closes: { reason: 'offer_declined', label: 'Offer declined' }, outcome: 'Declined' }
+      if (d.result === 'not_received')
+        return { canComplete: true, missing: [], closes: { reason: 'offer_not_received', label: 'Offer not received' }, outcome: 'Not received' }
+      if (d.result === 'agreed') return manual('Agreed')
+      return { canComplete: false, missing: ['Offer letter result'], outcome: '' }
     },
   },
   {
@@ -287,8 +357,15 @@ export const STAGES: StageDef[] = [
       'Send the candidate for the medical and record the result. A retest repeats this stage.',
     closer: true,
     repeatable: true,
+    decision: {
+      field: 'result',
+      prompt: 'Medical result',
+      message: 'Choose the medical result, Fit or Unfit, before moving this candidate.',
+      fields: ['result', 'reapplying', 'retestDate'],
+      advances: ['fit'],
+    },
     fields: [
-      { name: 'applied', required: true, label: 'Applied for medical', type: 'radio', options: YES_NO },
+      { name: 'applied', label: 'Applied for medical', type: 'radio', options: YES_NO },
       {
         name: 'appliedDate',
         label: 'Date applied',
@@ -299,9 +376,8 @@ export const STAGES: StageDef[] = [
       {
         name: 'result',
         required: true,
-        label: 'Result',
+        label: 'Medical result',
         type: 'radio',
-        showWhen: { field: 'applied', in: ['yes'] },
         options: [
           { value: 'fit', label: 'Fit' },
           { value: 'unfit', label: 'Unfit' },
@@ -309,12 +385,11 @@ export const STAGES: StageDef[] = [
       },
       {
         name: 'reapplying',
-        required: true,
-        label: 'Reapplying',
+        label: 'Plan another medical instead of stopping',
         type: 'radio',
         options: YES_NO,
         showWhen: { field: 'result', in: ['unfit'] },
-        help: 'A retest keeps the candidate on this stage and raises a follow-up task.',
+        help: 'Leave this on No to stop here. Yes keeps the candidate on this stage and raises a follow-up task.',
       },
       {
         name: 'retestDate',
@@ -326,8 +401,8 @@ export const STAGES: StageDef[] = [
       },
     ],
     evaluate: (d) => {
-      if (!d.result) return manual()
       if (d.result === 'fit') return { canComplete: true, missing: [], outcome: 'Fit' }
+      if (d.result !== 'unfit') return { canComplete: false, missing: ['Medical result'], outcome: '' }
       if (d.reapplying === 'yes') {
         const missing = need(d, [['retestDate', 'New medical date']])
         return {
@@ -337,14 +412,12 @@ export const STAGES: StageDef[] = [
           repeats: true,
         }
       }
-      if (d.reapplying === 'no')
-        return {
-          canComplete: true,
-          missing: [],
-          closes: { reason: 'medical_unfit', label: 'Medically unfit, not reapplying' },
-          outcome: 'Unfit',
-        }
-      return { canComplete: false, missing: ['Reapplying'], outcome: '' }
+      return {
+        canComplete: true,
+        missing: [],
+        closes: { reason: 'medical_unfit', label: 'Medically unfit' },
+        outcome: 'Unfit',
+      }
     },
   },
   {
@@ -550,7 +623,7 @@ for (const definition of STAGES) {
     { name: 'feedback', label: 'Stage feedback', type: 'textarea', required: true,
       placeholder: 'What happened at this stage, and why are you moving it?',
       help: 'Saved with your name and date in this stage\'s history.' },
-    ...definition.fields.map((field) => ({ ...field, required: ['reason', 'reapplying', 'retestDate'].includes(field.name) })),
+    ...definition.fields.map((field) => ({ ...field, required: field.name === definition.decision?.field || ['reason', 'retestDate'].includes(field.name) })),
   ]
   const evaluate = definition.evaluate
   definition.evaluate = (data) => {
@@ -571,8 +644,16 @@ for (const definition of STAGES) {
       if (field.type === 'number' && (typeof value === 'boolean' || !Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) >= 10_000_000_000 || Math.abs(Number(value) * 100 - Math.round(Number(value) * 100)) > 0.000001)) invalid.push(`${field.label}: enter a positive amount with at most two decimal places`)
     }
     if (definition.no === 6 && data.result === 'unfit' && data.reapplying === 'yes' && data.retestDate && data.appliedDate && data.retestDate < data.appliedDate) invalid.push('New medical date must be on or after the previous medical date')
+    if (!invalid.length && data.stop != null && data.stop !== '') {
+      const exit = stopExits(definition.no).find((item) => item.value === data.stop)
+      return exit
+        ? { canComplete: true, missing: [], closes: { reason: exit.reason, label: exit.closure }, outcome: exit.outcome }
+        : { canComplete: false, missing: ['Stop reason: choose one of the options for this stage'], outcome: '' }
+    }
     return invalid.length ? { canComplete: false, missing: invalid, outcome: '' } : evaluate(data)
   }
+  definition.closer = true
+  definition.stops = stopExits(definition.no).map(({ value, label }) => ({ value, label }))
 }
 
 export const stageByNo = (no: number) => STAGES[no - 1]
@@ -592,6 +673,16 @@ export const closureLabels: Record<ClosureReason, string> = {
   interview_rejected: 'Rejected at interview',
   medical_unfit: 'Medically unfit',
   unmapped: 'Removed from the order',
+  offer_declined: 'Offer declined',
+  offer_not_received: 'Offer not received',
+  stage_rejected: 'Rejected',
+  stage_declined: 'Candidate declined',
+  interview_not_possible: 'Interview not possible',
+  passport_not_available: 'Passport not available',
+  advance_not_paid: 'Advance not paid',
+  visa_rejected: 'Visa rejected',
+  visa_stamping_refused: 'Visa stamping refused',
+  not_travelling: 'Not travelling',
 }
 
 /** Whether a field should render given the values recorded so far. */

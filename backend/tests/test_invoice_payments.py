@@ -22,6 +22,8 @@ def ledger(desk, monkeypatch):
     desk.client.app.include_router(invoice_payments.router)
     monkeypatch.setattr(service, "get_settings", lambda: desk.settings)
     monkeypatch.setattr(invoices, "get_settings", lambda: desk.settings)
+    # Fees, GST and receipts are the admin's alone, so the ledger flows run as the admin.
+    as_user(desk, "admin", Role.admin)
     return desk
 
 
@@ -69,7 +71,7 @@ def test_deposit_before_ticket_counts_received_but_not_invoiced_and_is_idempoten
     data = received(ledger)
     assert (data["serviceFee"], data["gst"], data["total"], data["totalInvoiced"]) == ("10000.00", "1800.00", "11800.00", "0.00")
     assert (data["received"], data["balance"]) == ("2000.00", "9800.00")
-    assert data["payments"][0]["createdBy"] == {"id": "staff", "name": "Staff"}
+    assert data["payments"][0]["createdBy"] == {"id": "admin", "name": "Admin"}
     assert received(ledger)["payments"] == data["payments"]
     assert ledger.client.post(endpoint(), json=body(amount="2001")).status_code == 409
     paid = received(ledger, amount="9800", idempotencyKey="receipt-0002")
@@ -95,11 +97,13 @@ def test_receipts_enforce_assignment_and_application_scope(ledger):
     other_app, _ = prepare(ledger, candidate="second-candidate")
     assert ledger.client.get(endpoint(), params={"applicationId": other_app}).status_code == 404
     assert ledger.client.post(endpoint(), params={"applicationId": app}, json=body(applicationId=other_app)).status_code == 422
-    as_user(ledger, "other", Role.staff)
-    assert ledger.client.get(endpoint()).status_code == 403
-    assert ledger.client.post(endpoint(), json=body()).status_code == 403
-    assert ledger.client.get("/api/invoices/finance-summary").json()["total"] == 0
-    as_user(ledger, "manager", Role.manager)
+    # Neither another recruiter, the owning recruiter nor a manager may see or record receipts.
+    for user_id, role in (("other", Role.staff), ("staff", Role.staff), ("manager", Role.manager)):
+        as_user(ledger, user_id, role)
+        assert ledger.client.get(endpoint()).status_code == 403
+        assert ledger.client.post(endpoint(), json=body()).status_code == 403
+        assert ledger.client.get("/api/invoices/finance-summary").status_code == 403
+    as_user(ledger, "admin", Role.admin)
     assert ledger.client.get(endpoint()).status_code == 200
     assert ledger.client.get("/api/invoices/finance-summary").json()["total"] == 2
 
@@ -140,13 +144,15 @@ def test_reserved_pending_invoice_uses_reserved_rates_with_current_fee(ledger):
     assert report["totals"]["agreedTotal"] == "11000.00"
 
 
-def test_supervisor_void_retains_original_receipt_and_excludes_it_from_totals(ledger):
+def test_admin_void_retains_original_receipt_and_excludes_it_from_totals(ledger):
     prepare(ledger)
     data = received(ledger)
     entry = data["payments"][0]
     url = endpoint() + f"/{entry['id']}/void"
-    assert ledger.client.post(url, json={"reason": "Entered in error"}).status_code == 403
-    as_user(ledger, "manager", Role.manager)
+    for user_id, role in (("staff", Role.staff), ("manager", Role.manager)):
+        as_user(ledger, user_id, role)
+        assert ledger.client.post(url, json={"reason": "Entered in error"}).status_code == 403
+    as_user(ledger, "admin", Role.admin)
     assert ledger.client.post(url, json={"reason": " "}).status_code == 422
     voided = ledger.client.post(url, json={"reason": "Entered in error"})
     assert voided.status_code == 200, voided.text
@@ -226,9 +232,10 @@ def test_finance_summary_distinguishes_agreed_invoiced_received_and_authorized_t
     with ledger.sessions() as db:
         db.get(Candidate, "second-candidate").owner_id = "other"
         db.commit()
-    assert ledger.client.get("/api/invoices/finance-summary").json()["totals"]["agreedTotal"] == "11800.00"
-    as_user(ledger, "manager", Role.manager)
+    # The admin sees every candidate's totals whoever owns it; nobody else sees any.
     assert ledger.client.get("/api/invoices/finance-summary").json()["totals"]["agreedTotal"] == "17700.00"
+    as_user(ledger, "manager", Role.manager)
+    assert ledger.client.get("/api/invoices/finance-summary").status_code == 403
 
 
 def test_missing_fee_summary_never_invents_a_balance_or_payment(ledger):

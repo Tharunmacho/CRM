@@ -53,7 +53,8 @@ def env(schema_database):
         for number, (name, company, country, when, source, agency, recruiter, status, extra) in enumerate(PLACEMENTS, 1):
             order = Order(id=f"o{number}", ref=f"ORD-{number}", company_id=company, designation_id="job", openings=5, country=country)
             candidate = Candidate(id=f"c{number}", ref=f"CND-{number:05d}", name=name, phone=f"90000000{number:02d}", source=source,
-                                  source_detail=agency, owner_id=recruiter, passport_no="P7654321" if number == 1 else None)
+                                  source_detail=agency, owner_id=recruiter, passport_no="P7654321" if number == 1 else None,
+                                  care_id=f"CI-26-27-{number:03d}", traveller_id="CI-T-26-27-001" if number == 1 else None)
             db.add_all([order, candidate])
             db.flush()
             application = Application(id=f"a{number}", candidate_id=candidate.id, order_id=order.id, owner_id=recruiter, current_stage=11,
@@ -106,7 +107,7 @@ def test_every_travelled_placement_is_listed_newest_first_with_its_client_and_ag
     assert body["total"] == 7
     akash = next(row for row in body["rows"] if row["name"] == "Akash Murugesan")
     assert akash == {
-        "applicationId": "a1", "candidateId": "c1", "ref": "CND-00001", "name": "Akash Murugesan", "client": "Century Mechanical Systems Factory LLC",
+        "applicationId": "a1", "candidateId": "c1", "ref": "CND-00001", "travellerId": "CI-T-26-27-001", "careId": "CI-26-27-001", "name": "Akash Murugesan", "client": "Century Mechanical Systems Factory LLC",
         "clientId": "client", "country": "UAE", "job": "Machine Operator", "orderRef": "ORD-1", "orderId": "o1", "passportNumber": "P7654321", "agency": "Star Agency",
         "travelDate": "2026-05-09", "airline": "Air Arabia G9472", "pnr": "6ZA8JH", "recruiter": "Staff", "status": "deployed",
         "documents": {"have": 11, "required": 11, "missing": []}}
@@ -144,7 +145,7 @@ def test_agency_matches_form_assignment_for_real_names_and_intake_provenance(env
     assert names(get(env, agency="Actual Referrer")) == ["Akash Murugesan"]
     assert "Actual Referrer" in get(env)["options"]["agencies"]
     exported = list(csv.reader(StringIO(env.client.get("/api/travelled/export", params={"format": "csv", "agency": "Actual Referrer"}).content.decode("utf-8-sig"))))
-    assert len(exported) == 2 and exported[1][7] == "Actual Referrer"
+    assert len(exported) == 2 and exported[1][exported[0].index("Referral agency")] == "Actual Referrer"
 
 
 def test_registered_agency_named_bulk_import_is_preserved_without_changing_source(env):
@@ -336,13 +337,31 @@ def test_csv_export_follows_the_filters_and_is_safe_for_spreadsheets(env):
     assert response.headers["content-disposition"] == 'attachment; filename="travelled-candidates.csv"'
     text = response.content.decode("utf-8-sig")
     rows = list(csv.reader(StringIO(text)))
-    assert rows[0] == ["Travel date", "Candidate", "Ref", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
+    assert rows[0] == ["Traveller ID", "Travel date", "Candidate", "Ref", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
                        "PNR", "Recruiter", "Status", "Missing documents", "Passport"]
-    assert [r[1] for r in rows[1:]] == ["'=Formula Name", "Arun Kumar"]       # a name starting with "=" is not run as a formula
-    assert rows[2][:5] == ["2026-05-12", "Arun Kumar", "CND-00002", "Century Mechanical Systems Factory LLC", "UAE"]
-    assert rows[2][7] == "Star Agency"
-    assert rows[2][12] == "Signed offer, Police clearance certificate (PCC), Air ticket, Undertaking letter, Emigration, Insurance, Invoice"
-    assert rows[1][12].startswith("Resume, Passport, Medical, Signed offer, Police clearance")   # nothing on file: all eleven
+    col = rows[0].index
+    assert [r[col("Candidate")] for r in rows[1:]] == ["'=Formula Name", "Arun Kumar"]       # a name starting with "=" is not run as a formula
+    assert rows[2][col("Travel date"):col("Travel date") + 5] == ["2026-05-12", "Arun Kumar", "CND-00002", "Century Mechanical Systems Factory LLC", "UAE"]
+    assert rows[2][col("Referral agency")] == "Star Agency"
+    assert rows[2][col("Missing documents")] == "Signed offer, Police clearance certificate (PCC), Air ticket, Undertaking letter, Emigration, Insurance, Invoice"
+    assert rows[1][col("Missing documents")].startswith("Resume, Passport, Medical, Signed offer, Police clearance")   # nothing on file: all eleven
+
+
+def test_rows_carry_the_traveller_id_and_it_can_be_searched_and_exported(env):
+    rows = {row["name"]: row for row in get(env)["rows"]}
+    assert rows["Akash Murugesan"]["travellerId"] == "CI-T-26-27-001"
+    assert all(row["travellerId"] is None for name, row in rows.items() if name != "Akash Murugesan")   # not numbered yet: null, never missing
+    assert names(get(env, q="ci-t-26-27-001")) == ["Akash Murugesan"]
+    exported = list(csv.reader(StringIO(env.client.get("/api/travelled/export", params={"format": "csv", "q": "CI-T-26-27-001"}).content.decode("utf-8-sig"))))
+    assert exported[0][0] == "Traveller ID" and len(exported) == 2 and exported[1][0] == "CI-T-26-27-001"
+
+
+def test_rows_carry_the_care_india_id(env):
+    rows = get(env)["rows"]
+    assert rows and all("careId" in row for row in rows)
+    by_ref = {row["ref"]: row["careId"] for row in rows}
+    assert by_ref["CND-00001"] == "CI-26-27-001"
+    assert all(care_id == f"CI-26-27-{int(ref[-5:]):03d}" for ref, care_id in by_ref.items())
 
 
 def test_xlsx_export_holds_every_row_and_respects_staff_visibility(env):
@@ -377,3 +396,14 @@ def test_relationships_and_document_counts_do_not_query_per_candidate(env):
     finally:
         event.remove(engine, "before_cursor_execute", record)
     assert len(statements) == 2
+
+
+def test_the_invoice_is_not_a_required_document_for_recruiters_and_managers(env):
+    admin_rows = get(env)["rows"]
+    assert all(row["documents"]["required"] == 11 for row in admin_rows)
+    for actor in (SimpleNamespace(id="manager", role=Role.manager), SimpleNamespace(id="staff", role=Role.staff)):
+        env.actor = actor
+        rows = get(env)["rows"]
+        assert rows and all(row["documents"]["required"] == 10 and "Invoice" not in row["documents"]["missing"] for row in rows)
+        text = env.client.get("/api/travelled/export", params={"format": "csv"}).content.decode("utf-8-sig")
+        assert "Invoice" not in text

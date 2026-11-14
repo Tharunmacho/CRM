@@ -60,6 +60,7 @@ import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-a
 import { shortRef } from '@/features/candidates/components/data-bank-columns'
 import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
+import { careIdOf, idLine, travellerIdOf } from '@/features/candidates/candidate-ids'
 
 /**
  * One scrolling application: completed sections keep their saved feedback,
@@ -281,7 +282,7 @@ export function StageModal({
   )
 }
 
-const NEGATIVE_OUTCOMES = ['Failed', 'Rejected', 'Unfit', 'Not forwarded']
+const NEGATIVE_OUTCOMES = ['Failed', 'Rejected', 'Declined', 'Not received', 'Unfit', 'Not forwarded']
 
 /**
  * How many of the form's 12 columns each field takes. Short controls take 4 (three to a row), a longer
@@ -353,7 +354,7 @@ function ApplicationHeader({ app, recorded, effective }: { app: Application; rec
           <PersonAvatar name={cand.name} photoUrl={photo?.url} size={56} />
           <div className="sm-id">
             <h3 className="sm-name" title={cand.name}>{cand.name}</h3>
-            <p className="sm-sub"><span>Order</span><b className="tnum" title={order.ref}>{order.ref}</b><i aria-hidden="true">·</i><span>Candidate</span><b className="tnum" title={cand.ref}>{shortRef(cand.ref)}</b></p>
+            <p className="sm-sub"><span>Order</span><b className="tnum" title={order.ref}>{order.ref}</b><i aria-hidden="true">·</i><span>Candidate</span><b className="tnum" title={idLine(cand)}>{careIdOf(cand) || shortRef(cand.ref)}</b></p>
           </div>
           <div className="sm-head-side">
             <Badge tone={statusTone} variant="dot">{statusLabel}</Badge>
@@ -396,6 +397,8 @@ function CandidateRecord({ app }: { app: Application }) {
     <div className="sm-record">
       <Segment icon={<User className="h-4 w-4" />} title="Personal information" subtitle="Basic details">
         <Fact label="Name" value={cand.name} />
+        {careIdOf(cand) && <Fact label="Care India ID" value={careIdOf(cand)} ident />}
+        {travellerIdOf(cand) && <Fact label="Traveller ID" value={travellerIdOf(cand)} ident />}
         <Fact label="Reference" value={cand.ref} ident />
         <Fact label="Date of birth" value={dateLabel(cand.dob)} />
         <Fact label="Gender" value={cand.gender ?? 'Not provided'} className="capitalize" />
@@ -690,7 +693,7 @@ function CurrentStage({
     setAttempted(true)
     if (!result.canComplete) return
     const destination = result.repeats ? 'save this medical attempt and plan another medical'
-      : result.closes ? `close this order for the candidate: ${result.closes.label}`
+      : result.closes ? `stop here and close this order for the candidate (${result.closes.label}). This candidate will not go to the next stage`
       : def.no < STAGES.length ? `move to stage ${def.no + 1}: ${stageByNo(def.no + 1).title}`
       : 'mark this candidate as Deployed'
     if (!window.confirm(`Save your feedback for ${def.title} and ${destination}?`)) return
@@ -710,8 +713,14 @@ function CurrentStage({
   }
 
   // Short fields (Yes/No, date, time, choices) sit side by side on a 12-column grid; long ones take the whole row.
-  const visibleFields = def.fields.filter((f) => f.name !== 'feedback' && fieldVisible(f, data))
+  const shownFields = def.fields.filter((f) => f.name !== 'feedback' && fieldVisible(f, data))
+  // The choice that decides the stage is asked outright, above the feedback; only the rest is an optional detail.
+  const decisionFields = shownFields.filter((f) => def.decision?.fields.includes(f.name))
+  const visibleFields = shownFields.filter((f) => !def.decision?.fields.includes(f.name))
   const fieldSpan = fieldSpans(visibleFields)
+  const decisionMain = decisionFields.find((f) => f.name === def.decision?.field)
+  const decisionExtras = decisionFields.filter((f) => f !== decisionMain)
+  const decisionSpan = fieldSpans(decisionExtras)
   const ready = result.canComplete && !result.closes && !result.repeats
   const checkState = result.canComplete ? (result.closes ? 'is-closes' : 'is-ready') : ''
 
@@ -751,13 +760,53 @@ function CurrentStage({
           </div>
         </div>}
 
+        {def.decision && decisionMain && (
+          <div className="sm-decision">
+            <DecisionChoice def={def} field={decisionMain} value={data[decisionMain.name] as string | undefined} onChange={(v) => set(decisionMain.name, v)}
+              disabled={!canWork || busy || completed} stopping={!!result.closes} repeating={!!result.repeats} />
+            {decisionExtras.length > 0 && (
+              <div className="sm-form sm-decision-more">
+                {decisionExtras.map((f, index) => (
+                  <div key={f.name} className={`sm-c${decisionSpan[index]}`}>
+                    <StageFieldInput field={f} value={data[f.name]} onChange={(v) => set(f.name, v)} disabled={!canWork || busy || completed}
+                      applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="sm-feedback">
           <StageFieldInput field={def.fields.find((field) => field.name === 'feedback')!} value={data.feedback} onChange={(value) => set('feedback', value)} disabled={!canWork || busy || completed} applicationId={app.id} versions={[]} stage={app.currentStage} onUploaded={onUploaded} onUploading={() => {}} />
           {!compact && <p className="sm-hint">Only you move the stage. Missing documents will stay pending in the document checklist.</p>}
         </div>
 
+        {def.stops && def.stops.length > 0 && (
+          <div className="sm-stop">
+            <Field label="Not going ahead with this candidate?" hint="Choose how it ends. Feedback is still needed, and it is saved with the outcome.">
+              <div className="sm-decision-row" role="group" aria-label="Stop this candidate here" data-name="stop">
+                {def.stops.map((option) => {
+                  const on = data.stop === option.value
+                  const off = !canWork || busy || completed
+                  return (
+                    <button key={option.value} type="button" disabled={off} aria-pressed={on} onClick={() => set('stop', on ? undefined : option.value)}
+                      className={cn('sm-decision-opt', on && 'is-on is-stop', off && 'cursor-not-allowed opacity-60')}>
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
+              {data.stop != null && data.stop !== '' && result.closes && (
+                <p className="sm-decision-note is-stop" role="status"><CircleSlash className="h-4 w-4" aria-hidden="true" />
+                  This candidate will not go to the next stage. The order closes for them and they go back to the Data Bank.</p>
+              )}
+            </Field>
+          </div>
+        )}
+
         <details className="sm-stage-details">
-          <summary>Outcome and additional details <span>Optional</span></summary>
+          <summary>{def.decision ? 'Additional details' : 'Outcome and additional details'} <span>Optional</span></summary>
           <div className="sm-form">
           {visibleFields.map((f, index) => (
             <div key={f.name} className={`sm-c${fieldSpan[index]}`}>
@@ -777,7 +826,7 @@ function CurrentStage({
           </div>
         </details>
 
-        {def.closer && (!compact || result.closes) && (
+        {def.closer && !def.decision && (!compact || result.closes) && (
           <p className="sm-form-note">
             <AlertTriangle className="h-4 w-4" aria-hidden="true" />
             <span>If this stage ends with a closing result, the order closes for the candidate. They go back to the Data Bank and can be matched to another order.</span>
@@ -865,6 +914,48 @@ function CurrentStage({
   )
 }
 
+/**
+ * The outcome of a decision stage as clear, equal buttons. Only the positive answer moves the candidate on; choosing any
+ * other answer says plainly that they stop here. Feedback is asked for either way (it sits right below).
+ */
+function DecisionChoice({ def, field, value, onChange, disabled, stopping, repeating }: {
+  def: ReturnType<typeof stageByNo>
+  field: StageField
+  value: string | undefined
+  onChange: (value: string) => void
+  disabled?: boolean
+  stopping: boolean
+  repeating: boolean
+}) {
+  const decision = def.decision!
+  const next = def.no < STAGES.length ? stageByNo(def.no + 1) : null
+  return (
+    <Field label={field.label} required hint={field.help}>
+      <div className="sm-decision-row" role="group" aria-label={field.label} data-name={field.name}>
+        {(field.options ?? []).map((option) => {
+          const on = value === option.value
+          const goes = decision.advances.includes(option.value)
+          return (
+            <button key={option.value} type="button" disabled={disabled} aria-pressed={on} onClick={() => onChange(option.value)}
+              className={cn('sm-decision-opt', on && 'is-on', on && (goes ? 'is-go' : 'is-stop'), disabled && 'cursor-not-allowed opacity-60')}>
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
+      {value && (stopping || repeating) && (
+        <p className="sm-decision-note is-stop" role="status"><CircleSlash className="h-4 w-4" aria-hidden="true" />
+          {repeating ? 'This candidate will not go to the next stage until the medical result is Fit.' : 'This candidate will not go to the next stage. The order closes for them and they go back to the Data Bank.'}</p>
+      )}
+      {value && !stopping && !repeating && decision.advances.includes(value) && next && (
+        <p className="sm-decision-note is-go" role="status"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+          This candidate goes on to stage {next.no}, {next.title}.</p>
+      )}
+      {!value && <p className="sm-decision-note">{decision.message}</p>}
+    </Field>
+  )
+}
+
 function StageFieldInput({
   field,
   value,
@@ -937,7 +1028,7 @@ function StageFieldInput({
             disabled={disabled}
           >
             <option value="">
-              {field.optionsSource === 'users' ? 'Choose a staff member' : 'Choose one'}
+              {field.optionsSource === 'users' ? 'Choose a recruiter' : 'Choose one'}
             </option>
             {options.map((o) => (
               <option key={o.value} value={o.value}>

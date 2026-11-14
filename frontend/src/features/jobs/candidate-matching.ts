@@ -1,5 +1,6 @@
 import type { Candidate } from '@/shared/model/types'
 import { matchesSkills, skillKey } from '@/features/candidates/candidate-skills'
+import { idSearchText } from '@/features/candidates/candidate-ids'
 
 export interface CandidateMatchFilters {
   designation: string
@@ -30,7 +31,7 @@ export function matchesCandidate(
   if (!matchesSkills(candidate, filters.skills, filters.skillMode)) return false
 
   const haystack = [
-    candidate.name, candidate.ref, candidate.phone, candidate.email ?? '',
+    candidate.name, idSearchText(candidate), candidate.phone, candidate.email ?? '',
     candidate.passportNo ?? '', candidate.currentCity, ...candidate.designations,
     ...candidate.skills, candidate.resumeText,
   ].join(' ')

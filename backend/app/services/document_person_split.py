@@ -680,8 +680,6 @@ def commit_review(db, identifier, user, revision, decisions, settings):
         prepared.append((group, values, target))
     if duplicates:
         raise HTTPException(409, {"message": "Some of these people are already in the system. Check each duplicate and choose whether to merge it.", "code": "duplicate_candidates", "duplicates": duplicates})
-    admins = set(db.scalars(select(User.id).where(User.active.is_(True), User.role == Role.admin)))
-    supervisors = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
     for group, values, candidate in prepared:
         ocr_raw, notes, identity_conflicts = extraction.get(group.id, (None, [], []))
         provenance = {"bundleId": bundle.id, "groupId": group.id, "sourceType": bundle.source_type, "sourceId": bundle.source_id, "pages": group.pages}
@@ -722,9 +720,9 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 started = now()
                 db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=candidate.id,
                     owner_id=owner.id, created_at=started, sla_started_at=started, due_at=started + timedelta(hours=48)))
-            # PRD: the owner and the admin are told about an assignment; a waiting candidate alerts admins and managers.
-            for recipient in (admins | {owner.id}) if owner else supervisors:
-                db.add(Notification(user_id=recipient, kind="candidate_assignment", title="Candidate assigned" if owner else "Candidate needs assignment", detail=candidate.name, link_to=f"/candidates/{candidate.id}"))
+            # The owner is told it is theirs (unless they made it); only a waiting candidate alerts admins and managers.
+            from app.services.assignment_notifications import notify_new_candidate
+            notify_new_candidate(db, candidate, owner, actor_id=user.id, actor_name=user.name)
         _attach_group(db, bundle, group, candidate, user, settings)
         group.candidate_id, group.status = candidate.id, "committed"
         db.add(AuditEntry(actor_id=user.id, action="Confirmed a person from a document check", target=candidate.name, entity_type="candidate", entity_id=candidate.id, meta=provenance))

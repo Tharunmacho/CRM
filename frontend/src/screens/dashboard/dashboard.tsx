@@ -1,11 +1,14 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, UserCheck, Users } from 'lucide-react'
+import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, Plane, Repeat2, UserCheck, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { useReportData } from '@/features/reports/report-api'
 import type { LeadSummaryResponse } from '@/features/leads/lead-api'
 import { DashboardGraphs } from '@/features/dashboard/components/source-graph'
 import { candidatesAfterPrescreening, inView } from '@/features/dashboard/summary'
+import { useFollowUp } from '@/features/daily-work/use-daily-work'
+import { useTravelled } from '@/features/travelled/travelled-api'
+import { EMPTY_FILTERS } from '@/features/travelled/travelled-model'
 import '@/styles/dashboard-simple.css'
 
 type Tone = 'blue' | 'green' | 'amber' | 'violet' | 'teal' | 'slate' | 'red'
@@ -14,7 +17,7 @@ interface Card { key: string; label: string; value: number | null; note: string;
 const count = (value: number | null) => value === null ? '–' : value.toLocaleString('en-IN')
 const noun = (value: number | null, one: string, many: string) => value === 1 ? one : many
 
-/** Seven numbers and one graph. Everything is live: the workspace refreshes itself when anything changes, the inbox badge is
+/** Nine numbers and one graph. Everything is live: the workspace refreshes itself when anything changes, the inbox badge is
  *  polled, and the lead total is re-read whenever the lead sheet changes. Counts follow the viewer's role. */
 export default function DashboardPage() {
   const store = useStore()
@@ -36,6 +39,11 @@ export default function DashboardPage() {
     return { open: rows.length, overdue: rows.filter(task => task.dueAt && Date.parse(task.dueAt) < now).length }
   }, [store.visibleTasks])
   const leadTotal = leads.data ? leads.data.total : null
+  // Follow-up: selected candidates still moving through stages 2 to 11. Travelled: everyone who has been deployed. Same numbers as their screens.
+  const followUp = useFollowUp({ staff: isTeam ? 'all' : undefined, debounceMs: 4000 })
+  const travelled = useTravelled(EMPTY_FILTERS, store.me.id)
+  const followUpTotal = followUp.data ? followUp.data.summary.total : null
+  const travelledTotal = travelled.data ? travelled.data.total : null
 
   const cards: Card[] = [
     { key: 'inbox', label: 'Inbox', value: emails, note: !accounts ? 'loading emails' : accounts.length === 0 ? 'no email account added' : `${noun(emails, 'email', 'emails')} · ${accounts.length} ${noun(accounts.length, 'account', 'accounts')}`, icon: Mail, tone: 'blue', to: '/inbox' },
@@ -45,6 +53,8 @@ export default function DashboardPage() {
     { key: 'leads', label: 'Lead sheet', value: leadTotal, note: `${noun(leadTotal, 'lead', 'leads')} on the sheet`, icon: Users, tone: 'teal', to: '/leads' },
     { key: 'databank', label: 'Data Bank', value: candidates.length, note: `${noun(candidates.length, 'resume', 'resumes')} stored`, icon: Database, tone: 'slate', to: '/data-bank' },
     { key: 'tasks', label: 'Tasks', value: open, note: overdue > 0 ? `${count(overdue)} overdue` : 'open, none overdue', danger: overdue > 0, icon: ListChecks, tone: 'red', to: '/tasks' },
+    { key: 'followup', label: 'Follow up', value: followUpTotal, note: followUpTotal === null ? 'loading' : 'selected, still moving', icon: Repeat2, tone: 'amber', to: '/tasks?view=follow-up' },
+    { key: 'travelled', label: 'Travelled', value: travelledTotal, note: travelledTotal === null ? 'loading' : `${noun(travelledTotal, 'candidate', 'candidates')} deployed`, icon: Plane, tone: 'green', to: '/travelled' },
   ]
 
   return <div className="dashref dashsimple">

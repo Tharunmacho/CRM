@@ -4,7 +4,7 @@ Dashboard answers what arrived today, what needs action and where candidates are
 
 ## Roles and preparation
 
-Admin sees team totals and can select a staff member. Manager and Staff see their own dashboard numbers. The personal task and to-do sections remain personal even when Admin selects a team scope. Admin alone sees connected-source health. Create representative candidates, tasks and applications before accepting the figures; a database containing only zeros cannot demonstrate drill-down correctness.
+Admin sees team totals and can select a recruiter. Manager and Recruiter see their own dashboard numbers. The personal task and to-do sections remain personal even when Admin selects a team scope. Admin alone sees connected-source health. Create representative candidates, tasks and applications before accepting the figures; a database containing only zeros cannot demonstrate drill-down correctness.
 
 ## User journey
 
@@ -18,7 +18,7 @@ Admin sees team totals and can select a staff member. Manager and Staff see thei
 
 ## Screen and backend contract
 
-Each count must carry the same date and staff scope into its destination. “Today” uses the configured agency timezone. Source intake is based on saved candidate provenance; mailbox receipt count is not the candidate count. Pipeline figures count active applications, not closed or deployed history.
+Each count must carry the same date and recruiter scope into its destination. “Today” uses the configured agency timezone. Source intake is based on saved candidate provenance; mailbox receipt count is not the candidate count. Pipeline figures count active applications, not closed or deployed history.
 
 Overdue uses the stored due time; escalated uses persisted escalation state; missing daily updates use a current-owner remark for the agency day. A supervisor's remark does not satisfy the owner's obligation. Order selected/deployed figures must use actual stage/application results rather than the reference CRM's submitted-candidate count.
 
@@ -26,12 +26,12 @@ Loading must not appear as confirmed zero. Refresh failures should be visible. T
 
 ### Pipeline overview cards
 
-Four pressed-state cards sit under Today's work. They use the same server scope as the pipeline and task cards: staff see only their own candidates, admin and manager see the whole team or the person chosen in the staff picker (staff naming another person get a 403). `GET /api/dashboard` returns them under `overview` (additive; one statement, no extra queries); each card lists at most 200 placements and carries the full count.
+Four pressed-state cards sit under Today's work. They use the same server scope as the pipeline and task cards: recruiters see only their own candidates, admin and manager see the whole team or the person chosen in the recruiter picker (recruiters naming another person get a 403). `GET /api/dashboard` returns them under `overview` (additive; one statement, no extra queries); each card lists at most 200 placements and carries the full count.
 
 - **Overall offer letter**: value = active candidates waiting at stage 5; detail = offer letters issued in total (stage 5 completed, including candidates who moved on or were later closed).
 - **Overall visa**: value = active candidates waiting at stage 9 or 10; detail = visas received (stage 9 completed) and stamped (stage 10 completed).
 - **Overall departure**: value = active candidates waiting at stage 11 (ticket); detail = candidates departed (deployed placements).
-- **Overall idle stage**: active placements with no stage completed for 7 or more days (`STUCK_DAYS` in `staff_weekly.py`, the same rule as the weekly staff report; never-progressed placements count from when they were mapped). Detail shows the longest wait.
+- **Overall idle stage**: active placements with no stage completed for 7 or more days (`STUCK_DAYS` in `staff_weekly.py`, the same rule as the weekly recruiter report; never-progressed placements count from when they were mapped). Detail shows the longest wait.
 
 Reopened stage records never count. Pressing a card lists the people (name, job and order, client, country, stage, recruiter for the team view, days waiting, Open and Application form). The counts are also in Export. Implementation: `pipeline_overview` in [reporting service](../../backend/app/services/reporting.py), [overview helpers](../../frontend/src/features/dashboard/overview.ts), [panel](../../frontend/src/features/dashboard/components/overview-panel.tsx).
 
@@ -41,7 +41,7 @@ A stale task can close between opening a card and opening the record; show the c
 
 ## Acceptance checklist
 
-- [ ] Compare cards and destination rows for Admin team scope, one staff filter and Staff self scope.
+- [ ] Compare cards and destination rows for Admin team scope, one recruiter filter and Recruiters self scope.
 - [ ] Test records just before and after agency midnight.
 - [ ] Verify all eleven stage cards and an order with matched, selected and deployed candidates.
 - [ ] Complete or reassign a task and refresh; every related number agrees.
@@ -58,7 +58,7 @@ Implementation: [Dashboard screen](../../frontend/src/screens/dashboard/dashboar
 
 ## Lead sheet cards
 
-Under the Pipeline overview the dashboard shows a **Lead sheet** section (same card style): the work on the people who answered the agency's ads ([Lead sheet](23-lead-sheet.md)). It is role scoped like the rest of the page: **staff see only the leads assigned to them**, admin and manager see the whole team, and the staff picker narrows it to one person. A staff member cannot widen the scope by naming someone else (403, as for the rest of the dashboard).
+Under the Pipeline overview the dashboard shows a **Lead sheet** section (same card style): the work on the people who answered the agency's ads ([Lead sheet](23-lead-sheet.md)). It is role scoped like the rest of the page: **recruiters see only the leads assigned to them**, admin and manager see the whole team, and the recruiter picker narrows it to one person. A recruiter cannot widen the scope by naming someone else (403, as for the rest of the dashboard).
 
 | Card | Value |
 | --- | --- |
@@ -69,10 +69,10 @@ Under the Pipeline overview the dashboard shows a **Lead sheet** section (same c
 | Converted to candidates | leads converted in the period chosen above (7, 30, 90 days, this year, all time); the line shows the conversion rate = converted leads / assigned leads |
 | Unassigned leads (admin and manager only) | open leads nobody owns; always the whole pool, whichever person is chosen |
 
-Press a card to see the first 8 leads behind it (name, job and country, status, who it is assigned to in the team view, the relevant date, calls); a lead's name opens it on the Lead sheet (`/leads?lead=<id>`) and **Open Lead sheet** goes to the full sheet. A staff member who has not finished today's daily tasks sees "Finish today's tasks first" on the cards that are work (Not contacted, Follow-ups due, Resumes received); the numbers and lists stay readable. The cards are in **Export** as `Lead sheet: ...` rows.
+Press a card to see the first 8 leads behind it (name, job and country, status, who it is assigned to in the team view, the relevant date, calls); a lead's name opens it on the Lead sheet (`/leads?lead=<id>`) and **Open Lead sheet** goes to the full sheet. A recruiter who has not finished today's daily tasks sees "Finish today's tasks first" on the cards that are work (Not contacted, Follow-ups due, Resumes received); the numbers and lists stay readable. The cards are in **Export** as `Lead sheet: ...` rows.
 
 The numbers are the additive `leads` key of `GET /api/dashboard`, read with one aggregate statement beside the pipeline read and cached with the `reports` and `leads` topics per person (so a call or assignment changes them at once, and the dashboard refetches on the live `leads` event). The list behind a card is `GET /api/dashboard/leads?card=...&period=...&staff_id=...`, same scope rules, cached 10 s per person and card. Older servers send no `leads` key and the section is simply not shown.
 
-Checks: [ ] team, one person and staff scopes give different numbers and match the Lead sheet; [ ] a staff member cannot read another person's leads through `staff_id`; [ ] only admin and manager see Unassigned; [ ] a locked staff member sees the lock hint; [ ] a call logged on the Lead sheet updates the cards without a reload.
+Checks: [ ] team, one person and recruiters scopes give different numbers and match the Lead sheet; [ ] a recruiter cannot read another person's leads through `staff_id`; [ ] only admin and manager see Unassigned; [ ] a locked recruiter sees the lock hint; [ ] a call logged on the Lead sheet updates the cards without a reload.
 
 Implementation: [lead metrics](../../backend/app/services/lead_metrics.py), [dashboard route](../../backend/app/api/routers/reports.py), [card helpers](../../frontend/src/features/dashboard/lead-overview.ts), [section](../../frontend/src/features/dashboard/components/lead-overview.tsx).

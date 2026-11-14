@@ -66,7 +66,7 @@ test('request bodies: explicit ids, or the filter with the count the person saw'
 test('the confirmation states the exact count and the action', () => {
   const assign = b.confirmCopy({ action: 'assign', count: 3000, allMatching: true, ownerName: 'auto' })
   assert.equal(assign.title, 'Assign 3,000 leads')
-  assert.match(assign.lines[0], /^All 3,000 leads that match the current search and filters \(not only the ones on this page\) will be assigned to the available staff, spread evenly\.$/)
+  assert.match(assign.lines[0], /^All 3,000 leads that match the current search and filters \(not only the ones on this page\) will be assigned to the available recruiters, spread evenly\.$/)
   assert.equal(assign.confirmLabel, 'Assign 3,000 leads')
   assert.match(b.confirmCopy({ action: 'assign', count: 1, allMatching: false, ownerName: 'Asha' }).lines[0], /^1 lead will be assigned to Asha\.$/)
   const status = b.confirmCopy({ action: 'status', count: 12, allMatching: false, statusLabel: 'Contacted' })

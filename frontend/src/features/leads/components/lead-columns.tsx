@@ -7,7 +7,7 @@ import { whatsappHref } from '@/features/candidates/data-bank-view'
 import { WhatsAppTemplateButton } from './wa-template'
 import { Avatar, RowMenu } from '@/features/candidates/components/db-parts'
 import {
-  cleanPhone, createdParts, dobLabel, experienceAnswer, experienceQuestionSummary, extraAnswer, followUpLabel, followUpState, isClosed, leadAge, leadDate, leadStatus,
+  cleanPhone, createdParts, dobLabel, experienceAnswer, experienceQuestionSummary, extraAnswer, followUpLabel, followUpState, isClosed, leadAge, leadDate, leadStatus, uploadedLabel, uploadedParts,
   platformKind, PLATFORM_LABEL, type ExtraColumn, type Lead,
 } from '../lead-model'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
@@ -19,7 +19,15 @@ export function CreatedCell({ lead }: { lead: Lead }) {
   const date = leadDate(lead)
   const parts = createdParts(date?.value)
   if (!date || !parts) return <Dash />
-  return <span className="db-2l" title={`${date.label} ${new Date(date.value).toLocaleString()}`}><strong className="db-num">{parts.day}</strong><small>{parts.year}{date.label === 'Imported' && ' · Imported'}</small></span>
+  const uploaded = uploadedLabel(lead.createdAt)
+  return <span className="db-2l" title={`${date.label} ${new Date(date.value).toLocaleString()}${uploaded && date.label === 'Created' ? `\nUploaded ${uploaded}` : ''}`}><strong className="db-num">{parts.day}</strong><small>{parts.year}{date.label === 'Imported' && ' · Imported'}</small></span>
+}
+
+/** When the lead was imported into the CRM (agency time): the day over the clock time. */
+export function UploadedCell({ lead }: { lead: Lead }) {
+  const parts = uploadedParts(lead.createdAt)
+  if (!parts) return <Dash />
+  return <span className="db-2l" title={`Uploaded ${uploadedLabel(lead.createdAt)}`}><strong className="db-num">{parts.day}</strong><small>{parts.time}</small></span>
 }
 
 export function NameCell({ lead }: { lead: Lead }) {
@@ -146,7 +154,7 @@ export function ContactStateText({ lead }: { lead: Lead }) {
 }
 
 /** The assigned recruiter's full name ('' when nobody is assigned). */
-export const ownerNameOf = (lead: Lead, userById: LeadColumnContext['userById']) => (lead.ownerId ? (userById(lead.ownerId)?.name ?? lead.ownerName ?? 'Staff') : '')
+export const ownerNameOf = (lead: Lead, userById: LeadColumnContext['userById']) => (lead.ownerId ? (userById(lead.ownerId)?.name ?? lead.ownerName ?? 'Recruiter') : '')
 
 export function OwnerCell({ lead, userById }: { lead: Lead; userById: LeadColumnContext['userById'] }) {
   const name = ownerNameOf(lead, userById)

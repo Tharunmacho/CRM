@@ -87,22 +87,22 @@ export function AgencyFocusSection({ value, onChange, errors }: { value: AgencyF
 export function StaffDetailsSection({ rows, onChange, errors }: { rows: StaffRow[]; onChange: (rows: StaffRow[]) => void; errors: FieldErrors }) {
   const change = (index: number, key: keyof StaffRow, value: string) => onChange(rows.map((row, i) => i === index ? { ...row, [key]: value } : row))
   const filled = rows.filter((row) => row.name.trim() || row.designation.trim() || row.phone.trim() || row.email.trim()).length
-  return <Section icon={<Users size={17} />} title="Staff details" count={filled ? `${filled} added` : undefined}>
+  return <Section icon={<Users size={17} />} title="Recruiter details" count={filled ? `${filled} added` : undefined}>
     {rows.map((row, index) => {
       const at = (key: string) => errors[`staff.${index}.${key}`]
       return <fieldset key={index} className="cs-staff-row">
-        <legend className="sr-only">Staff member {index + 1}</legend>
+        <legend className="sr-only">Recruiter {index + 1}</legend>
         <div className="cs-staff-fields">
           <Field label="Name" error={at('name')}><Input maxLength={160} value={row.name} onChange={(e) => change(index, 'name', e.target.value)} aria-invalid={!!at('name')} autoComplete="off" /></Field>
           <Field label="Designation" error={at('designation')}><Input maxLength={120} value={row.designation} onChange={(e) => change(index, 'designation', e.target.value)} autoComplete="off" /></Field>
           <Field label="Phone" error={at('phone')}><Input type="tel" maxLength={40} value={row.phone} onChange={(e) => change(index, 'phone', e.target.value)} aria-invalid={!!at('phone')} autoComplete="off" /></Field>
           <Field label="Email" error={at('email')}><Input type="email" maxLength={255} value={row.email} onChange={(e) => change(index, 'email', e.target.value)} aria-invalid={!!at('email')} autoComplete="off" /></Field>
         </div>
-        <button type="button" className="cs-round-btn" aria-label={`Remove staff member ${index + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, i) => i !== index))}><Trash2 size={15} /></button>
+        <button type="button" className="cs-round-btn" aria-label={`Remove recruiter ${index + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, i) => i !== index))}><Trash2 size={15} /></button>
       </fieldset>
     })}
     {errors.staff && <p className="cs-form-error" role="alert">{errors.staff}</p>}
-    <button type="button" className="cs-add" disabled={rows.length >= MAX_STAFF_ROWS} onClick={() => onChange([...rows, emptyStaffRow()])}><Plus size={15} />Add staff</button>
+    <button type="button" className="cs-add" disabled={rows.length >= MAX_STAFF_ROWS} onClick={() => onChange([...rows, emptyStaffRow()])}><Plus size={15} />Add recruiter</button>
   </Section>
 }
 

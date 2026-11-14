@@ -2,7 +2,7 @@ import { ChevronDown, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Select } from '@/shared/ui/primitives'
-import { LEAD_STATUSES, PLATFORM_LABEL, platformKind, todayKey, type LeadFacets, type LeadFilters } from '../lead-model'
+import { DATE_FIELDS, DATE_PRESETS, LEAD_STATUSES, NEW_CARD_DETAIL, PLATFORM_LABEL, activePreset, platformKind, presetRange, todayKey, type LeadFacets, type LeadFilters } from '../lead-model'
 
 interface Props {
   filters: LeadFilters
@@ -36,7 +36,9 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
     </span>
   )
   const plain = (list: string[] | undefined, current: string): [string, string][] => withCurrent(list, current).map((item) => [item, item])
-  const dateActive = Boolean(filters.from || filters.to)
+  const dateActive = Boolean(filters.from || filters.to || filters.recent)
+  const dateLabel = DATE_FIELDS.find((field) => field.value === filters.dateField)?.label ?? 'Uploaded'
+  const preset = activePreset(filters)
   return (
     <div className="db-filters ld-filters" aria-label="Filters">
       <div className="db-filterbar" style={{ '--db-cols': 6 } as React.CSSProperties}>
@@ -63,18 +65,33 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
           </button>
         </span>
       </div>
-      {filters.batchId && (
+      {(filters.batchId || filters.recent) && (
         <div className="db-chips" aria-label="Filters in use">
-          <button type="button" className="db-chip" aria-label="Show every upload again" onClick={() => onChange({ batchId: '' })}>From one upload<X size={12} aria-hidden="true" /></button>
+          {filters.batchId && <button type="button" className="db-chip" aria-label="Show every upload again" onClick={() => onChange({ batchId: '' })}>From one upload<X size={12} aria-hidden="true" /></button>}
+          {filters.recent && <button type="button" className="db-chip" aria-label="Stop showing only the last 24 hours of uploads" onClick={() => onChange({ recent: '' })}>{NEW_CARD_DETAIL}<X size={12} aria-hidden="true" /></button>}
         </div>
       )}
       <div id="ld-more-filters" className="db-more" hidden={!moreOpen}>
+        <div className="ld-datebar">
+          <div className="db-seg ld-seg" role="group" aria-label="Which date to filter on">
+            {DATE_FIELDS.map((field) => (
+              <button key={field.value} type="button" className={cn('db-seg-btn', filters.dateField === field.value && 'is-on')} aria-pressed={filters.dateField === field.value}
+                title={field.value === 'uploaded' ? 'When the lead was imported into the CRM' : "The lead's own date from the ad platform"} onClick={() => onChange({ dateField: field.value })}>{field.label}</button>
+            ))}
+          </div>
+          <div className="db-seg ld-seg" role="group" aria-label="Quick dates">
+            {DATE_PRESETS.map(({ id, label }) => (
+              <button key={id} type="button" className={cn('db-seg-btn', preset === id && 'is-on')} aria-pressed={preset === id}
+                onClick={() => onChange(preset === id ? { from: '', to: '' } : { ...presetRange(id), recent: '' })}>{label}</button>
+            ))}
+          </div>
+        </div>
         <div className="db-more-grid ld-dates">
-          <Field label="Created from" error={filters.from && filters.to && filters.to < filters.from ? 'Must not be before the first date.' : undefined}>
-            <Input type="date" aria-label="Created from" value={filters.from} max={today} onChange={(event) => onChange({ from: event.target.value })} />
+          <Field label={`${dateLabel} from`} error={filters.from && filters.to && filters.to < filters.from ? 'Must not be before the first date.' : undefined}>
+            <Input type="date" aria-label={`${dateLabel} from`} value={filters.from} max={today} onChange={(event) => onChange({ from: event.target.value, recent: '' })} />
           </Field>
-          <Field label="Created up to">
-            <Input type="date" aria-label="Created up to" value={filters.to} max={today} onChange={(event) => onChange({ to: event.target.value })} />
+          <Field label={`${dateLabel} up to`}>
+            <Input type="date" aria-label={`${dateLabel} up to`} value={filters.to} max={today} onChange={(event) => onChange({ to: event.target.value, recent: '' })} />
           </Field>
         </div>
       </div>

@@ -15,9 +15,9 @@ import re
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -36,11 +36,14 @@ from app.db.models import (
     Attachment,
     AuditEntry,
     Candidate,
+    CandidateInvoice,
     CandidateStatus,
     Client,
     ClientStaff,
     Company,
     Designation,
+    DocumentExtractionJob,
+    InvoicePayment,
     Notification,
     Order,
     OrderStatus,
@@ -564,9 +567,9 @@ def _checked_staff_ids(db: Session, ids: list[str]) -> list[str]:
         elif not person.active:
             problems.append(f"{person.name} is deactivated, so they cannot be allocated.")
         elif person.role not in ALLOCATABLE_ROLES:
-            problems.append(f"{person.name} is an {person.role.value}; only staff or managers can be allocated.")
+            problems.append(f"{person.name} is an {person.role.value}; only recruiters or managers can be allocated.")
     if problems:
-        raise HTTPException(422, {"message": "Choose active staff or managers to allocate.",
+        raise HTTPException(422, {"message": "Choose active recruiters or managers to allocate.",
                                   "errors": [{"field": "staffIds", "message": message} for message in problems]})
     return list(ids)
 
@@ -832,14 +835,97 @@ ADMIN_OR_MANAGER = require_role(Role.admin, Role.manager)
 
 
 @router.delete("/orders/{order_id}")
-def delete_order(order_id: str, db: Session = Depends(get_db), user: User = Depends(ADMIN_OR_MANAGER)) -> dict:
+def delete_order(order_id: str, background: BackgroundTasks,
+                 withdraw_applications: bool = Query(False, alias="withdrawApplications"),
+                 db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+    """
+    Admin only. A job (order) with no candidates on it is simply deleted. A job with candidates is deleted only when the
+    admin confirms with `?withdrawApplications=true`: its candidate applications (stages, tasks and stage documents) are
+    removed in the same transaction and anyone still active on it goes back to the Data Bank. A deployed placement, or any
+    invoice or payment history, is kept on record, so such a job is refused and can only be closed.
+    Locks: the candidates on the job first, then the job (the order used when mapping or deleting a candidate).
+    """
+    placed = db.execute(
+        select(Application.id, Application.status, Candidate.id, Candidate.name, Candidate.ref, Candidate.needs_review)
+        .join(Candidate, Candidate.id == Application.candidate_id)
+        .where(Application.order_id == order_id)
+        .order_by(Candidate.id, Application.id)
+        .with_for_update(of=Candidate)
+    ).all()
     order = _master_row(db, Order, order_id)
-    _refuse_if_placed(db, [order.id])
     ref = order.ref
+    app_ids = [row[0] for row in placed]
+    who = {row[0]: row[3] for row in placed}
+    if app_ids:
+        deployed = next((row[3] for row in placed if row[1] is ApplicationStatus.deployed), None)
+        if deployed:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Can't delete {ref}: {deployed} was deployed through this job, and a deployed placement is kept on record. Close the job instead.")
+        # Read after the candidate locks above: invoice and receipt writes take the same candidate lock first.
+        money_app = db.scalar(select(CandidateInvoice.application_id).where(
+            CandidateInvoice.application_id.in_(app_ids),
+            or_(CandidateInvoice.number.is_not(None), exists().where(InvoicePayment.invoice_id == CandidateInvoice.id)),
+        ).limit(1)) or db.scalar(select(InvoicePayment.source_application_id).where(
+            InvoicePayment.source_application_id.in_(app_ids)).limit(1))
+        if money_app:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Can't delete {ref}: {who.get(money_app, 'A candidate')} has an invoice or a recorded payment on this job. Financial records are kept, so close the job instead.")
+        candidates = len({row[2] for row in placed})
+        if not withdraw_applications:
+            active = sum(1 for row in placed if row[1] is ApplicationStatus.active)
+            detail = f"{candidates} candidate{'s are' if candidates != 1 else ' is'} on {ref}"
+            detail += f" ({active} active)" if active else " (all closed)"
+            raise HTTPException(status.HTTP_409_CONFLICT, {
+                "message": f"{detail}. Deleting the job also removes their applications from it, stage history and stage documents included. Confirm to continue.",
+                "candidates": candidates, "active": active, "canWithdraw": True,
+                "blockers": [{"candidate": row[3], "order": ref, "status": row[1].value} for row in placed],
+            })
+
+    # Applications, stages, tasks, remarks, SLA events and daily-work items follow by ON DELETE CASCADE.
+    # Rows with a plain reference are handled here: stage documents, unissued invoices, links in notifications and to-dos.
+    keys: set[str] = set()
+    documents = 0
+    if app_ids:
+        docs = db.execute(select(Attachment.id, Attachment.object_key).where(
+            Attachment.entity_type == "application", Attachment.entity_id.in_(app_ids))).all()
+        documents = len(docs)
+        keys = {key for _, key in docs if key}
+        if docs:
+            doc_ids = [doc_id for doc_id, _ in docs]
+            db.execute(update(DocumentExtractionJob).where(DocumentExtractionJob.attachment_id.in_(doc_ids))
+                       .values(attachment_id=None))
+            db.execute(delete(Attachment).where(Attachment.id.in_(doc_ids)))
+        db.execute(delete(Notification).where(Notification.link_to.in_(
+            select(func.concat("/tasks?task=", Task.id)).where(Task.application_id.in_(app_ids)))))
+        db.execute(delete(CandidateInvoice).where(
+            CandidateInvoice.application_id.in_(app_ids), CandidateInvoice.number.is_(None),
+            ~exists().where(InvoicePayment.invoice_id == CandidateInvoice.id)))
+        # A candidate who was still active on the job is back in the Data Bank, as after "remove from job".
+        leaving = {row[2]: row for row in placed if row[1] is ApplicationStatus.active}
+        if leaving:
+            for candidate in db.scalars(select(Candidate).where(Candidate.id.in_(list(leaving)))):
+                if candidate.status == CandidateStatus.in_process:
+                    candidate.status = CandidateStatus.needs_review if candidate.needs_review else CandidateStatus.new
+            for candidate_id, row in leaving.items():
+                db.add(AuditEntry(actor_id=user.id, action="Removed from a deleted job", target=f"{row[3]} ({ref})",
+                                  entity_type="candidate", entity_id=candidate_id, meta={"order": ref, "ref": row[4]}))
+        db.execute(delete(Application).where(Application.order_id == order.id))
+    link = f"/orders/{order.id}"
+    db.execute(update(TodoItem).where(TodoItem.link_to == link).values(link_to=None, link_label=None))
+    db.execute(delete(Notification).where(Notification.link_to == link))
     _delete_orders(db, [order.id])
-    db.add(AuditEntry(actor_id=user.id, action="Deleted order", target=ref, entity_type="order", entity_id=order_id))
+    audit = AuditEntry(actor_id=user.id, action="Deleted order", target=ref, entity_type="order", entity_id=order_id,
+                       meta={"applications": len(app_ids), "candidates": sorted({row[4] for row in placed}),
+                             "documents": documents})
+    db.add(audit)
+    db.flush()
+    audit_id = audit.id
     db.commit()
-    return {"deleted": {"orders": 1}}
+    if keys:
+        # After the commit and the response: object storage can be slow and its failure must not matter here.
+        from app.api.routers.candidates import _remove_stored_files
+        background.add_task(_remove_stored_files, db.get_bind(), audit_id, keys)
+    return {"deleted": {"orders": 1, "applications": len(app_ids), "documents": documents}}
 
 
 @router.delete("/companies/{company_id}")
@@ -1143,9 +1229,8 @@ def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depen
                               meta={"reason": restart_reason, "viaReassignment": True}))
 
     from app.services.assignment_notifications import notify_assignment_changes, notify_task_assignment_changes
-    notification_reason = f"Reassigned by {user.name}: {reason}"
-    notify_assignment_changes(db, ownership_changes, reason=notification_reason)
-    notify_task_assignment_changes(db, task_only_changes, reason=notification_reason)
+    notify_assignment_changes(db, ownership_changes, actor_id=user.id, actor_name=user.name, reason=reason)
+    notify_task_assignment_changes(db, task_only_changes, actor_id=user.id, actor_name=user.name, reason=reason)
 
     db.add(
         AuditEntry(
@@ -1220,6 +1305,7 @@ def unassign(body: UnassignIn, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(409, refused[0]["reason"] if len(refused) == 1 else f"{len(refused)} candidates cannot be unassigned. {refused[0]['reason']}")
     from app.services.application_form import sync_follow_up_todo
     now = datetime.now(timezone.utc)
+    previous_owners = {c.id: c.owner_id for c in todo}
     for c in todo:
         previous = c.owner_id
         c.owner_id = None
@@ -1243,5 +1329,7 @@ def unassign(body: UnassignIn, db: Session = Depends(get_db), user: User = Depen
     if todo:
         db.add(AuditEntry(actor_id=user.id, action="Unassigned candidates", target=f"{len(todo)} candidates", entity_type="candidate",
                           meta={"candidateIds": [c.id for c in todo], "reason": reason}))
+    from app.services.assignment_notifications import notify_candidates_unassigned
+    notify_candidates_unassigned(db, [(c.id, c.name, previous_owners[c.id]) for c in todo], actor_id=user.id, actor_name=user.name, reason=body.reason)
     db.commit()
     return {"count": len(todo), "unassigned": len(todo), "alreadyUnassigned": already, "refused": refused}

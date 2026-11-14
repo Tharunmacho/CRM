@@ -84,8 +84,8 @@ def test_a_staff_member_who_adds_a_candidate_is_the_owner_and_the_round_robin_is
     assert env.db.get(m.Task, created["taskId"]).owner_id == "b"
     pointer = env.db.get(m.AssignmentPointer, 1)
     assert pointer is None or pointer.last_user_id is None
-    # Admin and the owner are told, nobody else.
-    assert set(env.db.scalars(select(m.Notification.user_id))) == {"b", "admin"}
+    # Nobody is told: the owner made it themselves (no notice of your own action) and admins get no copy of a routine assignment.
+    assert set(env.db.scalars(select(m.Notification.user_id))) == set()
 
 
 def test_staff_cannot_name_another_recruiter_but_may_name_themselves(env):
@@ -237,10 +237,6 @@ def test_admin_reassignment_moves_the_work_the_notices_and_the_reminder(env):
     created = add_candidate(env, "a", next_follow_up_date="2031-01-01")
     cid = created["id"]
     candidate = env.db.get(m.Candidate, cid)
-    today = datetime.now(timezone.utc).date()
-    env.db.add(m.DailyWorkItem(owner_id="a", work_date=today, kind="call", candidate_id=cid, slot_no=1, session="morning",
-                               due_at=datetime.now(timezone.utc) + timedelta(hours=2), status="open"))
-    env.db.commit()
     link = f"/candidates/{cid}"
     assert env.db.scalar(select(m.TodoItem.owner_id).where(m.TodoItem.link_to == link)) == "a"
 
@@ -259,12 +255,11 @@ def test_admin_reassignment_moves_the_work_the_notices_and_the_reminder(env):
     # The audit trail names who moved it, from whom, to whom and why.
     audit = env.db.scalar(select(m.AuditEntry).where(m.AuditEntry.action == "Candidate reassigned", m.AuditEntry.entity_id == cid))
     assert audit.actor_id == "admin" and audit.meta["fromUserId"] == "a" and audit.meta["toUserId"] == "b" and audit.meta["reason"] == "Workload"
-    # The new recruiter is told; the daily-work item of the old one is released with the reason "reassigned".
+    # The new recruiter is told; the candidate leaves the old recruiter's Daily work list and joins the new one's.
     assert env.db.scalar(select(func.count()).select_from(m.Notification).where(m.Notification.user_id == "b", m.Notification.link_to.like(f"%{cid}%"))) >= 1
-    daily_work.reconcile(env.db)
-    env.db.commit()
-    item = env.db.scalar(select(m.DailyWorkItem).where(m.DailyWorkItem.candidate_id == cid))
-    assert (item.status, item.release_reason) == ("released", "reassigned")
+    mine = {row[0].id for row in daily_work.fetch_rows(env.db, ["a"])}
+    theirs = {row[0].id for row in daily_work.fetch_rows(env.db, ["b"])}
+    assert cid not in mine and cid in theirs
     # The rule follows the new owner at once.
     act_as(env, "a")
     refused(env.client.post(f"/api/candidates/{cid}/call", json={"called": True, "interested": "yes"}), owner="Ravi")

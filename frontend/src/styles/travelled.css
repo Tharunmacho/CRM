@@ -68,6 +68,7 @@
 .tv-table a { color: var(--primary); font-weight: 500; }
 .tv-table a:hover { text-decoration: underline; }
 .tv-who a { font-weight: 600; }
+.tv-who .cid-chip { display: flex; width: fit-content; margin-top: 4px; }
 .tv-muted { color: var(--text-muted); }
 .tv-docs { display: inline-flex; flex-direction: column; font-variant-numeric: tabular-nums; font-weight: 600; cursor: default; }
 .tv-docs small { margin-top: 1px; font-size: 11.5px; font-weight: 500; }

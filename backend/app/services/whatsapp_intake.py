@@ -144,7 +144,7 @@ def commit_candidate(db, message, output):
             db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=candidate.id, owner_id=owner.id,
                         created_at=now, sla_started_at=now, due_at=now + timedelta(hours=48)))
         from app.services.candidate_review import notify_candidate_received
-        notify_candidate_received(db, candidate, owner, channel="WhatsApp", kind="assignment", results=[output])
+        notify_candidate_received(db, candidate, owner, channel="WhatsApp", results=[output])
     else:
         candidate = matches[0][0]
         if candidate.dob and values.get("dob") and candidate.dob != values["dob"]:

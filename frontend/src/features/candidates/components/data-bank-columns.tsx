@@ -21,6 +21,8 @@ import { BANK_FIELD_DEFS, DEFAULT_COLUMN_FIELDS, FIELD_PREFIX, type BankContext,
 import { bankApplication, bankFormApplication } from '@/features/candidates/data-bank-assignment'
 import { BANK_TABLE_COLUMNS, PLACEHOLDER_NAME, agentLabel, bankColumnWidth, candidateSubline, isPlaceholderName, sourceProvenance } from '@/features/candidates/data-bank-table'
 import '@/styles/data-bank-table.css'
+import '@/styles/candidate-ids.css'
+import { careIdOf, idLine, secondaryId, travellerLabel } from '@/features/candidates/candidate-ids'
 
 export const SOURCE_LABEL: Record<string, string> = {
   email: 'Email',
@@ -206,19 +208,24 @@ interface CellProps {
 }
 const plain = (text: string): ReactNode => text
 
-/** Name in bold over the reference and date of birth in muted text. A name the intake could not read shows muted and italic with a "Needs review" pill. */
+/**
+ * Name in bold over the Care India ID (darker), then the CRM reference and date of birth in muted text. Before a candidate has
+ * a Care India ID the reference leads, as it always did. A name the intake could not read shows muted and italic with a "Needs review" pill.
+ */
 export function CandidateCell({ candidate, mark = plain }: CellProps) {
   const dob = dobParts(candidate.dob)
-  const sub = candidateSubline(candidate.ref, dob?.label)
+  const care = careIdOf(candidate)
+  const rest = candidateSubline(care ? secondaryId(candidate) : candidate.ref, dob?.label)
   const unread = isPlaceholderName(candidate.name)
+  const traveller = travellerLabel(candidate)
   return (
-    <span className="dbt-stack" title={`${unread ? PLACEHOLDER_NAME : candidate.name}${dob ? ` · born ${dob.label} (${dob.age} years)` : ''} · ${candidate.ref}`}>
+    <span className="dbt-stack" title={`${unread ? PLACEHOLDER_NAME : candidate.name}${dob ? ` · born ${dob.label} (${dob.age} years)` : ''} · ${idLine(candidate)}${traveller ? ` · ${traveller}` : ''}`}>
       <span className="dbt-line">
         {unread
           ? <em className="dbt-main is-unread">Name missing or unreadable</em>
           : <strong className="dbt-main">{mark(candidate.name)}</strong>}
       </span>
-      {sub && <small className="dbt-sub">{sub}</small>}
+      {(care || rest) && <small className="dbt-sub">{care && <b className="cid-main">{mark(care)}</b>}{care && rest && ' · '}{rest}</small>}
     </span>
   )
 }

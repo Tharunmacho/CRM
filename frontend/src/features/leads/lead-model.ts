@@ -83,11 +83,18 @@ export interface LeadFilters {
   batchId: string
   /** '' = any, 'due' = the follow-up day has arrived (today or overdue) and the lead is still open. */
   followUp?: '' | 'due'
+  /** Which date `from`/`to` (and the Today / Yesterday / Last 7 days presets) filter on: when the lead was imported, or its own platform date. */
+  dateField: DateField
+  /** '24h' = uploaded in the last 24 hours (rolling): the "Uploaded in 24 hrs" card. Independent of `from`/`to`. */
+  recent: '' | '24h'
 }
+
+export type DateField = 'uploaded' | 'created'
+export const DATE_FIELDS: { value: DateField; label: string }[] = [{ value: 'uploaded', label: 'Uploaded' }, { value: 'created', label: 'Created' }]
 
 export type LeadCard = 'total' | 'new_today' | 'not_contacted' | 'interested' | 'resume_received' | 'converted' | 'follow_ups'
 
-export const EMPTY_FILTERS: LeadFilters = { q: '', status: '', campaign: '', position: '', country: '', platform: '', assigned: '', from: '', to: '', batchId: '' }
+export const EMPTY_FILTERS: LeadFilters = { q: '', status: '', campaign: '', position: '', country: '', platform: '', assigned: '', from: '', to: '', batchId: '', dateField: 'uploaded', recent: '' }
 
 export interface LeadSummary {
   scope?: string
@@ -118,7 +125,7 @@ export interface LeadFacets {
 
 /** The table's headings, in one place: a rename is a one-line change here. Custom question headings come from the uploaded sheets. */
 export const LEAD_HEADINGS = {
-  actions: 'Actions', created: 'Created', name: 'Name / Age / Contact', contact: 'Contact', position: 'Job applied', experience: 'Total experience',
+  actions: 'Actions', created: 'Created', uploaded: 'Uploaded', name: 'Name / Age / Contact', contact: 'Contact', position: 'Job applied', experience: 'Total experience',
   experienceIndia: 'India experience', experienceAbroad: 'Abroad experience', education: 'Education', state: 'State',
   location: 'Location', campaign: 'Campaign', country: 'Country', status: 'Assigned to', followup: 'Follow‑up', resume: 'Resume',
 } as const
@@ -153,7 +160,7 @@ export const LEAD_STATUSES: { value: string; label: string; tone: LeadTone }[] =
   { value: 'resume_received', label: 'Interested (resume in)', tone: 'ok' },
   { value: 'converted', label: 'Converted', tone: 'ok' },
   { value: 'not_interested', label: 'Not interested', tone: 'quiet' },
-  { value: 'invalid', label: 'Invalid', tone: 'bad' },
+  { value: 'invalid', label: 'Not reachable', tone: 'bad' },
   { value: 'wrong_number', label: 'Wrong number', tone: 'bad' },
 ]
 
@@ -194,7 +201,7 @@ export const isClosed = (status?: string | null) => CLOSED.has((status ?? '').tr
 /* ------------------------------------------------------------------- query */
 
 export const LEAD_SORTS: [string, string][] = [
-  ['created:desc', 'Newest first'], ['created:asc', 'Oldest first'], ['name:asc', 'Name A-Z'], ['name:desc', 'Name Z-A'],
+  ['created:desc', 'Newest first'], ['created:asc', 'Oldest first'], ['uploaded:desc', 'Recently uploaded'], ['name:asc', 'Name A-Z'], ['name:desc', 'Name Z-A'],
   ['position:asc', 'Job A-Z'], ['campaign:asc', 'Campaign A-Z'], ['status:asc', 'Status'], ['owner:asc', 'Assigned to'], ['follow_up:asc', 'Follow-up soonest'],
   ['last_contacted:desc', 'Last contacted'], ['calls:desc', 'Most calls'], ['experience:desc', 'Most experience'],
 ]
@@ -251,11 +258,37 @@ export function searchHint(query: string): string {
   return `Matching leads that contain all of: ${terms.map((term) => `"${term}"`).join(', ')}.`
 }
 
-/** Today at 00:00 local as YYYY-MM-DD (the "New today" card filters on it). */
-export function todayKey(now: Date = new Date()): string {
-  const two = (value: number) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`
+/** The agency's own time zone: every "day" the lead filters mention is a calendar day here, whatever the browser's zone is. */
+export const AGENCY_TIME_ZONE = 'Asia/Kolkata'
+
+/** The agency calendar day of `now` (plus `offsetDays`) as YYYY-MM-DD. */
+export function agencyDay(now: Date = new Date(), offsetDays = 0): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: AGENCY_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
+  const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value)
+  return new Date(Date.UTC(pick('year'), pick('month') - 1, pick('day') + offsetDays)).toISOString().slice(0, 10)
 }
+
+/** Today in the agency time zone as YYYY-MM-DD (the date inputs' upper limit and the "Today" preset). */
+export const todayKey = (now: Date = new Date()): string => agencyDay(now)
+
+export type DatePreset = 'today' | 'yesterday' | 'last7'
+export const DATE_PRESETS: { id: DatePreset; label: string }[] = [{ id: 'today', label: 'Today' }, { id: 'yesterday', label: 'Yesterday' }, { id: 'last7', label: 'Last 7 days' }]
+
+/** The from / to days a preset stands for (agency calendar days, both included; "Last 7 days" is today and the six before). */
+export function presetRange(preset: DatePreset, now: Date = new Date()): { from: string; to: string } {
+  if (preset === 'yesterday') return { from: agencyDay(now, -1), to: agencyDay(now, -1) }
+  if (preset === 'last7') return { from: agencyDay(now, -6), to: agencyDay(now) }
+  return { from: agencyDay(now), to: agencyDay(now) }
+}
+
+/** The preset the current from / to are exactly equal to, if any (it is shown pressed). */
+export function activePreset(filters: Pick<LeadFilters, 'from' | 'to'>, now: Date = new Date()): DatePreset | '' {
+  return DATE_PRESETS.find(({ id }) => { const range = presetRange(id, now); return range.from === filters.from && range.to === filters.to })?.id ?? ''
+}
+
+/** What the "uploaded in 24 hrs" card is called, and what it counts. */
+export const NEW_CARD_LABEL = 'Uploaded in 24 hrs'
+export const NEW_CARD_DETAIL = 'Uploaded in the last 24 hours'
 
 /** Query string for GET /leads (and the export): only the filters that are set, so equal views give equal strings. */
 export function buildLeadQuery(filters: LeadFilters, sort: { key: string; dir: 'asc' | 'desc' }): string {
@@ -270,6 +303,8 @@ export function buildLeadQuery(filters: LeadFilters, sort: { key: string; dir: '
   if (filters.assigned) params.set('owner', filters.assigned)
   if (filters.from) params.set('created_from', filters.from)
   if (filters.to) params.set('created_to', filters.to)
+  if (filters.from || filters.to) params.set('date_field', filters.dateField === 'created' ? 'created' : 'uploaded')
+  if (filters.recent === '24h') params.set('uploaded_within_hours', '24')
   if (filters.batchId) params.set('batch_id', filters.batchId)
   if (filters.followUp) params.set('follow_up', filters.followUp)
   params.set('sort', sort.key)
@@ -289,30 +324,28 @@ export function columnsQuery(filters: Pick<LeadFilters, 'campaign' | 'batchId'>)
 export const summaryScope = (filters: Pick<LeadFilters, 'assigned'>): 'mine' | 'all' => (filters.assigned === 'me' ? 'mine' : 'all')
 
 export function activeLeadFilterCount(filters: LeadFilters): number {
-  const { q, ...rest } = filters
-  void q
+  const { q, dateField, ...rest } = filters  // the date choice alone filters nothing
+  void q; void dateField
   return Object.values(rest).filter((value) => value !== '' && value !== undefined).length
 }
 
 /** What each KPI card sets on the filters. */
-export function cardFilters(card: LeadCard, now: Date = new Date()): Partial<LeadFilters> {
-  const today = todayKey(now)
+export function cardFilters(card: LeadCard): Partial<LeadFilters> {
   switch (card) {
-    case 'new_today': return { status: '', from: today, to: today }
-    case 'not_contacted': return { status: 'new', from: '', to: '' }
-    case 'interested': return { status: 'interested,resume_received', from: '', to: '' }  // said yes, or the resume has arrived
-    case 'resume_received': return { status: 'resume_received', from: '', to: '' }
-    case 'converted': return { status: 'converted', from: '', to: '' }
-    case 'follow_ups': return { status: '', from: '', to: '', followUp: 'due' }
-    default: return { status: '', from: '', to: '' }
+    case 'new_today': return { status: '', from: '', to: '', recent: '24h' }  // uploaded in the last 24 hours, whatever the lead's own date says
+    case 'not_contacted': return { status: 'new', from: '', to: '', recent: '' }
+    case 'interested': return { status: 'interested,resume_received', from: '', to: '', recent: '' }  // said yes, or the resume has arrived
+    case 'resume_received': return { status: 'resume_received', from: '', to: '', recent: '' }
+    case 'converted': return { status: 'converted', from: '', to: '', recent: '' }
+    case 'follow_ups': return { status: '', from: '', to: '', recent: '', followUp: 'due' }
+    default: return { status: '', from: '', to: '', recent: '' }
   }
 }
 
 /** Which KPI card the current filters correspond to (a card is lit only while the filters are exactly its own). */
-export function activeCard(filters: LeadFilters, now: Date = new Date()): LeadCard | '' {
-  const today = todayKey(now)
-  if (filters.followUp === 'due') return !filters.status && !filters.from && !filters.to ? 'follow_ups' : ''
-  if (!filters.status && filters.from === today && filters.to === today) return 'new_today'
+export function activeCard(filters: LeadFilters): LeadCard | '' {
+  if (filters.followUp === 'due') return !filters.status && !filters.from && !filters.to && !filters.recent ? 'follow_ups' : ''
+  if (filters.recent === '24h') return !filters.status && !filters.from && !filters.to ? 'new_today' : ''
   if (filters.from || filters.to) return ''
   if (filters.status === 'new') return 'not_contacted'
   if (filters.status === 'interested' || filters.status === 'interested,resume_received') return 'interested'
@@ -333,6 +366,21 @@ export function createdParts(value?: string | null): { day: string; year: string
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
   return { day: `${two(date.getDate())} ${MONTHS[date.getMonth()]}`, year: String(date.getFullYear()) }
+}
+
+const uploadedFormat = new Intl.DateTimeFormat('en-GB', { timeZone: AGENCY_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+
+/** When the lead was uploaded (imported into the CRM), in agency time: "14 Nov 2026, 10:12 IST"; '' when unknown. */
+export function uploadedLabel(value?: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : `${uploadedFormat.format(date)} IST`
+}
+
+/** "14 Nov" over "10:12" for the Uploaded column (agency time); null when the value is not a date. */
+export function uploadedParts(value?: string | null): { day: string; time: string } | null {
+  const match = /^(\d{2} \w{3}) \d{4}, (\d{2}:\d{2})/.exec(uploadedLabel(value))
+  return match ? { day: match[1], time: match[2] } : null
 }
 
 /** Source creation date when supplied; otherwise the CRM import time, explicitly labelled. */

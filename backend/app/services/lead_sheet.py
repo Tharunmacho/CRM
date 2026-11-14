@@ -26,13 +26,16 @@ from app.services.candidate_search import agency_midnight, literal_contains, sea
 STATUS_LABELS = {
     "new": "New", "contacted": "Contacted", "interested": "Interested", "resume_requested": "Resume requested",
     "resume_received": "Resume received", "converted": "Converted", "not_interested": "Not interested",
-    "invalid": "Invalid", "wrong_number": "Wrong number",
+    "invalid": "Not reachable", "wrong_number": "Wrong number",
 }
 CLOSED = ("converted", "not_interested", "invalid", "wrong_number")
 OUTCOMES = ("answered", "interested", "not_interested", "no_answer", "wrong_number")
 PLATFORM_LABELS = {"ig": "Instagram", "fb": "Facebook"}
 EXPORT_LIMIT = 50_000
-SORTS = ("created", "name", "status", "owner", "campaign", "position", "follow_up", "last_contacted", "calls", "experience")
+NEW_WINDOW_HOURS = 24      # "New today" = uploaded (stored in the CRM) within the last 24 hours, a rolling window
+MAX_RECENT_HOURS = 24 * 7  # largest `uploaded_within_hours` the list accepts
+DATE_FIELDS = ("uploaded", "created")  # which date created_from / created_to filter on
+SORTS = ("created", "uploaded", "name", "status", "owner", "campaign", "position", "follow_up", "last_contacted", "calls", "experience")
 
 
 def fail(status: int, code: str, message: str, **extra) -> HTTPException:
@@ -242,7 +245,11 @@ def apply_filters(query, owner, has_resume, user: User, f: dict):
 
     Always narrowed to the leads `user` may see: managers and staff only ever get the leads assigned to them."""
     query = query.where(visible_leads(user))
-    effective_time = func.coalesce(Lead.created_time, Lead.created_at)
+    # `uploaded` (default) = when the lead was imported into the CRM; `created` = the platform's own time, else the import time.
+    date_field = (f.get("date_field") or "uploaded").strip().lower()
+    if date_field not in DATE_FIELDS:
+        raise fail(422, "invalid_request", f"date_field must be one of: {', '.join(DATE_FIELDS)}.")
+    effective_time = Lead.created_at if date_field == "uploaded" else func.coalesce(Lead.created_time, Lead.created_at)
 
     def term_matches(term: str):
         lowered = term.lower()
@@ -287,6 +294,9 @@ def apply_filters(query, owner, has_resume, user: User, f: dict):
         query = query.where(effective_time >= agency_midnight(f["created_from"], "From date"))
     if f.get("created_to"):
         query = query.where(effective_time < agency_midnight(f["created_to"], "To date", 1))
+    recent = recent_hours(f.get("uploaded_within_hours"))
+    if recent:  # the "New today" card: uploaded within the last N hours (rolling), whatever the lead's own date says
+        query = query.where(Lead.created_at >= datetime.now(timezone.utc) - timedelta(hours=recent))
     if f.get("has_resume") is not None:
         query = query.where(has_resume if f["has_resume"] else ~has_resume)
     if f.get("matched_candidate") is not None:
@@ -302,6 +312,19 @@ def apply_filters(query, owner, has_resume, user: User, f: dict):
     return query
 
 
+def recent_hours(value) -> int | None:
+    """`uploaded_within_hours` as a whole number of hours (1 to a week), or None when it is not set."""
+    if value is None or value == "":
+        return None
+    try:
+        hours = int(str(value).strip())
+    except ValueError:
+        hours = 0
+    if not 1 <= hours <= MAX_RECENT_HOURS:
+        raise fail(422, "invalid_request", f"uploaded_within_hours must be a whole number from 1 to {MAX_RECENT_HOURS}.")
+    return hours
+
+
 def follow_up_horizon() -> datetime:
     """Midnight at the end of today in the agency time zone: a follow-up before it is due today or overdue."""
     from app.services.daily_work import agency_today
@@ -312,7 +335,7 @@ def _order(owner, key: str, direction: str):
     if key not in SORTS:
         raise fail(422, "invalid_request", f"Sort by one of: {', '.join(SORTS)}.")
     columns = {
-        "created": func.coalesce(Lead.created_time, Lead.created_at), "name": func.lower(Lead.name), "status": Lead.status,
+        "created": func.coalesce(Lead.created_time, Lead.created_at), "uploaded": Lead.created_at, "name": func.lower(Lead.name), "status": Lead.status,
         "owner": func.lower(owner.name), "campaign": func.lower(Lead.campaign_name), "position": func.lower(Lead.position_applied),
         "follow_up": Lead.next_follow_up_at, "last_contacted": Lead.last_contacted_at, "calls": Lead.call_count,
         "experience": func.coalesce(Lead.experience_total_years, Lead.experience_restaurant_years),
@@ -430,7 +453,7 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
     today_start = midnight(agency_today(datetime.now(timezone.utc)).isoformat(), "Today")
     closed = "('converted','not_interested','invalid','wrong_number')"
     rows = db.execute(text(
-        "SELECT status, campaign_name, count(*) AS n, count(*) FILTER (WHERE coalesce(created_time, created_at) >= :ts) AS new_today, "
+        "SELECT status, campaign_name, count(*) AS n, count(*) FILTER (WHERE created_at >= :since) AS new_today, "
         f"count(*) FILTER (WHERE next_follow_up_at < :horizon AND status NOT IN {closed}) AS due, "
         "count(*) FILTER (WHERE matched_candidate_id IS NOT NULL) AS matched, "
         "count(*) FILTER (WHERE resume_received_at IS NOT NULL) AS with_resume, "
@@ -440,7 +463,7 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
         f"(SELECT count(*) FROM crm_leads WHERE owner_id IS NULL AND status NOT IN {closed}), 0, "
         f"(SELECT count(*) FROM crm_leads WHERE owner_id = :me AND next_follow_up_at < :horizon AND status NOT IN {closed}), 0, 0, 0, "
         "(SELECT max(created_at) FROM crm_lead_batches WHERE status = 'completed')"),
-        {"ts": today_start, "everyone": scope == "all", "me": user.id, "horizon": today_start + timedelta(days=1)}).all()
+        {"since": datetime.now(timezone.utc) - timedelta(hours=NEW_WINDOW_HOURS), "everyone": scope == "all", "me": user.id, "horizon": today_start + timedelta(days=1)}).all()
     out = {"scope": scope, "total": 0, "newToday": 0, "unassigned": 0, "uncontacted": 0, "interested": 0, "resumeRequested": 0,
            "resumeReceived": 0, "converted": 0, "followUpsDue": 0, "followUpsDueMine": 0, "matchedCandidates": 0, "withResume": 0,
            "byStatus": {}, "byCampaign": [], "lastImportAt": None}
@@ -637,7 +660,7 @@ def assign_leads(db: Session, user: User, ids: list[str] | None, filters: dict |
     elif owner_id == "auto":
         staff = eligible_staff(db)
         if not staff:
-            raise fail(422, "invalid_request", "No staff member is available for automatic assignment.")
+            raise fail(422, "invalid_request", "No recruiter is available for automatic assignment.")
         names = {u.id: u.name for u in staff}
         picks = spread_evenly(staff, open_lead_counts(db, [u.id for u in staff]), len(target))
     else:
@@ -669,7 +692,14 @@ def apply_owner_changes(db: Session, user: User, move: dict[str | None, list[str
     Every moved lead gets a history entry; a lead that had a recruiter before gets an audit entry (reassigned / unassigned);
     the new recruiter is told. Taking a lead back from its recruiter clears `assigned_at`, keeps the status, and the old
     owner's follow-up to-do goes away with it (lead_followups.sync removes the to-do of a lead without an owner).
-    The previous recruiter is not notified (same as a reassignment): the lead simply leaves their list."""
+    Notices (one grouped notice per person, never to the person who made the change): the new recruiter is told the leads are
+    theirs, and the previous recruiter is told which leads left their list."""
+    everything = [i for ids_ in move.values() for i in ids_]
+    before = {row.id: row for row in db.execute(
+        text("SELECT id, owner_id, left(coalesce(name, phone, email, 'a lead'), 300) AS label FROM crm_leads WHERE id = ANY(CAST(:ids AS text[]))"),
+        {"ids": everything}).all()} if everything else {}
+    changes = [(lead_id, before[lead_id].label, before[lead_id].owner_id, new_owner)
+               for new_owner, lead_ids in move.items() for lead_id in lead_ids if lead_id in before]
     for new_owner, lead_ids in move.items():
         ids = {"ids": lead_ids, "u": user.id, "bulk": bulk}
         if new_owner is None:
@@ -687,8 +717,8 @@ def apply_owner_changes(db: Session, user: User, move: dict[str | None, list[str
                         "SELECT gen_random_uuid()::text, x, :u, 'assign', CAST(:s AS text), jsonb_build_object('owner', CAST(:o AS text), 'bulk', CAST(:bulk AS boolean)) "
                         "FROM unnest(CAST(:ids AS text[])) AS x"),
                    {"u": user.id, "s": f"Assigned to {names[new_owner]}", "o": new_owner, "ids": lead_ids, "bulk": bulk})
-        db.add(Notification(user_id=new_owner, kind="lead_assignment", title="New leads assigned",
-                            detail=f"{len(lead_ids)} {'lead' if len(lead_ids) == 1 else 'leads'} to call", link_to="/leads"))
+    from app.services.assignment_notifications import notify_lead_changes
+    notify_lead_changes(db, changes, actor_id=user.id, actor_name=user.name)
     lead_followups.sync(db, [i for ids_ in move.values() for i in ids_])  # a moved lead's follow-up to-do follows its owner (or goes when nobody owns it)
 
 

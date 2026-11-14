@@ -4,7 +4,7 @@ This module creates the employer context required by every job order. Source: PR
 
 ## Roles and preparation
 
-Admin, Manager and Staff can create and edit client/company records. Destructive deletion is restricted and must preserve linked business history. Obtain the employer's real contact information and an agreement where applicable. An order cannot replace its employer relationship with free text.
+Admin, Manager and Recruiter can create and edit client/company records. Destructive deletion is restricted and must preserve linked business history. Obtain the employer's real contact information and an agreement where applicable. An order cannot replace its employer relationship with free text.
 
 ## User journey
 

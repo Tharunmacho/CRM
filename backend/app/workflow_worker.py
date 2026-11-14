@@ -10,7 +10,7 @@ from app.services.workflow_scheduler import deliver_due_todos, scan_daily_work_o
 
 log = logging.getLogger("workflow_worker")
 TASK_SCAN_SECONDS = 15 * 60
-DAILY_SCAN_SECONDS = 60  # allocation, hourly-slot alerts and goal snapshots are at most a minute behind
+DAILY_SCAN_SECONDS = 60  # the daily list is computed live; this pass only retires items the old quota left open
 REMINDER_SCAN_SECONDS = 30
 
 
@@ -35,7 +35,7 @@ def main():
                 db.commit()
                 if task_scan or daily_scan:
                     next_daily_scan = time.monotonic() + DAILY_SCAN_SECONDS
-                if daily_scan and any(counts.get(key) for key in ("dailyAllocated", "dailyOverdue", "dailyPostponed")):
+                if daily_scan and any(counts.get(key) for key in ("dailyRetired",)):
                     log.info("Daily work scan complete: %s", counts)
                 if task_scan:
                     next_task_scan = time.monotonic() + TASK_SCAN_SECONDS

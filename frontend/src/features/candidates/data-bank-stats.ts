@@ -39,11 +39,11 @@ export function statCards(counts: Pick<PoolCounts, 'all' | 'unassigned' | 'needs
 export const poolAfterCardPress = (current: DataBankPool, card: Pick<StatCard, 'pool'>): DataBankPool =>
   card.pool === 'all' ? 'all' : togglePool(current, card.pool)
 
-export type VisibleFilter = 'scope' | 'source' | 'status' | 'staff'
+export type VisibleFilter = 'scope' | 'source' | 'status' | 'travel' | 'staff'
 
-/** The selects always on show beside the search; Staff is for the people who assign candidates. Everything else lives under More filters. */
+/** The selects always on show beside the search (Travel: any / travelled / not travelled); Staff is for the people who assign candidates. Everything else lives under More filters. */
 export const visibleFilters = (role: string | null | undefined): VisibleFilter[] =>
-  isSupervisor(role) ? ['scope', 'source', 'status', 'staff'] : ['scope', 'source', 'status']
+  isSupervisor(role) ? ['scope', 'source', 'status', 'travel', 'staff'] : ['scope', 'source', 'status', 'travel']
 
 /** Behind "More filters": the pool list (No order yet, Not interested...), stage and passport come first, then the text, years, date and skill filters. */
 export const MORE_FILTER_SELECTS = ['pool', 'stage', 'passport'] as const

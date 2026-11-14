@@ -90,6 +90,8 @@ export interface Candidate {
   ref: string
   /** Immutable public ID, sequenced for the Care India April--March financial year. */
   careId?: string | null
+  /** Immutable Traveller ID (separate CI-T series); only candidates who have travelled have one. */
+  travellerId?: string | null
   name: string
   phone: string
   whatsapp?: string
@@ -262,6 +264,16 @@ export type ClosureReason =
   | 'interview_rejected'
   | 'medical_unfit'
   | 'unmapped'
+  | 'offer_declined'
+  | 'offer_not_received'
+  | 'stage_rejected'
+  | 'stage_declined'
+  | 'interview_not_possible'
+  | 'passport_not_available'
+  | 'advance_not_paid'
+  | 'visa_rejected'
+  | 'visa_stamping_refused'
+  | 'not_travelling'
 
 export interface StageRecord {
   id?: string
@@ -355,8 +367,8 @@ export interface MailMessage {
 
 export interface Notification {
   id: string
-  /** Every kind the backend writes: workflow scheduler, assignments, intake and attendance. */
-  kind: 'assignment' | 'candidate_assignment' | 'candidate_request' | 'lead_assignment' | 'attendance' | 'escalation' | 'reminder' | 'todo' | 'daily_work'
+  /** The kinds the bell shows (the backend keeps others stored but hidden; `assignment`, `candidate_assignment` and `daily_work` are retired). */
+  kind: 'candidate_assigned' | 'candidate_removed' | 'candidate_waiting' | 'candidate_request' | 'task_assigned' | 'task_removed' | 'lead_assignment' | 'lead_removed' | 'todo' | 'assignment' | 'candidate_assignment' | 'daily_work'
   title: string
   detail: string
   createdAt: string

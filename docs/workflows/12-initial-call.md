@@ -31,7 +31,7 @@ For a response loss, refresh the profile/task before repeating the action. If an
 - [ ] Reject Called No with Interested Yes/No.
 - [ ] Record a real Not interested outcome and verify task closure and pool visibility.
 - [ ] Record interest and verify profile outcome persistence.
-- [ ] Attempt a call update as unrelated Staff and after an incompatible application change.
+- [ ] Attempt a call update as unrelated Recruiter and after an incompatible application change.
 - [ ] Map with an outstanding initial-call task; stage 1 exists and no false call outcome appears.
 - [ ] Fail a save and verify entered remarks remain available.
 

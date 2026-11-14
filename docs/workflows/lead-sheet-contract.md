@@ -5,7 +5,7 @@ Status: implemented by migration `0024_lead_sheet`, `app/api/routers/leads.py`, 
 backend changes, this file changes first. User-level description: [Lead sheet workflow](23-lead-sheet.md).
 
 A **lead** is a person who answered a social-media ad (Meta Lead Ads, Google lead forms or any spreadsheet). The agency
-uploads the platform's export; every person is stored once; staff call them, ask for an updated resume and either
+uploads the platform's export; every person is stored once; recruiters call them, ask for an updated resume and either
 convert the lead to a Data Bank candidate or close it.
 
 JSON is camelCase (like the other routers). Query parameters are snake_case (like `/api/candidates`). Dates are ISO 8601.
@@ -19,8 +19,8 @@ plus extra keys named below. Resume-check and reversal errors can also use a pla
 | HTTP | code | when |
 | --- | --- | --- |
 | 403 | `forbidden_role` | import, assign, export, batch delete by a role that may not |
-| 403 | `lead_not_yours` | staff works a lead assigned to someone else, or to nobody |
-| 403 | `daily_work_pending` | staff still has open daily work (see **Work gate**) |
+| 403 | `lead_not_yours` | a recruiter works a lead assigned to someone else, or to nobody |
+| 403 | `daily_work_pending` | a recruiter still has open daily work (see **Work gate**) |
 | 404 | `not_found` | unknown lead / batch |
 | 409 | `already_converted` | call/convert on a converted lead |
 | 409 | `duplicate_lead` | PATCH would give the lead a phone/e-mail another lead already has. Extra: `existingLeadId` |
@@ -37,7 +37,7 @@ plus extra keys named below. Resume-check and reversal errors can also use a pla
 
 `status` is one of (in working order): `new`, `contacted`, `interested`, `resume_requested`, `resume_received`,
 `converted`, `not_interested`, `invalid`, `wrong_number`. Labels for the UI: New, Contacted, Interested, Resume requested,
-Resume received, Converted, Not interested, Invalid, Wrong number. Enforced by a check constraint.
+Resume received, Converted, Not interested, Not reachable (stored value stays `invalid`), Wrong number. Enforced by a check constraint.
 
 Call outcomes (`POST /{id}/call`): `answered`, `interested`, `not_interested`, `no_answer`, `wrong_number`.
 
@@ -56,19 +56,21 @@ Activity kinds: `call`, `note`, `status`, `assign`, `import`, `convert`, `resume
 
 ## Work rules (who may do what)
 
-| action | admin | manager | staff |
+| action | admin | manager | recruiter |
 | --- | --- | --- | --- |
 | read list / summary / detail / batches | yes | yes | yes |
 | import, dry-run, delete a batch (admin only), assign, export | yes (delete batch: admin only) | import / assign / export yes | **403 `forbidden_role`** |
 | call, PATCH, check resume, convert, link-candidate, upload resume | any lead | any lead | **only leads assigned to them** (`lead_not_yours`) and only when not gated |
 | check or perform Move back to Lead | yes, subject to unused-candidate guards | no | no |
 
-Staff cannot claim leads; only admin/manager assign.
+Recruiters cannot claim leads; only admin/manager assign.
 
 ### Work gate (daily tasks first)
 
-A staff member must finish the daily work quota (Tasks > Daily work: today's items plus anything postponed) before they
-may work the lead sheet. For a **staff** user the server answers `403 daily_work_pending` on
+> **Superseded.** The gate is retired: the server never locks (`dailyWorkGate` is always `{ "locked": false, ... }`) and Tasks > Daily work no longer has a quota to finish, so unfinished daily work never blocks a recruiter's own leads. The text below describes the former behaviour.
+
+A recruiter must finish the daily work quota (Tasks > Daily work: today's items plus anything postponed) before they
+may work the lead sheet. For a **recruiter** user the server answers `403 daily_work_pending` on
 `POST /{id}/call`, `PATCH /{id}`, `POST /{id}/convert`, `POST /{id}/link-candidate` and on a resume upload to a lead
 (`POST /api/files` with `entity_type=lead`) while the gate is locked. Resume-check start and status endpoints also enforce the work gate. Reading the lead list and saved detail is never gated. Admin and manager are never gated.
 
@@ -79,7 +81,7 @@ may work the lead sheet. For a **staff** user the server answers `403 daily_work
 ```
 
 `dailyWorkGate` (also returned by `GET /summary`, and by `GET /{id}`):
-`locked` is true when the user is staff and has at least one `workflow_daily_work_items` row with `status='open'` and
+`locked` is true when the user is a recruiter and has at least one `workflow_daily_work_items` row with `status='open'` and
 `work_date <= today` (agency timezone). `open` = such rows; `postponed` = the ones from earlier days; `total` = open plus
 completed items of today; `nextDueAt` = earliest open `due_at` (or null); `message` is the text above (null when unlocked).
 Nothing allocated (day off, leave, quota already done, no candidates) means unlocked. The gate is computed per request (never
@@ -170,7 +172,7 @@ Normalisation of a stored lead (all editable by `PATCH`): see **Import parsing**
 | `file` | required. `.csv`, `.tsv`, `.txt`, `.xlsx` (25 MB max) |
 | `dry_run` | `true`: parse and report only, nothing is stored (default `false`) |
 | `mapping` | optional JSON `{"<header as in file>": "<field>" | null}` overriding the automatic header mapping; `null` sends the column to `extra` |
-| `assign_to` | optional: a staff user id, or `auto` (spread the new leads evenly over available staff). Default: unassigned |
+| `assign_to` | optional: a recruiter user id, or `auto` (spread the new leads evenly over available recruiters). Default: unassigned |
 | `campaign_label` | optional text used as campaign name for rows whose file has none |
 | `fill_empty` | `true`: for a duplicate of a stored lead, copy values the stored lead is missing (never contact fields, never workflow data). Default `false` |
 | `source` | `meta_ads` (default) or `other` |
@@ -259,13 +261,15 @@ candidate). Returns `{ "deleted": n, "kept": m }`. The batch row stays (marked `
 | `status` | one or more (repeat the param or comma-separate) |
 | `campaign`, `form`, `position`, `country`, `platform` | exact (case-insensitive) match on the stored value; comma-separate for several |
 | `owner` | `me`, `unassigned`, or a user id |
-| `created_from`, `created_to` | `YYYY-MM-DD`, agency timezone, on the lead's `createdTime` |
+| `created_from`, `created_to` | `YYYY-MM-DD` Asia/Kolkata calendar days (both included), on the date chosen by `date_field` |
+| `date_field` | which date `created_from` / `created_to` use: `uploaded` (default; `created_at`, when the lead was imported into the CRM) or `created` (the platform's own `createdTime`, else the upload time when the sheet had none). Anything else is `422` |
+| `uploaded_within_hours` | whole number 1 to 168: only leads uploaded (`created_at`) within the last N hours, a rolling window ending now. The "Uploaded in 24 hrs" card sends `24`; it can be combined with every other filter |
 | `has_resume` | `true` / `false` |
 | `matched_candidate` | `true`: already in the Data Bank (flagged at import); `false` |
 | `follow_up` | `due` (follow-up date has arrived) or `none` |
 | `batch_id` | one upload |
 
-`sort`: `created` (default), `name`, `status`, `owner`, `campaign`, `position`, `follow_up`, `last_contacted`, `calls`, `experience`. Ties break on id.
+`sort`: `created` (default; the lead's own date, else the upload time), `uploaded` (upload time), `name`, `status`, `owner`, `campaign`, `position`, `follow_up`, `last_contacted`, `calls`, `experience`. Ties break on id.
 Response: `{ "items": [Lead], "total": n, "page": 0, "pageSize": 25 }`. A page past the end returns the last page.
 
 ### GET /api/leads/columns  (all)  `?campaign=&form=&batch_id=`
@@ -283,7 +287,7 @@ Distinct values for the filter drop-downs: `{ "campaigns": [..], "forms": [..], 
 
 ### GET /api/leads/summary  (all)  `?scope=mine|all`
 
-Default `scope` is `mine` for staff and `all` for admin/manager. Numbers are over the leads in scope (`mine` = assigned to the viewer).
+Default `scope` is `mine` for recruiters and `all` for admin/manager. Numbers are over the leads in scope (`mine` = assigned to the viewer).
 
 ```json
 { "scope": "mine", "total": 120, "newToday": 14, "unassigned": 30, "uncontacted": 80, "interested": 9, "resumeRequested": 4,
@@ -294,6 +298,16 @@ Default `scope` is `mine` for staff and `all` for admin/manager. Numbers are ove
 
 (`unassigned` is always the global count of unassigned leads, since it is the manager's to-do.)
 
+**`newToday` means "uploaded in the last 24 hours"**: leads whose `createdAt` (the moment they were imported into the CRM) is within the last 24 hours, a rolling window, in the caller's scope. It never
+uses the ad platform's own `createdTime`, so a sheet of older leads uploaded just now counts, and it is not a calendar day. A re-uploaded duplicate is skipped at import (no new row, `createdAt` of the stored lead
+never moves), so it is never counted. `GET /api/leads?uploaded_within_hours=24` (with the same scope) returns exactly the leads this number counts; the Lead sheet's "Uploaded in 24 hrs" card applies that filter.
+The dashboard's `leads.newToday` card and its list (`at` = `uploaded`) use the same definition.
+
+**Two dates per lead.** `createdTime` is the lead's own date from the platform (may be null); `createdAt` is the upload time. Both are returned with every lead. The Lead sheet shows both: the **Created** column
+(own date) and the **Uploaded** column (date and clock time in IST, a default column right after Created that is the first one hidden when the table is too narrow; it is always in the expanded row, the card and the Columns
+menu). The Dates panel offers **Uploaded** (default) or **Created** as the date to filter on, Today / Yesterday / Last 7 days presets (Asia/Kolkata days; Last 7 days = today and the six before) and from / to inputs; the
+choice is kept while the sheet is open.
+
 ### GET /api/leads/export.xlsx and /export.csv  (admin, manager)
 
 Same filter parameters as the list (no paging); at most 50,000 rows. Formula safe (xlsx uses inline strings, csv prefixes `'`).
@@ -302,14 +316,14 @@ Same filter parameters as the list (no paging); at most 50,000 rows. Formula saf
 
 Lead detail (see above).
 
-### PATCH /api/leads/{id}  (owner staff, admin, manager)
+### PATCH /api/leads/{id}  (owner recruiter, admin, manager)
 
 Body (camelCase, all optional): `status`, `notes`, `nextFollowUpAt` (ISO, or null to clear), `positionApplied`, `countryInterest`, `name`,
 `phone`, `email`, `whatsapp`, `city`, `state`, `gender`, `dob`, `maritalStatus`, `educationLevel`, `experienceRestaurantYears`, `experienceTotalYears`.
 Changing a contact field re-computes the dedupe keys. `status: "converted"` is refused (use convert). Writes one activity row per kind of change
 (`status`, `note`, `edit`). Returns the Lead.
 
-### POST /api/leads/{id}/call  (owner staff, admin, manager)
+### POST /api/leads/{id}/call  (owner recruiter, admin, manager)
 
 Body: `{ "outcome": "answered|interested|not_interested|no_answer|wrong_number", "remarks": "text", "nextFollowUpAt": "ISO|null" }`.
 Applies the table in **Statuses**. Returns the Lead.
@@ -317,12 +331,12 @@ Applies the table in **Statuses**. Returns the Lead.
 ### POST /api/leads/assign  (admin, manager)
 
 Body: `{ "ids": ["…"] | null, "filter": { …same keys as the list query, snake_case… } | null, "ownerId": "user-id" | "auto", "onlyUnassigned": false }`.
-Give `ids` or `filter`. `auto` spreads the leads evenly over active staff who receive auto-assignment and are not on leave (the staff
+Give `ids` or `filter`. `auto` spreads the leads evenly over active recruiters who receive auto-assignment and are not on leave (the recruiter
 with the fewest open leads first); it uses its own cursor, so the candidate round robin is not disturbed. A specific `ownerId` must be an
-assignable staff member. Converted leads are never moved. Returns `{ "assigned": n, "skipped": m, "owners": [ {id, name, count} ] }`.
+assignable recruiter. Converted leads are never moved. Returns `{ "assigned": n, "skipped": m, "owners": [ {id, name, count} ] }`.
 Each new owner gets one notification (`kind: lead_assignment`, link `/leads`) per assignment.
 
-### Check resume before conversion (owner staff, admin, manager)
+### Check resume before conversion (owner recruiter, admin, manager)
 
 `POST /api/leads/{id}/resume-check` accepts multipart `resume` (optional; otherwise the latest saved lead resume) and `overrides` (optional JSON object containing only a string `name`, the candidate name shown in the conversion dialog). With no selected or saved resume it returns 422. It starts or reuses a durable reading without creating a candidate.
 
@@ -336,7 +350,7 @@ Only a completed, identity-readable resume with complete output and no conflicti
 
 The proof binds the user-owned job to the lead ID/name/phone/email/date-of-birth snapshot, effective candidate name, exact file hash and, when using the saved resume, its source attachment ID. A changed identity, different file or replaced saved attachment requires another check. Identity is revalidated against current records on status reads and conversion; there is no time-based proof expiry.
 
-### POST /api/leads/{id}/convert  (owner staff, admin, manager)
+### POST /api/leads/{id}/convert  (owner recruiter, admin, manager)
 
 `multipart/form-data`: `resume` (optional PDF / Word / image), `resume_check_id` (required whenever a selected or saved resume exists), `overrides` (optional JSON string with any of `name, phone, email, dob,
 gender, currentCity, designations[], totalExperience, countryPreference, sourceDetail, assignTo` to correct the lead's values before the candidate is created). Conversion with no selected or saved resume remains allowed.
@@ -356,15 +370,15 @@ Other linked leads or inbox/document sources, any application (including closed 
 
 Success removes the unused candidate, clears its link, restores the prior lead status, retains the lead's original fields/files/history, syncs its follow-up and records the actor/reason in lead history and audit. Response: `{lead: Lead, removedCandidateId, restoredStatus, alreadyReversed}`. Retrying the same candidate ID after a successful reversal returns `alreadyReversed: true`; a different/reconverted candidate is refused with 409.
 
-### POST /api/leads/{id}/link-candidate  (owner staff, admin, manager)
+### POST /api/leads/{id}/link-candidate  (owner recruiter, admin, manager)
 
 Body `{ "candidateId": "…" }`. Links the lead to an existing candidate and marks it `converted`. Returns the Lead.
 
 ### Resume for a lead (before conversion)
 
 Use the existing file endpoints with `entity_type=lead`: `POST /api/files` (`entity_type=lead`, `entity_id=<lead id>`, `slot=resume`, `file`),
-`GET /api/files?entity_type=lead&entity_id=…`, `GET /api/files/{id}`. Same permission rule as call (assigned staff, admin, manager;
-staff gated by the daily tasks). The upload sets the lead to `resume_received` and logs a `resume` activity. Each upload is a new version.
+`GET /api/files?entity_type=lead&entity_id=…`, `GET /api/files/{id}`. Same permission rule as call (assigned recruiter, admin, manager;
+recruiter gated by the daily tasks). The upload sets the lead to `resume_received` and logs a `resume` activity. Each upload is a new version.
 Uploading alone does not read a lead's resume. **Check resume** reads and verifies it before conversion; conversion reuses that verified output.
 
 ## Import parsing
@@ -411,7 +425,7 @@ A database unique index on `external_id` backs rule 1 even if two imports race.
 
 ## Live updates
 
-Table `crm_leads`, `crm_lead_batches` and `crm_lead_activities` feed the live topic **`leads`** (client-visible, no ids for staff). The lead screens subscribe to
+Table `crm_leads`, `crm_lead_batches` and `crm_lead_activities` feed the live topic **`leads`** (client-visible, no ids for recruiters). The lead screens subscribe to
 `leads` and `tasks` (the daily-work gate). Uploading a resume also touches `documents`/`candidates` through `document_attachments`.
 
 ## Storage (for reference)
@@ -429,7 +443,7 @@ otherwise be read as `/api/leads/{lead_id}`).
 
 ### GET /api/leads/campaigns  (all)
 
-One set-based statement, whatever the number of campaigns. Admin and manager see every lead; **staff see only the leads assigned to them**
+One set-based statement, whatever the number of campaigns. Admin and manager see every lead; **recruiters see only the leads assigned to them**
 (`scope: "mine"`, so every count is their own). Rates are percentages with one decimal (0 to 100).
 
 ```json
@@ -444,7 +458,7 @@ One set-based statement, whatever the number of campaigns. Admin and manager see
 ```
 
 Sorted by `leads` descending (forms too); at most 500 campaigns (`truncated`). Definitions: **newToday** arrived since midnight in the agency
-time zone (`created_time`, else the day it was stored); **last7Days** the last 7 days including today; **assigned** has an owner; **contacted** has a
+time zone (`created_time`, else the day it was stored; unlike the Lead sheet's and dashboard's "uploaded in the last 24 hours" card, which counts by upload time); **last7Days** the last 7 days including today; **assigned** has an owner; **contacted** has a
 call or a status past New; **interested** is Interested, Resume requested, Resume received or Converted; **resumeReceived** is the Resume received
 status or an uploaded resume; **conversionRate** = converted / leads; **lastUploadAt** the newest upload that brought in any of these leads; `platform` splits
 `fb` / `ig` / everything else. A lead without a campaign name is listed as `campaign: null` ("No campaign").
@@ -458,7 +472,7 @@ transaction. Every path that changes the date, the status, the owner, the name o
 link-candidate and the bulk actions (status, assign, delete).
 
 * date set or moved: the to-do is created or moved (its reminder is re-armed);
-* date cleared, lead converted / not interested / invalid / wrong number, lead deleted, lead with no owner: the open to-do is removed;
+* date cleared, lead converted / not interested / not reachable / wrong number, lead deleted, lead with no owner: the open to-do is removed;
 * lead reassigned: the open to-do moves to the new owner;
 * a to-do already ticked off is left alone and is not created again for the same due time; a new date makes a new one.
 
@@ -505,7 +519,7 @@ Code: `app/api/routers/lead_bulk.py` (thin), `app/services/lead_bulk.py` (rules)
 ```
 
 * **Selection**: `ids` (at most 10,000) **or** `filter`, which has exactly the query parameters of `GET /api/leads` (snake_case: `q`, `status`, `campaign`, `form`, `position`, `country`,
-  `platform`, `owner`, `created_from`, `created_to`, `has_resume`, `matched_candidate`, `follow_up`, `batch_id`; a list or a comma-separated string) and is resolved with the same
+  `platform`, `owner`, `created_from`, `created_to`, `date_field`, `uploaded_within_hours`, `has_resume`, `matched_candidate`, `follow_up`, `batch_id`; a list or a comma-separated string) and is resolved with the same
   `apply_filters` as the list, so "select all N matching" acts on exactly the rows the list shows. An unknown filter key is `422` (never silently ignored). `owner=none` is an alias of `unassigned`
   (the Lead sheet's "Unassigned" choice sends `none`). Neither `ids` nor `filter` is `422 invalid_request`.
 * **Hard cap**: 10,000 leads per call. More (ids, or a filter matching more) is `422 too_many_leads` with `limit: 10000` and a message asking to narrow the filter or work in parts.
@@ -515,12 +529,12 @@ Code: `app/api/routers/lead_bulk.py` (thin), `app/services/lead_bulk.py` (rules)
   `meta.bulk = true`) and one `UPDATE` per new owner (or one for the status). 5,000 leads is a few dozen statements at most, never one per lead. Every write statement starts with INSERT / UPDATE / DELETE so the change
   feed announces the live topic `leads`. A lead changed or converted by someone else while the call waited for the lock is read after that writer committed: it is skipped (or handled) without an error.
 * **Result** `200`: `{ action, requested, updated, skipped, skippedReasons: [{code, count, message}], ... }` (+ `owners: [{id, name, count}]` for assign, `status` for status). Reason codes:
-  `converted` (converted or linked to a candidate: never changed, moved or deleted by a bulk action), `already_set` (already had that status), `already_owner`, `not_yours` (staff), `gone` (an id that no longer exists),
+  `converted` (converted or linked to a candidate: never changed, moved or deleted by a bulk action), `already_set` (already had that status), `already_owner`, `not_yours` (recruiters), `gone` (an id that no longer exists),
   `changed`. The screen shows "N leads updated, K skipped (2 converted or linked to a candidate; ...)".
-* **Permissions**: `assign` and `export`: admin / manager (`403 forbidden_role`). `delete`: admin only. `status` / `not_interested`: admin / manager on any lead; **staff** only on leads assigned
+* **Permissions**: `assign` and `export`: admin / manager (`403 forbidden_role`). `delete`: admin only. `status` / `not_interested`: admin / manager on any lead; **recruiters** only on leads assigned
   to them (others are skipped as `not_yours`, a filter selection is narrowed to `owner=me`) and only when the daily-work gate is open (`403 daily_work_pending`, same body as elsewhere).
   `converted` can not be set (`422`; use Convert). The Lead sheet screen shows the selection bar to admin / manager only.
-* **assign**: same rules as `POST /assign` (an `ownerId` must be an assignable staff member; `auto` spreads evenly over available staff by open lead count; converted leads never move; leads that already belong
+* **assign**: same rules as `POST /assign` (an `ownerId` must be an assignable recruiter; `auto` spreads evenly over available recruiters by open lead count; converted leads never move; leads that already belong
   to the person are skipped as `already_owner`), one notification (`lead_assignment`) per new owner.
 * **export**: the response is the styled workbook (`lead-sheet-selected.xlsx`, header `X-Lead-Count`), the same columns and writer as `GET /export.xlsx` (`lead_xlsx`) with the custom question columns
   of the exported leads; no write, no live change. Order: `sort` / `direction` (default newest first).
@@ -530,7 +544,7 @@ Code: `app/api/routers/lead_bulk.py` (thin), `app/services/lead_bulk.py` (rules)
 
 ### DELETE /api/leads/{id}  (admin)
 
-Deletes one lead: `{ "deleted": 1, "id": "..." }`. `404 not_found`; `403 forbidden_role` for manager and staff; **`409 lead_linked`** when the lead was converted or is linked to a candidate
+Deletes one lead: `{ "deleted": 1, "id": "..." }`. `404 not_found`; `403 forbidden_role` for manager and recruiters; **`409 lead_linked`** when the lead was converted or is linked to a candidate
 (the message names the candidate ref; nothing is unlinked, the person is managed from the Data Bank). Removes the lead's activities (cascade), its resume attachment rows and, once committed and when no other
 attachment uses it, the stored file; writes a `Deleted lead` audit entry.
 

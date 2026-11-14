@@ -491,7 +491,7 @@ def test_report_survives_missing_lead_tables(desk):
     assert all(p["leads"]["available"] is False for p in data["staff"])
     assert [p["key"] for p in person(data, "asha")["scoreParts"]] == ["tasks", "hours", "stages"]
     assert any("Lead sheet tables are not in this database" in n for n in data["notes"])
-    assert "Leads by staff" in [name for name, _rows in staff_weekly_export.sheets(data)]
+    assert "Leads by recruiter" in [name for name, _rows in staff_weekly_export.sheets(data)]
 
 
 # ------------------------------------------------------------------ queries, permissions, export
@@ -564,17 +564,17 @@ def test_exports_are_real_files_with_the_report_content(api):
     assert 'filename="staff-weekly-2026-11-02-2026-11-08.xlsx"' in book.headers["content-disposition"]
     with ZipFile(BytesIO(book.content)) as archive:
         workbook = archive.read("xl/workbook.xml").decode()
-        for name in ("Staff summary", "Day by day", "Stages by staff", "Leads by staff", "Team funnel", "Questions to ask"):
+        for name in ("Recruiter summary", "Day by day", "Stages by recruiter", "Leads by recruiter", "Team funnel", "Questions to ask"):
             assert name in workbook
         summary = archive.read("xl/worksheets/sheet2.xml").decode()
         assert "Asha" in summary and "No attendance" in summary and "Lead conversion %" in summary
         sheet_names = [part.split('"')[0] for part in workbook.split('<sheet name="')[1:]]
-        leads_sheet = archive.read(f"xl/worksheets/sheet{sheet_names.index('Leads by staff') + 1}.xml").decode()
+        leads_sheet = archive.read(f"xl/worksheets/sheet{sheet_names.index('Leads by recruiter') + 1}.xml").decode()
         assert "Assigned leads called" in leads_sheet and "Asha" in leads_sheet and "Ravi" in leads_sheet
     table = api.client.get("/api/reports/staff-weekly/export?format=csv")
     assert table.status_code == 200 and table.headers["content-type"].startswith("text/csv")
     body = table.content.decode("utf-8-sig").splitlines()
-    assert body[0].startswith("Staff,Attendance,Days worked") and len(body) == 4  # asha, meena, ravi
+    assert body[0].startswith("Recruiter,Attendance,Days worked") and len(body) == 4  # asha, meena, ravi
     assert any(line.startswith("Asha,Worked,3,1,") for line in body)
     assert body[0].endswith("Leads assigned,Assigned leads called,Lead calls logged,Leads worked,Leads interested,Resumes received,"
                             "Leads converted,Lead conversion %,Lead follow-ups overdue")

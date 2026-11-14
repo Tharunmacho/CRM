@@ -4,31 +4,32 @@ This module establishes who can see a record, who can change it and how a change
 
 ## Roles and access
 
-| Action | Admin | Manager | Staff |
+| Action | Admin | Manager | Recruiter |
 | --- | --- | --- | --- |
 | Read Data Bank and candidate summaries | All | All | All |
 | Create clients, designations and orders | Yes | Yes | Yes |
-| Add a candidate | Yes, may choose the recruiter | Yes, may choose the recruiter | Yes; assigned to the staff member who adds it |
+| Add a candidate | Yes, may choose the recruiter | Yes, may choose the recruiter | Yes; assigned to the recruiter who adds it |
 | Correct candidates, upload or replace their documents, record calls, edit the application form, map or unmap, work stages | Any candidate | Any candidate | Own assigned candidates |
-| Receive automatic candidate allocation | No | No | Eligible Staff only |
+| Receive automatic candidate allocation | No | No | Eligible Recruiters only |
 | Reassign candidates and open tasks | Yes | Yes | No |
 | Connect sources; manage users; reopen stages; reset SLA | Yes | No | No |
-| Reports | All staff | All staff | Own numbers |
+| Reports | All recruiters | All recruiters | Own numbers |
+| Service fee, CGST/SGST, invoices, receipts and the Reports > Fee collections tab ([candidate invoices](candidate-invoices.md)) | Yes | No: not shown, 403 from the server | No: not shown, 403 from the server |
 | Private personal to-dos | Own | Own | No access |
-| Staff Directory | Team | Team | No access |
-| Attendance | Employee oversight | Own and Staff oversight | Own |
+| Recruiter Directory | Team | Team | No access |
+| Attendance | Employee oversight | Own and Recruiter oversight | Own |
 
-Staff Directory and attendance are later approved additions. Private CRM mail drafts remain private to their author even from an Admin; shared provider folders follow the connected mailbox model. Candidate discovery does not confer permission to edit another recruiter's work: the server answers `403 This candidate is assigned to <name>. Only they, a manager or an admin can work on it.` and the screens show the same sentence on the disabled action. An admin reassigns a candidate at any time and the new recruiter takes over everything (tasks, daily work, reminders).
+Recruiter Directory and attendance are later approved additions. Private CRM mail drafts remain private to their author even from an Admin; shared provider folders follow the connected mailbox model. Candidate discovery does not confer permission to edit another recruiter's work: the server answers `403 This candidate is assigned to <name>. Only they, a manager or an admin can work on it.` and the screens show the same sentence on the disabled action. An admin reassigns a candidate at any time and the new recruiter takes over everything (tasks, daily work, reminders).
 
 ## User journey
 
 1. Open the CRM and sign in with an active account. A failed login shows an error and allows correction.
 2. Land on Dashboard. The sidebar presents only permitted sections; direct links must enforce the same permissions.
-3. Open Data Bank and inspect a candidate owned by another Staff member. Shared profile information remains readable, while restricted correction and stage actions are unavailable.
+3. Open Data Bank and inspect a candidate owned by another Recruiter. Shared profile information remains readable, while restricted correction and stage actions are unavailable.
 4. Make an authorized edit. The saved action records the actor, time, target and relevant change details.
 5. Log out. Reopening a protected route requires authentication. Admin force logout or account deactivation also invalidates the old session.
 
-The original sidebar specified Dashboard, Inbox, Clients, Jobs (formerly Jobs / Positions), Candidate (formerly Add Candidate), Data Bank, Tasks, To-do List, Reports and User Management. Current navigation also includes Companies, WhatsApp, Mapped Candidates, Attendance and Staff Directory. These extensions are documented rather than counted as literal ten-item parity.
+The original sidebar specified Dashboard, Inbox, Clients, Jobs (formerly Jobs / Positions), Candidate (formerly Add Candidate), Data Bank, Tasks, To-do List, Reports and User Management. Current navigation also includes Companies, WhatsApp, Mapped Candidates, Attendance and Recruiter Directory. These extensions are documented rather than counted as literal ten-item parity.
 
 ## Screen and backend contract
 
@@ -43,8 +44,8 @@ On session expiry, sign in again before retrying. A saved action followed by a f
 ## Acceptance checklist
 
 - [ ] Test the same protected URL with all three roles, including a direct API request.
-- [ ] Staff can discover another recruiter's candidate but cannot save its stage or correction.
-- [ ] Admin and Manager private to-dos remain separate; Staff cannot access either list.
+- [ ] Recruiters can discover another recruiter's candidate but cannot save its stage or correction.
+- [ ] Admin and Manager private to-dos remain separate; Recruiters cannot access either list.
 - [ ] A successful edit and a failed edit produce the correct audit outcome.
 - [ ] Logout, force logout and deactivation invalidate existing sessions.
 - [ ] Confirm the additional navigation and contact/company model as deliberate product choices.

@@ -34,7 +34,8 @@ export default function ReportsPage() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const supervisor = store.can('all_reports')
-  const report = reportTabFromParams(params, supervisor)
+  const invoices = store.can('view_invoices')
+  const report = reportTabFromParams(params, supervisor, invoices)
   const weeklyMode = store.can('staff_report') && report === 'staff'
   const collectionsMode = report === 'collections'
   // In the weekly report ?from=&to=&staff= mean its week and the open person; elsewhere they seed the Filters card.
@@ -96,11 +97,11 @@ export default function ReportsPage() {
   const Icon = ICONS[report]
   const busy = weeklyMode ? weekly.refreshing : refreshing
   return <div className="reports-page rv">
-    <PageHeader title="Reports" description={supervisor ? 'Recruitment progress, team activity and candidate fee collections.' : 'How your recruitment is going, how busy you are, and advance money collected.'} actions={collectionsMode ? undefined :
+    <PageHeader title="Reports" description={invoices ? 'Recruitment progress, team activity and candidate fee collections.' : supervisor ? 'Recruitment progress and team activity.' : 'How your recruitment is going, how busy you are, and advance money collected.'} actions={collectionsMode ? undefined :
       <Button size="sm" icon={<RefreshCw size={14} className={busy ? 'animate-spin' : undefined} />} disabled={busy} onClick={weeklyMode ? weekly.refresh : refresh}>{busy ? 'Refreshing' : 'Refresh'}</Button>} />
 
     <section className="rv-card rv-report-head" aria-label="Choose a report">
-      <Tabs tabs={REPORTS.filter(item => supervisor || item.key !== 'collections').map(item => ({ key: item.key, label: item.label }))} active={report} onChange={chooseReport} />
+      <Tabs tabs={REPORTS.filter(item => invoices || item.key !== 'collections').map(item => ({ key: item.key, label: item.label }))} active={report} onChange={chooseReport} />
       <header>
         <div className="rv-report-title"><span className="rv-icon is-lg"><Icon size={20} strokeWidth={1.8} /></span><div><h2>{copy.title}</h2><p>{copy.note}</p></div></div>
         {collectionsMode ? null : weeklyMode ? <StaffWeeklyExport weekly={weekly} /> : <div className="rv-export">
@@ -149,8 +150,8 @@ export default function ReportsPage() {
             <label>To<Input type="date" aria-label="To date" value={filters.to_date} min={filters.from_date} onChange={e => update('to_date', e.target.value)} /></label>
             {FIELDS.map(([key, label, group]) => <label key={key}>{label}<Select aria-label={label} value={filters[key]} onChange={e => update(key, e.target.value)}><option value="">All {label.toLowerCase()}s</option>{options?.[group].map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></label>)}
             {supervisor
-              ? <label>Staff<Select aria-label="Staff" value={filters.staff_id} onChange={e => update('staff_id', e.target.value)}><option value="">All staff</option>{options?.staff.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></label>
-              : <div className="rv-own"><span>Staff</span><p title={`Reports are limited to ${store.me.name}`}><Lock size={14} aria-hidden="true" /><span>Only you</span></p></div>}
+              ? <label>Recruiter<Select aria-label="Recruiter" value={filters.staff_id} onChange={e => update('staff_id', e.target.value)}><option value="">All recruiters</option>{options?.staff.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</Select></label>
+              : <div className="rv-own"><span>Recruiter</span><p title={`Reports are limited to ${store.me.name}`}><Lock size={14} aria-hidden="true" /><span>Only you</span></p></div>}
           </div>
         </section>
 

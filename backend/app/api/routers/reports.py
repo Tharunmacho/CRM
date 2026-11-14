@@ -72,7 +72,7 @@ def staff_weekly_detail(staff_id: str, from_date: date | None = None, to_date: d
                         user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)):
     data = staff_weekly.build_report(db, from_date, to_date, get_settings().agency_timezone, staff_id=staff_id, with_candidates=True)
     if not data["staff"]:
-        raise HTTPException(404, "Staff member not found.")
+        raise HTTPException(404, "Recruiter not found.")
     return data
 
 
@@ -100,7 +100,7 @@ def export_report(report: str, format: Literal["xlsx", "pdf"], filters: Filters 
 @dashboard_router.get("")
 def dashboard(request: Request, staff_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if user.role not in ("admin", "manager") and staff_id not in (None, "", user.id):
-        raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
+        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
     zone = get_settings().agency_timezone
 
     def build() -> Encoded:
@@ -124,7 +124,7 @@ def dashboard_lead_list(card: Literal["newToday", "notContacted", "followUpsDue"
                         user: User = Depends(current_user), db: Session = Depends(get_db)):
     """The few leads behind one dashboard lead card. Same scope rule as the dashboard itself: staff see their own leads."""
     if user.role not in ("admin", "manager") and staff_id not in (None, "", user.id):
-        raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
+        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
     zone = get_settings().agency_timezone
     now = datetime.now(ZoneInfo(zone))
     key = ("dashboard-leads", scope_of(db), user.id, user.role.value, staff_id or None, card, period, zone)

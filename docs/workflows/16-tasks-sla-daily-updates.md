@@ -4,7 +4,7 @@ Tasks tell each recruiter what must happen next for a candidate, when it is due 
 
 ## Roles and preparation
 
-Staff work their own tasks. Admin and Manager can inspect team work, add supervisor remarks and reassign candidates with their open tasks. Only Admin can reset a deadline or change escalation reminder settings. Viewing a shared candidate profile does not authorize Staff to modify another recruiter's task.
+Recruiters work their own tasks. Admin and Manager can inspect team work, add supervisor remarks and reassign candidates with their open tasks. Only Admin can reset a deadline or change escalation reminder settings. Viewing a shared candidate profile does not authorize Recruiters to modify another recruiter's task.
 
 A candidate, application or medical follow-up must exist before its task exists. Recruitment tasks are created by the system; users do not create them freely or complete them with a checkbox. The workflow worker must run for escalations, historical missing-update checks and notification delivery.
 
@@ -23,13 +23,13 @@ An Admin reopen cancels obsolete downstream work and creates appropriate current
 
 ## User journey
 
-1. Open **Tasks** from the sidebar, a dashboard card, Staff Directory count or bell notification. Confirm the employee, stage or historical date shown above the list; these links can open a filtered view.
-2. Start with **Overdue** and **Due today**, then review **Open**. Initial-call and missing-update views provide more focused queues. Supervisors can choose a staff member and inspect escalated work. **Completed** supports an inclusive completion-date range; that range does not hide current open work.
+1. Open **Tasks** from the sidebar, a dashboard card, Recruiter Directory count or bell notification. Confirm the employee, stage or historical date shown above the list; these links can open a filtered view.
+2. Start with **Overdue** and **Due today**, then review **Open**. Initial-call and missing-update views provide more focused queues. Supervisors can choose a recruiter and inspect escalated work. **Completed** supports an inclusive completion-date range; that range does not hide current open work.
 3. Inspect candidate, order, stage, owner, creation time, due time and time remaining. Open the task to reach its initial-call action or the matching application stage. A stage task must not open an unrelated candidate or order.
 4. Carry out the recruitment action and save its outcome in the call or stage workflow. Saving a draft, uploading a document or writing a daily remark does not by itself complete a stage task. A successful stage transition closes the matching task and creates the next one in the same workflow transaction.
 5. For every task still open, open **Daily updates**, write what happened today and choose **Add remark**. The stage modal also exposes the task's daily remarks. Examples include “Called; candidate will send the passport tomorrow” or “Waiting for client feedback.”
 6. Read the timestamped history to confirm the remark saved. Remarks cannot be edited or deleted. Only a remark by the task owner satisfies that owner's daily-update requirement; a supervisor's note remains useful history but does not substitute for it.
-7. As a supervisor, open an escalation notification and inspect the overdue task. Use **Reassign** if another recruiter should take responsibility, select an eligible Staff member and enter a reason. All open tasks belonging to the selected candidate move together; completed work remains unchanged.
+7. As a supervisor, open an escalation notification and inspect the overdue task. Use **Reassign** if another recruiter should take responsibility, select an eligible Recruiter and enter a reason. All open tasks belonging to the selected candidate move together; completed work remains unchanged.
 8. Only when a new deadline is explicitly justified, Admin chooses **Reset SLA**, enters a reason and confirms. This starts a new 48-hour window and retains the previous escalation and reset history. An ordinary transfer does not reset the clock.
 9. Open **Completed** or the candidate history to verify the result. A notification for a task already completed or cancelled explains its current state and offers the relevant completed task or candidate history instead of presenting an actionable open task.
 
@@ -57,7 +57,7 @@ Manual reassignment, account-deactivation/demotion transfers and attendance cove
 
 Cancel a remark or reset dialog before saving to leave existing records unchanged. A failed remark save retains the entered text. A successful deadline reset followed by a failed list refresh reports that the reset saved; refresh the list before repeating it. If another user changed ownership or completed the task, refresh and work from the new state instead of forcing the stale action.
 
-Assignments link to [Staff Directory](11-staff-assignment-directory.md), completed actions to the candidate/application history, and persisted escalation/missing-update events to [Reports](17-reports.md). Bell **read** and **read all** affect the current recipient's notification state; they do not complete a task or erase an escalation.
+Assignments link to [Recruiter Directory](11-staff-assignment-directory.md), completed actions to the candidate/application history, and persisted escalation/missing-update events to [Reports](17-reports.md). Bell **read** and **read all** affect the current recipient's notification state; they do not complete a task or erase an escalation.
 
 ## Acceptance checklist
 
@@ -66,7 +66,7 @@ Assignments link to [Staff Directory](11-staff-assignment-directory.md), complet
 - [ ] Check a task exactly at its deadline and immediately after it; only the latter is overdue.
 - [ ] Run repeated scheduler checks and verify one initial escalation, with 24-hour repeats only when enabled.
 - [ ] Transfer an overdue candidate and verify deadlines, remarks and completed work remain unchanged.
-- [ ] Reset as Admin with a reason; reject the same request as Manager or Staff.
+- [ ] Reset as Admin with a reason; reject the same request as Manager or Recruiter.
 - [ ] Add an owner remark and clear today's badge; add only a supervisor remark and keep the requirement outstanding.
 - [ ] Cross the agency day boundary, including a completed-day task and a later reassignment, and verify historical alerts and report attribution.
 - [ ] Open old, completed, cancelled and inaccessible notification links; verify understandable states and permitted actions.
@@ -78,15 +78,17 @@ Task generation, stage-linked closure, daily remarks, recorded history, supervis
 
 Implementation: [Tasks screen](../../frontend/src/screens/tasks/tasks.tsx), [workflow API](../../backend/app/api/routers/workflow.py), [task scheduler](../../backend/app/services/workflow_scheduler.py), [data and reassignment API](../../backend/app/api/routers/data.py).
 
-## Daily work quota and goals
+## Today's candidates, Follow-up and Travelled
 
-The Tasks page opens on **Daily work**: each active Staff recruiter is handed a fixed number of candidates every working day (agency default 5: 3 morning slots and 2 evening slots, one candidate per hour). The data contract for reports is in [tasks-data-contract.md](tasks-data-contract.md).
+The Tasks page has three buckets in a tab strip, and a candidate moves between them without a manual step: **Today's candidates** (the page it opens on; the count is in the tab label) is the recruiter's own prescreening still to do, **Follow-up** (count in the label) is the recruiter's candidates whose application is active at stage 2 to 11 (stalest update first, with a Recruiter column and an All recruiters filter for admin and manager), and **Travelled** links to the Travelled screen where a candidate appears once stage 11 completes and the application is deployed. Finishing prescreening (stage 1) moves a candidate from Today's candidates to Follow-up; a negative exit (rejected at interview, offer declined or not received, medically unfit, not interested, unmapped) closes the application and removes the candidate from Follow-up. The rest of this section describes Today's candidates.
 
-* **Allocation is automatic and every working staff member always gets their goal if they have the candidates.** Priority: (1) the oldest open application-stage tasks they own, then (2) candidates they own that are not matched to an order (status new or in process): never-called ones first, then those already called and interested, who stay on the list until matched; never deployed, not interested or ownerless candidates, and nobody twice in one day. Client, Country and Job show a dash (or the form's preferred job) for the second kind, Stage reads "Initial call / Not matched to an order", and Open takes the recruiter to the candidate. When someone has fewer candidates than the goal the screen and the admin staff board say why, so the admin can assign candidates from the Data Bank. Opening Tasks, the supervisor view and the workflow worker (every minute) top the day up; a day off (leave, holiday or weekly off, Sunday by default) gets none. Slot deadlines follow the recruiter's shift: with the default 10:00-19:00 shift and a one-hour break they are 11:00, 12:00, 13:00, 15:00 and 16:00.
-* **Completion is the real workflow.** A stage item is finished when its stage task is completed (the same transaction records it); an owned-candidate item when the initial call is recorded with an outcome after it was allocated (an unanswered call does not count) or the candidate is matched and a stage is completed. There is no checkbox. Unmapping, closing, reopening or reassigning releases the item and a replacement is drawn.
-* **Carry-over.** Unfinished items stay on the list, marked Postponed with the number of days late and shown first, next to the new day's full quota: finishing 4 of 5 gives 1 postponed + 5 new = 6 the next working day. Nothing is capped or dropped, and the backlog count is shown.
-* **Alerts.** A countdown per item turns amber in the last 15 minutes and red when late; a banner asks Staff to "Complete your tasks first" on every page while today's list is unfinished (it can be hidden for 30 minutes and returns when another deadline is missed). The worker sends the owner a bell notice per missed hourly slot, and the owner and Admin/Manager one grouped notice when work is carried into a new day.
-* **Goals.** "Today's goals" shows candidates (morning/evening bars and hourly checkpoints), forwarded to client and stage moves against targets stored in `workflow_daily_goals`. Admin sets the agency default and per-person goals under **Set goals**; Manager can see them. Progress is computed from the real records and a per-day snapshot is kept in `workflow_daily_goal_progress`.
-* **Supervisors** see every recruiter's progress (candidates, morning/evening, forwarded, stage moves, postponed, overdue, next deadline) with a staff filter; Staff see only their own list.
+Today's candidates is one flat list of the signed-in recruiter's **own candidates that still need prescreening** (status new, in process or needs review; no application yet, or one at stage 1). There is no daily quota, no morning or evening split, no hourly slots, no deadlines and no countdowns, and nothing is postponed or carried over: recruiters work the list in whatever order and at whatever time suits them. The data contract is in [tasks-data-contract.md](tasks-data-contract.md).
 
-Implementation: [daily_work service](../../backend/app/services/daily_work.py), [daily work API](../../backend/app/api/routers/daily_work.py), [Daily work screen](../../frontend/src/screens/tasks/daily-work.tsx), migration `0020_daily_work_quota`.
+* **Who is listed.** Only candidates owned by the recruiter; deployed, not-interested, ownerless and other recruiters' candidates are never shown. A candidate flagged for review after the admin assigned it is still the recruiter's to work. The list is computed live on every read, so an assignment or reassignment shows at once.
+* **Order.** Candidates with prescreening waiting first (the longest waiting first), then the newest assigned. Candidates whose prescreening the recruiter finished today, or whose call got an answer today, move to a **Done today** group at the bottom (counted, latest first); a finished candidate is in Follow-up from then on.
+* **Columns.** S.No, Client, Country, Candidate (Care India ID, then the CND reference muted), Job, Referral, Stage, Remarks and Actions; Admin and Manager also get a Recruiter column. **Complete** (a candidate on an order) opens the stage; **Open** (not matched yet) goes to the application form; the row menu has Open candidate profile and Open stage; remarks are the same as the 48-hour list's.
+* **Header.** "Today's candidates" with "12 to work · 3 done today". The Tasks menu badge shows the same "to work" count for a recruiter.
+* **Supervisors.** Admin and Manager see everyone's candidates under "Everyone's candidates" with a per-recruiter board ("N to work · M done today", most to work first) and an **All recruiters** filter (Follow-up has the same filter); selecting a recruiter shows only theirs.
+* **Not changed.** The 48-hour Task rows, their SLA, escalations, daily remarks and the Tasks Open / Due today / Overdue list (above) are a separate feature. The admin daily-goal settings and tables stay in the database but the screen no longer uses them; the weekly recruiter report keeps reading the stage-move target. The "Complete your tasks first" banner and the overdue and carried-over bell notices are gone.
+
+Implementation: [daily_work service](../../backend/app/services/daily_work.py), [daily work API](../../backend/app/api/routers/daily_work.py), [Daily work screen](../../frontend/src/screens/tasks/daily-work.tsx).

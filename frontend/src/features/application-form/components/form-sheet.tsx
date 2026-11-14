@@ -27,7 +27,7 @@ export function FormSheet({
   const hasOrder = Boolean(form.application)
   return (
     <div className="af-sheet">
-      <Letterhead header={form.header} photo={form.documents.photo.current} reference={form.candidate.ref} assignment={form.assignment} />
+      <Letterhead header={form.header} photo={form.documents.photo.current} candidate={form.candidate} assignment={form.assignment} />
       <PersonalSection ctx={ctx} missing={bySection.get(1) ?? []} />
       <PassportSection ctx={ctx} missing={bySection.get(2) ?? []} />
       <EducationSection ctx={ctx} missing={bySection.get(3) ?? []} />

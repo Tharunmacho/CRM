@@ -52,7 +52,7 @@ def env(schema_database, tmp_path, monkeypatch):
         ocr_languages="eng", ocr_max_pages=300, ocr_page_timeout_seconds=20, ocr_document_timeout_seconds=600,
         veris_ocr_base_url="", veris_ocr_api_key="")
     environment = SimpleNamespace(sessions=sessions, settings=settings, admin=admin, staff=staff, other=other,
-        actor=SimpleNamespace(id=admin, role=Role.admin))
+        actor=SimpleNamespace(id=admin, role=Role.admin, name="Admin"))
     monkeypatch.setattr(api, "get_settings", lambda: settings)
     monkeypatch.setattr(document_jobs, "get_settings", lambda: settings)
     monkeypatch.setattr(inspection, "find_tesseract", lambda *_: None)
@@ -154,7 +154,7 @@ def test_manual_owner_scope_and_authenticated_previews(env):
     preview = env.client.get(bundle["pages"][0]["previewUrl"])
     assert preview.status_code == 200 and "private" in preview.headers["cache-control"]
     with fitz.open(stream=preview.content, filetype="pdf") as page: assert page.page_count == 1
-    env.actor = SimpleNamespace(id=env.other, role=Role.staff)
+    env.actor = SimpleNamespace(id=env.other, role=Role.staff, name="Synthetic reviewer")
     assert env.client.get('/api/document-bundles/' + bundle["id"]).status_code == 404
     assert env.client.get(bundle["pages"][0]["previewUrl"]).status_code == 404
     assert commit(env, bundle).status_code == 404
@@ -206,7 +206,7 @@ def test_duplicate_requires_explicit_merge_and_retains_owner_work(env):
 
 
 def test_only_the_owner_a_manager_or_an_admin_can_combine_a_duplicate(env):
-    env.actor = SimpleNamespace(id=env.other, role=Role.staff)
+    env.actor = SimpleNamespace(id=env.other, role=Role.staff, name="Synthetic reviewer")
     bundle = prepare(env)
     identifier = str(uuid4())
     with env.sessions() as db:
@@ -294,19 +294,19 @@ def test_shared_source_admin_review_completion_and_staff_forbidden(env, kind):
             db.add(WhatsAppChannel(phone_number_id="synthetic-business", enabled=True)); db.flush()
             db.add(WhatsAppMessage(id=identifier, provider_message_id="synthetic", phone_number_id="synthetic-business", sender_number="919999999999", received_at=datetime.now(timezone.utc), message_type="document", file_name="people.pdf", object_key=key, content_hash=digest, content_type="application/pdf", status="needs_review"))
         db.commit()
-    env.actor = SimpleNamespace(id=env.staff, role=Role.staff)
+    env.actor = SimpleNamespace(id=env.staff, role=Role.staff, name="Synthetic reviewer")
     assert env.client.post('/api/document-bundles', json={"sourceType": kind, "sourceId": identifier}).status_code == 403
-    env.actor = SimpleNamespace(id=env.admin, role=Role.admin)
+    env.actor = SimpleNamespace(id=env.admin, role=Role.admin, name="Synthetic reviewer")
     response = env.client.post('/api/document-bundles', json={"sourceType": kind, "sourceId": identifier})
     assert response.status_code == 202, response.text
     review = response.json(); subject.process_bundle(review["id"], sessions=env.sessions, settings=env.settings)
     review = env.client.get('/api/document-bundles/' + review["id"]).json()
     assert review["status"] == "review"
-    env.actor = SimpleNamespace(id=env.staff, role=Role.staff)
+    env.actor = SimpleNamespace(id=env.staff, role=Role.staff, name="Synthetic reviewer")
     assert env.client.get('/api/document-bundles/' + review["id"]).status_code == 200
     assert env.client.put('/api/document-bundles/' + review["id"] + '/review', json=payload(review)).status_code == 403
     assert commit(env, review).status_code == 403
-    env.actor = SimpleNamespace(id=env.admin, role=Role.admin)
+    env.actor = SimpleNamespace(id=env.admin, role=Role.admin, name="Synthetic reviewer")
     saved = commit(env, review); assert saved.status_code == 200, saved.text
     assert len(saved.json()["candidateIds"]) == 2
     if kind == "email":
@@ -403,7 +403,7 @@ def test_provider_acceptance_checkpoint_survives_review_reservation(env, monkeyp
 
 
 def test_completed_manual_history_recovers_exact_original_for_uploader_only(env):
-    env.actor = SimpleNamespace(id=env.staff, role=Role.staff)
+    env.actor = SimpleNamespace(id=env.staff, role=Role.staff, name="Synthetic reviewer")
     bundle = prepare(env)
     with env.sessions() as db:
         original = read_bytes(env.settings, db.get(DocumentExtractionJob, bundle["jobId"]).object_key)
@@ -430,7 +430,7 @@ def test_completed_manual_history_recovers_exact_original_for_uploader_only(env)
         db.add(unrelated); db.commit(); unrelated_id = unrelated.id
     assert env.client.get(f'/api/document-bundles/candidates/{unrelated_id}/sources').json()["reviews"] == []
     for identifier, role in [(env.other, Role.staff), (env.admin, Role.admin)]:
-        env.actor = SimpleNamespace(id=identifier, role=role)
+        env.actor = SimpleNamespace(id=identifier, role=role, name="Synthetic reviewer")
         assert env.client.get(f'/api/document-bundles/candidates/{saved["candidateIds"][0]}/sources').json()["reviews"] == []
         assert env.client.get(history[0]["originals"][0]["url"]).status_code == 404
         assert env.client.get('/api/document-bundles/' + bundle["id"]).status_code == 404

@@ -122,6 +122,7 @@ IGNORED_TABLES = frozenset({
     "email_oauth_states",         # short-lived consent handshakes
     "crm_worker_heartbeats",      # reading workers report in every few seconds; no screen shows the rows
     "crm_candidate_fiscal_counters",  # Care India ID serial per financial year; the candidate row it numbers announces itself
+    "crm_traveller_fiscal_counters",  # Traveller ID serial per financial year of the travel date; the candidate row it numbers announces itself
 })
 
 # Columns that workers rewrite continuously (heartbeats, retry clocks, OCR checkpoints). An UPDATE that sets only

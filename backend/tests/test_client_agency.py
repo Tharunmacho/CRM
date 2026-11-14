@@ -207,7 +207,7 @@ def test_put_replaces_the_team_and_staff_but_keeps_what_it_does_not_mention(env)
 
 
 @pytest.mark.parametrize("staff_ids,fragment", [
-    (["nobody"], "not a CRM user"), (["gone"], "deactivated"), (["admin"], "only staff or managers"),
+    (["nobody"], "not a CRM user"), (["gone"], "deactivated"), (["admin"], "only recruiters or managers"),
 ])
 def test_staff_ids_must_be_active_staff_or_managers(env, staff_ids, fragment):
     rejected = env.client.post("/api/clients", json={"name": "N", "company": {"name": "C"}, "staffIds": ["s1", *staff_ids]})
@@ -469,9 +469,12 @@ def test_mapping_hands_the_candidate_to_the_least_loaded_client_staff_member(env
     history = env.client.get(f"/api/candidates/{candidate.id}/assignment-history").json()["items"]
     assert len(history) == 1 and history[0]["fromUserId"] == "s3" and history[0]["toUserId"] == "s2" and history[0]["actorId"] == "s3"
     assert "Synthetic contact" in history[0]["reason"] and order["ref"] in history[0]["reason"]
-    # The new owner and the admin are told; nobody else.
-    notices = env.db.scalars(select(m.Notification).where(m.Notification.link_to == f"/candidates/{candidate.id}", m.Notification.kind == "assignment")).all()
-    assert {n.user_id for n in notices} == {"s2", "admin"} and all("Candidate assigned" == n.title for n in notices)
+    # Only the new owner is told, in plain English, that a rule (not a person) gave it to them; the previous owner made the
+    # move themselves and the admins get no copy of a routine assignment.
+    notices = env.db.scalars(select(m.Notification).where(m.Notification.link_to == f"/candidates/{candidate.id}/application",
+                                                          m.Notification.kind == "candidate_assigned")).all()
+    assert [n.user_id for n in notices] == ["s2"] and notices[0].title == "New candidate assigned to you"
+    assert "was assigned to you because you look after" in notices[0].detail and order["ref"] in notices[0].detail
     # Open tasks followed the candidate.
     assert {t.owner_id for t in env.db.scalars(select(m.Task).where(m.Task.candidate_id == candidate.id, m.Task.cancelled_at.is_(None)))} == {"s2"}
     assert env.db.scalar(select(func.count()).select_from(m.TaskEvent).where(m.TaskEvent.kind == "assignment")) >= 1
@@ -573,7 +576,8 @@ def test_manual_entry_with_a_matching_designation_goes_to_the_clients_staff(env)
     assert task.owner_id == "s3"
     saved = env.db.get(m.Candidate, routed["id"])
     assert saved.owner_id == saved.intake_owner_id == "s3"
-    assert {n.user_id for n in env.db.scalars(select(m.Notification).where(m.Notification.link_to == f"/candidates/{saved.id}"))} == {"s3", "admin"}
+    # Only the client's staff member is told; the admin who added it is not notified of their own action.
+    assert {n.user_id for n in env.db.scalars(select(m.Notification).where(m.Notification.link_to == f"/candidates/{saved.id}/application"))} == {"s3"}
     pointer = env.db.get(m.AssignmentPointer, 1)
     assert pointer is None or pointer.last_user_id is None  # the round-robin did not move
 

@@ -11,7 +11,7 @@ from app.api.routers import candidates, travelled
 from app.db.models import Attachment, AuditEntry, Candidate, CandidateStatus, DocumentExtractionJob
 from app.services import application_form, candidate_search, form_extraction as fx, manual_extraction
 from app.services.candidate_review import clear_resolved_document_review, record_review_flag, resolve_document_review_flag, review_reasons
-from app.services.document_identity import IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION
+from app.services.document_identity import IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION, IDENTITY_REVIEW_MESSAGE
 from app.services.desk_snapshot import read_snapshot
 from test_application_form import desk, form, upload, url
 from test_candidate_exports import exports, get, sheets, add_file

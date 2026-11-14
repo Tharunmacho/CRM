@@ -277,7 +277,7 @@ export interface OptionalDocument { slot: string; label: string; uploaded: boole
 export interface ApplicationFormData {
   capabilities?: { deferredDocumentReading: boolean }
   header: { company: string; title: string; address: string; phone: string; email: string }
-  candidate: { id: string; ref: string; careId?: string | null; name: string; status: string; needsReview: boolean; ownerId: string; ownerName: string; updatedAt: string; canEdit: boolean }
+  candidate: { id: string; ref: string; careId?: string | null; travellerId?: string | null; name: string; status: string; needsReview: boolean; ownerId: string; ownerName: string; updatedAt: string; canEdit: boolean }
   application: ApplicationRef | null
   applications: ApplicationRef[]
   personal: PersonalDetails

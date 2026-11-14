@@ -213,7 +213,8 @@ def enrich_fixture(engine):
         )
         connection.execute(
             Notification.__table__.update().values(
-                created_at=STAMP, detail="Assignment detail", link_to="/tasks"
+                # The seeded row predates the per-person kinds; the retired "assignment" kind is no longer shown on the bell.
+                created_at=STAMP, detail="Assignment detail", link_to="/tasks", kind="candidate_assigned"
             )
         )
         connection.execute(
@@ -226,7 +227,7 @@ def enrich_fixture(engine):
                 },
                 {
                     "id": "other-notification", "user_id": "schema-staff",
-                    "kind": "assignment", "title": "Other user's notification",
+                    "kind": "candidate_assigned", "title": "Other user's notification",
                     "created_at": STAMP, "read": False,
                 },
             ],

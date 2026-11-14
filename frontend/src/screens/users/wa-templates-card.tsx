@@ -56,7 +56,7 @@ export function WaTemplatesCard({ editable }: { editable: boolean }) {
 
   return <Panel flush className="uv-panel as-categories">
     <PanelHead id="as-wa-title" title="Lead sheet WhatsApp templates"
-      description={<>The messages the green WhatsApp button offers on the Lead sheet. Use {WA_PLACEHOLDERS.map((token) => <span className="lwa-chip" key={token}>{token}</span>)} and each lead's own details are filled in. Staff can still edit the text before they send it.</>} />
+      description={<>The messages the green WhatsApp button offers on the Lead sheet. Use {WA_PLACEHOLDERS.map((token) => <span className="lwa-chip" key={token}>{token}</span>)} and each lead's own details are filled in. Recruiters can still edit the text before they send it.</>} />
     {error && <p role="alert" className="uv-error as-inline">{error}</p>}
     {!saved && !error && <p className="as-inline uv-note">Loading the templates…</p>}
     {saved && <div className="lwa-set">

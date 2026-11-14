@@ -172,7 +172,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
       render: (u) => u.role === 'staff' && u.active ? <div className="uv-flags">
         <label className={cn(flagText.muted && 'is-muted')} title={flagText.note || undefined}><span>Auto-assign</span><Switch checked={u.receivesAutoAssign} disabled={!!pending} label={flagText.label + ': ' + u.name} compact onChange={(on) => void changeFlag(u, { receivesAutoAssign: on })} /></label>
         <label><span>On leave</span><Switch checked={u.onLeave} disabled={!!pending} label={'On leave: ' + u.name} compact onChange={(on) => void changeFlag(u, { onLeave: on })} /></label>
-      </div> : <span className="uv-none">{u.role !== 'staff' ? 'Staff only' : 'Account inactive'}</span>,
+      </div> : <span className="uv-none">{u.role !== 'staff' ? 'Recruiters only' : 'Account inactive'}</span>,
     },
     {
       key: 'work', header: 'Open work', width: '12%', sortable: true, value: (u) => work(u.id).candidates + work(u.id).tasks,
@@ -209,7 +209,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
     <Panel flush className="uv-panel uv-rotation">
       <PanelHead id="uv-rotation-title" title="Candidate assignment"
-        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active staff who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or a manager assigns a recruiter. An admin can switch it on in Agency settings.'}
+        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active recruiters who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or a manager assigns a recruiter. An admin can switch it on in Agency settings.'}
         actions={autoOn ? <><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></> : <Button size="sm" onClick={() => setParams({ tab: 'agency' }, { replace: true })}>Agency settings</Button>} />
       {autoOn && <div className="uv-rotation-body" role="group" aria-labelledby="uv-rotation-title">
         {availability.loading ? <p role="status" className="uv-note">Checking who is free…</p>
@@ -218,7 +218,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
             <div className="uv-rotation-group">
               <h3>Getting new candidates</h3>
               {eligible.length ? <div className="uv-rotation-list">{eligible.map((u) => <span key={u.id} className="uv-rotation-chip" title={u.name + ' · ' + work(u.id).candidates + ' candidates'}><UserAvatar name={u.name} size="sm" /><span>{u.name}</span><small>{work(u.id).candidates}</small></span>)}</div>
-                : <p role="status" className="uv-warn">No staff can be given new candidates automatically right now. Check leave and the switches in the table.</p>}
+                : <p role="status" className="uv-warn">No recruiters can be given new candidates automatically right now. Check leave and the switches in the table.</p>}
             </div>
             {onLeave.length > 0 && <div className="uv-rotation-group">
               <h3>Paused</h3>
@@ -237,11 +237,11 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
       <Tabs tabs={STATUS_TABS} active={statusFilter} onChange={(key) => setStatusFilter(key as StatusFilter)} />
       <div className={cn('uv-toolbar', filtered && 'has-clear')}>
         <SearchInput value={query} onChange={setQuery} placeholder="Search name, email or phone" />
-        <Select aria-label="Filter by role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as 'all' | Role)}><option value="all">All roles</option><option value="admin">Admin</option><option value="manager">Manager</option><option value="staff">Staff</option></Select>
+        <Select aria-label="Filter by role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as 'all' | Role)}><option value="all">All roles</option><option value="admin">Admin</option><option value="manager">Manager</option><option value="staff">Recruiter</option></Select>
         <div className="uv-sort-narrow"><Select aria-label="Sort team members" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}><option value="name">Sort: Name</option><option value="role">Sort: Role</option><option value="work">Sort: Open work</option></Select></div>
         {filtered && <Button variant="ghost" onClick={clearFilters}>Clear filters</Button>}
       </div>
-      {!autoOn && <p className="uv-assignment-note">Automatic assignment is off. Staff preferences below are saved for when it is enabled.</p>}
+      {!autoOn && <p className="uv-assignment-note">Automatic assignment is off. Recruiter preferences below are saved for when it is enabled.</p>}
       <DataTable compact plain stackBelow={1280} pageSize={PAGE_SIZE} rows={rows} columns={columns.map(column => ({ ...column, align: column.actions ? 'right' : 'left' }))} rowKey={(u) => u.id}
         resetPageKey={`${query}|${roleFilter}|${statusFilter}`} rowClassName={(u) => cn(!u.active && 'uv-row-off')}
         empty={<EmptyState title="No team members match" description="Try a different name, email or filter."

@@ -4,9 +4,9 @@ Manual entry saves to the same candidate records used by email and WhatsApp. Sav
 
 ## Roles and preparation
 
-All authenticated roles can add candidates. **Whoever adds a candidate as staff is the owner**: the candidate is assigned to that staff member (not to the next free recruiter) and they do the work and complete the stages. Admin and manager adding a candidate choose the recruiter on the page, or leave it on Automatic (next free recruiter). Email and WhatsApp intake keep the automatic round-robin.
+All authenticated roles can add candidates. **Whoever adds a candidate as a recruiter is the owner**: the candidate is assigned to that recruiter (not to the next free recruiter) and they do the work and complete the stages. Admin and manager adding a candidate choose the recruiter on the page, or leave it on Automatic (next free recruiter). Email and WhatsApp intake keep the automatic round-robin.
 
-**Who may work a candidate.** Every signed-in user can *see* every candidate. Only the assigned recruiter, a manager or an admin can change its details, add or replace its documents, record the initial call, match it to an order, save/complete stages and edit its application form; any other staff member gets `403 This candidate is assigned to <name>. Only they, a manager or an admin can work on it.` and the screens show the same sentence on disabled buttons. Reopening a finished stage is admin only. An admin (or manager) can reassign one or many candidates at any time; open tasks, daily-work items, the follow-up reminder and the notices move with the candidate and the audit log records who moved it, from whom, to whom and why. Prepare the candidate's identity/contact details and any resume, passport, photo, education or experience documents.
+**Who may work a candidate.** Every signed-in user can *see* every candidate. Only the assigned recruiter, a manager or an admin can change its details, add or replace its documents, record the initial call, match it to an order, save/complete stages and edit its application form; any other recruiter gets `403 This candidate is assigned to <name>. Only they, a manager or an admin can work on it.` and the screens show the same sentence on disabled buttons. Reopening a finished stage is admin only. An admin (or manager) can reassign one or many candidates at any time; open tasks, daily-work items, the follow-up reminder and the notices move with the candidate and the audit log records who moved it, from whom, to whom and why. Prepare the candidate's identity/contact details and any resume, passport, photo, education or experience documents.
 
 ## User journey
 
@@ -17,7 +17,7 @@ All authenticated roles can add candidates. **Whoever adds a candidate as staff 
 5. Attach the requested supporting documents. The adopted Aadhaar input is an additional supported identity document, not an original PDF requirement.
 6. Correct extraction suggestions before save. Human edits must survive a later OCR result. A future birth date, unusable phone or inconsistent experience/date combination needs correction.
 7. Save. If phone, email **or** passport matches an existing person, inspect the duplicate dialog. Choose **Open**, **Merge** or **Cancel**. Do not pick an arbitrary record when different identifiers match different people.
-8. A merge fills empty fields and adds evidence; it does not replace human corrections, ownership or completed work. Only the existing candidate's recruiter, a manager or an admin may combine into it; another staff member is told who the candidate is assigned to and can only open it. A new save by staff is assigned to that staff member; a new save by admin or manager follows their choice or the [rotation](11-staff-assignment-directory.md).
+8. A merge fills empty fields and adds evidence; it does not replace human corrections, ownership or completed work. Only the existing candidate's recruiter, a manager or an admin may combine into it; another recruiter is told who the candidate is assigned to and can only open it. A new save by recruiters is assigned to that recruiter; a new save by admin or manager follows their choice or the [rotation](11-staff-assignment-directory.md).
 9. Open the saved profile. Review the actual owner, initial-call deadline, documents and next action. A supervisor can assign an unassigned profile; stage work starts only after [order matching](13-order-matching.md).
 
 ## Screen and backend contract
@@ -38,7 +38,7 @@ Cancel a duplicate decision without changing the existing profile. When switchin
 - [ ] Merge into a profile with human corrections and verify only empty fields change.
 - [ ] Lose the save response, recover the intake and verify one candidate, one assignment and one call task.
 - [ ] Switch between two saved drafts and verify complete separation of identity and edits.
-- [ ] Test no eligible staff, profile assignment and authorized/unauthorized correction.
+- [ ] Test no eligible recruiters, profile assignment and authorized/unauthorized correction.
 
 ## Current implementation and remaining acceptance
 

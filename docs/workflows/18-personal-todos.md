@@ -4,7 +4,7 @@ The To-do List lets Admin and Manager keep private follow-ups such as calling a 
 
 ## Roles and preparation
 
-Admin and Manager each have their own list. Staff do not have this menu or permission to create and update these items. One administrator cannot use this screen to browse another person's private reminders. Choose a due date/time and, if useful, identify an existing candidate, client or order to link.
+Admin and Manager each have their own list. Recruiters do not have this menu or permission to create and update these items. One administrator cannot use this screen to browse another person's private reminders. Choose a due date/time and, if useful, identify an existing candidate, client or order to link.
 
 The form uses the browser's local date/time and sends a timestamp with its timezone to the server. Check the displayed local time when working from a device in a different timezone. Reminder delivery requires the workflow worker; the visible bell also depends on the signed-in browser fetching notifications.
 
@@ -48,7 +48,7 @@ Linked candidate/client/order pages retain their normal workflow. Recruitment fo
 - [ ] Create an item with a title, notes, due time, priority and candidate/client/order link; reopen it and verify persistence.
 - [ ] Test Today, Upcoming, earlier-today Overdue and Done with known times.
 - [ ] Sign in as another Admin/Manager and verify the item does not appear; reject another owner's update request.
-- [ ] Confirm Staff cannot open the module or create/update an item through the API.
+- [ ] Confirm Recruiters cannot open the module or create/update an item through the API.
 - [ ] Complete and reopen an item; verify no candidate/task/stage status changes.
 - [ ] Let an open item become due and allow the worker scan plus bell-poll delay; verify one private notification.
 - [ ] Change the due time after a reminder and verify the new schedule can notify; reopening alone should not duplicate the original alert.

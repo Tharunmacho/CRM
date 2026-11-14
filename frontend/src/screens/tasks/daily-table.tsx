@@ -6,15 +6,16 @@ import { countryCode, flagSrc } from '@/shared/lib/country-flag'
 import { Button, Textarea } from '@/shared/ui/primitives'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
+import { careIdOf, secondaryId } from '@/features/candidates/candidate-ids'
 import {
-  clientCell, clockTime, countdownLabel, countryCell, countryShort, countryTone, dueTone, msUntil, positionCell, postponedLabel, referralLabel, sessionLabel,
+  clientCell, clockTime, countryCell, countryShort, countryTone, positionCell, referralLabel, rowAction,
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
 
-export interface DailyGroup { key: string; title: string; hint: string; icon: ReactNode; items: DailyItem[]; tone?: 'late' }
+export interface DailyGroup { key: string; title: string; hint: string; icon: ReactNode; items: DailyItem[]; tone?: 'done' }
 
-/** Column order and pixel widths (the table scrolls sideways below their sum; the staff column is for supervisors). */
+/** Column order and pixel widths (the table scrolls sideways below their sum; the recruiter column is for supervisors). No deadline column. */
 const COLUMNS = [
   { key: 'no', title: 'S.No', width: 44 },
   { key: 'client', title: 'Client', width: 98 },
@@ -22,10 +23,9 @@ const COLUMNS = [
   { key: 'candidate', title: 'Candidate', width: 146, left: true },
   { key: 'position', title: 'Job', width: 92 },
   { key: 'referral', title: 'Referral', width: 82 },
-  { key: 'staff', title: 'Staff', width: 96, supervisor: true },
+  { key: 'staff', title: 'Recruiter', width: 96, supervisor: true },
   { key: 'stage', title: 'Stage', width: 120 },
   { key: 'remarks', title: 'Remarks', width: 146, left: true },
-  { key: 'deadline', title: 'Deadline', width: 120 },
   { key: 'actions', title: 'Actions', width: 128 },
 ] as const
 
@@ -56,8 +56,6 @@ export function ScrollEdges({ children, label = 'Daily candidates, scroll sidewa
 
 export interface DailyTableProps {
   groups: DailyGroup[]
-  now: number
-  skew: number
   zone?: string
   supervisor: boolean
   staffName: (id: string) => string | undefined
@@ -67,8 +65,8 @@ export interface DailyTableProps {
   onRemark: (item: DailyItem, text: string) => Promise<void>
 }
 
-/** The daily list in the reference style: centred columns, hairline dividers, 76px rows, banded Postponed/Morning/Evening groups. */
-export function DailyTable({ groups, now, skew, zone, supervisor, staffName, canWork, onOpen, onProfile, onRemark }: DailyTableProps) {
+/** The daily list in the reference style: centred columns, hairline dividers, 76px rows, a "To work" band and a "Done today" band. */
+export function DailyTable({ groups, zone, supervisor, staffName, canWork, onOpen, onProfile, onRemark }: DailyTableProps) {
   const columns = COLUMNS.filter((c) => supervisor || !('supervisor' in c))
   let serial = 0
   return (
@@ -78,15 +76,15 @@ export function DailyTable({ groups, now, skew, zone, supervisor, staffName, can
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left')}>{c.title}</th>)}</tr></thead>
         <tbody>
           {groups.map((g) => <Fragment key={g.key}>
-            <tr className={cn('dw-group', g.tone === 'late' && 'is-late')}>
+            <tr className={cn('dw-group', g.tone === 'done' && 'is-done')}>
               <th colSpan={columns.length} scope="colgroup">
-                <span className="dw-group-title">{g.icon}{g.title}<b className="tnum">{g.items.filter((i) => i.status === 'open').length} open</b></span>
+                <span className="dw-group-title">{g.icon}{g.title}<b className="tnum">{g.items.length}</b></span>
                 <small>{g.hint}</small>
               </th>
             </tr>
             {g.items.map((item) => {
               serial += 1
-              return <ItemRow key={item.id} item={item} serial={serial} now={now} skew={skew} zone={zone} showStaff={supervisor}
+              return <ItemRow key={item.id} item={item} serial={serial} zone={zone} showStaff={supervisor}
                 staffName={staffName(item.ownerId)} canWork={canWork(item)} onOpen={() => onOpen(item)} onProfile={() => onProfile(item)}
                 onRemark={(text) => onRemark(item, text)} />
             })}
@@ -97,35 +95,25 @@ export function DailyTable({ groups, now, skew, zone, supervisor, staffName, can
   )
 }
 
-function ItemRow({ item, serial, now, skew, zone, showStaff, staffName, canWork, onOpen, onProfile, onRemark }: {
-  item: DailyItem; serial: number; now: number; skew: number; zone?: string; showStaff: boolean; staffName?: string
+function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, onProfile, onRemark }: {
+  item: DailyItem; serial: number; zone?: string; showStaff: boolean; staffName?: string
   canWork: boolean; onOpen: () => void; onProfile: () => void; onRemark: (text: string) => Promise<void>
 }) {
-  const tone = dueTone(item, now, skew)
   const done = item.status === 'done'
-  const left = msUntil(item.dueAt, now, skew)
-  const due = clockTime(item.dueAt, zone)
-  const action = done ? 'View' : item.applicationId ? 'Complete' : 'Open'
+  const action = rowAction(item)
   return (
-    <tr className={cn('dw-row', `is-${tone}`, item.postponed && 'is-postponed', serial % 2 === 0 && 'is-alt')}>
+    <tr className={cn('dw-row', done && 'is-done', serial % 2 === 0 && 'is-alt')}>
       <td className="is-num tnum" data-label="S.No">{serial}</td>
       <td data-label="Client"><ClientCell item={item} /></td>
       <td data-label="Country"><CountryCell item={item} onAdd={onProfile} /></td>
-      <td data-label="Candidate" className="is-left"><RecordIdentity name={item.candidate} detail={item.candidateRef} /></td>
+      <td data-label="Candidate" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
       <td data-label="Job"><PositionCellView item={item} /></td>
       <td data-label="Referral"><span className={cn('dw-ref', item.referral.source === 'referral' && 'is-referral')}>{referralLabel(item.referral)}</span></td>
-      {showStaff && <td data-label="Staff">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">Not assigned</span>}</td>}
+      {showStaff && <td data-label="Recruiter">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">Not assigned</span>}</td>}
       <td data-label="Stage"><StageCell item={item} /></td>
       <td data-label="Remarks" className="is-left"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
-      <td data-label="Deadline">
-        <div className={cn('dw-slot', `is-${tone}`)} title={`${item.postponed ? 'Was due' : 'Due'} ${due}`}>
-          <span className="dw-slot-label">{item.postponed ? postponedLabel(item.daysLate) : `${sessionLabel(item.session)} ${item.slotNo} · ${due}`}</span>
-          {done
-            ? <b><CheckCircle2 size={14} aria-hidden="true" />Done {item.completedAt ? clockTime(item.completedAt, zone) : ''}</b>
-            : <b className="tnum" aria-live="off">{countdownLabel(left)}</b>}
-        </div>
-      </td>
       <td data-label="Actions" className="is-actions">
+        {done && <span className="dw-done-tag"><CheckCircle2 size={13} aria-hidden="true" />Done{item.completedAt ? ` ${clockTime(item.completedAt, zone)}` : ''}</span>}
         <div className="dw-actions">
           <Button size="sm" variant={done ? 'secondary' : 'primary'} className="dw-act" onClick={onOpen} aria-label={`${action === 'Complete' ? 'Complete the stage for' : action} ${item.candidate}`}>
             {action}
@@ -140,8 +128,20 @@ function ItemRow({ item, serial, now, skew, zone, showStaff, staffName, canWork,
   )
 }
 
+/** The Care India ID first and darker, the CRM reference (CND-...) second and muted; the reference alone before an ID exists. */
+export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId' | 'candidateRef'> }) {
+  const ids = { careId: item.candidateCareId, ref: item.candidateRef }
+  const care = careIdOf(ids)
+  const ref = care ? secondaryId(ids) : item.candidateRef
+  return (
+    <span title={[care, item.candidateRef].filter(Boolean).join(' · ')}>
+      {care && <b className="cid-main">{care}</b>}{care && ref && ' · '}{ref && <span className={care ? 'cid-ref' : undefined}>{ref}</span>}
+    </span>
+  )
+}
+
 /** Client has no fallback: it exists only through an order. Say so instead of leaving a bare dash. */
-function ClientCell({ item }: { item: DailyItem }) {
+export function ClientCell({ item }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact' | 'orderRef'> }) {
   const cell = clientCell(item)
   if (!cell.text) return <div className="dw-stack" title={cell.hint}><span className="dw-none">—</span><small className="dw-sub is-soft">No order yet</small></div>
   return (
@@ -152,7 +152,7 @@ function ClientCell({ item }: { item: DailyItem }) {
 }
 
 /** Solid country pill (flag inside when the app has one); the candidate's own wishes are marked "pref." underneath. */
-function CountryCell({ item, onAdd }: { item: DailyItem; onAdd: () => void }) {
+export function CountryCell({ item, onAdd }: { item: Pick<DailyItem, 'country' | 'countrySource' | 'locationHint' | 'candidate'>; onAdd: () => void }) {
   const cell = countryCell(item, countryCode)
   if (cell.names.length === 0) {
     return (
@@ -180,7 +180,7 @@ function CountryCell({ item, onAdd }: { item: DailyItem; onAdd: () => void }) {
   )
 }
 
-function PositionCellView({ item }: { item: DailyItem }) {
+export function PositionCellView({ item }: { item: Pick<DailyItem, 'position' | 'positionSource'> }) {
   const cell = positionCell(item)
   if (!cell.text) {
     return <div className="dw-stack" title={cell.hint}><span className="dw-none">—</span><small className="dw-sub is-soft">Not saved</small></div>
@@ -195,7 +195,7 @@ function PositionCellView({ item }: { item: DailyItem }) {
 }
 
 /** A compact stage chip, the stage name in one muted line and a slim progress bar underneath (never over the text). */
-function StageCell({ item }: { item: DailyItem }) {
+export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
   const no = item.stage
   const stage = no ? STAGES[Math.max(0, Math.min(TOTAL_STAGES, no) - 1)] : null
   return (
@@ -212,7 +212,7 @@ function StageCell({ item }: { item: DailyItem }) {
 }
 
 /** Latest remark plus a compact one-line box to add today's update (the same remark the 48-hour list uses). */
-function RemarkCell({ item, canWork, onSave }: { item: DailyItem; canWork: boolean; onSave: (text: string) => Promise<void> }) {
+export function RemarkCell({ item, canWork, onSave }: { item: Pick<DailyItem, 'remark' | 'candidate'>; canWork: boolean; onSave: (text: string) => Promise<void> }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -239,10 +239,10 @@ function RemarkCell({ item, canWork, onSave }: { item: DailyItem; canWork: boole
   )
 }
 
-interface MenuEntry { label: string; icon: typeof ArrowRight | typeof ExternalLink; onSelect: () => void }
+export interface MenuEntry { label: string; icon: typeof ArrowRight | typeof ExternalLink; onSelect: () => void }
 
 /** The three-dot menu, drawn on the page body so the scrolling table never clips it. */
-function RowMenu({ candidate, items }: { candidate: string; items: MenuEntry[] }) {
+export function RowMenu({ candidate, items }: { candidate: string; items: MenuEntry[] }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState({ top: 0, left: 0 })

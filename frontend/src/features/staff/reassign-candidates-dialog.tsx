@@ -58,13 +58,13 @@ export function ReassignCandidatesDialog({ candidateIds, onClose, onSaved }: {
       {availability.data && <>
         <Field label="New owner" required>
           <Select value={validOwner ? owner : ''} disabled={busy || !eligible.length} onChange={event => setOwner(event.target.value)} aria-label="New owner">
-            <option value="">{eligible.length ? 'Choose a staff member' : 'No one is available'}</option>
+            <option value="">{eligible.length ? 'Choose a recruiter' : 'No one is available'}</option>
             {eligible.map(staff => <option key={staff.id} value={staff.id}>{manualAssignmentLabel(staff)}</option>)}
           </Select>
         </Field>
         {!eligible.length && <div className="space-y-2">
-          <p role="status" className="text-sm text-amber-700">{staffAccounts.length === 0 ? 'There are no staff accounts yet. Add one in User Management.' : 'No one else can take these candidates right now.'}</p>
-          {notListed.length > 0 && <ul className="space-y-1 text-sm text-ink-600" aria-label="Staff who cannot take candidates right now">
+          <p role="status" className="text-sm text-amber-700">{staffAccounts.length === 0 ? 'There are no recruiter accounts yet. Add one in User Management.' : 'No one else can take these candidates right now.'}</p>
+          {notListed.length > 0 && <ul className="space-y-1 text-sm text-ink-600" aria-label="Recruiters who cannot take candidates right now">
             {notListed.map(item => <li key={item.id}><b className="font-semibold text-ink-900">{item.name}</b> · {item.reason}</li>)}
           </ul>}
           <Button size="sm" disabled={busy} onClick={availability.refresh}>Check again</Button>

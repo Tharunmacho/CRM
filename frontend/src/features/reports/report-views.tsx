@@ -100,14 +100,14 @@ export function StaffReport({ data }: { data: Data }) {
   const top = ranked[0]
   const leaders = top ? ranked.filter(s => s[metric] === top[metric]) : []
   return <>
-    <ChartCard title="Staff board" hint={`Ranked by ${active.long}, highest first. Pick another measure to re-rank.`} empty={noStaff} emptyHint="No staff match these filters." summary={`${data.staff.length} staff members ranked by ${active.long}.`}
-        actions={!noStaff && <Segmented label="Rank staff by" value={metric} onChange={setMetric} options={METRICS.map(item => ({ key: item.key, label: item.label }))} />}
+    <ChartCard title="Recruiter board" hint={`Ranked by ${active.long}, highest first. Pick another measure to re-rank.`} empty={noStaff} emptyHint="No recruiters match these filters." summary={`${data.staff.length} recruiters ranked by ${active.long}.`}
+        actions={!noStaff && <Segmented label="Rank recruiters by" value={metric} onChange={setMetric} options={METRICS.map(item => ({ key: item.key, label: item.label }))} />}
         insight={top && top[metric] > 0 ? (leaders.length === 1 ? <><b>{top.name}</b> leads with {num(top[metric])} {active.long}.</> : <><b>{plural(leaders.length, 'person', 'people')}</b> tie at {num(top[metric])} {active.long}.</>) : `No ${active.long} in this period.`}>
-        <Lollipops rows={board} colour={active.colour} label={`Staff ranked by ${active.long}`} />
+        <Lollipops rows={board} colour={active.colour} label={`Recruiters ranked by ${active.long}`} />
       </ChartCard>
-    <RTable rows={data.staff} rowKey={r => r.id} title="Staff detail" caption="One row per person. Admins and managers see the whole team. Staff see only themselves."
+    <RTable rows={data.staff} rowKey={r => r.id} title="Recruiter detail" caption="One row per person. Admins and managers see the whole team. Recruiters see only themselves."
       columns={c => [
-        c.col('name', 'Staff', '25%', r => r.name, { render: r => <RecordIdentity name={r.name} /> }), c.num('assigned', 'Assigned', '12%', r => r.assigned), c.num('done', 'Tasks done', '12%', r => r.completedTasks),
+        c.col('name', 'Recruiter', '25%', r => r.name, { render: r => <RecordIdentity name={r.name} /> }), c.num('assigned', 'Assigned', '12%', r => r.assigned), c.num('done', 'Tasks done', '12%', r => r.completedTasks),
         c.num('hours', 'Avg hours / stage', '14%', r => r.averageStageHours, r => <span className="tnum">{fmtHours(r.averageStageHours)}</span>),
         c.num('samples', 'Tasks timed', '11%', r => r.durationSamples), c.num('esc', 'Sent to admin', '13%', r => r.escalations), c.num('missed', 'Missed updates', '13%', r => r.missedUpdates),
       ]} />

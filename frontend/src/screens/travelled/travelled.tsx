@@ -14,6 +14,8 @@ import {
   type TravelledFilterKey, type TravelledFilters, type TravelledResult, type TravelledRow,
 } from '@/features/travelled/travelled-model'
 import '@/styles/travelled.css'
+import { primaryId, secondaryId } from '@/features/candidates/candidate-ids'
+import { TravellerIdChip } from '@/features/candidates/components/candidate-id-chip'
 
 const SHOWN = 6
 
@@ -209,7 +211,9 @@ function TravelTable({ rows, total }: { rows: TravelledRow[]; total: number }) {
             <td data-label="Travel date" className="tnum">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
             <td data-label="Candidate" className="tv-who">
               <Link to={`/candidates/${row.candidateId}`}>{row.name}</Link>
-              <small className="ident">{row.ref}</small>
+              <TravellerIdChip candidate={row} />
+              {primaryId(row) && <small className="ident" title="Care India ID">{primaryId(row)}</small>}
+              {secondaryId(row) && <small className="ident tv-muted" title="CRM reference">{secondaryId(row)}</small>}
               {row.passportNumber && <small className="ident">Passport {row.passportNumber}</small>}
               {row.status && <StatusPill status={row.status} />}
             </td>

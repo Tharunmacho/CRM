@@ -30,14 +30,14 @@ const filterJs = ts.transpileModule(filterTree.statements.filter(statement => !t
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
 }).outputText
 const components = {}
-const bindings = { ...stats, ...labels, PRD_COLUMNS: pools.PRD_COLUMNS, ChevronDown: 'svg', X: 'svg',
+const bindings = { ...stats, ...labels, PRD_COLUMNS: pools.PRD_COLUMNS, TRAVEL_CHOICES: pools.TRAVEL_CHOICES, parseTravel: pools.parseTravel, ChevronDown: 'svg', X: 'svg',
   Select: 'select', Field: 'label', Input: 'input', cn: (...values) => values.filter(Boolean).join(' '),
   stageByNo: number => ({ title: `Workflow ${number}` }) }
 new Function('exports', 'React', ...Object.keys(bindings), filterJs)(components, React, ...Object.values(bindings))
 const noop = () => {}
 const filterProps = (overrides = {}) => ({
   me: { id: 'u1', role: 'staff' }, filters: {}, onFilter: noop, pool: 'all', onPool: noop,
-  staff: '', onStaff: noop, users: [], skills: [], onSkills: noop, skillMode: 'all', onSkillMode: noop,
+  staff: '', onStaff: noop, travel: '', onTravel: noop, users: [], skills: [], onSkills: noop, skillMode: 'all', onSkillMode: noop,
   skillStatus: 'all', onSkillStatus: noop, coverage: { data: null, loading: false, error: '' },
   moreOpen: false, onMoreToggle: noop, canClear: false, onClear: noop, ...overrides,
 })
@@ -74,6 +74,22 @@ test('an existing stage selection remains available in More filters and marks hi
   assert.deepEqual(changes, [['stage', '']])
 })
 
+test('Travel is a select in the main filter bar for every role, with Any travel / Travelled / Not travelled', () => {
+  for (const role of ['staff', 'manager', 'admin']) {
+    const changes = []
+    const tree = components.DataBankFilters(filterProps({ me: { id: 'u1', role }, travel: 'no', onTravel: value => changes.push(value) }))
+    const bar = descendants(tree).find(node => node.props.className === 'dbt-bar')
+    const travel = findLabel(bar, 'Filter by travel')
+    assert.ok(travel, role)
+    assert.equal(travel.props.value, 'no')
+    assert.deepEqual(descendants(travel).filter(node => node.type === 'option').map(node => [node.props.value, node.props.children]),
+      [['', 'Any travel'], ['yes', 'Travelled'], ['no', 'Not travelled']])
+    travel.props.onChange({ target: { value: 'yes' } })
+    travel.props.onChange({ target: { value: 'nonsense' } })   // a value the select never offers reads as no filter
+    assert.deepEqual(changes, ['yes', ''])
+  }
+})
+
 const counts = { all: 4, unassigned: 3, needs_review: 0 }
 
 test('admin and manager see Resumes, Not assigned and Needs review; staff see no Not assigned card', () => {
@@ -108,10 +124,10 @@ test('pressing Resumes shows everyone; pressing another card toggles its pool', 
   assert.equal(stats.poolAfterCardPress('unassigned', review), 'needs_review')
 })
 
-test('the visible filters follow the role and Staff is only for admin and manager', () => {
-  assert.deepEqual(stats.visibleFilters('admin'), ['scope', 'source', 'status', 'staff'])
-  assert.deepEqual(stats.visibleFilters('manager'), ['scope', 'source', 'status', 'staff'])
-  assert.deepEqual(stats.visibleFilters('staff'), ['scope', 'source', 'status'])
+test('the visible filters (Travel for everyone) follow the role and Staff is only for admin and manager', () => {
+  assert.deepEqual(stats.visibleFilters('admin'), ['scope', 'source', 'status', 'travel', 'staff'])
+  assert.deepEqual(stats.visibleFilters('manager'), ['scope', 'source', 'status', 'travel', 'staff'])
+  assert.deepEqual(stats.visibleFilters('staff'), ['scope', 'source', 'status', 'travel'])
   assert.deepEqual([...stats.MORE_FILTER_SELECTS], ['pool', 'stage', 'passport'])
 })
 

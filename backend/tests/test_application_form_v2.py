@@ -94,6 +94,7 @@ def test_migration_from_0026_keeps_rows_is_idempotent_and_reversible(schema_data
 # ------------------------------------------------------------------ documents
 
 def test_blank_form_lists_the_fourteen_slots_in_order_with_their_rules(desk):
+    as_user(desk, "admin", Role.admin)  # the Invoice slot is the admin's alone (see test_invoice_access.py)
     data = form(desk)
     assert data["documentOrder"] == SLOTS and list(data["documents"]) == SLOTS
     docs = data["documents"]
@@ -114,6 +115,8 @@ def test_blank_form_lists_the_fourteen_slots_in_order_with_their_rules(desk):
 
 @pytest.mark.parametrize("slot", SLOTS)
 def test_every_slot_uploads_through_the_form_endpoint_and_only_resume_and_passport_are_read(desk, slot):
+    if slot == "invoice":
+        as_user(desk, "admin", Role.admin)  # the Invoice document is the admin's alone
     body = {"resume": pdf(CV), "passport": pdf(PASSPORT), "photo": PNG}.get(slot) or pdf(f"Synthetic {slot} document")
     media = "image/png" if slot == "photo" else "application/pdf"
     response = upload(desk, slot, body, name=f"{slot}.{'png' if slot == 'photo' else 'pdf'}", media=media)
@@ -134,6 +137,8 @@ def test_every_slot_uploads_through_the_form_endpoint_and_only_resume_and_passpo
 
 @pytest.mark.parametrize("slot", SLOTS)
 def test_plain_files_endpoint_accepts_every_slot_and_the_form_shows_it(desk, slot):
+    if slot == "invoice":
+        as_user(desk, "admin", Role.admin)  # the Invoice document is the admin's alone
     body, media, name = (PNG, "image/png", "p.png") if slot == "photo" else (pdf(f"Synthetic {slot} file"), "application/pdf", "d.pdf")
     response = desk.client.post("/api/files", data={"entity_type": "candidate", "entity_id": "candidate", "slot": slot}, files={"file": (name, body, media)})
     assert response.status_code in (200, 201), response.text
@@ -170,6 +175,7 @@ def test_a_new_version_moves_the_old_one_to_history_and_other_keeps_every_file(d
 
 
 def test_invoice_tracking_uses_latest_uploaded_evidence_without_changing_pipeline_progress(desk):
+    as_user(desk, "admin", Role.admin)
     before = form(desk)
     assert before["tracking"]["summary"]["tracked"] == 11
     assert next(row for row in before["tracking"]["rows"] if row["key"] == "invoice_generated")["checked"] is False
@@ -224,6 +230,7 @@ def test_older_education_and_experience_slot_keys_are_folded_into_the_certificat
     (11, {"signed_offer", "medical", "pcc", "visa", "emigration", "air_ticket", "undertaking_letter", "insurance", "invoice"}),
 ])
 def test_required_documents_follow_the_applications_current_stage(desk, stage, extra):
+    as_user(desk, "admin", Role.admin)
     app_id = mapped(desk)
     set_stage(desk, app_id, stage)
     data = form(desk)
@@ -804,7 +811,8 @@ def test_manual_deployment_preserves_the_missing_document_checklist_for_staff_an
         assert app.status == ApplicationStatus.deployed and app.current_stage == 11
         assert db.get(Candidate, "candidate").status.value == "deployed"
     deployment = form(desk)["deployment"]
-    assert deployment["ready"] is False and [m["label"] for m in deployment["missing"]] == DEPLOY_ORDER
+    expected = DEPLOY_ORDER if role == Role.admin else [label for label in DEPLOY_ORDER if label != "Invoice"]  # the Invoice is the admin's alone
+    assert deployment["ready"] is False and [m["label"] for m in deployment["missing"]] == expected
     assert deployment["missing"][0] == {"slot": "resume", "label": "Resume"}
 
 
@@ -833,6 +841,7 @@ def test_all_required_documents_do_not_replace_written_feedback_for_deployment(d
 
 
 def test_deployment_block_flips_live_and_older_optional_evidence_stays_available(desk):
+    as_user(desk, "admin", Role.admin)  # the admin's checklist holds all eleven documents; a recruiter's holds ten
     assert [m["slot"] for m in form(desk)["deployment"]["missing"]][:4] == ["resume", "passport", "medical", "signed_offer"]
     put_documents(desk, "resume", "passport", "photo")
     desk.client.post("/api/files", data={"entity_type": "candidate", "entity_id": "candidate", "slot": "education"},

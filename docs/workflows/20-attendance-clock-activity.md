@@ -1,13 +1,13 @@
 # Attendance check in and browser activity
 
-This module records deliberate check-in/check-out and explains how long a Staff account was observed in the CRM during those attendance sessions. Requirements: **ATT-01, ATT-02**, approved extensions to the original recruitment PRD. Browser activity is separate from [monthly attendance policy](21-attendance-monthly-hr.md) and does not calculate productivity or pay.
+This module records deliberate check-in/check-out and explains how long a Recruiter account was observed in the CRM during those attendance sessions. Requirements: **ATT-01, ATT-02**, approved extensions to the original recruitment PRD. Browser activity is separate from [monthly attendance policy](21-attendance-monthly-hr.md) and does not calculate productivity or pay.
 
 ## Roles and preparation
 
 | Role | Attendance and activity access |
 | --- | --- |
-| Staff | Check in/out, view own attendance and own browser activity. |
-| Manager | Check in/out, view own attendance and Staff attendance/activity. Another Manager's attendance is outside this role's scope. Manager browser activity is **Not tracked**. |
+| Recruiter | Check in/out, view own attendance and own browser activity. |
+| Manager | Check in/out, view own attendance and Recruiter attendance/activity. Another Manager's attendance is outside this role's scope. Manager browser activity is **Not tracked**. |
 | Admin | View employee attendance/activity and correct raw sessions with a reason. Admin does not use an employee attendance clock. |
 
 The account must be active and signed in. The matching application/database must be ready. The complete runtime includes the presence worker; reports also cap expired presence independently. Times display in the agency timezone, normally `Asia/Kolkata`, while saved timestamps use UTC.
@@ -16,7 +16,7 @@ The account must be active and signed in. The matching application/database must
 
 ### Check in and check out
 
-1. Open **Attendance** from the sidebar or the clock shortcut in the top bar. Staff sees **My attendance**; Manager can switch between the team and their own record.
+1. Open **Attendance** from the sidebar or the clock shortcut in the top bar. Recruiter sees **My attendance**; Manager can switch between the team and their own record.
 2. Wait for **Your attendance today** to load. The current badge says **Checked out** or **Checked in**. A loading/error state must not be mistaken for a confirmed clock state.
 3. Select **Check in**. While the request saves, the button is disabled. The server records its current time and returns the active session; the screen shows the check-in time and today's checked-in duration.
 4. Use the CRM normally. Navigating between screens does not start another shift. Multiple tabs share the employee's single open attendance session.
@@ -28,7 +28,7 @@ Closing the browser, locking the device, losing the connection or signing out do
 ## Review the duration and history journey
 
 1. Open the primary **Sessions & activity** tab. Choose **Attendance date** and, for supervisors, **Employee**. The view refreshes every 30 seconds while visible and on focus/reconnection.
-2. Read the four summaries: **Checked-in time**, **Online in CRM**, **Idle in CRM**, and **Away / no signal**. The last three describe Staff activity during attendance only. A Manager-only view says **Not tracked** for browser activity.
+2. Read the four summaries: **Checked-in time**, **Online in CRM**, **Idle in CRM**, and **Away / no signal**. The last three describe Recruiter activity during attendance only. A Manager-only view says **Not tracked** for browser activity.
 3. Review each employee row. The duration columns belong to the selected date; the clock and presence badges explicitly show the **current** state. The displayed update time is the server snapshot time.
 4. Select **View sessions**. The check-in/check-out panel shows each session and its selected-date duration. The activity panel shows the inferred intervals with start, end and duration.
 5. Alternatively, open an employee's monthly **Daily record** and choose **View sessions & activity** on a day. This carries the employee and exact date into the activity view. A direct link can use `/attendance?view=presence&staff=ID&date=YYYY-MM-DD`.
@@ -70,18 +70,18 @@ If a clock response is lost, the screen shows **Retry Check in** or **Retry Chec
 
 Presence connection errors show a sync warning and suppress a falsely fresh activity badge. Reports retain a clear stale-data warning after a failed refresh. A local clock estimate advances at most 30 seconds without another server snapshot. Reconnection refreshes the state instead of inventing the missing interval.
 
-Cancel a correction before saving to leave the record unchanged. Closing a saved session cannot be cancelled by the browser; correcting it requires the authorized, audited correction action. Staff following another employee's URL and Manager following another Manager's URL must receive an access error, including direct API requests.
+Cancel a correction before saving to leave the record unchanged. Closing a saved session cannot be cancelled by the browser; correcting it requires the authorized, audited correction action. Recruiters following another employee's URL and Manager following another Manager's URL must receive an access error, including direct API requests.
 
 ## Acceptance checklist
 
-- [ ] Staff and Manager can check in/out; Admin sees supervision without an employee clock.
+- [ ] Recruiters and Manager can check in/out; Admin sees supervision without an employee clock.
 - [ ] Two simultaneous check-ins produce one open session.
 - [ ] Lose a successful check-in response, reload, and explicitly retry: the original key returns the original session without creating another.
 - [ ] Repeat checkout after a later shift or correction; the later record stays unchanged.
 - [ ] Change login before retry; the old intent cannot mutate the new login's attendance.
 - [ ] Exercise foreground interaction, five-minute idle, blur/hide, closed browser and heartbeat timeout; labels and history match the defined estimates.
 - [ ] Open two tabs; their overlapping activity is counted once.
-- [ ] Verify online + idle + away equals the selected Staff member's checked-in time, allowing displayed rounding; gaps between shifts do not count.
+- [ ] Verify online + idle + away equals the selected Recruiter's checked-in time, allowing displayed rounding; gaps between shifts do not count.
 - [ ] Verify a Manager's recorded attendance is **Not tracked**, never offline time.
 - [ ] Review yesterday while currently checked in; historical totals and current badges remain distinct.
 - [ ] Test a midnight-crossing shift, explicit checkout, logout, forced logout and a reasoned correction.

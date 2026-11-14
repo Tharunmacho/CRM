@@ -1,3 +1,5 @@
+import { roleLabel } from '@/shared/model/role-labels'
+
 export type StaffAvailabilityStatus = 'available' | 'approved_leave' | 'manual_leave' | 'paused' | 'inactive' | 'not_assigned'
 
 export interface DirectoryEmployee {
@@ -36,7 +38,7 @@ export const availabilityOptions: { value: StaffAvailabilityStatus; label: strin
 ]
 
 export function staffRoleLabel(role: DirectoryEmployee['role']) {
-  return role === 'admin' ? 'Administrator' : role === 'manager' ? 'Manager' : 'Staff'
+  return roleLabel(role, true)
 }
 
 export function taskLink(id: string, view: 'open' | 'initial' | 'overdue' | 'escalated' | 'missing' | 'completed', period?: { from: string; to: string }) {

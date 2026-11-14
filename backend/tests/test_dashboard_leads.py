@@ -39,7 +39,7 @@ def seed(sessions, now=NOW):
         db.flush()
 
         def lead(key, owner, status, *, created=old, calls=0, follow=None, resume=None, assigned=None):
-            db.add(m.Lead(id=key, name=f"Lead {key}", phone=f"+9190000000{len(key)}", owner_id=owner, status=status, created_time=created,
+            db.add(m.Lead(id=key, name=f"Lead {key}", phone=f"+9190000000{len(key)}", owner_id=owner, status=status, created_time=created, created_at=created,
                           call_count=calls, next_follow_up_at=follow, resume_received_at=resume,
                           assigned_at=assigned or (old if owner else None), position_applied="Chef", country_interest="Dubai"))
 

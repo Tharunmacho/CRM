@@ -1,4 +1,4 @@
-"""Daily candidate quota and goals: each recruiter's list for today, the supervisors' per-staff view, goal editing."""
+"""Daily work: each recruiter's own workable candidates as one flat list, the supervisors' per-recruiter view, goal settings."""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,112 +8,88 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, DailyGoal, Role, User
-from app.db.session import get_db, writes_on_get
+from app.db.session import get_db
 from app.services import daily_work
-from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(prefix="/api", tags=["daily-work"])
 
 
+def _who(user: User, staff: str | None):
+    """Whose candidates the caller may read: (supervisor, owner ids or a select of them for the rows, select of every recruiter or None)."""
+    supervisor = user.role in (Role.admin, Role.manager)
+    if supervisor:
+        everyone = select(User.id).where(User.role == Role.staff)
+        return supervisor, [staff] if staff not in (None, "all") else everyone, everyone
+    if staff not in (None, "all", user.id):
+        raise HTTPException(403, "You can only see your own candidates.")
+    return supervisor, [user.id] if user.role == Role.staff else [], None
+
+
+def _read(db: Session, user: User, staff: str | None, counts_of, rows_of):
+    """Run the counts, the rows and (for supervisors) the roster in one round; returns (supervisor, selector, shown, roster, counts, rows)."""
+    supervisor, selector, everyone = _who(user, staff)
+    if supervisor:
+        counts, roster, fetched = daily_work.read_together(
+            db, lambda s: counts_of(s, everyone),
+            lambda s: list(s.execute(select(User.id, User.name, User.active).where(User.role == Role.staff).order_by(User.name, User.id)).all()),
+            lambda s: rows_of(s, selector))
+        if staff not in (None, "all") and staff not in {r.id for r in roster}:
+            raise HTTPException(404, "Recruiter not found")
+        shown = [staff] if staff not in (None, "all") else [r.id for r in roster]
+        return supervisor, selector, shown, roster, counts, fetched
+    if not selector:
+        return supervisor, selector, [], [], {}, []
+    counts, fetched = daily_work.read_together(db, lambda s: counts_of(s, selector), lambda s: rows_of(s, selector))
+    return supervisor, selector, selector, [], counts, fetched
+
+
 @router.get("/daily-work")
-@writes_on_get  # opening the screen tops the quota up, so it needs a real transaction
 def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """
-    Staff get their own list. Admin and Manager get every recruiter's progress and, for `staff=<id>` or `all`,
-    the matching rows. Opening this tops the quota up first (idempotent), so no one has to wait for the worker.
+    Today's candidates. A recruiter gets their own candidates that still have prescreening to do (new, in process or needs review,
+    with no application yet or one at stage 1; no daily cap, slots or deadlines): the ones still to work first, then "done today".
+    Admin and Manager get every recruiter's, or one recruiter's for `staff=<id>`, plus a per-recruiter count (to work, done today).
+    A read only: nothing is allocated.
     """
     now = datetime.now(timezone.utc)
-    supervisor = user.role in (Role.admin, Role.manager)
-    roster, everyone = [], []
-    if supervisor:
-        # On an autocommit connection of its own: one round trip, and this transaction's first statement is then the reconcile.
-        (roster,) = daily_work.read_together(db, lambda s: list(s.execute(select(User.id, User.name, User.active, User.on_leave)
-                                                                           .where(User.role == Role.staff).order_by(User.name, User.id)).all()))
-        everyone = [r.id for r in roster if r.active]
-        if staff in (None, "all"):
-            shown = everyone
-        elif staff in {r.id for r in roster}:
-            shown = [staff]
-        else:
-            raise HTTPException(404, "Staff member not found")
-        scope = everyone  # summaries cover every recruiter, whichever rows were asked for
-    else:
-        if staff not in (None, "all", user.id):
-            raise HTTPException(403, "You can only see your own daily tasks.")
-        scope = shown = [user.id] if user.role == Role.staff else []
-    today_date = daily_work.agency_today(now)
-    today = today_date.isoformat()
-    # Who is on leave comes from rows already in hand (the roster, or the signed-in account), not from another statement.
-    on_leave = ({r.id for r in roster if r.on_leave} if supervisor else {user.id} if getattr(user, "on_leave", False) else set()) & set(scope)
-    people = sorted(uid for uid in scope if uid not in on_leave)
-    # Round 1: the reconcile (on this transaction) runs beside ONE read of the goals, the four attendance tables, owned counts,
-    # today's item counts and the progress inputs, plus the list's rows and who still has candidates to hand out. Those reads
-    # are valid exactly when the reconcile changed nothing and nobody needs a top-up (the usual repeat call). Otherwise the
-    # allocation runs (set-based, whatever the number of recruiters), is committed, and the progress and rows are read again.
-    # Round 2: the placements, remarks and call tasks behind the rows, beside the progress snapshot write (if it changed).
-    if scope:
-        changed, (state, fetched, waiting) = daily_work.run_beside(
-            db,
-            lambda s: daily_work.reconcile(s, now=now),
-            lambda s: daily_work.read_state(s, scope, today_date),
-            lambda s: daily_work.fetch_rows(s, scope, now=now),
-            lambda s: daily_work.pool_waiting(s, people, today_date),
-        )
-        goals, owned = state.goals, state.owned
-        attendance = daily_work.compute_shifts(scope, today_date, *state.attendance)
-        created = daily_work.ensure_allocations(
-            db, scope, now=now, people=people, goals=goals, attendance=attendance, reconciled=True,
-            have=None if changed else state.have, pool_hint=None if changed else waiting)
-        if changed or created:
-            db.commit()
-            again, fetched = daily_work.read_together(
-                db, lambda s: daily_work.read_state(s, scope, today_date, parts=("progress",)), lambda s: daily_work.fetch_rows(s, scope, now=now))
-            state.done, state.stages, state.snapshot = again.done, again.stages, again.snapshot
-        progress = daily_work.goal_progress(db, scope, today_date, goals=goals, state=state)
-        rows, _ = daily_work.run_beside(
-            db, lambda s: daily_work.load_rows(s, scope, now=now, parallel=True, fetched=fetched),
-            lambda s: daily_work.save_progress(s, progress, today_date, state.snapshot))
-    else:
-        goals, owned, attendance = daily_work.load_goals(db, ["__agency__"]), {}, ({}, set())
-        progress, rows = {}, []
-    by_owner: dict[str, list[dict]] = {}
-    for row in rows:
-        by_owner.setdefault(row["ownerId"], []).append(row)
-    items = [r for r in rows if r["ownerId"] in shown]
-    blocks = [progress[uid] for uid in shown]
-    # The goals shown are per recruiter: one person's own, or the average per recruiter for the team. The summed team
-    # figures travel separately so the screen can label them as a total, never as the quota.
-    fallback_goals = goals["__agency__"]
-    fallback = {"candidates": {"target": fallback_goals["candidates"][0], "morning": fallback_goals["candidates"][1],
-                               "evening": fallback_goals["candidates"][0] - fallback_goals["candidates"][1],
-                               "done": 0, "morningDone": 0, "eveningDone": 0},
-                "forwardedToClient": {"target": fallback_goals["forwarded_to_client"], "actual": 0},
-                "stageMoves": {"target": fallback_goals["stage_moves"], "actual": 0}}
-    goals, targets_vary = (blocks[0], False) if len(blocks) == 1 else daily_work.average_goals(blocks, fallback)
-    team = daily_work.add_goal_totals(blocks)
-    quota = goals["candidates"]
-    off_today = set(attendance[1]) | on_leave
-    shortfalls = daily_work.work_shortfalls(db, progress, by_owner, today, off_today, scope, owned=owned)
+    supervisor, selector, shown, roster, counts, fetched = _read(
+        db, user, staff, lambda s, owners: daily_work.owner_counts(s, owners, now=now), lambda s, owners: daily_work.fetch_rows(s, owners, now=now))
+    # Then the placements and open tasks behind the rows, side by side, and last the remarks.
+    items = daily_work.load_rows(db, selector, now=now, parallel=True, fetched=fetched) if fetched else []
+    summary = daily_work.summarise([counts.get(uid, (0, 0)) for uid in shown])
     result = {
-        "agencyDate": today, "serverTime": now,
-        "dailyQuota": quota["target"], "morningQuota": quota["morning"], "eveningQuota": quota["evening"],
-        "goalsMode": "person" if len(blocks) == 1 else "average", "targetsVary": targets_vary,
-        "staffCount": len(shown), "teamGoals": team,
-        "shortfall": shortfalls.get(shown[0]) if len(shown) == 1 else None,
-        "offToday": bool(len(shown) == 1 and shown[0] in off_today),
-        "summary": daily_work.summarise(items, now, today), "items": items, "goals": goals,
-        # Hourly checkpoints only make sense for one person's day.
-        "checkpoints": daily_work.checkpoints(items, now, today) if len(shown) == 1 else None,
+        "agencyDate": daily_work.agency_today(now).isoformat(), "serverTime": now,
+        "staffCount": len(shown), "summary": summary, "items": items,
+        "truncated": len(items) < summary["total"] and len(items) >= daily_work.MAX_ROWS,
     }
     if supervisor:
-        result["staff"] = [{"userId": r.id, "name": r.name, "active": r.active, "offToday": r.id in off_today, "shortfall": shortfalls.get(r.id),
-                            "summary": daily_work.summarise(by_owner.get(r.id, []), now, today),
-                            "goals": progress.get(r.id)}
-                           for r in roster if r.active or by_owner.get(r.id)]
+        result["staff"] = [{"userId": r.id, "name": r.name, "active": r.active, "summary": daily_work.summarise([counts.get(r.id, (0, 0))])}
+                           for r in roster if r.active or counts.get(r.id)]
+    return result
+
+
+@router.get("/follow-up")
+def follow_up(staff: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """
+    Follow-up: the candidates a recruiter owns whose application is active at stage 2 to 11 (still going forward), stalest first.
+    A closed application (a negative exit) or a deployed one (it shows on Travelled) is not listed. Same scoping as `/daily-work`:
+    a recruiter sees their own, admin and manager everyone's or `staff=<id>`'s, with a per-recruiter count. A read only.
+    """
+    now = datetime.now(timezone.utc)
+    supervisor, selector, shown, roster, counts, fetched = _read(
+        db, user, staff, lambda s, owners: daily_work.follow_up_counts(s, owners), lambda s, owners: daily_work.fetch_follow_up(s, owners))
+    items = daily_work.load_follow_up(db, selector, fetched=fetched) if fetched else []
+    total = sum(counts.get(uid, 0) for uid in shown)
+    result = {"serverTime": now, "staffCount": len(shown), "summary": {"total": total}, "items": items,
+              "truncated": len(items) < total and len(items) >= daily_work.MAX_ROWS}
+    if supervisor:
+        result["staff"] = [{"userId": r.id, "name": r.name, "active": r.active, "summary": {"total": counts.get(r.id, 0)}}
+                           for r in roster if r.active or counts.get(r.id)]
     return result
 
 
 # ------------------------------------------------------------------ goals
+# Settings kept for the weekly performance report's stage-move target; the Daily work screen no longer uses them.
 
 class GoalIn(BaseModel):
     """Any subset of goals; `candidates` and `morning` go together. Omitted ones keep their current value."""
@@ -154,7 +130,7 @@ def _apply(db, user_id, body: GoalIn, actor: User):
             db.add(DailyGoal(user_id=user_id, metric=metric, target=target, morning_target=morning, updated_by=actor.id))
         else:
             row.target, row.morning_target, row.updated_by = target, morning, actor.id
-    db.add(AuditEntry(actor_id=actor.id, action="Changed agency daily goals" if user_id is None else "Changed staff daily goals",
+    db.add(AuditEntry(actor_id=actor.id, action="Changed agency daily goals" if user_id is None else "Changed recruiter daily goals",
                       entity_type="daily_goal", entity_id=user_id, meta=body.model_dump(exclude_none=True)))
 
 
@@ -187,7 +163,7 @@ def set_default_goals(body: GoalIn, db: Session = Depends(get_db), user: User = 
 def set_staff_goals(staff_id: str, body: GoalIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
     person = db.get(User, staff_id)
     if person is None or person.role != Role.staff:
-        raise HTTPException(404, "Staff member not found")
+        raise HTTPException(404, "Recruiter not found")
     _apply(db, staff_id, body, user)
     db.commit()
     return next(s for s in daily_goals(db, user)["staff"] if s["userId"] == staff_id)
@@ -198,8 +174,8 @@ def reset_staff_goals(staff_id: str, db: Session = Depends(get_db), user: User =
     """Remove the person's own goals so the agency defaults apply again."""
     person = db.get(User, staff_id)
     if person is None or person.role != Role.staff:
-        raise HTTPException(404, "Staff member not found")
+        raise HTTPException(404, "Recruiter not found")
     db.execute(delete(DailyGoal).where(DailyGoal.user_id == staff_id))
-    db.add(AuditEntry(actor_id=user.id, action="Reset staff daily goals to the agency default", entity_type="daily_goal", entity_id=staff_id))
+    db.add(AuditEntry(actor_id=user.id, action="Reset recruiter daily goals to the agency default", entity_type="daily_goal", entity_id=staff_id))
     db.commit()
     return next(s for s in daily_goals(db, user)["staff"] if s["userId"] == staff_id)

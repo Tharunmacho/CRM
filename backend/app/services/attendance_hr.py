@@ -391,7 +391,7 @@ def _cover_colleagues(db, employee, day=None):
 
 def _check_cover(db, employee, cover_id, day):
     if not any(person.id == cover_id for person in _cover_colleagues(db, employee, day)):
-        raise HTTPException(422, "Choose an available Staff colleague as cover")
+        raise HTTPException(422, "Choose an available recruiter colleague as cover")
 
 
 def _notify_approvers(db, row):
@@ -797,7 +797,7 @@ def run_cover_sweep(db, *, at=None):
         request.cover_settled_at = at
         counts["settled"] += 1
         _notify(db, request.user_id, "Leave cover ended", f"Cover for {request.attendance_date} has ended. Work that was not finished was given back to its original owner.")
-        notify_assignment_changes(db, ownership_changes, reason=f"Unfinished work returned after leave cover on {request.attendance_date}.", users=users.values())
+        notify_assignment_changes(db, ownership_changes, how=f"because the leave cover on {request.attendance_date} has ended", users=users.values())
     # Sessions use autoflush=False. Today's handover must see yesterday's
     # returned ownership and closed ledger entries in the same transaction.
     db.flush()
@@ -848,6 +848,6 @@ def run_cover_sweep(db, *, at=None):
             counts["started"] += 1
         request.cover_started_at = at
         _notify(db, cover.id, "Leave cover started", f"You are covering {owner.name} on {today}; unfinished work returns after today.")
-        notify_assignment_changes(db, ownership_changes, reason=f"Covering {owner.name} during leave on {today}.", users=users.values())
+        notify_assignment_changes(db, ownership_changes, how=f"while you cover {owner.name} on leave ({today})", users=users.values())
     db.flush()
     return counts

@@ -9,7 +9,7 @@ from decimal import Decimal
 
 REPORTS = {
     "funnel": ("Pipeline funnel", [("Pipeline", "pipeline", ["stage", "label", "reached", "active", "progressed", "closed", "dropOffPercent", "lostToNext", "lostToNextPercent"])]),
-    "staff": ("Staff performance", [("Staff", "staff", ["name", "assigned", "completedTasks", "averageStageHours", "durationSamples", "escalations", "missedUpdates"]),
+    "staff": ("Recruiter performance", [("Recruiter", "staff", ["name", "assigned", "completedTasks", "averageStageHours", "durationSamples", "escalations", "missedUpdates"]),
                                     ("Stage durations", "stageHours", ["stage", "label", "completed", "averageHours"])]),
     "source": ("Candidate sources", [("Sources", "sources", ["label", "count"]), ("Email accounts", "accounts", ["account", "count"])]),
     "orders": ("Order status", [("Orders", "orders", ["ref", "client", "company", "designation", "status", "openings", "matched", "selected", "deployed"])]),
@@ -19,8 +19,8 @@ REPORTS = {
                                          ("Monthly totals", "advanceMonths", ["month", "currency", "amount"])])
 }
 FILTER_LABELS = {"fromDate": "From date", "toDate": "To date", "clientId": "Client", "orderId": "Order",
-                 "designationId": "Job title", "staffId": "Staff member"}
-LABELS = {"label": "Description", "ref": "Order", "name": "Staff", "assigned": "Initial assignments",
+                 "designationId": "Job title", "staffId": "Recruiter"}
+LABELS = {"label": "Description", "ref": "Order", "name": "Recruiter", "assigned": "Initial assignments",
           "completedTasks": "Tasks completed", "averageStageHours": "Average stage hours", "durationSamples": "Stages timed",
           "missedUpdates": "Missed daily updates", "averageHours": "Average hours", "dropOffPercent": "Closure rate (%)",
           "lostToNext": "Lost before next stage", "lostToNextPercent": "Lost before next stage (%)"}

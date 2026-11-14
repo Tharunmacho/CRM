@@ -72,10 +72,12 @@ def test_manual_assignment_snapshot_due_time_notifications_and_sequence(db):
     assert candidate.ref.startswith('CND-')
     assert response.care_id == candidate.care_id
     assert re.fullmatch(r'CI-\d{2}-\d{2}-001', candidate.care_id or '')
-    assert set(db.scalars(select(m.Notification.user_id))) == {'a', 'admin'}
+    # Only the new owner is told: the admin who made the candidate is not notified of their own action and gets no copy.
+    assert set(db.scalars(select(m.Notification.user_id))) == {'a'}
 
 
 def test_no_eligible_manual_candidate_is_persisted_for_review(db):
+    db.add(m.User(id='manager', name='Manager', email='manager@example.test', role=m.Role.manager))
     for user in db.scalars(select(m.User).where(m.User.role == 'staff')):
         user.on_leave = True
     db.commit()
@@ -84,7 +86,9 @@ def test_no_eligible_manual_candidate_is_persisted_for_review(db):
     assert candidate.needs_review and candidate.status == m.CandidateStatus.needs_review
     assert candidate.owner_id is None and created.task_id is None
     assert db.scalar(select(func.count()).select_from(m.Task)) == 0
-    assert db.scalar(select(m.Notification.title)) == 'Candidate needs assignment'
+    # The admin who made it is not told of their own action; the manager hears that it is waiting for a recruiter.
+    [notice] = db.scalars(select(m.Notification)).all()
+    assert notice.user_id == 'manager' and notice.title == 'Candidate waiting for a recruiter'
 
 
 def test_approved_leave_excludes_round_robin_without_changing_manual_leave(db):

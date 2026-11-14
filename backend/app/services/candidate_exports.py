@@ -18,6 +18,7 @@ from app.core.config import get_settings
 from app.core.deps import ensure_can_work_candidate
 from app.db.models import Application, ApplicationFeedback, ApplicationStage, Attachment, Candidate, Remark, Role, Task, User
 from app.services import application_form, document_storage
+from app.services.invoice_access import INVOICE_SLOT, can_see_invoices
 from app.services.report_exports import stage_name, xlsx_rows
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -94,10 +95,13 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
     # public form summary. Match the existing stage and application-file access.
     ensure_can_work_candidate(candidate, user, db)
     app_ids = select(Application.id).where(Application.candidate_id == candidate_id)
-    attachments = list(db.scalars(select(Attachment).where(or_(
+    scope = or_(
         (Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id),
         (Attachment.entity_type == "application") & Attachment.entity_id.in_(app_ids),
-    )).order_by(Attachment.entity_type, Attachment.entity_id, Attachment.slot,
+    )
+    if not can_see_invoices(user):
+        scope = scope & (Attachment.slot != "invoice")  # invoice PDFs are the admin's, also in the record package
+    attachments = list(db.scalars(select(Attachment).where(scope).order_by(Attachment.entity_type, Attachment.entity_id, Attachment.slot,
                 Attachment.uploaded_at.desc(), Attachment.version.desc(), Attachment.id.desc()).limit(MAX_DOCUMENTS + 1)))
     if len(attachments) > MAX_DOCUMENTS:
         raise HTTPException(413, "This candidate has too many document versions for one export. Contact your administrator.")
@@ -140,7 +144,7 @@ def manifest(inspection: Inspection) -> dict:
     rejected_ids = {file["attachmentId"] for entry in slots.values()
                     for file in [*entry["files"], *entry["history"], *([entry["current"]] if entry["current"] else [])]
                     if file.get("identityMismatch")}
-    mandatory = dict(application_form.required_for_deployment())
+    mandatory = dict(application_form.required_for_deployment(INVOICE_SLOT in slots))
     selected = set()
     latest = {}
     for row in inspection.attachments:
@@ -182,8 +186,9 @@ def manifest(inspection: Inspection) -> dict:
         "candidateId": inspection.candidate.id, "reference": inspection.candidate.ref, "candidateName": inspection.candidate.name,
         "generatedAt": datetime.now(timezone.utc).isoformat(), "selectedApplication": form.get("application"),
         "scope": "This candidate's documents and documents from every one of their applications.",
-        "filePolicy": "Latest document per record and slot; all passport and Aadhaar files, Other documents and all invoice versions. Older normal-document version metadata is retained in this manifest.",
-        "missingRequiredBeforeDeployment": application_form.deployment_gaps({slot for slot, entry in slots.items() if entry["uploaded"]}),
+        "filePolicy": "Latest document per record and slot; all passport and Aadhaar files, Other documents" + (" and all invoice versions" if INVOICE_SLOT in slots else "") + ". Older normal-document version metadata is retained in this manifest.",
+        "missingRequiredBeforeDeployment": application_form.deployment_gaps(
+            {slot for slot, entry in slots.items() if entry["uploaded"]}, INVOICE_SLOT in slots),
         "missingRequiredNow": [{"slot": item["slot"], "label": item["label"]} for item in checklist if item["requiredNow"] and not item["uploaded"]],
         "checklist": checklist, "documents": documents,
     }

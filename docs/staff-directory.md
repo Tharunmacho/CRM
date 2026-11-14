@@ -1,8 +1,8 @@
-# Staff Directory
+# Recruiter Directory
 
-Staff Directory connects recruitment supervision to the existing candidate, task,
+Recruiter Directory connects recruitment supervision to the existing candidate, task,
 reporting and attendance workflows. Admin and Manager can open `/staff-directory`
-and `/staff-directory/:id`; Staff cannot access the routes or their APIs. User
+and `/staff-directory/:id`; Recruiter cannot access the routes or their APIs. User
 Management remains Admin-only.
 
 ## Team overview and employee record
@@ -16,7 +16,7 @@ The employee record contains current workload, attention queues, candidate manag
 performance dates and links to Reports and Attendance. Attendance links select the
 employee and the month containing the performance end date, subject to existing
 attendance permissions. Admin accounts do not have an employee attendance link;
-Managers can open their own attendance or a Staff employee's attendance.
+Managers can open their own attendance or a Recruiter employee's attendance.
 
 The white header, summary cards, neutral surfaces and responsive employee cards follow
 the Attendance layout. Routed screen implementations live in `frontend/src/screens/staff/`.
@@ -50,8 +50,8 @@ calendar. Pending requests and browser presence do not change assignment eligibi
 
 | State | Automatic intake | Manual reassignment / account replacement |
 | --- | --- | --- |
-| Active Staff, auto-assignment enabled, no leave | Yes | Yes |
-| Active Staff, auto-assignment paused, no leave | No | Yes |
+| Active Recruiter, auto-assignment enabled, no leave | Yes | Yes |
+| Active Recruiter, auto-assignment paused, no leave | No | Yes |
 | Approved paid/unpaid leave today | No | No |
 | Manual on-leave flag | No | No |
 | Inactive account | No | No |
@@ -84,7 +84,7 @@ automatic workload rebalance or reference evaluation reset is introduced.
 - `/data-bank?staff=ID` applies an exact owner filter to the server list and export.
 - `/tasks?staff=ID&view=open|initial|overdue|escalated|missing|completed` selects a
   workload queue. `from`/`to` apply only to completed tasks.
-- `/reports?staff=ID&from=YYYY-MM-DD&to=YYYY-MM-DD` opens Staff performance.
+- `/reports?staff=ID&from=YYYY-MM-DD&to=YYYY-MM-DD` opens Recruiter performance.
 - `/attendance?staff=ID&month=YYYY-MM&view=employee` opens the monthly employee record.
 
 This feature adds no database tables, columns or Alembic revision. It uses the existing
@@ -96,13 +96,13 @@ must be deployed together.
 Backend verification uses an explicitly guarded, disposable local PostgreSQL database.
 The focused suite covers API authorization, read-only queries, count and date boundaries,
 leave eligibility, candidate filter/export, account replacement and reassignment retention.
-Browser acceptance uses separate synthetic staff/candidate/attendance records; it does
+Browser acceptance uses separate synthetic recruiter/candidate/attendance records; it does
 not access production or external email/OCR providers. Evidence is recorded under
 `artifacts/staff-directory/` and `artifacts/staff-directory-backend.xml`.
 
 Verified on 22 October 2026:
 
-- 58 backend tests passed across Staff Directory, workflow drilldown, User Management
+- 58 backend tests passed across Recruiter Directory, workflow drilldown, User Management
   and candidate workflows, using disposable PostgreSQL records.
 - All 74 frontend tests passed, including workload filtering, availability, completion
   periods, completed-task notification context and the exact SLA deadline boundary.
@@ -110,7 +110,7 @@ Verified on 22 October 2026:
 - Browser acceptance passed against the real isolated API: all five workload queues
   matched backend counts; candidate, attendance and report links retained employee scope;
   Manager reassignment preserved deadlines, completed work, drafts, documents and remarks;
-  Staff routes and API access were denied.
+  Recruiter routes and API access were denied.
 - Nine directory/detail/dialog layout checks passed, including widths 360, 768, 1024,
   1440 and 1918 pixels, with no horizontal page overflow.
 - Four recovery checks passed: invalid performance dates, account-replacement eligibility,

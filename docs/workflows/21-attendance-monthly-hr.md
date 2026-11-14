@@ -4,9 +4,9 @@ This module applies the reference attendance rules explicitly approved by the us
 
 ## Roles and preparation
 
-Staff sees their own month, daily record, requests and schedule. Manager sees Staff plus their own record; they can decide eligible Staff requests and manage Staff scheduling/regularisation, but cannot approve or correct themselves. Admin supervises both employee roles, fills the reference financial-approval role, and alone can grant/replace direct paid/unpaid calendar leave, override a status or correct raw sessions. No employee approves their own request.
+Recruiter sees their own month, daily record, requests and schedule. Manager sees Recruiters plus their own record; they can decide eligible Recruiter requests and manage Recruiter scheduling/regularisation, but cannot approve or correct themselves. Admin supervises both employee roles, fills the reference financial-approval role, and alone can grant/replace direct paid/unpaid calendar leave, override a status or correct raw sessions. No employee approves their own request.
 
-Employee accounts and agency timezone must be configured. Confirm the effective shift and calendar before reviewing totals. The complete runtime must be running for scheduled leave-cover transfers; opening Attendance or Staff Directory does not perform a transfer.
+Employee accounts and agency timezone must be configured. Confirm the effective shift and calendar before reviewing totals. The complete runtime must be running for scheduled leave-cover transfers; opening Attendance or Recruiter Directory does not perform a transfer.
 
 ## Approved calculation rules
 
@@ -31,8 +31,8 @@ Late/early minutes remain visible even when flexible coverage completes the requ
 
 ### Review the month
 
-1. Open **Attendance**, choose the month and employee scope. Manager can choose **Team** or **My attendance**; Staff stays in their own scope.
-2. Review **Team overview** or **My month**. Supervisor cards show active staff, pending permissions, pending extra OT and unpaid time. Employee cards show present days, worked time, unpaid time and approved overtime.
+1. Open **Attendance**, choose the month and employee scope. Manager can choose **Team** or **My attendance**; Recruiter stays in their own scope.
+2. Review **Team overview** or **My month**. Supervisor cards show active recruiters, pending permissions, pending extra OT and unpaid time. Employee cards show present days, worked time, unpaid time and approved overtime.
 3. Read the policy strip before interpreting the totals. Open an employee's **View record**, or their request count, to inspect the underlying days or requests.
 4. In **Employee record** / **Daily records**, inspect result, first/last clock times, required shift, late/early minutes, allowance used and unpaid minutes. A provisional day includes its correction deadline.
 5. Open **Overtime and unpaid time breakdown** to compare unpaid time before OT, OT applied, final unpaid balance and unused OT.
@@ -42,8 +42,8 @@ Attendance percentage uses credited days out of scheduled days, not a browser-on
 
 ## Request and approval journey
 
-1. Staff or Manager selects **New request**, then chooses date and request type: late arrival, early exit, early check-in, official duty, work from home, paid leave, unpaid leave, rotational weekly off or extra overtime.
-2. Enter requested minutes for timed permissions/OT and a reason. For leave, choose an eligible Staff colleague when one is available. Submit once; the form keeps a stable request key during retries.
+1. Recruiter or Manager selects **New request**, then chooses date and request type: late arrival, early exit, early check-in, official duty, work from home, paid leave, unpaid leave, rotational weekly off or extra overtime.
+2. Enter requested minutes for timed permissions/OT and a reason. For leave, choose an eligible Recruiter colleague when one is available. Submit once; the form keeps a stable request key during retries.
 3. Review the saved request under **My requests**. A leave request with a nominated colleague starts as **Awaiting cover**; other eligible requests enter the approval queue.
 4. The nominated colleague selects **Accept cover** or **Decline cover** and can enter a note. Acceptance moves the request to approvers. After decline, the requester selects **Choose cover** to nominate another eligible colleague.
 5. Manager/Admin opens **Approvals**, inspects the date, reason, requested minutes, cover response and outstanding stages, then selects **Approve** or **Reject** with a decision reason.
@@ -73,13 +73,13 @@ Reference-company holidays and individual employee exceptions were not copied. R
 
 ## Recruitment leave cover journey
 
-1. Approved paid/unpaid calendar leave makes that Staff member ineligible for new allocation and manual reassignment on the leave date. A pending request does not make them unavailable.
+1. Approved paid/unpaid calendar leave makes that Recruiter ineligible for new allocation and manual reassignment on the leave date. A pending request does not make them unavailable.
 2. On the leave date, the supervised worker checks that approval, accepted cover and leave calendar are still valid and that cover remains eligible.
-3. It transfers the absent employee's eligible uncontacted candidates and their open tasks to the accepted Staff colleague. Original deadlines remain unchanged; candidate/task history records the handover.
-4. On the following day, the worker returns unfinished, unchanged work only when the original owner remains active Staff and is not manually on leave. Completed work and later human reassignment remain intact.
+3. It transfers the absent employee's eligible uncontacted candidates and their open tasks to the accepted Recruiter colleague. Original deadlines remain unchanged; candidate/task history records the handover.
+4. On the following day, the worker returns unfinished, unchanged work only when the original owner remains active Recruiter and is not manually on leave. Completed work and later human reassignment remain intact.
 5. Consecutive leave days settle the previous handover before starting the next. A missed leave window is marked settled without retroactively transferring work. A durable ledger prevents repeated sweeps from transferring the same work twice.
 
-Manager leave can be recorded, but does not invent Manager-owned recruitment work. Verify the actual handover state and ownership in [Staff Directory](11-staff-assignment-directory.md), the candidate profile and task history rather than assuming that approval alone has already moved candidates.
+Manager leave can be recorded, but does not invent Manager-owned recruitment work. Verify the actual handover state and ownership in [Recruiter Directory](11-staff-assignment-directory.md), the candidate profile and task history rather than assuming that approval alone has already moved candidates.
 
 ## Screen and backend contract
 
@@ -98,7 +98,7 @@ An already-decided request, unavailable cover, missed cutoff or unauthorized sel
 - [ ] Default full shift, flex-window coverage, late arrival, early exit and overnight work calculate from punches, independently of browser activity.
 - [ ] Monthly grace is allocated chronologically, warns at 45 minutes and never exceeds 60; the two-occasion limit and reasoned Admin exception behave as described.
 - [ ] Missing punches remain provisional until the deadline, then become unpaid unless corrected; future/untracked days do not create invented absences.
-- [ ] Staff permission, Manager request and attempted self-approval follow the correct authority and stage rules.
+- [ ] Recruiter permission, Manager request and attempted self-approval follow the correct authority and stage rules.
 - [ ] WFH/early/late timing restrictions are enforced by server time.
 - [ ] First paid leave remains paid; a second approved paid-leave request visibly converts to unpaid.
 - [ ] Cover acceptance, decline and renomination work; unavailable colleagues are rejected.

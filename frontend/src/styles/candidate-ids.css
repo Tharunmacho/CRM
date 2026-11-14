@@ -1,0 +1,6 @@
+/* Care India ID (primary), CRM reference (second, muted) and the Traveller ID chip. See features/candidates/candidate-ids.ts. */
+.cid-main { font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .01em; color: var(--text-main); }
+.cid-ref { font-weight: 400; color: var(--text-muted); }
+.cid-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 1px 10px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-2); font-size: 12px; line-height: 20px; color: var(--text-muted); white-space: nowrap; }
+.cid-chip > span { flex: none; }
+.cid-chip > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 600; letter-spacing: .01em; color: var(--text-main); }

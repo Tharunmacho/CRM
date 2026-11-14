@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { CalendarPlus, ChevronsDownUp, ChevronsUpDown, Download, FileCheck2, PhoneOff, RefreshCw, Search, ThumbsUp, Users, UserRoundCheck, Upload, BellRing } from 'lucide-react'
+import { CalendarPlus, ChevronsDownUp, ChevronsUpDown, Download, FileCheck2, PhoneOff, RefreshCw, Search, ThumbsUp, Users, Upload, BellRing } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
 import { EmptyState, PageHeader, Panel } from '@/shared/ui/display'
@@ -35,8 +35,8 @@ import { downloadLeadExport, gateFromRefusal, leadApi, uploadLeadResume, type Up
 import { useLeadData } from '@/features/leads/use-leads'
 import { GATE_REASON, gateBlocks, gateState, publishGate, type LeadGate } from '@/features/leads/lead-gate'
 import {
-  EMPTY_FILTERS, LEAD_SORTS, footerHint, activeCard, activeLeadFilterCount, buildLeadQuery, cardFilters, columnsQuery, isSupervisor, searchHint, summaryScope,
-  type ExtraColumn, type Lead, type LeadCard, type LeadFilters,
+  EMPTY_FILTERS, LEAD_SORTS, NEW_CARD_DETAIL, NEW_CARD_LABEL, footerHint, activeCard, activeLeadFilterCount, buildLeadQuery, cardFilters, columnsQuery, isSupervisor, searchHint, summaryScope,
+  type DateField, type ExtraColumn, type Lead, type LeadCard, type LeadFilters,
 } from '@/features/leads/lead-model'
 import { PAGE_SIZES, defaultPageSize, readPageSize, savePageSize } from '@/features/candidates/pager-model'
 import '@/styles/data-bank-v2.css'
@@ -47,6 +47,10 @@ import '@/styles/lead-extras.css'
 type Tab = 'leads' | 'campaigns' | 'uploads'
 const FRESH_MS = 8_000
 const VIEW_SCOPE = 'leads'
+const DATE_FIELD_KEY = 'crm-leads-date-field'
+/** The remembered Dates choice (session only); storage can be blocked, so it falls back to Uploaded. */
+const readDateField = (): DateField => { try { return window.sessionStorage.getItem(DATE_FIELD_KEY) === 'created' ? 'created' : 'uploaded' } catch { return 'uploaded' } }
+const saveDateField = (value: DateField) => { try { window.sessionStorage.setItem(DATE_FIELD_KEY, value) } catch { /* the choice just is not remembered */ } }
 /** Below this box width (a window of a window under 1100px wide) the leads read as cards; above it the one table always fits. */
 const TABLE_MIN_WIDTH = 900
 
@@ -60,7 +64,7 @@ export default function LeadsPage() {
   /** Only an admin hands out leads (managers and staff see just the leads assigned to them). */
   const canAssign = me.role === 'admin'
 
-  const [filters, setFilters] = useState<LeadFilters>(() => ({ ...EMPTY_FILTERS, batchId: params.get('batch') ?? '' }))
+  const [filters, setFilters] = useState<LeadFilters>(() => ({ ...EMPTY_FILTERS, dateField: readDateField(), batchId: params.get('batch') ?? '' }))
   const [sort, setSort] = useState({ key: 'created', dir: 'desc' as 'asc' | 'desc' })
   const [page, setPage] = useState(0)
   const [pageSize, setPageSizeState] = useState(() => readPageSize(VIEW_SCOPE) ?? defaultPageSize(typeof window === 'undefined' ? 900 : window.innerHeight))
@@ -113,8 +117,9 @@ export default function LeadsPage() {
 
   const filterKey = query
   useEffect(() => { setPage(0) }, [filterKey, pageSize])
-  const patchFilters = (patch: Partial<LeadFilters>) => setFilters((current) => ({ ...current, ...patch }))
-  const clearFilters = () => { setFilters(EMPTY_FILTERS); setParams((previous) => { const next = new URLSearchParams(previous); next.delete('batch'); return next }) }
+  // Which date the Dates filter uses (Uploaded or Created) is remembered while the sheet is open, also across Clear and other views.
+  const patchFilters = (patch: Partial<LeadFilters>) => { if (patch.dateField) saveDateField(patch.dateField); setFilters((current) => ({ ...current, ...patch })) }
+  const clearFilters = () => { setFilters((current) => ({ ...EMPTY_FILTERS, dateField: current.dateField })); setParams((previous) => { const next = new URLSearchParams(previous); next.delete('batch'); return next }) }
   const filterCount = activeLeadFilterCount(filters)
   const hasFilters = filterCount > 0 || Boolean(filters.q.trim())
 
@@ -145,7 +150,7 @@ export default function LeadsPage() {
 
   const viewBatch = (batchId: string) => {
     setUploading(false); setTab('leads')
-    setFilters({ ...EMPTY_FILTERS, batchId })
+    setFilters((current) => ({ ...EMPTY_FILTERS, dateField: current.dateField, batchId }))
     setParams((previous) => { const next = new URLSearchParams(previous); next.set('batch', batchId); return next })
     if (location.pathname.endsWith('/import')) navigate({ pathname: '/leads', search: `?batch=${batchId}` }, { replace: true })
   }
@@ -153,7 +158,7 @@ export default function LeadsPage() {
   /** A campaign row on the Campaigns tab: back to the Leads tab with that campaign as the only filter. */
   const viewCampaign = (campaign: string) => {
     setTab('leads')
-    setFilters({ ...EMPTY_FILTERS, campaign })
+    setFilters((current) => ({ ...EMPTY_FILTERS, dateField: current.dateField, campaign }))
     setParams((previous) => { const next = new URLSearchParams(previous); next.delete('batch'); return next })
   }
 
@@ -221,9 +226,9 @@ export default function LeadsPage() {
   const fmt = (value?: number) => (value === undefined ? '–' : value.toLocaleString())
   const kpis = [
     { label: 'Total leads', value: fmt(summary?.total), detail: summary?.scope === 'mine' ? 'Assigned to you' : 'Everyone who answered your ads', icon: Users, active: card === 'total', onSelect: () => pickCard('total') },
+    { label: NEW_CARD_LABEL, value: fmt(summary?.newToday), detail: NEW_CARD_DETAIL, icon: CalendarPlus, active: card === 'new_today', onSelect: () => pickCard('new_today') },
     { label: 'Not contacted', value: fmt(summary?.uncontacted), detail: 'Nobody has called yet', icon: PhoneOff, tone: 'warn' as const, active: card === 'not_contacted', onSelect: () => pickCard('not_contacted') },
     { label: 'Interested', value: fmt(summary ? summary.interested + summary.resumeReceived : undefined), detail: 'Said yes, or sent a resume', icon: ThumbsUp, tone: 'ok' as const, active: card === 'interested', onSelect: () => pickCard('interested') },
-    { label: 'Converted', value: fmt(summary?.converted), detail: 'Now candidates', icon: UserRoundCheck, tone: 'quiet' as const, active: card === 'converted', onSelect: () => pickCard('converted') },
     { label: 'Follow-ups due', value: fmt(summary?.followUpsDueMine), detail: 'Yours, due today or overdue', icon: BellRing, tone: 'warn' as const, active: card === 'follow_ups', onSelect: () => pickCard('follow_ups') },
   ]
 

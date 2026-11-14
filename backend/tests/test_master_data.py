@@ -256,7 +256,11 @@ def test_deletion_retains_closed_application_history_and_documents(desk, kind):
     identifier = {'clients': contact['id'], 'companies': company['id'], 'orders': order['id']}[kind]
     response = desk.client.delete(f'/api/{kind}/{identifier}')
     assert response.status_code == 409, response.text
-    assert 'history' in response.text.lower() and 'inactive' in response.text.lower()
+    if kind == 'orders':
+        # A job asks the admin to confirm removing its candidates (see test_order_delete.py); nothing goes without it.
+        assert '1 candidate is on' in response.text and '(all closed)' in response.text
+    else:
+        assert 'history' in response.text.lower() and 'inactive' in response.text.lower()
     with desk.sessions() as db:
         assert db.get(Client, contact['id']) and db.get(Company, company['id']) and db.get(Order, order['id'])
         assert db.get(Application, 'retained-application')
@@ -400,7 +404,11 @@ def test_only_admin_or_manager_may_delete_client_chain_records(desk, kind):
     with desk.sessions() as db:
         assert db.get(Client, contact['id']) and db.get(Company, company['id']) and db.get(Order, order['id'])
     desk.actor = SimpleNamespace(id='manager', role=Role.manager)
-    assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == 200
+    # A job (order) is deleted by an admin only.
+    assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == (403 if kind == 'orders' else 200)
+    if kind == 'orders':
+        desk.actor = SimpleNamespace(id='admin', role=Role.admin)
+        assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == 200
 
 
 def test_deleting_a_client_is_audited_and_names_the_candidate_that_blocks_it(desk):

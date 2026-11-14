@@ -11,7 +11,7 @@ from sqlalchemy.orm import aliased, defer, undefer
 from sqlalchemy.orm.attributes import set_committed_value
 from app.api.schemas import CandidateOut
 from app.core.config import get_settings
-from app.db.models import Application, Attachment, AuditEntry, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
+from app.db.models import Application, ApplicationStatus, Attachment, AuditEntry, Candidate, CandidateStatus, Client, Company, Designation, FormOption, Order, Source, User
 from app.domain.stages import STAGES
 from app.services.candidate_identity import normalized_labels
 from app.services.agency_display import agency_display_expression
@@ -70,6 +70,18 @@ class Search:
     matchable: bool = False
     # Only the resumes of one position, or "none" without an active or deployed placement.
     order_id: str = ""
+    # "yes": only candidates who travelled; "no": only those who have not; "" shows both. See has_travelled().
+    travelled: str = ""
+
+
+def has_travelled():
+    """True for a candidate with a deployed placement: the SAME rule as the Travelled report (api/routers/travelled.py).
+
+    A placement counts as travelled when its application is deployed (stage 11, which also hands out the Traveller ID).
+    It is decided per candidate over all of their applications, not by the one placement the Data Bank row displays, so
+    someone with a new active order after an earlier flight is still a traveller. A candidate marked `deployed` with no
+    deployed application is not counted, exactly as the report leaves them out."""
+    return exists(select(1).where(Application.candidate_id == Candidate.id, Application.status == ApplicationStatus.deployed)).correlate(Candidate)
 
 
 def normalized(expression):
@@ -145,7 +157,7 @@ def search_statement(filters: Search):
     def term_matches(term: str):
         """True when this one term appears (any case) in at least one of the candidate's details."""
         lowered = term.lower()
-        text_fields = [Candidate.name, Candidate.phone, Candidate.whatsapp, Candidate.email, Candidate.passport_no, Candidate.ref, Candidate.care_id, Candidate.nationality,
+        text_fields = [Candidate.name, Candidate.phone, Candidate.whatsapp, Candidate.email, Candidate.passport_no, Candidate.ref, Candidate.care_id, Candidate.traveller_id, Candidate.nationality,
                        Candidate.current_city, Candidate.country_preference, cast(Candidate.skills, String), cast(Candidate.designations, String), agent, User.name, intake.name,
                        Order.ref, Designation.title, Company.name, Client.name, Order.country, Order.city]
         clauses = [literal_contains(field, term) for field in text_fields]
@@ -194,6 +206,12 @@ def search_statement(filters: Search):
         query = query.where(has_passport)
     elif filters.passport == "missing":
         query = query.where(~has_passport)
+    if filters.travelled == "yes":
+        query = query.where(has_travelled())
+    elif filters.travelled == "no":
+        query = query.where(~has_travelled())
+    elif filters.travelled:
+        raise HTTPException(422, "Choose travelled, not travelled, or leave it empty.")
     if filters.pool == "unmapped":
         query = query.where(app.c.candidate_id.is_(None))
     elif filters.pool == "not_interested":
@@ -385,7 +403,7 @@ def export_candidates(db, filters):
         Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
     ).distinct()):
         (rejected_files if rejected else uploaded).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
-    rows = [["Care India ID", "CRM reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned staff", "Mapped order", "Stage", "Status", "Added at",
+    rows = [["Care India ID", "Traveller ID", "CRM reference", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned recruiter", "Mapped order", "Stage", "Status", "Added at",
              "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level", "Agency", "Profile review issues",
              *[label + " document" for _slot, label in required], "Missing mandatory documents"]]
     for candidate in candidates:
@@ -407,7 +425,7 @@ def export_candidates(db, filters):
             if not review:
                 review.append("Profile check pending")
         exact = "; ".join(f"{key}: {value}" for key, value in sorted((candidate.source_claims or {}).items()))
-        rows.append([candidate.care_id or "", candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
+        rows.append([candidate.care_id or "", candidate.traveller_id or "", candidate.ref, candidate.name, candidate.phone, candidate.email, ", ".join(candidate.designations), ", ".join(candidate.skills),
                      candidate.total_experience, exact, "Yes" if candidate.passport_no else "No", candidate.source.value,
                      users.get(candidate.owner_id, UNASSIGNED_LABEL), orders.get(app.order_id, "") if app else "", app.current_stage if app else "",
                      candidate.status.value, candidate.created_at.isoformat(),

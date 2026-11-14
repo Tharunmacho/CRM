@@ -34,10 +34,20 @@ export const PRD_COLUMNS = [
   { key: 'added', label: 'Date added' },
 ] as const
 
-/** How many of the filter controls currently narrow the list (column filters, staff, skills, coverage). */
-export function activeFilterCount(columnFilters: Record<string, string>, staff: string, skills: string[], skillStatus: string): number {
+/**
+ * The Travel filter: `yes` = travelled (has a deployed placement, the same rule as the Travelled report and the owner of a
+ * Traveller ID), `no` = not travelled, '' = both. It is the server's `travelled` query parameter and the page's `travelled` link parameter.
+ */
+export type TravelFilter = '' | 'yes' | 'no'
+export const TRAVEL_CHOICES: [TravelFilter, string][] = [['', 'Any travel'], ['yes', 'Travelled'], ['no', 'Not travelled']]
+
+/** Anything that is not exactly `yes` or `no` (a stale or hand-edited link) reads as no filter. */
+export const parseTravel = (raw: string | null | undefined): TravelFilter => (raw === 'yes' || raw === 'no' ? raw : '')
+
+/** How many of the filter controls currently narrow the list (column filters, staff, skills, coverage, travel). */
+export function activeFilterCount(columnFilters: Record<string, string>, staff: string, skills: string[], skillStatus: string, travel: TravelFilter = ''): number {
   const columns = Object.entries(columnFilters).filter(([key, value]) => key !== 'owner' && value.trim()).length
-  return columns + (staff ? 1 : 0) + skills.length + (skillStatus !== 'all' ? 1 : 0)
+  return columns + (staff ? 1 : 0) + skills.length + (skillStatus !== 'all' ? 1 : 0) + (travel ? 1 : 0)
 }
 
 /** What the Assigned-to column shows when a candidate has no recruiter (the server filters on this label too). */

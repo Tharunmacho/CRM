@@ -30,12 +30,23 @@ def test_feedback_is_required_even_when_stage_details_are_present(workflow, feed
         assert db.scalar(select(func.count()).select_from(Task).where(Task.application_id == app_id, Task.completed_at.is_(None))) == 1
 
 
+# The three decision stages need their positive answer to move on; every other early stage moves on feedback alone.
+POSITIVE = {4: {"result": "selected"}, 5: {"result": "agreed"}, 6: {"result": "fit"}}
+POSITIVE_OUTCOME = {4: "Selected", 5: "Agreed", 6: "Fit"}
+
+
 def test_first_ten_stages_accept_feedback_only_but_deployment_requires_ticket_and_date(workflow):
     env = workflow
     app_id = mapped(env)
     for stage in range(1, 11):
         lock = version(env, app_id)
-        body = {"lock_version": lock, "data": {"feedback": f"  Stage {stage}: recruiter approved this move.  "}}
+        body = {"lock_version": lock, "data": {"feedback": f"  Stage {stage}: recruiter approved this move.  ", **POSITIVE.get(stage, {})}}
+        if stage in POSITIVE:
+            # Feedback alone is not enough here: the API names the choice that is missing and does not move the stage.
+            refused = env.client.post(f"/api/applications/{app_id}/complete", json={"lock_version": lock, "data": {"feedback": "Recruiter approved this move."}})
+            assert refused.status_code == 422
+            assert refused.json()["detail"]["message"].startswith("Choose the ") and "before moving this candidate" in refused.json()["detail"]["message"]
+            assert env.client.get(f"/api/applications/{app_id}/draft").json()["lockVersion"] == lock
         response = env.client.post(f"/api/applications/{app_id}/complete", json=body)
         assert response.status_code == 200, response.text
         assert response.json()["currentStage"] == min(stage + 1, 11)
@@ -63,7 +74,7 @@ def test_first_ten_stages_accept_feedback_only_but_deployment_requires_ticket_an
         assert len(records) == 10
         for stage, row in enumerate(records, 1):
             assert row.data["feedback"] == f"Stage {stage}: recruiter approved this move."
-            assert row.outcome == "Completed manually" and row.completed_by == "staff"
+            assert row.outcome == POSITIVE_OUTCOME.get(stage, "Completed manually") and row.completed_by == "staff"
             assert row.completed_at is not None
         assert "travelDate" not in records[-1].data
 

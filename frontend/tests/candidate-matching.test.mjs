@@ -11,8 +11,9 @@ function moduleUrl(source) {
 }
 
 const skillsUrl = moduleUrl(await readFile(new URL('../src/features/candidates/candidate-skills.ts', import.meta.url), 'utf8'))
+const idsUrl = moduleUrl(await readFile(new URL('../src/features/candidates/candidate-ids.ts', import.meta.url), 'utf8'))
 const source = await readFile(new URL('../src/features/jobs/candidate-matching.ts', import.meta.url), 'utf8')
-const { matchesCandidate } = await import(moduleUrl(source.replace('@/features/candidates/candidate-skills', skillsUrl)))
+const { matchesCandidate } = await import(moduleUrl(source.replace('@/features/candidates/candidate-skills', skillsUrl).replace('@/features/candidates/candidate-ids', idsUrl)))
 const candidate = {
   name: 'Ravi Kumar', ref: 'CAN-009', phone: '9876543210', email: 'ravi@example.test',
   passportNo: 'P123456', currentCity: 'New Delhi', designations: ['TIG Welder'],
@@ -54,4 +55,10 @@ test('contact, passport, designation, and location are searchable without invent
     assert.equal(matchesCandidate(candidate, filters, query), true)
   }
   assert.equal(matchesCandidate(candidate, filters, 'Java developer'), false)
+})
+
+test('the Care India ID, the Traveller ID and the CRM reference all find the candidate', () => {
+  const withIds = { ...candidate, careId: 'CI-26-27-001', travellerId: 'CI-T-26-27-001' }
+  for (const query of ['CI-26-27-001', 'ci-t-26-27-001', 'CAN-009']) assert.equal(matchesCandidate(withIds, filters, query), true, query)
+  assert.equal(matchesCandidate(candidate, filters, 'CI-26-27-001'), false)
 })

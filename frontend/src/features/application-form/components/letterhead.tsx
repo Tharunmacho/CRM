@@ -1,5 +1,6 @@
 import { fileHref } from '@/shared/api/client'
 import { identLines, readableReference } from '../paper-model'
+import { paperIdLine, type CandidateIds } from '@/features/candidates/candidate-ids'
 import type { ApplicationFormData, AssignmentData, FormDocument } from '../types'
 
 /**
@@ -8,17 +9,19 @@ import type { ApplicationFormData, AssignmentData, FormDocument } from '../types
  */
 export function Letterhead({
   photo,
-  reference,
+  candidate,
   header,
   assignment,
 }: {
   header: ApplicationFormData['header']
   photo: FormDocument | null
-  reference: string
+  /** Its Care India ID leads the reference line, then the CRM reference; a Traveller ID follows when there is one. */
+  candidate: CandidateIds
   /** Client, job, source and agency are printed under the address, so the PDF carries them. Only what is known is shown. */
   assignment?: AssignmentData
 }) {
   const lines = identLines(assignment)
+  const idText = paperIdLine(candidate, readableReference)
   return (
     <header className="af-letterhead">
       <div className="af-brand">
@@ -28,7 +31,7 @@ export function Letterhead({
       <div className="af-heading">
         <p className="af-company">{header.company}</p>
         <h1 className="af-form-title">{header.title}</h1>
-        {readableReference(reference) && <p className="af-ref">Reference <span className="tnum">{readableReference(reference)}</span></p>}
+        {idText && <p className="af-ref tnum">{idText}</p>}
       </div>
       <div className="af-photo-wrap">
         <div className="af-photo" data-has-photo={photo ? 'true' : 'false'}>

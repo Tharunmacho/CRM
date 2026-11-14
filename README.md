@@ -1,6 +1,6 @@
 # Care India Overseas Recruitment CRM
 
-A recruitment CRM with a React/TypeScript frontend, FastAPI backend and PostgreSQL. It integrates candidate intake and documents, employers and job orders, eleven recruitment stages, tasks, reports, user management, a unified multi-account inbox (Gmail, Microsoft 365, Zoho and any IMAP/SMTP mailbox) and staff attendance. The requirement matrix distinguishes implemented behavior from live provider acceptance.
+A recruitment CRM with a React/TypeScript frontend, FastAPI backend and PostgreSQL. It integrates candidate intake and documents, employers and job orders, eleven recruitment stages, tasks, reports, user management, a unified multi-account inbox (Gmail, Microsoft 365, Zoho and any IMAP/SMTP mailbox) and recruiter attendance. The requirement matrix distinguishes implemented behavior from live provider acceptance.
 
 ## Requirements and implementation plan
 
@@ -172,7 +172,7 @@ On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The ro
 | `TESSERACT_CMD`, `OCR_LANGUAGES`, `OCR_MAX_PAGES`, `OCR_PAGE_TIMEOUT_SECONDS`, `OCR_DOCUMENT_TIMEOUT_SECONDS` | Local document reader configuration; see the first OCR stage below |
 | `GMAIL_*`, `MICROSOFT_*`, `APP_BASE_URL` | Optional OAuth sign-in for Gmail and Microsoft 365 mailboxes; see the email connection guide |
 | `EMAIL_INGESTION_ENABLED`, `EMAIL_POLL_SECONDS`, `MAIL_TOKEN_ENCRYPTION_KEY` | Mail reception/extraction workers and encrypted mailbox connections; see the email connection guide |
-| `AGENCY_TIMEZONE` | Agency-day boundaries for reports, task monitoring and staff attendance |
+| `AGENCY_TIMEZONE` | Agency-day boundaries for reports, task monitoring and recruiter attendance |
 | `STORAGE_DIR` | Backend file storage; defaults to `backend/data/uploads` locally |
 | `STATIC_DIR` | Built frontend location; defaults to `backend/static` locally |
 | `REDIS_URL` | Optional backend Redis connection; use a local URL for development and Dokploy's internal URL in production |
@@ -235,9 +235,9 @@ The independent email receiver and extraction worker retain originals before adv
 
 Run the complete backend from `backend/` with `python -m app.runtime`. It always starts the API, workflow, presence and manual document workers. Email workers start when `EMAIL_INGESTION_ENABLED=true`; WhatsApp starts when configured/enabled. Processes must share the same PostgreSQL database, storage and encryption key. See [operations](docs/operations.md) for storage identity, migration and backup procedures.
 
-## Staff attendance and activity
+## Recruiter attendance and activity
 
-Staff and Manager can check in/out from the shell and Attendance page. The monthly workspace adds the confirmed reference rules for duty hours, grace, paid leave, weekly offs, permissions, staged approvals, extra OT, roster and durable leave cover. Admin handles financial approval in the existing three-role model. Raw clock records and Staff browser presence remain separate. Logout stops presence without silently checking out. See [attendance policy](docs/attendance.md) for calculations, permissions and explicit limits.
+Recruiters and Manager can check in/out from the shell and Attendance page. The monthly workspace adds the confirmed reference rules for duty hours, grace, paid leave, weekly offs, permissions, staged approvals, extra OT, roster and durable leave cover. Admin handles financial approval in the existing three-role model. Raw clock records and Recruiters browser presence remain separate. Logout stops presence without silently checking out. See [attendance policy](docs/attendance.md) for calculations, permissions and explicit limits.
 
 ## Build and verification
 

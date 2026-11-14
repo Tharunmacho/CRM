@@ -4,12 +4,12 @@ Matching creates a candidate × order application and unlocks stage 1. An unmatc
 
 ## Roles and preparation
 
-All three roles can map/unmap under the application rules. Staff stage-edit permission still follows ownership. Prepare an open order and a candidate with an active owner, no active application and no deployed placement. Confirm interest before matching as the operating practice described in [initial call](12-initial-call.md).
+All three roles can map/unmap under the application rules. Recruiter stage-edit permission still follows ownership. Prepare an open order and a candidate with an active owner, no active application and no deployed placement. Confirm interest before matching as the operating practice described in [initial call](12-initial-call.md).
 
 ## User journey
 
 1. Open the order and choose **Match candidates**. Review **What this order needs**: saved designation, required skills and minimum experience.
-2. Search current backend candidates by designation, experience, exact skills, current location, passport number availability and assigned staff. Resume text can also be searched.
+2. Search current backend candidates by designation, experience, exact skills, current location, passport number availability and assigned recruiter. Resume text can also be searched.
 3. Select **Use designation requirements** to apply all saved requirements, or deliberately adjust/clear the filters. ALL and ANY skill matching have different meanings.
 4. Inspect each result's required skills recorded, requirements not recorded, full profile skills and experience shortfall. Open **View profile** in a new tab without losing the drawer's filters.
 5. Select visible candidates and choose **Match … and start stage 1**. The result creates applications and stage tasks; it does not merely mark a shortlist.

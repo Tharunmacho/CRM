@@ -26,9 +26,11 @@ from app.services import client_routing
 from app.services import form_extraction as form_fx
 from app.services.candidate_identity import identity_matches, enrich_empty, normalize_candidate_values, normalize_phone
 from app.services.candidate_intake_binding import bind_intake, lock_intake_group, saved_candidate, saved_candidate_id
+from app.services.assignment_notifications import candidate_label
 from app.services.candidate_review import UNNAMED
 from app.services.candidate_search import Pool, Search, search_candidates, export_candidates, candidate_skill_facets, pool_counts, position_groups
 from app.services.candidate_matching import match_candidates
+from app.services.invoice_access import can_see_invoices
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
 from app.db.models import _uuid
@@ -71,14 +73,14 @@ def candidate_filters(q: str = Query(default="", max_length=500), pool: Pool = "
                       skills: list[str] = Query(default=[]), skill_mode: Literal["all", "any"] = "all", missing_skills: bool = False,
                       column_filters: str = Query(default="{}", max_length=5000), sort: str = "new_first", direction: Literal["asc", "desc"] = "desc",
                       staff: str | None = Query(default=None, max_length=36), position_id: str = Query(default="", max_length=36),
-                      mine_new: bool = False, user: User = Depends(current_user)):
+                      mine_new: bool = False, travelled: Literal["yes", "no"] | None = None, user: User = Depends(current_user)):
     if len(skills) > 50 or any(len(skill) > 200 for skill in skills):
         raise HTTPException(422, "Select at most 50 skills of at most 200 characters each.")
     if mine_new:
         # "My new candidates": the ones assigned to the signed-in person that are still New. A view, not a permission:
         # leaving the flag out shows the whole shared Data Bank exactly as before.
-        return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, user.id, fresh=True, order_id=position_id)
-    return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, staff or None, order_id=position_id)
+        return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, user.id, fresh=True, order_id=position_id, travelled=travelled or "")
+    return Search(q, pool, skills, skill_mode, missing_skills, column_filters, sort, direction, staff or None, order_id=position_id, travelled=travelled or "")
 
 
 # The Data Bank summaries (pool sizes, skill facets, position groups) are the same for every signed-in user - the bank is
@@ -224,7 +226,9 @@ def candidate_detail(candidate_id: str, response: Response,
         files.setdefault((candidate_id, attachment["slot"]), []).append(attachment)
     response.headers["Cache-Control"] = "private, no-store"
     manual_records = statuses_by_candidate(result["manual_documents"]).get(candidate_id, {})
-    return _candidate_out(result["candidate"][0], files, CandidateDetailOut, DOCUMENT_SLOTS + FORM_DOCUMENT_SLOTS, manual_records)
+    # The Invoice document is the admin's: no other role gets the slot, its file links or its manual status.
+    slots = [slot for slot in DOCUMENT_SLOTS + FORM_DOCUMENT_SLOTS if slot[0] != "invoice" or can_see_invoices(user)]
+    return _candidate_out(result["candidate"][0], files, CandidateDetailOut, slots, manual_records)
 
 
 class OcrDataIn(BaseModel):
@@ -492,7 +496,7 @@ def ensure_assignable(db: Session, user_id: str | None) -> User:
     from app.services.attendance_availability import unavailable_staff_ids
     target = db.get(User, user_id) if user_id else None
     if target is None or target.role != Role.staff or not target.active or target.on_leave or target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, "Choose an active staff member who is not on leave")
+        raise HTTPException(422, "Choose an active recruiter who is not on leave")
     return target
 
 
@@ -705,14 +709,10 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
         db.flush()
         task_id = task.id
 
-    # PRD: the owner and the admin are told about an assignment. Admins and managers both hear about a candidate nobody could take.
-    told = [Role.admin] if owner else [Role.admin, Role.manager]
-    recipients = set(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_(told))))
-    if owner:
-        recipients.add(owner.id)
-    for recipient in recipients:
-        db.add(Notification(user_id=recipient, kind="candidate_assignment", title="Candidate assigned" if owner else "Candidate needs assignment",
-                            detail=candidate.name, link_to=f"/candidates/{candidate.id}"))
+    # The owner is told the candidate is theirs (not when they made it themselves); admins and managers hear only about a
+    # candidate nobody could take. The person who created it is never notified of their own action.
+    from app.services.assignment_notifications import notify_new_candidate
+    notify_new_candidate(db, candidate, owner, actor_id=user.id, actor_name=user.name)
 
     db.add(
         AuditEntry(
@@ -880,9 +880,11 @@ def request_allocation(candidate_id: str, db: Session = Depends(get_db), user: U
         raise HTTPException(429, "You have sent a lot of requests in the last hour. Wait a little before asking for more candidates.")
     holder = db.scalar(select(User.name).where(User.id == candidate.owner_id)) if candidate.owner_id else None
     for admin_id in admins:
-        db.add(Notification(user_id=admin_id, kind="candidate_request", title="Candidate requested",
-                            detail=f"{user.name} requested {candidate.name} ({candidate.ref})" + (f" · now with {holder}" if holder else " · not assigned yet"),
-                            link_to=f"/candidates/{candidate.id}"))
+        db.add(Notification(user_id=admin_id, kind="candidate_request", title="A recruiter is asking for a candidate",
+                            detail=f"{user.name} asked you to assign {candidate_label(candidate.name, candidate.care_id, candidate.ref)} to them. "
+                                   + (f"The candidate is with {holder} now." if holder else "The candidate is not assigned to anyone yet.")
+                                   + " Open the candidate to assign a recruiter.",
+                            link_to=f"/candidates/{candidate.id}/application"))
     db.add(AuditEntry(actor_id=user.id, action=ALLOCATION_REQUEST_ACTION, target=candidate.name, entity_type="candidate", entity_id=candidate.id,
                       meta={"requestedBy": user.id, "currentOwnerId": candidate.owner_id, "notified": len(admins)}))
     db.commit()
@@ -1037,7 +1039,7 @@ def _remove_stored_files(bind, audit_id: str, keys: set[str]) -> None:
 
 
 def _delete_candidate_rows(db: Session, candidate_id: str, *, audit_id: str, actor_id: str, target: str, ref: str,
-                           applications: int):
+                           applications: int, withdrawn_from: tuple[str, ...] = ()):
     """
     Everything that must change for one delete, as ONE statement (data-modifying CTEs; the database checks the
     foreign keys when the statement ends, so the order of the parts does not matter). Hosted PostgreSQL costs a
@@ -1079,11 +1081,14 @@ def _delete_candidate_rows(db: Session, candidate_id: str, *, audit_id: str, act
 
     documents = select(func.count()).select_from(docs).scalar_subquery()
     task_count = select(func.count()).select_from(tasks).scalar_subquery()
+    meta = ["ref", ref, "documents", documents, "applications", applications, "tasks", task_count]
+    if withdrawn_from:
+        # The order(s) the candidate was taken off in the same step (explicit admin override).
+        meta += ["withdrawnFromOrders", func.jsonb_build_array(*[literal(order_ref) for order_ref in withdrawn_from])]
     audit = insert(AuditEntry).from_select(
         ["id", "actor_id", "action", "target", "entity_type", "entity_id", "meta"],
         select(literal(audit_id), literal(actor_id), literal("Deleted candidate"), literal(target), literal("candidate"),
-               literal(candidate_id),
-               func.jsonb_build_object("ref", ref, "documents", documents, "applications", applications, "tasks", task_count)),
+               literal(candidate_id), func.jsonb_build_object(*meta)),
     ).returning(AuditEntry.id).cte("audit_row")
     parts.append(audit)
 
@@ -1095,8 +1100,12 @@ def _delete_candidate_rows(db: Session, candidate_id: str, *, audit_id: str, act
 
 
 @router.delete("/{candidate_id}")
-def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session = Depends(get_db),
-                     user: User = Depends(require_role(Role.admin))) -> dict:
+def delete_candidate(candidate_id: str, background: BackgroundTasks,
+                     withdraw_from_orders: bool = Query(False, alias="withdrawFromOrders"),
+                     db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+    # `?withdrawFromOrders=true` is the admin's explicit "take them off the order(s) and delete" confirmation: a candidate
+    # on an ACTIVE order is then deleted too. Without it (the default) such a candidate is refused. A deployed placement
+    # and any invoice/payment history are kept on record either way.
     # Four statements and one commit (the hosted database costs a round trip each):
     # cursor lock, candidate/placements lock, financial retention check, then the whole delete.
     # Same lock order as a profile correction: assignment cursor, then the candidate.
@@ -1125,7 +1134,7 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session
     # redoing); anyone else on an order, or deployed, is kept on record.
     imported = rows[0][5] == "Bulk import"
     if not imported:
-        if any(state is ApplicationStatus.active for state, _ in placements):
+        if not withdraw_from_orders and any(state is ApplicationStatus.active for state, _ in placements):
             raise HTTPException(status.HTTP_409_CONFLICT, "This candidate is still on an order. Remove them from the order first.")
         deployed = next((order_ref for state, order_ref in placements if state is ApplicationStatus.deployed), None)
         if deployed:
@@ -1144,12 +1153,19 @@ def delete_candidate(candidate_id: str, background: BackgroundTasks, db: Session
 
     name, ref = rows[0][0], rows[0][1]
     audit_id = _uuid()
+    withdrawn = tuple(sorted({order_ref for state, order_ref in placements
+                              if state is ApplicationStatus.active and order_ref})) if withdraw_from_orders else ()
     documents, tasks, stored_keys = _delete_candidate_rows(
-        db, candidate_id, audit_id=audit_id, actor_id=user.id, target=f"{name} ({ref})", ref=ref, applications=len(placements))
-    if imported and order_ids:
+        db, candidate_id, audit_id=audit_id, actor_id=user.id, target=f"{name} ({ref})", ref=ref, applications=len(placements),
+        withdrawn_from=withdrawn)
+    # Imported: every order they were on. Otherwise only the order(s) just withdrawn from (a closed placement never counted).
+    sync_ids = order_ids if imported else (
+        {order_id for _, _, application_id, state, _, _, order_id in rows
+         if application_id is not None and order_id and state is ApplicationStatus.active} if withdrawn else set())
+    if sync_ids:
         # A placement that is gone no longer fills an opening: an order that was Filled by it opens again.
         from app.api.routers.applications import _sync_order
-        for order in db.scalars(select(Order).where(Order.id.in_(order_ids)).with_for_update()):
+        for order in db.scalars(select(Order).where(Order.id.in_(sync_ids)).with_for_update()):
             _sync_order(db, order)
     db.commit()
 

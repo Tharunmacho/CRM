@@ -3,7 +3,7 @@ import { useRef } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
 import { RowMenu } from '@/features/candidates/components/db-parts'
-import { createdParts, followUpLabel, followUpState, leadDate, type Lead } from '../lead-model'
+import { createdParts, followUpLabel, followUpState, leadDate, uploadedLabel, type Lead } from '../lead-model'
 import { CampaignCell, ContactStateText, EducationCell, ExperienceCell, LocationCell, NameCell, PositionText, ownerNameOf } from './lead-columns'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
 
@@ -30,6 +30,7 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
   const owner = ownerNameOf(lead, context.userById)
   const date = leadDate(lead)
   const created = createdParts(date?.value)
+  const uploaded = uploadedLabel(lead.createdAt)
   const follow = followUpState(lead.nextFollowUpAt, lead.status)
   return (
     <li className={cn('db-mini ld-card', fresh && 'is-fresh', follow === 'overdue' && 'is-late')} tabIndex={0} onClick={() => onOpen(lead)}
@@ -40,6 +41,7 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
           <div className="min-w-0">
             <NameCell lead={lead} />
             {created && <small className="ld-card-sub">{date?.label === 'Imported' ? 'Imported ' : ''}{created.day} {created.year}</small>}
+            {date?.label === 'Created' && uploaded && <small className="ld-card-sub">Uploaded {uploaded}</small>}
           </div>
         </div>
         <ContactStateText lead={lead} />

@@ -1,32 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/shared/api/client'
 import { liveInterval } from '@/shared/state/live'
-import { clockSkew, nextCrossing, type DailyWorkResponse } from './daily-work-model'
+import type { DailyWorkResponse, FollowUpResponse } from './daily-work-model'
 
 interface Options {
-  /** Supervisors only: one staff id, or "all". Staff always get their own list. */
+  /** Supervisors only: one recruiter id, or "all". Recruiters always get their own list. */
   staff?: string
-  /** Skip the request (for example for a role that is not given a quota). */
+  /** Skip the request (for example for a role that has no list). */
   enabled?: boolean
   /** How long live changes are held back so a burst of task updates causes one request. */
   debounceMs?: number
 }
 
 /**
- * Today's daily list. Loads on mount and whenever the server announces a task change, plus a safety poll. `skew`
- * is the server clock minus the browser's, so hourly countdowns do not depend on the PC being set correctly.
+ * The Daily work list. Loads on mount and whenever the server announces a task, candidate or application change, plus a
+ * safety poll. There are no deadlines, so there is nothing to re-read at a given moment.
  */
-/**
- * The shell's daily prompt and the Tasks screen ask for the same list a moment apart: the answer is kept for three seconds so
- * the second one costs nothing. A task or candidate change (live event or write) drops it at once.
- */
-const CACHE = { ttlMs: 3_000, tags: ['tasks', 'users', 'candidates', 'applications', 'attendance', 'daily-work', 'daily-goals'] } as const
+const CACHE = { ttlMs: 3_000, tags: ['tasks', 'users', 'candidates', 'applications'] } as const
 
-export function useDailyWork({ staff, enabled = true, debounceMs = 1500 }: Options = {}) {
-  const [data, setData] = useState<DailyWorkResponse | null>(null)
+/** Today's candidates (`/daily-work`). */
+export const useDailyWork = (options: Options = {}) => useRecruiterList<DailyWorkResponse>('/daily-work', options)
+
+/** Follow-up (`/follow-up`): the same scoping, live topics and caching. A stage finished or an application closed moves a candidate between the two lists. */
+export const useFollowUp = (options: Options = {}) => useRecruiterList<FollowUpResponse>('/follow-up', options)
+
+function useRecruiterList<T>(path: string, { staff, enabled = true, debounceMs = 1500 }: Options) {
+  const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(enabled)
-  const [skew, setSkew] = useState(0)
   const generation = useRef(0)
   const staffKey = staff ?? ''
 
@@ -34,18 +35,17 @@ export function useDailyWork({ staff, enabled = true, debounceMs = 1500 }: Optio
     const mine = ++generation.current
     try {
       const query = staffKey ? `?staff=${encodeURIComponent(staffKey)}` : ''
-      const result = await api.get<DailyWorkResponse>(`/daily-work${query}`, { signal, cache: CACHE, fresh })
+      const result = await api.get<T>(`${path}${query}`, { signal, cache: CACHE, fresh })
       if (signal?.aborted || mine !== generation.current) return
       setData(result)
-      setSkew(clockSkew(result.serverTime, Date.now()))
       setError('')
     } catch (e) {
       if (signal?.aborted || mine !== generation.current) return
-      setError(e instanceof Error ? e.message : 'Daily tasks could not be loaded.')
+      setError(e instanceof Error ? e.message : 'Your candidates could not be loaded.')
     } finally {
       if (!signal?.aborted && mine === generation.current) setLoading(false)
     }
-  }, [staffKey])
+  }, [staffKey, path])
 
   useEffect(() => {
     if (!enabled) { setLoading(false); return }
@@ -56,21 +56,11 @@ export function useDailyWork({ staff, enabled = true, debounceMs = 1500 }: Optio
     return () => { controller.abort(); stop() }
   }, [enabled, load, debounceMs])
 
-  // The moment an hourly deadline passes, read again: the server records it as overdue and the screen turns red
-  // from real data, not only from the local countdown.
-  useEffect(() => {
-    if (!data) return
-    const wait = nextCrossing(data.items, Date.now(), skew)
-    if (wait === null) return
-    const timer = window.setTimeout(() => { if (document.visibilityState === 'visible') void load() }, Math.min(wait + 1500, 30 * 60_000))
-    return () => window.clearTimeout(timer)
-  }, [data, skew, load])
-
   const refresh = useCallback(() => load(undefined, true), [load])
-  return { data, error, loading, skew, refresh }
+  return { data, error, loading, refresh }
 }
 
-/** A clock that ticks every `intervalMs` while the tab is visible, for live countdowns. */
+/** A clock that ticks every `intervalMs` while the tab is visible (the Lead sheet's banner counts down with it). */
 export function useTicker(intervalMs = 1000, enabled = true) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {

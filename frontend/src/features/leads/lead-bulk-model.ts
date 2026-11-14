@@ -123,7 +123,7 @@ export function confirmCopy(input: ConfirmInput): ConfirmCopy {
           confirmLabel: `Make ${what} unassigned`, danger: false, typed: false,
         }
       }
-      const who = input.ownerName === 'auto' || !input.ownerName ? 'the available staff, spread evenly' : input.ownerName
+      const who = input.ownerName === 'auto' || !input.ownerName ? 'the available recruiters, spread evenly' : input.ownerName
       return { title: `Assign ${what}`, lines: [`${scope} will be assigned to ${who}.`, 'Converted leads are never moved. Leads that already belong to that person are skipped.'], confirmLabel: `Assign ${what}`, danger: false, typed: false }
     }
     case 'status':

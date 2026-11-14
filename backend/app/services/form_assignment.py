@@ -128,9 +128,9 @@ def _recruiter(db: Session, user_id: str) -> User:
     from app.services.attendance_availability import unavailable_staff_ids
     target = db.get(User, user_id) if user_id else None
     if target is None or not target.active or target.role not in RECRUITER_ROLES or target.on_leave:
-        raise HTTPException(422, "Choose an active staff member or manager who is not on leave.")
+        raise HTTPException(422, "Choose an active recruiter or manager who is not on leave.")
     if target.role == Role.staff and target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, "Choose an active staff member or manager who is not on leave.")
+        raise HTTPException(422, "Choose an active recruiter or manager who is not on leave.")
     return target
 
 
@@ -222,7 +222,6 @@ def apply(db: Session, user: User, candidate_id: str, fields: dict) -> dict:
         target = _recruiter(db, fields["recruiterId"])
         if target.id != candidate.owner_id:
             client_routing.reassign_candidate(
-                db, candidate, target, actor_id=user.id, reason=f"Changed on the application form by {user.name}",
-                notification_reason=f"Changed on the application form by {user.name}.")
+                db, candidate, target, actor_id=user.id, reason=f"Changed on the application form by {user.name}")
             changed.append("recruiter")
     return {"applicationId": shown, "changed": changed}

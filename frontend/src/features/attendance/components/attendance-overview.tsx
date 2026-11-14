@@ -54,7 +54,7 @@ export function AttendanceOverview({ rows, requests, own, month, onRecord, onReq
     { key: 'open', header: 'Actions', width: '8%', actions: true, render: (row) => <Button size="sm" aria-label={`Open attendance record for ${row.name}`} title={`Open attendance record for ${row.name}`} onClick={() => onRecord(row.userId)}>Open<ChevronRight size={14} /></Button> },
   ]
   return <Panel flush className="att-card">
-    <CardHead title={own ? 'Your monthly overview' : 'Monthly staff overview'} meta={own ? `${title}: your attendance, exceptions and unpaid time.` : `${title}: open an employee to see their daily record.`} action={<span className="att-count">{own ? title : `${rows.length} ${rows.length === 1 ? 'employee' : 'employees'}`}</span>} />
+    <CardHead title={own ? 'Your monthly overview' : 'Monthly recruiter overview'} meta={own ? `${title}: your attendance, exceptions and unpaid time.` : `${title}: open an employee to see their daily record.`} action={<span className="att-count">{own ? title : `${rows.length} ${rows.length === 1 ? 'employee' : 'employees'}`}</span>} />
     {!rows.length ? <EmptyState title="No employees in this view" description="Select another employee or month." /> : <DataTable compact stackBelow={1280} rows={rows} columns={columns} rowKey={(row) => row.userId} pageSize={50} />}
     <p className="att-note">Attendance counts approved paid leave. Weekly offs and holidays are left out. A day that is still checked in counts for now and may change.</p>
   </Panel>

@@ -116,7 +116,7 @@ export function MapToOrderDialog({
         </div>
       )}
       {candidateDeployed && <p role="status" className="mb-3 text-sm text-amber-700">Deployed candidates cannot be matched to another order.</p>}
-      {!owner?.active && <p role="status" className="mb-4 rounded-control bg-amber-50 p-4 text-sm text-amber-800">This candidate needs an active recruiter before you can match them to an order. Ask the admin to assign one from the candidate profile or the Staff Directory.</p>}
+      {!owner?.active && <p role="status" className="mb-4 rounded-control bg-amber-50 p-4 text-sm text-amber-800">This candidate needs an active recruiter before you can match them to an order. Ask the admin to assign one from the candidate profile or the Recruiter Directory.</p>}
       {error && <p role="alert" className="mb-3 rounded-control bg-stamp-50 p-3 text-sm text-stamp-700">{error}</p>}
       <div className="mb-4 rounded-panel border border-rule bg-field/50 p-4"><p className="text-sm font-semibold">Check the job requirements</p><p className="mt-1 text-sm text-ink-500">Use the saved skills and experience to decide. A matching job title alone does not mean the candidate is suitable. Matching starts prescreening and closes any initial call task that is still open.</p></div>
 

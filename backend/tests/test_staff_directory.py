@@ -175,9 +175,9 @@ def test_candidate_owner_drilldown_and_export_use_same_exact_filter(workspace):
     with ZipFile(BytesIO(response.content)) as archive:
         worksheet = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
     rows = worksheet.findall("{*}sheetData/{*}row")
-    # the export starts with "Care India ID", then "CRM reference"
-    assert [cell.find("{*}is/{*}t").text for cell in rows[0].findall("{*}c")[:2]] == ["Care India ID", "CRM reference"]
-    assert {row.findall("{*}c")[1].find("{*}is/{*}t").text for row in rows[1:]} == {"C-one", "C-two"}
+    # the export starts with "Care India ID", then "Traveller ID", then "CRM reference"
+    assert [cell.find("{*}is/{*}t").text for cell in rows[0].findall("{*}c")[:3]] == ["Care India ID", "Traveller ID", "CRM reference"]
+    assert {row.findall("{*}c")[2].find("{*}is/{*}t").text for row in rows[1:]} == {"C-one", "C-two"}
     workspace.client.cookies.set(SESSION_COOKIE, "session-manager")
     assert workspace.client.get("/api/candidates?staff=staff").status_code == 200
     assert workspace.client.get("/api/candidates/export?staff=staff").status_code == 403

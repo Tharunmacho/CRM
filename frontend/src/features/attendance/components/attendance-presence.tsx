@@ -77,7 +77,7 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
   const hasTrackedStaff = rows.some((row) => row.presence.tracked)
 
   const columns: Column<StaffAttendance>[] = [
-    { key: 'name', header: 'Employee', width: '22%', render: (row) => <RecordIdentity name={row.name + (row.userId === store.me.id ? ' (you)' : '')} detail={(row.role === 'manager' ? 'Manager' : row.role === 'admin' ? 'Admin' : 'Staff') + (!row.active ? ' · Inactive account' : '')} /> },
+    { key: 'name', header: 'Employee', width: '22%', render: (row) => <RecordIdentity name={row.name + (row.userId === store.me.id ? ' (you)' : '')} detail={(row.role === 'manager' ? 'Manager' : row.role === 'admin' ? 'Admin' : 'Recruiter') + (!row.active ? ' · Inactive account' : '')} /> },
     { key: 'state', header: 'Now', width: '17%', render: (row) => <div className="presence-state-stack"><Badge variant="dot" tone={row.attendance.status === 'checked_in' ? 'green' : 'neutral'}>{row.attendance.status === 'checked_in' ? 'Checked in' : 'Checked out'}</Badge>{row.presence.tracked ? <PresenceBadge status={row.presence.status} /> : <span className="att-muted">CRM use not tracked</span>}</div> },
     { key: 'checked', header: 'Checked in', width: '12%', render: (row) => <div className="att-two"><strong>{durationLabel(row.attendance.totalSeconds)}</strong><small>{row.attendance.sessions.length} {row.attendance.sessions.length === 1 ? 'check-in' : 'check-ins'}</small></div> },
     { key: 'online', header: 'Online in CRM', width: '11%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.activeSeconds) : 'Not tracked'}</span> },
@@ -95,7 +95,7 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
         <Button disabled={loading} icon={<RefreshCw size={16} className={loading ? 'animate-spin' : ''} />} onClick={() => setRetry((value) => value + 1)}>Refresh records</Button>
       </div>
     </div>
-    <div className="presence-explanation"><Info size={18} aria-hidden="true" /><p><strong>Check-in time and CRM use are different things.</strong> Check-in and check-out show attendance. Online and Idle show whether the CRM was open on screen. Away or offline means the CRM tab was hidden, the browser was closed or the internet dropped. It does not mean the person was not working. CRM use is tracked for Staff, not Managers.</p></div>
+    <div className="presence-explanation"><Info size={18} aria-hidden="true" /><p><strong>Check-in time and CRM use are different things.</strong> Check-in and check-out show attendance. Online and Idle show whether the CRM was open on screen. Away or offline means the CRM tab was hidden, the browser was closed or the internet dropped. It does not mean the person was not working. CRM use is tracked for Recruiters, not Managers.</p></div>
     {error && <Callout tone="error" role="alert">{error.replace(/[.!?]*$/, '.')} Press Refresh records to try again.{result && ' What you see may be out of date.'}</Callout>}
     {loading ? <p role="status" className="att-loading">Loading attendance records…</p> : result && <>
       <SummaryCards items={[
@@ -104,7 +104,7 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
         { label: 'Idle in CRM', value: hasTrackedStaff ? durationLabel(totals.idle) : 'Not tracked', detail: 'CRM open but not in use', icon: Coffee, tone: 'amber' },
         { label: 'Away or offline', value: hasTrackedStaff ? durationLabel(totals.offline) : 'Not tracked', detail: 'Checked in, but CRM not open', icon: WifiOff },
       ]} />
-      {activitySeconds > 0 && <Panel className="presence-day-breakdown"><div><strong>How staff used the CRM while checked in</strong><span>{durationLabel(activitySeconds)} counted or estimated · {dayLabel(date)}</span></div><ActivityBar row={{ activeSeconds: totals.active, idleSeconds: totals.idle, offlineSeconds: totals.offline }} /><PresenceLegend /></Panel>}
+      {activitySeconds > 0 && <Panel className="presence-day-breakdown"><div><strong>How recruiters used the CRM while checked in</strong><span>{durationLabel(activitySeconds)} counted or estimated · {dayLabel(date)}</span></div><ActivityBar row={{ activeSeconds: totals.active, idleSeconds: totals.idle, offlineSeconds: totals.offline }} /><PresenceLegend /></Panel>}
       <Panel flush className="att-card presence-roster">
         <CardHead title={team ? 'Daily team attendance' : 'Your daily record'} meta={`${dayLabel(date)} totals. The badges show the current state.`} />
         {!rows.length ? <EmptyState title="No employees in this view" description="Choose another employee to see their attendance and sessions." /> : <DataTable compact stackBelow={1280} rows={rows} columns={columns} rowKey={(row) => row.userId} pageSize={50} rowClassName={(row) => detail?.userId === row.userId ? 'presence-row-selected' : undefined} />}

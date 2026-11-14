@@ -4,7 +4,7 @@ The intake chain is receive → preserve original → extract → identify → s
 
 ## Roles and preparation
 
-Admin configures sources and reviews failures/ambiguities. Staff work the resulting assigned candidates and corrections. Required services are the API, receiving worker, extraction worker, configured storage/OCR and eligible Staff. Email receiving runs independently from slow extraction; the configured fallback receive cadence is two minutes.
+Admin configures sources and reviews failures/ambiguities. Recruiters work the resulting assigned candidates and corrections. Required services are the API, receiving worker, extraction worker, configured storage/OCR and eligible Recruiters. Email receiving runs independently from slow extraction; the configured fallback receive cadence is two minutes.
 
 ## User journey
 
@@ -33,7 +33,7 @@ Database writes, assignment and task creation use transactions/locks so concurre
 - [ ] Receive one manual, one email and one WhatsApp profile and find all in the same Data Bank.
 - [ ] Deliver the same identity concurrently through two channels; retain one candidate and correct provenance.
 - [ ] Verify duplicate enrichment preserves human values, owner and deadline.
-- [ ] Exercise no eligible Staff, low confidence and conflicting identity review.
+- [ ] Exercise no eligible Recruiters, low confidence and conflicting identity review.
 - [ ] Restart a worker during a provider job; resume the checkpoint without duplicate effects.
 - [ ] Exhaust automatic failures, inspect the error and complete a deliberate Admin retry.
 - [ ] Preview and enable the optional acknowledgement on a test channel, confirm one acknowledgement after a successful save, and verify review/failed/historical receipts do not send it. Turn it off and confirm queued confirmations pause.

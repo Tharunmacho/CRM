@@ -162,6 +162,74 @@ def test_candidate_on_an_active_order_cannot_be_deleted(env):
     assert env.db.get(m.Candidate, cid) is not None and count(env.db, m.Application, m.Application.candidate_id == cid) == 2
 
 
+def test_withdraw_flag_deletes_a_candidate_on_active_orders_and_reopens_a_filled_order(env):
+    db = env.db
+    cid = candidate(db, "busy")
+    other = candidate(db, "other")
+    application(db, "a-old", cid, "o1", m.ApplicationStatus.closed)
+    application(db, "a-live", cid, "o2", m.ApplicationStatus.active, stages=3)
+    application(db, "a-keep", other, "o2", m.ApplicationStatus.active)
+    db.add(m.Task(id="t1", kind=m.TaskKind.stage, title="Stage", candidate_id=cid, application_id="a-live", owner_id="staff"))
+    db.get(m.Order, "o2").status = m.OrderStatus.filled
+    db.commit()
+    response = env.http().delete(f"/api/candidates/{cid}?withdrawFromOrders=true")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"deleted": {"candidates": 1, "documents": 0, "applications": 2}}
+    db.expire_all()
+    assert db.get(m.Candidate, cid) is None
+    assert count(db, m.Application, m.Application.candidate_id == cid) == 0
+    assert count(db, m.ApplicationStage, m.ApplicationStage.application_id.in_(["a-old", "a-live"])) == 0
+    assert db.get(m.Task, "t1") is None
+    # The other candidate's placement stays; the order that was Filled opens again.
+    assert db.get(m.Application, "a-keep") is not None
+    assert db.get(m.Order, "o2").status is m.OrderStatus.open
+    audit = db.scalar(select(m.AuditEntry).where(m.AuditEntry.action == "Deleted candidate"))
+    assert audit.actor_id == "admin" and audit.entity_id == cid
+    assert audit.meta == {"ref": "C-busy", "documents": 0, "applications": 2, "tasks": 1, "withdrawnFromOrders": ["ORD-2"]}
+
+
+def test_flag_off_or_false_still_refuses_an_active_order(env):
+    cid = candidate(env.db, "busy")
+    application(env.db, "a-live", cid, "o1", m.ApplicationStatus.active)
+    env.db.commit()
+    response = env.http().delete(f"/api/candidates/{cid}?withdrawFromOrders=false")
+    assert response.status_code == 409
+    assert env.db.get(m.Candidate, cid) is not None and env.db.get(m.Application, "a-live") is not None
+
+
+def test_withdraw_flag_never_overrides_a_deployed_placement(env):
+    cid = candidate(env.db, "placed")
+    application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=11)
+    application(env.db, "a-live", cid, "o2", m.ApplicationStatus.active)
+    env.db.commit()
+    response = env.http().delete(f"/api/candidates/{cid}?withdrawFromOrders=true")
+    assert response.status_code == 409
+    assert "deployed through ORD-1" in response.json()["detail"]
+    assert env.db.get(m.Candidate, cid) is not None and count(env.db, m.Application, m.Application.candidate_id == cid) == 2
+    assert count(env.db, m.AuditEntry, m.AuditEntry.action == "Deleted candidate") == 0
+
+
+def test_withdraw_flag_never_overrides_invoice_history(env):
+    cid = candidate(env.db, "billed")
+    application(env.db, "a-live", cid, "o1", m.ApplicationStatus.active)
+    env.db.add(m.CandidateInvoice(id="inv", candidate_id=cid, application_id="a-live", scope_key="a-live", service_fee=5000,
+                                  number="TEST/009", status="pending_generation"))
+    env.db.commit()
+    response = env.http().delete(f"/api/candidates/{cid}?withdrawFromOrders=true")
+    assert response.status_code == 409
+    assert "reserved or issued invoice" in response.json()["detail"]
+    assert env.db.get(m.Candidate, cid) is not None and env.db.get(m.Application, "a-live") is not None
+
+
+@pytest.mark.parametrize("who", ["manager", "staff"])
+def test_only_admin_can_withdraw_and_delete(env, who):
+    cid = candidate(env.db, "x")
+    application(env.db, "a-live", cid, "o1", m.ApplicationStatus.active)
+    env.db.commit()
+    assert env.http(who).delete(f"/api/candidates/{cid}?withdrawFromOrders=true").status_code == 403
+    assert env.db.get(m.Candidate, cid) is not None and env.db.get(m.Application, "a-live") is not None
+
+
 def test_deployed_candidate_cannot_be_deleted(env):
     cid = candidate(env.db, "placed")
     application(env.db, "a-dep", cid, "o1", m.ApplicationStatus.deployed, stages=11)

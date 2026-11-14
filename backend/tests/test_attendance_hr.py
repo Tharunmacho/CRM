@@ -21,6 +21,7 @@ from test_database_naming import schema_database
 from test_workflow_scheduler import workspace as base_workspace
 
 NOW = datetime(2026, 10, 21, 3, 30, tzinfo=timezone.utc)  # Wednesday 09:00 IST.
+MOVE_KINDS = ('candidate_assigned', 'candidate_removed')  # the per-person ownership notices (the old copy-to-admins 'assignment' kind is retired)
 
 
 @pytest.fixture
@@ -171,13 +172,15 @@ def test_cover_sweep_returns_pending_keeps_completed_and_preserves_clocks(worksp
         assert first["started"] == 2
         assert pending.owner_id == completed.owner_id == "other"
         assert pending.due_at == NOW + timedelta(hours=36)
-        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        # PRD: the owner and the admin are told about an assignment (two candidates, two people each).
-        assert len(notices) == 4
-        assert {notice.user_id for notice in notices} == {'other', 'admin'}
+        notices = list(db.scalars(select(Notification).where(Notification.kind.in_(MOVE_KINDS))))
+        # One grouped notice per person, none for admins: the cover is told about the two candidates handed over, and the
+        # person on leave is told the same two were moved off their list.
+        assert len(notices) == 2
+        assert {notice.user_id for notice in notices} == {'other', 'owner'}
+        assert {notice.user_id: notice.kind for notice in notices} == {'other': 'candidate_assigned', 'owner': 'candidate_removed'}
         assert hr.run_cover_sweep(db, at=NOW + timedelta(minutes=1))["started"] == 0
         db.commit()
-        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 4
+        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind.in_(MOVE_KINDS))) == 2
         completed.completed_at = NOW + timedelta(hours=1)
         db.get(Candidate, "completed").call_recorded_at = NOW + timedelta(hours=1)
         db.commit()
@@ -189,11 +192,12 @@ def test_cover_sweep_returns_pending_keeps_completed_and_preserves_clocks(worksp
         assert hr.run_cover_sweep(db, at=NOW + timedelta(days=1, minutes=1))["settled"] == 0
         assert db.scalar(select(func.count()).select_from(AttendanceCoverItem).where(AttendanceCoverItem.request_id == request_id)) == 2
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_type == "candidate", AuditEntry.entity_id == "candidate")) == 2
-        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        returned = [notice for notice in notices if 'returned after leave cover' in notice.detail]
-        assert len(notices) == 6 and len(returned) == 2
-        assert {notice.user_id for notice in returned} == {'owner', 'admin'}
-        assert all(notice.link_to == '/candidates/candidate' for notice in returned)
+        notices = list(db.scalars(select(Notification).where(Notification.kind.in_(MOVE_KINDS))))
+        returned = [notice for notice in notices if 'because the leave cover on' in notice.detail and 'has ended' in notice.detail]
+        assert len(notices) == 4 and len(returned) == 2
+        # Only the unfinished candidate went back: its owner is told it is theirs again, the cover that it left their list.
+        assert {(notice.user_id, notice.kind) for notice in returned} == {('owner', 'candidate_assigned'), ('other', 'candidate_removed')}
+        assert next(notice for notice in returned if notice.user_id == 'owner').link_to == '/candidates/candidate/application'
 
 
 def test_cover_never_steals_human_reassignment_even_back_to_cover(workspace):
@@ -341,12 +345,12 @@ def test_cover_sweep_rollback_retries_without_half_transferred_work(workspace):
         db.rollback()
         assert db.get(Candidate, "candidate").owner_id == "owner"
         assert db.get(AttendanceHRRequest, request_id).cover_started_at is None
-        assert db.scalar(select(Notification.id).where(Notification.kind == 'assignment')) is None
+        assert db.scalar(select(Notification.id).where(Notification.kind.in_(MOVE_KINDS))) is None
         assert hr.run_cover_sweep(db, at=NOW + timedelta(minutes=1))["started"] == 1
         db.commit()
         assert db.scalar(select(func.count()).select_from(AttendanceCoverItem)) == 1
         assert db.scalar(select(func.count()).select_from(TaskEvent).where(TaskEvent.kind == "assignment")) == 1
-        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind == 'assignment')) == 2
+        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.kind.in_(MOVE_KINDS))) == 2  # the cover and the owner
 
 
 def test_status_override_survives_monthly_permission_classification(workspace):

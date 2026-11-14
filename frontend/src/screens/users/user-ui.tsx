@@ -1,15 +1,16 @@
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { Check, Copy, Eye, EyeOff, ShieldCheck, Sparkles, X } from 'lucide-react'
 import type { Role } from '@/shared/model/types'
+import { ROLE_LABELS } from '@/shared/model/role-labels'
 import { cn } from '@/shared/lib/cn'
 import { Badge } from '@/shared/ui/display'
 import { Button, Field, Input } from '@/shared/ui/primitives'
 import { FormSection as SharedFormSection } from '@/shared/ui/form-section'
 
-export const roleLabels: Record<Role, string> = { admin: 'Admin', manager: 'Manager', staff: 'Staff' }
+export const roleLabels: Record<Role, string> = ROLE_LABELS
 export const roleBlurbs: Record<Role, string> = {
   admin: 'Controls all settings and all accounts.',
-  manager: 'Looks after staff, moves work between people and is told about very late tasks.',
+  manager: 'Looks after recruiters, moves work between people and is told about very late tasks.',
   staff: 'Recruiter. Gets new candidates and does the tasks.',
 }
 

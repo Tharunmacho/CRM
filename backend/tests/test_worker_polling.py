@@ -101,7 +101,7 @@ class FakeDatabase:
             self.statements.append(sql)
         if sql.lstrip().startswith("SELECT EXISTS") or ("EXISTS (SELECT 1" in sql and sql.lstrip().startswith("SELECT")):
             return FakeResult([tuple(self.ready)])
-        if sql.lstrip().startswith("WITH ranked"):
+        if sql.lstrip().startswith("WITH eligible"):
             rows, self.jobs = self.jobs, []
             if rows and self.clock:
                 self.claimed_at.append(self.clock.now)
@@ -135,7 +135,7 @@ def test_an_idle_worker_asks_the_database_about_four_times_a_minute_and_never_cl
     _, wake, clock = run_virtual(database, seconds=600)
     minutes = clock.now / 60
     peeks = database.count("SELECT")
-    assert database.count("WITH ranked") == 0 and database.count("UPDATE") == 0, "an idle poll must not run the claiming UPDATE"
+    assert database.count("WITH eligible") == 0 and database.count("UPDATE") == 0, "an idle poll must not run the claiming UPDATE"
     assert peeks / minutes <= 4.5, f"{peeks / minutes:.1f} idle peeks a minute"
     # the heartbeat adds one autocommit upsert per BEAT_SECONDS; together an idle reader stays at or under ~8 statements a minute
     assert peeks / minutes + 60 / worker_heartbeat.BEAT_SECONDS <= 8
@@ -159,7 +159,7 @@ def test_a_notify_starts_the_work_at_once_not_at_the_next_poll():
         # once 100 s of idle time have passed a document is queued and Postgres delivers the NOTIFY: the sleeping wait ends at once
         if not database.claimed_at and not database.jobs and not event.flag and clock.now >= 100:
             database.ready = [True, False]
-            database.jobs = [SimpleNamespace(id="job-1", rn=1, due=utcnow())]
+            database.jobs = [SimpleNamespace(id="job-1", rn=1, lane_priority=0, due=utcnow())]
             clock.now += 0.3
             delivered.append(clock.now)
             event.set()
@@ -181,7 +181,7 @@ def test_a_notify_starts_the_work_at_once_not_at_the_next_poll():
 def test_polling_is_quick_only_for_a_couple_of_seconds_after_work_was_found():
     database = FakeDatabase()
     database.ready = [True, False]
-    database.jobs = [SimpleNamespace(id="job-1", rn=1, due=utcnow())]
+    database.jobs = [SimpleNamespace(id="job-1", rn=1, lane_priority=0, due=utcnow())]
     _, wake, clock = run_virtual(database, seconds=60)
     quick = [seconds for seconds in wake.waits if seconds == 0.5]
     assert 1 <= len(quick) <= 6, "0.5 s polling lasts ACTIVE_SECONDS, then it is the 15 s safety net again"

@@ -32,7 +32,7 @@ export function AutoAssignCard() {
   }
 
   return <Panel flush className="uv-panel">
-    <PanelHead id="as-assign-title" title="Candidate assignment" description="Who gets a new candidate. A staff member who adds a candidate by hand always keeps it." />
+    <PanelHead id="as-assign-title" title="Candidate assignment" description="Who gets a new candidate. A recruiter who adds a candidate by hand always keeps it." />
     <div className="as-body" role="group" aria-labelledby="as-assign-title">
       <div className="uv-toggle">
         <Switch label={toggle.label} description={toggle.helper} checked={toggle.checked} disabled={busy || toggle.disabled} onChange={(on) => void change(on)} />

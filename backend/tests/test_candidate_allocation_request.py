@@ -2,6 +2,7 @@
 
 Isolated PostgreSQL only; every name and number here is synthetic."""
 from datetime import datetime, timedelta, timezone
+import re
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -126,8 +127,11 @@ def test_a_staff_request_notifies_every_active_admin_and_is_audited(env):
     assert response.json() == {"requested": True, "alreadyRequested": False, "notified": 2}
     rows = notices(env)
     assert [row.user_id for row in rows] == ["admin", "admin2"]  # not the manager, the inactive admin or the requester
-    assert all(row.title == "Candidate requested" and row.link_to == "/candidates/theirs" and not row.read for row in rows)
-    assert "Asha requested Person theirs (REF-theirs)" in rows[0].detail and "now with Ravi" in rows[0].detail
+    assert all(row.title == "A recruiter is asking for a candidate" and row.link_to == "/candidates/theirs/application" and not row.read
+               for row in rows)
+    # The label carries the Care India ID (allocated on insert) and the CND reference.
+    assert re.search(r"Asha asked you to assign Person theirs \(CI-\d{2}-\d{2}-\d{3} · REF-theirs\) to them\.", rows[0].detail)
+    assert "The candidate is with Ravi now." in rows[0].detail
     [entry] = requests_logged(env, "theirs")
     assert entry.actor_id == "a" and entry.entity_type == "candidate" and entry.target == "Person theirs"
     assert entry.meta["currentOwnerId"] == "b"
@@ -136,7 +140,7 @@ def test_a_staff_request_notifies_every_active_admin_and_is_audited(env):
 def test_an_unassigned_candidate_can_be_requested_too(env):
     response = env.client.post("/api/candidates/waiting/request-allocation")
     assert response.status_code == 200 and response.json()["alreadyRequested"] is False
-    assert "not assigned yet" in notices(env)[0].detail
+    assert "not assigned to anyone yet" in notices(env)[0].detail
 
 
 def test_a_repeat_request_within_a_day_is_answered_without_new_notices(env):

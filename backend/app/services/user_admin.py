@@ -105,11 +105,11 @@ def _transfer(db: Session, actor: User, user: User, users: list[User], target_id
     if not candidates and not open_count:
         return {'candidates': 0, 'tasks': 0}, [], []
     if not target_id:
-        raise HTTPException(422, 'Choose a staff member to take over all of this person\'s candidates and open tasks.')
+        raise HTTPException(422, 'Choose a recruiter to take over all of this person\'s candidates and open tasks.')
     target = _find(users, target_id)
     from app.services.attendance_availability import unavailable_staff_ids
     if target.id == user.id or not target.active or target.role != Role.staff or target.on_leave or target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, 'Choose a different active staff member who is not on leave.')
+        raise HTTPException(422, 'Choose a different active recruiter who is not on leave.')
     ids = [candidate.id for candidate in candidates]
     for candidate in candidates:
         candidate.owner_id = target.id
@@ -170,10 +170,9 @@ def update_user(db: Session, actor: User, user_id: str, values: dict) -> User:
     became_eligible = not was_eligible and eligible_for_assignment(user)
     if ownership_changes or task_only_changes:
         from app.services.assignment_notifications import notify_assignment_changes, notify_task_assignment_changes
-        notify_assignment_changes(db, ownership_changes,
-            reason=f"Transferred during an account change by {actor.name}.", users=users)
-        notify_task_assignment_changes(db, task_only_changes,
-            reason=f"Transferred during an account change by {actor.name}.", users=users)
+        how = f"because {user.name}'s account was changed"
+        notify_assignment_changes(db, ownership_changes, actor_id=actor.id, actor_name=actor.name, how=how, users=users)
+        notify_task_assignment_changes(db, task_only_changes, actor_id=actor.id, actor_name=actor.name, how=how, users=users)
     revoked = _revoke(db, user) if revoke else 0
     if changes or transfer:
         _audit(db, actor, user, 'User updated' if next_active else 'User deactivated',

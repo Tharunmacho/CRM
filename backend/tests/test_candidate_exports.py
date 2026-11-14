@@ -89,7 +89,8 @@ def test_inspection_contains_full_sections_true_missing_checklist_and_safe_excel
     assert "Invoices" not in workbook
     assert "".join(row[1] for row in workbook["Resume text"][1:]) == "Resume line " * 6000
     checklist = {row[0]: row for row in workbook["Document checklist"][1:]}
-    assert sum(row[1] == "True" for row in checklist.values()) == 11
+    assert sum(row[1] == "True" for row in checklist.values()) == 10  # the recruiter's checklist: the Invoice is the admin's alone
+    assert "Invoice" not in checklist
     assert checklist["Resume"][4] == "Uploaded"
     assert checklist["Application form"][4] == "Optional"
     assert checklist["Signed offer"][4] == "Missing"
@@ -98,6 +99,7 @@ def test_inspection_contains_full_sections_true_missing_checklist_and_safe_excel
 
 
 def test_placement_invoice_is_visible_only_in_its_form_and_checklist(exports):
+    as_user(exports, "admin", Role.admin)  # invoices are the admin's alone (test_invoice_access.py)
     add_app(exports, "shown", stage=11)
     add_app(exports, "history", order="other-order", status=ApplicationStatus.closed)
     add_file(exports, "placement-invoice", "invoice", entity_type="application", entity_id="shown")
@@ -116,6 +118,7 @@ def test_placement_invoice_is_visible_only_in_its_form_and_checklist(exports):
 
 
 def test_placement_invoice_takes_precedence_over_newer_generic_upload(exports):
+    as_user(exports, "admin", Role.admin)
     add_app(exports, "shown", stage=11)
     add_file(exports, "placement-invoice", "invoice", entity_type="application", entity_id="shown", time=datetime.now(timezone.utc) - timedelta(days=1))
     add_file(exports, "generic-invoice", "invoice")
@@ -125,6 +128,7 @@ def test_placement_invoice_takes_precedence_over_newer_generic_upload(exports):
 
 
 def test_zip_includes_latest_normal_all_other_all_invoice_and_every_own_application(exports):
+    as_user(exports, "admin", Role.admin)
     old = datetime.now(timezone.utc) - timedelta(days=1)
     add_app(exports, "shown", stage=11)
     add_app(exports, "history", order="other-order", status=ApplicationStatus.closed)

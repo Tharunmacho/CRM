@@ -14,7 +14,8 @@ import { Button, SearchInput } from '@/shared/ui/primitives'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { DataTable, type Column } from '@/shared/ui/table'
 import { StageModal } from '@/features/workflow/components/stage-modal'
-import { DeleteRecordDialog } from '@/shared/components/delete-dialog'
+import { DeleteJobDialog } from '@/features/jobs/components/delete-job-dialog'
+import { canDeleteOrder } from '@/features/jobs/order-delete'
 import { CandidateMatchDrawer } from '@/features/jobs/components/candidate-match-drawer'
 import { OrderDialog, UnmapCandidateDialog } from '@/features/jobs/components/job-dialogs'
 import { Avatar, Flag, StageMini } from '@/features/jobs/components/identity'
@@ -26,6 +27,7 @@ import { RecordAudit } from '@/features/master-data/components/record-audit'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import { SnapshotState } from '@/shared/ui/page-loading'
 import '@/styles/jobs.css'
+import { idSearchText } from '@/features/candidates/candidate-ids'
 
 type AppFilter = 'all' | 'active' | 'selected' | 'deployed' | 'closed'
 const FILTERS: [AppFilter, string][] = [['all', 'All'], ['active', 'Active'], ['selected', 'Selected'], ['deployed', 'Deployed'], ['closed', 'Closed']]
@@ -69,7 +71,7 @@ export default function OrderDetailPage() {
       if (filter === 'closed' && a.status !== 'closed') return false
       if (!q) return true
       const candidate = store.candidate(a.candidateId)
-      return [candidate?.name, candidate?.phone, candidate?.ref, store.user(candidate?.ownerId ?? '')?.name].some((value) => (value ?? '').toLowerCase().includes(q))
+      return [candidate?.name, candidate?.phone, idSearchText(candidate), store.user(candidate?.ownerId ?? '')?.name].some((value) => (value ?? '').toLowerCase().includes(q))
     })
   }, [apps, filter, query, store.candidates, store.users])
 
@@ -228,7 +230,7 @@ export default function OrderDetailPage() {
                   {order.status === 'open' && <MenuButton icon={<Pause size={15} />} onClick={() => { close(); void actions.setStatus(order, 'on_hold') }}>Put on hold</MenuButton>}
                   {order.status === 'on_hold' && <MenuButton icon={<Play size={15} />} onClick={() => { close(); void actions.setStatus(order, 'open') }}>Start matching again</MenuButton>}
                   <MenuButton icon={<ClipboardCopy size={15} />} onClick={() => { close(); void copyShortlist() }}>Copy shortlist</MenuButton>
-                  {store.can('delete_records') && <MenuButton danger icon={<Trash2 size={15} />} onClick={() => { close(); setDeleting(true) }}>Delete job</MenuButton>}
+                  {canDeleteOrder(store.me?.role) && <MenuButton danger icon={<Trash2 size={15} />} onClick={() => { close(); setDeleting(true) }}>Delete job</MenuButton>}
                 </>
               )}
             </ActionMenu>
@@ -402,9 +404,8 @@ export default function OrderDetailPage() {
       <StageModal applicationId={openApp} open={!!openApp} onClose={() => setOpenApp(null)} />
       {editing && <OrderDialog order={order} onClose={() => setEditing(false)} />}
       {history && <RecordAudit kind="order" id={order.id} onClose={() => setHistory(false)} />}
-      <DeleteRecordDialog
-        kind="order"
-        id={order.id}
+      <DeleteJobDialog
+        orderId={order.id}
         open={deleting}
         onClose={() => setDeleting(false)}
         onDeleted={() => navigate('/jobs')}

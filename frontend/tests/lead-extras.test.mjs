@@ -169,7 +169,7 @@ test('the Follow-ups due card filters by due follow-ups and lights only for them
   assert.equal(lead.activeLeadFilterCount(lead.EMPTY_FILTERS), 0)
   assert.equal(lead.activeLeadFilterCount(filters), 1)
   // the other cards keep their exact filters
-  assert.deepEqual(lead.cardFilters('not_contacted', NOW), { status: 'new', from: '', to: '' })
+  assert.deepEqual(lead.cardFilters('not_contacted', NOW), { status: 'new', from: '', to: '', recent: '' })
 })
 
 test('overdue follow-ups are red, today amber, later plain (the state the table colours by)', () => {

@@ -96,7 +96,7 @@ export function ImportHistory({ supervisor, canAdmin, onViewBatch, refreshKey, o
     {boxWidth > 0 && boxWidth < 800 ? <ul className="ld-upload-cards" aria-label="Uploads">
       {data.items.map(batch => <li key={batch.id}>
         <h3>{batch.fileName}</h3>
-        <p>{batch.uploadedByName || 'Staff'} · {new Date(batch.createdAt).toLocaleDateString()}</p>
+        <p>{batch.uploadedByName || 'Recruiter'} · {new Date(batch.createdAt).toLocaleDateString()}</p>
         <dl><div><dt>New leads</dt><dd>{batch.rowsNew.toLocaleString()}</dd></div><div><dt>Duplicates</dt><dd>{batch.rowsDuplicate.toLocaleString()}</dd></div><div><dt>Invalid</dt><dd>{batch.rowsInvalid.toLocaleString()}</dd></div></dl>
         {actions(batch)}
       </li>)}

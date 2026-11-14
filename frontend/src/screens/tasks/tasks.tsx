@@ -13,12 +13,16 @@ import { EmptyState, PageHeader } from '@/shared/ui/display'
 import { Button, Field, SearchInput, Select, Textarea, Input } from '@/shared/ui/primitives'
 import { Dialog, Tabs } from '@/shared/ui/overlay'
 import { StageModal } from '@/features/workflow/components/stage-modal'
+import { applicationFormHref } from '@/features/application-form/form-model'
 import { RecordIdentity, SummaryCards } from '@/shared/ui/workspace'
 import { ReassignCandidatesDialog } from '@/features/staff/reassign-candidates-dialog'
 import { completedInPeriod, taskViewFromParams, validDateFilter, type TaskView } from '@/features/staff/task-filters'
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { ClockCell, RemarkPanel, clockOf } from './task-parts'
 import { DailyWork } from './daily-work'
+import { FollowUp } from './follow-up'
+import { useBucketCounts, useOpenBucket } from './tasks-tabs'
+import { bucketTabs } from '@/features/daily-work/daily-work-model'
 import { Flag, OwnerTag, StageTrack } from './task-identity'
 import '@/styles/tasks-page.css'
 
@@ -45,18 +49,21 @@ function Stamp({ value, empty }: { value?: string | Date; empty?: boolean }) {
   return <span className="tk-stamp" title={dateTimeLabel(date)}><b>{format(date, 'd MMM')}</b><small>{format(date, 'HH:mm')}</small></span>
 }
 
-/** The 48-hour list keeps every deep link (?view=, ?task=, ?stage=, ?date=); a plain /tasks opens the daily quota. */
+/** The 48-hour list keeps every deep link (?view=, ?task=, ?stage=, ?date=); a plain /tasks opens Daily work (my candidates). */
 const LIST_PARAMS = ['task', 'stage', 'date', 'from', 'to']
 function wantsDailyWork(params: URLSearchParams) {
   const view = params.get('view')
   return (!view || view === 'daily') && !LIST_PARAMS.some((name) => params.get(name))
 }
+function wantsFollowUp(params: URLSearchParams) {
+  return params.get('view') === 'follow-up' && !LIST_PARAMS.some((name) => params.get(name))
+}
 
 export default function TasksPage() {
   const [params, setParams] = useSearchParams()
-  if (wantsDailyWork(params)) {
-    return <DailyWork onOpenAll={() => setParams((previous) => { const next = new URLSearchParams(previous); next.set('view', 'open'); return next })} />
-  }
+  const openAll = () => setParams((previous) => { const next = new URLSearchParams(previous); next.set('view', 'open'); return next })
+  if (wantsDailyWork(params)) return <DailyWork onOpenAll={openAll} />
+  if (wantsFollowUp(params)) return <FollowUp onOpenAll={openAll} />
   return <TaskList />
 }
 
@@ -95,13 +102,17 @@ function TaskList() {
     else next.delete(name)
     return next
   })
-  const changeTab = (view: string) => setParams(previous => {
-    const next = new URLSearchParams(previous)
-    if (view === 'daily') { for (const name of ['view', 'task', 'stage', 'date', 'from', 'to']) next.delete(name); return next }
-    next.set('view', view)
-    if (view !== 'history') next.delete('date')
-    return next
-  })
+  const openBucket = useOpenBucket()
+  const bucketCounts = useBucketCounts()
+  const changeTab = (view: string) => {
+    if (view === 'daily' || view === 'follow-up' || view === 'travelled') { openBucket(view); return }
+    setParams(previous => {
+      const next = new URLSearchParams(previous)
+      next.set('view', view)
+      if (view !== 'history') next.delete('date')
+      return next
+    })
+  }
   useEffect(() => {
     if (!historyDay) return
     const controller = new AbortController()
@@ -163,7 +174,7 @@ function TaskList() {
   useEffect(() => { setShown(PAGE_SIZE) }, [tab, term, staffFilter, sort, stageFilter])
 
   const tabs = [
-    { key: 'daily', label: 'Daily work' },
+    ...bucketTabs(bucketCounts),
     ...(historyDay ? [{ key: 'history', label: 'No update on this date' }] : []),
     { key: 'open', label: 'Open' },
     { key: 'due', label: 'Due today' },
@@ -204,7 +215,7 @@ function TaskList() {
     { key: 'completed', label: 'Completed', value: buckets.completed.length, detail: completedFrom || completedTo ? 'In the selected period' : 'Stage finished', icon: CheckCheck, tone: 'green' as const },
   ]
 
-  const openTask = (t: Task) => { if (t.applicationId) { setOpenStage(t.stage || undefined); setOpenApp(t.applicationId) } else navigate(`/candidates/${t.candidateId}`) }
+  const openTask = (t: Task) => { if (t.applicationId) { setOpenStage(t.stage || undefined); setOpenApp(t.applicationId) } else navigate(applicationFormHref(t.candidateId)) }
   const onRowKey = (event: KeyboardEvent<HTMLElement>, t: Task) => {
     if (event.target !== event.currentTarget) return
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openTask(t) }
@@ -271,8 +282,8 @@ function TaskList() {
         <Tabs tabs={tabs} active={tab} onChange={changeTab} />
         <div className="tk-toolbar">
           {isSupervisor && (
-            <Select value={staffFilter} onChange={(e) => updateFilter('staff', e.target.value)} className="tk-select" aria-label="Filter by staff">
-              <option value="all">All staff</option>
+            <Select value={staffFilter} onChange={(e) => updateFilter('staff', e.target.value)} className="tk-select" aria-label="Filter by recruiter">
+              <option value="all">All recruiters</option>
               {store.users
                 .filter((u) => u.role !== 'admin' || u.id === staffFilter)
                 .map((u) => <option key={u.id} value={u.id}>{u.name}{!u.active ? ' (inactive)' : ''}</option>)}

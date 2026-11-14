@@ -128,6 +128,17 @@ class ClosureReason(str, enum.Enum):
     medical_unfit = "medical_unfit"
     unmapped = "unmapped"
     changed_job = "changed_job"  # moved to another job from the application form before prescreening was passed (migration 0027)
+    offer_declined = "offer_declined"  # stage 5: the candidate declined the offer (migration 0042)
+    offer_not_received = "offer_not_received"  # stage 5: the offer letter never came (migration 0042)
+    # The stopping exit every stage offers (migration 0043): Rejected / Declined at any of stages 1-10 and the stage-specific ones.
+    stage_rejected = "stage_rejected"
+    stage_declined = "stage_declined"
+    interview_not_possible = "interview_not_possible"  # stage 3
+    passport_not_available = "passport_not_available"  # stage 7
+    advance_not_paid = "advance_not_paid"  # stage 8
+    visa_rejected = "visa_rejected"  # stage 9
+    visa_stamping_refused = "visa_stamping_refused"  # stage 10
+    not_travelling = "not_travelling"  # stage 11: cancelled or declined before departure; never deploys
 
 
 class TaskKind(str, enum.Enum):
@@ -368,6 +379,23 @@ class CandidateFiscalCounter(Base):
     )
 
 
+class TravellerFiscalCounter(Base):
+    """Per-financial-year serial counter for the TRAVELLER ID, a series separate from the Data Bank Care India ID.
+
+    Keyed by the April--March year of the travel date; see ``app.services.traveller_id``.
+    """
+
+    __tablename__ = "crm_traveller_fiscal_counters"
+
+    fiscal_year: Mapped[str] = mapped_column(String(9), primary_key=True)
+    last_serial: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("last_serial >= 0", name="ck_crm_traveller_fiscal_counters_last_serial"),
+        {"comment": "Per-financial-year counters for immutable Care India traveller IDs (CI-T-YY-YY-NNN), keyed by travel date."},
+    )
+
+
 class Candidate(Base, PkMixin, TimestampMixin):
     __tablename__ = "crm_candidates"
 
@@ -375,6 +403,9 @@ class Candidate(Base, PkMixin, TimestampMixin):
     # Public, immutable Care India fiscal-year identity.  The legacy ``ref``
     # remains the technical CRM reference used by existing links and history.
     care_id: Mapped[str | None] = mapped_column(String(40))
+    # Second, separate immutable series for people who travelled: CI-T-YY-YY-NNN, numbered by the financial year of the
+    # travel date (migration 0041, ``app.services.traveller_id``). Null until the placement is deployed.
+    traveller_id: Mapped[str | None] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str] = mapped_column(String(40), nullable=False)
     whatsapp: Mapped[str | None] = mapped_column(String(40))
@@ -465,12 +496,18 @@ class Candidate(Base, PkMixin, TimestampMixin):
             "AND ((substring(care_id from 4 for 2)::integer + 1) % 100) = substring(care_id from 7 for 2)::integer)"),
             name="ck_crm_candidates_care_id_format",
         ),
+        CheckConstraint(
+            PostgresOnly("traveller_id IS NULL OR (traveller_id ~ '^[C][I]-[T]-[0-9]{2}-[0-9]{2}-(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$' "
+            "AND ((substring(traveller_id from 6 for 2)::integer + 1) % 100) = substring(traveller_id from 9 for 2)::integer)"),
+            name="ck_crm_candidates_traveller_id_format",
+        ),
         Index("ix_crm_candidates_phone", "phone"),
         Index("ix_crm_candidates_email_lower", func.lower(email)),
         Index("ix_crm_candidates_passport_upper", func.upper(passport_no)),
         Index("ix_crm_candidates_resume_tsv", "resume_tsv", postgresql_using="gin"),
         Index("ix_crm_candidates_follow_up", "next_follow_up_date", postgresql_where=text("next_follow_up_date IS NOT NULL")),
         Index("uq_crm_candidates_care_id", "care_id", unique=True, postgresql_where=text("care_id IS NOT NULL")),
+        Index("uq_crm_candidates_traveller_id", "traveller_id", unique=True, postgresql_where=text("traveller_id IS NOT NULL")),
         {"comment": "Recruitment candidate profiles, ownership, contact details and extracted document data."},
     )
 

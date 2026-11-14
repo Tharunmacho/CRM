@@ -30,6 +30,9 @@ def test_missed_update_drilldown_keeps_historical_owner_after_transfer(workspace
         assert missed_updates(date(2026, 10, 19), "owner", db, db.get(User, "manager"))["taskIds"] == []
 
 
+ASSIGNMENT_KINDS = ('candidate_assigned', 'candidate_removed', 'task_assigned', 'task_removed')
+
+
 @pytest.fixture
 def history_client(workspace):
     from app.api.routers import candidates, data
@@ -72,14 +75,16 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
         assert db.get(Candidate, 'candidate').owner_id == 'other'
         assert db.get(Task, 'task').owner_id == 'owner'
         assert db.scalar(select(TaskEvent).where(TaskEvent.kind == 'assignment')) is None
-        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert {notice.user_id for notice in notices} == {'other', 'admin'}
+        notices = list(db.scalars(select(Notification).where(Notification.kind.in_(ASSIGNMENT_KINDS))))
+        # per-recipient notices: the new owner and the previous owner; the acting admin gets no copy of their own action
+        assert {notice.user_id for notice in notices} == {'other', 'owner'}
         assert len(notices) == 2
-        assert all(notice.link_to == '/candidates/candidate' for notice in notices)
+        assert {notice.kind: notice.link_to for notice in notices} == {
+            'candidate_assigned': '/candidates/candidate/application', 'candidate_removed': '/candidates'}
     repeated = history_client.post('/api/candidates/reassign', json={**payload, 'reason': 'Already assigned'})
     assert repeated.status_code == 200
     with workspace() as db:
-        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 2
+        assert len(list(db.scalars(select(Notification).where(Notification.kind.in_(ASSIGNMENT_KINDS))))) == 2
     history_client.cookies.set(SESSION_COOKIE, 'history-owner')
     history = history_client.get('/api/candidates/candidate/assignment-history')
     assert history.status_code == 200
@@ -101,10 +106,12 @@ def test_same_candidate_owner_repairs_open_task_and_notifies_only_once(workspace
         assert history_client.post('/api/candidates/reassign', json=payload).status_code == 200
     with workspace() as db:
         assert db.get(Task, 'task').owner_id == 'other'
-        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
+        notices = list(db.scalars(select(Notification).where(Notification.kind.in_(ASSIGNMENT_KINDS))))
         assert len(notices) == 2
-        assert {notice.user_id for notice in notices} == {'other', 'admin'}
-        assert all(notice.title == 'Task assigned' and notice.link_to == '/tasks?task=task' for notice in notices)
+        assert {notice.user_id for notice in notices} == {'other', 'owner'}
+        assert {notice.kind: notice.title for notice in notices} == {
+            'task_assigned': 'New task assigned to you', 'task_removed': 'Task taken off your list'}
+        assert {notice.kind: notice.link_to for notice in notices} == {'task_assigned': '/tasks?task=task', 'task_removed': '/tasks'}
 
 
 def test_history_cursor_keeps_tied_timestamps_and_excludes_other_evidence(workspace, history_client):

@@ -19,7 +19,7 @@ export interface ActivityLookups {
   sourceLabel: (source: string) => string
 }
 
-const NEGATIVE = ['Failed', 'Rejected', 'Unfit', 'Not forwarded']
+const NEGATIVE = ['Failed', 'Rejected', 'Declined', 'Not received', 'Unfit', 'Not forwarded']
 
 /** Keep a lead's internal link readable in candidate source facts and history. */
 export function sourceDetailLabel(detail?: string | null): string {

@@ -51,10 +51,13 @@ export function deploymentText(deployment: ApplicationFormData['deployment'] | n
   return { text: names.length ? `Needs: ${names.join(', ')}` : 'Not ready to deploy', tone: 'needs' }
 }
 
-/** The documents that belong to a stage: the shared list says from which stage each one is expected. */
+/**
+ * The documents that belong to a stage: the shared list says from which stage each one is expected. A slot the server left out
+ * of the form is not listed (the Invoice is sent to the admin only).
+ */
 export function stageDocuments(stage: number, documents: ApplicationFormData['documents']): StageDocument[] {
   return DOCUMENT_SLOTS
-    .filter((entry) => entry.fromStage === stage)
+    .filter((entry) => entry.fromStage === stage && documents[entry.slot] !== undefined)
     .map((entry) => ({ slot: entry.slot, label: entry.label, uploaded: documents[entry.slot]?.uploaded === true }))
 }
 

@@ -18,6 +18,7 @@ import { conversationFromSearch } from '@/features/whatsapp/chat-types'
 import { CandidateChip, FileIcon } from '@/features/inbox/mail-parts'
 import { IntakeAcknowledgements } from '@/features/intake/intake-acknowledgements'
 import { DocumentBundleReview } from '@/features/candidates/components/document-bundle-review'
+import { idLine } from '@/features/candidates/candidate-ids'
 
 type Message = { documentBundle?: {id: string; status: string; candidateIds: string[]} | null; id: string; phoneNumberId: string; senderNumber: string; senderName?: string; type: string; body?: string; fileName?: string; hasFile: boolean; receivedAt: string; status: string; attempts: number; lastError?: string; candidateId?: string }
 type Inbox = { configured: boolean; configuredPhoneNumberId?: string; enabled: boolean; missingSettings: string[]; webhookPath: string; total: number; page: number; pageSize: number; messages: Message[]; channels: { id: string; displayNumber?: string; enabled: boolean; autoIngest: boolean; lastReceivedAt?: string; workerSeenAt?: string; lastError?: string }[] }
@@ -161,7 +162,7 @@ export default function WhatsAppPage() {
       {dialogError && <p role="alert" className="mb-3 text-sm text-stamp-700">{dialogError}</p>}
       {selected && <p className="mb-3 text-sm text-ink-500">From {selected.senderName || selected.senderNumber}{selected.body ? ` · ${selected.body}` : ''}</p>}
       {selected?.hasFile && <a className="wa-open-original" href={fileHref(`/api/whatsapp/messages/${selected.id}/file`)} target="_blank" rel="noreferrer"><FileIcon name={selected.fileName || 'file'} size="sm" />Open original document<ExternalLink size={13} /></a>}
-      <div className={cn('space-y-4')}><Field label="Candidate" required><Select value={candidateId} onChange={(e) => setCandidateId(e.target.value)}><option value="">Choose the matching candidate</option>{store.candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.ref} · {candidate.name}</option>)}</Select></Field><Field label="Why are you linking this?" required><Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} /></Field><p className="text-xs text-ink-500">For a new person, add them on the Candidate page with WhatsApp as the source, then come back here to link this message.</p></div>
+      <div className={cn('space-y-4')}><Field label="Candidate" required><Select value={candidateId} onChange={(e) => setCandidateId(e.target.value)}><option value="">Choose the matching candidate</option>{store.candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{idLine(candidate)} · {candidate.name}</option>)}</Select></Field><Field label="Why are you linking this?" required><Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} /></Field><p className="text-xs text-ink-500">For a new person, add them on the Candidate page with WhatsApp as the source, then come back here to link this message.</p></div>
     </Dialog>
   </div>
 }

@@ -46,7 +46,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     _migrate(engine, "head")
     columns = {c["name"]: c for c in inspect(engine).get_columns("crm_candidates")}
     assert FORM_COLUMNS <= set(columns)
-    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_fiscal_counters"}
+    assert set(inspect(engine).get_table_names()) == before_tables | {"crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_fiscal_counters", "crm_traveller_fiscal_counters"}
     with engine.connect() as connection:
         row = connection.execute(text("SELECT name, total_experience, father_name, experience_india, education, work_history, field_sources, source_claims "
                                       "FROM crm_candidates WHERE id='old'")).one()
@@ -176,7 +176,7 @@ def test_blank_candidate_form_has_every_docx_section_and_lists_what_is_missing(d
     assert data["recruitment"]["recruiter"] == {"id": "staff", "name": "Staff"}
     assert [row["key"] for row in data["tracking"]["rows"]] == [
         "prescreening", "forwarded", "interview_scheduling", "interview_result", "offer_letter", "pcc", "medical",
-        "passport_collection", "advance_payment", "visa", "visa_stamping", "ticket", "invoice_generated"]
+        "passport_collection", "advance_payment", "visa", "visa_stamping", "ticket"]  # the invoice row is the admin's alone
     assert {row["status"] for row in data["tracking"]["rows"]} == {"not_started", "not_applicable"}
     missing = {item["key"]: item for item in data["completeness"]["missing"]}
     assert missing["documents.passport"]["message"] == "Passport not uploaded"
@@ -457,7 +457,11 @@ def test_tracking_follows_the_stage_records_live(desk):
     rows = {r["key"]: r for r in data["tracking"]["rows"]}
     assert rows["prescreening"]["status"] == "in_progress" and rows["forwarded"]["status"] == "not_started"
     assert rows["pcc"]["status"] == "not_applicable" and rows["pcc"]["stage"] is None
-    assert rows["invoice_generated"]["status"] == "not_started" and rows["invoice_generated"]["label"] == "Invoice"
+    assert "invoice_generated" not in rows  # a recruiter's form carries no invoice evidence
+    as_user(desk, "admin", Role.admin)
+    admin_rows = {r["key"]: r for r in form(desk)["tracking"]["rows"]}
+    assert admin_rows["invoice_generated"]["status"] == "not_started" and admin_rows["invoice_generated"]["label"] == "Invoice"
+    as_user(desk, "staff", Role.staff)
 
     complete(desk, app_id, payload(desk, app_id, 1))
     rows = {r["key"]: r for r in form(desk)["tracking"]["rows"]}

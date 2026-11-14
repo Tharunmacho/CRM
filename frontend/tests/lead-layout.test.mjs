@@ -28,7 +28,7 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
   transformers: { before: [() => file => ts.factory.updateSourceFile(file, file.statements.filter(node => !ts.isImportDeclaration(node)))] },
 }).outputText
-const componentNames = ['CampaignCell', 'ContactCell', 'CreatedCell', 'EducationCell', 'ExperienceCell', 'ExtraAnswerCell', 'FieldCell', 'LeadActions', 'LocationCell', 'NameCell', 'PositionCountryCell', 'ProfileCell', 'ResumeCell', 'StateCell', 'StatusOwnerCell']
+const componentNames = ['CampaignCell', 'ContactCell', 'CreatedCell', 'UploadedCell', 'EducationCell', 'ExperienceCell', 'ExtraAnswerCell', 'FieldCell', 'LeadActions', 'LocationCell', 'NameCell', 'PositionCountryCell', 'ProfileCell', 'ResumeCell', 'StateCell', 'StatusOwnerCell']
 const setup = `const React={createElement:(type,props)=>({type,props})};const workBlock=()=>null;
   const LEAD_HEADINGS=${JSON.stringify(model.LEAD_HEADINGS)},EXTRA_PREFIX=${JSON.stringify(model.EXTRA_PREFIX)},FIELD_PREFIX=${JSON.stringify(fields.FIELD_PREFIX)};
   const DEFAULT_COLUMN_FIELDS=new Set(${JSON.stringify([...fields.DEFAULT_COLUMN_FIELDS])});const LEAD_FIELD_DEFS=${JSON.stringify(fields.LEAD_FIELD_DEFS)};
@@ -37,13 +37,13 @@ const columnsModule = await import(`data:text/javascript;base64,${Buffer.from(se
 const columns = columnsModule.leadColumns({ userById: () => null })
 const requested = ['name', 'position', 'education', 'experienceIndia', 'experienceAbroad', 'experience', 'location']
 
-test('lead table restores Actions and Created before the requested identity and experience breakdown', () => {
+test('lead table restores Actions, Created and Uploaded before the requested identity and experience breakdown', () => {
   const visible = columns.filter(column => !column.off)
-  assert.deepEqual(visible.slice(0, 2).map(column => column.key), ['actions', 'created'])
-  assert.deepEqual(visible.slice(0, 3).map(column => column.sticky), ['start', 'start', 'start'])
-  assert.deepEqual(visible.slice(2, 9).map(column => column.key), requested)
-  assert.deepEqual(visible.slice(2, 9).map(column => column.header), ['Name / Age / Contact', 'Job applied', 'Education', 'India experience', 'Abroad experience', 'Total experience', 'Location'])
-  assert.deepEqual(visible.slice(9).map(column => column.key), ['campaign', 'status', 'resume'])
+  assert.deepEqual(visible.slice(0, 3).map(column => column.key), ['actions', 'created', 'uploaded'])
+  assert.deepEqual(visible.slice(0, 4).map(column => column.sticky), ['start', 'start', 'start', 'start'])
+  assert.deepEqual(visible.slice(3, 10).map(column => column.key), requested)
+  assert.deepEqual(visible.slice(3, 10).map(column => column.header), ['Name / Age / Contact', 'Job applied', 'Education', 'India experience', 'Abroad experience', 'Total experience', 'Location'])
+  assert.deepEqual(visible.slice(10).map(column => column.key), ['campaign', 'status', 'resume'])
   assert.equal(new Set(columns.map(column => column.key)).size, columns.length)
 })
 
@@ -67,10 +67,29 @@ test('essential supplied facts remain available at desktop widths while optional
     const result = fit.fitColumns(columns, width)
     for (const key of requested) assert.ok(result.keys.includes(key), `${key} omitted at ${width}px`)
     assert.deepEqual(result.keys.slice(0, 2), ['actions', 'created'])
+    assert.ok(!result.keys.includes('uploaded') || result.keys.indexOf('uploaded') === 2, 'Uploaded sits right after Created')
     for (const key of ['contact', 'state', 'profile']) assert.equal(result.keys.includes(key), false, `${key} should begin off`)
   }
   assert.ok(fit.fitColumns(columns, 1700).keys.includes('campaign'), 'the original campaign column is shown when it fits')
   const explicit = fit.fitColumns(columns, 1700, { campaign:true })
   assert.ok(explicit.keys.includes('campaign'), 'the full campaign column remains available by choice')
   assert.ok(fit.fitColumns(columns, 1700, { state:true }).keys.includes('state'), 'State remains available as a separate optional column')
+})
+
+test('Uploaded is a default column that goes first when the table is tight, never costing another column its place', () => {
+  const uploaded = columns.find(column => column.key === 'uploaded')
+  assert.equal(uploaded.header, 'Uploaded')
+  assert.equal(uploaded.sortKey, 'uploaded')
+  assert.ok(!uploaded.off, 'visible by default')
+  const maxOptional = Math.max(...columns.filter(column => !column.off && column.optional).map(column => column.optional))
+  assert.equal(uploaded.optional, maxOptional, 'the first default column to be hidden')
+  assert.ok(fit.fitColumns(columns, 1700).keys.includes('uploaded'), 'shown when everything fits')
+  for (const width of [900, 1100]) {
+    const result = fit.fitColumns(columns, width)
+    const withoutUploaded = fit.fitColumns(columns.filter(column => column.key !== 'uploaded'), width)
+    assert.deepEqual(result.keys.filter(key => key !== 'uploaded'), withoutUploaded.keys, `no other column is hidden for it at ${width}px`)
+  }
+  assert.ok(fit.fitColumns(columns, 700, { uploaded: false }).keys.every(key => key !== 'uploaded'), 'the Columns picker can switch it off')
+  assert.equal(fields.DEFAULT_COLUMN_FIELDS.has('uploaded'), true)
+  assert.ok(fields.LEAD_FIELD_DEFS.some(field => field.id === 'uploaded'), 'the expanded row lists it with every other field')
 })

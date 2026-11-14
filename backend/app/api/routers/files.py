@@ -31,6 +31,7 @@ from app.db.session import get_db
 from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate
 from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, Lead, User
 from app.services import document_storage
+from app.services.invoice_access import can_see_invoices, ensure_can_see_invoices
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 logger = logging.getLogger(__name__)
@@ -177,6 +178,8 @@ def upload(
     slot = slot.strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", slot):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Choose which document this file is for.")
+    if slot == "invoice":
+        ensure_can_see_invoices(user)  # invoice files are the admin's; the automatic invoice never comes through this route
 
     # FastAPI runs this synchronous handler in its worker pool, including the
     # database and filesystem work below. Read one extra byte to detect oversized
@@ -352,6 +355,8 @@ def download(
     row = db.get(Attachment, attachment_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+    if row.slot == "invoice":
+        ensure_can_see_invoices(user)
     _own_stage_files_only(db, row.entity_type, row.entity_id, user)
 
     if row.object_key.startswith("s3://"):
@@ -395,6 +400,8 @@ def list_for(
         .where(Attachment.entity_type == entity_type, Attachment.entity_id == entity_id)
         .order_by(Attachment.slot, Attachment.version)
     )
+    if not can_see_invoices(user):
+        rows = [r for r in rows if r.slot != "invoice"]
     return [
         {
             "id": r.id,

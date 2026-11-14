@@ -341,7 +341,7 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
                         candidate_id=candidate.id, owner_id=owner.id, created_at=started,
                         sla_started_at=started, due_at=started + timedelta(hours=48)))
         from app.services.candidate_review import notify_candidate_received
-        notify_candidate_received(db, candidate, owner, channel="email", kind="candidate_assignment", results=results)
+        notify_candidate_received(db, candidate, owner, channel="email", results=results)
     else:
         candidate = matches[0]
         if candidate.dob and values.get("dob") and candidate.dob != values["dob"]:

@@ -94,3 +94,28 @@ test('the unassign confirmation names the recruiter and what follows; the toast 
   assert.equal(partial.text, '1 candidate made unassigned. 1 candidate had no recruiter already. Mapped One is mapped to ORD-1: reassign them to another recruiter instead.')
   assert.deepEqual(pools.unassignMessage({ unassigned: 0, alreadyUnassigned: 1, refused: [] }), { text: 'Nobody was changed. 1 candidate had no recruiter already.', tone: 'warn' })
 })
+
+test('the Travel filter reads yes / no from a link and anything else as no filter', () => {
+  assert.equal(pools.parseTravel('yes'), 'yes')
+  assert.equal(pools.parseTravel('no'), 'no')
+  for (const stale of ['', 'YES', 'travelled', 'true', null, undefined]) assert.equal(pools.parseTravel(stale), '')
+  assert.deepEqual(pools.TRAVEL_CHOICES, [['', 'Any travel'], ['yes', 'Travelled'], ['no', 'Not travelled']])
+})
+
+test('the Travel filter counts as one active filter and is optional for older callers', () => {
+  assert.equal(pools.activeFilterCount({}, '', [], 'all'), 0)
+  assert.equal(pools.activeFilterCount({}, '', [], 'all', ''), 0)
+  assert.equal(pools.activeFilterCount({}, '', [], 'all', 'yes'), 1)
+  assert.equal(pools.activeFilterCount({ stage: '11' }, 'staff-1', ['welder'], 'all', 'no'), 4)
+})
+
+test('the Data Bank sends Travel to the list and the Excel export, keeps it in the link and clears it with the other filters', async () => {
+  const page = await readFile(new URL('../src/screens/candidates/data-bank.tsx', import.meta.url), 'utf8')
+  assert.match(page, /parseTravel\(searchParams\.get\('travelled'\)\)/)
+  assert.match(page, /if \(travelled\) params\.set\('travelled', travelled\)/)
+  // list and export are built from the same query string, so Export Excel honours the filter like every other one
+  assert.match(page, /`\/candidates\?\$\{filterQuery\}&page=/)
+  assert.match(page, /\/api\/candidates\/export\?\$\{filterQuery\}/)
+  assert.match(page, /resetFilters = \(\) => \{[^\n]*clearLinkFilters\(\['staff', 'travelled'\]\)/)
+  assert.match(page, /onTravel=\{changeTravel\}/)
+})

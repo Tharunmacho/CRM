@@ -5,6 +5,7 @@ import { CornerDownLeft, FileText, Search, User, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { useStore } from '@/shared/state/crm-store'
 import { canWorkCandidate } from '@/features/candidates/candidate-access'
+import { idLine, idSearchText } from '@/features/candidates/candidate-ids'
 
 export interface SearchPage { label: string; to: string; icon: typeof Search }
 
@@ -29,9 +30,9 @@ export function CommandSearch({ open, onClose, pages }: { open: boolean; onClose
     if (!text) return pageHits.slice(0, 8)
     const people = store.candidates
       .filter((candidate) => canWorkCandidate(store.me, candidate)
-        && `${candidate.name} ${candidate.ref} ${candidate.phone} ${candidate.email ?? ''}`.toLowerCase().includes(text))
+        && `${candidate.name} ${idSearchText(candidate)} ${candidate.phone} ${candidate.email ?? ''}`.toLowerCase().includes(text))
       .slice(0, 6)
-      .map((candidate) => ({ key: `c:${candidate.id}`, label: candidate.name, detail: [candidate.ref, candidate.phone].filter(Boolean).join(' · '), to: `/candidates/${candidate.id}`, kind: 'candidate' as const, icon: User }))
+      .map((candidate) => ({ key: `c:${candidate.id}`, label: candidate.name, detail: [idLine(candidate), candidate.phone].filter(Boolean).join(' · '), to: `/candidates/${candidate.id}`, kind: 'candidate' as const, icon: User }))
     return [...people, ...pageHits].slice(0, 9)
   }, [query, pages, store])
 
@@ -67,7 +68,7 @@ export function CommandSearch({ open, onClose, pages }: { open: boolean; onClose
             </li>
           ))}
         </ul>
-        <footer className="cmdk-foot"><span className="cmdk-keys"><kbd>↑</kbd><kbd>↓</kbd> to move</span><span className="cmdk-keys"><kbd>Enter</kbd> to open</span><span><FileText size={12} aria-hidden="true" /> Staff members can only find their own candidates</span></footer>
+        <footer className="cmdk-foot"><span className="cmdk-keys"><kbd>↑</kbd><kbd>↓</kbd> to move</span><span className="cmdk-keys"><kbd>Enter</kbd> to open</span><span><FileText size={12} aria-hidden="true" /> Recruiters can only find their own candidates</span></footer>
       </div>
     </div>,
     document.body,

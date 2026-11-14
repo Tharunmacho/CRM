@@ -12,14 +12,14 @@ STATE_LABELS = {"present": "Present", "absent": "Absent", "leave": "Leave", "off
                 "untracked": "Not tracked", "future": "Upcoming"}
 
 SUMMARY_COLUMNS = [
-    "Staff", "Attendance", "Days worked", "Days absent", "Hours worked", "Hours expected", "Active hours in CRM",
+    "Recruiter", "Attendance", "Days worked", "Days absent", "Hours worked", "Hours expected", "Active hours in CRM",
     "Daily tasks assigned", "Daily tasks completed", "Completion %", "Postponed", "Overdue", "Backlog (earlier days)",
     "Stage moves", "Forwarded to client", "Interviews scheduled", "Selected", "Visa received", "Visa stamped", "Deployed",
     "Candidates in progress", "Stuck candidates", "Score",
     "Leads assigned", "Assigned leads called", "Lead calls logged", "Leads worked", "Leads interested", "Resumes received",
     "Leads converted", "Lead conversion %", "Lead follow-ups overdue",
 ]
-LEAD_COLUMNS = ["Staff", "Leads assigned", "Assigned leads called", "Assigned, not called", "Lead calls logged", "Leads worked",
+LEAD_COLUMNS = ["Recruiter", "Leads assigned", "Assigned leads called", "Assigned, not called", "Lead calls logged", "Leads worked",
                 "Leads interested", "Resumes received", "Leads converted", "Lead conversion % (converted / worked)",
                 "Lead follow-ups overdue (now)", "Open leads held (now)"]
 
@@ -61,12 +61,12 @@ def summary_rows(data):
 
 def sheets(data):
     zone, period = data["timezone"], data["range"]
-    about = [["Report", "Weekly staff performance"], ["Period", f"{period['from']} to {period['to']}"],
+    about = [["Report", "Weekly recruiter performance"], ["Period", f"{period['from']} to {period['to']}"],
              ["Generated at", _local(data["generatedAt"], zone)], ["Time zone", zone]]
     about += [["Score formula", line] for line in data["formula"]["lines"]]
     about += [["Note", note] for note in data["notes"]]
     staff = [SUMMARY_COLUMNS] + summary_rows(data)
-    daily = [["Staff", "Date", "Day", "Attendance", "Check-in", "Check-out", "Hours worked", "Active hours in CRM",
+    daily = [["Recruiter", "Date", "Day", "Attendance", "Check-in", "Check-out", "Hours worked", "Active hours in CRM",
               "Tasks assigned", "Tasks done", "Tasks missed", "Stage moves"]]
     for p in data["staff"]:
         for d in p["days"]:
@@ -74,7 +74,7 @@ def sheets(data):
                           _local(d["lastOut"], zone)[11:] if d["lastOut"] else "", round(d["workedSeconds"] / 3600, 2),
                           round(d["activeSeconds"] / 3600, 2), d["tasks"]["assigned"], d["tasks"]["done"], d["tasks"]["missed"],
                           d["stageMoves"]])
-    stages = [["Staff", "Stage", "Stage name", "In this stage now", "Moved in period", "Reached (all time)"]]
+    stages = [["Recruiter", "Stage", "Stage name", "In this stage now", "Moved in period", "Reached (all time)"]]
     for p in data["staff"]:
         for n in range(1, 12):
             stages.append([p["name"], n, data["funnel"][n - 1]["label"], p["stages"]["inStageNow"][n],
@@ -95,10 +95,10 @@ def sheets(data):
                           lead["followUpsOverdue"], lead["open"]])
     if len(leads) == 1:
         leads.append(["The Lead sheet has no numbers for this period."])
-    highlights = [["Staff", "Severity", "Issue", "Detail"]] + [[h["staffName"], h["severity"], h["title"], h["detail"]]
+    highlights = [["Recruiter", "Severity", "Issue", "Detail"]] + [[h["staffName"], h["severity"], h["title"], h["detail"]]
                                                                   for h in data["highlights"]]
-    return [("About this report", about), ("Staff summary", staff), ("Day by day", daily), ("Stages by staff", stages),
-            ("Leads by staff", leads), ("Team funnel", funnel), ("Questions to ask", highlights)]
+    return [("About this report", about), ("Recruiter summary", staff), ("Day by day", daily), ("Stages by recruiter", stages),
+            ("Leads by recruiter", leads), ("Team funnel", funnel), ("Questions to ask", highlights)]
 
 
 def xlsx(data) -> bytes:

@@ -21,9 +21,10 @@ from app.db.models import (
     Candidate, CandidateStatus, ClosureReason, Order, OrderStatus, Role, Task, TaskKind, User,
 )
 from app.domain.orders import reopen_blocker
-from app.domain.stages import FILE_FIELDS, TOTAL_STAGES, stage_by_no, validate_payload
-from app.services import agency_settings, daily_work
+from app.domain.stages import FILE_FIELDS, TOTAL_STAGES, blocked_message, stage_by_no, validate_payload
+from app.services import agency_settings
 from app.services import document_storage
+from app.services.traveller_id import assign_traveller_id
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -267,7 +268,7 @@ def _normalized_data(db: Session, app: Application, payload: dict, *, require_by
             matches = list(db.scalars(select(User).where(User.name == raw.strip())))
             keeper = matches[0] if len(matches) == 1 else None
         if keeper is None or not keeper.active or keeper.role != Role.staff:
-            raise HTTPException(422, "Choose an active staff member who is holding the passport.")
+            raise HTTPException(422, "Choose an active recruiter who is holding the passport.")
         data["heldBy"] = {"id": keeper.id, "name": keeper.name}
     try:
         return validate_payload(app.current_stage, data, _stage_options(db, app.current_stage))
@@ -429,7 +430,6 @@ def save_draft(application_id: str, body: DraftIn, db: Session = Depends(get_db)
         _check_version(app, body.lock_version)
         app.draft = _normalized_data(db, app, body.data)
         app.draft_saved_at, app.draft_saved_by = datetime.now(timezone.utc), user.id
-        daily_work.mark_started(db, app.id, app.draft_saved_at)
         app.lock_version += 1
         _audit(db, user, f"Saved stage {app.current_stage} draft", app, candidate,
                app.draft_saved_at, {"stage": app.current_stage, "lock_version": app.lock_version})
@@ -457,8 +457,9 @@ def complete_stage(application_id: str, body: CompleteIn,
         definition = stage_by_no(app.current_stage)
         result = definition.evaluate(data, _stage_options(db, app.current_stage))
         if not result.can_complete:
-            raise HTTPException(422, {"message": "This stage is not complete.", "missing": result.missing})
-        if app.current_stage == TOTAL_STAGES:
+            raise HTTPException(422, {"message": blocked_message(app.current_stage, result.missing), "missing": result.missing})
+        if app.current_stage == TOTAL_STAGES and not result.closes:
+            # Only a real completion deploys (and so needs a free opening); Not travelling closes the application instead.
             # Documents remain in the inspection checklist, independently of a manual stage move.
             deployed = db.scalar(select(func.count()).select_from(Application).where(
                 Application.order_id == order.id, Application.status == ApplicationStatus.deployed,
@@ -476,15 +477,12 @@ def complete_stage(application_id: str, body: CompleteIn,
             amount=data.get("amount") if app.current_stage == 8 else None,
             amount_currency=data.get("amountCurrency") if app.current_stage == 8 else None,
         ))
-        finished_tasks = []
+        # The candidate ticks off the recruiter's Daily work list from this stage record itself ("done today"); nothing else to write.
         for task in _open_tasks(db, app):
             if task.stage == app.current_stage:
                 task.completed_at = at
-                finished_tasks.append(task.id)
             else:
                 task.cancelled_at = at
-        # The recruiter's daily-quota item for this stage is finished in the same transaction.
-        daily_work.record_completion(db, finished_tasks, user.id, at)
         next_task = None
         app.draft = {}
         if result.closes:
@@ -498,6 +496,10 @@ def complete_stage(application_id: str, body: CompleteIn,
             app.status = ApplicationStatus.deployed
             candidate.status = CandidateStatus.deployed
             _sync_order(db, order)
+            # The candidate has travelled: the Traveller ID (CI-T-YY-YY-NNN) is numbered by the financial year of the
+            # travel date. Last, so the counter row is the final lock this transaction takes; a second completion after a
+            # reopen returns the number they already hold.
+            assign_traveller_id(db, candidate, data.get("travelDate"), at)
         else:
             app.current_stage += 1
             if app.current_stage == 7:

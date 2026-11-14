@@ -68,6 +68,8 @@ const list = (values?: readonly unknown[] | null): string => (values ?? []).map(
 
 export const BANK_FIELD_DEFS: readonly BankFieldDef[] = [
   { id: 'name', label: 'Full name', group: 'Person', width: 140, sortKey: 'name', inColumns: true, value: (c) => text(c.name) },
+  { id: 'careId', label: 'Care India ID', group: 'Person', width: 120, inColumns: true, value: (c) => text(c.careId) },
+  { id: 'travellerId', label: 'Traveller ID', group: 'Person', width: 130, inColumns: true, value: (c) => text(c.travellerId) },
   { id: 'ref', label: 'Reference', group: 'Person', width: 110, inColumns: true, value: (c) => text(c.ref) },
   { id: 'dob', label: 'Date of birth', group: 'Person', width: 110, inColumns: true, value: (c) => dayLabel(c.dob) },
   { id: 'gender', label: 'Gender', group: 'Person', width: 90, inColumns: true, value: (c) => sentence(text(c.gender)) },
@@ -131,7 +133,7 @@ export const bankFieldDef = (id: string) => BANK_FIELD_DEFS.find((field) => fiel
  * several fields share one cell: name over date of birth, phone with WhatsApp over e-mail).
  */
 export const DEFAULT_COLUMN_FIELDS: ReadonlySet<string> = new Set([
-  'name', 'dob', 'phone', 'whatsapp', 'email', 'passportNo', 'designations', 'totalExperience', 'countryPreference', 'serviceCharges',
+  'name', 'careId', 'dob', 'phone', 'whatsapp', 'email', 'passportNo', 'designations', 'totalExperience', 'countryPreference', 'serviceCharges',
   'interestLevel', 'added', 'owner', 'agent', 'source', 'status',
 ])
 

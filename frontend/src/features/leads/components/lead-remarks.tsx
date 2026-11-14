@@ -26,7 +26,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function Card({ card, now }: { card: RemarkCard; now: Date }) {
-  const who = card.who || 'Staff'
+  const who = card.who || 'Recruiter'
   const label = card.kind === 'pinned' ? 'Notes on file' : card.kind === 'note' ? 'Note' : ''
   return (
     <li className={cn('ld-rm-card', card.kind === 'pinned' && 'is-pinned')}>
@@ -110,7 +110,7 @@ export function LeadRemarksSheet({ lead, ownerName, onClose, onOpenLead }: Props
   const shown: Lead = detail ?? lead
   const status = leadStatus(shown.status)
   const stats = remarkStats(activities, cards, shown.callCount)
-  const owner = ownerName || 'Staff'
+  const owner = ownerName || 'Recruiter'
   const assigned = dateOnly(shown.assignedAt)
 
   return (

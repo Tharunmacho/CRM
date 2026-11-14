@@ -10,6 +10,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { FormSection } from '@/shared/ui/form-section'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { LINK_KINDS, PRIORITIES, linkKindOf, presetDue, presetLabel, toInputValue, type LinkKind, type Preset } from './todo-meta'
+import { idLine } from '@/features/candidates/candidate-ids'
 
 function Section({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children: ReactNode }) {
   return <FormSection icon={icon} title={title} hint={hint}>{children}</FormSection>
@@ -49,7 +50,7 @@ export function TodoDialog({ onClose, item, initialTitle = '' }: { onClose: () =
         label: [o.ref, designations.get(o.designationId), companies.get(o.companyId)].filter(Boolean).join(' · '),
         short: o.ref,
       })),
-      candidate: store.candidates.map((c) => ({ value: `/candidates/${c.id}`, label: `${c.name} · ${c.ref}`, short: c.name })),
+      candidate: store.candidates.map((c) => ({ value: `/candidates/${c.id}`, label: `${c.name} · ${idLine(c)}`, short: c.name })),
     }
     // Keep a saved link selectable even when its record is not in the loaded workspace.
     if (item?.linkTo && initialKind && !options[initialKind].some((o) => o.value === item.linkTo)) {

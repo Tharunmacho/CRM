@@ -118,6 +118,22 @@ def test_refused_deletes_stay_cheap_and_change_nothing(env):
     assert env.db.get(m.Candidate, cid) is not None
 
 
+def test_withdraw_and_delete_stays_within_the_statement_budget_with_one_commit(env):
+    cid = candidate(env.db, "busy")
+    application(env.db, "a-live", cid, "o1", m.ApplicationStatus.active)
+    application(env.db, "a-old", cid, "o2", m.ApplicationStatus.closed)
+    env.db.get(m.Order, "o1").status = m.OrderStatus.filled
+    env.db.commit()
+    warm(env)
+    with Counter(env.db.get_bind()) as counter:
+        response = env.http().delete(f"/api/candidates/{cid}?withdrawFromOrders=true")
+    assert response.status_code == 200, response.text
+    assert len(counter.statements) <= MAX_STATEMENTS, counter.statements
+    assert counter.commits == 1, counter.commits
+    env.db.expire_all()
+    assert env.db.get(m.Order, "o1").status is m.OrderStatus.open
+
+
 def test_a_delete_announces_the_tables_it_changed_to_open_desks():
     """The one-statement delete starts with WITH; the live-update feed must still see every table it wrote."""
     statement = "WITH a AS (UPDATE email_messages SET candidate_id=NULL RETURNING id), b AS (DELETE FROM crm_candidates RETURNING id) SELECT 1"

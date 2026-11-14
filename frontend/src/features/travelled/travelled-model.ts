@@ -11,6 +11,9 @@ export interface TravelledRow {
   applicationId: string
   candidateId: string
   ref: string
+  /** Care India ID and Traveller ID; absent from servers that do not send them yet. */
+  careId?: string | null
+  travellerId?: string | null
   name: string
   client: string
   clientId: string | null

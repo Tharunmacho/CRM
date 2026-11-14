@@ -1,5 +1,6 @@
 """Invoice generation tests use only the guarded disposable PostgreSQL DB and synthetic documents."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from decimal import Decimal
 
 import pymupdf
@@ -11,7 +12,7 @@ from app.api.routers import candidate_invoices as routes
 from app.db.models import Application, ApplicationStatus, Attachment, CandidateInvoice, InvoiceSettings, Role
 from app.services import candidate_invoices as service
 from test_application_form import as_user, desk, form, upload
-from test_application_workflow import complete, mapped, save
+from test_application_workflow import complete, mapped, reach, save
 from test_database_naming import schema_database
 from test_document_extraction import pdf
 
@@ -21,6 +22,17 @@ def billing(desk, monkeypatch):
     desk.client.app.include_router(routes.router)
     monkeypatch.setattr(service, "get_settings", lambda: desk.settings)
     return desk
+
+
+@contextmanager
+def admin(env):
+    """Fees, invoices and receipts are the admin's alone; ticket uploads stay with the recruiter."""
+    before = (env.actor.id, env.actor.role)
+    as_user(env, "admin", Role.admin)
+    try:
+        yield
+    finally:
+        as_user(env, *before)
 
 
 def configure(env):
@@ -33,21 +45,24 @@ def configure(env):
 
 
 def read(env, candidate="candidate", app=None):
-    response = env.client.get(f"/api/candidates/{candidate}/invoice", params={"applicationId": app} if app else {})
+    with admin(env):
+        response = env.client.get(f"/api/candidates/{candidate}/invoice", params={"applicationId": app} if app else {})
     assert response.status_code == 200, response.text
     return response.json()
 
 
 def fee(env, amount, candidate="candidate", app=None):
     current = read(env, candidate, app)
-    response = env.client.put(f"/api/candidates/{candidate}/invoice", json={"serviceFee": amount,
-        "applicationId": app, "lockVersion": current["lockVersion"]})
+    with admin(env):
+        response = env.client.put(f"/api/candidates/{candidate}/invoice", json={"serviceFee": amount,
+            "applicationId": app, "lockVersion": current["lockVersion"]})
     assert response.status_code == 200, response.text
     return response.json()
 
 
 def retry(env, candidate="candidate", app=None):
-    response = env.client.post(f"/api/candidates/{candidate}/invoice/reconcile", json={"applicationId": app})
+    with admin(env):
+        response = env.client.post(f"/api/candidates/{candidate}/invoice/reconcile", json={"applicationId": app})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -82,7 +97,8 @@ def test_ticket_upload_automatically_issues_actual_fee_invoice_and_keeps_stage_u
     assert data["status"] == "issued" and data["serviceFee"] == "5000.00"
     assert data["invoice"]["number"] == "CI/26-27/001"
     assert data["invoice"]["total"] == "5900.00"
-    response = billing.client.get(data["invoice"]["downloadUrl"])
+    with admin(billing):
+        response = billing.client.get(data["invoice"]["downloadUrl"])
     assert response.status_code == 200
     with pymupdf.open(stream=response.content, filetype="pdf") as document:
         text = "".join(page.get_text() for page in document)
@@ -147,8 +163,9 @@ def test_issued_amounts_and_number_cannot_be_edited_by_api_or_database(billing):
     configure(billing)
     upload(billing, "air_ticket", pdf("Ticket"))
     issued = fee(billing, "5000", app=app)
-    refused = billing.client.put("/api/candidates/candidate/invoice", json={"serviceFee": "6000", "applicationId": app,
-        "lockVersion": issued["lockVersion"]})
+    with admin(billing):
+        refused = billing.client.put("/api/candidates/candidate/invoice", json={"serviceFee": "6000", "applicationId": app,
+            "lockVersion": issued["lockVersion"]})
     assert refused.status_code == 409
     with billing.sessions() as db:
         row = db.scalar(select(CandidateInvoice))
@@ -179,8 +196,7 @@ def test_ambiguous_candidate_ticket_cannot_invoice_another_placement(billing):
 def test_completion_without_ticket_never_creates_an_invoice(billing):
     app = mapped(billing)
     configure(billing)
-    for stage in range(1, 11):
-        complete(billing, app, {"feedback": f"Move stage {stage} manually"})
+    reach(billing, app, 11)  # stages 1-10 with their required decisions (Selected, Agreed, Fit)
     # Deployment cannot be moved manually any more: it needs the ticket and the travel date, so no invoice can follow from a note.
     saved = save(billing, app, {"feedback": "Move stage 11 manually"})
     assert saved.status_code == 200, saved.text
@@ -202,7 +218,8 @@ def test_another_recruiter_cannot_read_fees_or_write_settings(billing):
 @pytest.mark.parametrize("value", ["4999", "30000.01", "5000.001", "NaN", True])
 def test_fee_is_actual_valid_pre_gst_amount_in_confirmed_range(billing, value):
     mapped(billing)
-    response = billing.client.put("/api/candidates/candidate/invoice", json={"serviceFee": value, "lockVersion": 0})
+    with admin(billing):
+        response = billing.client.put("/api/candidates/candidate/invoice", json={"serviceFee": value, "lockVersion": 0})
     assert response.status_code == 422
 
 

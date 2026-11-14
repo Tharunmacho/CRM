@@ -42,6 +42,9 @@ body.af-open { overflow: hidden; }
 .af-bar-back svg { width: 18px; height: 18px; }
 .af-bar-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; line-height: 1.25; }
 .af-bar-name { font-size: 16px; font-weight: 600; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-bar-nameline { display: flex; align-items: center; min-width: 0; gap: 4px 10px; }
+.af-bar-nameline > .af-bar-name { flex: 0 1 auto; min-width: 0; }
+.af-bar-nameline > .cid-chip { flex: 0 1 auto; }
 .af-bar-name.is-muted { color: var(--text-muted); font-weight: 500; }
 .af-bar-title small { font-size: 12px; line-height: 16px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .af-pct { display: inline-flex; align-items: center; flex: none; height: 28px; padding: 0 12px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 12%, var(--bg-card)); color: var(--primary-deep); font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -418,6 +421,7 @@ body.af-open { overflow: hidden; }
 @media screen and (max-width: 760px) {
   .af-bar { flex-wrap: wrap; padding: 8px 16px; gap: 8px 12px; }
   .af-bar-title { order: 1; flex: 1 1 0; }
+  .af-bar-nameline { flex-wrap: wrap; }
   .af-bar-back { order: 0; padding-right: 6px; }
   .af-bar-back span { display: none; }
   .af-live { order: 2; }

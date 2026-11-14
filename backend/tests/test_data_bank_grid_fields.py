@@ -72,8 +72,8 @@ def test_export_has_the_same_extra_columns_with_the_labels_admins_set(grid):
         sheet = ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
     rows = [[''.join(cell.itertext()) for cell in row.findall('{*}c')] for row in sheet.findall('{*}sheetData/{*}row')]
     header = rows[0]
-    # The sheet opens with the public Care India ID and the CRM reference, then the candidate's name.
-    assert header[:3] == ['Care India ID', 'CRM reference', 'Name']
+    # The sheet opens with the Data Bank Care India ID, the separate Traveller ID and the CRM reference, then the candidate's name.
+    assert header[:4] == ['Care India ID', 'Traveller ID', 'CRM reference', 'Name']
     body = {row[header.index('Name')]: row for row in rows[1:]}
     start = header.index('Date of birth')
     assert header[start:start + 5] == ['Date of birth', 'WhatsApp', 'Preferred country', 'Service charges', 'Interest level']
@@ -82,3 +82,18 @@ def test_export_has_the_same_extra_columns_with_the_labels_admins_set(grid):
     assert body['Ravi Kumar'][header.index('Interest level')] == 'More interested'
     assert body['Nobody Noted'][header.index('Service charges')] == 'Not discussed'
     assert body['Nobody Noted'][header.index('Interest level')] == ''
+
+
+def test_traveller_id_is_listed_searchable_and_exported_beside_the_care_india_id(grid):
+    grid.execute(m.Candidate.__table__.update().where(m.Candidate.id == 'two').values(traveller_id='CI-T-26-27-007'))
+    grid.commit()
+    row = next(item for item in listing(grid) if item['id'] == 'two')
+    assert row['travellerId'] == 'CI-T-26-27-007'
+    assert next(item for item in listing(grid) if item['id'] == 'one')['travellerId'] is None
+    assert {item['id'] for item in listing(grid, q='ci-t-26-27-007')} == {'two'}      # found by the traveller ID, as by the Care India ID
+    with ZipFile(BytesIO(export_candidates(grid, Search(sort='name', direction='asc')))) as archive:
+        sheet = ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml'))
+    rows = [[''.join(cell.itertext()) for cell in r.findall('{*}c')] for r in sheet.findall('{*}sheetData/{*}row')]
+    header = rows[0]
+    assert header.index('Traveller ID') == header.index('Care India ID') + 1
+    assert {r[header.index('Name')]: r[header.index('Traveller ID')] for r in rows[1:]}['Meena Das'] == 'CI-T-26-27-007'

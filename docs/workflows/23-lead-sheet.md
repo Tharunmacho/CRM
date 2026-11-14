@@ -8,9 +8,9 @@ lead, collect an updated resume and turn the good ones into Data Bank candidates
 ## Roles and preparation
 
 * **Admin and Manager** upload sheets, assign leads (one by one, in bulk or automatically), export, and can work any lead.
-* **Staff** see the whole sheet but can only call, edit and convert the leads **assigned to them**, and only **after finishing today's
-  daily tasks** (the Tasks > Daily work quota plus anything postponed). Until then the screen shows how many tasks are left and
-  the server refuses the work. Reading is never blocked. A staff member with nothing allocated (day off, leave, all done) is free to work.
+* **Recruiters** see the whole sheet but can only call, edit and convert the leads **assigned to them**. There is no daily-task lock:
+  Tasks > Daily work has no quota to finish any more, so nothing blocks a recruiter's own leads (the "finish today's tasks first" lines
+  further down in this page and in the checklists describe the retired gate). Reading is never blocked.
 
 ## Upload a sheet
 
@@ -19,7 +19,7 @@ lead, collect an updated resume and turn the good ones into Data Bank candidates
 2. The page first shows a **preview** (nothing is saved yet): the detected format, how each column of the file was understood
    (the columns it did not understand are kept anyway), how many people are new, how many are duplicates and how many rows are unusable,
    and the first rows as they will be stored. Fix a wrong column by choosing the right field for it. If the very same file was uploaded before, a warning says when.
-3. Optionally choose who gets the new leads (a person, or **automatic** to spread them evenly over the staff who are available) and a campaign name for sheets that have none.
+3. Optionally choose who gets the new leads (a person, or **automatic** to spread them evenly over the recruiters who are available) and a campaign name for sheets that have none.
 4. Confirm. The leads are stored in one step. The result lists the totals, and the duplicate and unusable rows with the reason.
 
 ## Duplicates: nobody is stored twice
@@ -40,11 +40,11 @@ A wrong upload can be undone by an admin from the upload history, as long as nob
 4. In **Convert to candidate**, choose the updated resume or use the one already saved, then press **Check resume**. Wait for a verified match before converting. A wrong person's file, several people's resumes, incomplete reading or uncertain identity blocks conversion and creates no candidate. Changing the selected file or candidate name requires another check.
    **Convert to candidate** then creates the Data Bank candidate and attaches the checked resume together, reusing its saved reading to fill permitted fields. It does not run the paid extraction again. Conversion without a resume remains available when none is selected or saved.
    If the phone or e-mail already belongs to a candidate, the CRM shows that candidate instead of creating a second one; **Link** connects the lead to it.
-5. Leads that do not go anywhere are set to **Not interested**, **Invalid** or **Wrong number**; nothing is deleted.
+5. Leads that do not go anywhere are set to **Not interested**, **Not reachable** or **Wrong number**; nothing is deleted.
 
 ## Statuses
 
-New, Contacted, Interested, Resume requested, Resume received, Converted, Not interested, Invalid, Wrong number.
+New, Contacted, Interested, Resume requested, Resume received, Converted, Not interested, Not reachable, Wrong number.
 
 ## Failure recovery
 
@@ -79,8 +79,8 @@ This is available only for an unused candidate created by that lead. Existing/sh
 * [ ] Upload the sample Meta file; preview shows the format and all columns mapped; confirm stores every person once.
 * [ ] Upload the same file again: 0 new, every row listed as a duplicate.
 * [ ] Upload a longer file: only the new people are added.
-* [ ] As staff with open daily tasks: lead calls and edits are refused with the daily tasks message; as admin they work.
-* [ ] Staff cannot upload, assign or export; staff cannot work another person's lead.
+* [ ] As recruiters with open daily tasks: lead calls and edits are refused with the daily tasks message; as admin they work.
+* [ ] Recruiters cannot upload, assign or export; recruiters cannot work another person's lead.
 * [ ] Check the correct resume, then convert: one candidate and its checked file appear together, using the saved reading.
 * [ ] A wrong-person, changed or unverified resume cannot create a candidate; no-resume conversion still works.
 * [ ] As admin, reverse an unused conversion with a reason; the lead and source resume remain. A candidate with recruitment or financial history cannot be reversed.
@@ -90,9 +90,9 @@ This is available only for an unused candidate created by that lead. Existing/sh
 * **Campaigns tab** (next to Leads and Uploads): one row per ad campaign with its leads, new today and in 7 days, how many are assigned and contacted, interested, resumes in,
   converted with a small bar for the conversion rate, the last upload, the Facebook / Instagram split, the top jobs and the countries people want. The last row totals them.
   Click a heading to sort; click a row to see that campaign's leads on the Leads tab; the arrow shows the campaign's forms. On a narrow screen the rows become cards. Managers and admins see
-  everything, staff see only the leads assigned to them.
+  everything, recruiters see only the leads assigned to them.
 * **Follow-up reminders**: when you set a follow-up date on a lead (in the lead, or when logging a call), the owner gets a to-do "Follow up lead: <name>" at 09:00 that day (a reminder in the notification bell when it is due; the **To-do** page itself is open to admins and managers),
-  linking back to the lead. Moving or clearing the date moves or removes it; converting the lead, marking it not interested, invalid or wrong number, deleting it, or reassigning it
+  linking back to the lead. Moving or clearing the date moves or removes it; converting the lead, marking it not interested, not reachable or wrong number, deleting it, or reassigning it
   (the to-do goes to the new owner) is followed too. The **Follow-ups due** card counts your own leads whose follow-up is today or overdue (click it to list them); overdue dates are red in the table.
 * **Already in the Data Bank, found later**: if a candidate with the same phone or e-mail is added after the lead was uploaded, the lead gets the "In Data Bank" flag at once, and the
   candidate's profile shows "From lead sheet: <campaign>" linking back to the lead.
@@ -105,7 +105,7 @@ This is available only for an unused candidate created by that lead. Existing/sh
 
 ### Checks (13B)
 
-* [ ] Campaigns tab: totals match the Leads tab; sorting by conversion reorders the rows; clicking a campaign filters the Leads tab; as staff only your own counts appear.
+* [ ] Campaigns tab: totals match the Leads tab; sorting by conversion reorders the rows; clicking a campaign filters the Leads tab; as recruiters only your own counts appear.
 * [ ] Set a follow-up date on a lead as its owner: a to-do "Follow up lead: <name>" appears at 09:00 on that day; clear the date: it disappears; reassign the lead: it moves to the new owner.
 * [ ] Add a candidate whose phone matches an uploaded lead: the lead shows "In Data Bank"; the candidate's profile links back to the lead.
 * [ ] WhatsApp button: pick a template, edit the text, Open WhatsApp: the lead's history has "WhatsApp message opened". Admin edits a template in Agency settings; the next popover uses it.
@@ -114,11 +114,11 @@ This is available only for an unused candidate created by that lead. Existing/sh
 ## Bulk actions, status change and delete
 
 * **Select leads**: tick rows (the ticks stay while you change pages) or the header box for the page. A bar sticks to the top of the table: "10 selected", **Select all 3,000 matching leads** (every page of the
-  current search and filters, not only the ticked ones), and the actions **Assign to...** (a person, or spread evenly over available staff), **Change status...**, **Mark not interested**, **Export selected** (Excel),
+  current search and filters, not only the ticked ones), and the actions **Assign to...** (a person, or spread evenly over available recruiters), **Change status...**, **Mark not interested**, **Export selected** (Excel),
   **Delete...** (admin only) and **Clear selection**. Changing the search, a filter or the page size clears the selection.
 * Each action opens a dialog that says the **exact number of leads and what will happen** before anything is changed ("All 3,000 leads that match the current search and filters ... will be assigned to ...").
   The result appears as "2,998 leads updated, 2 skipped (2 converted or linked to a candidate)". At most 10,000 leads per action; with more matches the bar asks you to narrow the filters.
-  Converted leads are never moved, changed or deleted by a bulk action. Only admin and manager use the bar (staff cannot assign, export or delete; a recruiter's own status changes follow the daily-task rule).
+  Converted leads are never moved, changed or deleted by a bulk action. Only admin and manager use the bar (recruiters cannot assign, export or delete; a recruiter's own status changes follow the daily-task rule).
 * **Change one lead's status**: the row's "..." menu has **Change status** and **Not interested**; the drawer has the Status box. A toast "Marked not interested. **Undo**" stays for 10 seconds and puts the previous status back.
 * **Delete a lead** (admin only): "Delete lead" in the row menu or the drawer, after a confirmation. A lead that was converted to a candidate cannot be deleted (the message says which candidate). Deleting removes the
   call history and resume. **If the same person is in a later upload they are added again** (nothing remembers deleted leads). Deleting more than 20 leads at once needs the word DELETE typed. Every deletion is in the audit log.
@@ -131,4 +131,4 @@ This is available only for an unused candidate created by that lead. Existing/sh
 * [ ] As admin delete one lead (the confirmation mentions the later upload); as a manager there is no delete. A converted lead cannot be deleted (menu entry disabled, the server refuses with 409).
 * [ ] Delete 21 or more leads through the bar: the button stays disabled until DELETE is typed.
 * [ ] Export selected downloads an Excel file with only the selected leads.
-* [ ] As staff with open daily tasks: no ticks, no bar, "Change status" is disabled with the daily-task reason.
+* [ ] As recruiters with open daily tasks: no ticks, no bar, "Change status" is disabled with the daily-task reason.

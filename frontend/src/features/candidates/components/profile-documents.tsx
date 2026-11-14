@@ -4,6 +4,7 @@ import { dateTimeLabel } from '@/shared/lib/format'
 import { newestFileVersions } from '@/shared/lib/document-files'
 import { DocumentExtractionAction } from '@/shared/ui/document-extraction-action'
 import { DocumentSlotRow } from '@/shared/ui/file-drop'
+import { useStore } from '@/shared/state/crm-store'
 import { profileDocuments, type ProfileDocument } from '../profile-documents-model'
 import { CertificateSlotRow } from './certificate-slot-row'
 
@@ -22,9 +23,10 @@ export function DocumentList({ documents, uploaderName, onUpload, emptyFor, onEx
   emptyFor?: (slot: DocumentSlot) => string | undefined
   onExtract?: (attachmentIds: string[]) => Promise<void>
 }) {
+  const invoices = useStore().can('view_invoices')
   return (
     <>
-      {profileDocuments(documents).map((slot) => {
+      {profileDocuments(documents, { invoices }).map((slot) => {
         const marked = slot.manualStatus?.uploaded === true && !slot.versions.some((file) => file.url)
         const emptyLabel = marked ? 'Marked manually · No file attached' : emptyFor?.(slot)
         return <Fragment key={slot.key}>{slot.multiple

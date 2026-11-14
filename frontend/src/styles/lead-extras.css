@@ -1,18 +1,6 @@
 /* Lead sheet extras: Campaigns tab, loading skeleton, WhatsApp template popover, candidate origin badge, template settings.
    Tokens only (see theme.css); light and dark follow the palette. */
 
-/* ---------- 7 KPI cards on one row on wide screens (Follow-ups due is the seventh) ---------- */
-@media (min-width: 1400px) {
-  .ld .db-kpis[data-count='7'] { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
-  .ld .db-kpis[data-count='7'] .db-kpi, .ld .db-kpis[data-count='7'] .db-kpi:nth-child(n + 5) { grid-column: auto; padding: 14px 12px 12px; }
-  .ld .db-kpis[data-count='7'] .db-kpi-label { font-size: 13px; }
-}
-
-@media (min-width: 900px) and (max-width: 1399px) {
-  .ld .db-kpis[data-count='7'] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .ld .db-kpis[data-count='7'] .db-kpi, .ld .db-kpis[data-count='7'] .db-kpi:nth-child(n + 5), .ld .db-kpis[data-count='7'] .db-kpi:last-child { grid-column: auto; }
-}
-
 /* ---------- Loading skeleton ---------- */
 .ld-skel { display: grid; gap: 0; padding: 4px 0 2px; }
 .ld-skel-row { display: grid; grid-template-columns: repeat(var(--ld-skel-cols, 6), minmax(0, 1fr)); gap: 18px; align-items: center; padding: 15px 22px; border-bottom: 1px solid var(--border-main); }

@@ -108,16 +108,17 @@ def reroute_for_order(db, candidate: Candidate, order: Order, allocated_ids: lis
     if target is None:
         return None
     reason = f"Matched to {order.ref}: {client_name or 'the client'} is looked after by {target.name}"
-    reassign_candidate(db, candidate, target, actor_id=actor_id, reason=reason, notification_reason=f"Client staff routing. {reason}.",
-                       start_call=False)
+    reassign_candidate(db, candidate, target, actor_id=actor_id, reason=reason, start_call=False, by_system=True,
+                       how=f"because you look after {client_name or 'the client'} ({order.ref})")
     return target
 
 
 def reassign_candidate(db, candidate: Candidate, target: User, *, actor_id: str | None, reason: str,
-                       notification_reason: str, start_call: bool = True) -> bool:
+                       how: str | None = None, by_system: bool = False, start_call: bool = True) -> bool:
     """Move one candidate to `target` the way the admin reassignment does (`POST /api/candidates/reassign`):
     the audit entry the assignment history reads, the review flag released when the owner was all it waited for, the
-    follow-up reminder and every open task following the candidate, and the notices to the new owner and the admins."""
+    follow-up reminder and every open task following the candidate, and the notices to the new owner and the previous owner
+    (never to the person who did it, and not to the admins). `by_system` says the move was a rule, not a person's choice."""
     from app.services.application_form import sync_follow_up_todo
     from app.services.assignment_notifications import notify_assignment_changes
     from app.services.candidate_review import release_ownership_review, review_reasons, start_initial_call
@@ -145,7 +146,8 @@ def reassign_candidate(db, candidate: Candidate, target: User, *, actor_id: str 
             add_event(db, task, "assignment", f"assignment:{task.id}:{now.isoformat()}", now,
                       {"fromOwnerId": task.owner_id, "toOwnerId": target.id, "actorId": actor_id, "reason": reason})
             task.owner_id = target.id
-    notify_assignment_changes(db, [(candidate.id, candidate.name, previous, target.id)], reason=notification_reason)
+    actor_name = None if by_system or not actor_id else db.scalar(select(User.name).where(User.id == actor_id))
+    notify_assignment_changes(db, [(candidate.id, candidate.name, previous, target.id)], actor_id=actor_id, actor_name=actor_name, how=how)
     return True
 
 

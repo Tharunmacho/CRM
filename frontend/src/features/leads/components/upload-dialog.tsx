@@ -299,7 +299,7 @@ export function UploadLeadsDialog({ open, onClose, users, onImported, onViewBatc
                 <span>Assign new leads to</span>
                 <Select aria-label="Assign new leads to" value={assign} disabled={busy} onChange={(event) => setAssign(event.target.value)}>
                   <option value={ASSIGN_KEEP}>Nobody yet (assign later)</option>
-                  <option value={ASSIGN_EVEN}>Distribute evenly between available staff</option>
+                  <option value={ASSIGN_EVEN}>Distribute evenly between available recruiters</option>
                   {staff.map((user) => <option key={user.id} value={user.id}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
                 </Select>
               </label>}

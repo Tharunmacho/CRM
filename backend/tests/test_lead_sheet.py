@@ -329,7 +329,8 @@ def test_list_search_filters_sort_and_paging(env):
     assert search("", position="Kitchen Helper") == search("kitchen helper")
     assert search("", status="new,contacted") == 40 and search("", status="interested") == 0
     assert env.client.get("/api/leads", params={"status": "bogus"}).status_code == 422
-    assert search("", created_from="2026-11-04", created_to="2026-11-04") == 40 and search("", created_from="2026-11-05") == 0
+    assert search("", created_from="2026-11-04", created_to="2026-11-04", date_field="created") == 40 and search("", created_from="2026-11-05", date_field="created") == 0
+    assert search("", created_from="2026-11-04", created_to="2026-11-04") == 0, "the default date is the upload day, not the sheet's own date"
     ordered = env.client.get("/api/leads", params={"sort": "name", "direction": "asc", "page_size": 3}).json()["items"]
     assert [l["name"] for l in ordered] == ["Test Lead 00000", "Test Lead 00001", "Test Lead 00002"]
     assert env.client.get("/api/leads", params={"sort": "bogus"}).status_code == 422

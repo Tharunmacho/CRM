@@ -282,7 +282,7 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
         if assign_to == "auto":
             staff = eligible_staff(db)
             if not staff:
-                raise ImportError_("invalid_request", "No staff member is available for automatic assignment. Upload without assigning, or choose a person.")
+                raise ImportError_("invalid_request", "No recruiter is available for automatic assignment. Upload without assigning, or choose a person.")
             owner_ids = spread_evenly(staff, open_lead_counts(db, [u.id for u in staff]), len(fresh))
             assigned_to = "auto"
         else:
@@ -290,7 +290,7 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
             try:
                 target = ensure_assignable(db, assign_to)
             except Exception as exc:  # HTTPException 422
-                raise ImportError_("invalid_request", getattr(exc, "detail", "Choose an active staff member who is not on leave")) from None
+                raise ImportError_("invalid_request", getattr(exc, "detail", "Choose an active recruiter who is not on leave")) from None
             owner_ids = [target.id] * len(fresh)
             assigned_to = target.id
 
@@ -352,7 +352,7 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
     result.update(batchId=batch.id, rowsNew=stored, rowsDuplicate=batch.rows_duplicate, rowsUpdated=updated,
                   duplicatesByReason=by_reason(len(fresh) - stored))
     if stored:
-        who = "automatically" if assigned_to == "auto" else ("to a staff member" if assigned_to else "unassigned")
+        who = "automatically" if assigned_to == "auto" else ("to a recruiter" if assigned_to else "unassigned")
         db.execute(text("INSERT INTO crm_lead_activities (id, lead_id, user_id, kind, summary) "
                         "SELECT md5(random()::text || clock_timestamp()::text || id)::uuid::text, id, :u, 'import', :s FROM crm_leads WHERE batch_id = :b"),
                    {"u": user.id, "s": f"Imported from {batch.file_name} ({who})", "b": batch.id})
@@ -361,7 +361,6 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
             for owner in owner_ids[:len(fresh)]:
                 if owner:
                     counts[owner] = counts.get(owner, 0) + 1
-            for owner, count in counts.items():
-                db.add(Notification(user_id=owner, kind="lead_assignment", title="New leads assigned",
-                                    detail=f"{count} new {'lead' if count == 1 else 'leads'} to call", link_to="/leads"))
+            from app.services.assignment_notifications import notify_lead_import
+            notify_lead_import(db, counts, actor_id=user.id, actor_name=user.name, file_name=batch.file_name)
     return result

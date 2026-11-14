@@ -1,6 +1,6 @@
 # Care India CRM module workflow guide
 
-Use this guide to review and accept the CRM one module at a time, from account setup and candidate intake through recruitment, staff supervision and deployment. Each module explains the user actions, required screens, backend rules, failure recovery and practical checks. The guide covers **all 56 original requirement IDs across all 12 PRD pages**, the **10 later mail and attendance requirements**, and the approved Staff Directory and skill-segregation extensions.
+Use this guide to review and accept the CRM one module at a time, from account setup and candidate intake through recruitment, recruiter supervision and deployment. Each module explains the user actions, required screens, backend rules, failure recovery and practical checks. The guide covers **all 56 original requirement IDs across all 12 PRD pages**, the **10 later mail and attendance requirements**, and the approved Recruiter Directory and skill-segregation extensions.
 
 The [original PRD](../requirements/recruitment-crm-developer-specification.pdf) defines the recruitment requirements. The [requirements matrix](../requirements-matrix.md) retains their IDs and distinguishes later decisions. The reference CRM at [commit 30f7ce6](https://github.com/Tharunmacho/email-automation/tree/30f7ce6b7402553116bbe6a2b8b2142bc72c8915) informs approved interaction patterns; its separate recruitment stages, inferred industry scores, finance roles and payroll are not automatically Care India requirements.
 
@@ -30,7 +30,7 @@ The unchecked boxes are a review checklist, **not a claim that all listed behavi
 | 08 [Zoho Inbox](08-zoho-inbox.md) | Connect → receive/read → compose/reply/draft → reconcile/import | Connected common flows; real mailbox/provider acceptance pending |
 | 09 [WhatsApp](09-whatsapp.md) | Connect → receive/chat → review/split → save → optional acknowledgement → delivery/recovery | Connected screens and durable outbox; real delivery pending |
 | 10 [Automated intake](10-automated-intake.md) | Receive → extract → deduplicate → save/assign → retry/review | Connected; multi-provider live/restart acceptance pending |
-| 11 [Staff Directory and assignment](11-staff-assignment-directory.md) | Eligibility/rotation → workload drill-down → reasoned transfer/history | Connected approved extension; legacy history remains bounded |
+| 11 [Recruiter Directory and assignment](11-staff-assignment-directory.md) | Eligibility/rotation → workload drill-down → reasoned transfer/history | Connected approved extension; legacy history remains bounded |
 | 12 [Initial call](12-initial-call.md) | Contact → Called/Interested outcome → task/pool/next action | Connected; operating sequence needs recruiter review |
 | 13 [Order matching](13-order-matching.md) | Backend search/evidence → application → unmap → fresh remap | Connected; bounded matching validated, scale benchmark separate |
 | 14 [Stages one to five](14-stages-one-to-five.md) | Prescreen → forward → schedule → result → offer, including exits/reopen | Connected; review every branch with representative records |
@@ -39,10 +39,10 @@ The unchecked boxes are a review checklist, **not a claim that all listed behavi
 | 17 [Reports](17-reports.md) | Six reports → shared filters/role scope → workbook/PDF | Connected; legacy history and volume limits disclosed |
 | 18 [Personal to-dos](18-personal-todos.md) | Private item → due reminder → complete/reopen/delete | Connected; deployed reminder delay needs acceptance |
 | 19 [User Management](19-user-management.md) | Create → eligibility → password/session → atomic deactivation/transfer | Connected; live role/account acceptance required |
-| 20 [Attendance clock and activity](20-attendance-clock-activity.md) | Intentional clock → online/idle/away intervals → corrections/retry | Connected; Staff activity is approximate, Manager activity not tracked |
+| 20 [Attendance clock and activity](20-attendance-clock-activity.md) | Intentional clock → online/idle/away intervals → corrections/retry | Connected; Recruiter activity is approximate, Manager activity not tracked |
 | 21 [Monthly attendance and HR](21-attendance-monthly-hr.md) | Policy → requests/approvals → roster/weekly off → leave cover/return | Connected adopted reference rules; no payroll module |
 | 22 [Deployment and operations](22-deployment-operations.md) | Configure → coordinated migration/release → workers → restore/acceptance | Operational checks; no deployment is implied by this guide |
-| 23 [Lead sheet](23-lead-sheet.md) | Upload ad-lead export (CSV/TSV/XLSX) → de-duplicate → assign → call → collect resume → convert to candidate | New; staff work leads only after today's daily tasks; contract in [lead-sheet-contract.md](lead-sheet-contract.md) |
+| 23 [Lead sheet](23-lead-sheet.md) | Upload ad-lead export (CSV/TSV/XLSX) → de-duplicate → assign → call → collect resume → convert to candidate | New; recruiters work leads only after today's daily tasks; contract in [lead-sheet-contract.md](lead-sheet-contract.md) |
 
 ## Recommended review order
 
@@ -54,7 +54,7 @@ Review task deadlines and daily updates (**16**) across those same candidate rec
 
 - **Employer structure:** the current contact → employer company hierarchy and extra navigation are retained. Changing to literal employer-as-Client is a separate data-model decision.
 - **Mail connection:** Zoho-only setup is the user's explicit replacement for the PDF's Gmail/Microsoft connection choices. Legacy non-Zoho evidence stays readable.
-- **Reference features:** the user adopted attendance rules and Staff Directory workflow. This does not import payroll, payslips, Sourcing Hub, B2B enquiries, custom finance roles or the reference's shorter candidate pipeline.
+- **Reference features:** the user adopted attendance rules and Recruiter Directory workflow. This does not import payroll, payslips, Sourcing Hub, B2B enquiries, custom finance roles or the reference's shorter candidate pipeline.
 - **Skill matching:** recorded skills, ALL/ANY filters and missing evidence are used. No inferred industry, alias-driven suitability percentage or invented experience is accepted as fact.
 - **Assignment notifications:** new intake and manual/account/leave-cover transfers notify the new owner and active supervisors in the same transaction, with no duplicates on unchanged or repeated ownership. Task-only repairs link to their task. See [module 16](16-tasks-sla-daily-updates.md#assignment-notifications).
 - **Intake:** opt-in acknowledgements and reviewed person/page splitting are implemented. Acknowledgements default off; ambiguous groups require confirmation. See [communication and split intake](../communications-and-split-intake.md).
@@ -93,7 +93,7 @@ Every original requirement ID appears once below with a module and section. Rela
 | TODO-01 | Private Admin/Manager to-dos and record links | [18 User journey](18-personal-todos.md#user-journey) |
 | TODO-02 | Date tabs and private due reminder | [18 Day buckets and reminder timing](18-personal-todos.md#day-buckets-and-reminder-timing) |
 | REPORT-01 | All six report types | [17 What each report means](17-reports.md#what-each-report-means) |
-| REPORT-02 | Shared five filters and Staff scope | [17 Screen and backend contract](17-reports.md#screen-and-backend-contract) |
+| REPORT-02 | Shared five filters and Recruiter scope | [17 Screen and backend contract](17-reports.md#screen-and-backend-contract) |
 | REPORT-03 | Real Excel and PDF exports | [17 User journey](17-reports.md#user-journey) |
 | USER-01 | Admin create/edit/deactivate | [19 Add and edit](19-user-management.md#add-and-edit-an-account), [19 Deactivate](19-user-management.md#deactivate-or-remove-a-staff-role) |
 | USER-02 | Eligibility/leave and transfer on deactivation | [19 Screen and backend contract](19-user-management.md#screen-and-backend-contract) |
@@ -105,7 +105,7 @@ Every original requirement ID appears once below with a module and section. Rela
 | INGEST-05 | Shared database, New/Needs review handling | [10 User journey](10-automated-intake.md#user-journey) |
 | INGEST-06 | Three retries, failed list and Admin retry | [10 Retry and review states](10-automated-intake.md#retry-and-review-states) |
 | INGEST-07 | Optional same-channel acknowledgement | [10 Current implementation and remaining acceptance](10-automated-intake.md#current-implementation-and-remaining-acceptance) |
-| ASSIGN-01 | Locked strict eligible-Staff rotation | [11 Roles and preparation](11-staff-assignment-directory.md#roles-and-preparation) |
+| ASSIGN-01 | Locked strict eligible-Recruiter rotation | [11 Roles and preparation](11-staff-assignment-directory.md#roles-and-preparation) |
 | ASSIGN-02 | Immediate new assignment and initial task; duplicates retain owner | [11 User journey](11-staff-assignment-directory.md#user-journey) |
 | ASSIGN-03 | Supervisor bulk transfer, open tasks and history | [11 Screen and backend contract](11-staff-assignment-directory.md#screen-and-backend-contract) |
 | ASSIGN-04 | Called/Interested/remarks and Not interested pool | [12 User journey](12-initial-call.md#user-journey) |
@@ -135,17 +135,17 @@ Every original requirement ID appears once below with a module and section. Rela
 | MAIL-03 | Private/provider drafts and supported folder operations | [08 User journey](08-zoho-inbox.md#user-journey) |
 | MAIL-04 | Bounded explicit historical import | [08 User journey](08-zoho-inbox.md#user-journey) |
 | ATT-01 | Intentional clocking, sessions and corrections | [20 User journey](20-attendance-clock-activity.md#user-journey) |
-| ATT-02 | Visible Staff browser activity and duration limits | [20 Screen and backend contract](20-attendance-clock-activity.md#screen-and-backend-contract) |
+| ATT-02 | Visible Recruiter browser activity and duration limits | [20 Screen and backend contract](20-attendance-clock-activity.md#screen-and-backend-contract) |
 | ATT-03 | Adopted monthly hours, allowance and OT calculation | [21 Approved calculation rules](21-attendance-monthly-hr.md#approved-calculation-rules) |
 | ATT-04 | Permission/leave/OT requests and staged approvals | [21 Request and approval journey](21-attendance-monthly-hr.md#request-and-approval-journey) |
 | ATT-05 | Weekly off, effective timings, duty plans and regularisation | [21 Weekly off and roster](21-attendance-monthly-hr.md#weekly-off-and-roster-journey), [21 Corrections](21-attendance-monthly-hr.md#corrections-journey) |
 | ATT-06 | Accepted leave cover, handover/return and assignment eligibility | [21 Recruitment leave cover journey](21-attendance-monthly-hr.md#recruitment-leave-cover-journey) |
 
-The approved **Staff Directory** extension is detailed in [module 11](11-staff-assignment-directory.md). The approved **visible skill segregation and evidence** extension is detailed in [module 07](07-data-bank-skills.md) and [module 13](13-order-matching.md). These are identified separately rather than inventing new original-PRD IDs.
+The approved **Recruiter Directory** extension is detailed in [module 11](11-staff-assignment-directory.md). The approved **visible skill segregation and evidence** extension is detailed in [module 07](07-data-bank-skills.md) and [module 13](13-order-matching.md). These are identified separately rather than inventing new original-PRD IDs.
 
 ## Verification and review record
 
-The [integration audit](../integration-audit.md) records the current code/test boundary. Latest focused comparisons are [candidate entry](../audit/candidate-entry-followup.md), [skills and matching](../audit/candidate-skills-followup.md), [attendance activity](../audit/attendance-presence-followup.md) and [Staff Directory](../staff-directory.md). Local browser reports are stored under `artifacts/workflow-followup/browser/` as `entry-report.json`, `skills-report.json`, `attendance-report.json` and `profile-report.json`. These generated, gitignored artifacts may not accompany a repository checkout; committed tests and the linked audit remain the portable evidence.
+The [integration audit](../integration-audit.md) records the current code/test boundary. Latest focused comparisons are [candidate entry](../audit/candidate-entry-followup.md), [skills and matching](../audit/candidate-skills-followup.md), [attendance activity](../audit/attendance-presence-followup.md) and [Recruiter Directory](../staff-directory.md). Local browser reports are stored under `artifacts/workflow-followup/browser/` as `entry-report.json`, `skills-report.json`, `attendance-report.json` and `profile-report.json`. These generated, gitignored artifacts may not accompany a repository checkout; committed tests and the linked audit remain the portable evidence.
 
 Use this compact record for each module after walkthrough: **reviewer and date; environment; roles exercised; passed checklist items; specific failures; product decisions; remaining live checks; accepted or follow-up required**. An accepted screen must agree with its backend result and downstream record.
 

@@ -1,6 +1,6 @@
 # Application form v2: assignment block, documents, recruiter feedback
 
-Extends `application-form-contract.md` (read it first). The application form is the staff's main working screen: every staff
+Extends `application-form-contract.md` (read it first). The application form is the recruiter's main working screen: every recruiter
 member works a candidate end to end from it. Shared by the backend agent and the frontend agent; keep this file in step with the code.
 The backend is authoritative for shapes: if you must change a name or shape, edit this file and say so in your report.
 Migration `0027_application_form_v2` (head is `0026_client_agency`; never edit applied migrations; additive and idempotent).
@@ -40,8 +40,8 @@ Answers the whole form (same as the other PUTs). Rules:
 - **Source**: owner, admin, manager. Sets `candidate.source`. **Agency**: owner, admin, manager; `agencyId` resolves the name from
   `crm_reference_agencies`, stored in `candidate.source_detail` (the agent/reference text that Data Bank search already reads); `agencyName`
   alone stores free text; both null clears it. Selecting an agency while source is not `referral` leaves the source unchanged.
-- **Recruiter** (`recruiterId`): admin and manager only (staff: 403), through the existing reassignment path (history, notices,
-  tasks move). Must be an active staff or manager.
+- **Recruiter** (`recruiterId`): admin and manager only (recruiter: 403), through the existing reassignment path (history, notices,
+  tasks move). Must be an active recruiter or manager.
 - Every successful change writes an audit entry ("Application form: job changed", ...) and bumps the live feed.
 - An application closed by a job change has `closureReason: "changed_job"` (tracking label "Moved to another job"; new value of the closure enum).
 - `orderId`, `source`, `agencyId`, `agencyName`, `recruiterId` are applied in that order in one transaction: a refusal changes nothing.
@@ -66,7 +66,7 @@ Answers the whole form (same as the other PUTs). Rules:
 | `undertaking_letter` | Undertaking letter | no | from stage 11, before deployment |
 | `emigration` | Emigration | no | from stage 10, after visa |
 | `insurance` | Insurance | no | from stage 11, before deployment |
-| `invoice` | Invoice | no | from stage 11, before deployment |
+| `invoice` | Invoice | no | from stage 11, before deployment. **Admin only**: for a recruiter or manager the slot is absent from `documents` and `documentOrder`, and from the checklist counts below |
 | `photo` | Photo | no | optional; existing uploads retained |
 | `education_certificate` | Education certificate | no | optional; existing uploads retained |
 | `experience_certificate` | Experience certificate | no | optional (never counted as missing) |
@@ -81,16 +81,17 @@ Each entry: `{ slot, label, hint, required: bool, requiredFromStage: number|null
 "always" ones). Allowed file types/size as today (PDF, Word, JPG, PNG, WebP, HEIC up to 25 MB); `photo` image only.
 `POST /api/candidates/{id}/application-form/documents` accepts every slot (multipart `slot`, `file`, `defer_extraction=true` by default). Files are stored first. Once all pages/files are ready, `POST .../application-form/extract` with `{attachmentIds:[...]}` queues the selected readable files atomically. Repeated starts reuse existing jobs. Per-file `extractionPending` and extraction results distinguish waiting, running, complete and review-needed files. Plain `POST /api/files` accepts the same slots; profile clients explicitly defer reading while automatic intake callers retain their existing default.
 
-A known wrong-person file remains available to view/download and carries `identityMismatch: true` on its file metadata and reading result. It does not count as accepted document evidence (`uploaded`); `fileUploaded` still reports the retained bytes. If another non-rejected file exists in the slot, that file can satisfy the checklist. An old manual confirmation cannot override a rejected file, and staff must upload the correct document instead of retrying or manually accepting the rejected one. The same distinction applies to profile/bootstrap, Data Bank, Travelled and inspection exports. Exports identify and retain rejected files for review.
+A known wrong-person file remains available to view/download and carries `identityMismatch: true` on its file metadata and reading result. It does not count as accepted document evidence (`uploaded`); `fileUploaded` still reports the retained bytes. If another non-rejected file exists in the slot, that file can satisfy the checklist. An old manual confirmation cannot override a rejected file, and recruiters must upload the correct document instead of retrying or manually accepting the rejected one. The same distinction applies to profile/bootstrap, Data Bank, Travelled and inspection exports. Exports identify and retain rejected files for review.
 
 **Completeness** (`completeness`: `{ percent, filled, total, missing: [{key,label,section}] }` as today) now counts: every personal/passport/etc.
 field as before, plus every document with `required: true`. Uploading a document or filling a field raises the percentage live.
 
-The eleven non-optional slots form the management document checklist; they do not block manual stage moves or deployment.
+The eleven non-optional slots form the management document checklist (ten for a recruiter or manager, because the Invoice is the admin's alone); they do not block manual stage moves or deployment.
 The checklist reports missing evidence independently of candidate status. Uploads may be added before their checklist stage. The optional application
 form slot retains uploaded evidence: printing the editable form alone does not mark it received. The `invoice_generated` tracking key is
 retained for compatibility, labelled **Invoice**, and reflects the latest invoice attachment and its upload time, never payment status.
-It does not add a workflow stage or change the eleven-stage progress denominator.
+It does not add a workflow stage or change the eleven-stage progress denominator. It is returned to the admin only; for a recruiter or manager the row does not exist
+(the form has twelve tracking rows).
 Optional documents never lower it and are listed under `completeness.optionalDocuments: [{slot,label,uploaded}]`. With no application the
 total is 18 (16 fields + resume and passport); each required-by-stage document adds one.
 Slot keys stored before v2 (`education`, `experience`) are folded into `education_certificate` / `experience_certificate` (by upload time).
@@ -98,7 +99,7 @@ The candidate profile (`GET /api/candidates/{id}`) adds the form-only slots afte
 seven older keys (labels now "Passport" and "Photo").
 
 **Manual stages and independent checklist (2026-11-12).** The owner's latest instruction removes document gates for every stage,
-including final deployment. The form places all eleven stages next to Recruiter. Staff select a stage to inspect its saved history;
+including final deployment. The form places all eleven stages next to Recruiter. Recruiters select a stage to inspect its saved history;
 the current stage moves only after written feedback and manual confirmation. `POST /api/applications/{id}/complete` requires nonblank
 `data.feedback` (up to 10,000 characters), saving feedback, actor/time, stage outcome and movement atomically. A feedback-only move records
 `Completed manually`, without inventing a result, payment or date. Explicit negative/retest decisions retain their existing behavior.
@@ -127,9 +128,9 @@ Form payload gains:
 `POST /api/candidates/{id}/application-form/feedback` body `{kind, reason?, body, applicationId?}` (owner, admin, manager). Answers the whole form.
 Each item also carries `canEdit` (own note, within 15 minutes) and `canDelete` (admin always, own note within 15 minutes).
 `PUT /api/candidates/{id}/application-form/feedback/{feedbackId}` (body `{kind?, reason?, body?}`, own note within 15 minutes) edits a note;
-POST answers 201, PUT and DELETE 200, all with the whole form. A `delay` or `issue` note notifies the admins and managers (Notification kind `feedback`, link to the form). Staff cannot edit or delete
+POST answers 201, PUT and DELETE 200, all with the whole form. A `delay` or `issue` note notifies the admins and managers (Notification kind `feedback`, link to the form). Recruiters cannot edit or delete
 a note after 15 minutes; admin can delete any (`DELETE /api/candidates/{id}/application-form/feedback/{feedbackId}`).
-Live topic `feedback` (add the table to `change_feed.py`); the staff weekly report (`staff_weekly`) gets `feedbackNotes` per person (count in the range) if cheap.
+Live topic `feedback` (add the table to `change_feed.py`); the recruiter weekly report (`staff_weekly`) gets `feedbackNotes` per person (count in the range) if cheap.
 
 ## 4. Wording (frontend)
 
@@ -142,10 +143,10 @@ shouting capitals in labels (the section bars keep their capitals as printed on 
 `GET /api/candidates/{id}/inspection.xlsx` exports saved candidate details, recruitment source, passport, education,
 work history, screening, placements, stage history, saved stage drafts, document checklist, document versions and
 recruiter notes. Feedback is not limited to the form's latest fifty notes. Task notes retain the normal visibility
-rule: staff see their own tasks, while administrators and managers see every task for the candidate. Oversized
+rule: recruiters see their own tasks, while administrators and managers see every task for the candidate. Oversized
 history is refused explicitly instead of being silently truncated.
 `GET /api/candidates/{id}/documents.zip` includes that workbook, `manifest.json`, the latest file for each ordinary
-document slot on the candidate and their applications, and every retained multi-file document and Invoice file. Older versions of the
+document slot on the candidate and their applications, and every retained multi-file document and, for the admin only, every Invoice file. Older versions of the
 ordinary slots remain listed in the manifest. Missing checklist items stay explicitly missing; no placeholder file
 is counted as evidence. A stored file that cannot be read fails the whole package before the download starts.
 
@@ -157,14 +158,14 @@ private, no-store caching. The UI requires pending form edits to be saved before
 The existing administrator Data Bank Excel export adds a column for each of the eleven checklist documents and a
 combined missing-document list, using the same checklist as the application form and Travelled. These are stored
 document statuses, not a declaration that a policy or certificate is valid. Candidate invoices are generated only
-after an actual air-ticket file and the staff-entered service fee are saved, with billing configured. See
+after an actual air-ticket file and the admin-entered service fee are saved, with billing configured; the invoice, fee and tax figures are visible to the admin only. See
 [candidate invoices](candidate-invoices.md) for numbering, tax settings and payment records.
 
 Manual checklist confirmation is separate from file storage: `uploaded` may be true while `fileUploaded` is false.
-`manualStatus` records the staff member, time and note. It never creates a file, reading result or invoice. View and
+`manualStatus` records the recruiter, time and note. It never creates a file, reading result or invoice. View and
 download actions require an actual file URL; missing-field badges are labelled separately from upload status.
 
-Interactive document uploads wait for the staff member's **Extract details** action. In Add candidate, each click
+Interactive document uploads wait for the recruiter's **Extract details** action. In Add candidate, each click
 captures the current file IDs; a file added during reading waits for the next click. Upload retries affect only
 failed uploads, and reading retries do not replace manually edited fields. Every source page has a reading result
 or an exclusion/review reason. Unresolved page numbers remain visible in document reports; incomplete resume

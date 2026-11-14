@@ -27,7 +27,7 @@ def lock_staff(db, user_id, *, clock=False):
     user = db.scalar(select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True))
     allowed = (Role.staff, Role.manager) if clock else (Role.staff,)
     if user is None or not user.active or user.role not in allowed:
-        raise HTTPException(403, "Only active staff accounts can clock in or out")
+        raise HTTPException(403, "Only active recruiter accounts can clock in or out")
     return user
 
 
@@ -129,7 +129,7 @@ def attendance_report(db, user, day, agency_timezone, staff_id=None, *, at=None)
         if staff_id and staff_id != user.id:
             target = db.get(User, staff_id)
             if target is None or target.role != Role.staff:
-                raise HTTPException(403, "Managers can view Staff and their own attendance")
+                raise HTTPException(403, "Managers can view Recruiters and their own attendance")
     if not team: people = people.where(User.id == user.id)
     elif staff_id: people = people.where(User.id == staff_id)
     # The shift and presence reads filter on the same people query, so all three can run at once.
@@ -183,7 +183,7 @@ def check_in(db, user, request_key, *, auth_session_id, at=None):
         return _remember_request(db, user, "check_in", request_key, existing, at)
     row = Attendance(user_id=user.id, checked_in_at=at, checkin_request_key=request_key)
     db.add(row); db.flush()
-    db.add(AuditEntry(actor_id=user.id, action="Staff checked in", entity_type="attendance", entity_id=row.id,
+    db.add(AuditEntry(actor_id=user.id, action="Recruiter checked in", entity_type="attendance", entity_id=row.id,
                       meta={"checkedInAt": at.isoformat()}))
     return _remember_request(db, user, "check_in", request_key, row, at)
 
@@ -197,7 +197,7 @@ def check_out(db, user, session_id, request_key, *, auth_session_id, at=None):
     if row.checked_out_at:
         return _remember_request(db, user, "check_out", request_key, row, at)
     row.checked_out_at, row.checkout_request_key = max(at, row.checked_in_at), request_key
-    db.add(AuditEntry(actor_id=user.id, action="Staff checked out", entity_type="attendance", entity_id=row.id,
+    db.add(AuditEntry(actor_id=user.id, action="Recruiter checked out", entity_type="attendance", entity_id=row.id,
                       meta={"checkedOutAt": row.checked_out_at.isoformat()}))
     return _remember_request(db, user, "check_out", request_key, row, at)
 
@@ -287,6 +287,6 @@ def correct_session(db, actor, session_id, checked_in_at, checked_out_at, reason
     if other: raise HTTPException(409, "Attendance times cannot overlap")
     before = {"checkedInAt": row.checked_in_at.isoformat(), "checkedOutAt": row.checked_out_at.isoformat() if row.checked_out_at else None}
     row.checked_in_at, row.checked_out_at, row.corrected_by, row.correction_reason = checked_in_at, checked_out_at, actor.id, reason
-    db.add(AuditEntry(actor_id=actor.id, action="Corrected staff attendance", entity_type="attendance", entity_id=row.id,
+    db.add(AuditEntry(actor_id=actor.id, action="Corrected recruiter attendance", entity_type="attendance", entity_id=row.id,
         meta={"reason": reason, "before": before, "after": {"checkedInAt": checked_in_at.isoformat(), "checkedOutAt": checked_out_at.isoformat() if checked_out_at else None}}))
     return row

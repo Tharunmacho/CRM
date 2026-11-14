@@ -30,10 +30,13 @@ def lead_filters(q: str = Query(default="", max_length=500), status: list[str] =
                  form: list[str] = Query(default=[]), position: list[str] = Query(default=[]), country: list[str] = Query(default=[]),
                  platform: list[str] = Query(default=[]), owner: str | None = Query(default=None, max_length=36),
                  created_from: str | None = Query(default=None, max_length=10), created_to: str | None = Query(default=None, max_length=10),
+                 date_field: Literal["uploaded", "created"] | None = None,
+                 uploaded_within_hours: int | None = Query(default=None, ge=1, le=168),
                  has_resume: bool | None = None, matched_candidate: bool | None = None,
                  follow_up: Literal["due", "none"] | None = None, batch_id: str | None = Query(default=None, max_length=36)) -> dict:
     return {"q": q, "status": status, "campaign": campaign, "form": form, "position": position, "country": country, "platform": platform,
-            "owner": owner, "created_from": created_from, "created_to": created_to, "has_resume": has_resume,
+            "owner": owner, "created_from": created_from, "created_to": created_to,
+            "date_field": date_field, "uploaded_within_hours": uploaded_within_hours, "has_resume": has_resume,
             "matched_candidate": matched_candidate, "follow_up": follow_up, "batch_id": batch_id}
 
 

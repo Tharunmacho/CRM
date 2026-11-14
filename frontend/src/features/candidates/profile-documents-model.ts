@@ -37,7 +37,9 @@ export function mergeVersions(first: FileVersion[], second: FileVersion[]): File
 }
 
 /** The 14 shared slots in order (empty ones included), then Aadhaar, then any other slot that holds a file. */
-export function profileDocuments(documents: ServerSlot[] | undefined): ProfileDocument[] {
+export function profileDocuments(documents: ServerSlot[] | undefined, options: { invoices?: boolean } = {}): ProfileDocument[] {
+  // The Invoice document is the admin's: everyone else gets no Invoice row, empty or not.
+  const showInvoice = options.invoices !== false
   const held = new Map<string, FileVersion[]>()
   const labels = new Map<string, string>()
   const manual = new Map<string, ServerSlot['manualStatus']>()
@@ -49,6 +51,7 @@ export function profileDocuments(documents: ServerSlot[] | undefined): ProfileDo
   }
   const shared = DOCUMENT_SLOTS.map((entry) => ({ key: entry.slot, label: entry.label, versions: held.get(entry.slot) ?? [], multiple: entry.multiple, manualStatus: manual.get(entry.slot) }))
     .filter((slot) => slot.key !== 'application_form' || slot.versions.length > 0 || slot.manualStatus?.uploaded)
+    .filter((slot) => showInvoice || slot.key !== 'invoice')
   const sharedKeys = new Set(DOCUMENT_SLOTS.map((entry) => entry.slot))
   const extras: ProfileDocument[] = []
   for (const [key, versions] of held) {

@@ -19,6 +19,8 @@ import { deskUnread } from './desk-unread'
 import { dropDeleted, markCandidateDeleted, removeCandidate, restoreCandidate, unmarkCandidateDeleted } from './candidate-removal'
 import { forgetSnapshots, persistSoon, readPersisted, signedInUserHint } from './snapshot-cache'
 import { live, liveInterval } from './live'
+import { removeOrder } from './order-removal'
+import { orderDeletePath } from '@/features/jobs/order-delete'
 import { matchDoneMessage } from '@/features/candidates/initial-call'
 import { unassignMessage, type UnassignResult } from '@/features/candidates/data-bank-pools'
 import type {
@@ -95,6 +97,7 @@ export type Capability =
   | 'export'
   | 'all_reports'
   | 'staff_report'
+  | 'view_invoices'
 
 /** Straight from the client specification's capability table. */
 const MATRIX: Record<Capability, Role[]> = {
@@ -113,6 +116,9 @@ const MATRIX: Record<Capability, Role[]> = {
   all_reports: ['admin', 'manager'],
   // The weekly per-person performance report (hours, tasks, candidate progress) is the admin's.
   staff_report: ['admin'],
+  // The agreed service fee, CGST/SGST, invoices, receipts and the Fee collections report are the admin's alone: recruiters and managers
+  // never see them (the server answers 403 and leaves them out of every payload; this only keeps the screens in step).
+  view_invoices: ['admin'],
 }
 
 type Toast = { id: number; message: string; tone: 'ok' | 'warn' } | null
@@ -178,9 +184,10 @@ interface StoreValue extends Data {
   /** Throw when the server refuses (a candidate still active or deployed below). */
   deleteClient: (id: string) => Promise<void>
   deleteCompany: (id: string) => Promise<void>
-  deleteOrder: (id: string) => Promise<void>
+  /** Admin only. Throws the server's plain message. `withdrawApplications` is the explicit confirmation to remove the candidates on the job with it. */
+  deleteOrder: (id: string, options?: { withdrawApplications?: boolean }) => Promise<void>
   /** Admin only. Throws the server's plain message (e.g. still on an order). */
-  deleteCandidate: (id: string) => Promise<void>
+  deleteCandidate: (id: string, options?: { withdrawFromOrders?: boolean }) => Promise<void>
   addDesignation: (payload: Record<string, unknown>) => Promise<void>
   addOrder: (payload: Record<string, unknown>) => Promise<void>
   addTodo: (payload: Record<string, unknown>) => Promise<void>
@@ -703,10 +710,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteCompany: async (id) => {
         await run(() => api.del(`/companies/${id}`), 'Company deleted')
       },
-      deleteOrder: async (id) => {
-        await run(() => api.del(`/orders/${id}`), 'Order deleted')
+      deleteOrder: async (id, options) => {
+        // The dialog shows the server's reason when it refuses, so a refusal is only thrown here. Once the server has
+        // confirmed, the job and its candidates' applications leave every list at once (counts follow), then a quiet
+        // refresh brings anything else that changed (a candidate back in the Data Bank).
+        const version = authVersion.current
+        await api.del(orderDeletePath(id, options?.withdrawApplications))
+        if (version !== authVersion.current) return
+        setData((current) => removeOrder(current, id))
+        notify('Job deleted')
+        void refresh({ keepCurrent: true }).catch(() => undefined)
       },
-      deleteCandidate: async (id) => {
+      deleteCandidate: async (id, options) => {
         // Optimistic: the candidate leaves every list now (the call below only has to confirm it), and comes
         // back with the server's reason if it refuses. The server's answer already says what changed, so there is
         // no full workspace reload; the live feed refreshes other desks and the lists that are fetched by search.
@@ -716,7 +731,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setData((current) => removeCandidate(current, id).data)
         notify('Candidate deleted')
         try {
-          await api.del(`/candidates/${id}`)
+          await api.del(`/candidates/${id}${options?.withdrawFromOrders ? '?withdrawFromOrders=true' : ''}`)
         } catch (err) {
           unmarkCandidateDeleted(id)
           if (version === authVersion.current) {

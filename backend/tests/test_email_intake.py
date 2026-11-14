@@ -443,7 +443,8 @@ def test_candidate_evidence_assignment_task_and_notifications_commit_once(intake
         assert candidate.source == Source.email and candidate.status == CandidateStatus.new
         task = db.scalar(select(Task))
         assert task.kind == TaskKind.initial_call and task.candidate_id == candidate.id and task.owner_id == "staff-a"
-        assert {notice.user_id for notice in db.scalars(select(Notification))} == {"admin", "staff-a"}
+        # Only the new owner is told (one notice); admins get no copy of a routine assignment.
+        assert {notice.user_id for notice in db.scalars(select(Notification))} == {"staff-a"}
         assert row_count(db, Candidate) == row_count(db, Task) == row_count(db, AuditEntry) == 1
         assert row_count(db, Attachment) == 2
         original = db.scalar(select(Attachment).where(Attachment.slot == "source_bundle"))
@@ -560,7 +561,7 @@ def test_candidate_transaction_failure_preserves_ocr_and_rolls_back_all_domain_w
     with intake.sessions() as db:
         assert db.get(EmailIngestionJob, job_id).status == "completed"
         assert row_count(db, Candidate) == row_count(db, Task) == 1
-        assert row_count(db, Notification) == 2
+        assert row_count(db, Notification) == 1  # the owner's notice only
     assert len(calls) == 1, "Retry must use the committed output, not request paid OCR again"
 
 
@@ -627,7 +628,7 @@ def test_same_content_in_another_message_and_account_reuses_completed_extraction
         assert job.state[second_part]["reused_from_attachment_id"]
         assert row_count(db, Candidate) == row_count(db, Task) == 1
         assert row_count(db, Attachment) == 2
-        assert row_count(db, Notification) == 2
+        assert row_count(db, Notification) == 1  # the owner's notice only
         assert row_count(db, MailMessage) == row_count(db, MailAttachment) == 2
     assert len(calls) == 1
 

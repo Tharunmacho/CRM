@@ -88,6 +88,8 @@ BODY = {"name": "Manual Person", "phone": "9000000044"}
 
 
 def test_manual_add_by_an_admin_leaves_it_unassigned_unless_a_recruiter_is_chosen(db):
+    db.add(m.User(id="manager", name="Manager", email="manager@example.test", role=m.Role.manager))
+    db.commit()
     api = client(db)
     created = api.post("/api/candidates", json=BODY)
     assert created.status_code == 201, created.text
@@ -97,7 +99,10 @@ def test_manual_add_by_an_admin_leaves_it_unassigned_unless_a_recruiter_is_chose
     db.expire_all()
     waiting = db.get(m.Candidate, created.json()["id"])
     assert waiting.needs_review and waiting.status == m.CandidateStatus.needs_review
-    assert db.scalar(select(func.count()).select_from(m.Notification).where(m.Notification.title == "Candidate needs assignment")) >= 1
+    # The admin who added it is not told of their own action; the manager hears that it is waiting for a recruiter.
+    waiting_for = list(db.scalars(select(m.Notification.user_id).where(m.Notification.title == WAITING_TITLE,
+                                                                       m.Notification.link_to.like(f"/candidates/{waiting.id}/%"))))
+    assert waiting_for == ["manager"]
 
 
 def test_a_staff_member_who_adds_a_candidate_keeps_it(db):

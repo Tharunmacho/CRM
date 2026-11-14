@@ -23,10 +23,11 @@ from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry, Candidate, Client, Company,
     Designation, DocumentExtractionJob, Order, Priority, Role, Source, Task, TodoItem, User,
 )
-from app.domain.stages import stage_by_no
+from app.domain.stages import STOP_OUTCOMES, stage_by_no
 from app.services import form_assignment, form_feedback
 from app.services import form_extraction as fx
 from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_passport, normalize_phone, normalized_labels
+from app.services.invoice_access import INVOICE_SLOT, can_see_invoices
 from app.services.parallel_reads import parallel_reads
 from app.services.reading_notes import plain_issues, plain_notes
 from app.services.document_status import ACTION as DOCUMENT_STATUS_ACTION, manual_document_statuses, read_manual_document_statuses
@@ -93,11 +94,17 @@ TRACKING = (
 NOT_TRACKED_NOTE = {
     "pcc": "Police clearance is not a stage in the CRM, so it is not tracked here.",
 }
-FAILED_OUTCOMES = {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 6: {"Unfit"}}
+# Outcomes after which the candidate stopped at that stage: the older negative exits plus the stopping exit every stage offers.
+_FAILED_BASE = {1: {"Failed"}, 2: {"Not forwarded"}, 4: {"Rejected"}, 5: {"Declined", "Not received"}, 6: {"Unfit"}}
+FAILED_OUTCOMES = {no: _FAILED_BASE.get(no, set()) | STOP_OUTCOMES[no] for no in range(1, 12)}
 CLOSURE_LABELS = {
     "prescreen_failed": "Failed prescreening", "not_interested": "Candidate not interested",
     "resume_not_received": "Resume not received", "interview_rejected": "Rejected at interview",
     "medical_unfit": "Medically unfit", "unmapped": "Removed from the order", "changed_job": "Moved to another job",
+    "offer_declined": "Offer declined", "offer_not_received": "Offer not received",
+    "stage_rejected": "Rejected", "stage_declined": "Candidate declined", "interview_not_possible": "Interview not possible",
+    "passport_not_available": "Passport not available", "advance_not_paid": "Advance not paid", "visa_rejected": "Visa rejected",
+    "visa_stamping_refused": "Visa stamping refused", "not_travelling": "Not travelling",
 }
 FOLLOW_UP_LABEL = "Follow-up"
 SAME_AS_PHONE = object()
@@ -137,7 +144,7 @@ def expiry_info(expiry: date | None, today: date) -> dict:
 
 
 def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: ZoneInfo | None = None,
-                     invoice: dict | None = None) -> dict:
+                     invoice: dict | None = None, show_invoice: bool = True) -> dict:
     """Rows of section 7 from the application's own stage records.
 
     `application` is an Application (or anything with status/current_stage/closure_reason) or None;
@@ -154,6 +161,8 @@ def tracking_payload(application, stage_rows: list, names: dict[str, str], tz: Z
     gone = application is not None and not open_app and application.status != ApplicationStatus.deployed
     rows = []
     for key, label, stage, listed in TRACKING:
+        if key == "invoice_generated" and not show_invoice:
+            continue  # only the admin sees invoice evidence; for everyone else the row does not exist
         row = {
             "key": key, "label": label, "systemLabel": stage_by_no(stage).title if stage else None, "stage": stage,
             "extra": not listed, "tracked": stage is not None, "status": "not_started", "checked": False,
@@ -340,31 +349,37 @@ def _document(row, names: dict[str, str]) -> dict:
 DEPLOY_STAGE = 11  # completing this stage (Air ticket) deploys the candidate
 
 
-def required_for_deployment() -> list[tuple[str, str]]:
-    """Final-stage inspection checklist in form order; documents never gate manual deployment."""
+def required_for_deployment(include_invoice: bool = True) -> list[tuple[str, str]]:
+    """Final-stage inspection checklist in form order; documents never gate manual deployment.
+
+    The Invoice slot belongs to the admin only: `include_invoice=False` is the checklist everyone else sees.
+    """
     return [(slot, label) for slot, label, _hint, from_stage, always, _read, _multiple in SLOT_SPECS
-            if always or (from_stage is not None and from_stage <= DEPLOY_STAGE)]
+            if (include_invoice or slot != INVOICE_SLOT) and (always or (from_stage is not None and from_stage <= DEPLOY_STAGE))]
 
 
-def deployment_gaps(uploaded: set[str]) -> list[dict]:
+def deployment_gaps(uploaded: set[str], include_invoice: bool = True) -> list[dict]:
     """Missing final-stage checklist evidence; older stored keys count for their new slot."""
     have = {LEGACY_SLOTS.get(slot, slot) for slot in uploaded}
-    return [{"slot": slot, "label": label} for slot, label in required_for_deployment() if slot not in have]
+    return [{"slot": slot, "label": label} for slot, label in required_for_deployment(include_invoice) if slot not in have]
 
 
-def missing_required_documents(db: Session, candidate_id: str) -> list[dict]:
+def missing_required_documents(db: Session, candidate_id: str, include_invoice: bool = True) -> list[dict]:
     """Candidate-wide inspection gaps; these never gate manual stage movement."""
     records = db.execute(select(Attachment.slot, rejected_expression()).where(
         Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id, Attachment.slot.in_(STORED_SLOTS)).distinct()).all()
     uploaded = {slot for slot, rejected in records if not rejected}
     wrong = {slot for slot, rejected in records if rejected}
     uploaded.update(slot for slot, saved in manual_document_statuses(db, candidate_id).items() if saved["uploaded"] and slot not in wrong)
-    return deployment_gaps(uploaded)
+    return deployment_gaps(uploaded, include_invoice)
 
 
 def set_document_status(db: Session, user: User, candidate_id: str, slot: str, uploaded: bool, note: str = "", *,
                         application_id: str | None = None, order_id: str | None = None) -> None:
     """Confirm a checklist item without manufacturing file evidence or running OCR/invoicing."""
+    if slot == INVOICE_SLOT:
+        from app.services.invoice_access import ensure_can_see_invoices
+        ensure_can_see_invoices(user)
     if slot not in SLOTS:
         raise HTTPException(422, "Choose a document from the candidate checklist.")
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update().execution_options(populate_existing=True))
@@ -518,7 +533,12 @@ def _pick(rows: list, application_id: str | None, order_id: str | None):
 
 
 def build_form(db: Session, candidate_id: str, user: User, *, application_id: str | None = None, order_id: str | None = None) -> dict:
-    """Everything the form shows, in two parallel rounds of reads."""
+    """Everything the form shows, in two parallel rounds of reads.
+
+    The Invoice slot, its tracking row and its place in the deployment checklist exist only for the admin; for a recruiter
+    or manager the payload carries no invoice, fee, tax figure, invoice number or invoice file link at all.
+    """
+    show_invoice = can_see_invoices(user)
     def read_candidate(session):
         return session.execute(
             select(Candidate, User.name).outerjoin(User, User.id == Candidate.owner_id)
@@ -534,13 +554,15 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
 
     def read_attachments(session):
         application_ids = select(Application.id).where(Application.candidate_id == candidate_id)
+        stored = STORED_SLOTS if show_invoice else tuple(slot for slot in STORED_SLOTS if slot != INVOICE_SLOT)
+        # Invoice PDFs are the admin's: nobody else's form reads, lists or links them.
+        scope = [(Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & Attachment.slot.in_(stored)]
+        if show_invoice:
+            scope.append((Attachment.entity_type == "application") & Attachment.entity_id.in_(application_ids) & (Attachment.slot == "invoice"))
         return list(session.execute(
             select(Attachment.id, Attachment.slot, Attachment.version, Attachment.file_name, Attachment.size_kb,
                    Attachment.content_type, Attachment.uploaded_at, Attachment.uploaded_by, Attachment.entity_type, Attachment.entity_id, rejected_expression())
-            .where(or_(
-                (Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & Attachment.slot.in_(STORED_SLOTS),
-                (Attachment.entity_type == "application") & Attachment.entity_id.in_(application_ids) & (Attachment.slot == "invoice"),
-            ))).all())
+            .where(or_(*scope))).all())
 
     def read_jobs(session):
         return list(session.execute(
@@ -595,6 +617,8 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
     sources = fx.sources_of(candidate)
     slots = document_slots(selected_document_attachments(attachments, application.id if application else None),
                            jobs, names, application.current_stage if application is not None else None, manual_records)
+    if not show_invoice:
+        slots.pop(INVOICE_SLOT, None)
     listing = _applications(application_rows)
     for item in listing:
         item["selected"] = application is not None and item["id"] == application.id
@@ -662,10 +686,11 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
             "sourceDetail": candidate.source_detail,
             "recruiter": {"id": candidate.owner_id, "name": owner_name or "Former team member"} if candidate.owner_id else None,
         },
-        "tracking": tracking_payload(application, selected_stages, names, tz, invoice=slots["invoice"]["current"]),
+        "tracking": tracking_payload(application, selected_stages, names, tz,
+                                     invoice=slots[INVOICE_SLOT]["current"] if show_invoice else None, show_invoice=show_invoice),
         "fieldSources": fx.public_sources(sources),
-        "documentOrder": list(SLOTS),
-        "deployment": _deployment(slots),
+        "documentOrder": [slot for slot in SLOTS if show_invoice or slot != INVOICE_SLOT],
+        "deployment": _deployment(slots, show_invoice),
         "assignment": form_assignment.build_block(user, candidate, owner_name, chosen, job_rows, agencies, recruiters),
         "feedback": form_feedback.build_block(user, candidate, application, feedback_items, tasks, selected_stages,
                                               can_edit(user, candidate)),
@@ -676,8 +701,8 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
     return form
 
 
-def _deployment(slots: dict) -> dict:
-    missing = deployment_gaps({slot for slot, entry in slots.items() if entry["uploaded"]})
+def _deployment(slots: dict, show_invoice: bool = True) -> dict:
+    missing = deployment_gaps({slot for slot, entry in slots.items() if entry["uploaded"]}, show_invoice)
     return {"ready": not missing, "missing": missing}
 
 

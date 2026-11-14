@@ -11,10 +11,11 @@ export function isReportTab(value: string | null | undefined): value is ReportKe
 /**
  * Which tab the address asks for. A known `?tab=` wins. Older links (Staff Directory's "View staff report", and the
  * former /staff-report page) carry only `?staff=`, which for a supervisor means the staff performance tab.
+ * Fee collections (`?tab=collections`) is the admin's alone (`invoices`, the `view_invoices` capability): for anyone else the link opens Pipeline.
  */
-export function reportTabFromParams(params: URLSearchParams, supervisor: boolean): ReportKey {
+export function reportTabFromParams(params: URLSearchParams, supervisor: boolean, invoices = false): ReportKey {
   const tab = params.get('tab')
-  if (tab === 'collections' && !supervisor) return DEFAULT_REPORT_TAB
+  if (tab === 'collections' && !invoices) return DEFAULT_REPORT_TAB
   if (isReportTab(tab)) return tab
   return supervisor && params.get('staff') ? 'staff' : DEFAULT_REPORT_TAB
 }

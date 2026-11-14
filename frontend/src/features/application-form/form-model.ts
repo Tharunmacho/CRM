@@ -445,7 +445,7 @@ export function normalizeForm(raw: unknown): ApplicationFormData {
       email: str(header.email) || 'info@careindiaoverseas.com',
     },
     candidate: {
-      id: str(candidate.id), ref: str(candidate.ref), careId: candidate.careId == null ? null : str(candidate.careId), name: str(candidate.name), status: str(candidate.status),
+      id: str(candidate.id), ref: str(candidate.ref), careId: candidate.careId == null ? null : str(candidate.careId), travellerId: candidate.travellerId == null ? null : str(candidate.travellerId), name: str(candidate.name), status: str(candidate.status),
       needsReview: candidate.needsReview === true, ownerId: str(candidate.ownerId), ownerName: str(candidate.ownerName),
       updatedAt: str(candidate.updatedAt), canEdit: candidate.canEdit === true,
     },

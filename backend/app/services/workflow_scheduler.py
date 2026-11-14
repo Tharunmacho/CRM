@@ -52,14 +52,14 @@ def deliver_due_todos(db, *, now=None):
     for todo in db.scalars(select(TodoItem).where(
         TodoItem.done.is_(False), TodoItem.reminded_at.is_(None), TodoItem.due_at <= now,
     ).with_for_update(skip_locked=True)):
-        notify(db, [todo.owner_id], "todo", "To-do due", todo.title, todo.link_to or "/todo")
+        notify(db, [todo.owner_id], "todo", "Your to-do is due", f'Your to-do "{todo.title}" is due now.', todo.link_to or "/todo")
         todo.reminded_at = now
         count += 1
     return count
 
 
 def scan_daily_work_only(db, *, now=None, agency_timezone=None):
-    """Allocation and daily-work alerts between the 15-minute task scans; the caller commits."""
+    """The daily-work clean-up pass between the 15-minute task scans (the daily list itself is computed live); the caller commits."""
     from app.services.daily_work import scan_daily_work
     supervisors = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
     return scan_daily_work(db, supervisors, now=now or datetime.now(timezone.utc), tz=agency_timezone)
@@ -136,7 +136,7 @@ def scan_workflow(db, *, now=None, agency_timezone=None):
                 grouped[owner_id].append(task.id)
                 counts["missedUpdates"] += 1
         for owner, task_ids in grouped.items():
-            name = db.scalar(select(User.name).where(User.id == owner)) or "Staff"
+            name = db.scalar(select(User.name).where(User.id == owner)) or "Recruiter"
             notify(db, supervisors, "missed_update", f"{name}: daily updates missing",
                    f"{len(task_ids)} open tasks had no owner update on {day.isoformat()}.", f"/tasks?staff={owner}&date={day.isoformat()}")
         config.last_daily_check_date = day

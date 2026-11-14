@@ -29,6 +29,8 @@ import { FormSheet } from '@/features/application-form/components/form-sheet'
 import { SidePanel } from '@/features/application-form/components/side-panel'
 import type { FormContext } from '@/features/application-form/components/sections'
 import '@/styles/application-form.css'
+import { careIdOf } from '@/features/candidates/candidate-ids'
+import { TravellerIdChip } from '@/features/candidates/components/candidate-id-chip'
 import '@/styles/application-form-v2.css'
 import '@/styles/candidate-records.css'
 import '@/styles/application-stages.css'
@@ -87,7 +89,9 @@ export default function ApplicationFormPage() {
   // The top bar follows the draft as it is typed: the name, then the reference, client and job.
   const title = candidateTitle(draft ? draft.personal.candidateName : undefined, form?.candidate.name || candidate?.name)
   const name = title.text
-  const subtitle = candidateSubtitle(form?.candidate.ref || candidate?.ref, form?.assignment)
+  // The Care India ID leads the line, then the CRM reference, client and job; a candidate who has travelled also gets a Traveller ID chip.
+  const ids = { ref: form?.candidate.ref || candidate?.ref, careId: form?.candidate.careId || candidate?.careId, travellerId: form?.candidate.travellerId || candidate?.travellerId }
+  const subtitle = [careIdOf(ids), candidateSubtitle(ids.ref, form?.assignment)].filter(Boolean).join(' · ')
 
   // The overlay covers the shell: lock its scroll and give the print stylesheet a hook to hide it.
   useEffect(() => {
@@ -225,7 +229,10 @@ export default function ApplicationFormPage() {
       <div className="af-bar">
         <button type="button" className="af-bar-back" onClick={close}><ArrowLeft aria-hidden="true" /><span>Back</span></button>
         <div className="af-bar-title">
-          <span className={cn('af-bar-name', title.muted && 'is-muted')} title={name}>{name}</span>
+          <span className="af-bar-nameline">
+            <span className={cn('af-bar-name', title.muted && 'is-muted')} title={name}>{name}</span>
+            <TravellerIdChip candidate={ids} />
+          </span>
           {subtitle && <small title={subtitle}>{subtitle}</small>}
         </div>
         {form && <span className="af-pct tnum" title="How much of the official form and its documents is filled in">{completeText(completeness.percent)}</span>}
@@ -284,7 +291,7 @@ export default function ApplicationFormPage() {
                 </div>
                 <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[form.candidate.ref, name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
                 <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
-                <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />
+                {store.can('view_invoices') && <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />}
                 <NotesPanel feedback={feedback ?? EMPTY_FEEDBACK} actions={feedbackActions} viewer={{ id: store.me.id, role: store.me.role }} canWork={canWork} />
               </div>
             </div>

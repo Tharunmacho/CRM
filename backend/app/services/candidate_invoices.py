@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.deps import ensure_can_work_candidate
 from app.db.models import Application, ApplicationStatus, Attachment, AuditEntry, Candidate, CandidateInvoice, Company, Designation, InvoiceSettings, Order, Role
 from app.services import document_storage, invoice_pdf
+from app.services.invoice_access import ensure_can_see_invoices
 
 logger = logging.getLogger(__name__)
 TEMPLATE = {
@@ -62,6 +63,7 @@ def missing_settings(row) -> list[str]:
 
 
 def settings_state(db, user) -> dict:
+    ensure_can_see_invoices(user)
     row = db.get(InvoiceSettings, 1)
     gaps = missing_settings(row)
     return {"canEdit": user.role == Role.admin, "configured": not gaps, "missing": gaps,
@@ -177,6 +179,7 @@ def _ensure_record(db, candidate_id, app):
 
 
 def save_fee(db, candidate_id, user, fee, lock_version, application_id=None):
+    ensure_can_see_invoices(user)
     try:
         candidate = _candidate(db, candidate_id, user, lock=True)
         app = _application(db, candidate_id, application_id)
@@ -328,8 +331,7 @@ def on_ticket_uploaded(db, attachment, user):
 
 
 def save_settings(db, user, values, lock_version):
-    if user.role != Role.admin:
-        raise HTTPException(403, "Only an administrator can change invoice settings")
+    ensure_can_see_invoices(user)
     try:
         # An advisory transaction lock also serializes the first singleton insert.
         from sqlalchemy import text

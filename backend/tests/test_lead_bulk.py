@@ -119,7 +119,7 @@ def test_filter_selection_equals_the_list_result_set(env):
     imported(env, meta_rows(0, 120), assign_to="a")
     imported(env, meta_rows(120, 200))
     filters = [{"q": "Testville 3"}, {"status": ["new"], "owner": "unassigned"}, {"owner": "a", "q": "kerala"},
-               {"platform": ["ig"], "created_from": "2026-11-01", "created_to": "2026-11-30"}, {"position": ["Kitchen Helper"]}]
+               {"platform": ["ig"], "created_from": "2026-11-01", "created_to": "2026-11-30", "date_field": "created"}, {"position": ["Kitchen Helper"]}]
     for filt in filters:
         params = {k: v for k, v in filt.items()}
         env.db.execute(text("UPDATE crm_leads SET status = 'new'")); env.db.commit()

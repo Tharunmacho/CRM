@@ -4,7 +4,7 @@
  * all read this list, so a heading cannot differ between them. Custom questions the ad forms ask are appended from the data
  * (GET /leads/columns); their headings are the sheet's own, tidied.
  */
-import { LEAD_HEADINGS, cleanPhone, dobLabel, experienceLabel, extraAnswer, leadAge, leadDate, leadStatus, type ExtraColumn, type Lead } from './lead-model'
+import { LEAD_HEADINGS, cleanPhone, dobLabel, experienceLabel, extraAnswer, leadAge, leadDate, leadStatus, uploadedLabel, type ExtraColumn, type Lead } from './lead-model'
 
 export const FIELD_GROUPS = ['Person', 'Contact', 'Job answers', 'Campaign & ad', 'Workflow'] as const
 export type FieldGroup = (typeof FIELD_GROUPS)[number]
@@ -31,6 +31,7 @@ const years = (value: number | string | null | undefined, written?: string | nul
 
 export const LEAD_FIELD_DEFS: readonly LeadFieldDef[] = [
   { id: 'created', label: 'Created time', group: 'Workflow', width: 110, value: (l) => when(leadDate(l)?.value) },
+  { id: 'uploaded', label: 'Uploaded time', group: 'Workflow', width: 130, value: (l) => uploadedLabel(l.createdAt) },
   { id: 'name', label: 'Full name', group: 'Person', width: 140, value: (l) => text(l.name) },
   { id: 'gender', label: 'Gender', group: 'Person', width: 90, value: (l) => text(l.gender) },
   { id: 'dob', label: 'Date of birth', group: 'Person', width: 110, value: (l) => dobLabel(l.dob) },
@@ -70,7 +71,7 @@ export const fieldDef = (id: string) => LEAD_FIELD_DEFS.find((field) => field.id
 
 /** Fields that already have a column of their own in the default table (the Columns menu lists them once, under that column). */
 export const DEFAULT_COLUMN_FIELDS: ReadonlySet<string> = new Set([
-  'created', 'name', 'gender', 'dob', 'age', 'phone', 'email', 'city', 'state', 'position', 'indiaYears', 'abroadYears', 'totalYears', 'educationLevel',
+  'created', 'uploaded', 'name', 'gender', 'dob', 'age', 'phone', 'email', 'city', 'state', 'position', 'indiaYears', 'abroadYears', 'totalYears', 'educationLevel',
   'platform', 'campaign', 'form', 'status', 'owner',
 ])
 

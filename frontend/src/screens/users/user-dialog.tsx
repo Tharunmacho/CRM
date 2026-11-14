@@ -53,7 +53,7 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
     if (!user && (!form.password || form.password !== form.confirmation)) {
       setError(form.password ? 'The two passwords are not the same.' : 'Enter a password for this person.'); return
     }
-    if (blocked) { setError('Choose a staff member who is free to take over the candidates and open tasks.'); return }
+    if (blocked) { setError('Choose a recruiter who is free to take over the candidates and open tasks.'); return }
     setBusy(true); setError('')
     const { confirmation, password, reassignToUserId, ...fields } = form
     const payload = { ...fields, name: form.name.trim(), email: form.email.trim().toLowerCase(), phone: form.phone.trim(),
@@ -93,7 +93,7 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
           </FormSection>
           <FormSection icon={<ShieldCheck size={18} />} title="Access" hint="The role decides what this person can see and do">
             <Field label="Role" hint={own ? 'Your own Admin role cannot be removed.' : roleBlurbs[form.role]} className="sm:col-span-2">
-              <Select value={form.role} disabled={busy || own} onChange={(e) => set('role', e.target.value as Role)}><option value="staff">Staff</option><option value="manager">Manager</option><option value="admin">Admin</option></Select>
+              <Select value={form.role} disabled={busy || own} onChange={(e) => set('role', e.target.value as Role)}><option value="staff">Recruiter</option><option value="manager">Manager</option><option value="admin">Admin</option></Select>
             </Field>
             {!user && <>
               <PasswordPair className="sm:col-span-2" label="Initial password" disabled={busy} password={form.password} confirmation={form.confirmation} generated={generated}
@@ -107,7 +107,7 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
             {isStaff ? <div className="uv-toggle">
               <Switch label="Can be given new candidates automatically" description={autoOn ? 'Include this person when new candidates are shared out.' : 'Automatic assignment is off. This only matters if an admin switches it on.'} checked={form.receivesAutoAssign} disabled={busy || !form.active} onChange={(value) => set('receivesAutoAssign', value)} />
               <Switch label="On leave" description="Stops new candidates being given, but keeps the work they have. Approved leave in Attendance also stops them." checked={form.onLeave} disabled={busy || !form.active} onChange={(value) => set('onLeave', value)} />
-            </div> : <p className="uv-note">Only Staff can be given new candidates automatically. {form.role === 'admin' ? 'Admins' : 'Managers'} never are, so these options do not apply.</p>}
+            </div> : <p className="uv-note">Only Recruiters can be given new candidates automatically. {form.role === 'admin' ? 'Admins' : 'Managers'} never are, so these options do not apply.</p>}
             {isStaff && currentAvailability && <p className="uv-note">Right now: <strong>{availabilityWords(currentAvailability.status, currentAvailability.label)}</strong>. Your changes start when you save.</p>}
           </FormSection>
         </>}
@@ -117,11 +117,11 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
               <div><strong>{owned}</strong><span>{owned === 1 ? 'candidate' : 'candidates'}</span></div>
               <div><strong>{tasks}</strong><span>open {tasks === 1 ? 'task' : 'tasks'}</span></div>
             </div>
-            <p className="uv-note">Everything moves to one staff member. Existing due times and history are kept.</p>
+            <p className="uv-note">Everything moves to one recruiter. Existing due times and history are kept.</p>
             {availability.loading && <p role="status" className="uv-note">Checking who is free to take over…</p>}
             {availability.error && <p role="alert" className="uv-error">{availability.error}</p>}
             <Field label="Move the work to" required><Select value={replacementValid ? form.reassignToUserId : ''} disabled={busy || availability.loading || !!availability.error || !replacementOptions.length} onChange={(e) => set('reassignToUserId', e.target.value)}>
-              <option value="">Choose an available staff member</option>{replacementOptions.map((candidate) => <option key={candidate.id} value={candidate.id}>{manualAssignmentLabel(candidate)}</option>)}
+              <option value="">Choose an available recruiter</option>{replacementOptions.map((candidate) => <option key={candidate.id} value={candidate.id}>{manualAssignmentLabel(candidate)}</option>)}
             </Select></Field>
             {availability.data && !replacementOptions.length && <p role="status" className="uv-warn">No one is free to take over. Check who is available before you deactivate this account.</p>}
             <div><Button size="sm" disabled={busy || availability.loading} onClick={availability.refresh}>Refresh</Button></div>

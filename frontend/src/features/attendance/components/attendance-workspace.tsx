@@ -139,7 +139,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
   const changeMonth = (value: string) => { if (/^\d{4}-\d{2}$/.test(value) && value >= '2000-01' && value <= '2100-12') { setMonth(value); setNotice('') } }
 
   return <div className="attendance-workspace">
-    <PageHeader title={own ? 'My attendance' : 'Staff attendance'} description={activeTab === 'presence' ? `Check-ins and check-outs for each day, and when people were using the CRM. Times are in ${timezone}.` : own ? 'Your attendance, leave and work schedule in one place.' : 'Attendance for the month, problem days and approvals for your team.'} actions={<>
+    <PageHeader title={own ? 'My attendance' : 'Recruiter attendance'} description={activeTab === 'presence' ? `Check-ins and check-outs for each day, and when people were using the CRM. Times are in ${timezone}.` : own ? 'Your attendance, leave and work schedule in one place.' : 'Attendance for the month, problem days and approvals for your team.'} actions={<>
       {canManage && store.me.role !== 'admin' && <Tabs variant="pill" className="att-scope" tabs={[{ key: 'team', label: 'Team' }, { key: 'mine', label: 'My attendance' }]} active={own ? 'mine' : 'team'} onChange={(key) => { setScope(key); setNotice('') }} />}
       {store.me.role !== 'admin' && <Button variant="primary" disabled={!bundle || !!error} icon={<Plus size={16} />} onClick={() => setRequesting(true)}>New request</Button>}
     </>} />
@@ -153,7 +153,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
       { label: 'Unpaid time', value: minutesLabel(totals.unpaid), detail: 'After approved overtime is taken off', icon: Timer, tone: 'amber' },
       { label: 'Extra overtime', value: minutesLabel(totals.overtime), detail: 'Approved extra hours', icon: ShieldCheck },
     ] : [
-      { label: 'Active staff', value: rows.filter((row) => row.active).length, detail: 'Counted this month', icon: Users },
+      { label: 'Active recruiters', value: rows.filter((row) => row.active).length, detail: 'Counted this month', icon: Users },
       { label: 'Permissions waiting', value: visibleRequests.filter((request) => request.kind !== 'extra_ot' && request.status === 'pending').length, detail: 'Waiting for a decision', icon: ShieldCheck, tone: 'amber' },
       { label: 'Extra overtime waiting', value: visibleRequests.filter((request) => request.kind === 'extra_ot' && request.status === 'pending').length, detail: 'Can cover late or short time', icon: Timer, tone: 'amber' },
       { label: 'Unpaid time', value: minutesLabel(totals.unpaid), detail: 'After free minutes and approved overtime', icon: WalletCards, tone: 'red' },

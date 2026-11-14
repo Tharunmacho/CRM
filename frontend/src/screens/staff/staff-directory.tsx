@@ -25,7 +25,7 @@ export default function StaffDirectoryPage() {
   }
 
   return <div className="staff-directory-workspace">
-    <PageHeader title="Staff directory" description="See how much work each person has, who is behind, and who gets the next new candidate." actions={<Button disabled={loading || refreshing} icon={<RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />} onClick={refresh}>{loading || refreshing ? 'Refreshing…' : 'Refresh'}</Button>} />
+    <PageHeader title="Recruiter directory" description="See how much work each person has, who is behind, and who gets the next new candidate." actions={<Button disabled={loading || refreshing} icon={<RefreshCw size={16} className={loading || refreshing ? 'animate-spin' : ''} />} onClick={refresh}>{loading || refreshing ? 'Refreshing…' : 'Refresh'}</Button>} />
     <DirectoryFeedback loading={loading && !view} error={error} retry={refresh} stale={!!view} />
     {view && <>
       <SummaryCards items={[

@@ -3,7 +3,7 @@ import { EXTRA_PREFIX, LEAD_HEADINGS, type ExtraColumn, type Lead } from '../lea
 import { DEFAULT_COLUMN_FIELDS, FIELD_PREFIX, LEAD_FIELD_DEFS } from '../lead-fields'
 import { workBlock, type LeadColumnContext } from './lead-actions'
 import {
-  CampaignCell, ContactCell, CreatedCell, EducationCell, ExperienceCell, ExtraAnswerCell, FieldCell, LeadActions,
+  CampaignCell, ContactCell, CreatedCell, UploadedCell, EducationCell, ExperienceCell, ExtraAnswerCell, FieldCell, LeadActions,
   LocationCell, NameCell, PositionCountryCell, ProfileCell, ResumeCell, StateCell, StatusOwnerCell,
 } from './lead-columns'
 
@@ -20,6 +20,7 @@ export function leadColumns(context: LeadColumnContext, extras: ExtraColumn[] = 
   const core: DbColumn<Lead>[] = [
     { key: 'actions', header: h.actions, width: 104, sticky: 'start', render: (l) => <LeadActions lead={l} context={context} /> },
     { key: 'created', header: h.created, sortKey: 'created', width: 92, sticky: 'start', group: 'Workflow', render: (l) => <CreatedCell lead={l} /> },
+    { key: 'uploaded', header: h.uploaded, sortKey: 'uploaded', width: 96, sticky: 'start', optional: 8, group: 'Workflow', render: (l) => <UploadedCell lead={l} /> },
     { key: 'name', header: h.name, sortKey: 'name', width: 192, align: 'left', className: 'ld-col-name', group: 'Person', sticky: 'start', render: (l) => <NameCell lead={l} /> },
     { key: 'position', header: h.position, sortKey: 'position', width: 140, align: 'left', group: 'Job answers', render: (l) => <PositionCountryCell lead={l} /> },
     { key: 'education', header: h.education, width: 130, align: 'left', group: 'Person', render: (l) => <EducationCell lead={l} /> },

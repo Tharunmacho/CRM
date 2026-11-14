@@ -155,6 +155,21 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
 .sm-feedback { margin: 24px; padding: 20px; border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border-main)); border-radius: 12px; background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 .sm-feedback textarea { min-height: 112px; resize: vertical; background: var(--bg-card); }
 .sm-feedback .sm-hint { margin-top: 10px; }
+/* The outcome of a decision stage: equal buttons, the answer that moves the candidate on and the ones that stop them. */
+.sm-decision { margin: 24px 24px 0; padding: 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.sm-decision-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.sm-decision-opt { flex: 1 1 0; min-width: 120px; min-height: 48px; padding: 0 16px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font-size: 15px; font-weight: 600; cursor: pointer; transition: border-color .15s, background-color .15s; }
+.sm-stop { margin: 0 24px 24px; padding: 16px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.sm-stop .sm-decision-opt { min-height: 40px; font-size: 14px; }
+.sm-decision-opt:hover:not(:disabled) { border-color: var(--border-hover); }
+.sm-decision-opt.is-on.is-go { border-color: var(--success-ink); background: var(--success-fill); box-shadow: inset 0 0 0 1px var(--success-ink); }
+.sm-decision-opt.is-on.is-stop { border-color: var(--error-ink); background: var(--error-fill); color: var(--error-ink); box-shadow: inset 0 0 0 1px var(--error-ink); }
+.sm-decision-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 13px; line-height: 1.5; color: var(--text-muted); }
+.sm-decision-note svg { flex: none; margin-top: 2px; }
+.sm-decision-note.is-go { color: var(--success-ink); }
+.sm-decision-note.is-stop { color: var(--error-ink); }
+.sm-decision-more { margin-top: 16px; padding: 16px 0 0; border-top: 1px solid var(--border-faint); }
+.sm-embedded .sm-decision { margin: 16px 20px 0; }
 .sm-stage-details { margin: 0 24px 24px; border: 1px solid var(--border-main); border-radius: 10px; }
 .sm-stage-details > summary { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-main); }
 .sm-stage-details > summary::before { content: '+'; font-size: 18px; color: var(--primary); }

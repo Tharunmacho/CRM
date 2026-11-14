@@ -162,7 +162,7 @@ function AgencyCards({ rows, query, onEdit, onDelete }: { rows: AgencyRow[]; que
       { label: 'Place / City', value: <Location primary={agency.place ?? ''} secondary={agency.state} query={query} /> },
       { label: 'Specialisation', value: <ChipList values={agency.specialisations} label="Specialisation" /> },
       { label: 'Preferred country', value: <ChipList values={agency.preferredCountries} label="Preferred country" /> },
-      { label: 'Staff', value: staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : <Quiet>None added</Quiet> },
+      { label: 'Recruiters', value: staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} {staffCount(agency) === 1 ? 'recruiter' : 'recruiters'}</span> : <Quiet>None added</Quiet> },
     ]}
     actions={<>
       {onEdit && <button type="button" className="cl-open cs-wide" onClick={() => onEdit(agency)} aria-label={`Edit ${agencyDisplayName(agency)}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
@@ -199,7 +199,7 @@ function AgencyTable({ rows, query, loading, onEdit, onDelete }: { rows: AgencyR
       ? <Location primary={[agency.place, agency.state].filter(Boolean).join(', ')} secondary={agency.address} query={query} /> : empty },
     { key: 'focus', header: 'Specialisation / country', width: '12%', align: 'left', render: ({ agency }) => (agency.specialisations?.length || agency.preferredCountries?.length)
       ? <span className="cs-tagstack"><ChipList values={agency.specialisations} label="Specialisation" /><ChipList values={agency.preferredCountries} label="Preferred country" /></span> : empty },
-    { key: 'staff', header: 'Team', width: '6%', align: 'left', render: ({ agency }) => staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} staff</span> : empty },
+    { key: 'staff', header: 'Team', width: '6%', align: 'left', render: ({ agency }) => staffCount(agency) ? <span title={staffLabel(agency)}>{staffCount(agency)} {staffCount(agency) === 1 ? 'recruiter' : 'recruiters'}</span> : empty },
     {
       key: 'actions', header: 'Actions', actions: true, minWidth: '8.5rem',
       render: ({ agency }) => <span className="cs-row-actions">
@@ -396,7 +396,7 @@ export default function ClientsPage() {
         <label className="cs-search">
           <Search size={18} aria-hidden="true" />
           <input ref={searchBox} autoFocus type="search" value={text} onChange={(event) => setText(event.target.value)} maxLength={120} autoComplete="off" spellCheck={false} aria-keyshortcuts="/"
-            placeholder={side === 'clients' ? 'Search by name, company, phone, email or recruiter' : 'Search by agency, name, phone, place or staff'} aria-label={`Search ${nouns}`} />
+            placeholder={side === 'clients' ? 'Search by name, company, phone, email or recruiter' : 'Search by agency, name, phone, place or recruiter'} aria-label={`Search ${nouns}`} />
           {text && <button type="button" className="cs-search-clear" aria-label="Clear search" onClick={clear}><X size={15} /></button>}
         </label>
         <div className="cs-layout" role="group" aria-label="View as">

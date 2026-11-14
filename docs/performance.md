@@ -397,6 +397,8 @@ node scripts/measure-requests.mjs --base http://localhost:<port> --email <admin>
 
 ## Daily work allocation (Tasks screen), task 13F
 
+> **Superseded.** Tasks > Daily work no longer allocates anything: `GET /api/daily-work` is a read-only list of the recruiter's own workable candidates (no top-up, locks, slots or snapshot writes). It runs about five statements for a recruiter and about seven for the supervisor view, whatever the number of recruiters (guarded by `test_the_screen_is_a_read_only_handful_of_statements_whatever_the_number_of_recruiters` in `backend/tests/test_daily_work.py`). The measurements below describe the retired allocation.
+
 `GET /api/daily-work` tops every working recruiter up to the daily goal before it answers, so it has to cope with a first call of
 the day (the workflow worker normally pre-allocates every 60 s, but a request can still hit the cold path) and with a repeat call
 that finds nothing to do. Before this pass both were sequential and per recruiter.

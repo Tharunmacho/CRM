@@ -25,7 +25,10 @@ STAGES = [stage.title for stage in WORKFLOW_STAGES]
 REASONS = {"prescreen_failed": "Failed the first screening", "not_interested": "Not interested",
            "resume_not_received": "Resume not received", "interview_rejected": "Interview rejected",
            "medical_unfit": "Not medically fit", "unmapped": "Removed from the order",
-           "changed_job": "Moved to another job"}
+           "changed_job": "Moved to another job", "offer_declined": "Offer declined", "offer_not_received": "Offer not received",
+           "stage_rejected": "Rejected", "stage_declined": "Candidate declined", "interview_not_possible": "Interview not possible",
+           "passport_not_available": "Passport not available", "advance_not_paid": "Advance not paid", "visa_rejected": "Visa rejected",
+           "visa_stamping_refused": "Visa stamping refused", "not_travelling": "Not travelling"}
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in",
                  "referral": "Referral", "other": "Other"}
 
@@ -57,7 +60,7 @@ class Filters:
         if self.from_date > self.to_date:
             raise HTTPException(422, "The start date must be on or before the end date.")
         if value(user.role) == "staff" and self.staff_id not in (None, user.id):
-            raise HTTPException(403, "Staff can only see their own numbers.")
+            raise HTTPException(403, "Recruiters can only see their own numbers.")
         return Filters(self.from_date, self.to_date, self.client_id, self.order_id,
                        self.designation_id, user.id if value(user.role) == "staff" else self.staff_id)
 
@@ -139,7 +142,7 @@ OVERVIEW_STAGES = (4, 5, 9, 10, 11)  # stage 4 feeds "selected"; 5, 9, 10, 11 fe
 def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
     """One fresh projection of operational data, excluding historical report input."""
     if not sees_team(user) and staff_id not in (None, user.id):
-        raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
+        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
     scope = staff_id if sees_team(user) else user.id
     zone = zone or get_settings().agency_timezone
     today = aware(now or datetime.now(timezone.utc)).astimezone(ZoneInfo(zone)).date()
@@ -539,7 +542,7 @@ def report_data(data, user, filters: Filters, zone=None, now=None):
 def dashboard_data(data, user, staff_id=None, zone=None, now=None):
     """Admin and manager see the team (optionally one person); staff land on their own workload."""
     if not sees_team(user) and staff_id not in (None, user.id):
-        raise HTTPException(403, "Only admins and managers can change which staff member the dashboard shows.")
+        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
     scope = staff_id if sees_team(user) else user.id
     now = aware(now or datetime.now(timezone.utc))
     zone = zone or get_settings().agency_timezone

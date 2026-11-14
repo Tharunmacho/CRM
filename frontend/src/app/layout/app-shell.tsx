@@ -39,12 +39,13 @@ import { useStore } from '@/shared/state/crm-store'
 import { taskClockStart } from '@/shared/lib/task-time'
 import { useAgency } from '@/shared/state/use-agency'
 import { Dropdown, MenuItem, Toast } from '@/shared/ui/overlay'
-import { DailyWorkPrompt } from '@/features/daily-work/daily-work-prompt'
 import { PageLoading } from '@/shared/ui/page-loading'
 import type { Capability } from '@/shared/state/crm-store'
 import { AttendanceProvider } from '@/features/attendance/attendance-context'
 import { CommandSearch } from './command-search'
 import { GATE_REASON, gateBlocks, gateState, readGate, subscribeGate } from '@/features/leads/lead-gate'
+import { useDailyWork } from '@/features/daily-work/use-daily-work'
+import { ROLE_TITLES } from '@/shared/model/role-labels'
 import '@/styles/shell.css'
 import '@/styles/surface.css'
 
@@ -76,7 +77,7 @@ const NAV: NavItem[] = [
   { to: '/travelled', label: 'Travelled', icon: Plane, group: 'Workspace' },
   { to: '/reports', label: 'Reports', icon: FileBarChart, group: 'Workspace' },
   { to: '/users', label: 'User Management', icon: Users, capability: 'user_management', group: 'Workspace' },
-  { to: '/staff-directory', label: 'Staff Directory', icon: ContactRound, supervisorsOnly: true, group: 'Workspace', extension: true },
+  { to: '/staff-directory', label: 'Recruiter Directory', icon: ContactRound, supervisorsOnly: true, group: 'Workspace', extension: true },
   { to: '/attendance', label: 'Attendance', icon: Clock3, group: 'Workspace', extension: true },
 ]
 
@@ -188,6 +189,11 @@ export function AppShell() {
     () => store.visibleTasks.filter((t) => !t.completedAt && !t.cancelledAt && slaState(taskClockStart(t)).overdue).length,
     [store.visibleTasks],
   )
+  // A recruiter's Tasks badge is today's candidates still to work (the same list as Tasks > Today's candidates, no deadline
+  // wording); admin and manager keep the count of overdue 48-hour tasks, since their list is everybody's.
+  const isRecruiter = store.me.role === 'staff'
+  const todays = useDailyWork({ enabled: isRecruiter, debounceMs: 4000 })
+  const tasksBadge = isRecruiter ? todays.data?.summary.toWork ?? 0 : overdue
 
   // Reading mail happens inside the inbox; refresh the badge as soon as you leave it.
   const refreshInboxUnread = store.refreshInboxUnread
@@ -323,7 +329,7 @@ export function AppShell() {
                   const list = items.filter((item) => item.group === group.id)
                   if (!list.length) return null
                   const closed = Boolean(group.label) && closedGroups.includes(group.id) && !collapsed
-                  const signals = list.some((item) => (item.signal === 'tasks' && overdue > 0) || (item.signal === 'inbox' && store.inboxUnread > 0))
+                  const signals = list.some((item) => (item.signal === 'tasks' && tasksBadge > 0) || (item.signal === 'inbox' && store.inboxUnread > 0))
                   return (
                     <div key={group.id} className={cn('rail-group', index === 0 && 'is-main', closed && 'is-closed')} role="group" aria-label={group.label ?? 'Overview'}>
                       {group.label && (
@@ -336,7 +342,7 @@ export function AppShell() {
                       <div className="rail-list-wrap" id={`rail-list-${group.id}`}>
                         <div className="rail-list">
                           {list.map((item) => {
-                            const count = item.signal === 'tasks' ? overdue : item.signal === 'inbox' ? store.inboxUnread : 0
+                            const count = item.signal === 'tasks' ? tasksBadge : item.signal === 'inbox' ? store.inboxUnread : 0
                             return (
                               <NavLink
                                 key={item.to}
@@ -354,7 +360,7 @@ export function AppShell() {
                                 <span className="rail-nav-icon" aria-hidden="true"><item.icon size={20} strokeWidth={1.75} /></span>
                                 <span className="rail-item-label">{item.label}</span>
                                 {item.to === '/leads' && leadsLocked && <span className="rail-lock" role="img" aria-label={GATE_REASON} title={GATE_REASON}><Lock size={13} strokeWidth={2} aria-hidden="true" /></span>}
-                                {count > 0 && <span className={cn('rail-badge', item.signal === 'tasks' && 'is-alert')} role="img" aria-label={item.signal === 'tasks' ? `${count} overdue` : `${count} unread`}>{badgeText(count)}</span>}
+                                {count > 0 && <span className={cn('rail-badge', item.signal === 'tasks' && !isRecruiter && 'is-alert')} role="img" aria-label={item.signal === 'tasks' ? (isRecruiter ? `${count} to work today` : `${count} overdue`) : `${count} unread`}>{badgeText(count)}</span>}
                               </NavLink>
                             )
                           })}
@@ -372,10 +378,9 @@ export function AppShell() {
         </nav>
 
         <div className="shell-body">
-          <Topbar menuRef={menuButtonRef} menuAlert={overdue > 0 || store.inboxUnread > 0} onMenu={() => setMobileOpen(true)} />
+          <Topbar menuRef={menuButtonRef} menuAlert={(!isRecruiter && overdue > 0) || store.inboxUnread > 0} onMenu={() => setMobileOpen(true)} />
           <main className="workspace">
             <div className={cn('workspace-inner', location.pathname !== '/' && 'workspace-page')}>
-              <DailyWorkPrompt />
               <Suspense fallback={<PageLoading onRetry={() => window.location.reload()} retryLabel="Reload page" />}>
                 <Outlet />
               </Suspense>
@@ -412,7 +417,7 @@ function RailFoot({ dock, pinLabel, onToggle, showTip, hideTip }: { dock: boolea
   )
 }
 
-const ROLE_LABEL: Record<string, string> = { admin: 'Administrator', manager: 'Manager', staff: 'Staff' }
+const ROLE_LABEL: Record<string, string> = ROLE_TITLES
 
 function ProfileMenu() {
   const { me, signOut } = useStore()

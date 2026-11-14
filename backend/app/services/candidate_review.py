@@ -20,7 +20,7 @@ UNNAMED = "Name needs review"
 NO_NAME_REASON = "We could not read a name from this file. Open it and enter the details, or upload a clearer copy."
 NO_CONTACT_REASON = ("We could not read a phone number or email from this file. "
                      "Open it and enter the details, or upload a clearer copy.")
-WAITING_TITLE = "Candidate received — needs assignment"
+WAITING_TITLE = "Candidate waiting for a recruiter"
 
 
 def has_extraction_warnings(results) -> bool:
@@ -160,21 +160,13 @@ def start_initial_call(db, candidate, owner_id: str, at: datetime) -> bool:
     return True
 
 
-def notify_candidate_received(db, candidate, owner, *, channel: str, kind: str, results) -> None:
+def notify_candidate_received(db, candidate, owner, *, channel: str, kind: str | None = None, results) -> None:
     """Receipt notices for a candidate created by intake, plus the review marker and the
-    best-effort WhatsApp conversation link. Ownerless candidates get a distinct notice."""
+    best-effort WhatsApp conversation link. The owner is told it was assigned to them; only a candidate nobody
+    could take alerts the admins and managers. (`kind` is accepted for older callers and ignored.)"""
     record_review_flag(db, candidate, ocr_warning=has_extraction_warnings(results))
-    # PRD: the owner and the admin are told about an assignment. Admins and managers both hear about a candidate nobody could take.
-    told = [Role.admin] if owner else [Role.admin, Role.manager]
-    recipients = set(db.scalars(select(User.id).where(User.role.in_(told), User.active.is_(True))))
-    if owner:
-        recipients.add(owner.id)
-    for recipient in recipients:
-        db.add(Notification(
-            user_id=recipient, kind=kind,
-            title=f"Candidate received by {channel}" if owner else WAITING_TITLE,
-            detail=candidate.name if owner else f"{candidate.name} · received by {channel}, no recruiter is available yet",
-            link_to=f"/candidates/{candidate.id}"))
+    from app.services.assignment_notifications import notify_new_candidate
+    notify_new_candidate(db, candidate, owner, channel=channel)
     from app.services.whatsapp_chat import link_conversations_for_candidate
     link_conversations_for_candidate(db, candidate)
 
@@ -222,7 +214,7 @@ def assign_waiting_candidates(db, actor_id: str | None, actor_name: str) -> dict
         per_owner[owner.id] = per_owner.get(owner.id, 0) + 1
         assigned += 1
     if changes:
-        notify_assignment_changes(db, changes, reason=f"Assigned from the waiting list by {actor_name}.")
+        notify_assignment_changes(db, changes, actor_id=actor_id, actor_name=actor_name, how="from the waiting list")
         db.add(AuditEntry(actor_id=actor_id, action="Assigned waiting candidates", target=f"{assigned} candidates",
                           entity_type="candidate", meta={"count": assigned, "perOwner": per_owner}))
     return {"assigned": assigned, "reviewCleared": cleared, "remaining": len(waiting) - assigned}

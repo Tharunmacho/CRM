@@ -16,19 +16,42 @@ export function linkedConversationId(response: { conversation?: { id?: unknown }
 /** Only an admin sees "Delete candidate"; the server refuses everyone else too. */
 export const canDeleteCandidate = (role: string | undefined): boolean => role === 'admin'
 
+export type DeleteBlocker = {
+  /** The plain sentence to show. */
+  message: string
+  /**
+   * True only when the candidate is on an active order and nothing else stops the delete: an admin may confirm
+   * "also remove them from the order(s) and delete". A deployed placement can never be overridden.
+   */
+  canWithdraw: boolean
+  /** The active order(s) the delete would take them off. */
+  orderRefs: string[]
+}
+
 /**
- * Why a candidate cannot be deleted from what the page already knows, or null when they can.
- * The server decides in the end and its message is shown if it disagrees.
+ * Why a candidate cannot be deleted as it stands, from what the page already knows, or null when they can.
+ * The server decides in the end (it also refuses invoices and payments) and its message is shown if it disagrees.
  */
 export function deleteCandidateBlocker(
   applications: ReadonlyArray<{ status: string; orderRef?: string }>,
-): string | null {
-  if (applications.some((application) => application.status === 'active')) {
-    return 'This candidate is still on an order. Remove them from the order first.'
-  }
+): DeleteBlocker | null {
+  // A deployed placement is kept on record, so being on another order as well changes nothing: no override.
   const deployed = applications.find((application) => application.status === 'deployed')
   if (deployed) {
-    return `This candidate was deployed${deployed.orderRef ? ` through ${deployed.orderRef}` : ''}, and a deployed placement is kept on record. They cannot be deleted.`
+    return {
+      message: `This candidate was deployed${deployed.orderRef ? ` through ${deployed.orderRef}` : ''}, and a deployed placement is kept on record. They cannot be deleted.`,
+      canWithdraw: false,
+      orderRefs: [],
+    }
+  }
+  const active = applications.filter((application) => application.status === 'active')
+  if (active.length) {
+    const orderRefs = [...new Set(active.map((application) => application.orderRef).filter((ref): ref is string => !!ref))]
+    return {
+      message: `This candidate is still on ${orderRefs.length ? `order ${orderRefs.join(', ')}` : 'an order'}.`,
+      canWithdraw: true,
+      orderRefs,
+    }
   }
   return null
 }

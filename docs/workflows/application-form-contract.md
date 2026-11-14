@@ -204,7 +204,7 @@ somewhat_interested, nextFollowUpDate. They are not part of `percent`.
 | Visa | `visa` | 9 Visa arrival + Google review |
 | Visa Stamping | `visa_stamping` | 10 Visa stamping |
 | Ticket | `ticket` | 11 Air ticket |
-| Invoice Generated | `invoice_generated` | none: invoicing is not a CRM stage -> `tracked:false`, `not_applicable` |
+| Invoice Generated | `invoice_generated` | none: invoicing is not a CRM stage -> `tracked:false`, `not_applicable`. Admin only: omitted for recruiters and managers (see [candidate invoices](candidate-invoices.md)) |
 
 Rows come back in exactly this order (13 rows). Extra rows should be shown after the docx rows' styling but in this
 order, labelled so the recruiter sees they are additional CRM stages.
@@ -289,7 +289,7 @@ them), except `screening.skills` and `screening.jobPreference`, which a resume's
 ## 8. Live updates
 
 Subscribe to `GET /api/events` (SSE, see `api/routers/events.py`) and refetch the form (debounced ~300 ms) on any of
-the topics `candidates`, `documents`, `applications` while the form is open (staff events carry topic names only, no
+the topics `candidates`, `documents`, `applications` while the form is open (recruiter events carry topic names only, no
 ids, so refetch whenever one of these arrives rather than matching ids; admins/managers also get
 `ids.candidates`). A document read finishing publishes `candidates` + `documents`; completing or reopening a stage
 publishes `applications`. If any `documents.*.extraction.status` is `processing` or `processing` is `true` and no event
@@ -381,7 +381,7 @@ Reference form field -> where it lives (nothing is duplicated):
 | Reference form | Stored in | Notes |
 |---|---|---|
 | Source / agent | `source` + `source_detail` (`recruitment.source`, `recruitment.sourceDetail`) | read only on the form; set when the candidate is entered |
-| Assigned staff | `owner_id` (`recruitment.recruiter`) | changed with the existing assign/reassign action |
+| Assigned recruiter | `owner_id` (`recruitment.recruiter`) | changed with the existing assign/reassign action |
 | Telemarketer notes | `call_remarks` (`screening.callOutcome.remarks`) | written by the initial-call action `POST /api/candidates/{id}/call`; read only on the form |
 | Skills | `skills` (`screening.skills`) | |
 | Phone / WhatsApp | `phone`, `whatsapp` (`personal.mobileNumber`, `personal.whatsapp`, derived `whatsappSameAsPhone`) | |
@@ -428,7 +428,7 @@ value up in `?includeInactive`-less data and fall back to the raw value as its l
 
 Response headers: `ETag` and `Cache-Control: private, no-cache`; send `If-None-Match` and expect `304 Not Modified` with no body.
 Live: every change publishes the topic **`form_options`** (and also `settings`, which agency settings, currencies and job categories use), so refetch
-`/api/form-options` (ETag makes it cheap) when either arrives. Staff events carry the topic name only, no ids.
+`/api/form-options` (ETag makes it cheap) when either arrives. Recruiter events carry the topic name only, no ids.
 
 ### 12.2 Change (administrator only; everyone else 403)
 
@@ -495,4 +495,4 @@ An Aadhaar copy is read like a resume or a passport (`kind: "aadhaar"`; the Add 
 
 Tests: `backend/tests/test_aadhaar_form_mapping.py` (mapping, fill rule, precedence in every order, masking, audit and log checks), `backend/tests/test_ocr_mapping.py`, `frontend/tests/application-form.test.mjs`, `frontend/tests/candidate-ocr.test.mjs`.
 
-Passport and Aadhaar keep every uploaded front/back/additional file, with per-file reading state and all files included in candidate exports. Aadhaar and application-form uploads are optional and never lower completeness. A failed file retains its failure message and `extractionPending: true` until staff explicitly request another reading. Resume keeps its existing latest-version form view; every page of the selected file is accounted for.
+Passport and Aadhaar keep every uploaded front/back/additional file, with per-file reading state and all files included in candidate exports. Aadhaar and application-form uploads are optional and never lower completeness. A failed file retains its failure message and `extractionPending: true` until recruiters explicitly request another reading. Resume keeps its existing latest-version form view; every page of the selected file is accounted for.

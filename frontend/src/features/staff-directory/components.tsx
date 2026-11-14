@@ -34,7 +34,7 @@ export function DirectoryFilters({ employees, search, employee, availability, on
   employees: DirectoryEmployee[]; search: string; employee: string; availability: string; onChange: (name: string, value: string) => void
 }) {
   const active = Boolean(search || employee || availability)
-  return <div className="staff-toolbar" role="group" aria-label="Staff filters">
+  return <div className="staff-toolbar" role="group" aria-label="Recruiter filters">
     <Field label="Search employees"><SearchInput value={search} placeholder="Name or email address" onChange={(value) => onChange('search', value)} /></Field>
     <Field label="Employee"><Select value={employee} onChange={(event) => onChange('employee', event.target.value)}><option value="">All employees</option>{employees.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
     <Field label="New candidates"><Select value={availability} onChange={(event) => onChange('availability', event.target.value)}><option value="">Anyone</option>{availabilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></Field>
@@ -97,8 +97,8 @@ export function DirectoryCards({ employees, query }: { employees: DirectoryEmplo
 }
 
 export function DirectoryFeedback({ loading, error, retry, stale = false }: { loading: boolean; error: string; retry: () => void; stale?: boolean }) {
-  if (error) return <div role="alert" className="staff-error"><div><strong>{stale ? 'We could not refresh the staff list' : 'We could not load the staff list'}</strong><p>{error}{stale && ' What you see may be out of date.'}</p></div><Button icon={<RefreshCw size={16} />} onClick={retry}>{error === 'The start date must be on or before the end date.' ? 'Reset dates' : 'Try again'}</Button></div>
-  if (loading) return <div role="status" className="staff-skeleton" aria-label="Loading staff"><div className="staff-skeleton-kpis">{[0, 1, 2, 3].map((i) => <span key={i} />)}</div><div className="staff-skeleton-table">{[0, 1, 2, 3, 4].map((i) => <span key={i} />)}</div><span className="sr-only">Loading staff…</span></div>
+  if (error) return <div role="alert" className="staff-error"><div><strong>{stale ? 'We could not refresh the recruiter list' : 'We could not load the recruiter list'}</strong><p>{error}{stale && ' What you see may be out of date.'}</p></div><Button icon={<RefreshCw size={16} />} onClick={retry}>{error === 'The start date must be on or before the end date.' ? 'Reset dates' : 'Try again'}</Button></div>
+  if (loading) return <div role="status" className="staff-skeleton" aria-label="Loading recruiters"><div className="staff-skeleton-kpis">{[0, 1, 2, 3].map((i) => <span key={i} />)}</div><div className="staff-skeleton-table">{[0, 1, 2, 3, 4].map((i) => <span key={i} />)}</div><span className="sr-only">Loading recruiters…</span></div>
   return null
 }
 

@@ -27,7 +27,7 @@ The server uses exact normalized skills for ALL/ANY and full-text resume search 
 
 ## Recovery and handoffs
 
-Loading must not show confirmed zero results. Search failures preserve filter input and show retry/error feedback; failed skill-group refresh hides unconfirmed counts. Changing filter/page scope clears hidden selections. Reopening from Staff Directory refreshes current ownership. Correct missing skills through the authorized profile editor, then refresh the directory.
+Loading must not show confirmed zero results. Search failures preserve filter input and show retry/error feedback; failed skill-group refresh hides unconfirmed counts. Changing filter/page scope clears hidden selections. Reopening from Recruiter Directory refreshes current ownership. Correct missing skills through the authorized profile editor, then refresh the directory.
 
 ## Acceptance checklist
 
@@ -35,7 +35,7 @@ Loading must not show confirmed zero results. Search failures preserve filter in
 - [ ] Older New candidates precede newer In process/Deployed candidates across page boundaries; choosing Newest first restores creation-date order across statuses.
 - [ ] Test ALL versus ANY, fullwidth/case/spacing variants and distinct substring skills.
 - [ ] Missing-skills results include empty and whitespace-only legacy values.
-- [ ] Staff can read all candidates but cannot export or reassign.
+- [ ] Recruiters can read all candidates but cannot export or reassign.
 - [ ] The Excel workbook contains the same filtered records, including owner scope.
 - [ ] A reassignment by another session changes counts and rows after refresh.
 

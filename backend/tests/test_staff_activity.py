@@ -157,7 +157,7 @@ def test_staff_scope_and_admin_reasoned_correction(workspace):
             activity.correct_session(db,admin,first.id,START,START+timedelta(hours=2,minutes=1),'Overlap',at=START+timedelta(hours=3))
         assert overlap.value.status_code==409
         activity.correct_session(db,admin,first.id,START,START+timedelta(minutes=50),'Corrected missed checkout',at=START+timedelta(hours=3));db.commit()
-        audit=db.scalar(select(AuditEntry).where(AuditEntry.action=='Corrected staff attendance'))
+        audit=db.scalar(select(AuditEntry).where(AuditEntry.action=='Corrected recruiter attendance'))
         assert audit.meta['before']['checkedOutAt']!=audit.meta['after']['checkedOutAt']
         assert audit.meta['reason']=='Corrected missed checkout'
         assert second.checked_out_at is None

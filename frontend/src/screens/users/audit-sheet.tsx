@@ -7,6 +7,7 @@ import type { User } from '@/shared/model/types'
 import { EmptyState } from '@/shared/ui/display'
 import { Button } from '@/shared/ui/primitives'
 import { Sheet } from '@/shared/ui/overlay'
+import { roleLabel } from '@/shared/model/role-labels'
 import { RolePill, UserAvatar, failureText } from './user-ui'
 
 interface AuditRow {
@@ -62,7 +63,7 @@ export function AuditHistory({ user, onClose }: { user: User; onClose: () => voi
           <div className="uv-tl-head"><p>{row.action}</p><time dateTime={row.at}>{dateTimeLabel(row.at)}</time></div>
           {row.target && <p className="uv-tl-target">{self ? 'Record: ' : 'Account: '}{row.target}</p>}
           {row.meta.changes && Object.keys(row.meta.changes).length > 0 && <dl className="uv-changes">{Object.entries(row.meta.changes).map(([key, change]) => <div key={key}>
-            <dt>{fieldLabels[key] ?? key.replaceAll('_', ' ')}</dt><dd><s>{show(change.before)}</s><span aria-label="changed to">to</span><b>{show(change.after)}</b></dd></div>)}</dl>}
+            <dt>{fieldLabels[key] ?? key.replaceAll('_', ' ')}</dt><dd><s>{key === 'role' ? roleLabel(String(change.before ?? '')) || 'None' : show(change.before)}</s><span aria-label="changed to">to</span><b>{key === 'role' ? roleLabel(String(change.after ?? '')) || 'None' : show(change.after)}</b></dd></div>)}</dl>}
           {row.meta.transfer && <p className="uv-tl-meta">Moved {row.meta.transfer.candidates} {row.meta.transfer.candidates === 1 ? 'candidate' : 'candidates'} and {row.meta.transfer.tasks} open {row.meta.transfer.tasks === 1 ? 'task' : 'tasks'}.</p>}
           {typeof row.meta.revokedSessions === 'number' && <p className="uv-tl-meta">{row.meta.revokedSessions} {row.meta.revokedSessions === 1 ? 'session' : 'sessions'} signed out.</p>}
           <p className="uv-tl-actor">{self ? 'Performed by ' : 'Changed by '}{actor}</p>

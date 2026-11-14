@@ -53,7 +53,7 @@ export function BulkDialog({ action, count, allMatching, users, onClose, onConfi
           <label className="ld-opt">
             <span>Assign to</span>
             <Select aria-label="Assign to" value={owner} onChange={(event) => setOwner(event.target.value)}>
-              <option value="auto">Distribute evenly between available staff</option>
+              <option value="auto">Distribute evenly between available recruiters</option>
               {staff.map((user) => <option key={user.id} value={user.id} disabled={user.onLeave}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
               <option value={UNASSIGNED}>Nobody: make unassigned</option>
             </Select>

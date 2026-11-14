@@ -287,3 +287,81 @@ def test_endpoints_serve_the_search_and_groups_without_breaking_order_matching(p
     matching = client.get('/api/candidates/matching', params={'order_id': 'o-1'})
     assert matching.status_code == 200, matching.text
     assert client.get('/api/candidates', params={'q': 'a' * 501}).status_code == 422
+
+
+def _travel_fixture(bank):
+    """Travellers: two with one flight (one has the Traveller ID, one is an older record without it), one with a flight AND a
+    new active placement, and a repeat traveller with two flights. Not travelled: new, active, closed, reopened and a
+    candidate merely *marked* deployed with no deployed placement."""
+    people = {'flown-id': 'o-1', 'flown-legacy': 'o-1', 'flown-and-active': 'o-2', 'flown-twice': 'o-1'}
+    for identifier in [*people, 'fresh', 'working', 'closed', 'reopened', 'marked-only']:
+        add(bank, identifier)
+    bank.get(m.Candidate, 'flown-id').traveller_id = 'CI-T-26-27-001'
+
+    def placement(identifier, candidate, order, state, stage, year=2025):
+        bank.add(m.Application(id=identifier, candidate_id=candidate, order_id=order, owner_id='asha', current_stage=stage, status=state,
+                               created_at=datetime(year, 1, 1, tzinfo=timezone.utc)))
+
+    deployed, active, closed = m.ApplicationStatus.deployed, m.ApplicationStatus.active, m.ApplicationStatus.closed
+    placement('p-id', 'flown-id', 'o-1', deployed, 11)
+    placement('p-legacy', 'flown-legacy', 'o-1', deployed, 11)
+    placement('p-old', 'flown-and-active', 'o-1', deployed, 11, 2024)
+    placement('p-new', 'flown-and-active', 'o-2', active, 3, 2026)
+    placement('p-twice-1', 'flown-twice', 'o-1', deployed, 11, 2023)
+    placement('p-twice-2', 'flown-twice', 'o-2', deployed, 11, 2025)
+    placement('p-working', 'working', 'o-1', active, 4)
+    placement('p-closed', 'closed', 'o-1', closed, 2)
+    placement('p-reopened', 'reopened', 'o-1', active, 11)   # stage 11 reopened: no longer deployed
+    bank.get(m.Candidate, 'marked-only').status = m.CandidateStatus.deployed
+    bank.commit()
+    return {'flown-id', 'flown-legacy', 'flown-and-active', 'flown-twice'}
+
+
+def test_travelled_filter_splits_the_bank_into_travelled_and_not_travelled(bank):
+    flown = _travel_fixture(bank)
+    everyone = ids(bank, '')
+    assert len(everyone) == 9
+    assert ids(bank, '', travelled='yes') == flown
+    assert ids(bank, '', travelled='no') == everyone - flown
+    assert ids(bank, '', travelled='') == everyone
+    # A placement that is shown as active still counts for someone who has flown before; nobody is listed twice.
+    page = search_candidates(bank, Search(travelled='yes'), 0, 50)
+    assert page['total'] == len(page['items']) == 4
+    # It combines with the other filters and carries into every read that shares the search.
+    assert ids(bank, 'flown', travelled='yes', column_filters='{"stage":"11"}') == {'flown-id', 'flown-legacy', 'flown-twice'}
+    assert ids(bank, '', travelled='no', pool='unmapped') == {'fresh', 'closed', 'marked-only'}
+    assert ids(bank, '', travelled='yes', order_id='o-2') == {'flown-and-active', 'flown-twice'}
+    assert position_groups(bank, Search(travelled='yes'))['resumes'] == 4
+    assert position_groups(bank, Search(travelled='no'))['resumes'] == 5
+    with pytest.raises(HTTPException) as bad:
+        ids(bank, '', travelled='maybe')
+    assert bad.value.status_code == 422
+
+
+def test_travelled_filter_counts_the_same_people_as_the_travelled_report(bank):
+    from app.api.routers import travelled as report
+    flown = _travel_fixture(bank)
+    rows = report.read_rows(bank, bank.get(m.User, 'admin'))
+    assert {row['candidateId'] for row in rows} == flown == ids(bank, '', travelled='yes')
+    assert len(rows) == 5   # the report counts placements: the repeat traveller flew twice
+    # The one record with a Traveller ID is travelled in both views.
+    assert [row['candidateId'] for row in rows if row['travellerId']] == ['flown-id']
+
+
+def test_travelled_filter_endpoints_and_export_follow_it(bank):
+    flown = _travel_fixture(bank)
+    admin = make_client(bank, 'admin')
+    for value, expected in (('yes', flown), ('no', ids(bank, '') - flown)):
+        listing = admin.get('/api/candidates', params={'travelled': value, 'page_size': 50})
+        assert listing.status_code == 200, listing.text
+        assert {row['id'] for row in listing.json()['items']} == expected and listing.json()['total'] == len(expected)
+        sheet = admin.get('/api/candidates/export', params={'travelled': value})
+        assert sheet.status_code == 200, sheet.text
+        with ZipFile(BytesIO(sheet.content)) as archive:
+            rows = [[''.join(cell.itertext()) for cell in row.findall('{*}c')]
+                    for row in ElementTree.fromstring(archive.read('xl/worksheets/sheet1.xml')).findall('{*}sheetData/{*}row')]
+        assert {row[rows[0].index('Name')] for row in rows[1:]} == expected
+    assert admin.get('/api/candidates', params={'travelled': 'maybe'}).status_code == 422
+    # Staff see the whole shared bank, so the filter is open to them too.
+    staff = make_client(bank, 'bala').get('/api/candidates', params={'travelled': 'yes', 'page_size': 50})
+    assert {row['id'] for row in staff.json()['items']} == flown

@@ -35,7 +35,7 @@ export function AssignLeadsDialog({ ids, users, fromName, onClose, onSaved }: {
         <label className="ld-opt">
           <span>{again ? 'Reassign to' : 'Assign to'}</span>
           <Select aria-label={again ? 'Reassign to' : 'Assign to'} value={owner} onChange={(event) => setOwner(event.target.value)}>
-            <option value="auto">Distribute evenly between available staff</option>
+            <option value="auto">Distribute evenly between available recruiters</option>
             {staff.map((user) => <option key={user.id} value={user.id} disabled={user.onLeave}>{user.name}{user.onLeave ? ' (on leave)' : ''}</option>)}
           </Select>
         </label>

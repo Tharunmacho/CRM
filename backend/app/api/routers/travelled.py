@@ -31,12 +31,13 @@ from app.db.models import (
 from app.db.session import get_db
 from app.services.agency_display import agency_display_expression
 from app.services.application_form import LEGACY_SLOTS, required_for_deployment
+from app.services.invoice_access import can_see_invoices
 
 router = APIRouter(prefix="/api/travelled", tags=["travelled"])
 
 NOT_RECORDED = "Not recorded"   # the label for a placement with no agency (or no country) on file; it can be filtered on too
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-EXPORT_COLUMNS = ("Travel date", "Candidate", "Ref", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
+EXPORT_COLUMNS = ("Traveller ID", "Travel date", "Candidate", "Ref", "Client", "Country", "Job", "Order", "Referral agency", "Airline and flight",
                   "PNR", "Recruiter", "Status", "Missing documents", "Passport")
 
 
@@ -119,7 +120,7 @@ class Filters:
         if self.q:
             needle = self.q.lower()
             if not any(needle in (row[key] or "").lower() for key in (
-                    "name", "ref", "passportNumber", "orderRef", "pnr", "client", "job", "agency", "country", "airline")):
+                    "name", "ref", "travellerId", "passportNumber", "orderRef", "pnr", "client", "job", "agency", "country", "airline")):
                 return False
         return True
 
@@ -150,7 +151,7 @@ def read_rows(db: Session, user: User) -> list[dict]:
         select(Application.id, Application.status, Candidate.id, Candidate.ref, Candidate.name,
                agency_display_expression().label("agency"), Order.ref, Order.country, Company.name, Company.country, Client.id, Designation.title,
                User.name, travel, ticket.c.data["airline"].as_string(), ticket.c.data["pnr"].as_string(),
-               Candidate.passport_no, Order.id)
+               Candidate.passport_no, Order.id, Candidate.traveller_id, Candidate.care_id)
         .select_from(Application)
         .join(Candidate, Candidate.id == Application.candidate_id)
         .join(Order, Order.id == Application.order_id)
@@ -165,7 +166,7 @@ def read_rows(db: Session, user: User) -> list[dict]:
         statement = statement.where(Application.owner_id == user.id)
     rows = []
     for (app_id, status, cand_id, ref, name, agency, order_ref, order_country, company, company_country, client_id,
-         job, recruiter, travel_date, airline, pnr, passport, order_id) in db.execute(statement).all():
+         job, recruiter, travel_date, airline, pnr, passport, order_id, traveller_id, care_id) in db.execute(statement).all():
         day = None
         if isinstance(travel_date, str) and _DAY.fullmatch(travel_date):
             try:
@@ -173,22 +174,24 @@ def read_rows(db: Session, user: User) -> list[dict]:
             except ValueError:
                 pass
         rows.append({
-            "applicationId": app_id, "candidateId": cand_id, "ref": ref, "name": name, "client": company, "clientId": client_id,
+            "applicationId": app_id, "candidateId": cand_id, "ref": ref, "travellerId": traveller_id, "careId": care_id, "name": name, "client": company, "clientId": client_id,
             "country": _text(order_country) or _text(company_country), "job": job, "orderRef": order_ref,
             "orderId": order_id, "passportNumber": passport or None,
             "agency": agency,
             "travelDate": day, "airline": airline or None, "pnr": pnr or None, "recruiter": recruiter,
             "status": getattr(status, "value", status),
         })
-    _add_documents(db, rows)
+    _add_documents(db, rows, user)
     rows.sort(key=lambda r: (r["name"] or "").lower())
     rows.sort(key=lambda r: r["travelDate"] or "", reverse=True)   # stable: newest first, then by name; undated last
     return rows
 
 
-def _add_documents(db: Session, rows: list[dict]) -> None:
-    """`documents` on every row: {have, required, missing[labels]} against the mandatory list, from ONE statement for all candidates."""
-    required = required_for_deployment()
+def _add_documents(db: Session, rows: list[dict], user: User | None = None) -> None:
+    """`documents` on every row: {have, required, missing[labels]} against the mandatory list, from ONE statement for all candidates.
+
+    The Invoice document is the admin's, so for anyone else it is neither required nor listed as missing."""
+    required = required_for_deployment(user is None or can_see_invoices(user))
     from app.services.document_identity import rejected_expression
     stored: dict[str, set[str]] = {}
     ids = sorted({row["candidateId"] for row in rows})
@@ -261,7 +264,7 @@ def _cell(value):
 
 def export_table(rows: list[dict]) -> list[list]:
     return [list(EXPORT_COLUMNS)] + [[_cell(v) for v in (
-        r["travelDate"] or "", r["name"], r["ref"], r["client"], r["country"] or "", r["job"], r["orderRef"], r["agency"] or "",
+        r["travellerId"] or "", r["travelDate"] or "", r["name"], r["ref"], r["client"], r["country"] or "", r["job"], r["orderRef"], r["agency"] or "",
         r["airline"] or "", r["pnr"] or "", r["recruiter"] or "", r["status"], ", ".join(r["documents"]["missing"]),
         r["passportNumber"] or "")] for r in rows]
 

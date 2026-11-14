@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { roleLabel } from '@/shared/model/role-labels'
 import { Select } from '@/shared/ui/primitives'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import { SOURCE_OPTIONS, cleanAgencyName, jobOptionText, jobUnavailableReason } from '../form-model'
@@ -98,6 +99,14 @@ export function AssignmentBar({
   const shownApplication = owned.find((item) => item.id === activeApplicationId) ?? owned.find((item) => item.orderId === jobValue)
   const jobSelectValue = several && shownApplication ? `app:${shownApplication.id}` : jobValue
 
+  // The jobs a candidate can be put on come first; filled, closed and on-hold jobs follow (greyed out), so the list opens on what is available.
+  const pickableJobs = useMemo(() => {
+    const rows = jobs.filter((job) => !ownedOrders.has(job.orderId)).map((job, index) => ({
+      job, index, reason: job.orderId === jobValue ? '' : jobUnavailableReason(job),
+    }))
+    return rows.sort((a, b) => Number(Boolean(a.reason)) - Number(Boolean(b.reason)) || a.index - b.index)
+  }, [jobs, ownedOrders, jobValue])
+
   const pickJob = (value: string) => {
     if (value.startsWith('app:')) {
       const id = value.slice(4)
@@ -134,10 +143,9 @@ export function AssignmentBar({
           <Select id="af-assign-job" searchable value={jobSelectValue} aria-label="Job" disabled={!clientId && !several} onChange={(event) => pickJob(event.target.value)}>
             <option value="">{clientId ? jobs.length ? 'No job chosen' : 'No open jobs available' : 'Choose a client first'}</option>
             {owned.map((item) => <option key={item.id} value={`app:${item.id}`}>{applicationOptionText(item, item.id === activeApplicationId)}</option>)}
-            {jobs.filter((job) => !ownedOrders.has(job.orderId)).map((job) => {
-              const reason = job.orderId === jobValue ? '' : jobUnavailableReason(job)
-              return <option key={job.orderId} value={job.orderId} disabled={Boolean(reason)}>{jobOptionText(job)}{reason ? ` (${reason})` : ''}</option>
-            })}
+            {pickableJobs.map(({ job, reason }) => (
+              <option key={job.orderId} value={job.orderId} disabled={Boolean(reason)}>{jobOptionText(job)}{reason ? ` (${reason})` : ''}</option>
+            ))}
           </Select>
         ) : several ? (
           <Select id="af-assign-job" value={jobSelectValue} aria-label="Job" onChange={(event) => pickJob(event.target.value)}>
@@ -184,7 +192,7 @@ export function AssignmentBar({
             {assignment.recruiter && !options.recruiters.some((item) => item.id === assignment.recruiter?.id) && (
               <option value={assignment.recruiter.id} disabled>{assignment.recruiter.name}</option>
             )}
-            {options.recruiters.map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` (${item.role})` : ''}</option>)}
+            {options.recruiters.map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` (${roleLabel(item.role).toLowerCase()})` : ''}</option>)}
           </Select>
         ) : (
           <p className="af-assign-value" id="af-assign-recruiter">{assignment.recruiter?.name || NOT_ASSIGNED_TEXT}</p>

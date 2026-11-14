@@ -14,6 +14,7 @@ from app.core.deps import current_user
 from app.db.models import Application, Attachment, Candidate, User
 from app.db.session import get_db
 from app.services import application_form as service, form_assignment, form_feedback
+from app.services.invoice_access import ensure_can_see_invoices
 
 router = APIRouter(prefix="/api/candidates/{candidate_id}/application-form", tags=["application-form"])
 
@@ -229,6 +230,8 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
     slot = slot.strip()
     if slot not in service.SLOTS:
         raise HTTPException(422, "Choose which document this is: " + ", ".join(service.SLOTS) + ".")
+    if slot == "invoice":
+        ensure_can_see_invoices(user)
     content_type = files_router._content_type(file.content_type, file.filename or "file")
     if slot == "photo" and not content_type.startswith("image/"):
         raise HTTPException(415, "The photo must be an image (JPG, PNG, WebP or HEIC).")

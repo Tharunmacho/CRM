@@ -287,6 +287,10 @@ export function funnelWidth(reached: number, first: number): number {
 export const CLOSURE_LABEL: Record<string, string> = {
   prescreen_failed: 'Failed prescreening', not_interested: 'Not interested', resume_not_received: 'Resume not received',
   interview_rejected: 'Rejected at interview', medical_unfit: 'Medically unfit', unmapped: 'Removed from the order',
+  offer_declined: 'Offer declined', offer_not_received: 'Offer not received',
+  stage_rejected: 'Rejected', stage_declined: 'Candidate declined', interview_not_possible: 'Interview not possible',
+  passport_not_available: 'Passport not available', advance_not_paid: 'Advance not paid', visa_rejected: 'Visa rejected',
+  visa_stamping_refused: 'Visa stamping refused', not_travelling: 'Not travelling',
 }
 
 /** The "x of y" text used for hours and tasks cells. */

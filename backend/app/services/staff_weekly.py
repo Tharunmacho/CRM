@@ -355,8 +355,10 @@ def build_report(db, from_date: date | None, to_date: date | None, zone: str, *,
         "from an earlier day counts no hours and is flagged: the person never checked out.",
         "Absent means a scheduled working day with no check-in. Weekly offs, holidays and approved leave are not absences "
         "(same rules as the Attendance page). Days before a person's first attendance record, and days still to come, are not judged.",
-        "Daily tasks are the quota the system hands each recruiter. Completed means the stage task was finished; postponed means "
-        "it was not finished by the end of its day; overdue means still open after its hourly deadline.",
+        "Daily tasks are history from the days the system handed each recruiter a fixed daily quota: completed means the stage task was "
+        "finished; postponed means it was not finished by the end of its day; overdue means still open after its hourly deadline. "
+        "Recruiters now work all of their own candidates with no quota, so periods after that change have no daily-task numbers and "
+        "the score uses hours and stage moves.",
         "A stage move is a stage completed in the period, credited to the recruiter responsible for the candidate. Stages that were "
         "later reopened are left out.",
         f"Stuck means an active candidate with no stage completed for {STUCK_DAYS} days or more.",

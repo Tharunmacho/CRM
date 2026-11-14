@@ -12,6 +12,7 @@ from sqlalchemy import Numeric, case, cast, func, or_, select
 from app.core.config import get_settings
 from app.db.models import ApplicationStage, AuditEntry, Candidate, CandidateInvoice, InvoicePayment, InvoiceSettings, Role, User
 from app.services import candidate_invoices as invoices
+from app.services.invoice_access import can_see_invoices, ensure_can_see_invoices
 
 
 def _received(db, invoice_id):
@@ -23,7 +24,7 @@ def ensure_fee_covers_receipts(db, row, fee, cgst_rate, sgst_rate):
     """Called under the shared candidate lock before changing an agreed service fee."""
     received = _received(db, row.id)
     if received and (fee is None or Decimal(invoices.amounts(fee, cgst_rate, sgst_rate)["total"]) < received):
-        raise HTTPException(422, "The agreed total cannot be lower than recorded receipts. Ask a manager to correct any mistaken receipt first.")
+        raise HTTPException(422, "The agreed total cannot be lower than recorded receipts. Correct any mistaken receipt first.")
 
 
 def _sums(db, row):
@@ -51,7 +52,7 @@ def summary(db, row, user=None):
             "received": invoices.money(received), "balance": invoices.money(balance) if balance is not None else None,
             "credit": invoices.money(max(received - total, Decimal(0))) if total is not None else "0.00",
             "canRecord": bool(row and total is not None and balance > 0),
-            "canVoid": bool(user and user.role in (Role.admin, Role.manager))}
+            "canVoid": can_see_invoices(user)}
 
 
 def _scope(db, candidate_id, user, application_id, *, lock=False):
@@ -98,6 +99,7 @@ def _advances(db, app):
 
 
 def state(db, candidate_id, user, application_id=None):
+    ensure_can_see_invoices(user)
     _, app, row = _scope(db, candidate_id, user, application_id)
     result = summary(db, row, user)
     payments = []
@@ -114,6 +116,7 @@ def state(db, candidate_id, user, application_id=None):
 
 
 def record(db, candidate_id, user, values, application_id=None):
+    ensure_can_see_invoices(user)
     try:
         candidate, app, row = _scope(db, candidate_id, user, application_id, lock=True)
         if row is None or row.service_fee is None:
@@ -160,8 +163,7 @@ def record(db, candidate_id, user, values, application_id=None):
 
 
 def void(db, candidate_id, payment_id, user, reason):
-    if user.role not in (Role.admin, Role.manager):
-        raise HTTPException(403, "Only a manager or administrator can void a receipt.")
+    ensure_can_see_invoices(user)
     try:
         candidate = invoices._candidate(db, candidate_id, user, lock=True)
         entry = db.scalar(select(InvoicePayment).join(CandidateInvoice).where(InvoicePayment.id == payment_id,
@@ -186,7 +188,8 @@ def void(db, candidate_id, payment_id, user, reason):
 
 
 def finance_summary(db, user, *, search="", status="all", limit=50, offset=0):
-    """Aggregate only the authorized matching set; pagination never changes its totals."""
+    """Aggregate the whole matching set (admin only); pagination never changes its totals."""
+    ensure_can_see_invoices(user)
     config = db.get(InvoiceSettings, 1)
     paid = select(InvoicePayment.invoice_id, func.sum(InvoicePayment.amount).label("received")).where(
         InvoicePayment.voided_at.is_(None)).group_by(InvoicePayment.invoice_id).subquery()
@@ -212,8 +215,6 @@ def finance_summary(db, user, *, search="", status="all", limit=50, offset=0):
         CandidateInvoice.issued_at.label("issuedAt"), CandidateInvoice.attachment_id.label("attachmentId"),
         CandidateInvoice.created_at.label("createdAt")).outerjoin(Candidate, Candidate.id == CandidateInvoice.candidate_id)
     query = query.outerjoin(paid, paid.c.invoice_id == CandidateInvoice.id)
-    if user.role not in (Role.admin, Role.manager):
-        query = query.where(Candidate.owner_id == user.id)
     search = search.strip()
     if search:
         escaped = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"

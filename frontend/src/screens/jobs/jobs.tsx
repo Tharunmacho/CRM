@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, BriefcaseBusiness, LayoutGrid, Pencil, Plus, Search, Table2, X } from 'lucide-react'
+import { ArrowRight, BriefcaseBusiness, LayoutGrid, Pencil, Plus, Search, Table2, Trash2, X } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import type { Order } from '@/shared/model/types'
 import { money } from '@/shared/lib/format'
@@ -10,6 +10,8 @@ import { DataTable, type Column } from '@/shared/ui/table'
 import { Flag, Progress } from '@/features/clients/components/parts'
 import { highlightPieces } from '@/features/clients/client-search'
 import { OrderDialog } from '@/features/jobs/components/job-dialogs'
+import { DeleteJobDialog } from '@/features/jobs/components/delete-job-dialog'
+import { canDeleteOrder } from '@/features/jobs/order-delete'
 import { OrderStatusText } from '@/features/jobs/components/order-parts'
 import { orderStatusKey } from '@/features/jobs/order-meta'
 import { SearchSelect } from '@/features/jobs/components/search-select'
@@ -81,7 +83,7 @@ function Salary({ order }: { order: Order }) {
     : <span className="cl-cell js-salary"><b>{money(order.salary, order.currency)}</b><span>per month</span></span>
 }
 
-function JobCards({ rows, query, newId, onOpen, onEdit }: { rows: JobRow[]; query: string; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void }) {
+function JobCards({ rows, query, newId, onOpen, onEdit, onDelete }: { rows: JobRow[]; query: string; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void; onDelete?: (o: Order) => void }) {
   return <div className="cs-grid">{rows.map((row) => {
     const o = row.order
     const facts: { label: string; value: ReactNode }[] = [
@@ -100,13 +102,14 @@ function JobCards({ rows, query, newId, onOpen, onEdit }: { rows: JobRow[]; quer
       <footer>
         <button type="button" className="cl-open cs-wide" onClick={() => onOpen(o)} aria-label={`Open ${row.title} ${o.ref}`}>Open<ArrowRight size={14} aria-hidden="true" /></button>
         {onEdit && <button type="button" className="cl-open cs-wide" onClick={() => onEdit(o)} aria-label={`Edit ${row.title} ${o.ref}`}><Pencil size={13} aria-hidden="true" />Edit</button>}
+        {onDelete && <button type="button" className="cl-open cs-wide is-danger" onClick={() => onDelete(o)} aria-label={`Delete ${row.title} ${o.ref}`}><Trash2 size={13} aria-hidden="true" />Delete</button>}
       </footer>
     </article>
   })}</div>
 }
 
 /** The table is the shared DataTable (the Clients page's look and column alignment); on a phone it stacks into labelled rows. */
-function JobTable({ rows, query, loading, newId, onOpen, onEdit }: { rows: JobRow[]; query: string; loading: boolean; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void }) {
+function JobTable({ rows, query, loading, newId, onOpen, onEdit, onDelete }: { rows: JobRow[]; query: string; loading: boolean; newId: string; onOpen: (o: Order) => void; onEdit?: (o: Order) => void; onDelete?: (o: Order) => void }) {
   const columns: Column<JobRow>[] = [
     {
       key: 'job', header: 'Job', width: '20%',
@@ -121,9 +124,10 @@ function JobTable({ rows, query, loading, newId, onOpen, onEdit }: { rows: JobRo
     { key: 'openings', header: 'Openings', width: '12%', align: 'left', render: (row) => <Openings row={row} /> },
     { key: 'status', header: 'Status', width: '9%', align: 'left', render: (row) => <OrderStatusText order={row.order} /> },
     {
-      key: 'actions', header: 'Actions', actions: true, minWidth: '8.5rem',
+      key: 'actions', header: 'Actions', actions: true, minWidth: onDelete ? '10.5rem' : '8.5rem',
       render: (row) => <span className="cs-row-actions">
         {onEdit && <button type="button" className="cs-icon-act" onClick={(event) => { event.stopPropagation(); onEdit(row.order) }} aria-label={`Edit ${row.title} ${row.order.ref}`} title="Edit"><Pencil size={14} aria-hidden="true" /></button>}
+        {onDelete && <button type="button" className="cs-icon-act is-danger" onClick={(event) => { event.stopPropagation(); onDelete(row.order) }} aria-label={`Delete ${row.title} ${row.order.ref}`} title="Delete"><Trash2 size={14} aria-hidden="true" /></button>}
         <button type="button" className="cl-open" onClick={(event) => { event.stopPropagation(); onOpen(row.order) }} aria-label={`Open ${row.title} ${row.order.ref}`}>Open<ArrowRight size={14} aria-hidden="true" /></button>
       </span>,
     },
@@ -155,9 +159,11 @@ export default function JobsPage() {
   const [layout, setLayoutState] = useState<Layout>(readLayout)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Order | null>(null)
+  const [deleting, setDeleting] = useState<Order | null>(null)
   const [newId, setNewId] = useState('')
   const searchBox = useRef<HTMLInputElement>(null)
   const canEdit = store.can('manage_records')
+  const canDelete = canDeleteOrder(store.me?.role)
 
   const patch = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(params)
@@ -280,8 +286,8 @@ export default function JobsPage() {
       </div>
     }
     return layout === 'table'
-      ? <JobTable rows={matched} query={query} loading={false} newId={newId} onOpen={open} onEdit={canEdit ? setEditing : undefined} />
-      : <JobCards rows={matched} query={query} newId={newId} onOpen={open} onEdit={canEdit ? setEditing : undefined} />
+      ? <JobTable rows={matched} query={query} loading={false} newId={newId} onOpen={open} onEdit={canEdit ? setEditing : undefined} onDelete={canDelete ? setDeleting : undefined} />
+      : <JobCards rows={matched} query={query} newId={newId} onOpen={open} onEdit={canEdit ? setEditing : undefined} onDelete={canDelete ? setDeleting : undefined} />
   }
 
   return (
@@ -324,6 +330,7 @@ export default function JobsPage() {
 
       {adding && <OrderDialog onClose={() => setAdding(false)} onSaved={saved} />}
       {editing && <OrderDialog order={editing} onClose={() => setEditing(null)} />}
+      {deleting && <DeleteJobDialog orderId={deleting.id} open onClose={() => setDeleting(null)} onEdit={() => setEditing(deleting)} />}
     </div>
   )
 }

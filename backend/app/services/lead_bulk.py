@@ -27,7 +27,7 @@ BULK_LIMIT = 10_000          # leads per call, hard cap
 TYPED_CONFIRM_OVER = 20      # deleting more than this many leads needs the word DELETE
 ACTIONS = ("assign", "status", "not_interested", "export", "delete")
 FILTER_KEYS = ("q", "status", "campaign", "form", "position", "country", "platform", "owner", "created_from", "created_to",
-               "has_resume", "matched_candidate", "follow_up", "batch_id")
+               "date_field", "uploaded_within_hours", "has_resume", "matched_candidate", "follow_up", "batch_id")
 EXPORT_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 REASONS = {
@@ -223,7 +223,7 @@ def _assign(db: Session, user: User, rows: list[tuple], owner_id: str, only_unas
     elif owner_id == "auto":
         staff = eligible_staff(db)
         if not staff:
-            raise fail(422, "invalid_request", "No staff member is available for automatic assignment.")
+            raise fail(422, "invalid_request", "No recruiter is available for automatic assignment.")
         names = {u.id: u.name for u in staff}
         picks = spread_evenly(staff, open_lead_counts(db, [u.id for u in staff]), len(candidates))
     else:

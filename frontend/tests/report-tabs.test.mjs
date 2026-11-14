@@ -18,7 +18,10 @@ test('every tab named here is a report in the configuration, and the other way r
 test('a known ?tab= opens that tab; unknown or missing falls back to Pipeline', () => {
   assert.equal(t.reportTabFromParams(q('tab=staff'), true), 'staff')
   assert.equal(t.reportTabFromParams(q('tab=advance'), false), 'advance')
-  assert.equal(t.reportTabFromParams(q('tab=collections'), true), 'collections')
+  // Fee collections belongs to the admin alone (the third argument is the view_invoices capability), not to managers.
+  assert.equal(t.reportTabFromParams(q('tab=collections'), true, true), 'collections')
+  assert.equal(t.reportTabFromParams(q('tab=collections'), true, false), 'funnel')
+  assert.equal(t.reportTabFromParams(q('tab=collections'), true), 'funnel')
   assert.equal(t.reportTabFromParams(q('tab=collections'), false), 'funnel')
   assert.equal(t.reportTabFromParams(q('tab=nonsense'), true), 'funnel')
   assert.equal(t.reportTabFromParams(q(''), true), 'funnel')

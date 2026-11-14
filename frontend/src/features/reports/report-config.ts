@@ -24,7 +24,7 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
     ],
   },
   {
-    key: 'staff', label: 'Staff performance', question: 'Who is carrying what?', title: 'Staff performance',
+    key: 'staff', label: 'Recruiter performance', question: 'Who is carrying what?', title: 'Recruiter performance',
     note: 'Candidates given to each person, tasks finished, the average hours each person takes per stage, and overdue tasks sent to the admin.',
     how: [
       'Assigned: candidates that arrived in the period and were first given to this person, within your filters.',
@@ -75,7 +75,7 @@ export const REPORTS: { key: ReportKey; label: string; question: string; title: 
  * (Other roles keep the table above: the weekly report is admin only, see the `staff_report` capability.)
  */
 export const STAFF_WEEKLY_COPY = {
-  title: 'Staff performance',
+  title: 'Recruiter performance',
   note: "Each person's attendance, hours, daily tasks and candidates from prescreening to deployment, for a week or any period you choose, worked out from the live records.",
 }
 
@@ -89,6 +89,11 @@ export const SERIES = { primary: 'var(--rv-c1)', teal: 'var(--rv-c2)', amber: 'v
 export const REASON_COLOURS: Record<string, string> = {
   prescreen_failed: SERIES.primary, not_interested: SERIES.amber, resume_not_received: SERIES.teal,
   interview_rejected: SERIES.violet, medical_unfit: SERIES.rose, unmapped: 'var(--rv-c-neutral)',
+  offer_declined: SERIES.green, offer_not_received: 'color-mix(in srgb, var(--rv-c3) 55%, white)',
+  stage_rejected: 'color-mix(in srgb, var(--rv-c4) 55%, white)', stage_declined: 'color-mix(in srgb, var(--rv-c6) 55%, white)',
+  interview_not_possible: 'color-mix(in srgb, var(--rv-c2) 55%, white)', passport_not_available: 'color-mix(in srgb, var(--rv-c5) 55%, white)',
+  advance_not_paid: 'color-mix(in srgb, var(--rv-c1) 55%, white)', visa_rejected: 'color-mix(in srgb, var(--rv-c5) 75%, black)',
+  visa_stamping_refused: 'color-mix(in srgb, var(--rv-c4) 75%, black)', not_travelling: 'var(--rv-c-bad)',
 }
 
 export const SOURCE_COLOURS: Record<string, string> = { email: SERIES.primary, whatsapp: SERIES.teal, walk_in: SERIES.amber, referral: 'color-mix(in srgb, var(--rv-c1) 42%, white)', other: 'var(--rv-c-neutral)' }

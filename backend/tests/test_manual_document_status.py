@@ -56,8 +56,11 @@ def test_manual_mark_persists_counts_completeness_and_retains_history_without_fi
 
 def test_manual_air_ticket_or_invoice_never_generates_invoice_or_ocr(desk):
     mapped(desk)
-    for slot in ("air_ticket", "invoice", "resume"):
+    for slot in ("air_ticket", "resume"):
         assert mark(desk, slot=slot).status_code == 200
+    assert mark(desk, slot="invoice").status_code == 403  # the Invoice document is the admin's alone
+    as_user(desk, "admin", Role.admin)
+    assert mark(desk, slot="invoice").status_code == 200
     with desk.sessions() as db:
         for model in (Attachment, DocumentExtractionJob, CandidateInvoice):
             assert db.scalar(select(func.count()).select_from(model)) == 0

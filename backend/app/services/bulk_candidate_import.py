@@ -35,6 +35,7 @@ from app.db.models import (
 from app.domain.stages import StageOptions, stage_by_no, validate_payload
 from app.services import document_storage
 from app.services.application_form import SLOT_LABELS, SLOT_SPECS, deployment_gaps
+from app.services.invoice_access import can_see_invoices
 from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_email, normalize_passport, normalize_phone
 
 # --------------------------------------------------------------------------------------------- document kinds
@@ -482,7 +483,9 @@ def stage_inputs(row: dict, files: dict[str, dict], options: StageOptions) -> tu
         2: clean({"forwarded": "yes", "dateForwarded": forwarded}),
         3: clean({"scheduled": "yes", "date": interview, "time": interview_time, "mode": mode}),
         4: {"result": "selected", "remarks": row.get("interview_remarks") or "Selected. Recorded from the candidate's file when the history was imported."},
-        5: clean({"obtained": "yes", "file": _file_ref("signed_offer", files)}),
+        # Imported history only ever records the positive outcomes (Selected, Agreed, Fit): the folder is the evidence that
+        # the candidate moved on, and a candidate who stopped at one of these stages is not imported as having travelled.
+        5: clean({"result": "agreed", "obtained": "yes", "file": _file_ref("signed_offer", files)}),
         6: clean({"applied": "yes", "appliedDate": medical, "result": "fit"}),
         7: clean({"collected": "yes", "collectedDate": collected, "copy": _file_ref("passport", files)}),
         8: clean({"collected": "yes", "amount": str(amount) if amount is not None else None, "amountCurrency": currency,
@@ -644,7 +647,8 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
         if not item["ok"]:
             break
         completed = item["stage"]
-    gaps = deployment_gaps({kind for kind in kinds if kind in CANDIDATE_SLOTS})
+    # The Invoice document is the admin's, so a recruiter's folder is never held back for a document they cannot see.
+    gaps = deployment_gaps({kind for kind in kinds if kind in CANDIDATE_SLOTS}, ctx.me is None or can_see_invoices(ctx.me))
 
     order = ctx.order(row.get("order"))
     action, notes = "documents_only", []
@@ -771,6 +775,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     from app.api.routers.files import _safe_name
     from app.db.models import Designation
     from app.services.care_india_id import allocate_care_id
+    from app.services.traveller_id import assign_traveller_id
     from app.services.lead_xlsx import agency_zone
     settings = get_settings()
 
@@ -882,6 +887,9 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
             amount=data.get("amount") if number == 8 else None, amount_currency=data.get("amountCurrency") if number == 8 else None))
     if deploy:
         _sync_order(db, locked)
+        # They have travelled: number them in the traveller series by the financial year of the travel date. A person the
+        # office only says has flown (no date on the sheet) is numbered by the day their travel stage is recorded.
+        assign_traveller_id(db, candidate, built[11].get("travelDate"), when[11])
     else:
         # The stage the recruiter continues at: its task, and what the sheet already says as the saved draft.
         if current <= plan["level"]:

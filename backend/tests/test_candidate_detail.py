@@ -47,9 +47,11 @@ def test_full_detail_matches_shared_bootstrap_without_private_internal_fields(wo
         # ...and lists the 15 extra document slots of the application form after the bootstrap's seven (stored only, so empty here).
         documents = detail.pop("documents")
         assert documents[:len(baseline["documents"])] == baseline["documents"]
-        assert [d["key"] for d in documents[len(baseline["documents"]):]] == [
+        # The Invoice slot is the admin's alone: a manager or recruiter gets 14 extra slots, not 15.
+        assert [d["key"] for d in documents[len(baseline["documents"]):]] == [key for key in [
             "application_form", "undertaking_letter", "insurance", "invoice", "education_certificate", "experience_certificate",
             "signed_offer", "medical", "pcc", "visa", "google_review", "visa_stamping", "emigration", "air_ticket", "other"]
+            if key != "invoice" or actor_id == "admin"]
         assert all(d["versions"] == [] for d in documents[len(baseline["documents"]):])
         assert detail == {key: value for key, value in baseline.items() if key != "documents"}
         assert measurement["queries"] == 1
