@@ -186,6 +186,38 @@ def test_shared_resume_passport_page_keeps_the_normal_passport_guard(monkeypatch
     assert person.father_name is None and person.ocr_data is None
 
 
+def test_partial_verified_resume_only_fills_empty_fields_and_keeps_replay_ignores(monkeypatch):
+    """The maintenance path cannot replace a trusted extracted address on a later force replay."""
+    from app.services import application_form
+    person = candidate("Alex Example")
+    person.passport_no = "AA145638"
+    person.current_address = "Trusted passport address"
+    person.field_sources = {"personal.currentAddress": "extracted"}
+    audit = []
+    db = SimpleNamespace(scalar=lambda *args: person, add=audit.append)
+    monkeypatch.setattr("app.services.document_identity.identity_matches", lambda *args, **kwargs: [])
+    monkeypatch.setattr(application_form, "_attach_read_documents", lambda *args, **kwargs: {})
+    raw = {
+        "name": "Alex Example", "contact": {"phones": ["9000000000"], "address": "Old resume address"},
+        "personal_info": {"father_name": "Suresh Example"},
+        "passport_details": {"passport_number": "ZZ999999", "place_of_issue": "Wrong place"},
+    }
+    job = SimpleNamespace(id="partial-job", candidate_id=person.id, owner_id="staff", status="needs_review",
+                          last_error=IDENTITY_REVIEW_MESSAGE,
+                          draft={"applicationForm": {"slot": "resume", "attachmentId": "partial-file"}})
+    output = {"status": "needs_review", "coverage": {"complete": False}, "extractions": {
+        "resume": {"fields": {"name": "Alex Example", "passport_no": "ZZ999999"}, "raw": raw}}}
+    application_form.apply_job_output(db, job, output, _partial_verified_resume_replay=True)
+
+    assert person.father_name == "Suresh Example"
+    assert person.current_address == "Trusted passport address" and person.passport_no == "AA145638"
+    ignored = fx.ignored_fields_for(person.ocr_data, "resume", raw)
+    assert fx.PASSPORT_DOCUMENT_COLUMNS <= ignored and "current_address" in ignored
+    fx.apply_stored_ocr(person, force=True)
+    assert person.current_address == "Trusted passport address" and person.passport_no == "AA145638"
+    assert job.status == "needs_review"
+
+
 def test_local_resume_contacts_wait_for_identity_check(monkeypatch):
     from app.services.application_form import apply_local_patterns
     person = candidate("Original Person")
