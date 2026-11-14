@@ -64,10 +64,15 @@ test('the referral column names the referrer, otherwise how the CV arrived', () 
   assert.equal(m.referralLabel({ source: 'whatsapp', label: 'WhatsApp', detail: null }), 'WhatsApp')
 })
 
-test('the table has the agreed columns and no Deadline column; the Recruiter column is for supervisors only', async () => {
+test('the table has the agreed sheet columns and no Deadline column; the Recruiter column is for supervisors only', async () => {
   const table = await code('../src/screens/tasks/daily-table.tsx')
   const columns = [...table.slice(table.indexOf('const COLUMNS'), table.indexOf('] as const')).matchAll(/title: '([^']+)'/g)].map((c) => c[1])
-  assert.deepEqual(columns, ['S.No', 'Client', 'Country', 'Candidate', 'Job', 'Referral', 'Recruiter', 'Stage', 'Remarks', 'Actions'])
+  // The nine agreed columns in the agency's order; Recruiter (supervisors only) sits after the candidate and the unlabeled actions cell trails.
+  assert.deepEqual(columns, ['S NO', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'Recruiter', 'JOB', 'REF', 'STAGE', 'REMARKS', 'AMOUNT', 'GOOGLE REVIEW', 'Actions'])
+  assert.deepEqual(columns.filter((c) => c !== 'Recruiter' && c !== 'Actions'),
+    ['S NO', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'JOB', 'REF', 'STAGE', 'REMARKS', 'AMOUNT', 'GOOGLE REVIEW'])
+  assert.match(table, /key: 'actions', title: 'Actions', width: \d+, quiet: true/)
+  assert.doesNotMatch(table, /Referral|'S\.No'/)
   assert.match(table, /key: 'staff', title: 'Recruiter', width: \d+, supervisor: true/)
   assert.doesNotMatch(table, /Deadline|countdown|overdue|Postponed|sessionLabel|slotNo|dueAt/i)
   // The Care India ID leads, the CND reference follows muted (the same helpers as the rest of the app).
@@ -171,7 +176,9 @@ test('the Tasks page has the Follow-up view and a Travelled tab that links to /t
   const table = await code('../src/screens/tasks/follow-up-table.tsx')
   assert.match(table, /from '\.\/daily-table'/)
   const columns = [...table.slice(table.indexOf('const COLUMNS'), table.indexOf('] as const')).matchAll(/title: '([^']+)'/g)].map((c) => c[1])
-  assert.deepEqual(columns, ['S.No', 'Client', 'Country', 'Candidate', 'Job', 'Recruiter', 'Stage', 'Last update / remarks', 'Actions'])
+  assert.deepEqual(columns, ['S NO', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'Recruiter', 'JOB', 'REF', 'STAGE', 'REMARKS', 'AMOUNT', 'GOOGLE REVIEW', 'Actions'])
+  assert.match(table, /AmountCell/)
+  assert.match(table, /ReviewCell/)
   assert.match(table, /Open stage/)
   assert.match(table, /Open candidate profile/)
   assert.match(table, /applicationFormHref|onOpen/)
@@ -190,4 +197,23 @@ test("a recruiter's Tasks badge counts today's candidates to work; no overdue or
   assert.match(shell, /summary\.toWork/)
   assert.match(shell, /to work today/)
   assert.doesNotMatch(shell, /Complete your tasks first/)
+})
+
+test('AMOUNT is the advance collected, as money; blank when none is recorded', () => {
+  assert.equal(m.advanceLabel({ advanceAmount: 5000, advanceCurrency: 'INR' }), '₹5,000.00')
+  assert.equal(m.advanceLabel({ advanceAmount: 125000.5, advanceCurrency: null }), '₹1,25,000.50')
+  assert.equal(m.advanceLabel({ advanceAmount: null, advanceCurrency: null }), null)
+  assert.equal(m.advanceLabel({ advanceAmount: 0, advanceCurrency: 'INR' }), null)
+  assert.match(m.advanceLabel({ advanceAmount: 100, advanceCurrency: 'AED' }), /100\.00/)
+})
+
+test('the AMOUNT and GOOGLE REVIEW cells show Yes, Pending or a dash, and never read invoice figures', async () => {
+  const table = await code('../src/screens/tasks/daily-table.tsx')
+  assert.match(table, /googleReview === 'obtained'[\s\S]*>Yes</)
+  assert.match(table, /googleReview === 'pending'[\s\S]*>Pending</)
+  assert.match(table, /advanceLabel\(item\)/)
+  const model = await code('../src/features/daily-work/daily-work-model.ts')
+  assert.match(model, /advanceAmount: number \| null/)
+  assert.match(model, /googleReview: GoogleReview/)
+  for (const text of [table, model]) assert.doesNotMatch(text, /invoice|cgst|gst/i)
 })

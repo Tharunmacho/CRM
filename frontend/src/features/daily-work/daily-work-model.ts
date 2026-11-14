@@ -4,6 +4,8 @@
  * finished today sit in a "Done today" group at the bottom. No imports, so it runs under node:test.
  */
 
+export type GoogleReview = 'obtained' | 'pending' | null
+
 export interface DailyItem {
   /** The candidate id: one row per candidate. */
   id: string
@@ -39,6 +41,12 @@ export interface DailyItem {
   positionSource: 'order' | 'preference' | 'skill' | null
   positionIsPreferred: boolean
   orderRef: string | null
+  /** Advance the candidate paid (stage 8) on this placement; null when none is recorded. Never an invoice figure. */
+  advanceAmount: number | null
+  /** The currency the advance was recorded in (INR unless another was chosen); null with no advance. */
+  advanceCurrency: string | null
+  /** Stage 9 Google review: obtained, pending (stage 9 or later, not obtained yet) or null (not applicable yet). */
+  googleReview: GoogleReview
   referral: { source: string; label: string; detail: string | null }
   remark: { body: string; at: string; by: string; count: number } | null
 }
@@ -94,6 +102,12 @@ export interface FollowUpItem {
   candidateRef: string
   candidateCareId: string | null
   orderRef: string | null
+  /** Advance the candidate paid (stage 8) on this placement; null when none is recorded. Never an invoice figure. */
+  advanceAmount: number | null
+  /** The currency the advance was recorded in (INR unless another was chosen); null with no advance. */
+  advanceCurrency: string | null
+  /** Stage 9 Google review: obtained, pending (stage 9 or later, not obtained yet) or null (not applicable yet). */
+  googleReview: GoogleReview
   remark: { body: string; at: string; by: string; count: number } | null
 }
 
@@ -161,6 +175,17 @@ export function clockTime(iso: string, timeZone?: string): string {
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime())) return '--:--'
   return new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
+}
+
+/** The AMOUNT column: the advance collected as money ("₹5,000.00"), or null when none is recorded (the cell shows a dash). */
+export function advanceLabel(item: Pick<DailyItem, 'advanceAmount' | 'advanceCurrency'>): string | null {
+  if (typeof item.advanceAmount !== 'number' || !Number.isFinite(item.advanceAmount) || item.advanceAmount <= 0) return null
+  const currency = (item.advanceCurrency || 'INR').toUpperCase()
+  try {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.advanceAmount)
+  } catch {
+    return `${currency} ${item.advanceAmount.toFixed(2)}`
+  }
 }
 
 /** Referral column text: the referrer when someone referred the candidate, otherwise how the CV arrived. */

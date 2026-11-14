@@ -4,19 +4,21 @@ import { Button } from '@/shared/ui/primitives'
 import { cn } from '@/shared/lib/cn'
 import { staleLabel, type FollowUpItem } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
-import { CandidateIds, ClientCell, CountryCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell } from './daily-table'
+import { AmountCell, CandidateIds, ClientCountryCell, OrderRefCell, PositionCellView, RemarkCell, ReviewCell, RowMenu, ScrollEdges, StageCell } from './daily-table'
 
-/** Column order and pixel widths (the table scrolls sideways below their sum; the recruiter column is for supervisors). */
+/** The same agreed column format as Today's candidates (the Recruiter column is for supervisors; the trailing actions column has no visible title). */
 const COLUMNS = [
-  { key: 'no', title: 'S.No', width: 44 },
-  { key: 'client', title: 'Client', width: 98 },
-  { key: 'country', title: 'Country', width: 108 },
-  { key: 'candidate', title: 'Candidate', width: 156, left: true },
-  { key: 'position', title: 'Job', width: 92 },
+  { key: 'no', title: 'S NO', width: 48 },
+  { key: 'client', title: 'CLIENT / COUNTRY', width: 138 },
+  { key: 'candidate', title: 'CANDIDATE NAME', width: 168, left: true },
   { key: 'staff', title: 'Recruiter', width: 96, supervisor: true },
-  { key: 'stage', title: 'Stage', width: 124 },
-  { key: 'update', title: 'Last update / remarks', width: 190, left: true },
-  { key: 'actions', title: 'Actions', width: 128 },
+  { key: 'position', title: 'JOB', width: 96 },
+  { key: 'ref', title: 'REF', width: 96 },
+  { key: 'stage', title: 'STAGE', width: 124 },
+  { key: 'update', title: 'REMARKS', width: 190, left: true },
+  { key: 'amount', title: 'AMOUNT', width: 96 },
+  { key: 'review', title: 'GOOGLE REVIEW', width: 96 },
+  { key: 'actions', title: 'Actions', width: 128, quiet: true },
 ] as const
 
 export interface FollowUpTableProps {
@@ -38,23 +40,25 @@ export function FollowUpTable({ items, now, supervisor, staffName, canWork, onOp
     <ScrollEdges label="Follow-up candidates, scroll sideways for more columns">
       <table className="dw-table dw-main" aria-label="Follow-up candidates" style={{ minWidth: columns.reduce((sum, c) => sum + c.width, 0) }}>
         <colgroup>{columns.map((c) => <col key={c.key} style={{ width: c.width }} />)}</colgroup>
-        <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left')}>{c.title}</th>)}</tr></thead>
+        <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
           {items.map((item, index) => {
             const name = staffName(item.ownerId)
             return (
               <tr key={item.id} className={cn('dw-row', index % 2 === 1 && 'is-alt')}>
-                <td className="is-num tnum" data-label="S.No">{index + 1}</td>
-                <td data-label="Client"><ClientCell item={{ ...item, kind: 'stage' }} /></td>
-                <td data-label="Country"><CountryCell item={item} onAdd={() => onProfile(item)} /></td>
-                <td data-label="Candidate" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
-                <td data-label="Job"><PositionCellView item={item} /></td>
+                <td className="is-num tnum" data-label="S NO">{index + 1}</td>
+                <td data-label="CLIENT / COUNTRY"><ClientCountryCell item={{ ...item, kind: 'stage' }} onAdd={() => onProfile(item)} /></td>
+                <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
                 {supervisor && <td data-label="Recruiter">{name ? <OwnerTag name={name} /> : <span className="dw-none">Not assigned</span>}</td>}
-                <td data-label="Stage"><StageCell item={item} /></td>
-                <td data-label="Last update / remarks" className="is-left">
+                <td data-label="JOB"><PositionCellView item={item} /></td>
+                <td data-label="REF"><OrderRefCell item={item} /></td>
+                <td data-label="STAGE"><StageCell item={item} /></td>
+                <td data-label="REMARKS" className="is-left">
                   <small className="dw-stale" title={new Date(item.lastUpdateAt).toLocaleString()}>Last update {staleLabel(item.lastUpdateAt, now)}</small>
                   <RemarkCell item={item} canWork={canWork(item)} onSave={(text) => onRemark(item, text)} />
                 </td>
+                <td data-label="AMOUNT"><AmountCell item={item} /></td>
+                <td data-label="GOOGLE REVIEW"><ReviewCell item={item} /></td>
                 <td data-label="Actions" className="is-actions">
                   <div className="dw-actions">
                     <Button size="sm" variant="primary" className="dw-act" onClick={() => onOpen(item)} aria-label={`Open the application form for ${item.candidate}`}>Open</Button>

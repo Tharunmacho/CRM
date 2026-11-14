@@ -14,7 +14,7 @@ from sqlalchemy import event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
-    Candidate, CandidateStatus, Client, Company, DailyWorkItem, Designation, Notification, Order, Remark, Role, Source, Task, TaskKind, User,
+    ApplicationStage, Candidate, CandidateStatus, Client, Company, DailyWorkItem, Designation, Notification, Order, Remark, Role, Source, Task, TaskKind, User,
 )
 from app.services import daily_work
 from app.services.daily_work import scan_daily_work
@@ -677,3 +677,61 @@ def test_both_lists_are_read_only_and_announced_by_the_live_feed_tables_they_dep
     # A stage finished or an application closed writes these tables: the topics the screens subscribe to ('tasks', 'candidates', 'applications').
     assert TOPIC_TABLES["crm_applications"] == ("applications",) and TOPIC_TABLES["crm_application_stages"] == ("applications",)
     assert TOPIC_TABLES["crm_candidates"] == ("candidates",) and TOPIC_TABLES["workflow_tasks"] == ("tasks",)
+
+
+# ------------------------------------------------------------------ AMOUNT (advance collected) and GOOGLE REVIEW columns
+
+def record_stage(env, app_id, stage, *, attempt=1, amount=None, currency=None, data=None, reopened=None, at=TUESDAY):
+    with env.sessions() as db:
+        db.add(ApplicationStage(application_id=app_id, stage=stage, attempt=attempt, data=data or {}, amount=amount, amount_currency=currency,
+                                completed_at=at, reopened_reason=reopened))
+        db.commit()
+
+
+def test_follow_up_rows_carry_the_advance_collected_and_the_google_review_state(desk):
+    apps = mapped_candidates(desk, 6)
+    for candidate, stage in (("c0", 2), ("c1", 8), ("c2", 9), ("c3", 9), ("c4", 8), ("c5", 10)):
+        set_application(desk, apps[candidate], stage=stage)
+    record_stage(desk, apps["c1"], 8, amount=5000, currency="INR", data={"collected": "yes", "amount": "5000.00", "amountCurrency": "INR"})
+    record_stage(desk, apps["c2"], 8, amount=12500.5, currency="INR", data={"collected": "yes"})
+    record_stage(desk, apps["c2"], 9, data={"arrived": "yes", "googleReview": True})
+    record_stage(desk, apps["c3"], 9, data={"arrived": "yes", "googleReview": False})
+    # c4: the first attempt was reopened (ignored); the latest attempt counts. A stage 8 with no amount is no advance.
+    record_stage(desk, apps["c4"], 8, attempt=1, amount=999, currency="INR", reopened="Receipt corrected")
+    record_stage(desk, apps["c4"], 8, attempt=2, amount=7000, currency="AED", data={"collected": "yes"}, at=TUESDAY + timedelta(hours=1))
+    record_stage(desk, apps["c5"], 8, data={"collected": "no"})
+    rows = {item["candidateId"]: item for item in follow(desk, "asha")["items"]}
+    got = {k: (v["advanceAmount"], v["advanceCurrency"], v["googleReview"]) for k, v in rows.items()}
+    assert got == {
+        "c0": (None, None, None),                 # stage 2: nothing yet
+        "c1": (5000.0, "INR", None),              # advance collected, stage 8: review not applicable yet
+        "c2": (12500.5, "INR", "obtained"),       # review obtained
+        "c3": (None, None, "pending"),            # at stage 9, not obtained
+        "c4": (7000.0, "AED", None),              # latest non-reopened attempt wins, in its own currency
+        "c5": (None, None, "pending"),            # stage 10 and no review recorded: still pending
+    }
+    # No invoice, CGST or GST figure rides along on a row.
+    assert not any(any(key.lower().startswith(("invoice", "cgst", "gst", "tax")) for key in item) for item in rows.values())
+
+
+def test_a_recruiter_sees_the_advance_of_their_own_candidates_and_supervisors_see_it_too(desk):
+    mine = mapped_candidates(desk, 1)
+    theirs = mapped_candidates(desk, 1, owner="ravi", start=20)
+    for app in (*mine.values(), *theirs.values()):
+        set_application(desk, app, stage=8)
+        record_stage(desk, app, 8, amount=4000 if app in mine.values() else 6000, currency="INR", data={"collected": "yes"})
+    assert [(i["candidateId"], i["advanceAmount"]) for i in follow(desk, "asha")["items"]] == [("c0", 4000.0)]
+    assert [(i["candidateId"], i["advanceAmount"]) for i in follow(desk, "ravi")["items"]] == [("c20", 6000.0)]
+    assert {i["candidateId"]: i["advanceAmount"] for i in follow(desk, "manager")["items"]} == {"c0": 4000.0, "c20": 6000.0}
+    assert {i["candidateId"]: i["advanceAmount"] for i in follow(desk, "admin")["items"]} == {"c0": 4000.0, "c20": 6000.0}
+
+
+def test_todays_rows_have_the_same_fields_blank_for_an_unmatched_candidate_and_read_from_the_active_placement(desk):
+    owned_candidates(desk, 1)
+    apps = mapped_candidates(desk, 1)
+    record_stage(desk, apps["c0"], 8, amount=3000, currency="INR", data={"collected": "yes"})
+    body = listing(desk, "asha")
+    rows = {item["candidateId"]: item for item in body["items"]}
+    assert rows["u100"]["advanceAmount"] is None and rows["u100"]["advanceCurrency"] is None and rows["u100"]["googleReview"] is None
+    assert rows["c0"]["advanceAmount"] == 3000.0 and rows["c0"]["advanceCurrency"] == "INR" and rows["c0"]["googleReview"] is None
+    assert not any(key.lower().startswith(("invoice", "cgst", "gst", "tax")) for item in body["items"] for key in item)

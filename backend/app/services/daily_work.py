@@ -37,6 +37,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -301,6 +302,52 @@ def run_beside(db, main, *reads):
     return result, outcomes
 
 
+REVIEW_STAGE = 9  # "Visa arrival + Google review"; the review is "pending" from here on until it is obtained
+
+
+def stage_facts_query(*where):
+    """Stage 8 (advance) and stage 9 (visa arrival + Google review) records, never a reopened one, for the placements in `where`."""
+    return (select(ApplicationStage.application_id, ApplicationStage.stage, ApplicationStage.attempt, ApplicationStage.completed_at,
+                   ApplicationStage.amount, ApplicationStage.amount_currency, ApplicationStage.data)
+            .where(ApplicationStage.stage.in_((8, REVIEW_STAGE)), ApplicationStage.reopened_reason.is_(None), *where))
+
+
+def stage_facts(rows) -> dict[str, dict]:
+    """{application id: {"advance": (amount, currency) or None, "review": bool}} from `stage_facts_query` rows.
+
+    The latest attempt of a stage is the effective record (the Advance collections report's rule). The advance is the amount the
+    recruiter recorded on stage 8, in the currency recorded there (INR unless another was chosen); a missing, zero or unreadable
+    amount is no advance. It is the candidate's own money paid in; no invoice, CGST or GST figure is read here."""
+    latest: dict[tuple[str, int], tuple] = {}
+    for row in rows:
+        key = (row[0], row[1])
+        if key not in latest or (row[2], row[3]) > (latest[key][2], latest[key][3]):
+            latest[key] = row
+    facts: dict[str, dict] = {}
+    for (application_id, stage), (_a, _s, _attempt, _at, amount, currency, data) in latest.items():
+        entry = facts.setdefault(application_id, {"advance": None, "review": False})
+        data = data or {}
+        if stage == 8:
+            raw = amount if amount is not None else data.get("amount")
+            try:
+                value = Decimal(str(raw))
+            except Exception:
+                continue
+            if value.is_finite() and value > 0:
+                entry["advance"] = (float(value.quantize(Decimal("0.01"))), (currency or data.get("amountCurrency") or data.get("currency") or "INR").upper())
+        else:
+            entry["review"] = data.get("googleReview") is True
+    return facts
+
+
+def payment_fields(app, facts: dict[str, dict]) -> dict:
+    """`advanceAmount` / `advanceCurrency` (null when none recorded) and `googleReview` ('obtained', 'pending' from stage 9 on, else null)."""
+    fact = facts.get(app.id) if app else None
+    advance = fact["advance"] if fact else None
+    review = "obtained" if fact and fact["review"] else "pending" if app and app.current_stage >= REVIEW_STAGE else None
+    return {"advanceAmount": advance[0] if advance else None, "advanceCurrency": advance[1] if advance else None, "googleReview": review}
+
+
 def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: bool = False, fetched: list | None = None) -> list[dict]:
     """The screen's rows for these recruiters (ids, or a select of ids), in list order: to work first, then done today.
 
@@ -321,8 +368,12 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
     task_query = (select(Task.candidate_id, Task.application_id, Task.id, Task.kind).where(
         Task.candidate_id.in_(ids), Task.kind.in_([TaskKind.stage, TaskKind.remedical, TaskKind.initial_call]),
         Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at, Task.id))
-    lookups = (lambda s: s.execute(app_query).all(), lambda s: s.execute(task_query).all())
-    placed, task_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
+    # Advance and Google review of the candidates' active placements: one more statement, run beside the other two.
+    fact_query = stage_facts_query(Application.id == ApplicationStage.application_id, Application.candidate_id.in_(ids),
+                                   Application.status == ApplicationStatus.active)
+    lookups = (lambda s: s.execute(app_query).all(), lambda s: s.execute(task_query).all(), lambda s: s.execute(fact_query).all())
+    placed, task_rows, fact_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
+    facts = stage_facts(fact_rows)
     apps: dict[str, list] = defaultdict(list)
     for placement in placed:
         apps[placement[0].candidate_id].append(placement)
@@ -355,7 +406,7 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
             "status": "done" if finished is not None else "open", "completedAt": finished,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id,
-            "orderRef": order.ref if order else None,
+            "orderRef": order.ref if order else None, **payment_fields(app, facts),
             "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
                          "detail": cand.source_detail if cand.source == Source.referral else None},
             "remark": {"body": remark["body"], "at": remark["at"], "by": remark["by"], "count": remark["count"]} if remark else None,
@@ -395,25 +446,31 @@ def fetch_follow_up(db, owner_ids) -> list:
         .where(*_follow_up_filter(owner_ids)).order_by(last.asc(), Application.id).limit(MAX_ROWS)).all()
 
 
-def load_follow_up(db, owner_ids, *, fetched: list | None = None) -> list[dict]:
-    """The Follow-up screen's rows, oldest last update first. `fetched` is the result of `fetch_follow_up` when already read."""
+def load_follow_up(db, owner_ids, *, fetched: list | None = None, parallel: bool = False) -> list[dict]:
+    """The Follow-up screen's rows, oldest last update first. `fetched` is the result of `fetch_follow_up` when already read.
+    `parallel=True` runs the three lookups side by side (see `load_rows`)."""
     rows = fetch_follow_up(db, owner_ids) if fetched is None else fetched
     if not rows:
         return []
     app_ids = [app.id for app, *_ in rows]
-    # The newest remark written on any of the placement's tasks, and the open stage task a new remark goes on.
+    # The newest remark written on any of the placement's tasks, the open stage task a new remark goes on, and the advance / review.
+    remark_query = (select(Task.application_id, Remark.body, User.name, Remark.created_at).select_from(Remark)
+                    .join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
+                    .where(Task.application_id.in_(app_ids)).order_by(Remark.created_at.desc(), Remark.id))
+    task_query = (select(Task.application_id, Task.id).where(
+        Task.application_id.in_(app_ids), Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
+        Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at, Task.id))
+    lookups = (lambda s: s.execute(remark_query).all(), lambda s: s.execute(task_query).all(),
+               lambda s: s.execute(stage_facts_query(ApplicationStage.application_id.in_(app_ids))).all())
+    remark_rows, task_rows, fact_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
     latest: dict[str, dict] = {}
-    for application_id, body, name, at in db.execute(
-            select(Task.application_id, Remark.body, User.name, Remark.created_at).select_from(Remark)
-            .join(Task, Task.id == Remark.task_id).outerjoin(User, User.id == Remark.author_id)
-            .where(Task.application_id.in_(app_ids)).order_by(Remark.created_at.desc(), Remark.id)):
+    for application_id, body, name, at in remark_rows:
         entry = latest.setdefault(application_id, {"body": body, "at": at, "by": name or "Unknown", "count": 0})
         entry["count"] += 1
     open_task: dict[str, str] = {}
-    for application_id, task_id in db.execute(select(Task.application_id, Task.id).where(
-            Task.application_id.in_(app_ids), Task.kind.in_([TaskKind.stage, TaskKind.remedical]),
-            Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.created_at, Task.id)):
+    for application_id, task_id in task_rows:
         open_task.setdefault(application_id, task_id)
+    facts = stage_facts(fact_rows)
     out = []
     for app, cand, order, company, client, designation, last_update in rows:
         out.append({
@@ -421,7 +478,7 @@ def load_follow_up(db, owner_ids, *, fetched: list | None = None) -> list[dict]:
             "stage": app.current_stage, "lastUpdateAt": last_update,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "orderRef": order.ref,
-            "remark": latest.get(app.id),
+            **payment_fields(app, facts), "remark": latest.get(app.id),
         })
     return out
 

@@ -8,25 +8,30 @@ import { RecordIdentity } from '@/shared/ui/workspace'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import { careIdOf, secondaryId } from '@/features/candidates/candidate-ids'
 import {
-  clientCell, clockTime, countryCell, countryShort, countryTone, positionCell, referralLabel, rowAction,
+  advanceLabel, clientCell, clockTime, countryCell, countryShort, countryTone, positionCell, rowAction,
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
 
 export interface DailyGroup { key: string; title: string; hint: string; icon: ReactNode; items: DailyItem[]; tone?: 'done' }
 
-/** Column order and pixel widths (the table scrolls sideways below their sum; the recruiter column is for supervisors). No deadline column. */
+/**
+ * The agreed column format, in this order for everyone (it mirrors the agency's sheet). The Recruiter column is added after the
+ * candidate for supervisors only; the trailing actions column has no visible title (Open / Complete and the row menu live there).
+ * Pixel widths: the table scrolls sideways below their sum. No deadline column.
+ */
 const COLUMNS = [
-  { key: 'no', title: 'S.No', width: 44 },
-  { key: 'client', title: 'Client', width: 98 },
-  { key: 'country', title: 'Country', width: 108 },
-  { key: 'candidate', title: 'Candidate', width: 146, left: true },
-  { key: 'position', title: 'Job', width: 92 },
-  { key: 'referral', title: 'Referral', width: 82 },
+  { key: 'no', title: 'S NO', width: 48 },
+  { key: 'client', title: 'CLIENT / COUNTRY', width: 138 },
+  { key: 'candidate', title: 'CANDIDATE NAME', width: 168, left: true },
   { key: 'staff', title: 'Recruiter', width: 96, supervisor: true },
-  { key: 'stage', title: 'Stage', width: 120 },
-  { key: 'remarks', title: 'Remarks', width: 146, left: true },
-  { key: 'actions', title: 'Actions', width: 128 },
+  { key: 'position', title: 'JOB', width: 96 },
+  { key: 'ref', title: 'REF', width: 96 },
+  { key: 'stage', title: 'STAGE', width: 120 },
+  { key: 'remarks', title: 'REMARKS', width: 160, left: true },
+  { key: 'amount', title: 'AMOUNT', width: 96 },
+  { key: 'review', title: 'GOOGLE REVIEW', width: 96 },
+  { key: 'actions', title: 'Actions', width: 128, quiet: true },
 ] as const
 
 /** Wraps a wide table: a soft shadow shows on whichever side still has columns scrolled out of view. */
@@ -73,7 +78,7 @@ export function DailyTable({ groups, zone, supervisor, staffName, canWork, onOpe
     <ScrollEdges>
       <table className="dw-table dw-main" aria-label="Daily candidates" style={{ minWidth: columns.reduce((sum, c) => sum + c.width, 0) }}>
         <colgroup>{columns.map((c) => <col key={c.key} style={{ width: c.width }} />)}</colgroup>
-        <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left')}>{c.title}</th>)}</tr></thead>
+        <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
           {groups.map((g) => <Fragment key={g.key}>
             <tr className={cn('dw-group', g.tone === 'done' && 'is-done')}>
@@ -103,15 +108,16 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
   const action = rowAction(item)
   return (
     <tr className={cn('dw-row', done && 'is-done', serial % 2 === 0 && 'is-alt')}>
-      <td className="is-num tnum" data-label="S.No">{serial}</td>
-      <td data-label="Client"><ClientCell item={item} /></td>
-      <td data-label="Country"><CountryCell item={item} onAdd={onProfile} /></td>
-      <td data-label="Candidate" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
-      <td data-label="Job"><PositionCellView item={item} /></td>
-      <td data-label="Referral"><span className={cn('dw-ref', item.referral.source === 'referral' && 'is-referral')}>{referralLabel(item.referral)}</span></td>
+      <td className="is-num tnum" data-label="S NO">{serial}</td>
+      <td data-label="CLIENT / COUNTRY"><ClientCountryCell item={item} onAdd={onProfile} /></td>
+      <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
       {showStaff && <td data-label="Recruiter">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">Not assigned</span>}</td>}
-      <td data-label="Stage"><StageCell item={item} /></td>
-      <td data-label="Remarks" className="is-left"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
+      <td data-label="JOB"><PositionCellView item={item} /></td>
+      <td data-label="REF"><OrderRefCell item={item} /></td>
+      <td data-label="STAGE"><StageCell item={item} /></td>
+      <td data-label="REMARKS" className="is-left"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
+      <td data-label="AMOUNT"><AmountCell item={item} /></td>
+      <td data-label="GOOGLE REVIEW"><ReviewCell item={item} /></td>
       <td data-label="Actions" className="is-actions">
         {done && <span className="dw-done-tag"><CheckCircle2 size={13} aria-hidden="true" />Done{item.completedAt ? ` ${clockTime(item.completedAt, zone)}` : ''}</span>}
         <div className="dw-actions">
@@ -138,6 +144,38 @@ export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId'
       {care && <b className="cid-main">{care}</b>}{care && ref && ' · '}{ref && <span className={care ? 'cid-ref' : undefined}>{ref}</span>}
     </span>
   )
+}
+
+/** CLIENT / COUNTRY in one cell: the client's name, the country pill (flag and short name) under it. */
+export function ClientCountryCell({ item, onAdd }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact' | 'country' | 'countrySource' | 'locationHint' | 'candidate'>; onAdd: () => void }) {
+  const cell = clientCell(item)
+  return (
+    <div className="dw-stack dw-cc">
+      {cell.text
+        ? <span className="dw-cell-strong" title={item.clientContact ? `Contact: ${item.clientContact}` : undefined}>{cell.text}</span>
+        : <span className="dw-none" title={cell.hint}>—</span>}
+      <CountryCell item={item} onAdd={onAdd} />
+    </div>
+  )
+}
+
+/** REF: the order's reference (ORD-...) for the job; nothing to show until the candidate is matched to an order. */
+export function OrderRefCell({ item }: { item: Pick<DailyItem, 'orderRef'> }) {
+  if (!item.orderRef) return <div className="dw-stack"><span className="dw-none">—</span><small className="dw-sub is-soft">No order yet</small></div>
+  return <span className="dw-ref" title="Order reference">{item.orderRef}</span>
+}
+
+/** AMOUNT: the advance the candidate paid (stage 8) as money; a dash while none is recorded. */
+export function AmountCell({ item }: { item: Pick<DailyItem, 'advanceAmount' | 'advanceCurrency'> }) {
+  const label = advanceLabel(item)
+  return label ? <span className="dw-amount tnum" title="Advance collected">{label}</span> : <span className="dw-none" title="No advance recorded yet">—</span>
+}
+
+/** GOOGLE REVIEW: Yes once obtained, Pending from stage 9 until it is, a dash before that. */
+export function ReviewCell({ item }: { item: Pick<DailyItem, 'googleReview'> }) {
+  if (item.googleReview === 'obtained') return <span className="dw-review is-yes">Yes</span>
+  if (item.googleReview === 'pending') return <span className="dw-review is-pending" title="Stage 9 reached; Google review not obtained yet">Pending</span>
+  return <span className="dw-none">—</span>
 }
 
 /** Client has no fallback: it exists only through an order. Say so instead of leaving a bare dash. */
