@@ -18,7 +18,14 @@ from sqlalchemy.orm import undefer
 from app.db.models import Attachment, AuditEntry, Candidate, Designation, DocumentExtractionJob, Role
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import OcrFields
-from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, provider_codes, request_extraction_retry
+from app.services.document_extraction import (
+    extract_attachment,
+    extract_selected_pages,
+    ExtractionFailure,
+    ExtractionPending,
+    provider_codes,
+    request_extraction_retry,
+)
 from app.services.document_storage import put_bytes, read_bytes
 from app.services.reading_notes import plain_notes
 from app.services.worker_heartbeat import waiting_reason
@@ -176,6 +183,141 @@ def _hand_back(identifier, claimed_by, sessions, reason, delay=300):
     log.warning("Document %s is not in this server's storage; handed back without an attempt.", identifier)
 
 
+# A maintenance-only reread of pages that have already been verified as a
+# candidate's resume.  It is deliberately *not* a normal ``resume`` job: a
+# normal job is allowed to derive attachments and may fill an application form.
+# This kind is created only by a guarded maintenance command and is held for a
+# separate, explicit review/apply step.
+REVIEW_ONLY_RESUME_KIND = "review_resume"
+REVIEW_ONLY_RESUME_DRAFT = "reviewOnlyResumeReread"
+
+
+def _review_only_resume_meta(kind, candidate_id, attachment_id, draft, digest):
+    """Return the sealed review-only metadata, or fail before a source is read.
+
+    The worker is intentionally strict here.  A malformed maintenance row must
+    never fall through to the normal candidate-document path, where a local
+    pattern check could write to a profile before the final form guard runs.
+    """
+    marked = isinstance(draft, dict) and REVIEW_ONLY_RESUME_DRAFT in draft
+    if kind != REVIEW_ONLY_RESUME_KIND:
+        if marked:
+            raise ExtractionFailure("A review-only resume reread has an invalid job kind.")
+        return None
+    if candidate_id is not None or attachment_id is not None:
+        raise ExtractionFailure("A review-only resume reread cannot be linked to a candidate or attachment.")
+    if not isinstance(draft, dict) or "applicationForm" in draft or "form" in draft:
+        raise ExtractionFailure("A review-only resume reread must not contain an application-form draft.")
+    meta = draft.get(REVIEW_ONLY_RESUME_DRAFT)
+    if not isinstance(meta, dict):
+        raise ExtractionFailure("A review-only resume reread is missing its sealed source record.")
+    if not all(isinstance(meta.get(name), str) and meta[name] for name in
+               ("candidateId", "candidateRef", "sourceAttachmentId", "sourceJobId", "sourceHash")):
+        raise ExtractionFailure("A review-only resume reread has incomplete source evidence.")
+    if meta.get("sourceHash") != digest or meta.get("originalResumePages") != [3, 4] \
+            or meta.get("expectedPageCount") != 2 or meta.get("holdForAdminReview") is not True:
+        raise ExtractionFailure("A review-only resume reread does not match its approved two-page source.")
+    return meta
+
+
+def _review_only_resume_page_check(data, meta):
+    """Prove the sealed source is still exactly the two-page derived resume."""
+    import pymupdf as fitz
+    try:
+        with fitz.open(stream=data, filetype="pdf") as document:
+            pages = document.page_count
+    except Exception as exc:
+        raise ExtractionFailure("The approved resume pages can no longer be opened.") from exc
+    if pages != meta["expectedPageCount"]:
+        raise ExtractionFailure("The approved reread source no longer has exactly two resume pages.")
+
+
+def _review_only_resume_summary(output):
+    """Non-sensitive acceptance facts for the review card; raw OCR remains in job state."""
+    output = output if isinstance(output, dict) else {}
+    extractions = output.get("extractions") if isinstance(output.get("extractions"), dict) else {}
+    resume = extractions.get("resume") if isinstance(extractions.get("resume"), dict) else {}
+    selected = resume.get("selected_pages") if isinstance(resume.get("selected_pages"), list) else []
+    selected = sorted({page for page in selected if type(page) is int and page > 0})
+    source = resume.get("source") if isinstance(resume.get("source"), dict) else {}
+    source_selected = source.get("selected_pages") if isinstance(source.get("selected_pages"), list) else []
+    source_selected = sorted({page for page in source_selected if type(page) is int and page > 0})
+    coverage = output.get("coverage") if isinstance(output.get("coverage"), dict) else {}
+    issues = []
+    if set(extractions) != {"resume"}:
+        issues.append("only_resume_may_be_extracted")
+    if output.get("status") != "complete":
+        issues.append("provider_result_not_complete")
+    if selected != [1, 2]:
+        issues.append("resume_pages_not_exactly_one_and_two")
+    if source_selected and source_selected != [1, 2]:
+        issues.append("provider_source_pages_not_exactly_one_and_two")
+    if coverage and coverage.get("complete") is False:
+        issues.append("coverage_not_complete")
+    return {
+        "holdForAdminReview": True,
+        "providerStatus": output.get("status"),
+        "foundKinds": sorted(extractions),
+        "selectedPages": selected,
+        "providerSourcePages": source_selected,
+        "coverageComplete": coverage.get("complete") if coverage else None,
+        "readyForIdentityReview": not issues,
+        "issues": issues,
+    }
+
+
+def _finish_review_only_resume(identifier, *, sessions, claimed_by, state, output, meta):
+    """Persist a review result without touching candidate, attachment, or application data."""
+    summary = _review_only_resume_summary(output)
+    state["reviewOnlyResumeReread"] = {
+        "candidateId": meta["candidateId"],
+        "candidateRef": meta["candidateRef"],
+        "sourceAttachmentId": meta["sourceAttachmentId"],
+        "sourceJobId": meta["sourceJobId"],
+        "sourceHash": meta["sourceHash"],
+        "originalResumePages": [3, 4],
+        "expectedPageCount": 2,
+        "holdForAdminReview": True,
+        "result": summary,
+    }
+    with sessions() as db:
+        job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
+        if _lost(job, claimed_by):
+            return
+        # Recheck the guard after provider work: a row changed in the meantime
+        # is never allowed to finish as a review-only result.
+        _review_only_resume_meta(job.kind, job.candidate_id, job.attachment_id, job.draft, job.content_hash)
+        job.state = json.loads(json.dumps(state, default=_plain))
+        job.result = {REVIEW_ONLY_RESUME_DRAFT: summary}
+        # Even a complete provider response stays held.  A separate, guarded
+        # maintenance command must verify identity and source provenance before
+        # it can fill any blank profile field.
+        job.status = "needs_review"
+        job.last_error = (
+            "Review-only resume reread is ready for validation. "
+            "No candidate fields or documents were changed."
+        )
+        job.updated_at = job.finished_at = now()
+        job.claimed_by = job.lease_until = None
+        db.commit()
+
+
+def _process_review_only_resume(identifier, *, sessions, settings, claimed_by, state, data, titles, meta, checkpoint):
+    """Read precisely the approved derived resume pages and always hold output."""
+    _review_only_resume_page_check(data, meta)
+    output = state.get("output")
+    if not isinstance(output, dict):
+        from app.services.extraction_scheduling import handoff_settings
+        # No inspection/classification, selected-PDF creation, or form fill is
+        # involved here.  The two pages were already reviewed as the resume.
+        output = extract_selected_pages({"resume": data}, state=state, save=checkpoint,
+                                        settings=handoff_settings(settings), designations=titles or [])
+        state["output"] = deepcopy(output)
+        checkpoint(state)
+    _finish_review_only_resume(identifier, sessions=sessions, claimed_by=claimed_by,
+                               state=state, output=output, meta=meta)
+
+
 def process_job(identifier, *, sessions, settings, claimed_by=None):
     """Read one document. ``claimed_by`` is the worker that leased it (see services/extraction_queue.py); a lease that
     has moved to another worker makes this run stop writing. Without it (direct calls) the job is taken here."""
@@ -191,6 +333,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             state = deepcopy(job.state or {})
             key, digest = job.object_key, job.content_hash
             owner, group_id, form_candidate = job.owner_id, job.group_id, job.candidate_id
+            kind, attachment_id, draft = job.kind, job.attachment_id, deepcopy(job.draft or {})
             attempts = job.attempts
             if not state.get("output"):
                 titles = list(db.scalars(select(Designation.title)))
@@ -200,13 +343,15 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             _autocommit(db)
             row = db.execute(select(DocumentExtractionJob.status, DocumentExtractionJob.claimed_by, DocumentExtractionJob.state,
                 DocumentExtractionJob.object_key, DocumentExtractionJob.content_hash, DocumentExtractionJob.owner_id,
-                DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id, DocumentExtractionJob.attempts,
+                DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id, DocumentExtractionJob.attachment_id,
+                DocumentExtractionJob.kind, DocumentExtractionJob.draft, DocumentExtractionJob.attempts,
                 select(func.array_agg(Designation.title)).scalar_subquery().label("titles"))
                 .where(DocumentExtractionJob.id == identifier)).one_or_none()
             if row is None or row.status not in READY or row.claimed_by != claimed_by:
                 return
             state = deepcopy(row.state or {})
             key, digest, owner, group_id, form_candidate = row.object_key, row.content_hash, row.owner_id, row.group_id, row.candidate_id
+            kind, attachment_id, draft = row.kind, row.attachment_id, deepcopy(row.draft or {})
             attempts = row.attempts
             titles = list(row.titles or [])
 
@@ -266,6 +411,11 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             return
         if hashlib.sha256(data).hexdigest() != digest:
             raise ExtractionFailure("The saved copy of this document looks damaged. Upload the original again, then try again.")
+        review_meta = _review_only_resume_meta(kind, form_candidate, attachment_id, draft, digest)
+        if review_meta is not None:
+            _process_review_only_resume(identifier, sessions=sessions, settings=settings, claimed_by=claimed_by,
+                                        state=state, data=data, titles=titles, meta=review_meta, checkpoint=checkpoint)
+            return
         output = state.get("output")
         if output is None:
             from app.services.extraction_scheduling import handoff_settings
@@ -378,6 +528,8 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
     from app.services.document_person_split import ensure_single_person_source
     lock_assignment_cursor(db)
     source_job = owned_job(db, identifier, user.id)
+    if isinstance(source_job.draft, dict) and REVIEW_ONLY_RESUME_DRAFT in source_job.draft:
+        raise HTTPException(409, "This review-only reread cannot be attached. It does not change candidate documents.")
     ensure_single_person_source(db, "manual", source_job.group_id)
     # Candidate locks are shared with normal file uploads, guaranteeing one next
     # version even when another recruiter uploads to this candidate concurrently.

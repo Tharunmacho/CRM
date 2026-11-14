@@ -1,5 +1,6 @@
 """Manual intake persistence/restart tests with disposable Postgres and fake OCR."""
 from copy import deepcopy
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import Attachment, Candidate, DocumentExtractionJob, Role, Source, User
 from app.services import document_extraction, manual_extraction
-from app.services.document_storage import read_bytes
+from app.services.document_storage import read_bytes, put_bytes
 from test_database_naming import _migrate, schema_database
 from test_document_extraction import pdf, result
 from test_ocr_classification import CV, PASSPORT
@@ -91,6 +92,26 @@ def start(env, identifier):
     assert response.status_code == 200, response.text
 
 
+def review_only_resume_job(env, data=None):
+    """A maintenance-held reread, not an attachable candidate intake."""
+    data = data or pdf(CV, CV)
+    identifier = str(uuid4())
+    digest = hashlib.sha256(data).hexdigest()
+    key = put_bytes(env.settings, "manual/owner/" + identifier + "/review-only-resume.pdf", data, "application/pdf")
+    draft = {"reviewOnlyResumeReread": {
+        "candidateId": "candidate", "candidateRef": "C-SYNTHETIC", "sourceAttachmentId": "derived-resume",
+        "sourceJobId": "original-mixed-job", "sourceHash": digest, "originalResumePages": [3, 4],
+        "expectedPageCount": 2, "holdForAdminReview": True,
+    }}
+    with env.sessions() as db:
+        db.add(DocumentExtractionJob(id=identifier, owner_id="owner", group_id=str(uuid4()), kind="review_resume",
+            filename="review-only-resume.pdf", content_type="application/pdf", object_key=key, content_hash=digest,
+            size_kb=max(1, (len(data) + 1023) // 1024), status="pending", state={"provider_generations": {"resume": 1}},
+            draft=draft, queued_at=manual_extraction.now()))
+        db.commit()
+    return identifier, data
+
+
 def test_original_saved_before_read_and_upload_retry_is_idempotent(intake):
     data = pdf(CV)
     job = upload(intake, data)
@@ -104,6 +125,47 @@ def test_original_saved_before_read_and_upload_retry_is_idempotent(intake):
     assert "no-store" in original.headers["cache-control"]
     with intake.sessions() as db:
         assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 1
+
+
+def test_review_only_resume_reread_never_touches_or_attaches_a_candidate(intake, monkeypatch):
+    identifier, data = review_only_resume_job(intake)
+    calls = []
+
+    def reread(page_pdfs, *, state, save, settings, designations):
+        calls.append((page_pdfs, dict(state), list(designations)))
+        return {
+            "status": "complete",
+            "coverage": {"complete": True},
+            "extractions": {
+                "resume": {
+                    "raw": {"name": "Human reviewed name", "experience": []},
+                    "fields": {"name": "Human reviewed name"},
+                    "selected_pages": [1, 2],
+                    "source": {"selected_pages": [1, 2]},
+                }
+            },
+        }
+
+    monkeypatch.setattr(manual_extraction, "extract_selected_pages", reread)
+    monkeypatch.setattr(manual_extraction, "extract_attachment", lambda *a, **k: pytest.fail("normal reader must not run"))
+    process(intake, identifier)
+
+    assert len(calls) == 1 and calls[0][0] == {"resume": data}
+    with intake.sessions() as db:
+        job = db.get(DocumentExtractionJob, identifier)
+        candidate = db.get(Candidate, "candidate")
+        assert job.status == "needs_review" and job.candidate_id is None and job.attachment_id is None
+        assert job.result["reviewOnlyResumeReread"] == {
+            "holdForAdminReview": True, "providerStatus": "complete", "foundKinds": ["resume"],
+            "selectedPages": [1, 2], "providerSourcePages": [1, 2], "coverageComplete": True,
+            "readyForIdentityReview": True, "issues": [],
+        }
+        assert "No candidate fields or documents were changed" in job.last_error
+        assert candidate.name == "Human reviewed name" and candidate.skills == ["Human skill"]
+        assert db.scalar(select(func.count()).select_from(Attachment)) == 0
+
+    response = intake.client.post("/api/ocr/jobs/" + identifier + "/attach", json={"candidateId": "candidate"})
+    assert response.status_code == 409 and "review-only" in response.json()["detail"]
 
 
 def test_provider_id_result_and_form_draft_survive_worker_restart(intake, monkeypatch):
