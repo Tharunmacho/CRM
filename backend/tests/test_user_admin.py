@@ -146,12 +146,13 @@ def test_deactivation_requires_valid_target_and_is_atomic(env):
         assert event.owner_id == 'receiver' and event.meta == {'fromOwnerId': 'staff', 'toOwnerId': 'receiver'}
         assert db.get(LoginSession, 'session-staff') is None
         assert db.scalar(select(AuditEntry).where(AuditEntry.entity_type == 'candidate')).meta['toUserId'] == 'receiver'
-        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert {notice.user_id for notice in notices} == {'receiver', 'admin'}
-        assert len(notices) == 2 and all(notice.link_to == '/candidates/candidate' for notice in notices)
+        # Only the receiving recruiter is told (one notice): the admin who did it gets no copy, and the deactivated owner is inactive.
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'candidate_assigned')))
+        assert {notice.user_id for notice in notices} == {'receiver'}
+        assert len(notices) == 1 and all(notice.link_to == '/candidates/candidate/application' for notice in notices)
     assert env.client.patch('/api/users/staff', json={'active': False, 'reassignToUserId': 'receiver'}).status_code == 200
     with env.factory() as db:
-        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))) == 2
+        assert len(list(db.scalars(select(Notification).where(Notification.kind == 'candidate_assigned')))) == 1
 
 
 def test_failed_commit_rolls_back_reassignment_and_revocation(env, monkeypatch):
@@ -179,10 +180,11 @@ def test_deactivation_notifies_about_task_only_transfer_without_claiming_candida
     with env.factory() as db:
         assert db.get(Task, 'open').owner_id == 'receiver'
         assert db.get(Task, 'completed').owner_id == 'staff'
-        notices = list(db.scalars(select(Notification).where(Notification.kind == 'assignment')))
-        assert len(notices) == 2
-        assert {notice.user_id for notice in notices} == {'receiver', 'admin'}
-        assert all(notice.title == 'Task assigned' and notice.link_to == '/tasks?task=open' for notice in notices)
+        # The candidate was already the receiver's, so this is a task notice only, and only the receiver gets it.
+        assert list(db.scalars(select(Notification).where(Notification.kind == 'candidate_assigned'))) == []
+        notices = list(db.scalars(select(Notification).where(Notification.kind == 'task_assigned')))
+        assert len(notices) == 1 and notices[0].user_id == 'receiver'
+        assert notices[0].title == 'New task assigned to you' and notices[0].link_to == '/tasks?task=open'
 
 
 def test_role_change_transfers_work_and_revokes_sessions(env):

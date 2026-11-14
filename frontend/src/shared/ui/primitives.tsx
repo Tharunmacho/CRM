@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useRef,
   type ButtonHTMLAttributes,
@@ -9,6 +10,7 @@ import {
 } from 'react'
 import { cn } from '@/shared/lib/cn'
 import { FieldLabelContext } from './control-context'
+import { useAutoGrow } from './use-auto-grow'
 export { Select } from './select'
 
 /* ---------------------------------------------------------------- Button */
@@ -34,8 +36,8 @@ const VARIANTS: Record<Variant, string> = {
 }
 
 const SIZES: Record<Size, string> = {
-  sm: 'h-8 px-3 text-[13px] gap-1.5',
-  md: 'h-10 px-4 text-[14px] gap-2',
+  sm: 'min-h-8 px-3 py-1 text-[13px] gap-1.5',
+  md: 'min-h-10 px-4 py-1.5 text-[14px] gap-2',
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -53,7 +55,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type="button"
       className={cn(
-        'ui-button inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border font-medium transition-colors [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0',
+        'ui-button inline-flex max-w-full shrink-0 items-center justify-center whitespace-normal text-center leading-tight [overflow-wrap:anywhere] rounded-[8px] border font-medium transition-colors [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0',
         `ui-button-${variant}`,
         VARIANTS[variant],
         'disabled:cursor-not-allowed',
@@ -136,21 +138,55 @@ const inputBase = 'ui-input w-full rounded-[8px] border bg-white px-3 text-[14px
 export const Input = forwardRef<
   HTMLInputElement,
   InputHTMLAttributes<HTMLInputElement> & { ident?: boolean }
->(function Input({ className, ident, ...rest }, ref) {
+>(function Input({ className, ident, title, ...rest }, ref) {
+  /* A single-line box shows one line of a long value; the tooltip carries the rest (never for passwords). */
+  const long = typeof rest.value === 'string' && rest.value.length > 28 && (rest.type === undefined || ['text', 'email', 'tel', 'url', 'search'].includes(rest.type))
   return (
-    <input ref={ref} className={cn(inputBase, 'h-10', ident && 'ident', className)} {...rest} />
+    <input ref={ref} title={title ?? (long ? String(rest.value) : undefined)} className={cn(inputBase, 'h-10', ident && 'ident', className)} {...rest} />
   )
 })
 
-export const Textarea = forwardRef<
-  HTMLTextAreaElement,
-  TextareaHTMLAttributes<HTMLTextAreaElement>
->(function Textarea({ className, rows = 3, ...rest }, ref) {
+export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  /** Grow with the text (default) instead of clipping it. Pass false for a fixed-size box. */
+  autoGrow?: boolean
+  /** Lowest height in lines when auto-growing. Defaults to `rows` (3 when that is not given either). */
+  minRows?: number
+  /** Highest height in lines before the box scrolls inside. Default 6; composers use 10 or more; 0 = unlimited. */
+  maxRows?: number
+}
+
+/**
+ * A bare <textarea> that auto-grows to fit what is typed or pasted (see use-auto-grow.ts), for fields that bring their
+ * own styling. Controlled and uncontrolled use both work; focus and caret are never touched.
+ */
+export const AutoTextarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function AutoTextarea(
+  { rows = 3, autoGrow = true, minRows, maxRows = 6, value, ...rest },
+  forwarded,
+) {
+  const inner = useRef<HTMLTextAreaElement | null>(null)
+  const low = Math.max(1, Math.floor(minRows ?? rows))
+  useAutoGrow(inner, value, { minRows: low, maxRows, enabled: autoGrow })
+  const setRef = useCallback((node: HTMLTextAreaElement | null) => {
+    inner.current = node
+    if (typeof forwarded === 'function') forwarded(node)
+    else if (forwarded) forwarded.current = node
+  }, [forwarded])
+  return <textarea ref={setRef} rows={autoGrow ? low : rows} value={value} {...rest} />
+})
+
+/** The standard multi-line field: auto-growing, styled like Input. Min height is `rows` lines (3 by default). */
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+  { className, rows = 3, autoGrow = true, minRows, ...rest },
+  ref,
+) {
+  const low = Math.max(1, Math.floor(minRows ?? rows))
   return (
-    <textarea
+    <AutoTextarea
       ref={ref}
       rows={rows}
-      className={cn(inputBase, 'min-h-[88px] py-2.5 leading-relaxed', className)}
+      minRows={minRows}
+      autoGrow={autoGrow}
+      className={cn(inputBase, autoGrow && low <= 1 ? 'min-h-0' : 'min-h-[88px]', 'py-2.5 leading-relaxed [overflow-wrap:anywhere]', className)}
       {...rest}
     />
   )

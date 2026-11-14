@@ -66,7 +66,7 @@ test('the referral column names the referrer, otherwise how the CV arrived', () 
 
 test('the table has the agreed sheet columns and no Deadline column; the Recruiter column is for supervisors only', async () => {
   const table = await code('../src/screens/tasks/daily-table.tsx')
-  const columns = [...table.slice(table.indexOf('const COLUMNS'), table.indexOf('] as const')).matchAll(/title: '([^']+)'/g)].map((c) => c[1])
+  const columns = [...table.slice(table.indexOf('const TASK_COLUMNS'), table.indexOf('] as const')).matchAll(/title: '([^']+)'/g)].map((c) => c[1])
   // The nine agreed columns in the agency's order; Recruiter (supervisors only) sits after the candidate and the unlabeled actions cell trails.
   assert.deepEqual(columns, ['S NO', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'Recruiter', 'JOB', 'REF', 'STAGE', 'REMARKS', 'AMOUNT', 'GOOGLE REVIEW', 'Actions'])
   assert.deepEqual(columns.filter((c) => c !== 'Recruiter' && c !== 'Actions'),
@@ -174,12 +174,20 @@ test('position and client cells say where the value came from or why it is missi
   assert.equal(m.clientCell({ client: 'Gulf Builders', kind: 'stage' }).text, 'Gulf Builders')
 })
 
-test('a country keeps one pill colour whatever its casing, and long names get their short form', () => {
-  assert.equal(m.countryTone('Qatar'), m.countryTone(' qatar '))
-  assert.ok(m.countryTone('Oman') >= 0 && m.countryTone('Oman') < m.COUNTRY_TONES)
+test('long country names get their short form', () => {
   assert.equal(m.countryShort('United Arab Emirates'), 'UAE')
   assert.equal(m.countryShort('Saudi Arabia'), 'KSA')
   assert.equal(m.countryShort('Qatar'), 'Qatar')
+})
+
+test('the remark box starts at one line, grows with the text to about four lines and then scrolls inside', () => {
+  assert.deepEqual(m.remarkBox(0), { height: m.REMARK_MIN, scroll: false })
+  assert.deepEqual(m.remarkBox(20), { height: m.REMARK_MIN, scroll: false })
+  assert.deepEqual(m.remarkBox(60.2), { height: 61, scroll: false })
+  assert.deepEqual(m.remarkBox(m.REMARK_MAX), { height: m.REMARK_MAX, scroll: false })
+  assert.deepEqual(m.remarkBox(300), { height: m.REMARK_MAX, scroll: true })
+  assert.deepEqual(m.remarkBox(Number.NaN), { height: m.REMARK_MIN, scroll: false })
+  assert.ok(m.remarkBox(48).height < m.remarkBox(90).height, 'grows with the text and shrinks back when it is deleted')
 })
 
 test("the three buckets: Today's candidates and Follow-up carry counts in their tab label, Travelled links to its own screen", () => {
@@ -212,8 +220,8 @@ test('the Tasks page has the Follow-up view and a Travelled tab that links to /t
   // Follow-up reuses the Today's candidates cells instead of copying them.
   const table = await code('../src/screens/tasks/follow-up-table.tsx')
   assert.match(table, /from '\.\/daily-table'/)
-  const columns = [...table.slice(table.indexOf('const COLUMNS'), table.indexOf('] as const')).matchAll(/title: '([^']+)'/g)].map((c) => c[1])
-  assert.deepEqual(columns, ['S NO', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'Recruiter', 'JOB', 'REF', 'STAGE', 'REMARKS', 'AMOUNT', 'GOOGLE REVIEW', 'Actions'])
+  assert.match(table, /TASK_COLUMNS/) // one column plan for both tables, so their headers and widths cannot drift apart
+  assert.doesNotMatch(table, /const COLUMNS/)
   assert.match(table, /AmountCell/)
   assert.match(table, /ReviewCell/)
   assert.match(table, /Open stage/)
@@ -253,4 +261,16 @@ test('the AMOUNT and GOOGLE REVIEW cells show Yes, Pending or a dash, and never 
   assert.match(model, /advanceAmount: number \| null/)
   assert.match(model, /googleReview: GoogleReview/)
   for (const text of [table, model]) assert.doesNotMatch(text, /invoice|cgst|gst/i)
+})
+
+test('the Tasks tables carry no explanatory filler: no group sentence, no "Not saved", "pref.", "from location" or "No order yet" notes', async () => {
+  for (const path of ['daily-table.tsx', 'follow-up-table.tsx', 'daily-work.tsx', 'follow-up.tsx']) {
+    const text = await code(`../src/screens/tasks/${path}`)
+    assert.doesNotMatch(text, /Candidates with prescreening waiting|Work them in the order|Finished candidates are in Follow-up|Finished candidates move to Travelled|Not saved|from location|from skills|No order yet|'pref\.'|dw-sub|dw-pref|dw-add/, path)
+  }
+  const table = await code('../src/screens/tasks/daily-table.tsx')
+  assert.match(table, /const bands = groups\.length > 1/) // a single group has no band
+  assert.match(table, /placeholder="Add remark"/)
+  assert.match(table, /useAutoGrow/)
+  assert.match(table, /remarkBox\(/)
 })

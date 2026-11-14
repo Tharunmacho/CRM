@@ -1,0 +1,31 @@
+/* Fit to content: typed or imported text (names, e-mails, file names, job titles, remarks) must wrap or grow its box, never
+ * spill over a neighbour or be cut off silently. Where the layout does shorten text with an ellipsis, shared/lib/truncation-title.ts
+ * shows the full text on hover and focus. Loaded last of the global sheets; page sheets that need more say so locally. */
+
+/* Badges and tags carry user text (skills, categories, statuses with names): wrap inside the available width. */
+.ui-badge { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+
+/* Field labels, hints and errors sit beside controls; long ones wrap instead of widening the form. */
+.ui-field { min-width: 0; }
+.ui-field-label, .ui-field-hint, .ui-field-error { min-width: 0; overflow-wrap: anywhere; }
+
+/* Dialogs and sheets are never wider than the window: any long unbroken string inside breaks rather than pushes the card. */
+.workspace-dialog, .workspace-sheet { overflow-wrap: anywhere; }
+.workspace-dialog .dialog-body, .workspace-sheet > div { min-width: 0; }
+
+/* Table action buttons keep one line (their cell is sized for it). */
+.ui-data-table td .ui-button { white-space: nowrap; }
+
+/* Toasts: a long message wraps inside the screen and scrolls when it is taller than the window. */
+.ui-toast { max-width: min(36rem, 100%); }
+
+/* An auto-growing text box sizes itself; it must not also show a drag handle that fights the measured height. */
+textarea.ui-input[style*='resize: none'] { resize: none; }
+
+/* Pick lists (reassign, client and job choosers): the name is what you are choosing by, so it wraps rather than being shortened. */
+:root :is(.ld-pick-name, .cs-opt-name, .js-opt-text b, .js-opt-text small, .jv-option-title, .jv-option-sub) { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+
+/* Names and job lines that identify a record in a header or card wrap onto a second line instead of being shortened. */
+:root :is(.cp-track-order b, .cp-app-copy b, .cp-app-copy span, .sm-name, .sm-sub .sm-sub-role, .sm-facts dd, .jv-order-title h4, .jv-order-title p, .cs-title h3, .cs-title p, .cd-cand-text > b, .cd-cand-text > small) { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+:root .sm-sub { flex-wrap: wrap; }
+:root .cp-track-order { align-items: flex-start; }

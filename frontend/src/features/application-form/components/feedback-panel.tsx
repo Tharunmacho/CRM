@@ -65,6 +65,7 @@ export function NoteComposer({ actions, defaultKind = 'update', onSent, autoFocu
         <Textarea
           value={body}
           rows={compact ? 2 : 3}
+          maxRows={8}
           maxLength={FEEDBACK_MAX_LENGTH}
           autoFocus={autoFocus}
           placeholder="What is happening with this candidate, and what is needed next?"

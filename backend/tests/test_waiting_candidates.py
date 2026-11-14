@@ -67,7 +67,7 @@ def test_ownerless_intake_waits_and_supervisors_get_a_distinct_notice(setup):
     candidate = ingest(sessions, settings)
     assert candidate.owner_id is None and candidate.needs_review and candidate.status == CandidateStatus.needs_review
     with sessions() as db:
-        notices = list(db.scalars(select(Notification).where(Notification.link_to == f"/candidates/{candidate.id}")))
+        notices = list(db.scalars(select(Notification).where(Notification.link_to.like(f"/candidates/{candidate.id}/%"))))
         assert {n.user_id for n in notices} == {"admin", "manager"}
         assert {n.title for n in notices} == {WAITING_TITLE}
         assert db.scalar(select(func.count()).select_from(Task)) == 0
@@ -77,10 +77,11 @@ def test_assigned_intake_keeps_the_ordinary_receipt_notice(setup):
     sessions, settings = setup
     candidate = ingest(sessions, settings)
     with sessions() as db:
-        notices = list(db.scalars(select(Notification).where(Notification.link_to == f"/candidates/{candidate.id}")))
-        assert {n.title for n in notices} == {"Candidate received by WhatsApp"}
-        # PRD: "The owner and the admin are notified" of an assignment; managers are not.
-        assert {n.user_id for n in notices} == {candidate.owner_id, "admin"}
+        notices = list(db.scalars(select(Notification).where(Notification.link_to.like(f"/candidates/{candidate.id}/%"))))
+        assert {n.title for n in notices} == {"New candidate assigned to you"} and {n.kind for n in notices} == {"candidate_assigned"}
+        # Only the owner is told, in plain English that it arrived by WhatsApp; admins and managers get no copy of a routine assignment.
+        assert {n.user_id for n in notices} == {candidate.owner_id}
+        assert "arrived by WhatsApp and was assigned to you automatically" in notices[0].detail
 
 
 def test_reassign_clears_review_when_the_missing_owner_was_the_only_reason(setup):
@@ -144,8 +145,10 @@ def test_sweep_assigns_round_robin_in_one_transaction_with_tasks_notices_and_aud
         assert all(not db.get(Candidate, f"wait-{n}").needs_review for n in range(3))
         assert db.scalar(select(func.count()).select_from(Task).where(Task.candidate_id.like("wait-%"))) == 3
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.action == "Candidate assigned from waiting list")) == 3
-        assert db.scalar(select(func.count()).select_from(Notification).where(Notification.title == "Candidate assigned")) >= 3
-        assert "manager" not in set(db.scalars(select(Notification.user_id).where(Notification.title == "Candidate assigned")))
+        # One grouped notice per recruiter (owner got two candidates, other one); the admin who ran the sweep and the manager get none.
+        notices = list(db.scalars(select(Notification).where(Notification.kind == "candidate_assigned")))
+        assert {n.user_id for n in notices} == {"owner", "other"} and len(notices) == 2
+        assert all("Admin assigned you" in n.detail and "from the waiting list" in n.detail for n in notices)
         assert assign_waiting_candidates(db, "admin", "Admin")["assigned"] == 0
 
 

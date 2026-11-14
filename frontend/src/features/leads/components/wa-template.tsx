@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { AutoTextarea } from '@/shared/ui/primitives'
 import { useAgency } from '@/shared/state/use-agency'
 import { loadWaTemplates, leadExtrasApi } from '../lead-extras-api'
 import { DEFAULT_WA_TEMPLATES, WA_BODY_MAX, fillTemplate, waUrl, type WaTemplate } from '../wa-template-model'
@@ -128,7 +129,7 @@ function Composer({ open }: { open: Open }) {
           <button key={item.key} type="button" role="radio" aria-checked={item.key === chosen?.key} className="lwa-tab" onClick={() => pick(item)}>{item.title}</button>
         ))}
       </div>
-      <textarea ref={area} className="lwa-text" value={text} maxLength={1000} aria-label="Message text" onChange={(event) => { setText(event.target.value); setEdited(true); setNote('') }} />
+      <AutoTextarea ref={area} rows={4} maxRows={8} className="lwa-text" value={text} maxLength={1000} aria-label="Message text" onChange={(event) => { setText(event.target.value); setEdited(true); setNote('') }} />
       <p className="lwa-hint">{edited ? <><b>Edited for this message only.</b> </> : null}Change the wording if you like; the template stays as it is. {text.length > WA_BODY_MAX ? 'Long messages are fine on WhatsApp.' : ''}</p>
       {!url && <p className="lwa-err" role="alert">This lead has no valid phone number.</p>}
       {note && <p className="lwa-hint" role="status">{note}</p>}

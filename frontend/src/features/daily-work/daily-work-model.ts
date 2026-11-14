@@ -321,15 +321,14 @@ export function clientCell(item: Pick<DailyItem, 'client' | 'kind'>): { text: st
   return { text: '', hint: item.kind === 'call' ? 'Not matched to an order yet' : 'No client recorded' }
 }
 
-/** Number of colours in the country pill palette (`dw-ctry-0` ... in daily-work.css). */
-export const COUNTRY_TONES = 8
+/** The remark box: one line (36px) when idle, growing with the text to about four lines (100px), then it scrolls inside. */
+export const REMARK_MIN = 36
+export const REMARK_MAX = 100
 
-/** A stable colour for a country: the same name always gets the same pill, whatever the casing. */
-export function countryTone(name: string): number {
-  const key = name.trim().toLowerCase()
-  let hash = 0
-  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  return hash % COUNTRY_TONES
+/** The box height for a given text height (`scrollHeight`) and whether it has to scroll: never below one line, never above four. */
+export function remarkBox(contentHeight: number): { height: number; scroll: boolean } {
+  const wanted = Number.isFinite(contentHeight) ? Math.ceil(contentHeight) : REMARK_MIN
+  return { height: Math.min(REMARK_MAX, Math.max(REMARK_MIN, wanted)), scroll: wanted > REMARK_MAX }
 }
 
 const SHORT_COUNTRIES: Record<string, string> = {

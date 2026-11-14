@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './app/App'
 import { initTheme } from './shared/lib/theme'
+import { installTruncationTitles } from './shared/lib/truncation-title'
 import './styles/fonts.css'
 import './styles/theme.css'
 import './styles/index.css'
@@ -14,8 +15,10 @@ import './styles/compact.css'
 import './styles/depth.css'
 import './styles/skin.css'
 import './styles/forms.css'
+import './styles/fit.css'
 
 initTheme()
+installTruncationTitles()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

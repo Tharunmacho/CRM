@@ -44,8 +44,8 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const groups: DailyGroup[] = useMemo(() => {
     const { toWork, done } = splitItems(items ?? [])
     return [
-      { key: 'to-work', title: 'To work', hint: 'Candidates with prescreening waiting come first, then the newest assigned. Work them in the order that suits you.', icon: <ListChecks size={15} aria-hidden="true" />, items: toWork },
-      { key: 'done-today', title: 'Done today', hint: 'Prescreening was finished or the call was answered today. Finished candidates are in Follow-up from tomorrow.', icon: <CheckCircle2 size={15} aria-hidden="true" />, items: done, tone: 'done' as const },
+      { key: 'to-work', title: 'To work', icon: <ListChecks size={15} aria-hidden="true" />, items: toWork },
+      { key: 'done-today', title: 'Done today', icon: <CheckCircle2 size={15} aria-hidden="true" />, items: done, tone: 'done' as const },
     ].filter((g) => g.items.length > 0)
   }, [items])
 
@@ -79,8 +79,8 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
       <PageHeader
         title="Tasks"
         description={mine
-          ? "Today's task: the candidates assigned to you who still need prescreening. Finish prescreening and the candidate moves to Follow-up. Work them in whatever order and at whatever time suits you."
-          : "Today's task for every recruiter: candidates who still need prescreening, with how many each has left to work and how many were finished today."}
+          ? 'Candidates assigned to you who still need prescreening.'
+          : 'Candidates who still need prescreening, for every recruiter.'}
         actions={<>
           <Button onClick={onOpenAll}><ListChecks size={15} aria-hidden="true" />All 48-hour tasks</Button>
           <Button onClick={() => void refresh()}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>

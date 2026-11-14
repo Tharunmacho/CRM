@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowRight, CheckCircle2, ExternalLink, MoreHorizontal, PhoneCall, Save, UserRound } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCall, Save, UserRound } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { countryCode, flagSrc } from '@/shared/lib/country-flag'
 import { Button, Textarea } from '@/shared/ui/primitives'
@@ -8,33 +8,34 @@ import { RecordIdentity } from '@/shared/ui/workspace'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import {
-  advanceLabel, clientCell, clockTime, countryCell, countryShort, countryTone, positionCell, rowAction,
+  advanceLabel, clientCell, clockTime, countryCell, countryShort, positionCell, remarkBox, rowAction,
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
 
-export interface DailyGroup { key: string; title: string; hint: string; icon: ReactNode; items: DailyItem[]; tone?: 'done' }
+export interface DailyGroup { key: string; title: string; icon: ReactNode; items: DailyItem[]; tone?: 'done' }
 
 /**
  * The agreed column format, in this order for everyone (it mirrors the agency's sheet). The Recruiter column is added after the
  * candidate for supervisors only; the trailing actions column has no visible title (Open / Complete and the row menu live there).
  * Widths are the column plan in px: the table is fixed-layout and each column gets its share of the table width (see
  * columnLayout), so at or above the sum they fill the panel exactly and below it the table scrolls sideways with the actions
- * column kept in view (sticky). Text columns (client, candidate, recruiter, job, remarks) are left-aligned in header and cell;
- * the rest (S NO, REF, STAGE, AMOUNT, GOOGLE REVIEW, actions) are centred. No deadline column.
+ * column kept in view (sticky). The sum (about 1180px with the Recruiter column) fits the panel at a 1500px window with the sidebar
+ * open. One alignment per column, the same in header and cell: text columns (client, candidate, recruiter, job, remarks) are
+ * left-aligned, the rest (S NO, REF, STAGE, AMOUNT, GOOGLE REVIEW) are centred and the actions are right-aligned. No deadline column.
  */
-const COLUMNS = [
-  { key: 'no', title: 'S NO', width: 44 },
-  { key: 'client', title: 'CLIENT / COUNTRY', width: 124, left: true },
-  { key: 'candidate', title: 'CANDIDATE NAME', width: 164, left: true },
-  { key: 'staff', title: 'Recruiter', width: 124, supervisor: true, left: true },
-  { key: 'position', title: 'JOB', width: 100, left: true },
-  { key: 'ref', title: 'REF', width: 124 },
-  { key: 'stage', title: 'STAGE', width: 108 },
-  { key: 'remarks', title: 'REMARKS', width: 136, left: true },
-  { key: 'amount', title: 'AMOUNT', width: 96 },
-  { key: 'review', title: 'GOOGLE REVIEW', width: 84 },
-  { key: 'actions', title: 'Actions', width: 128, quiet: true },
+export const TASK_COLUMNS = [
+  { key: 'no', title: 'S NO', width: 40 },
+  { key: 'client', title: 'CLIENT / COUNTRY', width: 116, left: true },
+  { key: 'candidate', title: 'CANDIDATE NAME', width: 156, left: true },
+  { key: 'staff', title: 'Recruiter', width: 94, supervisor: true, left: true },
+  { key: 'position', title: 'JOB', width: 112, left: true },
+  { key: 'ref', title: 'REF', width: 76 },
+  { key: 'stage', title: 'STAGE', width: 156 },
+  { key: 'remarks', title: 'REMARKS', width: 148, left: true },
+  { key: 'amount', title: 'AMOUNT', width: 80 },
+  { key: 'review', title: 'GOOGLE REVIEW', width: 80 },
+  { key: 'actions', title: 'Actions', width: 124, quiet: true },
 ] as const
 
 /** Fixed-layout plan for a column list: the table's minimum width (the sum) and each column's percentage share of the table. */
@@ -79,11 +80,13 @@ export interface DailyTableProps {
   onRemark: (item: DailyItem, text: string) => Promise<void>
 }
 
-/** The daily list in the reference style: centred columns, hairline dividers, 76px rows, a "To work" band and a "Done today" band. */
+/** The daily list in the reference style: hairline dividers, 72px rows, every cell vertically centred. A "To work" and a "Done today" band only when both exist. */
 export function DailyTable({ groups, zone, supervisor, staffName, canWork, onOpen, onProfile, onRemark }: DailyTableProps) {
-  const columns = COLUMNS.filter((c) => supervisor || !('supervisor' in c))
+  const columns = TASK_COLUMNS.filter((c) => supervisor || !('supervisor' in c))
   const layout = columnLayout(columns)
   let serial = 0
+  // A single "To work" group needs no band of its own; the bands only tell the two groups apart.
+  const bands = groups.length > 1 || groups[0]?.tone === 'done'
   return (
     <ScrollEdges>
       <table className="dw-table dw-main" aria-label="Daily candidates" style={{ minWidth: layout.minWidth }}>
@@ -91,12 +94,11 @@ export function DailyTable({ groups, zone, supervisor, staffName, canWork, onOpe
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left', c.key === 'actions' && 'is-actions')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
           {groups.map((g) => <Fragment key={g.key}>
-            <tr className={cn('dw-group', g.tone === 'done' && 'is-done')}>
+            {bands && <tr className={cn('dw-group', g.tone === 'done' && 'is-done')}>
               <th colSpan={columns.length} scope="colgroup">
                 <span className="dw-group-title">{g.icon}{g.title}<b className="tnum">{g.items.length}</b></span>
-                <small>{g.hint}</small>
               </th>
-            </tr>
+            </tr>}
             {g.items.map((item) => {
               serial += 1
               return <ItemRow key={item.id} item={item} serial={serial} zone={zone} showStaff={supervisor}
@@ -116,18 +118,19 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
 }) {
   const done = item.status === 'done'
   const action = rowAction(item)
+  const noCountry = countryCell(item, countryCode).names.length === 0
   return (
     <tr className={cn('dw-row', done && 'is-done', serial % 2 === 0 && 'is-alt')}>
       <td className="is-num tnum" data-label="S NO">{serial}</td>
-      <td data-label="CLIENT / COUNTRY" className="is-left"><ClientCountryCell item={item} onAdd={onProfile} /></td>
+      <td data-label="CLIENT / COUNTRY" className={cn('is-left', !item.client && noCountry && 'is-empty')}><ClientCountryCell item={item} /></td>
       <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
-      {showStaff && <td data-label="Recruiter" className="is-left">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">Not assigned</span>}</td>}
-      <td data-label="JOB" className="is-left"><PositionCellView item={item} /></td>
-      <td data-label="REF"><OrderRefCell item={item} /></td>
+      {showStaff && <td data-label="Recruiter" className="is-left">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">—</span>}</td>}
+      <td data-label="JOB" className={cn('is-left', !item.position && 'is-empty')}><PositionCellView item={item} /></td>
+      <td data-label="REF" className={cn(!item.orderRef && 'is-empty')}><OrderRefCell item={item} /></td>
       <td data-label="STAGE"><StageCell item={item} /></td>
-      <td data-label="REMARKS" className="is-left"><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
-      <td data-label="AMOUNT"><AmountCell item={item} /></td>
-      <td data-label="GOOGLE REVIEW"><ReviewCell item={item} /></td>
+      <td data-label="REMARKS" className={cn('is-left', !item.remark && !(canWork && !done) && 'is-empty')}><RemarkCell item={item} canWork={canWork && !done} onSave={onRemark} /></td>
+      <td data-label="AMOUNT" className={cn(!advanceLabel(item) && 'is-empty')}><AmountCell item={item} /></td>
+      <td data-label="GOOGLE REVIEW" className={cn(!item.googleReview && 'is-empty')}><ReviewCell item={item} /></td>
       <td data-label="Actions" className="is-actions">
         {done && <span className="dw-done-tag"><CheckCircle2 size={13} aria-hidden="true" />Done{item.completedAt ? ` ${clockTime(item.completedAt, zone)}` : ''}</span>}
         <div className="dw-actions">
@@ -137,6 +140,7 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
           <RowMenu candidate={item.candidate} items={[
             ...(item.applicationId ? [{ label: done ? 'View stage' : 'Open stage', icon: ArrowRight, onSelect: onOpen }] : []),
             { label: 'Open candidate profile', icon: UserRound, onSelect: onProfile },
+            ...(noCountry ? [{ label: 'Add preferred country', icon: Globe, onSelect: onProfile }] : []),
           ]} />
         </div>
       </td>
@@ -147,26 +151,29 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
 /** The ONE ID of the candidate: the Data Bank ID. The CRM reference (CND-...) shows only for an old row that has no Data Bank ID. */
 export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId' | 'candidateRef'> }) {
   const id = primaryId({ careId: item.candidateCareId, ref: item.candidateRef })
-  return <span title={id}>{id && <b className="cid-main">{id}</b>}</span>
+  return id ? <b className="cid-main" title={id}>{id}</b> : null
 }
 
-/** CLIENT / COUNTRY in one cell: the client's name, the country pill (flag and short name) under it. */
-export function ClientCountryCell({ item, onAdd }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact' | 'country' | 'countrySource' | 'locationHint' | 'candidate'>; onAdd: () => void }) {
+/**
+ * CLIENT / COUNTRY in one cell: the client's name (up to two lines) and the country chip (flag and short name) under it.
+ * A row with only one of them shows just that one; with neither it is a single muted dash. What is missing is added from the row menu.
+ */
+export function ClientCountryCell({ item }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact' | 'country' | 'countrySource' | 'locationHint'> }) {
   const cell = clientCell(item)
+  const country = countryCell(item, countryCode)
+  if (!cell.text && country.names.length === 0) return <span className="dw-none" title={cell.hint}>—</span>
   return (
-    <div className="dw-stack dw-cc">
-      {cell.text
-        ? <span className="dw-cell-strong" title={item.clientContact ? `Contact: ${item.clientContact}` : undefined}>{cell.text}</span>
-        : <span className="dw-none" title={cell.hint}>—</span>}
-      <CountryCell item={item} onAdd={onAdd} />
+    <div className="dw-cc">
+      {cell.text && <span className="dw-cell-strong dw-clamp" title={item.clientContact ? `${cell.text}. Contact: ${item.clientContact}` : cell.text}>{cell.text}</span>}
+      <CountryChip country={country} />
     </div>
   )
 }
 
-/** REF: the order's reference (ORD-...) for the job; nothing to show until the candidate is matched to an order. */
+/** REF: the order's reference (ORD-...) for the job; a muted dash until the candidate is matched to an order. */
 export function OrderRefCell({ item }: { item: Pick<DailyItem, 'orderRef'> }) {
-  if (!item.orderRef) return <div className="dw-stack"><span className="dw-none">—</span><small className="dw-sub is-soft">No order yet</small></div>
-  return <span className="dw-ref" title="Order reference">{item.orderRef}</span>
+  if (!item.orderRef) return <span className="dw-none" title="Not matched to an order yet">—</span>
+  return <span className="dw-ref" title={item.orderRef}>{item.orderRef}</span>
 }
 
 /** AMOUNT: the advance the candidate paid (stage 8) as money; a dash while none is recorded. */
@@ -182,70 +189,36 @@ export function ReviewCell({ item }: { item: Pick<DailyItem, 'googleReview'> }) 
   return <span className="dw-none">—</span>
 }
 
-/** Client has no fallback: it exists only through an order. Say so instead of leaving a bare dash. */
-export function ClientCell({ item }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact' | 'orderRef'> }) {
-  const cell = clientCell(item)
-  if (!cell.text) return <div className="dw-stack" title={cell.hint}><span className="dw-none">—</span><small className="dw-sub is-soft">No order yet</small></div>
-  return (
-    <div className="dw-stack" title={item.clientContact ? `Contact: ${item.clientContact}` : undefined}>
-      <span className="dw-cell-strong">{cell.text}</span>{item.orderRef && <small className="dw-sub">{item.orderRef}</small>}
-    </div>
-  )
-}
-
-/** Solid country pill (flag inside when the app has one); the candidate's own wishes are marked "pref." underneath. */
-export function CountryCell({ item, onAdd }: { item: Pick<DailyItem, 'country' | 'countrySource' | 'locationHint' | 'candidate'>; onAdd: () => void }) {
-  const cell = countryCell(item, countryCode)
-  if (cell.names.length === 0) {
-    return (
-      <div className="dw-stack" title={cell.hint}>
-        <span className="dw-none">—</span>
-        <small className="dw-sub is-soft">Not saved · <button type="button" className="dw-add" onClick={onAdd} aria-label={`Add a preferred country for ${item.candidate}`}>Add</button></small>
-      </div>
-    )
-  }
-  const [first, ...more] = cell.names
+/** A small neutral chip: the flag (when the app has one) and the short country name. A dashed edge marks a country that is not from an order (the tooltip says where it comes from). */
+export function CountryChip({ country }: { country: ReturnType<typeof countryCell> }) {
+  const [first, ...more] = country.names
+  if (!first) return null
   const code = countryCode(first)
-  const shown = countryShort(first)
-  const note = cell.source === 'preference' ? 'pref.' : cell.source === 'location' ? 'from location' : ''
   return (
-    <div className="dw-stack" title={`${cell.names.join(', ')}. ${cell.hint}`}>
-      <span className="dw-pills">
-        <span className={cn('dw-ctry', `dw-ctry-${countryTone(first)}`, cell.source !== 'order' && 'is-soft')}>
-          {code && <img src={flagSrc(code)} alt="" width={16} height={11} loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none' }} />}
-          <span>{shown}</span>
-        </span>
-        {more.length > 0 && <small className="dw-more">+{more.length}</small>}
-      </span>
-      {note && <small className="dw-pref">{note}</small>}
-    </div>
+    <span className={cn('dw-ctry', country.source !== 'order' && 'is-soft')} title={`${country.names.join(', ')}. ${country.hint}`}>
+      {code && <img src={flagSrc(code)} alt="" width={16} height={11} loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none' }} />}
+      <span>{countryShort(first)}</span>
+      {more.length > 0 && <small className="dw-more">+{more.length}</small>}
+    </span>
   )
 }
 
+/** JOB: up to two lines, the full title in the tooltip; a muted dash when none is known. */
 export function PositionCellView({ item }: { item: Pick<DailyItem, 'position' | 'positionSource'> }) {
   const cell = positionCell(item)
-  if (!cell.text) {
-    return <div className="dw-stack" title={cell.hint}><span className="dw-none">—</span><small className="dw-sub is-soft">Not saved</small></div>
-  }
-  return (
-    <div className="dw-stack" title={`${cell.text}. ${cell.hint}`}>
-      <span className="dw-cell-strong dw-clamp">{cell.text}</span>
-      {cell.source === 'preference' && <small className="dw-pref">pref.</small>}
-      {cell.source === 'skill' && <small className="dw-pref">from skills</small>}
-    </div>
-  )
+  if (!cell.text) return <span className="dw-none" title={cell.hint}>—</span>
+  return <span className="dw-cell-strong dw-clamp" title={`${cell.text}. ${cell.hint}`}>{cell.text}</span>
 }
 
-/** A compact stage chip, the stage name in one muted line and a slim progress bar underneath (never over the text). */
+/** STAGE: one pill with the stage name (the same width in every row) and a slim progress bar under it. */
 export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
   const no = item.stage
   const stage = no ? STAGES[Math.max(0, Math.min(TOTAL_STAGES, no) - 1)] : null
   return (
     <div className="dw-stage" title={stage ? `Stage ${no} of ${TOTAL_STAGES}: ${stage.title}` : 'Initial call, before a stage starts'}>
       {stage
-        ? <span className="dw-stage-chip"><b>Stage {no}</b></span>
+        ? <span className="dw-stage-chip">Stage {no} · {stage.title}</span>
         : <span className="dw-stage-chip is-call"><PhoneCall size={12} aria-hidden="true" />Initial call</span>}
-      <small className="dw-stage-name">{stage ? stage.title : 'No order yet'}</small>
       <span className="dw-stage-bar" aria-hidden="true">
         {STAGES.map((s) => <i key={s.no} className={cn(no !== null && s.no < no && 'is-done', s.no === no && 'is-now')} />)}
       </span>
@@ -253,11 +226,31 @@ export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
   )
 }
 
-/** Latest remark plus a compact one-line box to add today's update (the same remark the 48-hour list uses). */
-export function RemarkCell({ item, canWork, onSave }: { item: Pick<DailyItem, 'remark' | 'candidate'>; canWork: boolean; onSave: (text: string) => Promise<void> }) {
+/** Keeps a textarea exactly as tall as its text (one line up to about four, then it scrolls inside); see remarkBox. */
+function useAutoGrow(value: string) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    // Empty: always the single idle line (a wrapping placeholder must not make the box taller).
+    const box = remarkBox(value ? el.scrollHeight : 0)
+    el.style.height = `${box.height}px`
+    el.style.overflowY = box.scroll ? 'auto' : 'hidden'
+  }, [value])
+  return ref
+}
+
+/**
+ * REMARKS: one muted line (the latest remark, or `lead` such as "Last update 3 days ago" in Follow-up) over a same-width field with
+ * the save icon in its bottom-right corner. The field grows with the typed text up to about four lines and shrinks back when text
+ * is deleted; the line shows the saved remark wrapped (two lines), the full text in its tooltip. Read-only people see just the line, or a dash.
+ */
+export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyItem, 'remark' | 'candidate'>; canWork: boolean; onSave: (text: string) => Promise<void>; lead?: string }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const box = useAutoGrow(text)
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const value = text.trim()
@@ -267,15 +260,17 @@ export function RemarkCell({ item, canWork, onSave }: { item: Pick<DailyItem, 'r
     catch (e) { setError(e instanceof Error ? e.message : 'The remark could not be saved.') }
     finally { setBusy(false) }
   }
+  const last = item.remark
+  const line = lead ? (last ? `${lead} · ${last.body}` : lead) : last?.body
   return (
     <div className="dw-remark">
-      {item.remark && <p className="dw-remark-last" title={`${item.remark.by} · ${new Date(item.remark.at).toLocaleString()}\n${item.remark.body}`}>{item.remark.body}</p>}
+      {line && <p className={cn('dw-remark-last', lead && 'is-lead')} title={`${lead ? `${lead}\n` : ''}${last ? `${last.by} · ${new Date(last.at).toLocaleString()}\n${last.body}` : ''}`.trim()}>{line}</p>}
       {canWork && <form onSubmit={submit}>
-        <Textarea rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={item.remark ? 'Add update' : 'Add remark'} maxLength={10000} disabled={busy}
+        <Textarea ref={box} autoGrow={false} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder="Add remark" maxLength={10000} disabled={busy}
           aria-label={`Remark for ${item.candidate}`} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(e as unknown as FormEvent) } }} />
         <button type="submit" className="dw-remark-save" disabled={busy || !text.trim()} aria-label="Save remark" title="Save remark"><Save size={14} aria-hidden="true" /></button>
       </form>}
-      {!item.remark && !canWork && <span className="dw-none">—</span>}
+      {!line && !canWork && <span className="dw-none">—</span>}
       {error && <small className="dw-remark-error" role="alert">{error}</small>}
     </div>
   )

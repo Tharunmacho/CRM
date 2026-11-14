@@ -81,7 +81,7 @@ export function ReplyComposer({ messageId, address, disconnected }: { messageId:
     <p className="mb-2 flex items-center gap-2 text-xs text-ink-600"><CornerUpLeft className="h-4 w-4" />Reply from {address}</p>
     {disconnected && <p className="mb-3 text-sm text-amber-900">Reconnect this mailbox to reply. Existing conversations remain available.</p>}
     {error && <p role="alert" className="mb-3 text-sm text-stamp-700">{error}</p>}
-    <Textarea rows={4} value={body} onChange={(event) => setBody(event.target.value)} disabled={busy || disconnected || attempted} placeholder="Write your reply" maxLength={50000} aria-label="Reply message" />
+    <Textarea rows={4} maxRows={10} value={body} onChange={(event) => setBody(event.target.value)} disabled={busy || disconnected || attempted} placeholder="Write your reply" maxLength={50000} aria-label="Reply message" />
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {!attempted ? <Button variant="primary" disabled={busy || disconnected || !body.trim()} onClick={() => void send()}>Send reply</Button>
         : <Button disabled={busy} onClick={() => void load().catch((cause) => setError(cause.message))}>Check reply status</Button>}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { MessageCircle, RotateCcw, Save } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Panel } from '@/shared/ui/display'
-import { Button } from '@/shared/ui/primitives'
+import { AutoTextarea, Button } from '@/shared/ui/primitives'
 import { leadExtrasApi, loadWaTemplates } from '@/features/leads/lead-extras-api'
 import { WA_BODY_MAX, WA_PLACEHOLDERS, WA_TITLE_MAX, bodyRoom, fillTemplate, unknownPlaceholders, type WaTemplate } from '@/features/leads/wa-template-model'
 import { PanelHead, failureText } from './user-ui'
@@ -69,7 +69,7 @@ export function WaTemplatesCard({ editable }: { editable: boolean }) {
             <Button variant="ghost" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />} disabled={!editable || busy || item.isDefault} onClick={() => void apply([{ key: item.key, reset: true }], `${item.defaultTitle ?? item.title} is back to the default wording.`)}>Use default</Button>
           </header>
           <label>Title<input type="text" maxLength={WA_TITLE_MAX} value={value.title} disabled={!editable || busy} onChange={(event) => setDraft((current) => ({ ...current, [item.key]: { ...value, title: event.target.value } }))} /></label>
-          <label>Message ({Math.max(0, bodyRoom(value.body))} characters left of {WA_BODY_MAX})<textarea value={value.body} disabled={!editable || busy} onChange={(event) => setDraft((current) => ({ ...current, [item.key]: { ...value, body: event.target.value } }))} /></label>
+          <label>Message ({Math.max(0, bodyRoom(value.body))} characters left of {WA_BODY_MAX})<AutoTextarea rows={3} maxRows={10} value={value.body} disabled={!editable || busy} onChange={(event) => setDraft((current) => ({ ...current, [item.key]: { ...value, body: event.target.value } }))} /></label>
           {issue ? <p role="alert" className="lwa-err">{issue}</p> : <p className="lwa-hint">Preview: {preview}</p>}
         </div>
       })}

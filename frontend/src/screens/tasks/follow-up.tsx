@@ -65,8 +65,8 @@ export function FollowUp({ onOpenAll }: { onOpenAll: () => void }) {
       <PageHeader
         title="Tasks"
         description={supervisor
-          ? "Every recruiter's candidates who are selected and still moving through the later stages. The ones with the oldest update are first."
-          : 'Your candidates who are selected and still moving through the later stages. The ones with the oldest update are first, so nothing goes quiet.'}
+          ? "Every recruiter's selected candidates, oldest update first."
+          : 'Your selected candidates, oldest update first.'}
         actions={<>
           <Button onClick={onOpenAll}><ListChecks size={15} aria-hidden="true" />All 48-hour tasks</Button>
           <Button onClick={() => void refresh()}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
@@ -86,7 +86,7 @@ export function FollowUp({ onOpenAll }: { onOpenAll: () => void }) {
       <section className="dw-panel" aria-label="Follow-up">
         <div className="dw-panel-head">
           <div><h2>{supervisor && <Users size={16} aria-hidden="true" />} {title}</h2>
-            <p className="dw-summary" aria-live="polite">{total} {total === 1 ? 'candidate' : 'candidates'}{supervisor && !person ? ` · ${data.staffCount} ${data.staffCount === 1 ? 'recruiter' : 'recruiters'}` : ''}. Finished candidates move to Travelled; closed ones leave.</p></div>
+            <p className="dw-summary" aria-live="polite">{total} {total === 1 ? 'candidate' : 'candidates'}{supervisor && !person ? ` · ${data.staffCount} ${data.staffCount === 1 ? 'recruiter' : 'recruiters'}` : ''}</p></div>
           {supervisor && <Select value={staffFilter ?? 'all'} onChange={(e) => setStaff(e.target.value)} className="tk-select" aria-label="Filter by recruiter">
             <option value="all">All recruiters</option>
             {(data.staff ?? []).map((s) => <option key={s.userId} value={s.userId}>{s.name} ({s.summary.total}){!s.active ? ' (inactive)' : ''}</option>)}

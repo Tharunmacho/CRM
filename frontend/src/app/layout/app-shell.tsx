@@ -506,10 +506,10 @@ function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: R
                     <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', n.kind === 'candidate_request' && !n.read ? 'bg-stamp-600' : n.read ? 'bg-ink-300' : 'bg-navy-600')} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
-                        <span className="notif-title text-xs font-medium text-ink">{n.title}</span>
+                        <span className="notif-title min-w-0 text-xs font-medium text-ink [overflow-wrap:anywhere]">{n.title}</span>
                         <span className="shrink-0 text-micro text-ink-400">{ago(n.createdAt)}</span>
                       </span>
-                      <span className="mt-0.5 block text-xs leading-snug text-ink-500">{n.detail}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-ink-500 [overflow-wrap:anywhere]">{n.detail}</span>
                     </span>
                   </button>
                 ))}

@@ -111,10 +111,12 @@ def test_admin_reallocates_an_already_assigned_lead(env):
     entry = audits(env, "Lead reassigned")[0]
     assert (entry.actor_id, entry.entity_id, entry.meta["fromUserId"], entry.meta["toUserId"]) == ("admin", ids[0], "a", "b")
     assert [t.owner_id for t in follow_up_todos(env, ids[0])] == ["b"]
-    # Only the new owner is told.
-    told = {n.user_id for n in env.db.scalars(select(m.Notification).where(m.Notification.title == "New leads assigned"))}
+    # The new owner is told it is theirs and the previous owner that it left their list; the admin who did it, and nobody else, gets nothing.
+    told = {n.user_id for n in env.db.scalars(select(m.Notification).where(m.Notification.kind == "lead_assignment"))}
     assert told == {"a", "b"}  # "a" from the first allocation at import time
-    assert env.db.scalar(select(func.count()).select_from(m.Notification).where(m.Notification.user_id == "a")) == 1
+    assert sorted(n.kind for n in env.db.scalars(select(m.Notification).where(m.Notification.user_id == "a"))) == ["lead_assignment", "lead_removed"]
+    assert [n.kind for n in env.db.scalars(select(m.Notification).where(m.Notification.user_id == "b"))] == ["lead_assignment"]
+    assert env.db.scalar(select(func.count()).select_from(m.Notification).where(m.Notification.user_id.in_(["admin", "manager"]))) == 0
 
 
 def test_reallocation_target_must_be_an_active_staff_member(env):
@@ -146,9 +148,11 @@ def test_admin_unassigns_a_lead_and_only_the_admin_sees_it_afterwards(env):
     assert activities(env, ids[0])[-1] == "Unassigned from Asha"
     entry = audits(env, "Lead unassigned")[0]
     assert (entry.actor_id, entry.entity_id, entry.meta["fromUserId"], entry.meta["toUserId"]) == ("admin", ids[0], "a", None)
-    # The old owner's follow-up to-do is gone, and nobody is notified (a reassignment does not tell the old owner either).
+    # The old owner's follow-up to-do is gone, and only the old owner is told it left their list (nobody else, not the admin).
     assert follow_up_todos(env, ids[0]) == []
-    assert env.db.scalar(select(func.count()).select_from(m.Notification)) == before
+    assert env.db.scalar(select(func.count()).select_from(m.Notification)) == before + 1
+    [notice] = env.db.scalars(select(m.Notification).where(m.Notification.kind == "lead_removed"))
+    assert notice.user_id == "a"
     # Visibility: the admin finds it under "Unassigned"; the old owner and everyone else no longer see it.
     assert visible_to(env, "admin", owner="none") == {ids[0]}
     assert visible_to(env, "a") == set(ids[1:]) and visible_to(env, "b") == set() and visible_to(env, "manager") == set()
@@ -242,8 +246,9 @@ def test_admin_reallocates_an_assigned_candidate_with_the_open_work(env):
     assert env.db.get(m.Candidate, candidate.id).owner_id == "b" and env.db.get(m.Task, task.id).owner_id == "b"
     entry = audits(env, "Candidate reassigned")[0]
     assert (entry.meta["fromUserId"], entry.meta["toUserId"]) == ("a", "b")
-    told = {n.user_id for n in env.db.scalars(select(m.Notification).where(m.Notification.title == "Candidate assigned"))}
-    assert told == {"b", "admin"}
+    # The new owner is told it is theirs, the previous owner that it moved; the admin who did it gets no copy.
+    told = {(n.user_id, n.kind) for n in env.db.scalars(select(m.Notification).where(m.Notification.kind.in_(["candidate_assigned", "candidate_removed"])))}
+    assert told == {("b", "candidate_assigned"), ("a", "candidate_removed")}
     # And back to the first person, as often as needed.
     assert reassign(env, [candidate.id], "a").status_code == 200
     env.db.expire_all()
@@ -270,7 +275,8 @@ def test_admin_unassigns_a_candidate_who_then_waits_for_a_recruiter(env):
     assert env.db.scalar(select(func.count()).select_from(m.TodoItem).where(m.TodoItem.link_to == f"/candidates/{candidate_id}")) == 0
     entry = audits(env, "Candidate unassigned")[0]
     assert (entry.actor_id, entry.entity_id, entry.meta["fromUserId"], entry.meta["toUserId"]) == ("admin", candidate_id, "a", None)
-    assert env.db.scalar(select(func.count()).select_from(m.Notification).where(m.Notification.user_id == "a")) == 0
+    # The old recruiter is told (once) that it was taken off their list; nobody else is.
+    assert [(n.user_id, n.kind) for n in env.db.scalars(select(m.Notification))] == [("a", "candidate_removed")]
     history = env.client.get(f"/api/candidates/{candidate_id}/assignment-history").json()["items"]
     assert (history[0]["action"], history[0]["fromName"], history[0]["toName"]) == ("Candidate unassigned", "Asha", "Unassigned")
     # It is in the "Not assigned" pool again.

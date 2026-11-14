@@ -112,8 +112,8 @@ export function Dialog({
         <header className="dialog-head flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-6 py-5">
           {icon && <span className="dialog-icon shrink-0">{icon}</span>}
           <div className="min-w-0 flex-1">
-            <h2 className="text-[19px] font-semibold leading-snug tracking-[-0.02em] text-ink">{title}</h2>
-            {description && <p className="mt-1 text-[14px] leading-6 text-ink-500">{description}</p>}
+            <h2 className="text-[19px] font-semibold leading-snug tracking-[-0.02em] text-ink [overflow-wrap:anywhere]">{title}</h2>
+            {description && <p className="mt-1 text-[14px] leading-6 text-ink-500 [overflow-wrap:anywhere]">{description}</p>}
           </div>
           <IconButton label="Close" className="ui-dialog-close" onClick={onClose}>
             <X className="h-4 w-4" />
@@ -121,7 +121,7 @@ export function Dialog({
         </header>
         <div className={cn('dialog-body px-6 py-5', contained ? 'dialog-scroll-body scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain sm:flex-none sm:overflow-visible')}>{children}</div>
         {footer && (
-          <footer className="dialog-foot flex shrink-0 items-center justify-end gap-2 border-t border-rule-soft bg-white px-6 py-4">
+          <footer className="dialog-foot flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-rule-soft bg-white px-6 py-4">
             {footer}
           </footer>
         )}
@@ -169,17 +169,17 @@ export function Sheet({
         style={{ animation: 'sheet-in 200ms cubic-bezier(.2,.8,.3,1)' }}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-rule-soft px-5 py-4">
-          <div className="min-w-0">
-            <h2 className="text-[18px] font-semibold leading-snug tracking-[-0.02em] text-ink">{title}</h2>
-            {description && <p className="mt-1 text-[14px] leading-6 text-ink-500">{description}</p>}
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[18px] font-semibold leading-snug tracking-[-0.02em] text-ink [overflow-wrap:anywhere]">{title}</h2>
+            {description && <p className="mt-1 text-[14px] leading-6 text-ink-500 [overflow-wrap:anywhere]">{description}</p>}
           </div>
           <IconButton label="Close" className="ui-dialog-close" onClick={onClose}>
             <X className="h-4 w-4" />
           </IconButton>
         </header>
-        <div className="scrollbar-thin flex-1 overflow-y-auto">{children}</div>
+        <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto">{children}</div>
         {footer && (
-          <footer className="dialog-foot flex shrink-0 items-center justify-end gap-2 border-t border-rule-soft bg-white px-5 py-3">
+          <footer className="dialog-foot flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-rule-soft bg-white px-5 py-3">
             {footer}
           </footer>
         )}
@@ -364,11 +364,11 @@ export function Toast({
       <div
         role="status"
         className={cn(
-          'ui-toast pointer-events-auto flex max-w-full items-center gap-3 rounded-[10px] border px-4 py-2.5 text-[14px] shadow-overlay animate-sheet-in',
+          'ui-toast pointer-events-auto flex max-h-[60dvh] max-w-full items-center gap-3 overflow-y-auto rounded-[10px] border px-4 py-2.5 text-[14px] shadow-overlay animate-sheet-in',
         )}
         data-tone={tone}
       >
-        <span className="min-w-0 break-words">{message}</span>
+        <span className="min-w-0 [overflow-wrap:anywhere]">{message}</span>
         <button type="button" onClick={onDismiss} aria-label="Dismiss message" className="ui-toast-close -mr-1 grid shrink-0 place-items-center opacity-70 hover:opacity-100">
           <X className="h-3.5 w-3.5" />
         </button>
