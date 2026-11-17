@@ -40,6 +40,7 @@
 .ds-value { margin: 2px 0 4px; font-size: 34px; font-weight: 650; line-height: 1.05; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .ds-note { font-size: 12.5px; line-height: 1.4; color: var(--text-muted); }
 .ds-note.is-danger { color: var(--error-ink); font-weight: 500; }
+.ds-note2 { margin-top: 1px; font-size: 12px; opacity: .9; }
 .ds-blue { --tone: var(--ds-blue); } .ds-green { --tone: var(--ds-green); } .ds-amber { --tone: var(--ds-amber); }
 .ds-violet { --tone: var(--ds-violet); } .ds-teal { --tone: var(--ds-teal); } .ds-slate { --tone: var(--ds-slate); } .ds-red { --tone: var(--ds-red); }
 

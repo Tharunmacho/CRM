@@ -31,8 +31,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session, attributes
 
+from app.integrations.ocr import experience
 from app.integrations.ocr.mapping import (
-    _DEMONYMS, _gender, _passport_no, _person_name, _unique, _years, parse_loose_date,
+    _DEMONYMS, _gender, _passport_no, _person_name, _unique, _years, find_date_in, parse_loose_date, phone_candidates, phone_rank,
+    pick_email, pick_phone,
 )
 
 UNNAMED = "Name needs review"
@@ -126,11 +128,12 @@ def _s(value: Any, limit: int = 200) -> str | None:
     return cleaned[:limit] or None
 
 
-def _d(value: Any) -> date | None:
+def _d(value: Any, role: str | None = None) -> date | None:
+    """A date from a date or the reader's text. `role` ("birth" / "other") lets a two-digit year be read (see parse_loose_date)."""
     if isinstance(value, date):
         return value
-    text = _s(value, 40)
-    return parse_loose_date(text) if text else None
+    text = _s(value, 60)
+    return parse_loose_date(text, role) if text else None
 
 
 def _dict(value: Any) -> dict:
@@ -192,6 +195,9 @@ def normalize_marital(value: Any) -> str | None:
     key = re.sub(r"[^a-z ]", "", text.casefold()).strip()
     if key in _MARITAL:
         return _MARITAL[key]
+    words = [w for w in key.split() if w in _MARITAL]   # "Marital status: Married", "Single (Unmarried)", "Married."
+    if len({_MARITAL[w] for w in words}) == 1 and not {"not", "never", "no"} & set(key.split()):
+        return _MARITAL[words[0]]
     return text.title() if len(text) <= 30 else None
 
 
@@ -236,10 +242,13 @@ def _period(entry: dict) -> str | None:
     span = None
     if start or end:
         span = f"{start or '?'} - {end or 'Present'}"
-    if span and human and months:
+    if span and human and human != "0 months" and (months or entry.get("duration_months") is None):
         return f"{span} ({human})"[:120]
     if span:
         return span[:120]
+    written = _first(entry, "period", "dates", "date_range", "tenure", limit=120)
+    if written:
+        return written
     return human[:120] if human and (months or entry.get("duration_months") is None) and human != "0 months" else None
 
 
@@ -278,13 +287,128 @@ def _address(value: Any) -> str | None:
 
 
 def _experience_years(raw: dict) -> tuple[int | None, int | None, int | None]:
+    """(total, India, abroad) in whole completed years (``_years`` floors: 26 months is 2, 11 months is 0 and left blank;
+    the exact period stays in the work-history rows). Months come from the reader's totals and from every job's own
+    duration, dates or stated period (see ``integrations.ocr.experience``); overlapping jobs count once."""
     entries = [e for e in _list(raw.get("experience")) if isinstance(e, dict)]
-    total = _months(raw.get("total_experience_months")) or sum(_months(e.get("duration_months")) for e in entries)
-    abroad = _months(raw.get("overseas_experience_months")) or sum(_months(e.get("duration_months")) for e in entries if e.get("is_overseas") is True)
-    india = _months(raw.get("indian_experience_months"))
-    if not india and total and total > abroad:
-        india = total - abroad
+    jobs = experience.summarize(entries)
+    abroad = experience.resolve(_months(raw.get("overseas_experience_months")), jobs.abroad, jobs.naive_abroad)
+    india = experience.resolve(_months(raw.get("indian_experience_months")), jobs.india, jobs.naive_india)
+    total = experience.resolve(_months(raw.get("total_experience_months")), jobs.total, jobs.naive_total)
+    total = max(total, abroad, india)
+    if not india and total > abroad:
+        india = total - abroad  # jobs whose country is unknown count as India, as before
     return _years(total), _years(india), _years(abroad)
+
+
+def _birth_date(value: Any) -> date | None:
+    """A date of birth the form can trust: one exact day, not in the future and not before 1900 (a misread two-digit year)."""
+    found = _d(value, "birth")
+    return found if found and 1900 <= found.year and found <= date.today() else None
+
+
+def _nationality(value: Any) -> str | None:
+    text = _s(value, 80)
+    return text.title() if text and text.isupper() else text
+
+
+_HONORIFIC = re.compile(r"^(?:mr|mrs|ms|shri|sri|smt|late|sh)\b\.?\s+", re.I)
+
+
+def _father(value: Any) -> str | None:
+    """The father's name: "S/O Ramesh", "Mr. Ramesh Kumar" and "Late Ramesh" give the name alone."""
+    text = _s(value)
+    if not text:
+        return None
+    text = relative_name(text) or text
+    while _HONORIFIC.match(text) and len(text.split()) > 1:
+        text = _HONORIFIC.sub("", text, count=1)
+    return _person_name(text)
+
+
+def _language_list(value: Any) -> list[str] | None:
+    """Languages as separate entries: a list, or one text ("English, Hindi & Tamil") that the reader did not split."""
+    items = value if isinstance(value, list) else [value]
+    pieces = [piece.strip(" .:-") for item in items if (text := _s(item, 200)) for piece in re.split(r"[,;/&|]|\s+and\s+", text)]
+    return _unique([piece[:80] for piece in pieces if piece]) or None
+
+
+_LABEL_END = r"[ \t]*[:;=\-–—][ \t]*"
+_PAGE_DOB = re.compile(r"(?<![a-z])(?:date\s*of\s*birth|d\s*\.?\s*o\s*\.?\s*b\b\.?|birth\s*date|born(?:\s*on)?)[\s:;=\-–—.]*(.{6,40})", re.I)
+_PAGE_PHONE = re.compile(r"(?<![a-z])(?:mobile|mob|cell|contact|phone|ph|tel|telephone|whats\s*app)\b[^\d\n]{0,20}?(\+?\(?\d[\d ().\-]{6,24}\d)", re.I)
+_PAGE_FATHER = re.compile(r"(?<![a-z])(?:father'?s?\s*name|name\s*of\s*(?:the\s*)?father|father)" + _LABEL_END + r"([^\n]{2,70})", re.I)
+_PAGE_MARITAL = re.compile(r"marital\s*status(?:" + _LABEL_END + r")?[ \t]*(single|unmarried|married|divorced|widow(?:ed|er)?|separated|bachelor)\b", re.I)
+_PAGE_GENDER = re.compile(r"(?<![a-z])(?:gender|sex)" + _LABEL_END + r"(male|female|m|f)\b", re.I)
+_PAGE_NATIONALITY = re.compile(r"nationality" + _LABEL_END + r"([A-Za-z]{3,30})", re.I)
+_NEXT_LABEL = re.compile(r"\s{2,}|\t|\||\b(?:date\s*of\s*birth|dob|mobile|phone|gender|sex|nationality|marital|religion|mother|age|email)\b", re.I)
+
+
+def _page_text(raw: dict) -> str:
+    pages = [p for p in _list(raw.get("pages")) if isinstance(p, dict)]
+    pages.sort(key=lambda p: p.get("page_number") if type(p.get("page_number")) is int else 0)
+    return "\n".join(t.replace("\x00", " ") for t in (p.get("text") for p in pages) if isinstance(t, str))[:60000]
+
+
+def _page_text_details(raw: dict) -> dict[str, Any]:
+    """Details the resume prints beside a label but the reader's structured result left empty, taken from the page text.
+
+    Used only for what the structured result gave no usable value for (the caller keeps the structured value when there is one),
+    only next to its label (Date of birth / DOB, Mobile / Phone / Contact, Father's name, Marital status, Gender / Sex,
+    Nationality, any e-mail address), and every value goes through the same parsing as the structured one, so a line that does
+    not read as that kind of value gives nothing. The first labelled match wins."""
+    text = _page_text(raw)
+    if not text:
+        return {}
+    out: dict[str, Any] = {}
+    for match in _PAGE_DOB.finditer(text):
+        found = find_date_in(match.group(1), "birth")
+        if found and 1900 <= found.year and found <= date.today():
+            out["dob"] = found
+            break
+    for match in _PAGE_PHONE.finditer(text):
+        number = pick_phone(match.group(1))
+        if number and phone_rank(number) == 2:
+            out["phone"] = number
+            break
+    email = pick_email([text])
+    if email:
+        out["email"] = email
+    match = _PAGE_FATHER.search(text)
+    name = re.match(r"[A-Za-z][A-Za-z .']{1,58}", _NEXT_LABEL.split(match.group(1), maxsplit=1)[0].strip()) if match else None
+    father = _father(name.group().strip(" .'")) if name and len(name.group().strip(" .'")) >= 2 else None
+    if father:
+        out["father_name"] = father
+    match = _PAGE_MARITAL.search(text)
+    marital = normalize_marital(match.group(1)) if match else None
+    if marital:
+        out["marital_status"] = marital
+    match = _PAGE_GENDER.search(text)
+    gender = _gender(match.group(1)) if match else None
+    if gender:
+        out["gender"] = gender
+    match = _PAGE_NATIONALITY.search(text)
+    found = _nationality(match.group(1)) if match else None
+    if found and found.casefold() not in {"status", "religion", "gender", "marital", "mobile", "email"}:
+        out["nationality"] = found
+    return out
+
+
+def unusable_resume_fields(raw: Any, values: dict[str, Any]) -> list[str]:
+    """Columns the resume's structured result states but that gave no usable value ("12/03/95" read as no date, a phone number
+    with too few digits, an e-mail without an @): the reader HAD something, the form still gets nothing, so a person must be told.
+    Passport columns are left out (the passport itself is their source)."""
+    raw = _dict(raw)
+    contact, info = _dict(raw.get("contact")), _dict(raw.get("personal_info"))
+    out: list[str] = []
+    if "dob" not in values and _s(info.get("date_of_birth")):
+        out.append("dob")
+    if "phone" not in values and (any(_s(p) for p in _list(contact.get("phones"))) or _s(contact.get("whatsapp"))):
+        out.append("phone")
+    if "email" not in values and any(_s(e) for e in _list(contact.get("emails"))):
+        out.append("email")
+    if "gender" not in values and _s(info.get("gender")):
+        out.append("gender")
+    return out
 
 
 def resume_values(raw: Any) -> dict[str, Any]:
@@ -295,36 +419,40 @@ def resume_values(raw: Any) -> dict[str, Any]:
     name = _person_name(_s(raw.get("name")))
     if name:
         out["name"] = name
-    phones = [p for p in (_s(p, 40) for p in _list(contact.get("phones"))) if p]
-    if phones:
-        out["phone"] = phones[0]
-    whatsapp = _s(contact.get("whatsapp"), 40)
+    # A number is read out of the reader's text whatever label or note surrounds it, a landline only when nothing else was found,
+    # and a resume that gives only a WhatsApp number still has a mobile (see mapping.pick_phone).
+    phone = pick_phone(_list(contact.get("phones")) or contact.get("phones"), contact.get("whatsapp"))
+    if phone:
+        out["phone"] = phone
+    whatsapp = next((n for n in phone_candidates(contact.get("whatsapp")) if phone_rank(n) == 2), None)
     if whatsapp:
         out["whatsapp"] = whatsapp
-    emails = [e for e in (_s(e, 255) for e in _list(contact.get("emails"))) if e]
-    if emails:
-        out["email"] = emails[0].lower()
+    email = pick_email(_list(contact.get("emails")) or contact.get("emails"))
+    if email:
+        out["email"] = email[:255]
     out_address = _address(contact.get("address"))
     if out_address:
         out["current_address"] = out_address
-    father = _person_name(_first(info, "father_name", "fathers_name", "father"))
+    father = _father(_first(info, "father_name", "fathers_name", "father"))
     if father:
         out["father_name"] = father
     marital = normalize_marital(info.get("marital_status"))
     if marital:
         out["marital_status"] = marital
-    dob = _d(info.get("date_of_birth"))
+    dob = _birth_date(info.get("date_of_birth"))
     if dob:
         out["dob"] = dob
-    gender = _gender(_s(info.get("gender"), 20))
+    gender = _gender(_s(info.get("gender"), 60))
     if gender:
         out["gender"] = gender
-    nationality = _s(info.get("nationality"), 80)
+    nationality = _nationality(info.get("nationality"))
     if nationality:
         out["nationality"] = nationality
-    languages = _unique([l for l in (_s(l, 80) for l in _list(info.get("languages_known"))) if l])
+    languages = _language_list(info.get("languages_known"))
     if languages:
         out["languages"] = languages[:30]
+    for column, found in _page_text_details(raw).items():
+        out.setdefault(column, found)   # only what the reader left out, and only beside a label ("DOB:", "Mobile:")
     skills = _unique([k for k in (_s(k, 200) for k in _list(raw.get("skills"))) if k])
     if skills:
         out["skills"] = skills[:200]
@@ -335,7 +463,7 @@ def resume_values(raw: Any) -> dict[str, Any]:
     if number:
         out["passport_no"] = number
     for column, key in (("passport_issue", "date_of_issue"), ("passport_expiry", "date_of_expiry")):
-        found = _d(passport.get(key))
+        found = _d(passport.get(key), "other")
         if found:
             out[column] = found
     place = _s(passport.get("place_of_issue"), 120)
@@ -398,10 +526,10 @@ def passport_values(raw: Any) -> dict[str, Any]:
         given = _printed(raw, ("given names", "given name", "name"))
         surname = _printed(raw, ("surname",))
         out["name"] = _person_name(" ".join(part for part in (given, surname) if part))
-    dob = _d(mrz.get("date_of_birth")) or _d(_printed(raw, ("date of birth", "dob")))
+    dob = _d(mrz.get("date_of_birth"), "birth") or _d(_printed(raw, ("date of birth", "dob")), "birth")
     if dob:
         out["dob"] = dob
-    gender = _gender(_s(mrz.get("sex"), 20)) or _gender(_printed(raw, ("sex", "gender")))
+    gender = _gender(_s(mrz.get("sex"), 60)) or _gender(_printed(raw, ("sex", "gender")))
     if gender:
         out["gender"] = gender
     code = (_s(mrz.get("nationality"), 10) or "").upper()
@@ -411,10 +539,10 @@ def passport_values(raw: Any) -> dict[str, Any]:
     number = _passport_no(_s(mrz.get("passport_number"), 40)) or _passport_no(_printed(raw, ("passport no", "passport number", "passport no.")))
     if number:
         out["passport_no"] = number
-    issue = _d(mrz.get("date_of_issue")) or _d(_printed(raw, ("date of issue",)))
+    issue = _d(mrz.get("date_of_issue"), "other") or _d(_printed(raw, ("date of issue",)), "other")
     if issue:
         out["passport_issue"] = issue
-    expiry = _d(mrz.get("expiry_date")) or _d(_printed(raw, ("date of expiry", "expiry date", "date of expiration")))
+    expiry = _d(mrz.get("expiry_date"), "other") or _d(_printed(raw, ("date of expiry", "expiry date", "date of expiration")), "other")
     if expiry:
         out["passport_expiry"] = expiry
     place = _printed(raw, ("place of issue",))
@@ -459,10 +587,10 @@ def aadhaar_values(raw: Any) -> dict[str, Any]:
     name = _person_name(_s(identity.get("name")))
     if name:
         out["name"] = name
-    dob = _d(identity.get("date_of_birth"))
+    dob = _d(identity.get("date_of_birth"), "birth")
     if dob:
         out["dob"] = dob
-    gender = _gender(_s(identity.get("gender"), 20))
+    gender = _gender(_s(identity.get("gender"), 60))
     if gender:
         out["gender"] = gender
     address_text = identity.get("address")
@@ -508,11 +636,22 @@ class ApplyResult:
     filled: list[str] = field(default_factory=list)
     kept: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    # Fields the document HAD a value for that was not put on the form, and why: {"field": "personal.mobileNumber",
+    # "reason": "owned_by_other" | "unreadable" | "withheld" | "differs_from_passport" | "name_differs", "candidate"?: "CI-157"}.
+    # Never a value. Each one is also listed in `kept` (the list the screen already carries), so it is never silent.
+    skipped: list[dict] = field(default_factory=list)
 
     def merge(self, other: "ApplyResult") -> None:
-        for name in ("filled", "kept", "conflicts"):
+        for name in ("filled", "kept", "conflicts", "skipped"):
             current = getattr(self, name)
             current.extend(item for item in getattr(other, name) if item not in current)
+
+    def skip(self, key: str, reason: str, candidate: str | None = None) -> None:
+        entry = {"field": key, "reason": reason, **({"candidate": candidate} if candidate else {})}
+        if entry not in self.skipped:
+            self.skipped.append(entry)
+        if key not in self.kept and key not in self.conflicts:
+            self.kept.append(key)
 
 
 def sources_of(candidate) -> dict:
@@ -536,6 +675,16 @@ def _norm(kind: str, value: Any) -> Any:
 
 def _same(spec: Spec, current: Any, new: Any) -> bool:
     return _norm(spec.kind, current) == _norm(spec.kind, new)
+
+
+PROVISIONAL_NAME = "_provisionalName"
+
+
+def provisional_name(candidate) -> bool:
+    """True while the candidate's name is only a placeholder (the bulk-import folder name): the first document that
+    carries a name replaces it, whoever typed nothing. A name a person typed or a document gave is never provisional."""
+    sources = getattr(candidate, "field_sources", None)
+    return isinstance(sources, dict) and bool(sources.get(PROVISIONAL_NAME)) and sources.get("personal.candidateName") is None
 
 
 def _is_empty(spec: Spec, current: Any, source: str | None) -> bool:
@@ -573,18 +722,69 @@ def _conflicts(db: Session | None, candidate, column: str, value: Any) -> bool:
         return False
 
 
+_OWNED_LABELS = {"phone number": "phone", "email": "email", "passport number": "passport_no"}
+
+
+def _identity_skips(candidate, values: dict[str, Any], db: Session | None) -> list[tuple[str, str, str | None]]:
+    """(form field, reason, other candidate's CARE id) for every identifier of a refused document, so the refusal says WHICH
+    phone / e-mail / passport number belongs to ANOTHER candidate (never the value itself) and whose it is."""
+    from app.services.document_identity import identity_findings
+    try:
+        findings = identity_findings(candidate, values, db)
+    except Exception:
+        return []
+    out: list[tuple[str, str, str | None]] = []
+    for finding in findings:
+        kind = finding.get("field")
+        if kind == "candidate":
+            care_id = (finding.get("duplicate") or {}).get("careId")
+            for label in finding.get("matchedOn") or []:
+                column = _OWNED_LABELS.get(label)
+                if column:
+                    out.append((SPECS[column].key, "owned_by_other", care_id))
+        elif kind == "passport_no":
+            out.append((SPECS["passport_no"].key, "differs_from_passport", None))
+        elif kind == "name":
+            out.append((SPECS["name"].key, "name_differs", None))
+    return out
+
+
+def note_unfilled(candidate, result: ApplyResult, kind: str, raw: Any, values: dict[str, Any], ignored=()) -> None:
+    """Say, in `result`, which resume details never reached the form although the document has them: the reader's text could
+    not be used (a date that is not one exact day, a number with too few digits) or the caller withheld the field. Only
+    where the form is still empty for that field, and never for a passport column (the passport document supplies those)."""
+    if kind != "resume" or result.conflicts:
+        return
+    sources = sources_of(candidate)
+    reasons = {column: "unreadable" for column in unusable_resume_fields(raw, values)}
+    for column in ignored:
+        if column in values and column not in PASSPORT_DOCUMENT_COLUMNS:
+            reasons.setdefault(column, "withheld")
+    for column, reason in reasons.items():
+        spec = SPECS.get(column)
+        if spec and _is_empty(spec, getattr(candidate, column, None), sources.get(spec.key)):
+            result.skip(spec.key, reason)
+
+
 def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | None = None, *, fill_all: bool = True,
-                 only_fill_empty: bool = False) -> ApplyResult:
+                 only_fill_empty: bool = False, allow_name_conflict: bool = False) -> ApplyResult:
     """Apply one document's values to a candidate under the fill rule. `kind` is resume | passport.
 
     With `fill_all=False` only the application-form-only columns (NEW_COLUMNS) are filled; every other column is merely
     stamped "extracted" when it already equals the document (so it counts as read, not typed)."""
     from app.services.document_identity import identity_conflicts
     conflicts = identity_conflicts(candidate, values, db)
+    if allow_name_conflict:
+        # A person confirmed that this document is the right person's: only the name difference is waived, never a passport
+        # number or an identifier owned by another candidate.
+        conflicts = [key for key in conflicts if key != "name"]
     if conflicts:
         if hasattr(candidate, "needs_review"):
             candidate.needs_review = True
-        return ApplyResult(conflicts=[SPECS[key].key if key in SPECS else "document.identity" for key in conflicts])
+        refused = ApplyResult(conflicts=[SPECS[key].key if key in SPECS else "document.identity" for key in conflicts])
+        for key, reason, owner in _identity_skips(candidate, values, db):
+            refused.skipped.append({"field": key, "reason": reason, **({"candidate": owner} if owner else {})})
+        return refused
     sources = sources_of(candidate)
     from_passport = set(sources.get("_fromPassport") or [])
     from_aadhaar = set(sources.get("_fromAadhaar") or [])
@@ -598,7 +798,7 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
         current = getattr(candidate, column)
         source = sources.get(spec.key)
         same = _same(spec, current, new)
-        empty = _is_empty(spec, current, source)
+        empty = _is_empty(spec, current, source) or (column == "name" and provisional_name(candidate))
         authority = column in PASSPORT_AUTHORITY
         if kind != "passport" and authority and spec.key in from_passport and not empty:
             if not same:
@@ -630,6 +830,7 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
         if empty or source == "extracted":
             if column in IDENTITY and _conflicts(db, candidate, column, new):
                 result.conflicts.append(spec.key)
+                result.skipped.append({"field": spec.key, "reason": "owned_by_other"})
                 continue
             setattr(candidate, column, new)
             sources[spec.key] = "extracted"
@@ -652,6 +853,8 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
         sources["_fromAadhaar"] = sorted(from_aadhaar)
     else:
         sources.pop("_fromAadhaar", None)
+    if sources.get("personal.candidateName") is not None:
+        sources.pop(PROVISIONAL_NAME, None)  # a document or a person has now named the candidate
     if sources != sources_of(candidate):
         candidate.field_sources = sources
     return result
@@ -740,14 +943,87 @@ def mark_stored_applied(candidate) -> None:
 
 
 def apply_document(candidate, kind: str, raw: Any, db: Session | None = None, *, ignore_fields=(),
-                   only_fill_empty: bool = False) -> ApplyResult:
+                   only_fill_empty: bool = False, allow_name_conflict: bool = False) -> ApplyResult:
     """Apply a freshly read document, then remember it. Marks the candidate so the ocr_data hook does not repeat it."""
     ignored = frozenset(ignore_fields)
-    values = {key: value for key, value in values_for(kind, raw).items() if key not in ignored}
-    result = apply_values(candidate, kind, values, db, only_fill_empty=only_fill_empty)
+    every_value = values_for(kind, raw)
+    values = {key: value for key, value in every_value.items() if key not in ignored}
+    result = apply_values(candidate, kind, values, db, only_fill_empty=only_fill_empty, allow_name_conflict=allow_name_conflict)
+    note_unfilled(candidate, result, kind, raw, every_value, ignored)
     if kind == "aadhaar" and not result.conflicts:
         note_aadhaar(candidate, raw)
+    if kind == "resume" and "education" in result.filled:
+        restore_certificate_education(candidate)
     mark_applied(candidate, kind, raw)
+    _flags(candidate)["form_explicit"] = True
+    return result
+
+
+# An education certificate is read by the resume reader (its job kind is "resume") but it is not the candidate's resume: it only
+# contributes education rows. Its raw output is stored under its own key, so it never becomes (or displaces) the primary resume.
+CERTIFICATE_KEY = "education_certificate"
+
+
+def _education_row_key(row: dict) -> tuple[str, str, str]:
+    return tuple(str(row.get(name) or "").strip().casefold() for name in ("level", "institute", "passedYear"))
+
+
+def _same_education_row(left: dict, right: dict) -> bool:
+    """Same level and institute, and the same pass year (a row without a year matches a row with one)."""
+    (level, institute, year), (other_level, other_institute, other_year) = _education_row_key(left), _education_row_key(right)
+    return level == other_level and institute == other_institute and (year == other_year or not year or not other_year)
+
+
+def _merge_education_rows(candidate, rows: list[dict]) -> bool:
+    """Add the rows the candidate does not have yet. Existing rows are never removed or reordered, and a list a person typed
+    ("manual") is left alone. Returns True when a row was added."""
+    sources = sources_of(candidate)
+    if sources.get("education") == "manual":
+        return False
+    current = [row for row in _list(getattr(candidate, "education", None)) if isinstance(row, dict)]
+    merged = list(current)
+    for row in rows:
+        if len(merged) >= MAX_EDUCATION:
+            break
+        if not any(_same_education_row(row, known) for known in merged):
+            merged.append(row)
+    if len(merged) == len(current):
+        return False
+    candidate.education = merged
+    if not current or sources.get("education") == "extracted":
+        sources["education"] = "extracted"
+        candidate.field_sources = sources
+    return True
+
+
+def restore_certificate_education(candidate) -> None:
+    """A resume read replaces its own education rows; the rows of the stored education certificates are added back."""
+    rows = [row for raw in stored_documents(getattr(candidate, "ocr_data", None), CERTIFICATE_KEY) for row in education_rows(_dict(raw))]
+    if rows:
+        _merge_education_rows(candidate, rows)
+
+
+def apply_education_certificate(candidate, raw: Any, db: Session | None = None, *, allow_name_conflict: bool = False) -> ApplyResult:
+    """Apply one education certificate: ONLY its education rows, merged with the candidate's own. Never the name, contacts,
+    address, experience or skills (a certificate is not a resume). A certificate of another person is rejected."""
+    from app.services.document_identity import identity_conflicts
+    values = values_for("resume", raw)
+    conflicts = identity_conflicts(candidate, {key: values[key] for key in ("name", "phone", "email", "passport_no") if key in values}, db)
+    if allow_name_conflict:
+        conflicts = [key for key in conflicts if key != "name"]
+    if conflicts:
+        if hasattr(candidate, "needs_review"):
+            candidate.needs_review = True
+        return ApplyResult(conflicts=[SPECS[key].key if key in SPECS else "document.identity" for key in conflicts])
+    result = ApplyResult()
+    rows = education_rows(_dict(raw))
+    if rows:
+        before = sources_of(candidate).get("education")
+        if _merge_education_rows(candidate, rows):
+            result.filled.append(SPECS["education"].key)
+        elif before == "manual" and not all(any(_same_education_row(row, known) for known in _list(candidate.education)
+                                                if isinstance(known, dict)) for row in rows):
+            result.kept.append(SPECS["education"].key)
     _flags(candidate)["form_explicit"] = True
     return result
 
@@ -789,6 +1065,7 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
     reviewed = _dict(ocr_data).get("person_split")
     content_only = isinstance(reviewed, dict) and bool(reviewed.get("contentOnlyAutofill")) \
         and bool(reviewed.get("ocrIdentityConflictFields"))
+    unfilled: list[tuple] = []
     for kind in SLOT_KINDS:
         documents = stored_documents(ocr_data, kind)
         if not force:
@@ -796,19 +1073,27 @@ def apply_stored_ocr(candidate, db: Session | None = None, *, force: bool = Fals
         for raw in documents:
             if not force and already_applied(candidate, kind, raw):
                 continue
-            values = values_for(kind, raw)
+            values = every_value = values_for(kind, raw)
             ignored = ignored_fields_for(ocr_data, kind, raw)
             if ignored:
                 values = {key: value for key, value in values.items() if key not in ignored}
             if content_only:
                 values = {key: value for key, value in values.items() if key in REVIEWED_CONTENT_ONLY_COLUMNS}
             applied = apply_values(candidate, kind, values, db, fill_all=fill_all)
+            if fill_all and not content_only and not applied.conflicts:   # the automatic hook fills only the newer columns on purpose
+                unfilled.append((kind, raw, every_value, ignored))
             result.merge(applied)
             if kind == "aadhaar" and not applied.conflicts:
                 note_aadhaar(candidate, raw)
             mark_applied(candidate, kind, raw)
+    if before["education"] != candidate.education:
+        restore_certificate_education(candidate)   # a resume replaced its rows: the education certificates' rows come back
+    for kind, raw, every_value, ignored in unfilled:   # judged after EVERY document: a later one may have filled the field
+        said = ApplyResult()
+        note_unfilled(candidate, said, kind, raw, every_value, ignored)
+        result.merge(ApplyResult(kept=said.kept, skipped=said.skipped))
     # A replay may set a field once per stored document; report only the ones whose final value differs from the start.
-    result.filled = [spec.key for column, spec in SPECS.items() if spec.key in result.filled and before[column] != getattr(candidate, column)]
+    result.filled =[spec.key for column, spec in SPECS.items() if spec.key in result.filled and before[column] != getattr(candidate, column)]
     return result
 
 

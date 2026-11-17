@@ -50,7 +50,7 @@ SLOT_SPECS = (
     ("insurance", "Insurance", "The candidate's insurance policy, before deployment.", 11, False, False, False),
     ("invoice", "Invoice", "The candidate's invoice, before deployment.", 11, False, False, False),
     ("photo", "Photo", "Optional. A recent passport-size photo (an image).", None, False, False, False),
-    ("education_certificate", "Education certificate", "Optional. The highest qualification certificate.", None, False, False, False),
+    ("education_certificate", "Education certificate", "Optional. The highest qualification certificate.", None, False, True, False),
     ("experience_certificate", "Experience certificate", "Optional. Certificates from previous employers.", None, False, False, False),
     ("google_review", "Google review", "Optional. Proof of the candidate's Google review.", None, False, False, False),
     ("visa_stamping", "Visa stamping", "Optional. The passport page with the visa stamp.", None, False, False, False),
@@ -58,6 +58,10 @@ SLOT_SPECS = (
 )
 SLOTS = tuple(spec[0] for spec in SLOT_SPECS)
 READ_SLOTS = tuple(spec[0] for spec in SLOT_SPECS if spec[5])
+# The reading job's own `kind` column is a String(20): "education_certificate" (21 characters) does not fit. The reader types an
+# education page as a resume anyway (integrations/ocr/classification.py), so those jobs are stored as kind "resume"; the job
+# still points at its file (attachment_id) and keeps the real slot in draft.applicationForm.slot.
+JOB_KIND = {"education_certificate": "resume"}
 SLOT_LABELS = {spec[0]: spec[1] for spec in SLOT_SPECS}
 # The slots that are not part of the candidate's older Documents list (data.DOCUMENT_SLOTS): stored only.
 EXTRA_SLOTS = tuple(slot for slot in SLOTS if slot not in {"resume", "passport", "aadhaar", "photo"})
@@ -326,7 +330,14 @@ def extraction_view(job) -> dict | None:
             "filled": saved.get("filled") or [], "kept": saved.get("kept") or [],
             # Details the document reader returned that have no field on the form (path, values), and what was and was not sent.
             "unmapped": saved.get("unmapped") or [], "coverage": saved.get("coverage"),
-            "identityMismatch": bool(saved.get("identityMismatch"))}
+            "identityMismatch": bool(saved.get("identityMismatch")), "duplicateOf": saved.get("duplicateOf"),
+            # Why the document was rejected (field, document kind, the two names for a name). Absent on a reading made before this was recorded.
+            "identityReasons": saved.get("identityReasons") or []}
+    failure = (job.draft or {}).get("readerFailure")
+    if isinstance(failure, dict) and job.status in {"retry", "failed", "needs_review"}:
+        # Why the reader failed (class, HTTP status, attempt, safe detail): the screen's "Details" disclosure and the report.
+        base["failure"] = {key: failure[key] for key in ("errorClass", "httpStatus", "retriable", "code", "detail", "attempt",
+                                                           "maxAttempts", "at", "retryAt", "localFallback") if key in failure}
     if job.status in PROCESSING:
         retry_note = job.last_error if job.status == "retry" else None
         return {**base, "status": "processing", "message": retry_note}
@@ -339,11 +350,33 @@ def extraction_view(job) -> dict | None:
     return {**base, "status": "done", "message": None}
 
 
-def _document(row, names: dict[str, str]) -> dict:
-    return {"attachmentId": row.id, "fileName": row.file_name, "sizeKb": row.size_kb, "version": row.version,
-            "url": f"/api/files/{row.id}", "contentType": row.content_type, "uploadedAt": _iso(row.uploaded_at),
-            "uploadedBy": {"id": row.uploaded_by, "name": names.get(row.uploaded_by, "Former team member")} if row.uploaded_by else None,
-            "identityMismatch": bool(getattr(row, "identity_mismatch", False))}
+def split_sources_statement(candidate_id: str):
+    """The upload entries of a candidate's files that were cut from a larger scan (one statement for all of them)."""
+    return select(AuditEntry.meta).where(
+        AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate_id,
+        AuditEntry.action == "Uploaded document", AuditEntry.meta.has_key("split_pages"))
+
+
+def split_sources(metas) -> dict[str, dict]:
+    """attachment id -> {"fileName": the scan it was cut from, "pages": its pages in that scan (1-based)}."""
+    found: dict[str, dict] = {}
+    for meta in metas or ():
+        pages = meta.get("split_pages") if isinstance(meta, dict) else None
+        if not (isinstance(meta, dict) and meta.get("attachment_id") and meta.get("original_name")
+                and isinstance(pages, list) and pages and all(isinstance(page, int) and not isinstance(page, bool) for page in pages)):
+            continue
+        found[meta["attachment_id"]] = {"fileName": meta["original_name"], "pages": pages}
+    return found
+
+
+def _document(row, names: dict[str, str], splits: dict[str, dict] | None = None) -> dict:
+    out = {"attachmentId": row.id, "fileName": row.file_name, "sizeKb": row.size_kb, "version": row.version,
+           "url": f"/api/files/{row.id}", "contentType": row.content_type, "uploadedAt": _iso(row.uploaded_at),
+           "uploadedBy": {"id": row.uploaded_by, "name": names.get(row.uploaded_by, "Former team member")} if row.uploaded_by else None,
+           "identityMismatch": bool(getattr(row, "identity_mismatch", False))}
+    if splits and row.id in splits:   # only a file cut from a larger scan; stage copies are never in `splits`
+        out["splitFrom"] = splits[row.id]
+    return out
 
 
 DEPLOY_STAGE = 11  # completing this stage (Air ticket) deploys the candidate
@@ -451,7 +484,7 @@ def _combined_reading(files):
 
 
 def document_slots(attachments: list, jobs: list, names: dict[str, str], stage: int | None = None,
-                   manual_records: dict | None = None) -> dict:
+                   manual_records: dict | None = None, splits: dict[str, dict] | None = None) -> dict:
     """All document slots in order. `stage` is the shown application's current stage (None: no application, only the always-counted ones are required)."""
     by_slot: dict[str, list] = {slot: [] for slot in SLOTS}
     for row in attachments:
@@ -463,7 +496,7 @@ def document_slots(attachments: list, jobs: list, names: dict[str, str], stage: 
         # Newest first. Versions count per stored slot key, so a folded legacy slot is ordered by upload time instead.
         rows = sorted(by_slot[slot], key=lambda r: (r.uploaded_at, r.version), reverse=True)
         current = rows[0] if rows else None
-        files = [{**_document(row, names), "extraction": _file_reading(row, jobs) if readable else None} for row in rows] if multiple else []
+        files = [{**_document(row, names, splits), "extraction": _file_reading(row, jobs) if readable else None} for row in rows] if multiple else []
         for file in files:
             file["identityMismatch"] = file["identityMismatch"] or bool((file["extraction"] or {}).get("identityMismatch"))
             file["extractionPending"] = readable and (file["extraction"] is None or file["extraction"]["status"] == "failed")
@@ -472,7 +505,7 @@ def document_slots(attachments: list, jobs: list, names: dict[str, str], stage: 
         reading = _combined_reading(files) if multiple and readable else _file_reading(current, jobs) if current is not None and readable else None
         current_read = _file_reading(current, jobs) if current is not None and readable else None
         current_pending = readable and (current_read is None or current_read["status"] == "failed")
-        current_view = {**_document(current, names), "extractionPending": current_pending} if current else None
+        current_view = {**_document(current, names, splits), "extractionPending": current_pending} if current else None
         if current_view:
             current_view["identityMismatch"] = current_view["identityMismatch"] or bool((current_read or {}).get("identityMismatch"))
             if current_view["identityMismatch"]:
@@ -488,7 +521,7 @@ def document_slots(attachments: list, jobs: list, names: dict[str, str], stage: 
                        "fileUploaded": current is not None, "manualStatus": manual,
                        "identityMismatch": bool(rejected),
                        "current": current_view, "versions": len(rows),
-                       "history": [_document(r, names) for r in rows[1:]],
+                       "history": [_document(r, names, splits) for r in rows[1:]],
                        "files": files,
                        "extraction": reading,
                        "extractionPending": bool(readable and rows and (any(file["extractionPending"] for file in files) if multiple else current_view["extractionPending"]))}
@@ -600,10 +633,11 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         # Reference agencies and recruiters for the assignment pickers.
         return form_assignment.read_agencies(session), form_assignment.read_recruiters(session)
 
-    found, application_rows, attachments, jobs, stages, names, (feedback_items, tasks), job_rows, (agencies, recruiters), manual_records = parallel_reads(
+    found, application_rows, attachments, jobs, stages, names, (feedback_items, tasks), job_rows, (agencies, recruiters), manual_records, split_metas = parallel_reads(
         db, read_candidate, read_applications, read_attachments, read_jobs, read_stages, read_names, read_notes,
         lambda session: form_assignment.read_job_options(session, candidate_id), read_lists,
-        lambda session: manual_document_statuses(session, candidate_id))
+        lambda session: manual_document_statuses(session, candidate_id),
+        lambda session: list(session.scalars(split_sources_statement(candidate_id))))   # one read for every split file's origin
     if found is None:
         raise HTTPException(404, "Candidate not found")
     candidate, owner_name = found
@@ -616,7 +650,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
 
     sources = fx.sources_of(candidate)
     slots = document_slots(selected_document_attachments(attachments, application.id if application else None),
-                           jobs, names, application.current_stage if application is not None else None, manual_records)
+                           jobs, names, application.current_stage if application is not None else None, manual_records, split_sources(split_metas))
     if not show_invoice:
         slots.pop(INVOICE_SLOT, None)
     listing = _applications(application_rows)
@@ -930,7 +964,10 @@ def refresh_from_stored(db: Session, user: User, candidate_id: str) -> list[str]
     if candidate is None:
         raise HTTPException(404, "Candidate not found")
     ensure_can_edit(user, candidate)
+    stand_in_name = candidate.name if fx.provisional_name(candidate) else None
     result = fx.apply_stored_ocr(candidate, db, force=True)
+    if stand_in_name and candidate.name != stand_in_name:
+        rename_imported_files(db, candidate, stand_in_name, candidate.name)   # the stored files carry the real name too
     if result.filled:
         db.add(AuditEntry(actor_id=user.id, action="Filled application form from stored documents", target=candidate.name,
                           entity_type="candidate", entity_id=candidate.id, meta={"filled_fields": result.filled}))
@@ -946,7 +983,7 @@ def queue_reading(db: Session, user: User, candidate: Candidate, attachment: Att
     from app.services.instance_guard import instance_name
     job = DocumentExtractionJob(
         instance=instance_name(get_settings()),
-        id=str(uuid.uuid4()), owner_id=user.id, group_id=str(uuid.uuid4()), kind=attachment.slot, filename=attachment.file_name[:150],
+        id=str(uuid.uuid4()), owner_id=user.id, group_id=str(uuid.uuid4()), kind=JOB_KIND.get(attachment.slot, attachment.slot), filename=attachment.file_name[:150],
         content_type=content_type, object_key=attachment.object_key, content_hash=attachment.content_hash or "",
         size_kb=attachment.size_kb or 1, status="pending", candidate_id=candidate.id, attachment_id=attachment.id,
         draft={"applicationForm": {"candidateId": candidate.id, "slot": attachment.slot, "attachmentId": attachment.id}},
@@ -999,6 +1036,8 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
         document = documents.get(kind)
         if kind not in fx.SLOT_KINDS or not document or (not mixed and kind == source.slot and not derive_source_slot):
             continue
+        if source.slot in JOB_KIND and kind == JOB_KIND[source.slot]:
+            continue   # an education certificate is typed as a resume to be read: its pages are never filed as a Resume
         previous = db.scalar(select(Attachment).where(
             Attachment.entity_type == "candidate", Attachment.entity_id == job.candidate_id, Attachment.slot == kind)
             .order_by(Attachment.uploaded_at.desc(), Attachment.version.desc()).limit(1))
@@ -1097,12 +1136,67 @@ def _partial_resume_replay_ignores(extraction: object, candidate: Candidate | No
     return frozenset(ignored)
 
 
+def rename_imported_files(db: Session, candidate: Candidate, old_name: str, new_name: str) -> int:
+    """A bulk-imported candidate's documents are stored as "<Name>-<Document>.<ext>" with the folder name as a stand-in. When a
+    document gives the real name, the files carry it too (the candidate's own copies and the stage copies). Returns how many.
+
+    A candidate whose name could not be read at import is called `PENDING_NAME` and its files carry the care id instead
+    ("CI_167-Passport.pdf"); when `old_name` is that placeholder both stems are "old", so either one becomes the real name. A file
+    whose stem is neither (renamed by a person) is never touched."""
+    from app.services.bulk_candidate_import import name_slug
+    from app.services.candidate_review import PENDING_NAME
+    new_prefix = f"{name_slug(new_name)}-"
+    old_prefixes = [f"{name_slug(old_name)}-"]
+    if (old_name or "").strip().casefold() == PENDING_NAME.casefold() and (candidate.care_id or "").strip():
+        old_prefixes.append(f"{name_slug(candidate.care_id)}-")
+    old_prefixes = [prefix for prefix in dict.fromkeys(old_prefixes) if prefix != new_prefix]
+    if not old_prefixes or not (old_name or "").strip():
+        return 0
+    application_ids = list(db.scalars(select(Application.id).where(Application.candidate_id == candidate.id)))
+    owners = [("candidate", [candidate.id])] + ([("application", application_ids)] if application_ids else [])
+    renamed = 0
+    new_names: dict[str, str] = {}
+    for entity_type, ids in owners:
+        for attachment in db.scalars(select(Attachment).where(
+                Attachment.entity_type == entity_type, Attachment.entity_id.in_(ids),
+                or_(*(Attachment.file_name.startswith(prefix, autoescape=True) for prefix in old_prefixes)))):
+            old_prefix = next(prefix for prefix in old_prefixes if attachment.file_name.startswith(prefix))
+            attachment.file_name = new_prefix + attachment.file_name[len(old_prefix):]
+            new_names[attachment.id] = attachment.file_name
+            renamed += 1
+    if new_names and application_ids:
+        # A stage keeps a small reference to its file ({"id", "name", ...}); its name is a copy and must follow the file.
+        def follow(value):
+            if isinstance(value, dict):
+                changed = {key: follow(item) for key, item in value.items()}
+                if value.get("id") in new_names and "name" in value:
+                    changed["name"] = new_names[value["id"]]
+                return changed
+            if isinstance(value, list):
+                return [follow(item) for item in value]
+            return value
+        for stage in db.scalars(select(ApplicationStage).where(ApplicationStage.application_id.in_(application_ids))):
+            updated = follow(stage.data)
+            if updated != stage.data:
+                stage.data = updated
+        for application in db.scalars(select(Application).where(Application.id.in_(application_ids))):
+            updated = follow(application.draft)
+            if updated != application.draft:
+                application.draft = updated
+    return renamed
+
+
 def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
-                     _partial_verified_resume_replay: bool = False) -> None:
+                     _partial_verified_resume_replay: bool = False, _confirm_name: bool = False,
+                     _confirmed_by: str | None = None) -> None:
     """Called by the extraction worker in the transaction that completes a form-uploaded job.
 
     Stores the read documents on the candidate (`ocr_data`, like every other intake) and fills the form under the
     fill rule, then records the outcome on the job so the form can say what happened.
+
+    `_confirm_name` is for a person who confirmed that a document rejected only for its NAME is the right person's: the name
+    difference is waived (the candidate keeps its name unless it is a folder stand-in), but a passport-number mismatch or an
+    identifier owned by another candidate still rejects. `_confirmed_by` is that person, for the audit entry.
     """
     meta = (job.draft or {}).get("applicationForm")
     if not meta or not job.candidate_id:
@@ -1113,25 +1207,63 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
                           .options(undefer(Candidate.education), undefer(Candidate.work_history), undefer(Candidate.field_sources), undefer(Candidate.ocr_data))
                           .with_for_update().execution_options(populate_existing=True))
     extractions = (output or {}).get("extractions") or {}
-    from app.services.document_identity import identity_conflicts, IDENTITY_REVIEW_MESSAGE, IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION
+    from app.services.document_identity import (
+        identity_findings, name_disagreement, public_reason, best_known_name,
+        IDENTITY_REVIEW_MESSAGE, IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION)
     identity_resume_ignores = (_partial_resume_replay_ignores(extractions.get("resume")) if _partial_verified_resume_replay else
                                _mixed_resume_passport_ignores(candidate, output or {}, extractions)) if candidate else frozenset()
     resume_ignores = (_partial_resume_replay_ignores(extractions.get("resume"), candidate) if _partial_verified_resume_replay else
                       identity_resume_ignores) if candidate else frozenset()
-    identity_problems = sorted({field for kind, extraction in extractions.items()
-                                for field in identity_conflicts(candidate, _without_ignored_fields(
-                                    extraction.get("fields") or {}, identity_resume_ignores if kind == "resume" else frozenset()), db)}) if candidate else []
-    if candidate and not identity_problems:
-        identity_problems = sorted({field for kind, extraction in extractions.items()
-                                    for field in identity_conflicts(candidate, _without_ignored_fields(
-                                        fx.values_for(kind, extraction.get("raw") or {}), identity_resume_ignores if kind == "resume" else frozenset()), db)})
+    # Every cause is kept (not just a field name): the screen says what was read, what it was compared with, or who owns the
+    # phone / e-mail / passport. The fields the reader mapped and the stored reader output are both checked, as before.
+    findings: list[dict] = []
+    for kind, extraction in (extractions.items() if candidate else ()):
+        ignored = identity_resume_ignores if kind == "resume" else frozenset()
+        for source in (extraction.get("fields") or {}, fx.values_for(kind, extraction.get("raw") or {})):
+            for finding in identity_findings(candidate, _without_ignored_fields(source, ignored), db):
+                if not any(known["field"] == finding["field"] and known["documentKind"] == kind for known in findings):
+                    findings.append({**finding, "documentKind": kind})
+    stand_in_name = candidate.name if candidate and fx.provisional_name(candidate) else None
+    if _confirm_name:
+        findings = [finding for finding in findings if finding["field"] != "name"]
+    if candidate and not findings and stand_in_name and not _confirm_name:
+        # While the name is only the folder stand-in nothing else checks it: two documents of this one job must still agree.
+        disagreement = name_disagreement(extractions)
+        if disagreement:
+            findings.append({"field": "name", **disagreement})
+    identity_problems = sorted({finding["field"] for finding in findings})
     if identity_problems:
         # Store diagnostics on the job only. Nothing from this document may enter profile OCR/history/derived slots.
         from app.services.candidate_review import record_review_flag
         candidate.needs_review = True
         record_review_flag(db, candidate, ocr_warning=True, attachment_id=meta.get("attachmentId"), document_job_id=job.id)
         job.status, job.last_error = "needs_review", IDENTITY_REVIEW_MESSAGE
-        form = {**dict(meta), "result": {"status": "needs_review", "message": IDENTITY_REVIEW_MESSAGE,
+        # When the passport, phone or e-mail already belongs to ANOTHER candidate (typically the same person imported twice), the
+        # screen says who, instead of the vague "wrong document".
+        duplicate_of = next((finding["duplicate"] for finding in findings if finding.get("duplicate")), None)
+        reasons: list[dict] = []
+        for finding in findings:
+            reason = public_reason(finding)
+            if reason not in reasons:
+                reasons.append(reason)
+        # The candidate is still only named by its folder: a plausible full name from the documents (passport, then Aadhaar,
+        # then resume) replaces it even though this reading is rejected, so later documents are compared with a real name and
+        # the stored files carry it. Never when the problem is an identifier owned by another candidate or a passport mismatch.
+        named_from_document = None
+        if stand_in_name and set(identity_problems) == {"name"}:
+            named_from_document = best_known_name(extractions, candidate)
+            if named_from_document:
+                candidate.name = named_from_document
+                sources = fx.sources_of(candidate)
+                sources["personal.candidateName"] = "extracted"
+                sources.pop(fx.PROVISIONAL_NAME, None)
+                candidate.field_sources = sources
+                rename_imported_files(db, candidate, stand_in_name, named_from_document)
+                db.add(AuditEntry(actor_id=job.owner_id, action="Named candidate from a document", target=candidate.name,
+                                  entity_type="candidate", entity_id=candidate.id,
+                                  meta={"previous_name": stand_in_name, "attachment_id": meta.get("attachmentId"), "document_job_id": job.id}))
+        form = {**dict(meta), "result": {"status": "needs_review", "message": IDENTITY_REVIEW_MESSAGE, "duplicateOf": duplicate_of,
+                "identityReasons": reasons,
                 "kindsFound": list(extractions), "filled": [], "kept": [], "identityMismatch": True,
                 "coverage": {**((output or {}).get("coverage") or {}), "complete": False,
                              "issues": [IDENTITY_REVIEW_MESSAGE]}}}
@@ -1139,7 +1271,7 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
         db.add(AuditEntry(actor_id=job.owner_id, action=IDENTITY_REJECTED_ACTION,
                          target=candidate.name, entity_type="candidate", entity_id=candidate.id,
                          meta={"attachment_id": meta.get("attachmentId"), "document_job_id": job.id,
-                               "conflicting_fields": identity_problems}))
+                               "conflicting_fields": identity_problems, "reasons": reasons}))
         return
     # A saved, otherwise-complete output can be replayed after a narrowly
     # corrected identity rule. Resolution is appended only after the same
@@ -1153,25 +1285,39 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
     found: list[str] = []
     if candidate is not None:
         fx.mark_stored_applied(candidate)
+        stand_in_name = candidate.name if fx.provisional_name(candidate) else None
         for kind in sorted(extractions, key=lambda k: {"resume": 0, "aadhaar": 1, "passport": 2}.get(k, 3)):
             extraction = extractions[kind]
             raw = extraction.get("raw")
             if not isinstance(raw, dict) or not raw:
                 continue
             found.append(kind)
+            if kind == JOB_KIND.get(meta.get("slot")):
+                # An education certificate (read as a "resume"): its raw output is kept under its own key so it never becomes the
+                # primary resume, and ONLY its education rows are applied, merged with the existing ones.
+                incoming = {fx.CERTIFICATE_KEY: raw}
+                if extraction.get("source"):
+                    incoming["_sources"] = {fx.CERTIFICATE_KEY: extraction["source"]}
+                candidate.ocr_data = merge_ocr_data(candidate.ocr_data, incoming)
+                result.merge(fx.apply_education_certificate(candidate, raw, db, allow_name_conflict=_confirm_name))
+                continue
             incoming = {kind: raw}
             if extraction.get("source"):
                 incoming["_sources"] = {kind: extraction["source"]}
             candidate.ocr_data = merge_ocr_data(candidate.ocr_data, incoming)
             ignored = resume_ignores if kind == "resume" else frozenset()
+            if _confirm_name and not stand_in_name:
+                ignored = ignored | {"name"}   # the candidate keeps the name it has; only a folder stand-in is replaced
             if ignored:
                 fx.remember_ignored_fields(candidate, kind, raw, ignored)
             if kind in fx.SLOT_KINDS:
                 result.merge(fx.apply_document(
                     candidate, kind, raw, db, ignore_fields=ignored,
-                    only_fill_empty=_partial_verified_resume_replay and kind == "resume"))
-            if kind == "resume" and not candidate.resume_text:
+                    only_fill_empty=_partial_verified_resume_replay and kind == "resume", allow_name_conflict=_confirm_name))
+            if kind == "resume" and meta.get("slot") not in JOB_KIND and not candidate.resume_text:
                 candidate.resume_text = resume_text_from({"resume": raw})
+        if stand_in_name and candidate.name != stand_in_name:
+            rename_imported_files(db, candidate, stand_in_name, candidate.name)
         if result.filled:
             db.add(AuditEntry(actor_id=job.owner_id, action="Filled application form from an uploaded document", target=candidate.name,
                               entity_type="candidate", entity_id=candidate.id,
@@ -1179,7 +1325,7 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
     slot = meta.get("slot")
     if not found:
         status = "unreadable"
-        message = warnings[0] if warnings else f"We could not find a {slot} in this file. Check the file and upload it again, or enter the details by hand."
+        message = warnings[0] if warnings else f"We could not find a {SLOT_LABELS.get(slot, slot).lower()} in this file. Check the file and upload it again, or enter the details by hand."
     elif slot in fx.SLOT_KINDS and slot not in found:
         status = "needs_review"
         message = f"This file holds a {' and '.join(found)}, not a {slot}. It was read for what it contains."
@@ -1206,12 +1352,13 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
     if resolving_identity_rejection and status == "done" and candidate is not None:
         job.status, job.last_error = "completed", None
         attachment_id = meta.get("attachmentId")
-        db.add(AuditEntry(actor_id=job.owner_id, action=IDENTITY_RESOLVED_ACTION,
+        db.add(AuditEntry(actor_id=_confirmed_by or job.owner_id, action=IDENTITY_RESOLVED_ACTION,
                           target=candidate.name, entity_type="candidate", entity_id=candidate.id,
                           meta={"attachment_id": attachment_id, "document_job_id": job.id,
-                                "resolves": IDENTITY_REJECTED_ACTION}))
+                                "resolves": IDENTITY_REJECTED_ACTION,
+                                **({"confirmed_by": _confirmed_by, "confirmed": "name"} if _confirm_name else {})}))
         from app.services.candidate_review import clear_resolved_document_review, resolve_document_review_flag
-        if resolve_document_review_flag(db, candidate, actor_id=job.owner_id, attachment_id=attachment_id,
+        if resolve_document_review_flag(db, candidate, actor_id=_confirmed_by or job.owner_id, attachment_id=attachment_id,
                                         document_job_id=job.id):
             clear_resolved_document_review(db, candidate)
 
@@ -1422,6 +1569,74 @@ def replay_saved_partial_resume(db: Session, *, candidate_id: str, job_id: str) 
     return True
 
 
+class _ConfirmationRefused(RuntimeError):
+    """The confirmed document still fails a check that a person may not waive."""
+
+
+def reconsider_identity_rejection(db: Session, user: User, candidate_id: str, attachment_id: str, *, confirm_name: bool = False) -> dict:
+    """Apply the SAVED reading of one rejected document again: no new read, nothing is sent to the reader.
+
+    `confirm_name=False` ("Read again"): the saved output is judged by today's rules. A rejection that came from an older
+    rule (a folder stand-in, a name written without a space) resolves by itself; otherwise the result is refreshed with the
+    reasons found now.
+    `confirm_name=True` ("This is the right person: use this document"): a person vouches for the document. Allowed only when
+    the recorded rejection of THIS attachment and THIS reading was for the name alone; the name difference is waived, nothing
+    else (a passport-number mismatch or an identifier owned by another candidate still rejects, and nothing changes then).
+    The candidate keeps its name unless it is only the folder stand-in, which the document's name replaces.
+    The audit entry "Resolved document identity mismatch" names the attachment and the reading, so only that rejection ends.
+    Whoever may edit the candidate (the pattern of Extract details and Upload) may do either. Returns a small outcome dict.
+    """
+    from app.services.document_identity import IDENTITY_REJECTED_ACTION, IDENTITY_RESOLVED_ACTION, IDENTITY_REVIEW_MESSAGE
+    from app.services.document_reading import READABLE_SLOTS
+    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
+    if candidate is None:
+        raise HTTPException(404, "Candidate not found")
+    ensure_can_edit(user, candidate)
+    attachment = db.scalar(select(Attachment).where(Attachment.id == attachment_id, Attachment.entity_type == "candidate",
+                                                    Attachment.entity_id == candidate_id, Attachment.slot.in_(READABLE_SLOTS)).with_for_update())
+    if attachment is None:
+        raise HTTPException(404, "This candidate has no such document.")
+    job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))
+                    .where(DocumentExtractionJob.candidate_id == candidate_id, DocumentExtractionJob.attachment_id == attachment.id)
+                    .order_by(DocumentExtractionJob.created_at.desc()).limit(1).with_for_update().execution_options(populate_existing=True))
+    meta = (job.draft or {}).get("applicationForm") if job is not None and isinstance(job.draft, dict) else None
+    if job is None or job.status != "needs_review" or job.last_error != IDENTITY_REVIEW_MESSAGE \
+            or not _same_application_form_source(meta, candidate_id=candidate.id, attachment_id=attachment.id, slot=(meta or {}).get("slot")) \
+            or not _has_unresolved_identity_rejection(db, candidate_id=candidate.id, attachment_id=attachment.id, job_id=job.id):
+        raise HTTPException(409, "This document is not waiting for an identity check.")
+    saved = (job.state or {}).get("output") if isinstance(job.state, dict) else None
+    if not (isinstance(saved, dict) and saved.get("status") == "complete" and isinstance(saved.get("extractions"), dict) and saved["extractions"]):
+        if confirm_name:
+            raise HTTPException(409, "The saved reading of this document is incomplete, so a name cannot be confirmed from it. Choose Read again first.")
+        # Nothing usable was saved: read the stored file again. The old rejection is closed (it belongs to the old reading); the
+        # new reading is judged on its own and records its own rejection if it fails.
+        fresh = queue_reading(db, user, candidate, attachment, attachment.content_type or "application/pdf")
+        db.add(AuditEntry(actor_id=user.id, action=IDENTITY_RESOLVED_ACTION, target=candidate.name, entity_type="candidate", entity_id=candidate.id,
+                          meta={"attachment_id": attachment.id, "document_job_id": job.id, "resolves": IDENTITY_REJECTED_ACTION,
+                                "superseded_by_job": fresh.id}))
+        db.flush()
+        return {"resolved": False, "jobId": fresh.id, "requeued": True}
+    if confirm_name:
+        fields: list = []
+        for action, entry_meta in db.execute(select(AuditEntry.action, AuditEntry.meta).where(
+                AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate.id, AuditEntry.action == IDENTITY_REJECTED_ACTION)):
+            if isinstance(entry_meta, dict) and entry_meta.get("attachment_id") == attachment.id and entry_meta.get("document_job_id") == job.id:
+                fields = entry_meta.get("conflicting_fields") or []
+        if fields != ["name"]:
+            raise HTTPException(409, "Only a document that was stopped for its name alone can be confirmed. Check the passport number or the other candidate first.")
+    try:
+        with db.begin_nested():
+            apply_job_output(db, job, deepcopy(saved), _confirm_name=confirm_name, _confirmed_by=user.id if confirm_name else None)
+            form = (job.draft or {}).get("applicationForm") if isinstance(job.draft, dict) else None
+            result = form.get("result") if isinstance(form, dict) else None
+            if confirm_name and (not isinstance(result, dict) or result.get("identityMismatch") or job.status != "completed"):
+                raise _ConfirmationRefused()
+    except _ConfirmationRefused:
+        raise HTTPException(409, "The document still fails a check that cannot be waived (a passport number or another candidate's details). Nothing was changed.") from None
+    db.flush()
+    return {"resolved": job.status == "completed", "jobId": job.id}
+
+
 def apply_local_patterns(db: Session, candidate_id: str, patterns: dict) -> list[str]:
     """Fill the form at once from what the LOCAL reading of the pages verified, before (or without) the online reader.
 
@@ -1436,6 +1651,7 @@ def apply_local_patterns(db: Session, candidate_id: str, patterns: dict) -> list
     if candidate is None:
         return []
     filled: list[str] = []
+    stand_in_name = candidate.name if fx.provisional_name(candidate) else None
     passport = patterns.get("passport") or {}
     mrz: dict = {}
     if passport.get("number_ok"):
@@ -1453,6 +1669,8 @@ def apply_local_patterns(db: Session, candidate_id: str, patterns: dict) -> list
         anchored = bool(values.get("name") or (candidate.passport_no and values.get("passport_no") == candidate.passport_no))
         if anchored and not identity_conflicts(candidate, values, db):
             filled += fx.apply_values(candidate, "passport", values, db).filled
+    if stand_in_name and candidate.name != stand_in_name:
+        rename_imported_files(db, candidate, stand_in_name, candidate.name)
     if filled:
         from app.services.candidate_review import profile_gaps, release_ownership_review
         release_ownership_review(candidate, profile_gaps(candidate))   # a phone found lifts "needs review" when that was the only gap

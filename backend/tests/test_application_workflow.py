@@ -208,7 +208,7 @@ def test_negative_outcomes_close_tasks_and_allow_fresh_mapping(workflow, stage, 
     assert result["status"] == "closed" and result["closureReason"] == reason
     with env.sessions() as db:
         assert not db.scalar(select(Task.id).where(Task.application_id == app_id, Task.completed_at.is_(None), Task.cancelled_at.is_(None)))
-        assert db.get(Candidate, "candidate").status == (CandidateStatus.not_interested if stage == 2 else CandidateStatus.new)
+        assert db.get(Candidate, "candidate").status == (CandidateStatus.not_interested if stage == 2 or reason in {"offer_declined", "not_interested"} else CandidateStatus.new)  # the candidate said no: Not interested
     next_id = mapped(env, order="other-order")
     assert next_id != app_id
     with env.sessions() as db:

@@ -71,7 +71,9 @@ def test_every_other_answer_stops_the_candidate_at_that_stage(workflow, stage, d
         assert db.scalar(select(Task.completed_at).where(Task.application_id == app_id, Task.stage == stage)) is not None
         assert not db.scalar(select(ApplicationStage.id).where(ApplicationStage.application_id == app_id, ApplicationStage.stage > stage))
         assert db.get(Order, "order").status != OrderStatus.filled
-        assert db.get(Candidate, "candidate").status == CandidateStatus.new
+        # The candidate's own no (Declined / Offer declined) parks them as Not interested: they leave Tasks and return to the Data Bank
+        # under that status. A rejection or "not received" is not their no, so those stay "new".
+        assert db.get(Candidate, "candidate").status == (CandidateStatus.not_interested if reason == "offer_declined" else CandidateStatus.new)
         audit = db.scalar(select(AuditEntry).where(AuditEntry.entity_id == app_id, AuditEntry.action == f"Recorded stage {stage}: {outcome}"))
         assert audit.meta["closes"] == reason
     # They go back to the Data Bank and can be matched to another order straight away.

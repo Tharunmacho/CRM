@@ -172,7 +172,8 @@ def test_email_waits_keep_shortest_poll_unless_provider_capacity_blocks_admissio
 def test_combined_form_upload_populates_each_document_slot_and_preserves_original(desk):
     response = upload(desk, "resume", pdf(CV, PASSPORT))
     assert response.status_code == 202
-    original_id = response.json()["document"]["current"]["attachmentId"]
+    # The combined scan is now cut at upload: the response's "current" file is the one-page Resume piece, not the scan.
+    assert response.json()["document"]["current"]["splitFrom"]["pages"] == [1]
     process_pending(desk)
     result = form(desk)
     assert result["personal"]["candidateName"] == "Alex Example"  # the saved candidate name is kept
@@ -183,7 +184,9 @@ def test_combined_form_upload_populates_each_document_slot_and_preserves_origina
         with fitz.open(stream=data, filetype="pdf") as document:
             assert len(document) == 1
     with desk.sessions() as db:
-        original = db.get(Attachment, original_id)
+        # The whole original (both pages, as received) is kept as the candidate's source_bundle; the slots hold only the cut pieces.
+        original = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.slot == "source_bundle"))
+        assert original.file_name == "doc.pdf"
         with fitz.open(stream=read_bytes(desk.settings, original.object_key), filetype="pdf") as document:
             assert len(document) == 2
         before = db.scalar(select(func.count()).select_from(Attachment))

@@ -3,7 +3,7 @@ import { ApiError } from '@/shared/api/client'
 import { classifyLoadError, type LoadErrorView } from './load-error'
 import { liveInterval } from '@/shared/state/live'
 import { isOtherRecord } from '@/shared/state/live-events'
-import { FORM_LIVE_TOPICS, addFeedback, deleteFeedback, extractFormDocuments, loadApplicationForm, saveApplicationForm, saveAssignment, saveDocumentStatus, uploadFormDocument, type FeedbackDraft, type FormTarget } from './form-api'
+import { FORM_LIVE_TOPICS, addFeedback, checkDocumentIdentity, deleteFeedback, extractFormDocuments, loadApplicationForm, saveApplicationForm, saveAssignment, saveDocumentStatus, uploadFormDocument, type FeedbackDraft, type FormTarget, type IdentityCheck } from './form-api'
 import { applyAssignmentChange, applyOptimisticUploads, buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, validateDraft } from './form-model'
 import type { ApplicationFormData, AssignmentChange, AssignmentData, DocumentKind, FormDraft } from './types'
 
@@ -179,11 +179,12 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
   const upload = useCallback(async (kind: DocumentKind, file: File) => {
     setPendingUploads((current) => ({ ...current, [kind]: { fileName: file.name, sizeKb: Math.max(1, Math.round(file.size / 1024)) } }))
     try {
-      const answered = await uploadFormDocument(candidateId, kind, file, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId })
+      const { form: answered, split } = await uploadFormDocument(candidateId, kind, file, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId })
       if (answered) {
         lastSignature.current = JSON.stringify(answered)
-        apply(answered) // shows "Reading…" at once; the finished reading arrives as a live change
+        apply(answered) // shows "Reading…" at once and every field a scan was filed in; the finished reading arrives as a live change
       } else await reload(true)
+      return split
     } finally {
       setPendingUploads((current) => { const { [kind]: _done, ...rest } = current; return rest })
     }
@@ -198,6 +199,12 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
       if (cause instanceof ApiError && (cause.status === 405 || (cause.status === 404 && /^not found$/i.test(cause.message.trim())))) throw new Error('Restart the CRM server to save document status.')
       throw cause
     }
+  }, [candidateId, orderId, applicationId, apply])
+
+  const checkIdentity = useCallback(async (attachmentId: string, action: IdentityCheck) => {
+    const saved = await checkDocumentIdentity(candidateId, attachmentId, action, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId })
+    lastSignature.current = JSON.stringify(saved)
+    apply(saved)
   }, [candidateId, orderId, applicationId, apply])
 
   const extractDocuments = useCallback(async (attachmentIds: string[]) => {
@@ -264,5 +271,5 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
     }
   }, [candidateId, apply, reload])
 
-  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, markDocument, extractDocuments, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
+  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, markDocument, extractDocuments, checkIdentity, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
 }

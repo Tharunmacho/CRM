@@ -8,15 +8,19 @@ import { dateTimeLabel } from '@/shared/lib/format'
 import { fileHref } from '@/shared/api/client'
 import { FileLink } from '@/shared/ui/file-drop'
 import { DOCUMENT_ACCEPT } from '@/shared/lib/document-files'
+import { splitSourceCaption } from '@/shared/lib/split-source'
 import { DocumentUploadQueue, useDocumentUploadQueue } from '@/shared/ui/document-upload-queue'
 import { DocumentExtractionAction } from '@/shared/ui/document-extraction-action'
 import { Button, Field, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { documentLabel, documentSlot } from '@/shared/model/document-slots'
-import { describeExtraction, sizeLabel } from '../form-model'
+import { Link } from 'react-router-dom'
+import { describeExtraction, identityActions, readerFailureLines, sizeLabel } from '../form-model'
+import { loadDocumentReport, type IdentityCheck } from '../form-api'
 import { documentRowStates, documentRowsProgress, documentsCountText, type DocumentRowIcon, type DocumentRowState } from '../document-rows'
 import type { ApplicationFormData, DocumentKind, DocumentSlot, FormDocument } from '../types'
 import { SectionHeader } from './section-header'
+import { DuplicateMergeAction } from './candidate-merge'
 import { ReadReport } from '@/features/candidates/components/read-report'
 import { formReports, incompleteReadingText } from '@/features/candidates/read-report'
 import '@/styles/application-form-aadhaar.css'
@@ -31,26 +35,82 @@ const ICONS: Record<string, LucideIcon> = {
 const STATE_ICONS: Record<DocumentRowIcon, LucideIcon | null> = { check: CheckCircle2, clock: Clock, dot: null }
 
 /** What the reading of one document did, in the words a recruiter needs. */
-export function ExtractionLine({ kind, slot, onCorrect, disabled }: { kind: DocumentKind; slot: DocumentSlot; onCorrect?: () => void; disabled?: boolean }) {
+export function ExtractionLine({ kind, slot, onCorrect, disabled, attachmentId, onIdentity }: {
+  kind: DocumentKind
+  slot: DocumentSlot
+  onCorrect?: () => void
+  disabled?: boolean
+  /** The file this reading belongs to, and what to do about a rejected one (Read again / This is the right person). */
+  attachmentId?: string
+  onIdentity?: (attachmentId: string, action: IdentityCheck) => Promise<void>
+}) {
+  const [working, setWorking] = useState(false)
+  const [problem, setProblem] = useState('')
   const note = describeExtraction(kind, slot)
   const wrongDocument = slot.extraction?.identityMismatch === true
   const incomplete = wrongDocument ? '' : incompleteReadingText(slot.extraction?.coverage)
   if (note.tone === 'none') return null
   const tone = incomplete ? 'review' : note.tone
   const Icon = tone === 'reading' ? Loader2 : tone === 'done' ? CheckCircle2 : TriangleAlert
+  const run = async (action: IdentityCheck) => {
+    if (!attachmentId || !onIdentity || working) return
+    setWorking(true); setProblem('')
+    try { await onIdentity(attachmentId, action) }
+    catch (cause) { setProblem(cause instanceof Error ? cause.message : 'The check could not be saved. Try again.') }
+    finally { setWorking(false) }
+  }
+  const actions = wrongDocument ? identityActions(slot.extraction) : []
   return (
     <div className={cn('af-extract', `is-${tone}`, wrongDocument && 'is-wrong-document')} role={tone === 'failed' || incomplete ? 'alert' : 'status'}>
-      <Icon aria-hidden="true" /><span>{incomplete || note.text}</span>{wrongDocument && onCorrect && <button type="button" className="af-docbtn" disabled={disabled} onClick={onCorrect}>Upload correct file</button>}
+      <Icon aria-hidden="true" /><span>{incomplete || note.text}</span>
+      {wrongDocument && slot.extraction?.duplicateOf && <DuplicateMergeAction duplicate={slot.extraction.duplicateOf} />}
+      {actions.map((action) => {
+        switch (action.kind) {
+          case 'read_again': return onIdentity && attachmentId ? <button key="read" type="button" className="af-docbtn" disabled={disabled || working} onClick={() => void run('read_again')}>Read again</button> : null
+          case 'confirm_name': return onIdentity && attachmentId ? <button key="confirm" type="button" className="af-docbtn" disabled={disabled || working} onClick={() => void run('confirm_name')}>This is the right person: use this document</button> : null
+          case 'open_candidate': return <Link key="open" className="af-docbtn" to={`/candidates/${action.candidateId}`}>{action.label}</Link>
+          case 'check_passport': return <button key="passport" type="button" className="af-docbtn" onClick={() => document.querySelector('[data-document="passport"]')?.scrollIntoView({ block: 'center' })}>Check the passport</button>
+          case 'upload': return onCorrect ? <button key="upload" type="button" className="af-docbtn" disabled={disabled} onClick={onCorrect}>Upload correct file</button> : null
+        }
+      })}
+      {problem && <small role="alert">{problem}</small>}
+      {slot.extraction?.failure && (
+        <details className="af-extract-details">
+          <summary>Details</summary>
+          <ul>{readerFailureLines(slot.extraction.failure).map((line) => <li key={line}>{line}</li>)}</ul>
+        </details>
+      )}
     </div>
+  )
+}
+
+/** Copies the plain-text report of how this candidate's documents were read (no names or numbers) for pasting to the developer. */
+function CopyReportButton({ candidateId }: { candidateId: string }) {
+  const [state, setState] = useState<'idle' | 'working' | 'copied' | 'failed'>('idle')
+  const copy = async () => {
+    setState('working')
+    try {
+      await navigator.clipboard.writeText(await loadDocumentReport(candidateId))
+      setState('copied')
+    } catch {
+      setState('failed')
+    }
+    window.setTimeout(() => setState('idle'), 3000)
+  }
+  return (
+    <button type="button" className="af-docbtn" disabled={state === 'working'} onClick={() => void copy()} title="Copy how these documents were read, to send to the developer">
+      {state === 'working' ? 'Copying…' : state === 'copied' ? 'Report copied' : state === 'failed' ? 'Could not copy' : 'Copy report'}
+    </button>
   )
 }
 
 /** One stored file on one line: its name (a link), then size and date, muted. The name is cut with an ellipsis, never wrapped. */
 function FileRow({ file, action }: { file: FormDocument; action?: ReactNode }) {
   const detail = [sizeLabel(file.sizeKb), file.uploadedAt ? dateTimeLabel(file.uploadedAt) : 'Saving'].join(' · ')
+  const splitNote = splitSourceCaption(file.splitFrom)
   return (
     <div className="af-docfile">
-      <div className="af-docfile-copy">{file.url ? <a href={fileHref(file.url)} target="_blank" rel="noreferrer" title={file.fileName}>{file.fileName}</a> : <span title={file.fileName}>{file.fileName}</span>}<small>{detail}</small></div>
+      <div className="af-docfile-copy">{file.url ? <a href={fileHref(file.url)} target="_blank" rel="noreferrer" title={file.fileName}>{file.fileName}</a> : <span title={file.fileName}>{file.fileName}</span>}<small>{detail}</small>{splitNote && <small className="af-docfile-split" title={splitNote}>{splitNote}</small>}</div>
       {file.url && <div className="af-docfile-actions"><a href={fileHref(file.url)} target="_blank" rel="noreferrer" aria-label={`View ${file.fileName}`} title={`View ${file.fileName}`} className="af-docbtn is-icon"><Eye aria-hidden="true" /></a><FileLink url={file.url} download title={`Download ${file.fileName}`} className="af-docbtn is-icon"><Download aria-hidden="true" /><span className="sr-only">Download {file.fileName}</span></FileLink>{action || <span aria-hidden="true" />}</div>}
     </div>
   )
@@ -76,12 +136,13 @@ function useSlotUpload(slot: DocumentSlot, canUpload: boolean, busy: boolean, on
  * One document on one compact row, on fixed columns so the rows line up from top to bottom:
  * status icon, name, status chip, file (name, size, date), actions (Upload or Replace, View).
  */
-function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, onExtract }: {
+function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, onExtract, onIdentity }: {
   slot: DocumentSlot
   state: DocumentRowState
   canUpload: boolean
   busy: boolean
   onUpload: (kind: DocumentKind, file: File) => Promise<void>
+  onIdentity?: (attachmentId: string, action: IdentityCheck) => Promise<void>
   onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
   onExtract?: (attachmentIds: string[]) => Promise<void>
 }) {
@@ -118,10 +179,10 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
       <b className="af-docrow-name" title={label}>{label}</b>
       <span className={cn('af-doc-chip', `is-${state.key}`, rejectedOnly && 'is-rejected')}>{working ? 'Uploading' : rejectedOnly ? 'Wrong document' : state.chip}</span>
       <div className="af-docrow-file">
-        {files.map((file, index) => <div key={file.attachmentId}><FileRow file={file} action={index === 0 && hasFile ? uploadButton : undefined} />{slot.multiple && file.extraction && <ExtractionLine kind={slot.slot} slot={{ ...slot, extraction: file.extraction }} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} />}</div>)}
+        {files.map((file, index) => <div key={file.attachmentId}><FileRow file={file} action={index === 0 && hasFile ? uploadButton : undefined} />{slot.multiple && file.extraction && <ExtractionLine kind={slot.slot} slot={{ ...slot, extraction: file.extraction }} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={file.attachmentId} onIdentity={canUpload ? onIdentity : undefined} />}</div>)}
         {marked && <div className="af-doc-manual"><b>Marked manually · No file attached</b><small>{slot.manualStatus?.by.name || 'Former team member'}{slot.manualStatus?.at ? ` · ${dateTimeLabel(slot.manualStatus.at)}` : ''}</small>{slot.manualStatus?.note && <p>{slot.manualStatus.note}</p>}</div>}
         {slot.multiple && !hasFile && !marked && <p className="af-doc-hint">{slot.slot === 'passport' ? 'Add the photo page, address page or other passport pages together.' : slot.slot === 'aadhaar' ? 'Add both front and back pages before extracting details.' : 'Choose or drop several files.'}</p>}
-        {(!slot.multiple || !files.some((file) => file.extraction)) && <ExtractionLine kind={slot.slot} slot={slot} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} />}
+        {(!slot.multiple || !files.some((file) => file.extraction)) && <ExtractionLine kind={slot.slot} slot={slot} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={slot.current?.attachmentId} onIdentity={canUpload ? onIdentity : undefined} />}
         <DocumentUploadQueue queue={upload.queue} />
         {canUpload && <DocumentExtractionAction files={files} disabled={working} onExtract={onExtract} />}
       </div>
@@ -158,10 +219,12 @@ export function DocumentsSection({
   busyKinds,
   onManualStatus,
   onExtract,
+  onIdentity,
 }: {
   form: ApplicationFormData
   canUpload: boolean
   onUpload: (kind: DocumentKind, file: File) => Promise<void>
+  onIdentity?: (attachmentId: string, action: IdentityCheck) => Promise<void>
   busyKinds: DocumentKind[]
   onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
   onExtract?: (attachmentIds: string[]) => Promise<void>
@@ -178,6 +241,7 @@ export function DocumentsSection({
         title="Documents"
         chip={(
           <div className="af-docs-progress">
+            {canUpload && form.candidate?.id && <CopyReportButton candidateId={form.candidate.id} />}
             <span className="af-docs-count tnum">{documentsCountText(progress)}</span>
             <span className={cn('af-docs-bar', progress.total > 0 && progress.uploaded === progress.total && 'is-full')} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent} aria-label="Documents uploaded">
               <i style={{ width: `${progress.percent}%` }} />
@@ -196,6 +260,7 @@ export function DocumentsSection({
             onUpload={onUpload}
             onManualStatus={onManualStatus}
             onExtract={onExtract}
+            onIdentity={onIdentity}
           />
         ))}
       </ul>

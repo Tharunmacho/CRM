@@ -30,6 +30,8 @@ from app.api.routers.mail_actions import router as actions_router
 from app.api.routers.zoho_mailbox import router as zoho_router
 from app.api.routers.mail_compose import router as compose_router
 from app.api.routers.mail_accounts import router as accounts_router
+from app.api.routers.inbox_ingested import router as ingested_router
+from app.services.inbox_ingested import intake_counts_columns
 from app.services.mail_storage import storage_identity
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
@@ -37,6 +39,7 @@ router.include_router(actions_router)
 router.include_router(zoho_router)
 router.include_router(compose_router)
 router.include_router(accounts_router)
+router.include_router(ingested_router)
 admin = require_role(Role.admin)
 supervisor = require_role(Role.admin, Role.manager)
 
@@ -142,7 +145,9 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
     order = (MailMessage.received_at.desc(), MailMessage.id.desc())
 
     def read_accounts(session):
-        return list(session.execute(select(MailAccount, MailAccount.secrets.isnot(None).label("has_secrets")).options(
+        # The two scalar columns (candidates created by email, jobs to review) feed the dashboard's Inbox card and ride on this
+        # statement: they are uncorrelated subqueries, each evaluated once, not another round trip.
+        return list(session.execute(select(MailAccount, MailAccount.secrets.isnot(None).label("has_secrets"), *intake_counts_columns()).options(
             defer(MailAccount.secrets), defer(MailAccount.sync_state)).order_by(MailAccount.address)))
 
     def read_counts(session):
@@ -188,8 +193,15 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
     attached_to = {}
     for item in attachments:
         attached_to.setdefault(item.message_id, []).append(item)
+    intake = {
+        # Positional (account, has_secrets, created by email, jobs to review); stand-in sessions may return only the first two.
+        "ingestedCandidates": account_rows[0][2] if account_rows and len(account_rows[0]) > 2 else 0,
+        "review": account_rows[0][3] if account_rows and len(account_rows[0]) > 3 else 0,
+        "accounts": sum(1 for account in accounts if not account.disconnected_at),
+    }
     return {
-        "accounts": [account_out(account, configured, counts, has_secrets) for account, has_secrets in account_rows],
+        "intake": intake,  # the dashboard's Inbox card: candidates created by email, jobs to review, connected mailboxes
+        "accounts": [account_out(account, configured, counts, row[1]) for account, row in zip(accounts, account_rows)],
         "availableAccounts": list(configured) if user.role == Role.admin else [],
         "providers": mail_providers.readiness(get_settings()) if user.role == Role.admin else [],
         "total": total, "offset": offset, "limit": limit, "hasMore": offset + len(messages) < total,

@@ -380,6 +380,13 @@ function messageFrom(detail: unknown): string | undefined {
   return undefined
 }
 
+/** Where each part of a scan that held several documents was filed (the server cuts it by what is on each page). */
+export interface SplitReport {
+  /** "This file held several documents: Passport (pages 2-3) and Resume (pages 1, 8) were filed in their own fields." */
+  message: string | null
+  pieces: { slot: string; label: string; fileName: string; pages: number[]; id: string; url: string; version: number }[]
+}
+
 export interface UploadedFile {
   id: string
   name: string
@@ -387,6 +394,8 @@ export interface UploadedFile {
   version: number
   url: string
   uploadedAt: string
+  /** Present only when the file held several documents and was filed in their own fields. */
+  split?: SplitReport
 }
 
 interface FormRequestOptions extends RequestOptions {

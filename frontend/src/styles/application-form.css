@@ -365,6 +365,10 @@ body.af-open { overflow: hidden; }
 .af-extract.is-done { background: var(--success-fill); color: var(--success-ink); }
 .af-extract.is-review { background: var(--warning-fill); color: var(--warning-ink); }
 .af-extract.is-failed { background: var(--error-fill); color: var(--error-ink); }
+.af-extract:has(.af-extract-details) { flex-wrap: wrap; }
+.af-extract-details { flex: 1 0 100%; font-size: 12px; font-weight: 400; }
+.af-extract-details summary { cursor: pointer; font-weight: 600; width: max-content; }
+.af-extract-details ul { margin: 4px 0 0; padding-left: 18px; }
 
 /* Tracking: Stage | Status | Date | Completed by, with a slim progress bar above */
 .af-progress { height: 5px; margin: 10px 12px; border-radius: 999px; background: var(--tint-3); overflow: hidden; }

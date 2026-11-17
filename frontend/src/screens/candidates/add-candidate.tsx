@@ -378,7 +378,7 @@ export default function AddCandidatePage() {
     // The draft and the attachments run together; the workspace refresh starts when they are done and is not waited for.
     const { failed, refreshed } = await finishSavedCandidate({
       saveDraft: () => intake.saveDraft(snapshotDraft(candidateId)),
-      attach: () => intake.attach(candidateId),
+      attach: () => intake.attach(candidateId, (message) => store.notify(message)),
       refresh: () => store.refresh({ keepCurrent: true }),
     })
     workspaceRefresh.current = refreshed

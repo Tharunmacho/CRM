@@ -124,8 +124,8 @@ def test_search_pages_and_counts_stay_correct(people):
 
 
 def test_default_new_candidates_first_orders_the_entire_result_before_paging(bank):
-    # Every non-New record is newer than every New record, so sorting a fetched
-    # newest-first page in memory could never produce the expected first pages.
+    # The default preset is simply whoever was added last, whatever their status (an imported candidate is not at
+    # "New" yet must be on top), ordered across the entire result before paging.
     records = [
         ('new-old', m.CandidateStatus.new, 1),
         ('new-b', m.CandidateStatus.new, 2),
@@ -141,7 +141,7 @@ def test_default_new_candidates_first_orders_the_entire_result_before_paging(ban
     pages = [search_candidates(bank, Search(), page, 2) for page in range(4)]
     assert all(page['total'] == 7 for page in pages)
     assert [[row['id'] for row in page['items']] for page in pages] == [
-        ['new-a', 'new-b'], ['new-old', 'process-new'], ['process-old', 'review'], ['deployed'],
+        ['review', 'deployed'], ['process-new', 'process-old'], ['new-a', 'new-b'], ['new-old'],
     ]
     explicit = search_candidates(bank, Search(sort='added', direction='desc'), 0, 2)
     assert [row['id'] for row in explicit['items']] == ['review', 'deployed']
@@ -152,7 +152,7 @@ def test_default_new_candidates_first_orders_the_entire_result_before_paging(ban
     client = make_client(bank, 'asha')
     default_page = client.get('/api/candidates', params={'page': 1, 'page_size': 2})
     assert default_page.status_code == 200, default_page.text
-    assert [row['id'] for row in default_page.json()['items']] == ['new-old', 'process-new']
+    assert [row['id'] for row in default_page.json()['items']] == ['process-new', 'process-old']   # page index 1: the second page
     newest_page = client.get('/api/candidates', params={'sort': 'added', 'direction': 'desc', 'page_size': 2})
     assert newest_page.status_code == 200, newest_page.text
     assert [row['id'] for row in newest_page.json()['items']] == ['review', 'deployed']

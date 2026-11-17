@@ -111,7 +111,9 @@ def _accepted_document(versions, manual) -> bool:
 
 
 def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: type[CandidateOut] = CandidateOut,
-                   slots: list[tuple[str, str]] = DOCUMENT_SLOTS, manual_records: dict | None = None) -> CandidateOut:
+                   slots: list[tuple[str, str]] = DOCUMENT_SLOTS, manual_records: dict | None = None,
+                   splits: dict[str, dict] | None = None) -> CandidateOut:
+    """`splits` (attachment id -> {fileName, pages}) is only given by the single-candidate profile read."""
     manual_records = manual_records or {}
     from app.services.application_form import LEGACY_SLOTS
     documents = [
@@ -131,6 +133,7 @@ def _candidate_out(c: dict, files: dict[tuple[str, str], list[dict]], model: typ
                     "uploadedBy": f["uploaded_by"], "extractionPending": bool(f.get("extraction_pending")),
                     "uploadedAt": datetime.fromisoformat(f["uploaded_at"]),
                     "identityMismatch": bool(f.get("identity_mismatch")),
+                    **({"splitFrom": splits[f["id"]]} if splits and f["id"] in splits else {}),
                 }
                 for f in files.get((c["id"], key), [])
             ],
@@ -1024,12 +1027,26 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
     from app.core.deps import ensure_can_work_candidate
     ensure_can_work_candidate(c, user, db)
-    # The call may be recorded after the candidate was already matched to an order
-    # (matching closes the initial-call task, the call result is still worth keeping).
-    # In that case the outcome is stored and audited, but the candidate's status and
-    # the order application are left alone: a "not interested" answer must not close
-    # an active application silently, the recruiter does that in the order's stages.
-    on_order = db.scalar(select(Application.id).where(Application.candidate_id == c.id, Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed])).limit(1)) is not None
+    # The call may be recorded after the candidate was already matched to an order (matching closes the initial-call task,
+    # the call result is still worth keeping). A "not interested" answer for someone still at prescreening (stage 1) takes
+    # them off that order: the application closes as "not interested", its tasks are cancelled, and they go back to the Data
+    # Bank (not in Tasks or Follow-up) to be used for another job. Past prescreening, the placement is only ever closed in
+    # its own stage, so there the outcome is stored and audited but the application is left alone.
+    placements = list(db.scalars(select(Application).where(Application.candidate_id == c.id, Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed])).with_for_update()))
+    on_order = bool(placements)
+    prescreening = [a for a in placements if a.status == ApplicationStatus.active and a.current_stage <= 1]
+    leaves_order = body.called and body.interested == "no" and bool(prescreening) and len(prescreening) == len(placements)
+    if leaves_order:
+        from app.api.routers.applications import _audit, _open_tasks
+        from app.db.models import ClosureReason
+        closed_at = datetime.now(timezone.utc)
+        for placement in prescreening:
+            placement.status, placement.closure_reason = ApplicationStatus.closed, ClosureReason.not_interested
+            placement.lock_version += 1
+            for open_task in _open_tasks(db, placement):
+                open_task.cancelled_at = closed_at
+            _audit(db, user, "Candidate not interested at the initial call: taken off the order", placement, c, closed_at)
+        on_order = False
 
     now = datetime.now(timezone.utc)
     c.call_called = body.called
@@ -1061,7 +1078,10 @@ def record_call(candidate_id: str, body: CallIn, db: Session = Depends(get_db), 
     notice = None
     if on_order and body.called and body.interested == "no":
         notice = "Saved. This candidate is still on an order, so nothing on the order was changed. Unmap them or record the result in their stage if they should leave it."
-    return {"ok": True, "onOrder": on_order, "statusChanged": not on_order and body.interested in {"yes", "no"}, "notice": notice}
+    if leaves_order:
+        notice = "Saved. The candidate is not interested, so they were taken off the order and moved back to the Data Bank. They can be used for another job."
+    return {"ok": True, "onOrder": on_order, "statusChanged": not on_order and body.interested in {"yes", "no"}, "notice": notice,
+            "leftOrder": leaves_order}
 
 
 # -------------------------------------------------------------------- todos

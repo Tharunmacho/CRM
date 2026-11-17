@@ -204,14 +204,17 @@ PDF, DOC/DOCX converted once to PDF, and supported single-frame Pillow images ar
 1. Update the backend environment with `backend/requirements-dev.txt` as described above.
 2. Install Tesseract with English and orientation data (`eng`, `osd`). The reader checks `PATH` and the usual Windows location, `C:\Program Files\Tesseract-OCR\tesseract.exe`; use `TESSERACT_CMD` for another location. Tesseract is installed in the current development environment.
 3. Configure the backend OCR provider URL/key for field extraction. Keep these values server-side. Local inspection still returns actionable review information when provider configuration or extraction fails.
-4. For Word documents, install LibreOffice and make its executable discoverable. It is not installed in the current local environment, so export Word documents to PDF there. Both Docker and Nixpacks install Tesseract (`eng`/`osd`) and LibreOffice Writer.
-5. Restart the API after configuration changes.
+4. For Word documents, install LibreOffice and make its executable discoverable. It is not installed in the current local environment, so export Word documents to PDF there. Both Docker and Nixpacks install Tesseract (`eng`/`osd`/`tam`) and LibreOffice Writer.
+5. **Tamil (and other scripts) on Aadhaar cards.** Indian ID cards are bilingual and the English-only model reads the other script as nonsense Latin letters, which breaks name extraction. Pages recognised as Aadhaar are therefore read a second time with `eng+tam` (setting `OCR_AADHAAR_LANGUAGES`) and the better read is kept; every other page is read with `OCR_LANGUAGES` (English) exactly as before, because an Indic pack makes Tesseract invent junk glyphs on photos and stamps and slows those pages. Without admin rights, run `python backend/scripts/install_ocr_languages.py` once: it builds `backend/data/tessdata` (git-ignored) with `eng`, `osd` and `tam` (download from the official `tessdata_fast` repository, checksum printed; add more with `--langs hin mal kan tel`; each extra pack makes the Aadhaar re-read slower) and the backend uses that folder automatically. On a server, install the apt package instead (`tesseract-ocr-tam`, already in the Dockerfile and `nixpacks.toml`). If `tam` is missing the reader keeps working in English and logs one warning, `Tamil text will be read poorly: install tam.traineddata`.
+6. Restart the API after configuration changes.
 
 The public settings are documented in `backend/.env.example`:
 
 ```dotenv
 TESSERACT_CMD=
 OCR_LANGUAGES=eng
+OCR_AADHAAR_LANGUAGES=eng+tam
+# OCR_TESSDATA_DIR=backend/data/tessdata
 OCR_MAX_PAGES=300
 OCR_PAGE_TIMEOUT_SECONDS=20
 OCR_DOCUMENT_TIMEOUT_SECONDS=600

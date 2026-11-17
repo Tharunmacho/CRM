@@ -368,15 +368,40 @@ def _matched_candidate(env, *, status=None):
     return order
 
 
-def test_call_can_be_recorded_after_matching_without_changing_order_work(desk):
+def test_call_recorded_after_matching_takes_a_prescreening_candidate_off_the_order(desk):
+    from app.db.models import CandidateStatus, ClosureReason
+    _matched_candidate(desk, status=CandidateStatus.in_process)
+    with desk.sessions() as db:
+        db.add(Task(id='matched-task', application_id='matched-app', candidate_id='matched', kind=TaskKind.stage, stage=1, title='Prescreen', owner_id='staff'))
+        db.commit()
+    response = desk.client.post('/api/candidates/matched/call', json={'called': True, 'interested': 'no', 'remarks': 'Changed his mind'})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # Still at prescreening: "not interested" closes the application, cancels its tasks and returns the candidate to the Data Bank.
+    assert body['leftOrder'] is True and body['onOrder'] is False and body['statusChanged'] is True and 'taken off the order' in body['notice']
+    with desk.sessions() as db:
+        candidate = db.get(Candidate, 'matched')
+        assert candidate.call_called and candidate.call_interested == 'no' and candidate.call_remarks == 'Changed his mind' and candidate.call_recorded_at
+        assert candidate.status == CandidateStatus.not_interested
+        application = db.get(Application, 'matched-app')
+        assert application.status == ApplicationStatus.closed and application.closure_reason == ClosureReason.not_interested and application.lock_version == 1
+        assert db.get(Task, 'matched-task').cancelled_at is not None
+        assert db.scalar(select(AuditEntry).where(AuditEntry.entity_id == 'matched-app', AuditEntry.action == 'Candidate not interested at the initial call: taken off the order'))
+        audit = db.scalar(select(AuditEntry).where(AuditEntry.entity_id == 'matched', AuditEntry.action == 'Recorded initial call'))
+        assert audit.actor_id == 'staff' and audit.meta == {'called': True, 'interested': 'no', 'on_order': False}
+
+
+def test_call_can_be_recorded_after_matching_without_changing_order_work_past_prescreening(desk):
     from app.db.models import CandidateStatus
     _matched_candidate(desk, status=CandidateStatus.in_process)
     with desk.sessions() as db:
+        db.get(Application, 'matched-app').current_stage = 4
+        db.commit()
         tasks_before = db.scalar(select(func.count()).select_from(Task))
     response = desk.client.post('/api/candidates/matched/call', json={'called': True, 'interested': 'no', 'remarks': 'Changed his mind'})
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body['onOrder'] is True and body['statusChanged'] is False and 'still on an order' in body['notice']
+    assert body['onOrder'] is True and body['statusChanged'] is False and body['leftOrder'] is False and 'still on an order' in body['notice']
     with desk.sessions() as db:
         candidate = db.get(Candidate, 'matched')
         assert candidate.call_called and candidate.call_interested == 'no' and candidate.call_remarks == 'Changed his mind' and candidate.call_recorded_at

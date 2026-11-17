@@ -17,6 +17,9 @@ from app.db.models import AuditEntry, Candidate, CandidateStatus, Notification, 
 OCR_FLAG_ACTION = "Flagged for document review"
 OCR_FLAG_RESOLVED_ACTION = "Resolved document review flag"
 UNNAMED = "Name needs review"
+# A bulk-imported candidate whose documents showed no readable name yet: never the folder name. Carries the provisional-name marker
+# (field_sources["_provisionalName"]) so the first document that reads a name replaces it.
+PENDING_NAME = "Name not read yet"
 NO_NAME_REASON = "We could not read a name from this file. Open it and enter the details, or upload a clearer copy."
 NO_CONTACT_REASON = ("We could not read a phone number or email from this file. "
                      "Open it and enter the details, or upload a clearer copy.")
@@ -37,7 +40,7 @@ def has_extraction_warnings(results) -> bool:
 def has_real_name(name) -> bool:
     """A name a person can be called by: not blank and never the old placeholder."""
     text = (name or "").strip()
-    return bool(text) and text.casefold() != UNNAMED.casefold()
+    return bool(text) and text.casefold() not in (UNNAMED.casefold(), PENDING_NAME.casefold())
 
 
 def candidate_refusal(values) -> str | None:
@@ -57,7 +60,7 @@ def candidate_refusal(values) -> str | None:
 
 def profile_gaps(candidate) -> set[str]:
     gaps = set()
-    if not (candidate.name or "").strip() or candidate.name.strip() == UNNAMED:
+    if not (candidate.name or "").strip() or candidate.name.strip() in (UNNAMED, PENDING_NAME):
         gaps.add("missing_name")
     if not (candidate.phone or "").strip():
         gaps.add("missing_phone")

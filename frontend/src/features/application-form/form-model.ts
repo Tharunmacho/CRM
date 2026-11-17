@@ -28,7 +28,9 @@ import type {
   FieldSource,
   FormDocument,
   FormDraft,
+  IdentityReason,
   MissingItem,
+  ReaderFailure,
   SourceDocument,
   TrackingRow,
   TrackingStatus,
@@ -259,6 +261,13 @@ export function optionLabel(options: FieldOption[] | undefined, value: string): 
 
 const EXTRACTION_STATES: ExtractionStatusCode[] = ['processing', 'done', 'failed', 'unreadable', 'needs_review']
 
+/** The optional `splitFrom` of a file cut from a larger scan: that scan's name and the pages it holds. Malformed counts as absent. */
+function splitFrom(raw: unknown): { splitFrom?: { fileName: string; pages: number[] } } {
+  const value = rec(raw)
+  const pages = list(value.pages).filter((page): page is number => Number.isInteger(page) && (page as number) > 0)
+  return typeof value.fileName === 'string' && value.fileName && pages.length ? { splitFrom: { fileName: value.fileName, pages } } : {}
+}
+
 function normaliseDocument(raw: unknown): FormDocument | null {
   const value = rec(raw)
   if (!value.url && !value.attachmentId) return null
@@ -274,7 +283,60 @@ function normaliseDocument(raw: unknown): FormDocument | null {
     extraction: normaliseExtraction(value.extraction),
     extractionPending: typeof value.extractionPending === 'boolean' ? value.extractionPending : undefined,
     identityMismatch: value.identityMismatch === true || rec(value.extraction).identityMismatch === true,
+    ...splitFrom(value.splitFrom),
   }
+}
+
+const IDENTITY_FIELDS = ['name', 'passport_no', 'candidate']
+const NAME_SOURCES = ['candidate', 'stored_document', 'other_document']
+
+function identityReasons(raw: unknown): IdentityReason[] {
+  return list(raw).flatMap((item): IdentityReason[] => {
+    const value = rec(item)
+    const field = str(value.field)
+    if (!IDENTITY_FIELDS.includes(field)) return []
+    const from = str(value.expectedFrom)
+    return [{
+      field: field as IdentityReason['field'],
+      documentKind: str(value.documentKind) || null,
+      ...(str(value.found) ? { found: str(value.found) } : {}),
+      ...(str(value.expected) ? { expected: str(value.expected) } : {}),
+      ...(NAME_SOURCES.includes(from) ? { expectedFrom: from as IdentityReason['expectedFrom'] } : {}),
+      ...(str(value.expectedKind) ? { expectedKind: str(value.expectedKind) } : {}),
+      ...(Array.isArray(value.matchedOn) ? { matchedOn: value.matchedOn.map(str).filter(Boolean) } : {}),
+    }]
+  })
+}
+
+/** The reader's failure record the server attaches to a reading that is retrying, failed or needs a look (never document content). */
+function readerFailure(raw: unknown): ReaderFailure | undefined {
+  const value = rec(raw)
+  if (!str(value.errorClass)) return undefined
+  const fallback = rec(value.localFallback)
+  return {
+    errorClass: str(value.errorClass),
+    ...(typeof value.httpStatus === 'number' ? { httpStatus: value.httpStatus } : {}),
+    retriable: value.retriable === true,
+    ...(str(value.code) ? { code: str(value.code) } : {}),
+    detail: str(value.detail),
+    ...(typeof value.attempt === 'number' ? { attempt: value.attempt } : {}),
+    ...(typeof value.maxAttempts === 'number' ? { maxAttempts: value.maxAttempts } : {}),
+    ...(str(value.at) ? { at: str(value.at) } : {}),
+    ...(str(value.retryAt) ? { retryAt: str(value.retryAt) } : {}),
+    ...(str(fallback.source) ? { localFallback: { source: str(fallback.source), fields: list(fallback.fields).map(str) } } : {}),
+  }
+}
+
+/** The lines of the Details disclosure under a failed reading: what the reader did, in the words of the report. */
+export function readerFailureLines(failure: ReaderFailure): string[] {
+  const attempt = failure.attempt && failure.maxAttempts ? `attempt ${failure.attempt} of ${failure.maxAttempts}` : ''
+  return [
+    `Reason: ${failure.errorClass.replaceAll('_', ' ')}${failure.httpStatus ? ` (HTTP ${failure.httpStatus})` : ''}${failure.code ? `, reader code ${failure.code}` : ''}`,
+    failure.detail && `Detail: ${failure.detail}`,
+    attempt && `${attempt}; ${failure.retriable ? 'it can be tried again' : 'trying again will not help until it is fixed'}`,
+    failure.retryAt && `Next automatic attempt: ${new Date(failure.retryAt).toLocaleTimeString()}`,
+    failure.localFallback && `Filled from the ${failure.localFallback.source}: ${failure.localFallback.fields.join(', ')}`,
+  ].filter((line): line is string => Boolean(line))
 }
 
 function normaliseExtraction(raw: unknown): Extraction | null {
@@ -282,9 +344,14 @@ function normaliseExtraction(raw: unknown): Extraction | null {
   const value = rec(raw)
   const status = str(value.status).toLowerCase() as ExtractionStatusCode
   if (!EXTRACTION_STATES.includes(status)) return null
+  const failure = readerFailure(value.failure)
   return {
     status,
+    ...(failure ? { failure } : {}),
     identityMismatch: value.identityMismatch === true,
+    duplicateOf: typeof rec(value.duplicateOf).candidateId === 'string'
+      ? { candidateId: str(rec(value.duplicateOf).candidateId), careId: str(rec(value.duplicateOf).careId) || null, name: str(rec(value.duplicateOf).name) } : null,
+    identityReasons: identityReasons(value.identityReasons),
     message: str(value.message),
     filled: list(value.filled).map(str),
     kept: list(value.kept).map(str),
@@ -682,19 +749,88 @@ export interface ExtractionNote {
 }
 
 /** What a document's last reading did, in the words a recruiter needs. */
+const docWord = (kind: string | null | undefined): string => (kind ? kind.replaceAll('_', ' ') : 'document')
+
+/** One sentence per recorded reason a document was rejected; says what was read and what it was compared with. */
+function describeIdentityReason(reason: IdentityReason, slotKind: string): string {
+  const doc = docWord(reason.documentKind || slotKind)
+  if (reason.field === 'name') {
+    const subject = reason.found ? `The ${doc} names "${reason.found}"` : `The ${doc} names someone else`
+    const other = reason.expected ? `"${reason.expected}"` : 'another name'
+    if (reason.expectedFrom === 'other_document') return `${subject}, but the ${docWord(reason.expectedKind)} read with it names ${other}.`
+    if (reason.expectedFrom === 'stored_document') return `${subject}, but this candidate's other documents name ${other}.`
+    return `${subject}, but this candidate is ${other}.`
+  }
+  if (reason.field === 'passport_no') return `The ${doc}'s passport number differs from the passport already on this candidate.`
+  const owned = reason.matchedOn?.length ? reason.matchedOn.join(', ') : 'phone number, email or passport number'
+  return `The ${doc}'s ${owned} already belongs to another candidate in the CRM.`
+}
+
+export type IdentityAction =
+  | { kind: 'read_again' }
+  | { kind: 'confirm_name' }
+  | { kind: 'open_candidate'; candidateId: string; label: string }
+  | { kind: 'check_passport' }
+  | { kind: 'upload' }
+
+/**
+ * What a person may do about a rejected document, by the reason it was rejected. "Upload correct file" is only for a document that
+ * is plainly another person's (the name AND the passport number both differ); a name alone can be confirmed, a passport number
+ * or another candidate's details cannot, and an older rejection that recorded no reason can only be read again.
+ */
+export function identityActions(extraction: Pick<Extraction, 'identityMismatch' | 'duplicateOf' | 'identityReasons'> | null | undefined): IdentityAction[] {
+  if (!extraction?.identityMismatch) return []
+  const fields = new Set((extraction.identityReasons ?? []).map((reason) => reason.field))
+  if (extraction.duplicateOf) {
+    const other = extraction.duplicateOf
+    return [{ kind: 'open_candidate', candidateId: other.candidateId, label: `Open ${other.careId || other.name || 'that candidate'}` }, { kind: 'read_again' }]
+  }
+  if (!fields.size || fields.has('candidate')) return [{ kind: 'read_again' }]
+  if (fields.has('passport_no') && fields.has('name')) return [{ kind: 'read_again' }, { kind: 'upload' }]
+  if (fields.has('passport_no')) return [{ kind: 'check_passport' }, { kind: 'read_again' }]
+  return [{ kind: 'read_again' }, { kind: 'confirm_name' }]
+}
+
+/**
+ * " Not changed: Date of birth, Mobile number. Check them against the document." The fields the document has a value for but the form did
+ * not take (a person's own entry stays, the date or number could not be read, another candidate owns the phone): the server lists them in
+ * `kept`, so a missing field is never silent. A field that was filled after all is left out; a key with no field on the form is skipped.
+ */
+function notChangedNote(extraction: Pick<Extraction, 'kept' | 'filled'>, lead: string): string {
+  const labels = new Map<string, string>([...PERSONAL_FIELDS, ...PASSPORT_FIELDS, ...EXPERIENCE_FIELDS].map((def) => [def.path, def.label]))
+  labels.set('education', 'Education')
+  labels.set('experience.history', 'Work history')
+  const names = [...new Set((extraction.kept ?? []).filter((key) => !(extraction.filled ?? []).includes(key)).map((key) => labels.get(key)).filter((label): label is string => !!label))]
+  return names.length ? `${lead}Not changed: ${names.join(', ')}. Check ${names.length === 1 ? 'it' : 'them'} against the document.` : ''
+}
+
 export function describeExtraction(kind: DocumentKind, slot: Pick<DocumentSlot, 'uploaded' | 'extraction'>): ExtractionNote {
   const extraction = slot.extraction
-  if (extraction?.identityMismatch) return { tone: 'failed', text: 'Wrong document. No details were filled. Upload the correct document.' }
+  if (extraction?.identityMismatch && extraction.duplicateOf) {
+    const other = extraction.duplicateOf
+    return { tone: 'failed', text: `Already in the CRM as ${other.careId ? `${other.careId} · ` : ''}${other.name || 'another candidate'}. Open that candidate, or remove the duplicate, then read again.` }
+  }
+  if (extraction?.identityMismatch) {
+    const reasons = (extraction.identityReasons ?? []).map((reason) => describeIdentityReason(reason, kind))
+    if (!reasons.length) return { tone: 'failed', text: 'This document was stopped as another person\'s. No details were filled. Choose Read again to see why.' }
+    const fields = new Set((extraction.identityReasons ?? []).map((reason) => reason.field))
+    const advice = fields.size === 1 && fields.has('name')
+      ? 'Open the document to check it. If it is the right person, confirm it below.'
+      : fields.has('name') && fields.has('passport_no')
+        ? 'The name and the passport number both differ. Open the document to check it, then upload the correct one.'
+        : fields.has('passport_no') ? 'Open the document and the passport to check the number.' : 'Open the document to check it.'
+    return { tone: 'failed', text: `${reasons.join(' ')} No details were filled. ${advice}` }
+  }
   if (kind === 'photo' || !slot.uploaded || !extraction) return { tone: 'none', text: '' }
   const filled = extraction.filled.length
   const fields = `${filled} ${filled === 1 ? 'field' : 'fields'}`
   switch (extraction.status) {
     case 'processing':
-      return { tone: 'reading', text: extraction.message || `Reading the ${kind}…` }
+      return { tone: 'reading', text: extraction.message || `Reading the ${kind.replaceAll('_', ' ')}…` }
     case 'done':
-      return { tone: 'done', text: filled > 0 ? `Filled ${fields} on the form` : 'Read. Nothing new to fill in' }
+      return { tone: 'done', text: `${filled > 0 ? `Filled ${fields} on the form` : 'Read. Nothing new to fill in'}${notChangedNote(extraction, '. ')}` }
     case 'needs_review':
-      return { tone: 'review', text: `${filled > 0 ? `Filled ${fields}. ` : ''}${extraction.message || 'Some pages could not be read. Please check the details.'}` }
+      return { tone: 'review', text: `${filled > 0 ? `Filled ${fields}. ` : ''}${extraction.message || 'Some pages could not be read. Please check the details.'}${notChangedNote(extraction, ' ')}` }
     default:
       return { tone: 'failed', text: `${extraction.message || 'Could not read this document.'} Enter the details manually.` }
   }

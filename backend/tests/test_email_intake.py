@@ -95,6 +95,13 @@ def intake(schema_database, tmp_path, monkeypatch):
     # executable. Native person inspection still runs on the retained PDF.
     from app.integrations.ocr import inspection
     monkeypatch.setattr(inspection, "find_tesseract", lambda _command=None: None)
+    # The split of a combined PDF reads the OCR settings: never the real .env.
+    from app.services import bulk_candidate_import as bulk
+    monkeypatch.setattr(bulk, "get_settings", lambda: SimpleNamespace(tesseract_cmd=None, ocr_languages="eng"))
+    # These tests use synthetic reader results whose pages do not mirror the PDF's real content: filing the other documents of an
+    # attachment is covered by test_email_intake_split.py, so here the cutting step finds nothing (the unchanged cases stay exact).
+    monkeypatch.setattr(subject.intake_documents, "build_split", lambda data, store, **kw: {
+        "source_sha256": hashlib.sha256(data).hexdigest(), "original_name": "", "pieces": [], "note": None})
     _migrate(schema_database, "head")
     sessions = sessionmaker(bind=schema_database, autoflush=False, expire_on_commit=False)
     settings = SimpleNamespace(storage_dir=tmp_path, ocr_document_timeout_seconds=600)

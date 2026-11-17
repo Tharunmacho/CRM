@@ -21,6 +21,7 @@ import { FormErrorCard, FormSkeleton } from '@/features/application-form/compone
 import { SectionHeader } from '@/features/application-form/components/section-header'
 import { AssignmentBar } from '@/features/application-form/components/assignment-bar'
 import { DocumentsSection } from '@/features/application-form/components/documents-section'
+import { MergeIntoPicker } from '@/features/application-form/components/candidate-merge'
 import { RecordDownloads } from '@/features/application-form/components/record-downloads'
 import { InvoiceCard } from '@/features/application-form/components/invoice-card'
 import { FillView } from '@/features/application-form/fill/fill-view'
@@ -145,9 +146,10 @@ export default function ApplicationFormPage() {
   const upload = useCallback(async (kind: DocumentKind, file: File) => {
     setBusyKinds((current) => [...current, kind])
     try {
-      await state.upload(kind, file)
+      const split = await state.upload(kind, file)
       const entry = documentSlot(kind)
-      store.notify(`${entry?.label ?? 'Document'} uploaded`)
+      // A scan of several documents was filed field by field: say which went where instead of only "uploaded".
+      store.notify(split?.message || `${entry?.label ?? 'Document'} uploaded`)
     } finally {
       setBusyKinds((current) => current.filter((item) => item !== kind))
     }
@@ -245,6 +247,7 @@ export default function ApplicationFormPage() {
               <Button variant="primary" disabled={saving} onClick={() => void state.save()} icon={saving ? <Loader2 className="animate-spin" /> : <Save />}>{saving ? 'Saving…' : 'Save changes'}</Button>
             </>
           )}
+          {form && me.role === 'admin' && <MergeIntoPicker sourceId={id} sourceLabel={primaryId(ids) || name} />}
           <Button ref={previewButton} onClick={() => setPreviewOpen(true)} icon={<Eye />} disabled={!form} aria-haspopup="dialog">Preview form</Button>
           {/* The paper form is always rendered, so this prints it from anywhere. */}
           <Button onClick={() => window.print()} icon={<Printer />} disabled={!form}>Print or save as PDF</Button>
@@ -288,7 +291,7 @@ export default function ApplicationFormPage() {
                   <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
                 </div>
                 <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[primaryId(ids), name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
-                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
+                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onIdentity={state.checkIdentity} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
                 {store.can('view_invoices') && <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />}
                 <NotesPanel feedback={feedback ?? EMPTY_FEEDBACK} actions={feedbackActions} viewer={{ id: store.me.id, role: store.me.role }} canWork={canWork} />
               </div>

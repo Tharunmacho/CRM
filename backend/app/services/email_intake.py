@@ -32,8 +32,9 @@ from app.services.mail_config import configured_mailboxes
 from app.services.mail_providers import account_config
 from app.services.candidate_identity import name_relation, identity_matches, enrich_empty, merge_ocr_data, normalize_candidate_values, normalize_phone, normalize_email, normalize_passport
 from app.services.document_storage import put_bytes, read_bytes
+from app.services import intake_documents
 
-log = logging.getLogger(__name__)
+log =logging.getLogger(__name__)
 
 
 class IntakeReviewError(ValueError):
@@ -375,13 +376,19 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
             db.add(Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link))
             db.flush()
             new_resume = new_resume or link["slot"] == "resume"
+    # Every other document of the attachments (offer, visa, medical, police clearance, ticket, certificates ...) in its own field,
+    # cut by the worker before this transaction. A piece the field already holds is skipped, so a retry adds nothing.
+    splits = [split for split in (
+        (job.state.get(attachment.id) or {}).get("split") for attachment in sorted(attachments, key=lambda item: item.id)) if split]
+    intake_documents.file_pieces(db, candidate, splits, origin={"channel": "email", "email_message_id": message.id})
+    info = [split["note"] for split in splits if split.get("note")]
     # A different resume file is the latest resume, so Data Bank search must find its
     # text (the database trigger refreshes the search index when resume_text changes).
     if text and (new_resume or not candidate.resume_text):
         candidate.resume_text = text
     message.candidate_id = candidate.id
     job.candidate_id, job.status = candidate.id, "completed"
-    job.last_error = ("Saved from the readable documents. " + " ".join(notes))[:500] if notes else None
+    job.last_error = " ".join(([("Saved from the readable documents. " + " ".join(notes))] if notes else []) + info)[:500] or None
     db.flush()
     from app.services.intake_acknowledgements import queue_intake_acknowledgement
     queue_intake_acknowledgement(db, "email", message.id)
@@ -436,6 +443,7 @@ def _cached_document(db, attachment):
             # Derived files belong to the new receipt's storage namespace.
             # Rebuild those from the verified original without repeating OCR.
             saved.pop("documents", None)
+            saved.pop("split", None)
             return saved
     return None
 
@@ -502,6 +510,39 @@ def _save_selected_documents(settings, account_id, attachment, data, result):
     return documents
 
 
+def _split_attachments(settings, account_id, attachments, results, state, checkpoint, readings=None):
+    """Cut every other document (offer, visa, medical, police clearance, ticket, certificates ...) out of each attachment.
+
+    The other documents are told apart by what is on each page, and the local inspection saved in the job state has the page kinds
+    but not the page text (the text is dropped before it is saved). The pages are NOT read a second time: `readings` is the local
+    reading made a moment ago in this run (kept in memory only), and on a retry in another process the page kinds saved with the
+    job (`intake_documents.remember_kinds`: no text) are used with the saved inspection. Only when neither exists (a state saved
+    before this was kept) does the engine read the pages itself (`split_by_content`: local, bounded to 40 pages, 8 s a page and
+    120 s; a native text layer costs nothing). Outside any database transaction. The pieces are stored and
+    checkpointed in the job state, so a retried job or commit never reads or stores them again; the same file attached twice is read
+    once (the commit files it once). A file that cannot be split stays whole in the original bundle and the job says so; this never fails the receipt."""
+    by_id = {attachment.id: attachment for attachment in attachments}
+    done = set()
+    for result in results:
+        attachment = by_id.get(result["source"]["attachment_id"])
+        if attachment is None or result.get("synthetic") or attachment.content_hash in done:
+            continue
+        done.add(attachment.content_hash)
+        document_state = copy.deepcopy(state.get(attachment.id, {}))
+        if intake_documents.usable(document_state.get("split"), attachment.content_hash, lambda key: read_bytes(settings, key)):
+            continue
+        extractions = result.get("extractions") or {}
+        document_state["split"] = intake_documents.build_split(
+            read_bytes(settings, attachment.object_key),
+            lambda index, content: store_original(
+                settings, account_id, f"{attachment.message_id}:{attachment.content_hash}:piece", index, content),
+            covered=[number for part in extractions.values() for number in part.get("selected_pages") or []],
+            extracted=bool(extractions), original_name=attachment.file_name or "",
+            readings=readings, report=result.get("inspection"), page_kinds=document_state.get("page_kinds"),
+        )
+        checkpoint(attachment.id, document_state)
+
+
 def process_job(job_id, *, sessions, settings):
     with sessions() as db:
         job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())
@@ -531,6 +572,7 @@ def process_job(job_id, *, sessions, settings):
 
     try:
         results = []
+        readings = {}   # the local reading of each attachment made in this run (in memory only: it holds page text)
         pending = None
         from app.services.extraction_scheduling import handoff_settings, PENDING_RECHECK_SECONDS
         extraction_settings = handoff_settings(settings)
@@ -565,6 +607,7 @@ def process_job(job_id, *, sessions, settings):
                             cached = copy.deepcopy(prior)
                             cached["reused_from_attachment_id"] = prior_id
                             cached.pop("documents", None)
+                            cached.pop("split", None)
                             break
                     if cached is None:
                         with sessions() as db:
@@ -573,14 +616,20 @@ def process_job(job_id, *, sessions, settings):
                     document_state = cached
                     result = copy.deepcopy(cached["output"])
                 else:
+                    fresh = {}
                     try:
-                        result = extract_attachment(
-                            data, state=document_state,
-                            save=lambda value, aid=attachment.id: checkpoint(aid, value),
-                            settings=extraction_settings, designations=titles,
-                            partial=True, ignore_decorative=True,
-                        )
+                        # The local reading made here is kept (in memory) for cutting the other documents out of the file, so the
+                        # pages are not read a second time; its page kinds (no text) are saved with the job for a retry.
+                        with intake_documents.reading_scope() as fresh:
+                            result = extract_attachment(
+                                data, state=document_state,
+                                save=lambda value, aid=attachment.id: checkpoint(aid, value),
+                                settings=extraction_settings, designations=titles,
+                                partial=True, ignore_decorative=True,
+                            )
                     except ExtractionPending as exc:
+                        if intake_documents.remember_kinds(document_state, attachment.content_hash, fresh):
+                            checkpoint(attachment.id, document_state)
                         # Its provider ID is checkpointed; start reading the next
                         # attachment while this one runs remotely. Revisit all
                         # unfinished attachments before committing the candidate.
@@ -595,6 +644,8 @@ def process_job(job_id, *, sessions, settings):
                         # A damaged or protected document: report this attachment for review
                         # and carry on with the others instead of failing the whole receipt.
                         result = _synthetic_output("needs_review", str(exc)[:300], attachment.file_name)
+                    intake_documents.keep_readings(readings, fresh)
+                    intake_documents.remember_kinds(document_state, attachment.content_hash, fresh)
                 document_state["output"] = result
                 checkpoint(attachment.id, document_state)
             if not result.get("synthetic"):
@@ -623,6 +674,9 @@ def process_job(job_id, *, sessions, settings):
             }})
         if pending is not None:
             raise pending
+        # Only a receipt that will create or enrich a candidate pays for cutting the other documents out of its attachments.
+        if any(result.get("extractions") for result in results) and not any(result.get("splitSuggested") for result in results):
+            _split_attachments(settings, account_id, attachments, results, state, checkpoint, readings)
         with sessions() as db:
             lock_assignment_cursor(db)
             job = db.scalar(select(EmailIngestionJob).where(EmailIngestionJob.id == job_id).with_for_update())

@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import socket
 import traceback
 from uuid import uuid4
@@ -16,6 +17,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import undefer
 
 from app.db.models import Attachment, AuditEntry, Candidate, Designation, DocumentExtractionJob, Role
+from app.integrations.ocr import reader_failures
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import OcrFields
 from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, provider_codes, request_extraction_retry
@@ -56,6 +58,53 @@ def failure_record(exc: BaseException, *, attempt: int, worker: str | None) -> d
     from app.services.worker_heartbeat import code_version
     return {"type": type(exc).__name__, "where": _where(exc), "at": now().isoformat(), "attempt": attempt,
             "worker": worker, "version": code_version()}
+
+
+def reader_failure_view(reason: dict, *, attempt: int | None = None, retry_in: float | None = None, fallback: dict | None = None) -> dict:
+    """What the screen and the diagnostics say about a reader failure: the machine fields and the sentence. Nothing here is
+    document content (see integrations/ocr/reader_failures.py): the class, the HTTP status, the attempt, a safe detail."""
+    from app.integrations.ocr import reader_failures
+    view = {key: reason[key] for key in ("errorClass", "httpStatus", "retriable", "code", "detail") if reason.get(key) not in (None, "")}
+    view.setdefault("errorClass", "internal_error")
+    view.setdefault("retriable", False)
+    view.setdefault("detail", "")
+    view.update(attempt=attempt, maxAttempts=MAX_ATTEMPTS, at=now().isoformat(),
+                message=reader_failures.message(reason, attempt=attempt, max_attempts=MAX_ATTEMPTS, retry_in=retry_in))
+    if retry_in:
+        view["retryAt"] = (now() + timedelta(seconds=retry_in)).isoformat()
+    if fallback:
+        view["localFallback"] = fallback
+        view["message"] += (" The " + ", ".join(fallback["fields"]) + " from the passport's coded lines (read on this computer, source: "
+                            + fallback["source"] + ") " + ("are" if len(fallback["fields"]) > 1 else "is") + " on the form. Check them.")
+    return view
+
+
+def _local_passport_fallback(state: dict) -> dict | None:
+    """The passport values the local reading verified by their own check digits and put on the form (names only, no values)."""
+    local = (state.get("local_patterns") or {}).get("passport") or {}
+    if not state.get("local_filled"):
+        return None
+    fields = [label for flag, label in (("number_ok", "passport number"), ("birth_ok", "date of birth"), ("expiry_ok", "expiry date")) if local.get(flag)]
+    return {"source": "local passport zone", "fields": fields} if fields else None
+
+
+def _flag_local_fallback(db, job, fallback: dict, failure: dict) -> None:
+    """The reader gave up but the passport's own coded lines filled the form: leave a trace and flag it for a look (never silently)."""
+    from types import SimpleNamespace
+    from app.db.models import AuditEntry
+    from app.services.candidate_review import record_review_flag
+    if not job.candidate_id:
+        return
+    name = db.scalar(select(Candidate.name).where(Candidate.id == job.candidate_id))
+    if name is None:
+        return
+    who = SimpleNamespace(id=job.candidate_id, name=name)
+    record_review_flag(db, who, ocr_warning=True, attachment_id=job.attachment_id, document_job_id=job.id)
+    db.add(AuditEntry(actor_id=None, action="Kept passport details from the local passport zone", target=name, entity_type="candidate",
+                      entity_id=job.candidate_id, meta={"source": fallback["source"], "fields": fallback["fields"],
+                                                         "reader_error_class": failure["errorClass"], "document_job_id": job.id}))
+
+
 READY = {"pending", "processing", "retry"}
 # Lease renewed by each checkpoint; the worker pool also renews it by heartbeat (settings.extraction_lease_seconds).
 LEASE_SECONDS = 180
@@ -176,18 +225,31 @@ def _hand_back(identifier, claimed_by, sessions, reason, delay=300):
     log.warning("Document %s is not in this server's storage; handed back without an attempt.", identifier)
 
 
+# The reading kind a form slot stands for (an education certificate is read as a resume, as application_form.JOB_KIND does).
+_SLOT_KIND = {"resume": "resume", "passport": "passport", "aadhaar": "aadhaar", "education_certificate": "resume"}
+
+
+def _expected_kind(draft) -> str | None:
+    """The kind of document the person said they uploaded (the form slot of the file), or None for any other upload.
+    It only lets the reader look at a scan the local check could not identify; it never decides what a page is."""
+    form = draft.get("applicationForm") if isinstance(draft, dict) else None
+    slot = form.get("slot") if isinstance(form, dict) else None
+    return _SLOT_KIND.get(slot) if isinstance(slot, str) else None
+
+
 def process_job(identifier, *, sessions, settings, claimed_by=None):
     """Read one document. ``claimed_by`` is the worker that leased it (see services/extraction_queue.py); a lease that
     has moved to another worker makes this run stop writing. Without it (direct calls) the job is taken here."""
     titles = None
     with sessions() as db:
         if claimed_by is None:
-            job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state))
+            job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))
                             .where(DocumentExtractionJob.id == identifier).with_for_update())
             if job is None or job.status not in READY:
                 return
             job.status = "processing"
             job.updated_at = job.started_at = now()
+            expected_kind = _expected_kind(job.draft)
             state = deepcopy(job.state or {})
             key, digest = job.object_key, job.content_hash
             owner, group_id, form_candidate = job.owner_id, job.group_id, job.candidate_id
@@ -201,6 +263,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             row = db.execute(select(DocumentExtractionJob.status, DocumentExtractionJob.claimed_by, DocumentExtractionJob.state,
                 DocumentExtractionJob.object_key, DocumentExtractionJob.content_hash, DocumentExtractionJob.owner_id,
                 DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id, DocumentExtractionJob.attempts,
+                DocumentExtractionJob.draft,
                 select(func.array_agg(Designation.title)).scalar_subquery().label("titles"))
                 .where(DocumentExtractionJob.id == identifier)).one_or_none()
             if row is None or row.status not in READY or row.claimed_by != claimed_by:
@@ -209,6 +272,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             key, digest, owner, group_id, form_candidate = row.object_key, row.content_hash, row.owner_id, row.group_id, row.candidate_id
             attempts = row.attempts
             titles = list(row.titles or [])
+            expected_kind = _expected_kind(row.draft)
 
     # Which reader ran this attempt (a job that has no "reader" in its state was handled by older code).
     from app.services.worker_heartbeat import code_version
@@ -270,7 +334,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         if output is None:
             from app.services.extraction_scheduling import handoff_settings
             output = extract_attachment(data, state=state, save=save_and_fill, settings=handoff_settings(settings), designations=titles or [],
-                                        final_attempt=attempts + 1 >= MAX_ATTEMPTS)
+                                        final_attempt=attempts + 1 >= MAX_ATTEMPTS, expected_kind=expected_kind)
             state["output"] = deepcopy(output)
             checkpoint(state)
         from app.services.document_extraction import checked_person_output
@@ -325,6 +389,13 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 " ".join(unread)[:500] if unread else "Review the saved reading report or enter details manually.")
             job.updated_at = job.finished_at = now()
             job.claimed_by = job.lease_until = None
+            if (job.draft or {}).get("readerFailure"):   # an earlier attempt's failure no longer applies
+                job.draft = {key: item for key, item in dict(job.draft).items() if key != "readerFailure"}
+            lost_reason = next((part["reader_failure"] for record in (state.get("provider_jobs") or {}).values()
+                                for part in [record, *(record.get("chunks") or [])]
+                                if part.get("reader_failure") and "result" not in part), None)
+            if lost_reason and job.status == "needs_review":   # some kind could not be read: say precisely why
+                job.draft = {**dict(job.draft or {}), "readerFailure": reader_failure_view(lost_reason, attempt=attempts + 1)}
             if form_candidate:
                 try:
                     from app.services.application_form import apply_job_output
@@ -342,6 +413,11 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             if not _lost(job, claimed_by):
                 job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=getattr(exc, "retry_seconds", 2))
                 job.last_error = str(exc) if hasattr(exc, "retry_seconds") else "The document is still being read. Its progress is saved."
+                if getattr(exc, "reason", None):   # a busy or slow reader is named on the document line, with a Details disclosure
+                    job.draft = {**dict(job.draft or {}), "readerFailure": reader_failure_view(
+                        exc.reason, attempt=job.attempts, retry_in=getattr(exc, "retry_seconds", None))}
+                elif (job.draft or {}).get("readerFailure"):
+                    job.draft = {key: item for key, item in dict(job.draft).items() if key != "readerFailure"}
                 job.updated_at = now()
                 job.claimed_by = job.lease_until = None
                 db.commit()
@@ -350,22 +426,41 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         log.warning("Manual extraction %s failed (%s at %s; reader codes: %s); original and checkpoints retained.",
                     identifier, type(exc).__name__, _where(exc), provider_codes(state), exc_info=True)
         with sessions() as db:
-            job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state))
+            job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))
                             .where(DocumentExtractionJob.id == identifier).with_for_update())
             if not _lost(job, claimed_by):
                 job.attempts += 1
+                # A reader failure that trying again cannot fix (the file was refused, our key is wrong) is not tried again.
+                gives_up = job.attempts >= MAX_ATTEMPTS or bool(getattr(exc, "permanent", False))
                 saved = deepcopy(job.state or {})
-                if job.attempts < 4:
+                if not gives_up:
                     request_extraction_retry(saved, automatic=True)
                 # Why, for whoever has to look: the exception type and where it was raised, never the document.
                 saved["failure"] = failure_record(exc, attempt=job.attempts, worker=claimed_by)
                 saved["reader"] = state.get("reader")
+                job.status = "failed" if gives_up else "retry"
+                # Exponential backoff (30 s, 1 min, 2 min) with jitter, so many files that failed together do not return together.
+                delay = 30 * 2 ** (job.attempts - 1) * random.uniform(0.85, 1.25)
+                reason = getattr(exc, "reason", None)
+                fallback = _local_passport_fallback(saved)
+                if reason:
+                    failure = reader_failure_view(reason, attempt=job.attempts, retry_in=None if gives_up else delay, fallback=fallback)
+                    saved["failure"].update(errorClass=failure["errorClass"], httpStatus=failure.get("httpStatus"),
+                                            retriable=failure["retriable"], detail=failure["detail"])
+                    job.draft = {**dict(job.draft or {}), "readerFailure": failure}
+                    job.last_error = failure["message"][:500]
+                    if gives_up and fallback:
+                        _flag_local_fallback(db, job, fallback, failure)
+                else:
+                    job.last_error = str(exc)[:500] if isinstance(exc, ExtractionFailure) else (
+                        f"Reading failed ({type(exc).__name__}). The technical details are in the server log. "
+                        "The original file is safe. Try again, and contact your administrator if it keeps happening.")
+                    if not isinstance(exc, ExtractionFailure):
+                        failure = reader_failure_view(reader_failures.custom("internal_error", type(exc).__name__),
+                                                      attempt=job.attempts, retry_in=None if gives_up else delay, fallback=fallback)
+                        job.draft = {**dict(job.draft or {}), "readerFailure": failure}
                 job.state = saved
-                job.status = "failed" if job.attempts >= 4 else "retry"
-                job.last_error = str(exc)[:500] if isinstance(exc, ExtractionFailure) else (
-                    f"Reading failed ({type(exc).__name__}). The technical details are in the server log. "
-                    "The original file is safe. Try again, and contact your administrator if it keeps happening.")
-                job.next_attempt_at = now() + timedelta(seconds=30 * 2 ** (job.attempts - 1))
+                job.next_attempt_at = now() + timedelta(seconds=delay)
                 job.updated_at = now()
                 job.claimed_by = job.lease_until = None
                 if job.status == "failed":
@@ -373,9 +468,38 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 db.commit()
 
 
+def _plan_split_of_original(db, user, identifier, candidate_id, settings):
+    """Before any lock is taken: does the saved scan hold documents beyond the ones the reader already cut out of it?
+
+    Reading the pages is slow, so it never happens while the candidate (or the assignment cursor) is locked. Any refusal or
+    failure here only means "no analysis": the attach below then raises whatever it always raised, or stores the files as before.
+    """
+    from app.core.deps import ensure_can_work_candidate
+    from app.services import document_splitting
+    job = candidate = None
+    try:
+        job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier, DocumentExtractionJob.owner_id == user.id))
+        candidate = db.get(Candidate, candidate_id)
+        if (job is None or candidate is None or job.candidate_id or job.status == "dismissed" or job.content_type != "application/pdf"
+                or job.kind not in document_splitting.READ_SLOTS):
+            return None
+        ensure_can_work_candidate(candidate, user, db)
+        data = read_bytes(settings, job.object_key)
+        if hashlib.sha256(data).hexdigest() != job.content_hash:
+            return None
+        return document_splitting.plan_split(None, job.filename, data)
+    except Exception:
+        return None
+    finally:
+        for row in (candidate, job):   # the locked reads that follow must see the rows as they are then, not as they were before
+            if row is not None:
+                db.expire(row)
+
+
 def attach_original(db, user, identifier, candidate_id, settings, *, original_only=False):
     from app.api.routers.candidates import lock_assignment_cursor
     from app.services.document_person_split import ensure_single_person_source
+    split_plan = None if original_only else _plan_split_of_original(db, user, identifier, candidate_id, settings)
     lock_assignment_cursor(db)
     source_job = owned_job(db, identifier, user.id)
     ensure_single_person_source(db, "manual", source_job.group_id)
@@ -420,10 +544,28 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
             entity_type="candidate", entity_id=candidate.id, meta={"attachment_id": row.id, "slot": slot,
             "version": row.version, "document_job_id": job.id, "original_only": original_only}))
     db.flush()
+    # A scan that also holds other documents (a signed offer, a medical report ...) has those pages filed in their own fields
+    # too; the fields the reader already filled from this scan are left as they are.
+    filed = []
+    if split_plan is not None:
+        from app.services import document_splitting
+        written: list[str] = []
+        try:
+            with db.begin_nested():
+                filed = document_splitting.store_pieces(db, user, candidate, split_plan, job.filename, settings=settings, written=written,
+                                                        skip_slots=set(documents), audit_extra={"document_job_id": job.id})
+        except Exception:
+            from app.services.bulk_candidate_import import discard_written
+            discard_written(settings, written)
+            filed = []
     job.attachment_id = attached["source_bundle"]
     job.candidate_id = candidate.id
     job.status = "attached"
     job.updated_at = now()
     job.state = {**deepcopy(job.state or {}), "attached_documents": attached, "attached_original_only": original_only}
     db.commit()
-    return job_out(job, detail=True)
+    answer = job_out(job, detail=True)
+    if filed:
+        from app.services import document_splitting
+        answer["split"] = document_splitting.report(filed)   # the screen tells the person which documents went to which field
+    return answer

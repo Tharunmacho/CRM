@@ -1,4 +1,4 @@
-import { FileSearch } from 'lucide-react'
+import { FileSearch, History } from 'lucide-react'
 import type { RowMenuItem } from '@/features/candidates/components/db-parts'
 import type { User } from '@/shared/model/types'
 import { leadRefusal, type Lead, type LeadActor } from '../lead-model'
@@ -11,6 +11,8 @@ export interface LeadColumnContext {
   onOpen: (lead: Lead) => void
   /** The "Assigned to" cell: opens the remarks and what-was-done panel (assigned leads only). */
   onViewRemarks?: (lead: Lead) => void
+  /** The row menu's "View log": the calls, notes, status changes and assignments of this lead. */
+  onViewLog?: (lead: Lead) => void
   onLogCall: (lead: Lead) => void
   onConvert: (lead: Lead) => void
   onUploadResume: (lead: Lead, file: File) => void
@@ -23,12 +25,13 @@ export function workBlock(context: Pick<LeadColumnContext, 'me' | 'gate' | 'user
 }
 
 /**
- * The row "..." menu is deliberately tiny: Open lead only.
+ * The row "..." menu is deliberately tiny: Open lead and View log.
  * Every other action (edit, remarks, convert, assign, WhatsApp, status, not interested,
  * delete, move back) lives inside the opened lead.
  */
 export function leadMenuItems(context: LeadColumnContext, lead: Lead): RowMenuItem[] {
   return [
     { label: 'Open lead', icon: FileSearch, onSelect: () => context.onOpen(lead) },
+    ...(context.onViewLog ? [{ label: 'View log', icon: History, onSelect: () => context.onViewLog?.(lead) }] : []),
   ]
 }

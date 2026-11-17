@@ -51,10 +51,11 @@ from pydantic import ValidationError
 from veriis import FileDescriptor, VerisOCR, VerisOCRError
 from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 
-from app.integrations.ocr import client as ocr_client
+from app.integrations.ocr import client as ocr_client, reader_failures
 from app.integrations.ocr.field_coverage import field_report, row_report
 from app.integrations.ocr.classification import identity_hint, passport_plan
 from app.integrations.ocr.inspection import READING_FILE, InspectionError, inspect_document, restore_inspection
+from app.integrations.ocr.inspection import _real_words as _real_word_count
 from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields
 from app.integrations.ocr.merge import merge_results
 from app.integrations.ocr.payload import prepare_job, rotations_from, unsendable
@@ -88,7 +89,8 @@ class ExtractionDeferred(ExtractionPending):
     def __init__(self, kind: str, retry_seconds: float, job_id: str | None = None):
         super().__init__(job_id or "", kind)
         self.retry_seconds = max(2.0, min(3600.0, retry_seconds))
-        self.args = ("The document reader is busy. Your file is saved and will be tried automatically when capacity is available.",)
+        self.reason = reader_failures.custom("reader_busy", "the reader's queue is full or asked us to wait")
+        self.args = ("The reader is busy (too many requests): retrying. Your file is saved and will be tried automatically when capacity is available.",)
 
 
 class ExtractionOverdue(ExtractionPending):
@@ -97,11 +99,23 @@ class ExtractionOverdue(ExtractionPending):
     def __init__(self, job_id: str, kind: str):
         super().__init__(job_id, kind)
         self.retry_seconds = 30.0
-        self.args = ("The document reader is taking longer than usual. Its accepted job is saved and will be checked again.",)
+        self.reason = reader_failures.custom("reader_slow", "the accepted job has not finished within the usual time")
+        self.args = ("The reader is taking longer than usual. Its accepted job is saved and will be checked again.",)
 
 
 class ExtractionFailure(Exception):
-    """An actionable failure without provider URLs, credentials or document text."""
+    """An actionable failure without provider URLs, credentials or document text.
+
+    ``reason`` (see integrations/ocr/reader_failures.py) says precisely what went wrong when the reader was the cause;
+    ``permanent`` says that trying again cannot help (the worker then stops its automatic attempts)."""
+
+    reason: dict | None = None
+    permanent: bool = False
+
+    def __init__(self, *args, reason: dict | None = None):
+        super().__init__(*args)
+        self.reason = reason
+        self.permanent = reader_failures.is_permanent(reason)
 
 
 class UnreadableDocument(ExtractionFailure):
@@ -172,7 +186,12 @@ def request_extraction_retry(state: dict, *, automatic: bool = False) -> list[st
         invalid = record.get("status") == "succeeded" and (
             record.get("coverage_status") == "needs_review" or record.get("validation_status") == "failed"
         )
-        if not (failed or (invalid and not automatic)):
+        # An answer we could not use gets ONE automatic new reading (a fresh key, so one more job is paid for); a second
+        # unusable answer for the same kind waits for a person.
+        earlier = state.get("provider_job_history", {}).get(kind, [])
+        once_more = (invalid and automatic and record.get("validation_status") == "failed"
+                     and not any(old.get("validation_status") == "failed" for old in earlier))
+        if not (failed or (invalid and not automatic) or once_more):
             continue
         state.setdefault("provider_job_history", {}).setdefault(kind, []).append(deepcopy(record))
         generations = state.setdefault("provider_generations", {})
@@ -534,7 +553,9 @@ def _failure_text(unit: _Unit) -> str:
     reason = unit.record.get("provider_error") or {}
     code = f" (reader code: {reason['code']})" if reason.get("code") else ""
     wait = "Try again in a minute" if reason.get("retryable") else "Try again later"
-    return f"We could not read the {_mode(unit.kind)} pages{unit.label}{code}. {wait}, or enter the details by hand."
+    said = reader_failures.safe_text(reason.get("message"), 120).rstrip(". ")
+    why = f", the reader said: {said}" if said else ""   # the reader's own sentence, so the real reason is on the screen
+    return f"We could not read the {_mode(unit.kind)} pages{unit.label}{code}{why}. {wait}, or enter the details by hand."
 
 
 _ORDER = ("resume", "passport", "aadhaar")
@@ -588,12 +609,43 @@ def provider_codes(state: dict) -> str:
 def _terminal(rec: dict, status: str, final: bool) -> bool:
     """A failure that trying the same job again will not fix: the reader said it cannot be retried, or the last
     automatic attempt has been used."""
-    return final or (status == "failed" and (rec.get("provider_error") or {}).get("retryable", True) is False)
+    return final or (status in ("failed", "error") and (rec.get("provider_error") or {}).get("retryable", True) is False)
 
 
-def _failed_notice(kind: str) -> str:
+def _reason_for(state: dict, kind: str) -> dict | None:
+    """The reader failure recorded on a kind's job (or on its first failed chunk)."""
+    record = (state.get("provider_jobs") or {}).get(kind) or {}
+    for part in [record, *(record.get("chunks") or [])]:
+        if part.get("reader_failure"):
+            return part["reader_failure"]
+    return None
+
+
+def _first_failure(state: dict, failures: dict) -> ExtractionFailure:
+    """Nothing usable was read: the first failure is raised with its precise reason (and stops automatic attempts when permanent)."""
+    kind, message = next(iter(failures.items()))
+    return ExtractionFailure(message, reason=_reason_for(state, kind))
+
+
+def _passport_gaps(state: dict, fields) -> list[str]:
+    """Notices for what the local reading verified in the passport's coded lines (its own check digits agreed) but the
+    reader's answer left out. The form already holds the local value (see apply_local_patterns); the notice makes a
+    person look at it instead of it passing silently."""
+    local = (state.get("local_patterns") or {}).get("passport") or {}
+    gaps = []
+    for flag, attribute, label in (("number_ok", "passport_no", "passport number"),):   # the number is what identifies; dates differ too often to flag
+        if local.get(flag) and not getattr(fields, attribute, None):
+            gaps.append(reader_failures.message(reader_failures.missing_field(label))
+                        + " The value read from the passport's coded lines on this computer was used (source: local passport zone). Check it.")
+    return gaps
+
+
+def _failed_notice(kind: str, reason: dict | None = None) -> str:
     name = _KIND_NAMES.get(_mode(kind), _mode(kind))
-    return f"The {name} pages could not be read. Enter the {name} details by hand, or ask for the document to be read again."
+    notice = f"The {name} pages could not be read. Enter the {name} details by hand, or ask for the document to be read again."
+    if reason:  # the real reason, so nobody has to guess (never any document text)
+        notice += " Why: " + reader_failures.message(reason)
+    return notice
 
 
 def _check_cached(kind: str, selected: list[int], record: dict, source_hash: str, generation: int,
@@ -620,7 +672,7 @@ def _check_cached(kind: str, selected: list[int], record: dict, source_hash: str
             if failures is not None and _terminal(rec, rec["status"], final):
                 failures[kind] = message
                 return []
-            raise ExtractionFailure(message)
+            raise ExtractionFailure(message, reason=rec.get("reader_failure"))
         if rec.get("status") == "succeeded" and "result" not in rec:
             raise ExtractionFailure("The saved result for this document has gone missing. Check the document, then try again.")
     return [unit for unit in units if "result" not in unit.record]
@@ -666,6 +718,7 @@ def _apply_job(unit: _Unit, job) -> bool:
     rec.pop("capacity_retry_at", None)
     if any((rec.get("provider_error") or {}).get(flag) for flag in ("capacity", "transport")):
         rec.pop("provider_error", None)
+        rec.pop("reader_failure", None)
     rec["status"] = job.status
     if job.status in _PENDING:
         unit.outcome = "pending"
@@ -685,13 +738,18 @@ def _apply_job(unit: _Unit, job) -> bool:
                 "message": " ".join(str(getattr(reason, "message", "")).split())[:200],
                 "retryable": bool(getattr(reason, "retryable", False)),
             }
+        rec["reader_failure"] = reader_failures.from_job(
+            status="failed", code=getattr(reason, "code", None), message=getattr(reason, "message", None),
+            retryable=bool(getattr(reason, "retryable", False)) if reason is not None else None)
         unit.outcome = "failed"
     elif job.status == "succeeded" and isinstance(job.result, dict):
         rec["result"] = deepcopy(job.result)
+        rec.pop("reader_failure", None)
         unit.outcome = "ok"
     else:
         if job.status == "succeeded":
             rec["validation_status"] = "failed"
+        rec["reader_failure"] = reader_failures.from_job(status=job.status, result_is_dict=isinstance(job.result, dict))
         unit.outcome = "unusable"
     return recovered_timeout or before != (rec.get("status"), rec.get("error"), rec.get("validation_status"), "result" in rec, rec.get("provider_error"), rec.get("overdue_since"))
 
@@ -794,6 +852,7 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                     unit.record.pop("capacity_retry_at", None)
                     if any((unit.record.get("provider_error") or {}).get(flag) for flag in ("capacity", "transport")):
                         unit.record.pop("provider_error", None)
+                        unit.record.pop("reader_failure", None)
                     log.debug("%s: job accepted %s duplicate=%s", _step(unit), _job_label(payload.job_id), duplicate)
                     waiting.append(ack)
                     dirty = True
@@ -821,14 +880,17 @@ def _run_jobs(units: list[_Unit], *, state: dict, save, settings, on_kind_done=N
                             "code": str(getattr(payload, "code", None) or "provider_busy")[:80],
                             "http_status": status, "retryable": True, "capacity": True,
                         }
+                        unit.record["reader_failure"] = reader_failures.classify(payload)
                         dirty, held = True, True
                         log.info("%s: reader capacity is full; saved work will resume in %.0fs", _step(unit), delay)
                         continue
+                    reason = reader_failures.classify(payload)
                     unit.record["provider_error"] = {
                         "code": _short(getattr(payload, "code", None) or type(payload).__name__),
                         "http_status": status, "transport": True,
-                        "retryable": isinstance(payload, VerisOCRError) and (status is None or status >= 500),
+                        "retryable": reason["retriable"],
                     }
+                    unit.record["reader_failure"] = reason
                     dirty = True
                     if status == 409:  # the same upload key was used before with other file contents
                         unit.record["key_conflict"] = True
@@ -881,12 +943,13 @@ def _merge_kind(kind: str, record: dict, state: dict, save) -> dict | None:
         payload = chunk["result"]
         try:
             response = _MODELS[_mode(kind)].model_validate(payload)
-        except ValidationError:
-            chunk["validation_status"] = "failed"
+        except ValidationError as invalid:
+            reason = reader_failures.unusable(invalid)
+            chunk["validation_status"], chunk["reader_failure"] = "failed", reason
             record["status"] = "succeeded"
             _persist(state, save)
             raise ExtractionFailure(
-                f"The saved {kind} result could not be used. Check it before trying to read the document again."
+                f"The saved {kind} result could not be used. " + reader_failures.message(reason), reason=reason,
             ) from None
         if _chunk_covered(response, len(chunk["selected_pages"])):
             chunk["coverage_status"] = "complete"
@@ -1023,6 +1086,7 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
                       checkpoint=checkpoint, ready=ready, failures=failures, final=final, resubmitted=True)
 
     failure: str | None = None
+    failure_reason: dict | None = None
     pending: ExtractionPending | None = None
     deferred: ExtractionDeferred | None = None
     for kind in kinds:
@@ -1030,14 +1094,15 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
             message = {
                 "failed": lambda: _failure_text(unit),
                 "timed_out": lambda: f"Reading the {_mode(unit.kind)} pages{unit.label} took too long. It can be tried again.",
-                "error": lambda: "The document reader sent back an answer we could not use. Try again.",
-                "unusable": lambda: "The document reader did not find anything we could use. Check the document, then try again.",
+                "error": lambda: reader_failures.message(unit.record.get("reader_failure") or reader_failures.custom("internal_error")),
+                "unusable": lambda: reader_failures.message(unit.record.get("reader_failure") or reader_failures.from_job(status=None)),
             }.get(unit.outcome)
             if message is not None:
                 if failures is not None and (unit.outcome == "unusable" or _terminal(unit.record, unit.outcome, final)):
                     failures.setdefault(kind, message())
                 elif failure is None:
                     failure = message()
+                    failure_reason = unit.record.get("reader_failure")
             elif unit.outcome == "pending":
                 waiting = (ExtractionOverdue(unit.record["job_id"], kind) if unit.record.get("overdue_since")
                            else ExtractionPending(unit.record["job_id"], kind))
@@ -1050,7 +1115,9 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
     if failure or pending or deferred:
         if dirty:
             checkpoint()  # the paid responses of the jobs that did finish are kept
-        raise ExtractionFailure(failure) if failure else deferred or pending
+        if failure:
+            raise ExtractionFailure(failure, reason=failure_reason)
+        raise deferred or pending
     results: dict[str, dict | None] = {}
     for kind in kinds:
         if kind in (failures or {}):
@@ -1292,9 +1359,9 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
     lost = {_mode(key) for key in failures or {}}
     if lost:
         if not any(payload is not None for key, payload in payloads.items() if _mode(key) not in lost):
-            raise ExtractionFailure(next(iter(failures.values())))  # nothing usable was read: the failure is not hidden
+            raise _first_failure(state, failures)  # nothing usable was read: the failure is not hidden
         for kind in sorted(lost, key=_order):
-            review.append(_failed_notice(kind))
+            review.append(_failed_notice(kind, next((_reason_for(state, key) for key in failures if _mode(key) == kind), None)))
         warnings.extend(review)
         covered = False
         log.warning("%s: could not read the %s (reader codes: %s); what was read is kept and the file goes to review",
@@ -1335,11 +1402,12 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
             continue
         try:
             response = _MODELS[kind].model_validate(payload)
-        except ValidationError:
-            record["validation_status"] = "failed"
+        except ValidationError as invalid:
+            reason = reader_failures.unusable(invalid)
+            record["validation_status"], record["reader_failure"] = "failed", reason
             _persist(state, save)
             raise ExtractionFailure(
-                f"The saved {kind} result could not be used. Check it before trying to read the document again."
+                f"The saved {kind} result could not be used. " + reader_failures.message(reason), reason=reason,
             ) from None
         if not _chunk_covered(response, len(selected)):
             record["coverage_status"] = "needs_review"
@@ -1349,6 +1417,10 @@ def _run_kinds(selected_by_kind, inspected, report, source_hash, *, state, save,
         record["coverage_status"] = "complete"
         fields, notices = _map_fields(kind, response, designations)
         warnings.extend(notices)
+        if kind == "passport":
+            for gap in _passport_gaps(state, fields):
+                warnings.append(gap)
+                review.append(gap)
         merge = deepcopy(record.get("merge")) if record.get("merge") else None
         if kind in late_merge:
             extra = late_merge[kind]
@@ -1656,8 +1728,85 @@ def _probe_pages(inspected) -> dict[str, list[int]]:
     return out
 
 
+_EXPECTED_KINDS = ("resume", "passport", "aadhaar")
+# At most this many pages of a file nothing was identified in are sent to the reader as the kind the person said it is.
+_EXPECTED_PROBE_LIMIT = 6
+_PROSE_WORDS = 5  # an unread page with this many real words and no identity sign reads as plain text, not as a failed scan
+_GARBAGE_MIN_CHARS = 100  # letters and digits a read page needs before it can count as noise: less is a photo or a short note
+_GARBAGE_WORD_FLOOR = 8  # real words below this, and below the share of the text below, make a page's text noise
+_GARBAGE_WORD_SHARE = 0.03  # a real page has about 0.09 real words per character, a noisy phone photo about 0.01
+_PAGE_LIMIT_SKIP = re.compile(r"\bmore than \d+ pages\b", re.IGNORECASE)  # the reason of a page left out for the page cap
+
+
+def _reads_as_noise(text: str) -> bool:
+    """Whether a page the local check 'read' holds a lot of text that is not language (a noisy photograph read as hundreds
+    of stray characters). Short text is never noise, and neither is anything with enough real words for its length."""
+    text = text or ""
+    if sum(c.isalnum() for c in text) < _GARBAGE_MIN_CHARS:
+        return False
+    return _real_word_count(text) < max(_GARBAGE_WORD_FLOOR, _GARBAGE_WORD_SHARE * len(text))
+
+
+def _probe_candidate(page) -> bool:
+    """Whether one page of a file nothing was identified in may be shown to the reader as the kind of the slot."""
+    text = page.text or ""
+    if page.status == "unread":
+        if page.method in ("not_processed", "failed"):
+            # Stopped by a time limit or an error: the reader may still read it. Left out because the document has more
+            # pages than are read at all is a decision, not a failure, so those never are.
+            return not _PAGE_LIMIT_SKIP.search(getattr(page, "reason", "") or "")
+        # An unread page whose retained text is plainly prose (several real words, no identity sign) is not a failed scan.
+        return bool(identity_hint(text)) or len(re.findall(r"[A-Za-z]{3,}", text)) < _PROSE_WORDS
+    if page.status == "read" and page.document_type == "unknown":
+        return bool(identity_hint(text)) or _reads_as_noise(text)
+    return False
+
+
+def _expected_probe_pages(inspected, kind: str | None) -> dict[str, list[int]]:
+    """For a file in which the local check identified no page at all, the pages worth showing the reader as the kind the
+    person chose the slot for (a photographed or faint passport the local check could not read). Pages count that were
+    left unread (also by a time limit or an error, but not skipped for the page cap), or read but unidentified while
+    showing an identity sign or holding only noise: a blank or photo-only page, or one read fine as plain unrelated text,
+    never does. At most ``_EXPECTED_PROBE_LIMIT`` pages are sent, those showing an identity sign first, then the first
+    pages."""
+    if kind not in _EXPECTED_KINDS or inspected.has_classified_pages:
+        return {}
+    # A page the local check read fine and judged to be some other text (no identity sign) is not evidence of a document it
+    # failed on, so it is not sent; only a page it could not read, could not classify while it shows an identity sign, or
+    # read as noise (see _probe_candidate).
+    candidates = [page for page in inspected.pages if _probe_candidate(page)]
+    candidates.sort(key=lambda page: (not identity_hint(page.text), page.page_number))
+    pages = sorted(page.page_number for page in candidates[:_EXPECTED_PROBE_LIMIT])
+    return {kind: pages} if pages else {}
+
+
+_EXPECTED_LABELS = {"resume": "document", "passport": "passport", "aadhaar": "Aadhaar card"}
+_EXPECTED_ADVICE = {
+    "passport": "Upload a clearer copy of the data page (sharp, upright, the machine-readable lines visible)",
+    "aadhaar": "Upload a clearer copy of the front and back (sharp, upright, the whole card visible)",
+    "resume": "Upload a clearer copy (sharp, upright, every page visible)",
+}
+
+
+def _expected_unread_note(kind: str) -> str:
+    """Said when the reader was shown the pages of a file as the kind the person chose and found nothing there. Plain
+    wording, so that reading_notes.plain_notes keeps it as it is (it matches none of its rules)."""
+    what = "document" if kind == "resume" else _EXPECTED_LABELS[kind] + " scan"
+    return f"We could not read this {what}. {_EXPECTED_ADVICE[kind]} or enter the details by hand."
+
+
+def _expected_read_note(kind: str) -> str:
+    """Said when the reader found the kind on pages the local check could not identify (kept by plain_notes as it is)."""
+    return (f"The {_EXPECTED_LABELS[kind]} was read by the document reader from a scan the local check could not verify. "
+            "Check the details against the original file.")
+
+
 def _found(kind: str, payload: dict) -> bool:
     """Whether a Veris result for candidate pages holds anything of the kind."""
+    if kind == "resume":
+        contact = payload.get("contact") if isinstance(payload.get("contact"), dict) else {}
+        return bool(payload.get("name") or any(contact.values()) or payload.get("designation") or payload.get("skills")
+                    or payload.get("education") or payload.get("experience") or payload.get("highest_qualification"))
     if kind == "passport":
         mrz = payload.get("mrz") if isinstance(payload.get("mrz"), dict) else {}
         return bool(mrz.get("passport_number") or mrz.get("surname") or mrz.get("given_names") or payload.get("fields"))
@@ -1726,7 +1875,7 @@ def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict,
 def extract_attachment(
     data: bytes, *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
-    final_attempt: bool = False,
+    final_attempt: bool = False, expected_kind: str | None = None,
 ) -> dict:
     """Inspect every page and read the kinds found (see ``_extract_attachment``), logging one summary line for the file."""
     started = time.monotonic()
@@ -1734,7 +1883,7 @@ def extract_attachment(
     try:
         result = _extract_attachment(
             data, state=state, save=save, settings=settings, designations=designations, partial=partial,
-            ignore_decorative=ignore_decorative, final_attempt=final_attempt)
+            ignore_decorative=ignore_decorative, final_attempt=final_attempt, expected_kind=expected_kind)
         _summary(state, result, started)
         return result
     except (ExtractionPending, ExtractionFailure) as exc:
@@ -1747,7 +1896,7 @@ def extract_attachment(
 def _extract_attachment(
     data: bytes, *, state: dict, save: Callable[[dict], None], settings,
     designations: list[str] | None = None, partial: bool = True, ignore_decorative: bool = False,
-    final_attempt: bool = False,
+    final_attempt: bool = False, expected_kind: str | None = None,
 ) -> dict:
     """Inspect every page and resume recorded résumé/passport/Aadhaar jobs.
 
@@ -1759,6 +1908,12 @@ def _extract_attachment(
 
     A kind the reader terminally failed on does not fail the file while another kind was read: the result is
     needs_review with a notice naming the kind (``final_attempt``: the caller has no automatic attempt left).
+
+    ``expected_kind`` (resume, passport or aadhaar: what the person said the file is, from the form slot they chose) only
+    matters for a file in which the local check identified no page at all (a photographed, tilted or faint scan): instead
+    of giving up, up to ``_EXPECTED_PROBE_LIMIT`` unread or unidentified pages are shown to the reader as candidates of that
+    kind and settled like any probe (nothing found: nothing is applied; found: the pages are marked as identified by the
+    reader, not the local check). Without it, or when any page was identified, nothing changes.
     """
     source_hash = hashlib.sha256(data).hexdigest()
     if state.get("source_sha256") not in {None, source_hash}:
@@ -1850,7 +2005,15 @@ def _extract_attachment(
     if state.get("splitSuggested"):
         warnings.append("This document contains different candidate identities. Open Review people and pages before saving any candidate.")
         return _finish(state, save, report, {}, "needs_review", warnings)
-    if not inspected.complete and not (partial and inspected.has_classified_pages):
+    # No page identified, but the person chose the slot: the pages the local check could not identify are shown to the reader
+    # as that kind (see _expected_probe_pages). A restored inspection holds no text, so the saved plan is kept as it was.
+    expected: dict[str, list[int]] = {}
+    if partial and expected_kind in _EXPECTED_KINDS and not inspected.has_classified_pages:
+        if fresh_inspection or "probe_plan" not in state:
+            expected = _expected_probe_pages(inspected, expected_kind)
+        else:
+            expected = {kind: list(pages) for kind, pages in (state.get("probe_plan") or {}).items() if kind == expected_kind and pages}
+    if not inspected.complete and not (partial and (inspected.has_classified_pages or expected)):
         warnings.append("Some pages are unread or unclassified. Review the document before extraction.")
         return _finish(state, save, report, {}, "needs_review", warnings)
 
@@ -1860,6 +2023,9 @@ def _extract_attachment(
     }
     if not partial:
         probes = {}
+    elif expected:
+        probes = expected
+        state["probe_plan"] = probes
     elif fresh_inspection or "probe_plan" not in state:
         probes = _probe_pages(inspected)
         state["probe_plan"] = probes  # a restored inspection holds no text, so the plan is kept to stay the same on every visit
@@ -1901,6 +2067,14 @@ def _extract_attachment(
         if check:
             extraction["coverage"]["crossCheck"] = check
     promoted = _settle_probes(inspected, probes, classified, extractions, warnings, review)
+    if expected:
+        # First in the list: the form shows the first note, so it says what happened to this scan.
+        if expected_kind in promoted:
+            warnings.insert(0, _expected_read_note(expected_kind))
+        elif expected_kind not in extractions:
+            note = _expected_unread_note(expected_kind)
+            warnings.insert(0, note)
+            review.append(note)  # also the reason shown on the upload row (coverage "failed")
     if promoted:
         # Pages the document reader confirmed are now identified pages of the file.
         report = inspected.to_dict()

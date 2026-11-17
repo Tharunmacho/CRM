@@ -101,7 +101,7 @@ def test_blank_form_lists_the_fourteen_slots_in_order_with_their_rules(desk):
     assert [docs[s]["label"] for s in SLOTS] == [
         "Application form", "Resume", "Passport", "Aadhaar", "Medical", "Signed offer", "Police clearance certificate (PCC)", "Visa", "Air ticket",
         "Undertaking letter", "Emigration", "Insurance", "Invoice", "Photo", "Education certificate", "Experience certificate", "Google review", "Visa stamping", "Other documents"]
-    assert {s for s in SLOTS if docs[s]["readable"]} == {"resume", "passport", "aadhaar"}
+    assert {s for s in SLOTS if docs[s]["readable"]} == {"resume", "passport", "aadhaar", "education_certificate"}   # sent to the online reader
     assert {s for s in SLOTS if docs[s]["multiple"]} == {"passport", "aadhaar", "other"}
     assert {s: docs[s]["requiredFromStage"] for s in SLOTS if docs[s]["requiredFromStage"]} == {
         "signed_offer": 5, "medical": 6, "pcc": 7, "visa": 9, "emigration": 10, "air_ticket": 11, "undertaking_letter": 11, "insurance": 11, "invoice": 11}
@@ -129,8 +129,12 @@ def test_every_slot_uploads_through_the_form_endpoint_and_only_resume_and_passpo
         row = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.slot == slot))
         jobs = db.scalar(select(func.count()).select_from(DocumentExtractionJob))
     assert row is not None and row.version == 1
-    assert jobs == (1 if slot in ("resume", "passport", "aadhaar") else 0)
-    assert (document["extraction"] is not None) == (slot in ("resume", "passport", "aadhaar"))
+    read = slot in ("resume", "passport", "aadhaar", "education_certificate")
+    assert jobs == (1 if read else 0)
+    assert (document["extraction"] is not None) == read
+    if slot == "education_certificate":      # the job kind is 20 characters at most, so it is stored as "resume" and still shows on this file
+        with desk.sessions() as db:
+            assert db.scalar(select(DocumentExtractionJob.kind)) == "resume"
     if slot == "photo":
         assert out["form"]["photo"]["attachmentId"] == document["current"]["attachmentId"]
 

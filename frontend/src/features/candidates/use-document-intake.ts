@@ -197,13 +197,15 @@ export function useDocumentIntake(ownerId: string) {
     if (!current.current.length) return current.current
     return merge(await api.get<IntakeJob[]>('/ocr/jobs/groups/' + group.current, { signal }))
   }
-  const attach = async (candidateId: string) => {
+  /** `onFiled` hears the sentence the server writes when a saved scan held several documents and they were filed in their own fields. */
+  const attach = async (candidateId: string, onFiled?: (message: string) => void) => {
     const failures: Record<string, string> = {}
     for (const job of current.current) {
       if (job.candidateId === candidateId && job.status === 'attached') continue
       try {
-        const saved = await api.post<IntakeJob>('/ocr/jobs/' + job.id + '/attach', { candidateId })
+        const saved = await api.post<IntakeJob & { split?: { message: string | null } }>('/ocr/jobs/' + job.id + '/attach', { candidateId })
         update(current.current.map((value) => value.id === saved.id ? saved : value))
+        if (saved.split?.message) onFiled?.(saved.split.message)
       } catch (err) { failures[job.kind] = job.filename + ': ' + (err instanceof Error ? err.message : 'This file could not be added to the candidate') }
     }
     return failures

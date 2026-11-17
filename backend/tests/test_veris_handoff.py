@@ -432,7 +432,10 @@ def test_a_page_read_by_two_chunks_is_kept_once_in_order():
 
 
 def test_a_conflict_between_chunks_sends_the_extraction_to_review_but_keeps_the_fields(world):
-    world.veris.build = lambda mode, number, texts: {"name": "Alex Example" if number == 0 else "Someone Else"}
+    # The chunk is told apart by its pages, not by the order the side-by-side submissions reach the fake (a loaded machine
+    # can submit part 2 before part 1, which made "Alex Example" the second chunk's name and this test fail by chance).
+    world.veris.build = lambda mode, number, texts: {
+        "name": "Alex Example" if any("PAGE-1\n" in text + "\n" for text in texts) else "Someone Else"}
 
     output = world.extract(long_resume(45))
 

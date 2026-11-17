@@ -121,13 +121,49 @@ export interface FormDocument {
   extraction?: Extraction | null
   extractionPending?: boolean
   identityMismatch?: boolean
+  /** Present when the file was cut from a larger scan at import: that scan's name and the pages (1-based) it holds. */
+  splitFrom?: { fileName: string; pages: number[] }
 }
 
 export type ExtractionStatusCode = 'processing' | 'done' | 'failed' | 'unreadable' | 'needs_review'
 
+export interface IdentityReason {
+  field: 'name' | 'passport_no' | 'candidate'
+  /** The kind of document the reason was found in (resume, passport, aadhaar). */
+  documentKind?: string | null
+  /** name only: the name read from the document, and the name it was compared with. */
+  found?: string
+  expected?: string
+  /** name only: where `expected` comes from. */
+  expectedFrom?: 'candidate' | 'stored_document' | 'other_document'
+  expectedKind?: string
+  /** candidate only: which identifiers are already owned by another candidate. */
+  matchedOn?: string[]
+}
+
+/** Why the document reader did not give a usable answer (machine fields; never document content). Absent when reading did not fail. */
+export interface ReaderFailure {
+  errorClass: string
+  httpStatus?: number
+  retriable: boolean
+  code?: string
+  detail: string
+  attempt?: number
+  maxAttempts?: number
+  at?: string
+  retryAt?: string
+  localFallback?: { source: string; fields: string[] }
+}
+
 export interface Extraction {
   status: ExtractionStatusCode
+  /** What the reader said went wrong, for the Details disclosure under the note. */
+  failure?: ReaderFailure
   identityMismatch?: boolean
+  /** The document's passport / phone / e-mail already belongs to this other candidate (the same person imported twice). */
+  duplicateOf?: { candidateId: string; careId: string | null; name: string } | null
+  /** Why the document was rejected. Never holds a passport, phone or e-mail value, only which one. Empty on an older reading. */
+  identityReasons?: IdentityReason[]
   message: string
   filled: string[]
   kept: string[]

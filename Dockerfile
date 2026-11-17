@@ -25,7 +25,7 @@ WORKDIR /app
 
 # Local page inspection and Word-to-PDF conversion before specialist OCR.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd libreoffice-writer \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd tesseract-ocr-tam libreoffice-writer \
     && rm -rf /var/lib/apt/lists/*
 
 # psycopg[binary] ships its own libpq, so no build toolchain is needed here.

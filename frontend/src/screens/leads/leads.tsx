@@ -20,6 +20,7 @@ import { GateBanner } from '@/features/leads/components/gate-banner'
 import { UploadLeadsDialog } from '@/features/leads/components/upload-dialog'
 import { ImportHistory } from '@/features/leads/components/import-history'
 import { LeadDrawer } from '@/features/leads/components/lead-drawer'
+import { LeadLogSheet } from '@/features/leads/components/lead-log'
 import { LeadRemarksSheet } from '@/features/leads/components/lead-remarks'
 import { SafeBoundary } from '@/features/leads/components/safe-boundary'
 import { CampaignsTab } from '@/features/leads/components/campaigns-tab'
@@ -75,6 +76,7 @@ export default function LeadsPage() {
   const [moreOpen, setMoreOpen] = useState(false)
   const [uploading, setUploading] = useState(location.pathname.endsWith('/import'))
   const [open, setOpen] = useState<Lead | null>(null)
+  const [logFor, setLogFor] = useState<Lead | null>(null)
   const [remarksFor, setRemarksFor] = useState<Lead | null>(null)
   const [calling, setCalling] = useState<Lead | null>(null)
   const [editing, setEditing] = useState<Lead | null>(null)
@@ -191,6 +193,7 @@ export default function LeadsPage() {
     userById: store.user,
     onOpen: setOpen,
     onViewRemarks: setRemarksFor,
+    onViewLog: setLogFor,
     onLogCall: setCalling,
     onConvert: setConverting,
     onUploadResume: (lead, file) => { void uploadResume(lead, file).catch(() => {}) },
@@ -337,8 +340,10 @@ export default function LeadsPage() {
         onUploadResume={uploadResume} onGateRefusal={onGateRefusal}
         canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo}
         onEdit={setEditing} onChangeStatus={bulk.openStatus} onNotInterested={(lead) => { void bulk.quickStatus(lead, 'not_interested') }}
+        onViewLog={setLogFor}
       />
       </SafeBoundary>
+      <LeadLogSheet lead={logFor} version={data.page} onClose={() => setLogFor(null)} />
       <LeadRemarksSheet lead={remarksLive} ownerName={remarksLive ? ownerNameOf(remarksLive, store.user) : ''}
         onClose={() => setRemarksFor(null)} onOpenLead={(lead) => { setRemarksFor(null); setOpen(lead) }} />
       {bulk.overlays}

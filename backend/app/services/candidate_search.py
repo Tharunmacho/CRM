@@ -288,11 +288,9 @@ def search_statement(filters: Search):
             expression = cast(expression, String)
             query = query.where(literal_contains(expression, term.strip()))
     if filters.sort == "new_first":
-        # This fixed preset is applied before LIMIT/OFFSET: all New candidates,
-        # then In process, then the other statuses, newest within each group.
-        priority = case((Candidate.status == CandidateStatus.new, 0),
-                        (Candidate.status == CandidateStatus.in_process, 1), else_=2)
-        return query.order_by(priority.asc(), Candidate.created_at.desc(), Candidate.id)
+        # This fixed preset is applied before LIMIT/OFFSET: whoever was added last comes first, whatever their status
+        # (an imported candidate is not at "New" yet must still be on top, where the person who imported them looks).
+        return query.order_by(Candidate.created_at.desc(), Candidate.id)
     sortable = {**expressions, **ranks}
     if filters.sort not in sortable:
         raise HTTPException(422, "We cannot sort by this column.")

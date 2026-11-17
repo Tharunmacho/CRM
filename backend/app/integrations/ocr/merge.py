@@ -18,6 +18,8 @@ import json
 import re
 from typing import Any
 
+from app.integrations.ocr import experience
+
 # Added together across chunks.
 _SUM = {"processing_time_ms", "total_processing_time_ms", "page_count"}
 # The most cautious of the chunks.
@@ -146,14 +148,13 @@ class _Merge:
 def _experience_totals(merged: dict, parts: list[dict], notes: list[str]) -> None:
     entries = [e for e in merged.get("experience") or [] if isinstance(e, dict)]
 
-    def months(entry: dict) -> int:
-        value = entry.get("duration_months")
-        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else 0
-
+    # Each job's own months (or its dates / stated period when the reader gave no months); overlapping dated jobs
+    # count once. Everything not abroad counts as India here, as before.
+    jobs = experience.summarize(entries)
     summed = {
-        "total_experience_months": sum(months(e) for e in entries),
-        "overseas_experience_months": sum(months(e) for e in entries if e.get("is_overseas") is True),
-        "indian_experience_months": sum(months(e) for e in entries if e.get("is_overseas") is not True),
+        "total_experience_months": jobs.total,
+        "overseas_experience_months": jobs.abroad,
+        "indian_experience_months": experience.summarize([e for e in entries if not experience.is_abroad(e)]).total,
     }
     changed = False
     for names in _EXPERIENCE_TOTALS:

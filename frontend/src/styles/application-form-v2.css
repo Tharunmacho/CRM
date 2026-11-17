@@ -82,6 +82,14 @@
 .af .af-doc-manual small, .af .af-doc-hint { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .af .af-doc-manual p { margin: 3px 0 0; }
 .af .af-docbtn.af-doc-manual-action { font-size: 11px; padding-inline: 8px; }
+.af .af-docbtn svg { width: 14px; height: 14px; }
+.af .af-merge-ask { color: var(--text-muted); font-size: 12px; }
+.af-merge { display: grid; gap: 10px; }
+.af-merge p, .af-merge ul { margin: 0; }
+.af-merge ul { padding-left: 18px; font-size: 13px; }
+.af-merge-confirm { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+.af-merge-results { list-style: none; padding: 0 !important; display: grid; gap: 4px; max-height: 280px; overflow-y: auto; }
+.af-merge-results .ui-button-ghost { width: 100%; justify-content: flex-start; text-align: left; }
 .aff-passport-upload { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 8px; min-width: 0; width: 100%; max-width: 100%; }
 .aff-passport-upload > .aff-small-btn { margin-left: auto; max-width: 100%; }
 .aff-passport-upload > .aff-doc { height: auto; min-height: 24px; max-width: 100%; white-space: normal; line-height: 1.5; }

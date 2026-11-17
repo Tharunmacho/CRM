@@ -85,8 +85,13 @@ def test_snapshot_compilation_uses_an_explicit_public_projection():
     assert "projection-only-user" not in sql
     assert "projection-only-user" in compiled.params.values()
     assert "SELECT *" not in sql.upper()
+    # document_reading.pending_expression() matches an imported file to its reading job by (candidate, object_key) inside a WHERE predicate.
+    # That compares the column server-side and never selects it, so it is the one allowed mention; any other appearance is still a leak.
+    matching = "document_extraction_jobs.object_key = document_attachments_1.object_key"
+    assert sql.count(matching) == 1
+    exposed = sql.replace(matching, "")
     for field in FORBIDDEN_FIELDS:
-        assert field not in sql
+        assert field not in exposed
     for private_table in (
         "auth_sessions", "email_accounts", "email_messages", "email_attachments",
         "ingestion_failures",

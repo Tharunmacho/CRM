@@ -307,7 +307,7 @@ def cv_deskew_angle(grey: Image.Image) -> float:
     if lines is None:
         return 0.0
     angles = []
-    for x1, y1, x2, y2 in lines[:, 0]:
+    for x1, y1, x2, y2 in np.asarray(lines).reshape(-1, 4):  # (N, 1, 4) in OpenCV 4, (N, 4) in OpenCV 5
         angle = float(np.degrees(np.arctan2(y1 - y2, x2 - x1)))
         if abs(angle) <= 12:
             angles.append(angle)
@@ -315,7 +315,9 @@ def cv_deskew_angle(grey: Image.Image) -> float:
         return 0.0
     median = float(np.median(angles))
     spread = float(np.percentile(np.abs(np.array(angles) - median), 75))
-    return round(median, 1) if abs(median) >= 0.7 and spread < 1.5 else 0.0
+    # ``median`` is the lines' own tilt (positive: rising to the right, i.e. rotated counter-clockwise). PIL's
+    # ``rotate(angle)`` turns counter-clockwise, so levelling the page needs the opposite turn.
+    return round(-median, 1) if abs(median) >= 0.7 and spread < 1.5 else 0.0
 
 
 def cv_document_quad(grey: Image.Image) -> tuple[list[tuple[float, float]], float] | None:

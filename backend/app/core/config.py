@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.cpus import available_cpus
+from app.core.cpus import available_cpus, default_page_workers
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -81,12 +81,25 @@ class Settings(BaseSettings):
     # Local inspection always runs before a specialist Veris extraction.
     # A blank command discovers Tesseract from PATH or its usual Windows location.
     tesseract_cmd: str | None = None
+    # Tesseract language packs, joined with "+", used to read EVERY page. Keep it English: an Indic pack makes Tesseract
+    # invent Tamil/Hindi glyphs on photos, stamps and textured pages (measured: 81 junk lines instead of 1 on a visa
+    # page) and slows those pages down, with no gain on English text.
     ocr_languages: str = "eng"
+    # Indian ID cards are bilingual (English plus the state language) and the English-only model reads that script as
+    # nonsense Latin letters, which breaks name extraction. Pages recognised as Aadhaar are therefore read once more with
+    # these packs (Tamil is the main market). Add hin, mal, kan or tel only when those cards turn up: each extra pack
+    # makes that one re-read 2x-8x slower. A pack that is not installed is dropped with one warning, so a machine
+    # without it still reads English. Blank: no second read.
+    ocr_aadhaar_languages: str = "eng+tam"
+    # A folder holding the traineddata files (eng, osd and the extra languages together: Tesseract reads one folder only).
+    # It lets the languages be installed without admin rights; see scripts/install_ocr_languages.py. Used when it has
+    # more of the wanted languages than the system install. Blank: the system install only.
+    ocr_tessdata_dir: str = str(BACKEND_ROOT / "data" / "tessdata")
     ocr_max_pages: int = Field(default=300, ge=1, le=1000)
     ocr_page_timeout_seconds: float = Field(default=20.0, ge=1, le=120)
     ocr_document_timeout_seconds: float = Field(default=600.0, ge=10, le=1800)
     # Pages read at the same time by the local OCR (one Tesseract process per page).
-    ocr_page_workers: int = Field(default_factory=lambda: max(1, min(8, available_cpus())), ge=1, le=32)
+    ocr_page_workers: int = Field(default_factory=default_page_workers, ge=1, le=32)
     # How long a worker keeps checking an accepted Veris job before it hands the slot back
     # and revisits the job later (a hand-back costs a release, a retry delay and a re-claim, each a database round
     # trip). 60 s lets a job of 20-45 s finish within the same visit. Zero keeps the single-poll behaviour.

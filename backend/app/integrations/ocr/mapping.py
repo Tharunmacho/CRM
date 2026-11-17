@@ -9,7 +9,8 @@ looks plausible gets saved.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+import unicodedata
+from datetime import date
 from typing import Any
 
 from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
@@ -46,22 +47,7 @@ class OcrFields(Wire):
     work_history: list[dict[str, Any]] | None = None
 
 
-# Day first throughout: these are Indian resumes, where 05/12/1990 is the 5th of December.
-_DATE_FORMATS = (
-    "%Y-%m-%d",
-    "%d/%m/%Y",
-    "%d-%m-%Y",
-    "%d.%m.%Y",
-    "%d %B %Y",
-    "%d %b %Y",
-    "%d-%B-%Y",
-    "%d-%b-%Y",
-    "%B %d, %Y",
-    "%b %d, %Y",
-    "%B %d %Y",
-    "%b %d %Y",
-)
-
+# Day first throughout (see parse_loose_date): these are Indian resumes, where 05/12/1990 is the 5th of December.
 _ORDINAL = re.compile(r"\b(\d{1,2})(st|nd|rd|th)\b", re.IGNORECASE)
 
 # ISO 3166-1 alpha-3 code -> demonym for the countries the agency recruits from. Any other
@@ -84,17 +70,91 @@ _DEMONYMS = {
 }
 
 
-def parse_loose_date(value: str | None) -> date | None:
-    """A resume's free-text date, or None when it does not read as one exact day."""
-    if not value:
+_MONTH_NAMES = ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+                "november", "december")
+_MONTH_BY_WORD = {**{name: index for index, name in enumerate(_MONTH_NAMES, 1)},
+                  **{name[:3]: index for index, name in enumerate(_MONTH_NAMES, 1)}, "sept": 9}
+_DATE_LABEL = re.compile(r"^\s*(?:date\s*of\s*birth|birth\s*date|birthday|d\s*\.?\s*o\s*\.?\s*b\.?)\s*[:;\-–—.=]*\s*", re.IGNORECASE)
+_ISO_DATE = r"(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)"
+_NUMERIC_DATE = r"(?<![\d/.-])(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{4}|\d{2})(?![\d/-])"
+_DAY_MONTH_YEAR = r"(?<!\d)(\d{1,2})[-/. ]?([a-z]{3,9})\.?[-/. ]?(\d{4}|\d{2})(?!\d)"
+_MONTH_DAY_YEAR = r"(?<![a-z])([a-z]{3,9})\.?[-/. ]?(\d{1,2})[-/. ](\d{4}|\d{2})(?!\d)"
+
+
+def _date_text(value: Any) -> str:
+    """One line of text for the date patterns: label, ordinal, comma, "of", "(29 years)", odd spacing and an apostrophe year removed."""
+    text = unicodedata.normalize("NFKC", str(value))
+    text = _DATE_LABEL.sub("", text)
+    text = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", text)
+    text = re.sub(r"\b(?:age|aged)\b.*$", " ", text, flags=re.IGNORECASE)
+    text = _ORDINAL.sub(r"\1", text)
+    text = re.sub(r"\bof\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"[’'`´]\s*(\d{2})(?!\d)", r" \1", text)
+    text = re.sub(r"\s*([/\-.])\s*", r"\1", text)
+    return " ".join(text.replace(",", " ").lower().split()).strip(" .:;-")
+
+
+def _expand_year(text: str, role: str | None) -> int | None:
+    """A four-digit year as is. A two-digit year only when the role says which century is plausible: a date of birth is a
+    person aged 16 to 90; any other date (issue, expiry) falls within 40 years back and 20 years ahead. None otherwise."""
+    if len(text) == 4:
+        return int(text)
+    if role is None:
         return None
-    cleaned = _ORDINAL.sub(r"\1", " ".join(value.split()))
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(cleaned, fmt).date()
-        except ValueError:
-            continue
+    this_year = date.today().year
+    for century in (2000, 1900):
+        year = century + int(text)
+        if (16 <= this_year - year <= 90) if role == "birth" else (this_year - 40 <= year <= this_year + 20):
+            return year
     return None
+
+
+def _day(year: int | None, month: int, day: int) -> date | None:
+    if year is None:
+        return None
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _find_date(text: str, role: str | None, whole: bool) -> date | None:
+    """The first exact day in already-cleaned `text` (all of it when `whole`). Day first throughout, except that a figure
+    above 12 in the middle can only be the day (03/25/1995 is 25 March)."""
+    find = (lambda pattern: re.fullmatch(pattern, text)) if whole else (lambda pattern: re.search(pattern, text))
+    match = find(_ISO_DATE)
+    if match:
+        return _day(int(match[1]), int(match[2]), int(match[3]))
+    match = find(_NUMERIC_DATE)
+    if match:
+        first, second = int(match[1]), int(match[2])
+        year = _expand_year(match[3], role)
+        found = _day(year, second, first)
+        return found if found or first > 12 or second <= 12 else _day(year, first, second)
+    match = find(_DAY_MONTH_YEAR)
+    if match and match[2] in _MONTH_BY_WORD:
+        return _day(_expand_year(match[3], role), _MONTH_BY_WORD[match[2]], int(match[1]))
+    match = find(_MONTH_DAY_YEAR)
+    if match and match[1] in _MONTH_BY_WORD:
+        return _day(_expand_year(match[3], role), _MONTH_BY_WORD[match[1]], int(match[2]))
+    return None
+
+
+def parse_loose_date(value: str | None, role: str | None = None) -> date | None:
+    """A resume's free-text date, or None when it does not read as one exact day.
+
+    Reads 1995-03-12, 12/03/1995, 12-03-1995, 12.03.1995, 12 / 03 / 1995, 12 Mar 1995, 12th March, 1995, 12-Mar-95,
+    March 12 1995, Mar'95 style years and a leading "DOB:" / "Date of Birth:" label, day first. A two-digit year is read only
+    when `role` is given: "birth" (a person aged 16 to 90) or "other" (an issue / expiry date). A bare year is not a date."""
+    if value is None or isinstance(value, bool) or not str(value).strip():
+        return None
+    text = _date_text(value)
+    return _find_date(re.sub(r"[t ]\d{1,2}:\d{2}.*$", "", text) if re.match(r"\d{4}-", text) else text, role, whole=True) if text else None
+
+
+def find_date_in(text: str, role: str | None = None) -> date | None:
+    """The first exact day written anywhere in a short piece of text (the stretch after a "Date of birth" label)."""
+    return _find_date(_date_text(text), role, whole=False) if text else None
 
 
 def _text(value: str | None) -> str | None:
@@ -102,12 +162,77 @@ def _text(value: str | None) -> str | None:
     return value or None
 
 
+_MALE_WORDS = {"m", "male", "man", "boy", "gent", "gents", "gentleman"}
+_FEMALE_WORDS = {"f", "female", "woman", "girl", "lady", "ladies"}
+
+
 def _gender(value: str | None) -> str | None:
-    v = (value or "").strip().lower()
-    if v in {"m", "male"}:
-        return "male"
-    if v in {"f", "female"}:
-        return "female"
+    """male / female from "Male", "M", "MALE.", "Sex: Male", "Male (M)"; None when it says neither (or both)."""
+    words = re.findall(r"[a-z]+", (value or "").lower())
+    male, female = any(w in _MALE_WORDS for w in words), any(w in _FEMALE_WORDS for w in words)
+    if male != female and len(words) <= 4:
+        return "male" if male else "female"
+    return None
+
+
+_NUMBER_RUN = re.compile(r"\+?\(?\d[\d\s().\-]*")
+_LOOSE_MOBILE = re.compile(r"(?<!\d)(?:(?:\+|00)?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}(?!\d)")
+
+
+def phone_rank(number: str) -> int:
+    """0 not a phone number, 1 a landline or a short number, 2 a number that can be a mobile (the digits decide, 7 to 15 of them)."""
+    digits = re.sub(r"\D", "", number)
+    digits = digits[2:] if digits.startswith("00") else digits
+    if not 7 <= len(digits) <= 15:
+        return 0
+    national = digits[2:] if len(digits) == 12 and digits.startswith("91") else digits[1:] if len(digits) == 11 and digits.startswith("0") else digits
+    if len(national) == 10 and national[0] not in "6789" and len(national) != len(digits):
+        return 1                      # an Indian trunk-prefixed or +91 landline (0484 2345678)
+    return 2 if len(digits) >= 10 else 1
+
+
+def phone_candidates(value: Any) -> list[str]:
+    """The phone numbers in one reader value, each cleaned of its label and any note ("Mobile: 98765 00810 (WhatsApp)" gives
+    "98765 00810"; "98765 00810 / 98765 00811" gives both). At most 40 characters each, in reading order."""
+    if value is None or isinstance(value, bool):
+        return []
+    text = unicodedata.normalize("NFKC", str(value)).replace("\x00", " ")
+    found: list[str] = []
+    for piece in re.split(r"[,;|/\n\r]+|\s+(?:and|&)\s+|\s+(?:or)\s+", text):
+        start = re.search(r"\+?\(?\d", piece)
+        run = _NUMBER_RUN.match(piece, start.start()) if start else None
+        number = " ".join(run.group().split()).strip(" .-(") if run else ""
+        if number and phone_rank(number) and len(number) <= 40:
+            found.append(number)
+    if not found:    # "98765 00810 98765 00811": two numbers with nothing between them
+        found = [" ".join(m.group().split()) for m in _LOOSE_MOBILE.finditer(text)]
+    return list(dict.fromkeys(found))
+
+
+def pick_phone(phones: Any, whatsapp: Any = None) -> str | None:
+    """The mobile number to put on the form: the first reader number that can be a mobile (a landline only when there is nothing
+    better), else the WhatsApp number (a resume that says only "WhatsApp: ..." has no other mobile). None when nothing usable."""
+    values = phones if isinstance(phones, (list, tuple)) else [phones]
+    numbers = [n for value in values for n in phone_candidates(value)]
+    best = max(numbers, key=lambda n: (phone_rank(n), -numbers.index(n)), default=None)
+    if best and phone_rank(best) == 2:
+        return best
+    on_whatsapp = next((n for n in phone_candidates(whatsapp) if phone_rank(n) == 2), None)
+    return on_whatsapp or best
+
+
+_EMAIL_ADDRESS = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
+
+
+def pick_email(emails: Any) -> str | None:
+    """The first usable e-mail address, lower case ("Email: A.B@Gmail.com", "a.b @ gmail.com" and a list entry holding several)."""
+    values = emails if isinstance(emails, (list, tuple)) else [emails]
+    for value in values:
+        if value is None or isinstance(value, bool):
+            continue
+        match = _EMAIL_ADDRESS.search(re.sub(r"\s*@\s*", "@", str(value)))
+        if match:
+            return match.group().lower()
     return None
 
 
@@ -224,6 +349,8 @@ def _low_confidence(kind: str, pages) -> list[str]:
 
 
 _FORM_ONLY = {"father_name", "marital_status", "current_address", "experience_india", "education", "work_history"}
+# Plain form fields the reader may leave out although the resume prints them beside a label; filled from the page text only when empty.
+_PAGE_TEXT_GAPS = {"phone", "email", "dob", "gender", "nationality", "languages"}
 
 
 def _form_values(kind: str, response) -> dict[str, Any]:
@@ -246,32 +373,40 @@ def resume_fields(r: ResumeResponse, designations: list[str]) -> tuple[OcrFields
     """
     designation = match_designation(r.designation, designations)
 
-    email = r.contact.emails[0].strip().lower() if r.contact.emails else None
     pp = r.passport_details
     info = r.personal_info
 
     fields = OcrFields(
         name=_person_name(r.name),
-        phone=_text(r.contact.phones[0]) if r.contact.phones else None,
+        phone=pick_phone(r.contact.phones, r.contact.whatsapp),
         whatsapp=_text(r.contact.whatsapp),
-        email=email or None,
-        dob=parse_loose_date(info.date_of_birth),
+        email=pick_email(r.contact.emails),
+        dob=parse_loose_date(info.date_of_birth, "birth"),
         gender=_gender(info.gender),
         nationality=_text(info.nationality),
         current_city=current_city_from(r),
         languages=_unique(info.languages_known),
         passport_no=_passport_no(pp.passport_number),
-        passport_issue=parse_loose_date(pp.date_of_issue),
-        passport_expiry=parse_loose_date(pp.date_of_expiry),
+        passport_issue=parse_loose_date(pp.date_of_issue, "other"),
+        passport_expiry=parse_loose_date(pp.date_of_expiry, "other"),
         passport_place=_text(pp.place_of_issue),
         designation=designation,
         total_experience=_years(r.total_experience_months),
         gulf_experience=_years(r.overseas_experience_months),
         skills=_unique(r.skills),
     )
-    for name, value in _form_values("resume", r).items():
+    from app.services import form_extraction
+    dumped = r.model_dump(mode="json", exclude={"pages"})
+    dumped["pages"] = [{"page_number": p.page_number, "text": p.text} for p in r.pages]   # the page text: labelled details the reader left out
+    for name, value in form_extraction.values_for("resume", dumped).items():
         if name in _FORM_ONLY:
             setattr(fields, name, value)
+        elif name in ("total_experience", "gulf_experience"):
+            # Worked out from the reader's totals AND from each job's dates, so a resume read without the totals
+            # still fills them (the reader's own totals alone leave these blank).
+            setattr(fields, name, value)
+        elif name in _PAGE_TEXT_GAPS and getattr(fields, name) in (None, "", []):
+            setattr(fields, name, value)   # found only in the page text, beside its label (see form_extraction.resume_values)
     return fields, [*r.warnings, *_low_confidence("resume", r.pages)]
 
 
@@ -306,7 +441,7 @@ def passport_fields(p: PassportResponse) -> tuple[OcrFields, list[str]]:
         passport_no=_passport_no(mrz.passport_number),
         # The machine-readable zone carries neither the place nor (usually) the date of
         # issue; those are printed on the page and come from the visual fields.
-        passport_issue=mrz.date_of_issue or parse_loose_date(_printed(p, "Date of Issue")),
+        passport_issue=mrz.date_of_issue or parse_loose_date(_printed(p, "Date of Issue"), "other"),
         passport_expiry=mrz.expiry_date,
         passport_place=_printed(p, "Place of Issue"),
     )

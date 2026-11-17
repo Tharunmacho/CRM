@@ -364,7 +364,10 @@ class CandidateIdCounter(Base):
     """The one continuous counter behind the Care India candidate ID (``CI-001``, ``CI-002`` ...).
 
     A single row keyed ``GLOBAL``; reserved with one upsert (``app.services.care_india_id``), so concurrent intakes
-    serialise on that row and never share a number.  It only grows: numbers are never reused or restarted.
+    serialise on that row and never share a number.  The row only mirrors the number last given: the next ID is one more than the
+    highest ``care_id`` in the Data Bank (``allocate_care_id``), so the number of a deleted candidate at the end of the series is
+    given again and the counter can go back down.  There is no yearly restart.  Copies of an ID outside the CRM are therefore not
+    unique over time; ``Candidate.ref`` is the reference that is never reused.
     """
 
     __tablename__ = "crm_candidate_id_counters"

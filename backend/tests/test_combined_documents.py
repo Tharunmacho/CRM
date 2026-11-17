@@ -43,7 +43,8 @@ def combined(monkeypatch):
 
     def extract(data, **options):
         return subject.extract_attachment(
-            data, state=state, save=lambda s: saved.append(deepcopy(s)), settings=settings, designations=["Welder"], **options)
+            data, state=options.pop("state", state), save=lambda s: saved.append(deepcopy(s)), settings=settings,
+            designations=["Welder"], **options)
 
     def plan():
         """kind -> original page numbers sent to that Veris mode (page numbers only)."""
@@ -319,3 +320,332 @@ def test_settled_pages_are_handed_out_after_the_first_look_while_the_rest_are_st
     assert cut and settled["resume"] == [1] and settled["passport"] == [2] and settled["aadhaar"] == [4]
     assert again == [3]  # the unclassified page gets the second, slower look
     assert done.resume_pages == [1] and done.passport_pages == [2] and done.aadhaar_pages == [4]
+
+
+# ------------------------------------------------------------------------------ the slot the person chose (expected_kind)
+
+OLD_STOP = "Some pages are unread or unclassified. Review the document before extraction."
+PASSPORT_NOT_READ = ("We could not read this passport scan. Upload a clearer copy of the data page (sharp, upright, "
+                     "the machine-readable lines visible) or enter the details by hand.")
+NOTHING = lambda mode, number, texts: {"mrz": {}, "fields": []} if mode == "passport" else {"aadhaar": {}}
+
+
+def lose_the_text(monkeypatch, *numbers):
+    """The local check could not read these pages at all (a photographed or faint scan): unread, no text."""
+    real = subject.inspect_document
+
+    def inspect_and_lose(data, **options):
+        found = real(data, **options)
+        for page in found.pages:
+            if page.page_number in numbers:
+                page.status, page.document_type, page.method, page.text = "unread", "unknown", "tesseract", ""
+                page.reason = "We could not read enough text on this page"
+        return found
+
+    monkeypatch.setattr(subject, "inspect_document", inspect_and_lose)
+
+
+def hint_on_unrelated(monkeypatch):
+    """The pages of the synthetic 'unrelated' minutes show an identity sign (a hint only, never a classification)."""
+    from app.integrations.ocr import classification
+    monkeypatch.setattr(classification, "_IDENTITY_HINT", classification.re.compile(r"garden committee", classification.re.I))
+
+
+def form_result(output, person, monkeypatch, slot="passport"):
+    """What the application form does with a reading (the same call the worker makes), without a database."""
+    from types import SimpleNamespace as Namespace
+    from app.services import application_form
+
+    monkeypatch.setattr("app.services.document_identity.identity_matches", lambda *args, **kwargs: [])
+    monkeypatch.setattr(application_form, "_attach_read_documents", lambda *args, **kwargs: {})
+    audit = []
+    db = Namespace(scalar=lambda *args: person, add=audit.append)
+    job = Namespace(id="job", candidate_id=person.id, owner_id="staff", status=output["status"], last_error=None,
+                    draft={"applicationForm": {"slot": slot, "attachmentId": "file"}})
+    application_form.apply_job_output(db, job, output)
+    return job, job.draft["applicationForm"]["result"]
+
+
+@pytest.mark.parametrize("how", ["unidentified", "unread"])
+def test_an_unclassified_scan_in_the_passport_slot_reaches_the_reader_and_fills_the_form(combined, monkeypatch, how):
+    from test_document_identity import candidate
+    from app.services.reading_notes import plain_notes
+
+    lose_the_text(monkeypatch, 1) if how == "unread" else hint_on_unrelated(monkeypatch)
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="passport")
+
+    assert [s["mode"] for s in combined.veris.submissions] == ["passport"] and combined.plan() == {"passport": [1]}
+    assert set(output["extractions"]) == {"passport"} and output["extractions"]["passport"]["selected_pages"] == [1]
+    assert output["status"] == "needs_review"
+    assert any("identified as a passport by the document reader, not by the local check" in w for w in output["warnings"])
+    assert output["inspection"]["passport_pages"] == [1] and output["inspection"]["unknown_pages"] == []
+    assert combined.state["probe_plan"] == {"passport": [1]}
+    # What the person is told: it was read by the reader and wants a check (never the vague "some pages could not be read").
+    first = plain_notes(output["warnings"])[0]
+    assert first.startswith("The passport was read by the document reader") and first == output["warnings"][0]
+
+    person = candidate("Alex Example")
+    job, shown = form_result(output, person, monkeypatch)
+    assert shown["status"] == "needs_review" and shown["message"] == first and shown["filled"] and shown["kindsFound"] == ["passport"]
+    assert person.passport_no == "P0000000"
+
+
+@pytest.mark.parametrize("how", ["unidentified", "unread"])
+def test_when_the_reader_finds_no_passport_nothing_is_filled_and_the_message_is_specific(combined, monkeypatch, how):
+    from test_document_identity import candidate
+    from app.services.reading_notes import PAGES_NOTE, plain_notes
+
+    lose_the_text(monkeypatch, 1) if how == "unread" else hint_on_unrelated(monkeypatch)
+    combined.veris.build = NOTHING
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="passport")
+
+    assert combined.plan() == {"passport": [1]} and output["extractions"] == {}
+    assert output["status"] == "needs_review"
+    assert output["warnings"][0] == PASSPORT_NOT_READ
+    assert any("checked as a possible passport and none was found" in w for w in output["warnings"])
+    assert output["coverage"]["failed"] == [PASSPORT_NOT_READ]  # the reason shown on the upload row
+    assert output["inspection"]["passport_pages"] == []
+    # The note survives plain_notes as it is and comes first: it, not the vague pages note, is what the form shows.
+    assert plain_notes(output["warnings"])[0] == PASSPORT_NOT_READ != PAGES_NOTE
+    person = candidate("Alex Example")
+    before = dict(person.__dict__)
+    _job, shown = form_result(output, person, monkeypatch)
+    assert shown["status"] == "unreadable" and shown["message"] == PASSPORT_NOT_READ and shown["filled"] == []
+    assert person.__dict__ == before
+
+
+def test_a_passport_for_another_person_found_this_way_is_still_rejected(combined, monkeypatch):
+    from test_document_identity import candidate
+    from app.services.document_identity import IDENTITY_REVIEW_MESSAGE
+
+    hint_on_unrelated(monkeypatch)
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="passport")
+    assert set(output["extractions"]) == {"passport"}  # read by the reader as "ALEX EXAMPLE"
+
+    person = candidate("Original Person")
+    job, shown = form_result(output, person, monkeypatch)
+
+    assert job.status == "needs_review" and job.last_error == IDENTITY_REVIEW_MESSAGE
+    assert shown["identityMismatch"] is True and shown["filled"] == [] and person.passport_no is None
+
+
+@pytest.mark.parametrize("expected", [None, "medical", "photo", ""])
+def test_without_a_readable_slot_an_unclassified_file_behaves_as_before(combined, expected):
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind=expected)
+
+    assert combined.veris.submissions == [] and output["extractions"] == {}
+    assert output["status"] == "needs_review" and output["warnings"][-1] == OLD_STOP
+    assert not any("scan" in w for w in output["warnings"])
+    assert not combined.state.get("probe_plan")
+
+
+@pytest.mark.parametrize("expected", ["passport", "aadhaar", "resume"])
+def test_a_page_read_fine_as_plain_unrelated_text_is_never_sent_as_the_slot_kind(combined, expected):
+    output = combined.extract(composite_pdf(["unrelated"] * 2, form="native"), expected_kind=expected)
+
+    assert combined.veris.submissions == [] and output["extractions"] == {}
+    assert output["status"] == "needs_review" and output["warnings"][-1] == OLD_STOP
+    assert not combined.state.get("probe_plan")
+
+
+def test_not_passing_expected_kind_is_the_same_as_passing_none(combined):
+    plain = combined.extract(composite_pdf(["unrelated"], form="native"))
+    again = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind=None, state={})
+    assert {k: v for k, v in plain.items() if k != "inspection"} == {k: v for k, v in again.items() if k != "inspection"}
+    assert plain["warnings"][-1] == OLD_STOP and plain["inspection"]["pages"][0]["status"] == "read"
+
+
+def test_a_file_with_one_classified_page_gets_no_extra_probes_from_the_slot(combined):
+    data = composite_pdf(["resume", "passport", "unrelated", "aadhaar"], form="native")
+
+    output = combined.extract(data, expected_kind="passport")
+
+    # Exactly the outcome of test_an_unrelated_page_never_blocks_the_documents_that_are_there.
+    assert combined.plan() == {"resume": [1], "passport": [2], "aadhaar": [4]}
+    assert len(combined.veris.submissions) == 3 and combined.state["probe_plan"] == {}
+    assert output["coverage"]["pages"]["probed"] == {}
+    assert {p["page"]: p["blocking"] for p in output["coverage"]["pages"]["not_sent"]} == {3: True}
+    assert output["status"] == "needs_review" and not any("scan" in w for w in output["warnings"])
+
+
+def test_at_most_six_pages_of_an_unidentified_file_are_sent_and_the_rest_stay_in_the_original(combined, monkeypatch):
+    hint_on_unrelated(monkeypatch)
+    output = combined.extract(composite_pdf(["unrelated"] * 10, form="native"), expected_kind="passport")
+
+    # The passport mode takes one page per job (see _new_record): six pages are six one-page jobs, never more.
+    assert len(combined.veris.submissions) == 6 and all(len(s["texts"]) == 1 for s in combined.veris.submissions)
+    assert combined.plan() == {"passport": [1, 2, 3, 4, 5, 6]}
+    assert output["extractions"]["passport"]["selected_pages"] == [1, 2, 3, 4, 5, 6]
+    assert any(w.startswith("Pages 7, 8, 9, 10 could not be read or classified and were not extracted") for w in output["warnings"])
+    assert output["coverage"]["pages"]["unresolved"] == [7, 8, 9, 10]
+
+
+def test_an_unidentified_aadhaar_or_resume_slot_is_probed_as_that_kind_and_dropped_when_nothing_is_found(combined, monkeypatch):
+    hint_on_unrelated(monkeypatch)
+    combined.veris.build = lambda mode, number, texts: {"aadhaar": {}} if mode == "aadhaar" else {"name": "", "pages": []}
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="aadhaar")
+
+    assert combined.plan() == {"aadhaar": [1]} and output["extractions"] == {}
+    assert output["warnings"][0].startswith("We could not read this Aadhaar card scan. Upload a clearer copy of the front and back")
+
+
+def test_the_probe_plan_is_kept_so_a_retry_after_a_pending_reader_sends_the_same_pages(combined, monkeypatch):
+    hint_on_unrelated(monkeypatch)
+    data = composite_pdf(["unrelated"] * 3, form="native")
+    combined.veris.script[("passport", 0)] = "running"
+    with pytest.raises(subject.ExtractionPending):
+        combined.extract(data, expected_kind="passport")
+    assert combined.saved[-1]["probe_plan"] == {"passport": [1, 2, 3]}
+
+    combined.veris.script.clear()
+    first = [s["key"] for s in combined.veris.submissions]
+    output = combined.extract(data, expected_kind="passport", state=deepcopy(combined.saved[-1]))
+
+    keys = [s["key"] for s in combined.veris.submissions]
+    assert keys[:len(first)] == first and len(keys) == 3 == len(set(keys))  # one job per page, none sent twice
+    assert set(output["extractions"]) == {"passport"} and output["extractions"]["passport"]["selected_pages"] == [1, 2, 3]
+
+
+def test_the_pages_chosen_are_unread_or_unidentified_with_an_identity_sign_and_capped_at_six():
+    def page(number, status="read", kind="unknown", method="native_text", text="Surname of the holder", reason=""):
+        return SimpleNamespace(page_number=number, status=status, document_type=kind, method=method, text=text, reason=reason)
+
+    pages = [page(1, "unread", method="tesseract", text=""),            # unread: counts
+             page(2, text="Plain minutes of a committee meeting"),       # read fine, no identity sign: never
+             page(14, "unread", method="tesseract", text="lorem ipsum nothing to see here"),  # unread but plainly prose: never
+             page(15, "unread", method="tesseract", text="xq zv 7 ,,"),  # unread, scrap of noise: counts
+             page(3), page(4), page(5),                                  # unidentified with an identity sign
+             page(6, "blank", "other", "photo_no_text"),
+             page(7, "unread", method="not_processed", text="", reason=f"This document has more than {PAGE_CAP} pages, which is too many to read."),
+             page(8, "unread", method="not_processed", text="", reason=f"This document has more than {PAGE_CAP} pages, which is too many to read."),
+             page(9, "read", "other")]
+    inspected = SimpleNamespace(pages=pages, has_classified_pages=False)
+
+    assert subject._expected_probe_pages(inspected, "passport") == {"passport": [1, 3, 4, 5, 15]}
+    inspected.pages = pages + [page(number) for number in range(10, 14)]
+    assert subject._expected_probe_pages(inspected, "passport") == {"passport": [3, 4, 5, 10, 11, 12]}  # signs first, then the first pages
+    assert subject._expected_probe_pages(inspected, "medical") == {} and subject._expected_probe_pages(inspected, None) == {}
+    inspected.has_classified_pages = True
+    assert subject._expected_probe_pages(inspected, "passport") == {}
+    assert subject._expected_probe_pages(SimpleNamespace(pages=[page(2, text="Plain minutes"), page(6, "blank", "other", "photo_no_text"), page(9, "read", "other")], has_classified_pages=False), "passport") == {}
+
+
+PAGE_CAP = 50
+NOISE = "= i =. i� el Fal �a, a rig ,, ; xk tq. " * 25          # a noisy phone photo read as hundreds of stray characters
+RESUME_TEXT = "Experienced engineer managing large projects and delivering reliable software for customers. " * 12
+TIME_LIMIT = "Reading this document went over the time limit."
+TOO_LARGE = "This page is too large to read."
+PAGE_CAP_REASON = f"This document has more than {PAGE_CAP} pages, which is too many to read."
+
+
+def reshape(monkeypatch, number, **fields):
+    """Make the local check's verdict on one page of the file what a hard scan gives (status, method, text, reason)."""
+    real = subject.inspect_document
+
+    def inspect_and_change(data, **options):
+        found = real(data, **options)
+        for page in found.pages:
+            if page.page_number == number:
+                for name, value in fields.items():
+                    setattr(page, name, value)
+        return found
+
+    monkeypatch.setattr(subject, "inspect_document", inspect_and_change)
+
+
+def probe_page(number, status="read", kind="unknown", method="tesseract", text="", reason=""):
+    return SimpleNamespace(page_number=number, status=status, document_type=kind, method=method, text=text, reason=reason)
+
+
+def test_the_noise_and_the_resume_text_used_here_are_what_they_claim_to_be():
+    assert subject._reads_as_noise(NOISE) and not subject._reads_as_noise(RESUME_TEXT)
+    assert not subject._reads_as_noise("") and not subject._reads_as_noise("xq zv 7 ,,") and not subject._reads_as_noise("lorem ipsum nothing to see here")
+
+
+def test_a_page_read_as_hundreds_of_stray_characters_in_the_passport_slot_reaches_the_reader(combined, monkeypatch):
+    reshape(monkeypatch, 1, status="read", document_type="unknown", method="tesseract", text=NOISE)
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="passport")
+
+    assert [s["mode"] for s in combined.veris.submissions] == ["passport"] and combined.plan() == {"passport": [1]}
+    assert set(output["extractions"]) == {"passport"} and combined.state["probe_plan"] == {"passport": [1]}
+
+
+def test_a_normal_page_of_text_in_the_passport_slot_does_not_reach_the_reader(combined, monkeypatch):
+    reshape(monkeypatch, 1, status="read", document_type="unknown", method="tesseract", text=RESUME_TEXT)
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="passport")
+
+    assert combined.veris.submissions == [] and output["extractions"] == {} and not combined.state.get("probe_plan")
+    assert output["warnings"][-1] == OLD_STOP
+
+
+def test_without_a_slot_a_page_of_stray_characters_is_left_alone(combined, monkeypatch):
+    reshape(monkeypatch, 1, status="read", document_type="unknown", method="tesseract", text=NOISE)
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind=None)
+
+    assert combined.veris.submissions == [] and output["extractions"] == {} and output["warnings"][-1] == OLD_STOP
+
+
+@pytest.mark.parametrize("reason", [TIME_LIMIT, TOO_LARGE])
+def test_a_page_stopped_by_a_time_limit_or_an_error_reaches_the_reader_in_the_passport_slot(combined, monkeypatch, reason):
+    method = "not_processed" if reason == TIME_LIMIT else "failed"
+    reshape(monkeypatch, 1, status="unread", document_type="unknown", method=method, text="", reason=reason)
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="passport")
+
+    assert [s["mode"] for s in combined.veris.submissions] == ["passport"] and combined.plan() == {"passport": [1]}
+    assert set(output["extractions"]) == {"passport"}
+
+
+@pytest.mark.parametrize("method", ["not_processed", "failed"])
+def test_a_page_left_out_for_the_page_cap_never_reaches_the_reader(combined, monkeypatch, method):
+    reshape(monkeypatch, 1, status="unread", document_type="unknown", method=method, text="", reason=PAGE_CAP_REASON)
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind="passport")
+
+    assert combined.veris.submissions == [] and output["extractions"] == {} and not combined.state.get("probe_plan")
+
+
+@pytest.mark.parametrize("method, reason", [("not_processed", TIME_LIMIT), ("failed", TOO_LARGE), ("not_processed", PAGE_CAP_REASON)])
+def test_without_a_slot_stopped_pages_are_left_alone(combined, monkeypatch, method, reason):
+    reshape(monkeypatch, 1, status="unread", document_type="unknown", method=method, text="", reason=reason)
+
+    output = combined.extract(composite_pdf(["unrelated"], form="native"), expected_kind=None)
+
+    assert combined.veris.submissions == [] and output["extractions"] == {}
+
+
+def test_noise_and_stopped_pages_are_chosen_after_the_pages_with_an_identity_sign_and_capped_at_six():
+    pages = [probe_page(1, text=NOISE),
+             probe_page(2, "unread", method="not_processed", reason=TIME_LIMIT),
+             probe_page(3, "unread", method="failed", reason=TOO_LARGE),
+             probe_page(4, text=RESUME_TEXT),                                                       # real text: never
+             probe_page(5, "unread", method="not_processed", reason=PAGE_CAP_REASON),               # the page cap: never
+             probe_page(6, "unread", method="failed", reason=PAGE_CAP_REASON),
+             probe_page(7, text="Surname of the holder"),                                           # identity sign: first
+             probe_page(8, "blank", "other", "photo_no_text"),
+             probe_page(9, text=NOISE, kind="other"),                                               # classified as another kind: never
+             probe_page(10, text="Given names " + NOISE)]
+    inspected = SimpleNamespace(pages=pages, has_classified_pages=False)
+
+    assert subject._expected_probe_pages(inspected, "passport") == {"passport": [1, 2, 3, 7, 10]}
+    inspected.pages = pages + [probe_page(number, text=NOISE) for number in range(11, 16)]
+    assert subject._expected_probe_pages(inspected, "passport") == {"passport": [1, 2, 3, 7, 10, 11]}
+    pages_with_signs = [probe_page(n, text="Surname of the holder") for n in (8, 9, 10)] + [probe_page(n, text=NOISE) for n in (1, 2, 3, 4)]
+    assert subject._expected_probe_pages(SimpleNamespace(pages=pages_with_signs, has_classified_pages=False), "aadhaar") == {"aadhaar": [1, 2, 3, 8, 9, 10]}
+    assert subject._expected_probe_pages(inspected, None) == {} and subject._expected_probe_pages(inspected, "medical") == {}
+    inspected.has_classified_pages = True
+    assert subject._expected_probe_pages(inspected, "passport") == {}
+
+
+def test_the_notes_this_adds_are_kept_by_plain_notes_exactly():
+    from app.services.reading_notes import plain_notes
+    for kind in ("resume", "passport", "aadhaar"):
+        for note in (subject._expected_unread_note(kind), subject._expected_read_note(kind)):
+            assert plain_notes([note]) == [note]
+            assert plain_notes([note], kind=kind) == [note]

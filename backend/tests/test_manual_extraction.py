@@ -537,3 +537,36 @@ def test_conflicting_probe_results_finish_as_review_not_repeated_selected_page_f
         assert saved.state["document_history"]["aadhaar"][-1] == stale
         assert read_bytes(intake.settings, stale["object_key"])
     assert len(intake.submissions) == paid_count
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+@pytest.mark.parametrize("slot,expected", [("passport", "passport"), ("aadhaar", "aadhaar"), ("resume", "resume"),
+                                           ("education_certificate", "resume"), ("photo", None), ("medical", None), (None, None)])
+def test_the_form_slot_of_a_job_reaches_the_reader_as_the_expected_kind(intake, monkeypatch, slot, expected, claimed):
+    from test_document_extraction import UNCLASSIFIED
+    from app.integrations.ocr import classification
+    monkeypatch.setattr(classification, "_IDENTITY_HINT", classification.re.compile(r"travel arrangements", classification.re.I))
+    intake.settings.veris_early_dispatch = False
+    job = upload(intake, pdf(UNCLASSIFIED), kind="passport")
+    start(intake, job["id"])
+    with intake.sessions() as db:
+        row = db.get(DocumentExtractionJob, job["id"])
+        row.draft = {"applicationForm": {"slot": slot, "attachmentId": "file"}} if slot else {}
+        if claimed:
+            row.status, row.claimed_by = "processing", "worker-1"
+        db.commit()
+    seen = []
+    real = document_extraction.extract_attachment
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("expected_kind"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(manual_extraction, "extract_attachment", spy)
+    manual_extraction.process_job(job["id"], sessions=intake.sessions, settings=intake.settings, claimed_by="worker-1" if claimed else None)
+
+    assert seen == [expected]
+    # A scan in the passport slot that no page was identified in is shown to the reader as a passport; any other file is not.
+    assert [mode for mode, _key in intake.submissions] == (["passport"] if expected == "passport" else
+                                                          ["aadhaar"] if expected == "aadhaar" else
+                                                          ["resume"] if expected == "resume" else [])

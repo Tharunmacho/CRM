@@ -20,6 +20,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
+from difflib import SequenceMatcher
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
 from typing import Any
@@ -41,10 +42,14 @@ from app.services.candidate_identity import identity_matches, normalize_candidat
 # --------------------------------------------------------------------------------------------- document kinds
 
 ADVANCE_RECEIPT = "advance_receipt"
+SOURCE_BUNDLE = "source_bundle"   # the scan as received, kept when pages cut from it were not filed again (Source document evidence)
 # Every document the folder can hold: the form's own slots, plus the stage 8 receipt that is not a candidate document.
 KIND_LABELS: dict[str, str] = {**SLOT_LABELS, ADVANCE_RECEIPT: "Advance receipt (stage 8)", "aadhaar": "Aadhaar card"}
 CANDIDATE_SLOTS = tuple(spec[0] for spec in SLOT_SPECS)
-READ_SLOTS = ("resume", "passport", "aadhaar")  # the only documents that are read (OCR); they fill in the profile
+READ_SLOTS = ("resume", "passport", "aadhaar")  # the three identity documents: pages of these kinds are told apart by content
+# Every document sent to the online reader to fill in the profile: the identity documents plus the education certificates (the
+# reader types an education page as resume, so the education details are extracted). One list for every path that queues a reading.
+SENT_TO_READER = READ_SLOTS + ("education_certificate",)
 IMAGE_ONLY = ("photo",)
 # Candidate document -> (stage, field) whose evidence it is. The same stored file is attached to both places.
 STAGE_FILES: dict[str, tuple[int, str]] = {
@@ -153,48 +158,134 @@ def classify_content(data: bytes) -> list[str]:
 _NOT_A_NAME = {"resume", "passport", "photo", "visa", "medical", "offer", "signed", "ticket", "pcc", "police", "clearance", "stamping",
                "stamp", "stamped", "emigration", "education", "certificate", "experience", "receipt", "advance", "google", "review",
                "scan", "image", "document", "page", "copy", "front", "back", "steel", "fixer", "welder", "fitter", "driver", "helper",
-               "mason", "carpenter", "electrician", "plumber", "painter", "foreman", "rigger", "cook", "chef", "mechanic", "operator"}
+               "mason", "carpenter", "electrician", "plumber", "painter", "foreman", "rigger", "cook", "chef", "mechanic", "operator",
+               # what a scanner, a phone or an office program calls a file when nobody renamed it: never a person
+               "camscanner", "scanner", "scanned", "scans", "new", "doc", "docs", "documents", "img", "images", "dsc", "dscn", "pxl",
+               "pic", "picture", "pictures", "photos", "whatsapp", "screenshot", "screen", "file", "files", "untitled", "pages", "pdf",
+               "adobe", "office", "lens", "noname"}
 
 
-def _person_in(path: str) -> tuple[str, str] | None:
-    """(initials, name word) when the file name starts with a person's name: "K.Sivakumar-offer.jpg" -> ("K.", "Sivakumar")."""
+def _name_in(path: str) -> tuple[str, list[str]] | None:
+    """(initials, name words) when the file name starts with a person's name: "K.Sivakumar-offer.jpg" -> ("K.", ["Sivakumar"]),
+    "Rashid khan - PP.pdf" -> ("", ["Rashid", "khan"]). The name runs until the first word that is a document, a trade or a
+    number, so "EVisa-123.pdf" and "Itinerary AB1CD2.pdf" name nobody. At most three words."""
     stem = PurePosixPath(path.replace("\\", "/")).stem
-    first = re.split(r"[-_ ]+", stem.strip(), maxsplit=1)[0]
-    initials = re.match(r"^((?:[A-Za-z]\.)+)", first)
-    word = first[len(initials.group(1)):] if initials else first
-    if len(word) >= 4 and word.isalpha() and word.lower() not in _NOT_A_NAME:
-        return (initials.group(1) if initials else ""), word
-    return None
+    # The office names a file "<name>-<document>" ("Rashid khan - PP", "K.Sivakumar-signed offer"): a hyphen or underscore ends the name.
+    head = re.split(r"\s*[-_]\s*", stem.strip(), maxsplit=1)[0]
+    tokens = [token for token in re.split(r"[,()\s]+", head) if token]
+    initials = ""
+    while tokens:
+        match = re.match(r"^((?:[A-Za-z]\.)+)(.*)$", tokens[0])
+        if not match:
+            break
+        initials += match.group(1)
+        if match.group(2):
+            tokens[0] = match.group(2)
+            break
+        tokens.pop(0)
+    words: list[str] = []
+    if tokens and re.match(r"^[A-Za-z]+\d", tokens[0]):
+        return None                       # DOC00014, IMG_0042, DSC01234, PXL_2024...: a camera or scanner counter, not a person
+    for token in tokens[:3]:
+        if not (token.isalpha() and len(token) >= 2 and token.lower() not in _NOT_A_NAME and not _kinds_in(token)):
+            break
+        words.append(token)
+    if not words or len(words[0]) < 2 or len("".join(words)) < 4:
+        return None
+    return initials, words
+
+
+def _same_person(left: str, right: str) -> bool:
+    """Two spellings of one person's name (spaces and case ignored): equal, or a slip of a letter ("rashid" / "rashiid",
+    "rashidkhan" / "rashidkhand"). Different people stay apart: "mohamedali" / "mohamedasif" (ratio 0.86), "kumar" / "kumaran"."""
+    if left == right:
+        return True
+    return min(len(left), len(right)) >= 5 and SequenceMatcher(None, left, right).ratio() >= 0.9
+
+
+def _extends(short: str, long: str) -> bool:
+    """`long` is `short` with more of the name after it ("rashid" -> "rashidkhan"): at least three more letters."""
+    return len(short) >= 5 and long.startswith(short) and len(long) - len(short) >= 3
+
+
+def _cluster_names(named: list[dict]) -> tuple[list[dict], set[int]]:
+    """Group the named files by person: every pair of names that are spellings of one person is linked, and each linked set is
+    one person (extra words in a file name, like "WhatsApp" or "picker", only lengthen a name and never split it). A bare first
+    name that begins several different people's names ("Mohamed" beside "Mohamed Ali" and "Mohamed Asif") fits no one in
+    particular: its files come back as `ambiguous` instead of being given to a guess."""
+    parent = list(range(len(named)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(named)):
+        for j in range(i + 1, len(named)):
+            if find(i) != find(j) and _same_person(named[i]["key"], named[j]["key"]):
+                parent[find(j)] = find(i)
+    grouped: dict[int, list[dict]] = {}
+    for i, item in enumerate(named):
+        grouped.setdefault(find(i), []).append(item)
+    clusters = [{"items": items, "keys": {item["key"] for item in items}} for items in grouped.values()]
+    ambiguous: set[int] = set()
+    # A shorter name that more of the name follows in other files ("rashid" -> "rashidkhan", "rashidkhan nawazkhan") joins them when
+    # they are all one person. When it could begin two different people ("mohamed" -> "mohamed ali", "mohamed asif") it is
+    # ambiguous, and its files are left out for a person to place.
+    for cluster in sorted(clusters, key=lambda c: len(min(c["keys"], key=len))):
+        if cluster not in clusters:
+            continue
+        shortest = min(cluster["keys"], key=len)
+        hosts = [other for other in clusters if other is not cluster and any(_extends(shortest, key) for key in other["keys"])]
+        if not hosts:
+            continue
+        lineages: list[list[dict]] = []
+        for host in hosts:
+            for lineage in lineages:
+                if any(_extends(a, b) or _extends(b, a) or _same_person(a, b) for other in lineage for a in host["keys"] for b in other["keys"]):
+                    lineage.append(host)
+                    break
+            else:
+                lineages.append([host])
+        if len(lineages) == 1:
+            for host in lineages[0]:
+                cluster["items"] += host["items"]
+                cluster["keys"] |= host["keys"]
+                clusters.remove(host)
+        else:
+            ambiguous |= {item["index"] for item in cluster["items"]}
+            clusters.remove(cluster)
+    return clusters, ambiguous
 
 
 def split_people(paths: list[str]) -> dict | None:
     """Separate a folder that holds several people, by the name each file name starts with. None for an ordinary folder.
 
     {"people": [{"name", "paths"}], "shared": [paths given to everyone, e.g. a group air ticket], "left_out": [paths
-    that cannot be told apart]}. A file with no name in it is shared only when it is an air ticket (a "3 PAX" ticket
-    covers everyone); any other nameless file is left out rather than put on the wrong person.
+    that cannot be told apart]}. Every file goes to ONE person (or is shared, for an air ticket that covers everyone), so
+    two people's files never mix. A file whose name says nobody's, or says a name that fits two different people, is left
+    out for a person to place; it is never guessed.
     """
-    groups: dict[str, dict] = {}
-    nameless: list[str] = []
-    for path in paths:
-        person = _person_in(path)
-        if person is None:
-            nameless.append(path)
-            continue
-        initials, word = person
-        group = groups.setdefault(word[:5].lower(), {"paths": [], "words": [], "initials": []})
-        group["paths"].append(path)
-        group["words"].append(word)
-        if initials:
-            group["initials"].append(initials.upper())
-    if len(groups) < 2:
+    named = []
+    for index, path in enumerate(paths):
+        found = _name_in(path)
+        if found is not None:
+            initials, words = found
+            named.append({"index": index, "path": path, "initials": initials, "words": words, "key": "".join(words).lower()})
+    clusters, ambiguous = _cluster_names(named)
+    if len(clusters) < 2:
         return None
     people = []
-    for group in groups.values():
-        word = max(dict.fromkeys(group["words"]), key=group["words"].count)   # the most common spelling, first seen on a tie
-        initials = group["initials"][0] if group["initials"] else ""
-        name = (initials.replace(".", ". ").strip() + " " + word.capitalize()).strip()
-        people.append({"name": name, "paths": list(group["paths"])})
+    for cluster in sorted(clusters, key=lambda c: min(i["index"] for i in c["items"])):
+        items = sorted(cluster["items"], key=lambda entry: entry["index"])
+        spellings = [" ".join(entry["words"]) for entry in items]
+        best = max(dict.fromkeys(spellings), key=spellings.count)             # the most common spelling, first seen on a tie
+        initials = next((entry["initials"].upper() for entry in items if entry["initials"]), "")
+        name = (initials.replace(".", ". ").strip() + " " + " ".join(word.capitalize() for word in best.split())).strip()
+        people.append({"name": name, "paths": [entry["path"] for entry in items]})
+    placed = {entry["path"] for entry in named if entry["index"] not in ambiguous}
+    nameless = [path for path in paths if path not in placed]
     shared = [path for path in nameless if classify_path(path) == "air_ticket"]
     for person in people:
         person["paths"] += shared
@@ -356,6 +447,29 @@ def parse_yes_no(raw: Any) -> bool | None:
     if text in {"no", "n", "false", "0", "not done"}:
         return False
     return None
+
+
+def name_slug(name: str) -> str:
+    """A person's name as it appears at the start of a stored file name: "Gunavelan R" -> "Gunavelan_R"."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", name or "").strip("_") or "Candidate"
+
+
+def import_file_name(person: str, kinds: list[str], original: str, taken: set[str]) -> str:
+    """The name an imported document is stored under: "<Name>-<Document>.<ext>", e.g. "Gunavelan_R-Passport.pdf".
+
+    A scan that is several documents carries all their names ("Gunavelan_R-Signed_offer_Passport_Aadhaar_card.pdf"); a second
+    file of the same kind gets "-2". `taken` holds the names already used for this candidate. The original name is kept in the
+    audit entry of the upload.
+    """
+    extension = PurePosixPath(original.replace("\\", "/")).suffix.lower()
+    label = "_".join(name_slug(KIND_LABELS.get(kind, kind)) for kind in kinds) or "Document"
+    stem = f"{name_slug(person)}-{label}"
+    candidate, number = f"{stem}{extension}", 1
+    while candidate.lower() in taken:
+        number += 1
+        candidate = f"{stem}-{number}{extension}"
+    taken.add(candidate.lower())
+    return candidate
 
 
 def _clean_name(folder: str) -> str:
@@ -580,16 +694,24 @@ def evidence_level(row: dict, kinds: set[str]) -> int:
     return max((number for number, present in shown.items() if present), default=0)
 
 
-def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict], row: dict | None) -> dict:
+def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict], row: dict | None, by_name: bool = True,
+                   folder_names: bool = True, name_source: str | None = None, check_duplicates: bool = True) -> dict:
     """What importing this candidate would do, without writing anything.
 
     `files` are [{path, kind?}]; `kind` is the user's choice when they changed the suggestion. The result's `action` is
     skip (an error stops it), documents_only (no order to put them on), in_progress (stages recorded up to the first one
     that lacks something; the rest is done on the stage screen) or deploy (all eleven stages recorded).
+
+    The candidate's name is the sheet's, or the one read from the documents (`row["name"]`, `name_source` "documents"). With
+    `folder_names` False (the Import screen) the folder is only a way of grouping files and never becomes a name: a candidate
+    whose documents showed no name is called `PENDING_NAME` and the first reading of a document replaces it. The folder name
+    is still the name for the callers that import an organised library (`folder_names` True, the default).
     """
+    from app.services.candidate_review import PENDING_NAME
     row = dict(row or {})
     issues: list[dict] = []
-    name = (row.get("name") or _clean_name(folder)).strip()
+    name = (row.get("name") or "").strip() or (_clean_name(folder) if folder_names else PENDING_NAME)
+    name_source = name_source or ("sheet" if row.get("name") else "pending" if name == PENDING_NAME else "folder")
     row["name"] = name
     planned_files, by_kind = [], {}
     for item in files:
@@ -597,6 +719,8 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
         kinds = [item["kind"]] if item.get("kind") else list(item.get("kinds") or classify_path_kinds(path))
         problem = file_problem(path)
         entry = {"path": path, "kind": kinds[0] if kinds else None, "kinds": kinds, "skipped": bool(problem), "problem": problem}
+        if item.get("pages"):
+            entry["pages"] = list(item["pages"])     # only these pages of the file belong to this candidate (a scan shared by several people)
         if not problem and "photo" in kinds and not path.lower().endswith(IMAGE_EXTENSIONS):
             entry.update(skipped=True, problem="The photo must be an image (JPG, PNG, WebP or HEIC).")
         if not kinds and not problem:
@@ -609,7 +733,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
             for kind in kinds:
                 by_kind.setdefault(kind, []).append(entry)
     unnamed = sum(1 for entry in planned_files if entry.get("guessed"))
-    if unnamed:
+    if unnamed and by_name:
         issues.append({"level": "info", "message": f"{unnamed} file{'s' if unnamed != 1 else ''} with no clue in the name will be checked for a resume, passport or Aadhaar card when you import."})
     for kind, entries in by_kind.items():
         if len(entries) > 1 and kind != "other":
@@ -620,14 +744,16 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
         issues.append({"level": "error", "message": "No name. Name the folder after the candidate."})
     if phone and not normalize_phone(phone):
         issues.append({"level": "error", "message": f"Phone '{phone}' is not a valid number (at least seven digits)."})
-    duplicate = None
-    if not any(i["level"] == "error" for i in issues):
+    duplicate, matched_by = None, None
+    if check_duplicates and not any(i["level"] == "error" for i in issues):
         found = identity_matches(db, {"phone": phone, "email": email, "passport_no": passport}, lock=False) if (
             normalize_phone(phone) or normalize_email(email) or normalize_passport(passport)) else []
         if found:
             duplicate = found[0][0]
-        elif name:  # no phone yet: the same name is the best sign this person is already in
+            matched_by = {"phone number": "phone", "email": "email", "passport number": "passport"}.get((found[0][1] or ["name"])[0], "name")
+        elif name and name != PENDING_NAME:  # no phone yet: the same (real) name is the best sign this person is already in
             duplicate = db.scalar(select(Candidate).where(func.lower(func.trim(Candidate.name)) == name.lower()).limit(1))
+            matched_by = "name" if duplicate is not None else None
         if duplicate is not None:
             issues.append({"level": "error", "message": f"Already in the CRM as {duplicate.care_id or duplicate.ref} ({duplicate.name}). Nothing is imported for this folder."})
     owner = ctx.recruiter(row.get("recruiter"))
@@ -683,7 +809,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
         if completed >= 8 and not row.get("advance_amount"):
             notes.append("No advance amount was given, so the advance is recorded from the receipt without an amount.")
     issues.extend({"level": "info", "message": note} for note in notes)
-    if gaps:
+    if gaps and by_name:        # computed from the file NAMES: wrong for a person found by reading the files, so not said then
         issues.append({"level": "info", "message": "Documents not found: " + ", ".join(g["label"] for g in gaps) + ". Upload them later from the profile."})
     if any(i["level"] == "error" for i in issues):
         action = "skip"
@@ -693,7 +819,10 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
         "files": planned_files, "issues": issues, "stages": report if action != "documents_only" else [], "level": level,
         "completedThrough": completed if action in {"in_progress", "deploy"} else 0, "currentStage": current if action == "in_progress" else None,
         "missingDocuments": [gap["label"] for gap in gaps], "action": action, "duplicateOf": duplicate.ref if duplicate else None,
-        "duplicateOfCareId": duplicate.care_id if duplicate else None,
+        "duplicateOfCareId": duplicate.care_id if duplicate else None, "duplicateOfId": duplicate.id if duplicate else None,
+        "nameSource": name_source,
+        "alreadyInCrm": ({"candidateId": duplicate.id, "careId": duplicate.care_id, "ref": duplicate.ref, "name": duplicate.name,
+                          "matchedBy": matched_by, "files": 0, "strength": "certain" if matched_by == "passport" else "possible"} if duplicate else None),
     }
 
 
@@ -705,6 +834,249 @@ class Upload:
     kinds: list[str]
     data: bytes
     content_type: str
+    # Set when the file was cut out of a larger scan by `split_by_content`: the pages (numbered in the original scan) it holds,
+    # and the name the whole scan came in under (`path` then carries that name with a .pdf extension).
+    pages: list[int] | None = None
+    original_name: str | None = None
+    # What the splitting read on each page of `data` (`duplicate_pages.PageRead`, None for a page not read): lets the pages that are
+    # already filed in another file of the same document be told apart without reading anything twice.
+    facts: list | None = None
+    # The whole scan `data` was cut from (as received): kept as "Source document evidence" when a page of `data` is not filed again.
+    source: bytes | None = None
+
+
+# --------------------------------------------------------------------------------------------- splitting a scan by content
+
+# Bounded cost: a scan the local reader cannot finish in this time is stored whole, as before.
+SPLIT_MAX_PAGES = 40
+SPLIT_PAGE_TIMEOUT = 8
+SPLIT_DOCUMENT_TIMEOUT = 120
+
+
+@dataclass
+class Piece:
+    kinds: list[str]
+    data: bytes
+    pages: list[int]          # numbered in the original scan, in order; [] when the scan was not split
+
+
+@dataclass
+class SplitResult:
+    pieces: list[Piece]
+    split: bool               # False: the scan is stored whole under `pieces[0].kinds`
+    note: str | None = None
+    # How each page was filed by its content: {page number: {"kind", "confidence", "reason", "inherited"}} for every page the
+    # content kind classifier placed (identity documents are decided by the page classifier and are not listed here).
+    page_kinds: dict[int, dict] = field(default_factory=dict)
+    # What was read on every page that was inspected, by page number of the scan (`duplicate_pages.PageRead`): the text and how
+    # sure the reader was. Kept so the pages already filed elsewhere can be recognised without reading the scan again.
+    page_reads: dict = field(default_factory=dict)
+
+    def reads_for(self, pages: list[int]) -> list | None:
+        """The readings of these pages (numbers in the scan that was read), or None when any of them was not read."""
+        found = [self.page_reads.get(number) for number in pages]
+        return found if found and all(item is not None for item in found) else None
+
+
+def wants_split(kinds: list[str], content_type: str) -> bool:
+    """A PDF whose name says nothing, or says more than one document ("signed offer,aadhar,pp.pdf"), may hold several documents.
+    A file named for one document is that document; an image is one page; both are kept whole."""
+    return content_type == "application/pdf" and "photo" not in kinds and len(kinds) != 1
+
+
+def _whole(data: bytes, kinds: list[str], note: str | None = None) -> SplitResult:
+    return SplitResult([Piece(list(kinds), data, [])], False, note)
+
+
+def split_by_content(data: bytes, content_type: str, kinds_from_name: list[str], original_name: str = "") -> SplitResult:
+    """Cut a multi-document scan into the documents it holds, by what is on each page (read locally, no network).
+
+    One piece per identity document found (passport, Aadhaar, resume: its pages in original order; a page that is both goes to
+    both). The other pages are then sorted by their content too (`kind_classifier`): one piece per kind found (signed offer, visa,
+    medical, police clearance, air ticket, certificates ...); a page that is an education certificate or an application form
+    stays with the resume it is read with and is also filed in its own field. A page with no confident kind of its own (a poor
+    scan, an unfamiliar document) is left over. The left-over pages are filed under the kinds the file name gave that no page
+    showed (the name is the person's claim, so it keeps what nobody else claimed), "other" when there are none. A name that
+    claims a kind the reader did not find on any page, with no page left over, keeps the whole scan under it, so a misread never
+    empties a slot. A photo or blank page stays next to the document it follows. Pieces covering the same pages are one piece
+    with all their kinds, and a piece that is the whole scan is the original bytes, untouched. Every page ends up in at least
+    one piece. Content decides before the name: a file named "visa,medical,pcc" is cut into those three by what each page says.
+
+    Never raises: a scan that cannot be read in time is returned whole under the kinds today's rules give it (the name's, else
+    what `classify_content` makes of its first pages), with an info note.
+    """
+    named = list(dict.fromkeys(kinds_from_name))
+    if not wants_split(named, content_type):
+        return _whole(data, named)
+    try:
+        from app.integrations.ocr.inspection import inspect_document
+        settings = get_settings()
+        inspected = inspect_document(
+            data, tesseract_cmd=getattr(settings, "tesseract_cmd", None), languages=getattr(settings, "ocr_languages", "eng"),
+            max_pages=SPLIT_MAX_PAGES, page_timeout=SPLIT_PAGE_TIMEOUT, document_timeout=SPLIT_DOCUMENT_TIMEOUT)
+        return _split_inspected(inspected, data, named, original_name)
+    except Exception:
+        short = (original_name or "The file").rsplit("/", 1)[-1]
+        return _whole(data, named or classify_content(data) or ["other"],
+                      f"{short} could not be split into its documents; it was stored whole.")
+
+
+def _content_kinds(inspected) -> dict:
+    """The content kind of each page that was read (`kind_classifier`), by page number. Never raises: a page it cannot judge has none."""
+    if isinstance(getattr(inspected, "content_kinds", None), dict):   # kinds saved from an earlier reading (intake_documents): no page text
+        return inspected.content_kinds
+    try:
+        from app.integrations.ocr.kind_classifier import classify_kinds
+        pages = inspected.pages
+        guesses = classify_kinds([page.text if page.status == "read" else "" for page in pages])
+        return {page.page_number: guess for page, guess in zip(pages, guesses) if guess.kind and page.status == "read"}
+    except Exception:
+        return {}
+
+
+def _split_inspected(inspected, data: bytes, named: list[str], original_name: str) -> SplitResult:
+    result = _split_pieces(inspected, data, named, original_name)
+    try:
+        from app.services.duplicate_pages import PageRead
+        result.page_reads = {page.page_number: PageRead(page.text or "", float(page.confidence or 0.0), page.status)
+                             for page in inspected.pages}
+    except Exception:    # the readings only serve the duplicate check; a page without one is simply never called a repeat
+        result.page_reads = {}
+    return result
+
+
+def _split_pieces(inspected, data: bytes, named: list[str], original_name: str) -> SplitResult:
+    count = inspected.page_count
+    everything = list(range(1, count + 1))
+    identity = {kind: inspected._pages_of(kind) for kind in READ_SLOTS}
+    content = _content_kinds(inspected)
+    # A page the content classifier is sure of beats an identity guess that had no evidence of its own: one that only borrowed its
+    # kind from the page next to it, or took a visa's machine-readable zone for a passport, or a flight itinerary's number for an
+    # Aadhaar card.
+    # A certificate or letter that took the resume kind from the page before it (scanned experience letters and certificates run on
+    # from a resume and are read with it) stays in the resume as well as being filed in its own field.
+    # An EDUCATION certificate is the exception: it is read from its own piece, so it leaves the resume altogether (a certificate in
+    # the middle of resume pages is simply skipped by the resume piece). Experience letters and application forms stay in both.
+    alongside = {number for number, guess in content.items() if guess.alongside_identity and guess.kind != "education_certificate"}
+    for page in inspected.pages:
+        guess = content.get(page.page_number)
+        if guess and guess.kind == "education_certificate" and page.document_type == "resume":
+            pages = identity.get("resume", [])
+            if page.page_number in pages:
+                pages.remove(page.page_number)
+        elif guess and page.document_type == "resume" and page.inherited and guess.kind == "experience_certificate":
+            alongside.add(page.page_number)
+        elif guess and not guess.alongside_identity and (guess.overrides_identity or (page.inherited and guess.confidence >= 0.7)):
+            for pages in identity.values():
+                if page.page_number in pages:
+                    pages.remove(page.page_number)
+    # A page that shows nothing of its own and only borrowed its kind from a neighbour belongs there when it FOLLOWS that
+    # document (the back of a card, the next page of a resume). One that merely sits in front of a passport is not part of it.
+    for page in inspected.pages:
+        pages = identity.get(page.document_type, [])
+        if page.status == "read" and page.inherited and page.page_number in pages and page.page_number - 1 not in pages:
+            pages.remove(page.page_number)
+    identity = {kind: pages for kind, pages in identity.items() if pages}
+    taken = {number for pages in identity.values() for number in pages}
+    # The other documents, by content: every read page that is not an identity page, and the certificates / forms that are also a
+    # resume page and so are filed twice.
+    by_kind: dict[str, list[int]] = {}
+    for number, guess in content.items():
+        if number not in taken or number in alongside:
+            by_kind.setdefault(guess.kind, []).append(number)
+    if not identity and not by_kind:
+        return _whole(data, named or ["other"])
+    blank = {page.page_number for page in inspected.pages if page.status == "blank"}
+    # A photo or blank page stays with the identity document it follows (the passport's own photo page, the back of a card, a
+    # resume's last sheet). It never follows an offer, a visa, a medical or any other document: there it is anyone's guess, so it
+    # goes to the leftover pieces, never inside that document's cut.
+    claimed = taken | {number for pages in by_kind.values() for number in pages}
+    for number in everything:
+        if number in blank and number not in claimed:
+            for pages in identity.values():
+                if number - 1 in pages:
+                    pages.append(number)
+                    claimed.add(number)
+                    break
+    leftover = [number for number in everything if number not in claimed]
+    # What the name claims that no page showed. The left-over pages are filed there; with none left over the claim keeps the whole scan.
+    unclaimed = [kind for kind in named if kind not in identity and kind not in by_kind]
+    leftover_kinds = unclaimed or (["other"] if leftover else [])
+    plan: list[tuple[list[str], list[int]]] = [([kind], sorted(pages)) for kind, pages in identity.items()]
+    plan += [([kind], sorted(pages)) for kind, pages in by_kind.items()]
+    if leftover_kinds:
+        plan.append((leftover_kinds, leftover or everything))   # nothing left over: the named kinds keep the whole scan
+    # Kinds on the very same pages are one piece with all their kinds - except a certificate or form that is ALSO a resume page: the
+    # page stays in the resume's cut, and the certificate / form is its own cut so each field gets its own file.
+    merged: dict[tuple, list[str]] = {}
+    for kinds, pages in plan:
+        alone = kinds[0] in by_kind and kinds[0] not in identity and set(pages) <= alongside
+        into = merged.setdefault((tuple(pages), kinds[0] if alone else None), [])
+        into += [kind for kind in kinds if kind not in into]
+    pieces = [Piece(kinds, data if list(pages) == everything else _cut_pages(inspected, list(pages)), list(pages))
+              for (pages, _), kinds in merged.items()]
+    if len(pieces) == 1 and pieces[0].pages == everything:
+        return SplitResult([Piece(pieces[0].kinds, data, [])], False)
+    if set(everything) - {number for piece in pieces for number in piece.pages}:   # cannot happen; never lose a page
+        raise ValueError("a page was lost")
+    short = (original_name or "The file").rsplit("/", 1)[-1]
+    parts = "; ".join(f"{' + '.join(KIND_LABELS.get(kind, kind) for kind in piece.kinds)} (page{'s' if len(piece.pages) != 1 else ''} "
+                      f"{_page_list(piece.pages)})" for piece in pieces)
+    borrowed = sorted(number for number, guess in content.items() if guess.inherited)
+    careful = (f" Page{'s' if len(borrowed) != 1 else ''} {_page_list(borrowed)} took the kind of the page before "
+               "(a continuation of the same document) and should be checked." if borrowed else "")
+    kinds_of = {number: {"kind": guess.kind, "confidence": guess.confidence, "reason": guess.reason, "inherited": guess.inherited}
+                for number, guess in content.items()}
+    return SplitResult(pieces, True, f"{short} holds several documents and was split by what is on each page: {parts}.{careful}", kinds_of)
+
+
+def _cut_pages(inspected, pages: list[int]) -> bytes:
+    """A PDF of just these pages (original order). Scanners often give every page the same resource list, so a plain copy of two
+    pages drags the pictures of all the others along (a 2-page piece as big as the 8-page scan); cleaning the pages' content
+    drops what a page does not use. If cleaning is refused, the plain copy is used."""
+    import pymupdf as fitz
+    try:
+        with fitz.open(stream=inspected._pdf, filetype="pdf") as source, fitz.open() as subset:
+            for number in pages:
+                subset.insert_pdf(source, from_page=number - 1, to_page=number - 1)
+            return subset.tobytes(garbage=4, deflate=True, clean=True, no_new_id=True)
+    except Exception:
+        return inspected.pdf_for_pages(pages, allow_unresolved=True)
+
+
+def cut_pdf_pages(data: bytes, pages: list[int]) -> bytes:
+    """A PDF of just these pages (numbered as in the original, kept in order). Used for a scan whose pages belong to different
+    people: each person gets their own pages, and the piece is then split into documents like any other file. Raises ValueError
+    when none of the pages exist or the file is not a readable PDF."""
+    import pymupdf as fitz
+    try:
+        with fitz.open(stream=data, filetype="pdf") as source:
+            wanted = sorted({number for number in pages if 1 <= number <= source.page_count})
+            if not wanted:
+                raise ValueError("none of the pages exist")
+            with fitz.open() as subset:
+                for number in wanted:
+                    subset.insert_pdf(source, from_page=number - 1, to_page=number - 1)
+                try:
+                    return subset.tobytes(garbage=4, deflate=True, clean=True, no_new_id=True)
+                except Exception:
+                    return subset.tobytes(deflate=True)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("the file could not be cut") from exc
+
+
+def _page_list(pages: list[int]) -> str:
+    runs: list[str] = []
+    start = prev = pages[0]
+    for number in pages[1:] + [0]:
+        if number == prev + 1:
+            prev = number
+            continue
+        runs.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = number
+    return ", ".join(runs)
 
 
 class ImportRefused(Exception):
@@ -748,8 +1120,12 @@ def _file_ref_of(attachment: Attachment) -> dict:
             "sizeKb": attachment.size_kb, "version": attachment.version}
 
 
-def queue_reads(db: Session, user: User, candidate: Candidate, stored: dict[str, Attachment]) -> None:
-    """Queue the documents to be read: each stored FILE once, however many of the three it holds.
+def queue_reads(db: Session, user: User, candidate: Candidate, stored: dict[str, "Attachment | list[Attachment]"]) -> None:
+    """Queue the documents to be read: each stored FILE once, however many of the kinds (SENT_TO_READER) it holds.
+
+    A slot may map to several files (a passport's data page and its back page are two files of the passport slot): every one of
+    them is queued, once per stored file, so the page that carries the machine-readable zone is never skipped because another file
+    of the same slot was stored after it.
 
     The reader finds the resume, passport and Aadhaar pages inside one file by itself, so a scan that is both a passport and an
     Aadhaar card (or a resume with both attached) is one job, not one per document. Queueing it per document read the same
@@ -757,19 +1133,242 @@ def queue_reads(db: Session, user: User, candidate: Candidate, stored: dict[str,
     """
     from app.services.application_form import queue_reading
     seen: set[str] = set()
-    for slot in READ_SLOTS:
-        attachment = stored.get(slot)
-        if attachment is not None and attachment.object_key not in seen:
-            seen.add(attachment.object_key)
-            queue_reading(db, user, candidate, attachment, attachment.content_type or "application/pdf")
+    for slot in SENT_TO_READER:
+        held = stored.get(slot)
+        for attachment in (held if isinstance(held, list) else [held] if held is not None else []):
+            if attachment.object_key not in seen:
+                seen.add(attachment.object_key)
+                queue_reading(db, user, candidate, attachment, attachment.content_type or "application/pdf")
+
+
+@dataclass
+class IdentityRead:
+    """Who the documents of one candidate say they are (read locally, from the text the splitting already read)."""
+    name: str | None = None
+    passports: set[str] = field(default_factory=set)
+    aadhaars: set[str] = field(default_factory=set)
+    phones: set[str] = field(default_factory=set)
+    emails: set[str] = field(default_factory=set)
+
+
+def read_identity(uploads: list[Upload], settings=None, budget: float = 60.0) -> IdentityRead:
+    """The candidate's name (and identifiers) from the passport, Aadhaar card and resume files, and only from them: passport
+    machine-readable zone or printed name, the name line of the Aadhaar card, the first line of the resume (the same readers and
+    the same "is this a person's name" test as the folder reading in people_by_content). The pages were read by `split_by_content`
+    already; a file that was stored whole by its name (never read) is read here, once, within `budget` seconds. A name that does not
+    look like a person's is never used. Never raises."""
+    import time
+    from app.services import duplicate_pages as dup, people_by_content as pbc
+    found = IdentityRead()
+    hits: list = []
+    deadline = time.monotonic() + budget
+    try:
+        for upload in uploads:
+            kind = next((item for item in upload.kinds if item in READ_SLOTS), None)
+            if kind is None:
+                continue
+            count = dup.page_count(upload.data, upload.content_type or "")
+            if not count:
+                continue
+            facts = list(upload.facts) if upload.facts and len(upload.facts) == count and all(item is not None for item in upload.facts) else None
+            if facts is None:
+                doc = dup.Doc(upload.path, upload.data, upload.content_type or "", list(range(1, count + 1)), [None] * count, True)
+                if not dup.read_pages(doc, settings=settings, deadline=deadline):
+                    continue
+                facts = doc.reads
+                upload.facts = facts
+            for read in facts:
+                if read is None or read.status == "blank" or not (read.text or "").strip():
+                    continue
+                evidence = pbc.extract(read.text, kind)
+                hits += [hit for hit in evidence.names if hit.source in ("passport", "aadhaar", "resume") and not hit.weak and pbc.usable(hit.tokens)]
+                found.passports |= set(evidence.passports)        # the zone's checked number, or one printed next to "passport"
+                found.aadhaars |= set(evidence.aadhaars)
+                found.phones |= set(evidence.phones)
+                found.emails |= set(evidence.emails)
+    except Exception:
+        pass
+    if hits:
+        best = sorted(hits, key=lambda hit: (pbc.PRIORITY.get(hit.source, 9), -len(hit.tokens)))[0]
+        found.name = pbc.display_name(best.tokens)
+    return found
+
+
+def hashes_of(uploads: list[Upload]) -> list[set[str]]:
+    """Per filed upload, the SHA-256 of the file as stored and of the whole scan it was cut from (either is the same file)."""
+    return [{hashlib.sha256(item).hexdigest() for item in (upload.data, upload.source) if item}
+            for upload in uploads if upload.kinds != [SOURCE_BUNDLE]]
+
+
+def candidates_with_files(db: Session, groups: list[set[str]]) -> tuple[Candidate, int] | None:
+    """The existing candidate that already holds most of these files (an indexed lookup on the stored file hashes), and how many
+    of the `groups` (one set of hashes per file) it holds; None unless it holds at least half of them. One shared file (a group
+    ticket) is never enough for a folder of several."""
+    everything = {digest for group in groups for digest in group}
+    if not groups or not everything:
+        return None
+    rows = db.execute(select(Attachment.entity_id, Attachment.content_hash).where(
+        Attachment.entity_type == "candidate", Attachment.content_hash.in_(everything))).all()
+    held: dict[str, set[str]] = {}
+    for entity_id, digest in rows:
+        held.setdefault(entity_id, set()).add(digest)
+    best: tuple[str, int] | None = None
+    for entity_id, digests in held.items():
+        count = sum(1 for group in groups if group & digests)
+        if best is None or count > best[1]:
+            best = (entity_id, count)
+    if best is None or best[1] * 2 < len(groups):
+        return None
+    candidate = db.get(Candidate, best[0])
+    return (candidate, best[1]) if candidate is not None else None
+
+
+IMPORT_KEY = "_importKey"       # field_sources key: the client's idempotency key of the import that created the candidate
+
+
+STRONG = ("import key", "same file", "passport")        # the same person for certain; phone / email / name alone are "possible"
+
+
+def find_duplicate(db: Session, uploads: list[Upload], identity: "IdentityRead | None", import_key: str | None, row: dict | None = None) -> dict | None:
+    """Is this person already in the CRM? Checked inside the import transaction, under the lock that serialises every candidate
+    creation, BEFORE a Care India ID is taken: a double click or two browsers importing one folder make ONE candidate, and a person
+    who is already there (a travelled candidate imported earlier, say) is never created again. Evidence, strongest first, never the
+    folder or file NAMES:
+      * the client's import key, or the very same files (half of them or more are already stored on one candidate): certain;
+      * a passport number: read from the documents (machine-readable zone, or printed) or given by the sheet: certain;
+      * a phone number or email (given by the sheet, or read from the documents), or the same typed full name: possible.
+    (The CRM keeps only the last four digits of an Aadhaar number, so a card is matched by its file, not by its number.)"""
+    row = row or {}
+    found: tuple[Candidate, str, int] | None = None
+    if import_key:
+        from sqlalchemy import cast
+        from sqlalchemy.dialects.postgresql import JSONB
+        candidate = db.scalar(select(Candidate).where(cast(Candidate.field_sources, JSONB)[IMPORT_KEY].astext == import_key).limit(1))
+        if candidate is not None:
+            found = (candidate, "import key", 0)
+    if found is None:
+        held = candidates_with_files(db, hashes_of(uploads))
+        if held is not None:
+            found = (held[0], "same file", held[1])
+    if found is None:
+        numbers = sorted(identity.passports) if identity else []
+        if row.get("passport_no"):
+            numbers.insert(0, row["passport_no"])
+        for number in numbers[:4]:
+            hits = identity_matches(db, {"passport_no": number}, lock=False)
+            if hits:
+                found = (hits[0][0], "passport", 0)
+                break
+    if found is None:
+        for label, key, values in (("phone", "phone", ([row["phone"]] if row.get("phone") else []) + (sorted(identity.phones) if identity else [])),
+                                   ("email", "email", ([row["email"]] if row.get("email") else []) + (sorted(identity.emails) if identity else []))):
+            for value in values[:3]:
+                hits = identity_matches(db, {key: value}, lock=False)
+                if hits:
+                    found = (hits[0][0], label, 0)
+                    break
+            if found is not None:
+                break
+    if found is None and (row.get("name") or "").strip():
+        from app.services.candidate_review import PENDING_NAME
+        typed = row["name"].strip()
+        if typed != PENDING_NAME:
+            candidate = db.scalar(select(Candidate).where(func.lower(func.trim(Candidate.name)) == typed.lower()).limit(1))
+            if candidate is not None:
+                found = (candidate, "name", 0)
+    if found is None:
+        return None
+    candidate, matched, files = found
+    strength = "certain" if matched in STRONG else "possible"
+    wording = {"import key": "this folder was already imported", "same file": "the same files", "passport": "same passport", "phone": "same phone number",
+               "email": "same email", "name": "same name"}[matched]
+    return {"candidateId": candidate.id, "careId": candidate.care_id, "ref": candidate.ref, "name": candidate.name, "matchedBy": matched,
+            "strength": strength, "files": files, "choices": ["skip", "add_documents"] + (["import_anyway"] if strength == "possible" else []),
+            "message": f"Already in the CRM as {candidate.care_id or candidate.ref} · {candidate.name} ({strength}: {wording})"}
+
+
+def add_documents(db: Session, user: User, candidate: Candidate, uploads: list[Upload], written: list[str], settings) -> list[dict]:
+    """File these uploads into an EXISTING candidate (the "Add these documents" choice for a duplicate): each as the next version of
+    its document field, never overwriting; a file (or, for a PDF, every page of it) the field already holds is "already filed" and
+    skipped; the scan the pages were cut from is kept under Source document evidence. Only documents are written: the candidate's
+    details, status, owner, placements and stages are never touched. In the caller's transaction."""
+    from app.api.routers.files import _safe_name
+    from app.services import document_splitting as splitting
+    now = datetime.now(timezone.utc)
+    existing: dict[str, list[Attachment]] = {}
+    for row in db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id)
+                          .order_by(Attachment.version.desc())):
+        existing.setdefault(row.slot, []).append(row)
+    taken = {row.file_name.lower() for rows in existing.values() for row in rows}
+    person = splitting._person(candidate, "")
+    answer: list[dict] = []
+    for upload in sorted(uploads, key=lambda item: (item.kinds == [SOURCE_BUNDLE], item.path.lower())):
+        digest = hashlib.sha256(upload.data).hexdigest()
+        extension = PurePosixPath(upload.path.replace("\\", "/")).suffix.lower()
+        object_key: str | None = None
+        for kind in upload.kinds:
+            if kind in ("photo", ADVANCE_RECEIPT):
+                answer.append({"slot": kind, "label": KIND_LABELS.get(kind, kind), "fileName": upload.path.rsplit("/", 1)[-1], "pages": list(upload.pages or []),
+                               "alreadyFiled": False, "added": False, "note": "not added to an existing candidate"})
+                continue
+            slot = kind if (kind in CANDIDATE_SLOTS or kind == "aadhaar" or kind == SOURCE_BUNDLE) else "other"
+            versions = existing.setdefault(slot, [])
+            same = next((row for row in versions if row.content_hash == digest), None)
+            if same is None and slot != SOURCE_BUNDLE and upload.content_type == "application/pdf":
+                same = splitting._already_filed(splitting.PlannedPiece([slot], upload.data, list(upload.pages or []), upload.facts), slot, versions, settings)
+            entry = {"slot": slot, "label": KIND_LABELS.get(slot, slot), "pages": list(upload.pages or []), "added": same is None, "alreadyFiled": same is not None}
+            if same is not None:
+                answer.append({**entry, "fileName": same.file_name})
+                continue
+            if slot == SOURCE_BUNDLE:
+                file_name = _safe_name((upload.original_name or upload.path).replace("\\", "/").rsplit("/", 1)[-1])
+            else:
+                file_name = _safe_name(import_file_name(person, [slot], upload.path, taken))
+            if object_key is None:
+                object_key, _ = _store_bytes(settings, upload.data, f"document-{uuid.uuid4().hex[:6]}{extension}", upload.content_type, written)
+            row = Attachment(id=str(uuid.uuid4()), entity_type="candidate", entity_id=candidate.id, slot=slot, version=(versions[0].version if versions else 0) + 1,
+                             file_name=file_name, size_kb=max(1, round(len(upload.data) / 1024)), content_type=upload.content_type, object_key=object_key,
+                             content_hash=digest, uploaded_by=user.id, uploaded_at=now)
+            db.add(row)
+            db.add(AuditEntry(actor_id=user.id, action="Uploaded document", target=file_name, entity_type="candidate", entity_id=candidate.id,
+                              meta={"attachment_id": row.id, "slot": slot, "version": row.version, "bulk_import": True, "added_to_existing": True,
+                                    "original_name": (upload.original_name or upload.path).rsplit("/", 1)[-1][:200],
+                                    **({"split_pages": upload.pages} if upload.pages else {}),
+                                    **({"extraction_deferred": True} if slot in SENT_TO_READER else {})}, at=now))
+            versions.insert(0, row)
+            answer.append({**entry, "fileName": file_name})
+    db.add(AuditEntry(actor_id=user.id, action="Added documents from an import", target=candidate.name, entity_type="candidate", entity_id=candidate.id,
+                      meta={"bulk_import": True, "added": sum(1 for item in answer if item["added"]), "already_filed": sum(1 for item in answer if item["alreadyFiled"])}, at=now))
+    db.flush()
+    return answer
 
 
 def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row: dict | None, uploads: list[Upload],
-                     written: list[str]) -> dict:
+                     written: list[str], name_is_stand_in: bool = False, name_from_files: bool = False,
+                     duplicates: list | None = None, name_source: str | None = None, identity: "IdentityRead | None" = None,
+                     import_key: str | None = None, on_duplicate: str = "skip") -> dict:
     """Create the candidate, store and attach every document and record the placement the plan describes.
+
+    Names: with `name_source` ("sheet" | "documents" | "pending", what the Import screen's endpoint decided) the folder name is NEVER
+    the candidate's name: `row["name"]` holds the sheet's or the document-read name, and without one the candidate is called
+    `PENDING_NAME` with the provisional-name marker (the first reading of a document replaces it). Their files are named
+    "<Name>-<Document>.<ext>", or "<Care India ID>-<Document>.<ext>" while no name is known. Without `name_source` (the library
+    import script) the folder name is the name, as before.
+
+    Duplicates (`find_duplicate`): under the lock that serialises candidate creation, BEFORE a Care India ID is taken, the import
+    key, the files and the passport / phone / email (given by the sheet or read from the documents) are checked against the CRM.
+    A person who is already there is never created again: the answer is {"status": "duplicate" | "already_imported", careId,
+    candidateId, name, matchedBy, strength: "certain" | "possible", choices} and nothing is written or numbered. `on_duplicate`
+    is the person's choice from `choices`: "skip" (the default: report only), "add_documents" (file these documents into the
+    existing candidate, answer {"status": "documents_added", ...}) or "import_anyway" (only for a "possible" match: create the
+    candidate after all).
 
     Everything happens in the caller's transaction; the caller commits, or rolls back and calls `discard_written(written)`.
     Raises ImportRefused, writing nothing, when the plan is a skip.
+
+    `duplicates` (`duplicate_pages.Skipped`) are the pages that were left out because the same page is already filed: each is
+    written to the audit trail and answered in `result["duplicates"]` / `result["documents"][n]["duplicates"]`. An upload of kind
+    `source_bundle` is the whole scan such pages were cut from, kept as received under "Source document evidence".
     """
     from app.api.routers.applications import _sync_order, _task
     from app.api.routers.candidates import lock_assignment_cursor
@@ -782,13 +1381,38 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
 
     # Candidate identity, reference and ownership decisions are serialised the same way the add-candidate screen does.
     lock_assignment_cursor(db)
-    plan = plan_candidate(db, ctx, folder=folder, row=row, files=[{"path": u.path, "kinds": u.kinds} for u in uploads])
+    if name_source is not None:
+        existing = find_duplicate(db, uploads, identity, import_key, row)
+        if existing is not None and not (on_duplicate == "import_anyway" and existing["strength"] == "possible"):
+            if on_duplicate == "add_documents":
+                target = db.get(Candidate, existing["candidateId"])
+                filed = add_documents(db, user, target, uploads, written, settings)
+                return {"status": "documents_added", "action": "skip", "folder": folder, **existing, "documents": filed,
+                        "issues": [{"level": "info", "message": f"{existing['message']}. Documents were added to it ({sum(1 for f in filed if f['added'])} filed, "
+                                                                f"{sum(1 for f in filed if f['alreadyFiled'])} already there); nothing else of the candidate was changed."}]}
+            return {"status": "already_imported" if existing["matchedBy"] == "import key" else "duplicate", "action": "skip", "folder": folder, **existing,
+                    "issues": [{"level": "info", "message": f"{existing['message']}. Nothing was imported."}]}
+    plan = plan_candidate(db, ctx, folder=folder, row=row, files=[{"path": u.path, "kinds": u.kinds} for u in uploads
+                                                                    if u.kinds != [SOURCE_BUNDLE]],
+                          folder_names=name_source is None, name_source=name_source, check_duplicates=on_duplicate != "import_anyway")
     if plan["action"] == "skip":
         raise ImportRefused(plan)
     row = dict(row or {})
     owner = ctx.recruiter(row.get("recruiter"))
     order = ctx.order(row.get("order")) if plan["action"] in {"in_progress", "deploy"} else None
     now = datetime.now(timezone.utc)
+
+    # The slow part (writing every file to the document store) comes BEFORE the Care India ID is taken: that ID holds a global
+    # lock until the commit, so taking it first made every import wait behind the slowest upload.
+    # A scan that holds several documents goes first, so a dedicated file of the same kind ends up as the current version.
+    # The files are stored under a neutral name; the name they are listed under ("<Name>-<Document>" or "<CI-167>-<Document>") is set
+    # below, once the Care India ID exists.
+    to_attach: list[tuple[Upload, str, str, str]] = []
+    ordered = sorted(uploads, key=lambda item: (item.kinds == [SOURCE_BUNDLE], len(item.kinds) == 1, item.path.lower()))
+    for number, upload in enumerate(ordered, 1):
+        extension = PurePosixPath(upload.path.replace("\\", "/")).suffix.lower()
+        object_key, digest = _store_bytes(settings, upload.data, f"document-{number}{extension}", upload.content_type, written)   # once, whatever it counts as
+        to_attach.append((upload, "", object_key, digest))
 
     phone = plan["phone"] or ""
     candidate = Candidate(
@@ -804,6 +1428,12 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
                 else CandidateStatus.new if phone else CandidateStatus.needs_review),
         # No phone yet: the reading of the resume and passport fills it in and lifts the flag by itself.
         needs_review=not phone, owner_id=owner.id, intake_owner_id=owner.id, created_by=user.id,
+        # The folder name is only a stand-in: the name on the resume, passport or any other document replaces it.
+        # (A name read from the files on the Import screen is just as provisional, and says so: "files".)
+        field_sources=({**({} if ((row or {}).get("name") and not name_is_stand_in) else {"_provisionalName": "files" if name_from_files else True})}
+                       if name_source is None else
+                       {**({} if name_source == "sheet" else {"_provisionalName": name_source}),
+                        **({IMPORT_KEY: import_key} if import_key else {})}),
     )
     for key, value in normalize_candidate_values({"phone": phone, "email": plan["email"], "passport_no": plan["passportNo"]}).items():
         setattr(candidate, key, value)
@@ -818,13 +1448,33 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     # kind becomes the next version. The stage 8 receipt is not a candidate document, only stage evidence.
     stored: dict[str, Attachment] = {}
     receipt: Attachment | None = None
-    # A scan that holds several documents goes first, so a dedicated file of the same kind ends up as the current version.
-    for upload in sorted(uploads, key=lambda item: (len(item.kinds) == 1, item.path.lower())):
-        file_name = _safe_name(upload.path.rsplit("/", 1)[-1])
-        object_key, digest = _store_bytes(settings, upload.data, file_name, upload.content_type, written)   # once, whatever it counts as
+    # The listed name of a file: "<Name>-<Document>.<ext>"; "<CI_167>-<Document>.<ext>" while no name was read from the documents
+    # (a later reading renames "<CI_167>-..." to the real name, see application_form.rename_imported_files).
+    from app.services.candidate_review import PENDING_NAME
+    person = candidate.care_id if plan["name"] == PENDING_NAME else plan["name"]
+    taken: set[str] = set()
+    named_attach = []
+    for upload, _, object_key, digest in to_attach:
+        if upload.kinds == [SOURCE_BUNDLE]:     # the scan as received: it keeps its own name
+            file_name = _safe_name(upload.path.replace("\\", "/").rsplit("/", 1)[-1])
+        else:
+            file_name = _safe_name(import_file_name(person, upload.kinds, upload.path, taken))
+        named_attach.append((upload, file_name, object_key, digest))
+    to_attach = named_attach
+    for upload, file_name, object_key, digest in to_attach:
         common = dict(file_name=file_name, size_kb=max(1, round(len(upload.data) / 1024)), content_type=upload.content_type,
                       object_key=object_key, content_hash=digest, uploaded_by=user.id, uploaded_at=now)
         for kind in upload.kinds:
+            if kind == SOURCE_BUNDLE:
+                bundle = Attachment(id=str(uuid.uuid4()), entity_type="candidate", entity_id=candidate.id, slot=SOURCE_BUNDLE, version=1, **common)
+                previous = stored.get(SOURCE_BUNDLE)
+                bundle.version = (previous.version + 1) if previous else 1
+                db.add(bundle)
+                db.add(AuditEntry(actor_id=user.id, action="Uploaded document", target=file_name, entity_type="candidate", entity_id=candidate.id,
+                                  meta={"attachment_id": bundle.id, "slot": SOURCE_BUNDLE, "version": bundle.version, "bulk_import": True,
+                                        "kept_original": True, "original_name": (upload.original_name or upload.path).rsplit("/", 1)[-1][:200]}, at=now))
+                stored[SOURCE_BUNDLE] = bundle
+                continue
             if kind not in CANDIDATE_SLOTS and kind != "aadhaar":
                 receipt = Attachment(id=str(uuid.uuid4()), entity_type="application", entity_id="", slot="", version=1, **common)
                 continue
@@ -833,13 +1483,32 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
                                     version=(previous.version + 1) if previous else 1, **common)
             db.add(attachment)
             db.add(AuditEntry(actor_id=user.id, action="Uploaded document", target=file_name, entity_type="candidate", entity_id=candidate.id,
-                              meta={"attachment_id": attachment.id, "slot": kind, "version": attachment.version, "bulk_import": True}, at=now))
+                              meta={"attachment_id": attachment.id, "slot": kind, "version": attachment.version, "bulk_import": True,
+                                  "original_name": (upload.original_name or upload.path).rsplit("/", 1)[-1][:200],
+                                  **({"split_pages": upload.pages} if upload.pages else {}),
+                                  # Stored, not read: the profile and the form offer "Extract details" for it (see document_reading.pending_expression).
+                                  **({"extraction_deferred": True} if kind in SENT_TO_READER else {})}, at=now))
             stored[kind] = attachment
     db.flush()
-    queue_reads(db, user, candidate, stored)
-
+    # The import only SPLITS the files into their documents and stores them. Reading them (OCR) starts when a person asks for
+    # it (Extract details on the candidate's form, or "Read the documents" on the Import screen), never by itself.
     result = {"candidateId": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "name": candidate.name, "action": plan["action"], "issues": plan["issues"],
-              "files": len(uploads), "order": None, "completedThrough": 0, "currentStage": None}
+              "files": sum(1 for upload in uploads if upload.kinds != [SOURCE_BUNDLE]), "order": None, "completedThrough": 0, "currentStage": None,
+              "status": "imported", "nameSource": plan["nameSource"]}
+    # What was filed, and which pages were NOT filed again because the same page is already in one of these files.
+    names = {id(upload): file_name for upload, file_name, _, _ in to_attach}
+    skipped = list(duplicates or [])
+    result["documents"] = [
+        {"fileName": file_name, "kinds": list(upload.kinds), "originalName": (upload.original_name or upload.path).rsplit("/", 1)[-1],
+         "pages": list(upload.pages or []),
+         "duplicates": [item.as_dict(names) for item in skipped if item.keeper is upload]}
+        for upload, file_name, _, _ in to_attach if upload.kinds != [SOURCE_BUNDLE]]
+    result["duplicates"] = [item.as_dict(names) for item in skipped]
+    for item in skipped:
+        db.add(AuditEntry(actor_id=user.id, action="Skipped duplicate pages", target=item.file, entity_type="candidate", entity_id=candidate.id,
+                          meta={"bulk_import": True, "slot": item.kind, "pages": item.pages, "same_as_file": item.same_as_file,
+                                "same_as_pages": item.same_as_pages, "kept_as": names.get(id(item.keeper)), "reason": item.why,
+                                "message": item.message()}, at=now))
 
     if order is None:
         db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=candidate.id, owner_id=owner.id,

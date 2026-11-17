@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import csv
 import dataclasses
+import hashlib
 import io
 import contextvars
 import logging
@@ -24,13 +25,13 @@ from pathlib import Path
 import pymupdf as fitz
 from PIL import Image, ImageOps, ImageStat
 
-from app.core.cpus import available_cpus
+from app.core.cpus import available_cpus, default_page_workers
 
 from . import page_enhance as enhance
 from . import second_opinion
 from . import read_merge as merge
 from . import validators
-from .classification import classify_page, classify_pages, identity_hint, needs_more_reading
+from .classification import classify_page, classify_pages, identity_hint, kind_known, needs_more_reading
 from .classification import _evidence as classification_evidence
 
 
@@ -202,8 +203,9 @@ READING_FILE: contextvars.ContextVar[str] = contextvars.ContextVar("reading_file
 _ACCEPT_CONFIDENCE = 72.0
 _SMALL_TEXT_PX = 20
 _MAX_RENDER_PIXELS = 40_000_000
+_MIN_RENDER_DPI = 40  # below this a page is not legible whatever its box says; an absurd page box is refused instead
 _MAX_IMAGE_FRAMES = 500
-_DEFAULT_PAGE_WORKERS = max(1, min(8, available_cpus()))
+_DEFAULT_PAGE_WORKERS = default_page_workers()
 _LANGUAGE = re.compile(r"[A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)*")
 
 try:  # HEIC/HEIF photos are read when the optional decoder is installed.
@@ -271,30 +273,103 @@ def _find_libreoffice() -> str | None:
 
 
 _LANGUAGE_CACHE: dict[tuple[str, str], str] = {}
+# Where the languages of a (command, languages) pair were found: a folder passed as --tessdata-dir, or None for the
+# Tesseract install's own folder. Filled by _usable_languages; _tesseract only looks it up (it never probes).
+_TESSDATA_CHOICE: dict[tuple[str, str], str | None] = {}
+
+_INSTALL_HINT = "run backend/scripts/install_ocr_languages.py, which needs no admin rights, or install the language pack"
+
+
+def _configured_tessdata_dir() -> Path | None:
+    """The folder of language files this installation keeps for itself (``OCR_TESSDATA_DIR``), when it exists."""
+    value = os.environ.get("OCR_TESSDATA_DIR")
+    if value is None:
+        try:
+            from app.core.config import get_settings
+
+            value = get_settings().ocr_tessdata_dir
+        except Exception:
+            value = ""
+    value = (value or "").strip()
+    if not value:
+        return None
+    folder = Path(value)
+    return folder if folder.is_dir() else None
+
+
+def _list_languages(command: str, tessdata: Path | None) -> set[str] | None:
+    """The language packs Tesseract finds (in ``tessdata`` when given), or None when it cannot say."""
+    args = [command, "--list-langs"] + (["--tessdata-dir", str(tessdata)] if tessdata else [])
+    try:
+        result = subprocess.run(args, capture_output=True, timeout=15, check=False,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return {line.strip() for line in result.stdout.decode("utf-8", "replace").splitlines()[1:] if line.strip()}
+
+
+def _warn_missing(missing: list[str]) -> None:
+    if "tam" in missing:
+        log.warning("Tamil text will be read poorly: install tam.traineddata (%s).", _INSTALL_HINT)
+    others = [lang for lang in missing if lang != "tam"]
+    if others:
+        log.warning("OCR language pack(s) %s not installed, so text in those scripts will be read poorly (%s).",
+                    ", ".join(others), _INSTALL_HINT)
 
 
 def _usable_languages(command: str, languages: str) -> str:
     """The requested language packs that are installed (``eng`` when none are).
 
     A missing pack makes Tesseract fail every page, so it is dropped up front rather than
-    discovered page by page.
+    discovered page by page. The packs may come from the Tesseract install or from this installation's own folder
+    (``OCR_TESSDATA_DIR``; Tesseract reads one folder per call, so that folder also holds ``eng`` and ``osd``); the
+    source holding more of the wanted packs wins, the install on a tie. A missing pack is reported once.
     """
     key = (command, languages)
     if key in _LANGUAGE_CACHE:
         return _LANGUAGE_CACHE[key]
     wanted = languages if _LANGUAGE.fullmatch(languages or "") else "eng"
+    wanted_list = list(dict.fromkeys(wanted.split("+")))
     chosen = wanted
-    try:
-        result = subprocess.run([command, "--list-langs"], capture_output=True, timeout=15, check=False,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if result.returncode == 0:
-            installed = {line.strip() for line in result.stdout.decode("utf-8", "replace").splitlines()[1:]}
-            kept = [lang for lang in wanted.split("+") if lang in installed]
-            chosen = "+".join(kept) if kept else ("eng" if "eng" in installed else wanted)
-    except (OSError, subprocess.SubprocessError):
-        pass
+    folder: str | None = None
+    system = _list_languages(command, None)
+    if system is not None:
+        kept = [lang for lang in wanted_list if lang in system]
+        own_dir = _configured_tessdata_dir()
+        own = _list_languages(command, own_dir) if own_dir else None
+        # A folder is only usable when it holds the base and the orientation data too, and the ``tsv`` output setting
+        # (without it Tesseract silently prints plain text instead of the word table): it replaces the install's folder.
+        if own_dir is not None and not (own is not None and {"eng", "osd"} <= own and (own_dir / "configs" / "tsv").is_file()):
+            log.warning("OCR language folder %s is ignored: it must hold eng.traineddata, osd.traineddata and configs/tsv (%s).",
+                        own_dir, _INSTALL_HINT)
+            own = None
+        if own is not None:
+            own_kept = [lang for lang in wanted_list if lang in own]
+            if len(own_kept) > len(kept):
+                kept, folder = own_kept, str(own_dir)
+        available = (own if folder else system)
+        chosen = "+".join(kept) if kept else ("eng" if "eng" in available else wanted)
+        missing = [lang for lang in wanted_list if lang not in kept]
+        if missing:
+            _warn_missing(missing)
     _LANGUAGE_CACHE[key] = chosen
+    _TESSDATA_CHOICE[(command, chosen)] = folder
     return chosen
+
+
+def _default_aadhaar_languages() -> str:
+    """The packs an Aadhaar page is read with a second time (``OCR_AADHAAR_LANGUAGES``; Tamil with English by default)."""
+    value = os.environ.get("OCR_AADHAAR_LANGUAGES")
+    if value is None:
+        try:
+            from app.core.config import get_settings
+
+            value = get_settings().ocr_aadhaar_languages
+        except Exception:
+            value = "eng+tam"
+    return (value or "").strip()
 
 
 def _usable_native(text: str) -> bool:
@@ -448,6 +523,9 @@ def _tesseract(image: Image.Image, command: str, languages: str, timeout: float,
             # legacy-only, so a rejected --oem is retried once without it.
             for use_oem in (True, False):
                 args = [command, str(image_path), "stdout", "-l", languages, "--dpi", str(int(dpi)), "--psm", str(psm)]
+                tessdata = _TESSDATA_CHOICE.get((command, languages))
+                if tessdata:
+                    args += ["--tessdata-dir", tessdata]
                 if use_oem:
                     args += ["--oem", "1"]
                 args += ["-c", "preserve_interword_spaces=1"]
@@ -548,7 +626,7 @@ def _second_deadline(window_end: float) -> float:
     return now + max((window_end - now) * 0.6, second_opinion.RUN_SECONDS)
 
 
-def _prepare(kind: str, hi: Image.Image, color) -> Image.Image | None:
+def _prepare(kind: str, hi: Image.Image, color=None) -> Image.Image | None:
     if kind == "grey":
         return hi
     cv = enhance.has_cv()
@@ -560,18 +638,12 @@ def _prepare(kind: str, hi: Image.Image, color) -> Image.Image | None:
         return enhance.cv_adaptive(hi) if cv else enhance.local_threshold(hi)
     if kind == "sharp":
         return enhance.sharpen(enhance.cv_denoise(hi) if cv else enhance.denoise(hi))
-    if kind == "redflat":
-        rgb = color()
-        if rgb is None:
-            return None
-        red = enhance.red_channel(rgb)
-        return enhance.cv_flatten(red) if cv else enhance.flatten_background(red)
-    return None
+    return None  # "redflat" is prepared by the caller (it needs the colour render, see ``red_flat``)
 
 
 def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadline: float,
                render=None, dpi: int = OCR_BASE_DPI, render_color=None, hard_deadline: float | None = None,
-               need_more=None, fast: bool = False) -> OCRRead:
+               need_more=None, fast: bool = False, release=None) -> OCRRead:
     """Read one page image, escalating only as far as the page needs.
 
     One fast pass is enough for a clean, well covered page. Otherwise the page is read again under
@@ -579,7 +651,9 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
     contrast-stretched, binarised, red channel, a cut-out photographed card), each attempt adding
     what the others missed; the reads are merged and noise dropped. Targeted passes then read a
     passport's machine-readable zone and an Aadhaar number. ``render(dpi)`` and
-    ``render_color(dpi)`` return a fresh image of the same page at another resolution.
+    ``render_color(dpi)`` return a fresh image of the same page at another resolution; ``release(image)`` (optional) is
+    told when such a render is closed, so the caller can stop counting it. At most two page bitmaps are alive at once
+    (the page as first rendered, and one other render at a time).
 
     ``need_more(text)`` (optional) says whether the text read so far could still change what the page is taken to be;
     once it answers False the general ladder (second engine, card cut-out, extra settings, deskew, rotation) stops. The
@@ -592,6 +666,12 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
     problem: OCRRead | None = None
     timed_out = False
     opened: list[Image.Image] = []
+
+    def free(extra: Image.Image) -> None:
+        extra.close()
+        if release is not None:
+            release(extra)
+
     tried: list[str] = []
     candidates: list[merge.Candidate] = []
 
@@ -720,15 +800,30 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                     opened.append(hi)
             return hi
 
-        color_cache: list[Image.Image | None] = []
+        def red_flat() -> Image.Image | None:
+            """The background-flattened red channel of the page at the high resolution, or None without a colour render.
 
-        def color() -> Image.Image | None:
-            if not color_cache:
-                rgb = render_color(OCR_HIGH_DPI) if render_color is not None else None
-                if rgb is not None:
-                    opened.append(rgb)
-                color_cache.append(rgb)
-            return color_cache[0]
+            A colour render is three bytes per pixel, so it is the one bitmap that must not sit next to the grey high
+            resolution render: that one is freed first (``get_hi`` renders it again if a later step needs it) and the
+            colour render is freed as soon as its red channel is out. Only the page itself and one render are alive."""
+            nonlocal hi
+            if render_color is None:
+                return None
+            if hi is not None and hi is not image:
+                opened[:] = [o for o in opened if o is not hi]
+                free(hi)
+                hi = None
+            rgb = render_color(OCR_HIGH_DPI)
+            try:
+                red = enhance.red_channel(rgb)
+            finally:
+                if rgb is not image:
+                    free(rgb)
+            try:
+                return enhance.cv_flatten(red) if enhance.has_cv() else enhance.flatten_background(red)
+            finally:
+                if red is not rgb and red is not image:
+                    red.close()
 
         if first is not None and (first.confidence < 45 or first.words < 3) and not photo_like and can():
             attempt("orientation psm1", image, 1, dpi)
@@ -808,12 +903,17 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
         for name, kind, psm in (_LADDER[:1] if photo_like else _LADDER):
             if not can() or settled():
                 break
+            if kind == "redflat":
+                prepared = red_flat()
+                if prepared is None:
+                    continue
+                opened.append(prepared)
+                attempt(f"{name} psm{psm}", prepared, psm, hi_dpi, sparse=psm in (11, 12))
+                continue
             base = get_hi()
             if base is None:
                 break
-            if kind == "redflat" and color() is None:
-                continue
-            prepared = _prepare(kind, base, color)
+            prepared = _prepare(kind, base, None)
             if prepared is None:
                 continue
             if prepared is not base:
@@ -901,7 +1001,7 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
     finally:
         for extra in opened:
             if extra is not image:
-                extra.close()
+                free(extra)
 
     lines, dropped, text, confidence, words, good = current()
     if extra_lines:
@@ -934,9 +1034,16 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                        variants=list(tried))
     if not result.text.strip() and problem is not None:
         return problem
-    if sum(c.isalnum() for c in result.text) < 15 and first is not None and first.words <= 3:
+    # A picture reads as nothing at all, or as a scatter of symbols and fragments from its texture (no real words).
+    if (sum(c.isalnum() for c in result.text) < 15 and first is not None and first.words <= 3) or (_real_words(result.text) < _PHOTO_MAX_WORDS and not _has_identity(result.text)):
         try:
-            result.photo = photo_like or enhance.looks_like_photo(enhance.photo_metrics(image))
+            metrics = enhance.photo_metrics(image)
+            empty = sum(c.isalnum() for c in result.text) < 15 and first is not None and first.words <= 3
+            # Noise only (some text but no real words) must look like a picture (big AND dark, not just one of them) and
+            # carry almost no text; a pale tinted document page (a passport address page), a dark scan of a short
+            # certificate or a sparse stamped page is not enough.
+            result.photo = (photo_like or enhance.looks_like_photo(metrics)) if empty else (
+                _photo_like_page(metrics) and _almost_no_text(result.text))
         except Exception:
             result.photo = False
     return result
@@ -1045,6 +1152,40 @@ def _default_workers() -> int:
         return _DEFAULT_PAGE_WORKERS
 
 
+_PHOTO_MAX_WORDS = 8  # a picture page yields a few stray "words" from its texture; a document page yields dozens
+
+
+def _has_identity(text: str) -> bool:
+    """A checksum-valid Aadhaar number / passport MRZ, or a text the classifier already recognises: a sparse ID card."""
+    ev = classification_evidence(text or "")
+    return bool(ev["passport"] or ev["aadhaar"] or classify_page(text or "").document_type != "unknown")
+
+
+_PHOTO_TEXT_WORDS = 5    # a photo page has fewer real words than this ...
+_PHOTO_TEXT_CHARS = 60   # ... and fewer letters and digits than this: more is a page of text, whatever it looks like
+
+
+def _almost_no_text(text: str) -> bool:
+    """Whether the OCR text of a page is so thin that the page can only be a picture (stray fragments from its texture)."""
+    return _real_words(text) < _PHOTO_TEXT_WORDS and sum(c.isalnum() for c in text or "") < _PHOTO_TEXT_CHARS
+
+
+def _photo_like_page(metrics: dict) -> bool:
+    """Big AND dark: both of the thresholds enhance.looks_like_photo accepts either of. A passport address page is tinted
+    (non-paper) without being dark; a dark scan of a document is dark without covering the sheet."""
+    return metrics["dark"] >= 0.04 and metrics["nonpaper"] >= 0.30
+
+
+def _real_words(text: str) -> int:
+    """How many words of four or more letters in this OCR text look like real words (a vowel, no run of consonants or
+    tripled letter). Texture in a photograph reads as symbols and short fragments, so it scores near zero."""
+    count = 0
+    for word in re.findall(r"[A-Za-z]{4,}", text or ""):
+        if re.search(r"[aeiouAEIOU]", word) and not re.search(r"[b-df-hj-np-tv-zB-DF-HJ-NP-TV-Z]{5,}", word) and not re.search(r"(.)\1\1", word):
+            count += 1
+    return count
+
+
 class _PageReader:
     """Reads the pages of one PDF, any number at a time.
 
@@ -1065,6 +1206,8 @@ class _PageReader:
         self.image_source = image_source
         self.lock = threading.Lock()
         self.retried: set[int] = set()
+        # The page box of each page being read (set by ``_read`` for the duration of its ``_ocr``).
+        self.boxes: dict[int, object] = {}
         # Per OCR'd page: how it was read (settings, confidence, flags). Numbers and booleans only.
         self.details: dict[int, dict] = {}
 
@@ -1088,6 +1231,20 @@ class _PageReader:
             long_inches = max(rect.width, rect.height) / 72
             return max(72, round(max(1800, min(long_inches * 300, 3300)) / long_inches))
         return OCR_BASE_DPI
+
+    @staticmethod
+    def _fit_dpi(rect, dpi: float) -> int:
+        """The resolution to render a page at: ``dpi`` itself, or lower when the page box is so large that ``dpi`` would
+        exceed the pixel budget. Phone and scanner apps often write a photo's pixel size as points (a 2400x3200 px
+        picture becomes a 2400x3200 pt page), and such a page reads cleanly at a lower resolution because its content
+        is as large as its box. Only a box too big even at the floor is refused."""
+        area = max(rect.width * rect.height, 1.0)
+        ceiling = math.floor(72 * math.sqrt(_MAX_RENDER_PIXELS / area))
+        if ceiling >= dpi:
+            return int(dpi)
+        if ceiling < _MIN_RENDER_DPI:
+            raise InspectionError("This page is too large to read. Save it at a standard page size and upload it again.")
+        return ceiling
 
     def read(self, index: int) -> InspectedPage:
         number = index + 1
@@ -1120,9 +1277,7 @@ class _PageReader:
                     mixed_page = False
         if native_usable and not mixed_page:
             return InspectedPage(number, "read", "unknown", "native_text", text, 1.0)
-        dpi = self._page_dpi(rect)
-        if rect.width * rect.height * (dpi / 72) ** 2 > _MAX_RENDER_PIXELS:
-            raise InspectionError("This page is too large to read. Save it at a standard page size and upload it again.")
+        dpi = self._fit_dpi(rect, self._page_dpi(rect))
         with _GAUGE.hold():
             image = self._render(index, dpi)
             try:
@@ -1130,7 +1285,13 @@ class _PageReader:
                     return InspectedPage(number, "blank", "other", "rendered_blank", "", 1.0,
                                          "The rendered page is uniformly near-white.")
                 page_started = time.monotonic()
-                read = self._ocr(index, image, dpi)
+                # The page box goes to ``_ocr`` through the reader (not as an argument), so a subclass or fake that keeps
+                # the three-argument ``_ocr(index, image, dpi)`` signature still works.
+                self.boxes[index] = rect
+                try:
+                    read = self._ocr(index, image, dpi)
+                finally:
+                    self.boxes.pop(index, None)
             finally:
                 image.close()
         self.details[number] = {
@@ -1138,10 +1299,12 @@ class _PageReader:
             "setting": read.setting, "variants": list(read.variants), "words": read.words,
             "seconds": round(time.monotonic() - page_started, 2), **read.notes,
         }
-        if read.photo and not read.retryable and len(read.text.strip()) < 40:
+        if read.photo and not read.retryable and (len(read.text.strip()) < 40 or (_almost_no_text(read.text) and not _has_identity(read.text))):
             # A picture with next to no text (a passport photo page, the photo side of a card): it carries nothing to
-            # read, so it is accounted for as such and never holds the document back.
-            return InspectedPage(number, "blank", "other", "photo_no_text", "", 1.0,
+            # read, so it is accounted for as such and never holds the document back. What little text it has is kept
+            # (classification can still use a real word or two); stray symbols are not.
+            kept = read.text.strip() if _real_words(read.text) >= 1 and sum(c.isalnum() for c in read.text) >= 15 else ""
+            return InspectedPage(number, "blank", "other", "photo_no_text", kept, 1.0,
                                  "Photo / no text: this page is a picture with almost no text to read.")
         # A poor scan or a photo of a page reads at low average confidence yet still yields real text. A page with a
         # substantial amount of it is kept (its confidence stays low) and classified on the evidence it holds: the
@@ -1162,19 +1325,38 @@ class _PageReader:
         return result
 
     def _ocr(self, index: int, image: Image.Image, dpi: int) -> OCRRead:
-        extra_holds: list[_BitmapGauge._Hold] = []
+        rect = self.boxes.get(index)
+        # Every extra render holds one slot of the bitmap gauge until it is released (``release``) or the page is done.
+        holds: dict[int, _BitmapGauge._Hold] = {}
+
+        def fit(resolution: int) -> int:
+            # The higher-resolution renders of an oversized page stay inside the pixel budget too.
+            return self._fit_dpi(rect, resolution) if rect is not None else resolution
+
+        def rendered(make, resolution: int) -> Image.Image:
+            hold = _GAUGE.hold()
+            hold.__enter__()
+            try:
+                extra = make(index, fit(resolution))
+            except BaseException:
+                hold.__exit__()
+                raise
+            stale = holds.pop(id(extra), None)  # an earlier image of that id was freed without being released
+            if stale is not None:
+                stale.__exit__()
+            holds[id(extra)] = hold
+            return extra
 
         def render(resolution: int) -> Image.Image:
-            hold = _GAUGE.hold()
-            hold.__enter__()
-            extra_holds.append(hold)
-            return self._render(index, resolution)
+            return rendered(self._render, resolution)
 
         def render_color(resolution: int) -> Image.Image:
-            hold = _GAUGE.hold()
-            hold.__enter__()
-            extra_holds.append(hold)
-            return self._render_color(index, resolution)
+            return rendered(self._render_color, resolution)
+
+        def release(extra: Image.Image) -> None:
+            hold = holds.pop(id(extra), None)
+            if hold is not None:
+                hold.__exit__()
 
         read = OCRRead("", 0)
         try:
@@ -1183,15 +1365,66 @@ class _PageReader:
                 read = _ocr_image(image, command=self.command, languages=self.languages, deadline=window,
                                   render=render, dpi=dpi, render_color=render_color, hard_deadline=self.deadline,
                                   need_more=(lambda text: self.need_more(text, index)) if self.need_more else None,
-                                  fast=self.fast)
+                                  fast=self.fast, release=release)
                 if not read.retryable or time.monotonic() >= self.deadline:
                     break
                 if attempt == 1:
                     self.retried.add(index + 1)
         finally:
-            for hold in extra_holds:
+            for hold in holds.values():
                 hold.__exit__()
+            holds.clear()
         return read
+
+    def reread(self, index: int, page: InspectedPage, languages: str) -> InspectedPage:
+        """``page`` read once more with ``languages`` (the extra script packs of an ID card).
+
+        One plain Tesseract call on the page as it was first read (turned the same way). The new text replaces the old only
+        when it is no worse: it must share a valid Aadhaar number with the first read (when that found one), still look
+        like an Aadhaar, lose no real amount of text and not read at clearly lower confidence. Otherwise the first read
+        stands. Never raises.
+        """
+        number = index + 1
+        if time.monotonic() >= self.deadline:
+            return page
+        try:
+            with self.lock:
+                rect = self.document[index].rect
+            dpi = self._fit_dpi(rect, self._page_dpi(rect))
+            started = time.monotonic()
+            with _GAUGE.hold():
+                image = self._render(index, dpi)
+                try:
+                    turn = int(self.details.get(number, {}).get("rotation") or 0)
+                    if turn:
+                        turned, image = image, image.rotate(turn, expand=True, fillcolor=255)
+                        turned.close()
+                    window = min(self.deadline, started + self.page_timeout)
+                    read = _tesseract(image, self.command, languages, window - time.monotonic(), psm=3, dpi=dpi)
+                finally:
+                    image.close()
+            seconds = round(time.monotonic() - started, 2)
+        except Exception:
+            return page
+        if not read.text.strip() or read.reason:
+            return page
+        before = {n.number for n in validators.find_aadhaar_numbers(page.text) if n.valid}
+        after = {n.number for n in validators.find_aadhaar_numbers(read.text) if n.valid}
+        old_size, new_size = len("".join(page.text.split())), len("".join(read.text.split()))
+        better = (
+            bool(read.text.strip()) and not read.reason and (not before or bool(before & after))
+            and (classify_page(read.text).document_type == "aadhaar" or bool(after))
+            and new_size >= 0.7 * old_size and read.confidence >= page.confidence * 100 - 3
+        )
+        self.details.setdefault(number, {}).update(indic_reread=better, indic_reread_seconds=seconds)
+        if not better:
+            return page
+        text = read.text
+        # A valid number only the first read found (a second card on the sheet) is kept: its line is carried over.
+        for line in page.text.splitlines():
+            if {n.number for n in validators.find_aadhaar_numbers(line) if n.valid} - after:
+                text += "\n" + line
+        return dataclasses.replace(page, text=text, confidence=read.confidence / 100)
 
 
 def _scaled_budget(page_count: int, workers: int, page_timeout: float) -> float:
@@ -1203,7 +1436,7 @@ def inspect_document(
     data: bytes, *, tesseract_cmd: str | None = None, languages: str = "eng",
     max_pages: int = 300, page_timeout: float = 20, document_timeout: float = 600,
     page_workers: int | None = None, need_more=needs_more_reading, two_pass: bool = True,
-    on_first_pass=None,
+    on_first_pass=None, aadhaar_languages: str | None = None,
 ) -> Inspection:
     """Inspect all pages without network, database, filename or nationality rules.
 
@@ -1224,6 +1457,10 @@ def inspect_document(
     always reported in page order. A page with a usable embedded text layer is not OCR'd;
     every other page is rendered lazily and read by Tesseract. ``document_timeout`` is the
     most a document may take; the effective limit shrinks for small documents.
+
+    ``languages`` reads every page. Pages recognised as Aadhaar (bilingual cards: English plus the state language, which
+    an English-only model turns into nonsense Latin letters) are read once more with ``aadhaar_languages`` (default:
+    ``OCR_AADHAAR_LANGUAGES``, ``eng+tam``) and the better read kept; other pages are never touched by the extra packs.
     """
     if type(max_pages) is not int or max_pages < 1:
         raise InspectionError("The inspection page limit must be a positive integer.")
@@ -1235,8 +1472,14 @@ def inspect_document(
     deadline = started + document_timeout
     normalized, source_format = _normalize(data, deadline)
     command = find_tesseract(tesseract_cmd)
+    extra_languages = ""
     if command:
         languages = _usable_languages(command, languages)
+        wanted_extra = _default_aadhaar_languages() if aadhaar_languages is None else aadhaar_languages.strip()
+        if wanted_extra:
+            extra_languages = _usable_languages(command, wanted_extra)
+            if extra_languages == languages:  # nothing more to read with (a pack is missing, or the same packs)
+                extra_languages = ""
     warnings: list[str] = []
     try:
         source = fitz.open(stream=normalized, filetype="pdf")
@@ -1275,7 +1518,7 @@ def inspect_document(
                 index for index, (page, verdict) in enumerate(zip(pages, provisional))
                 if page.method != "native_text" and page.status != "blank" and (
                     (page.status == "unread" and page.method not in ("not_processed", "failed"))
-                    or (page.status == "read" and verdict.document_type == "unknown")
+                    or (page.status == "read" and verdict.document_type == "unknown" and not kind_known(page.text))
                     or (page.status == "read" and verdict.inherited and identity_hint(page.text)
                         and verdict.document_type in ("passport", "aadhaar") and verdict.document_type not in proven)
                 )
@@ -1291,6 +1534,22 @@ def inspect_document(
                     pass
             for index, page in zip(again, read_all(again)):
                 pages[index] = page
+        if extra_languages:
+            verdicts = classify_pages([p.text if p.status == "read" else "" for p in pages])
+            bilingual = [index for index, (page, verdict) in enumerate(zip(pages, verdicts))
+                         if page.status == "read" and page.method == "tesseract"
+                         and ("aadhaar" in verdict.also or verdict.document_type == "aadhaar")]
+            if bilingual:
+                def again_with_indic(index: int) -> InspectedPage:
+                    return reader.reread(index, pages[index], extra_languages)
+
+                if workers == 1 or len(bilingual) == 1:
+                    updated = [again_with_indic(index) for index in bilingual]
+                else:
+                    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="crm-ocr") as pool:
+                        updated = [future.result() for future in [pool.submit(again_with_indic, i) for i in bilingual]]
+                for index, page in zip(bilingual, updated):
+                    pages[index] = page
         for number in range(limit + 1, count + 1):
             pages.append(InspectedPage(
                 number, "unread", "unknown", "not_processed", "",
@@ -1355,8 +1614,44 @@ def inspect_document(
     if len(pages) != count or [p.page_number for p in pages] != list(range(1, count + 1)) \
             or completeness["pages_read"] + blank + len(unread) != count:
         raise InspectionError("The page check lost track of a page. Please upload the document again.", retryable=True)
-    return Inspection(pages, len(pages), source_format, warnings, normalized, completeness=completeness,
-                      patterns=patterns)
+    result = Inspection(pages, len(pages), source_format, warnings, normalized, completeness=completeness,
+                        patterns=patterns)
+    _offer_to_capture(data, result)
+    return result
+
+
+# A caller that reads a file and later needs the same pages again (the mail/WhatsApp intake cuts the other documents out of an
+# attachment by what each page says) opens `capture_inspections()`: every `inspect_document` finished inside it leaves a snapshot
+# of its result, by the SHA-256 of the bytes it was given, so the second step reuses the reading instead of running OCR again. The
+# snapshot lives only in the caller's memory for the run (it holds the page text, so it is never saved); the page threads started
+# inside inherit the scope (it is a contextvar holding one dict).
+_CAPTURE: contextvars.ContextVar["dict[str, Inspection] | None"] = contextvars.ContextVar("inspection_capture", default=None)
+_CAPTURE_LIMIT = 8   # snapshots kept per scope: the scope of one job run holds a handful of attachments
+
+
+@contextlib.contextmanager
+def capture_inspections():
+    """Collect a snapshot of every inspection finished inside the block: {sha256 of the file bytes: Inspection}. The first
+    reading of a file is kept (a later one of the same bytes, under other limits, never replaces it)."""
+    found: dict = {}
+    token = _CAPTURE.set(found)
+    try:
+        yield found
+    finally:
+        _CAPTURE.reset(token)
+
+
+def _offer_to_capture(data: bytes, inspection: Inspection) -> None:
+    found = _CAPTURE.get()
+    if found is None or len(found) >= _CAPTURE_LIMIT:
+        return
+    digest = hashlib.sha256(data).hexdigest()
+    if digest not in found:
+        # Own copies of the pages: later steps promote or demote pages of the live inspection (a page the document reader
+        # identified), and the snapshot must stay what the local reading itself saw.
+        found[digest] = dataclasses.replace(
+            inspection, pages=[dataclasses.replace(page, also=list(page.also)) for page in inspection.pages],
+            warnings=list(inspection.warnings), allow_partial=False)
 
 
 def _numbers(values: list[int]) -> str:

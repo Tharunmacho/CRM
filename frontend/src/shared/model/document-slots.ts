@@ -34,7 +34,7 @@ export const DOCUMENT_SLOTS: DocumentSlot[] = [
   { slot: 'insurance', label: 'Insurance', hint: 'The candidate’s insurance policy, before deployment.', readable: false, multiple: false, always: false, fromStage: 11 },
   { slot: 'invoice', label: 'Invoice', hint: 'The candidate’s invoice, before deployment.', readable: false, multiple: false, always: false, fromStage: 11 },
   { slot: 'photo', label: 'Photo', hint: 'Optional. Shown in the photo box at the top of the form.', readable: false, multiple: false, always: false, fromStage: null, imageOnly: true },
-  { slot: 'education_certificate', label: 'Education certificate', hint: 'Optional. The highest qualification.', readable: false, multiple: false, always: false, fromStage: null },
+  { slot: 'education_certificate', label: 'Education certificate', hint: 'Optional. The highest qualification.', readable: true, multiple: false, always: false, fromStage: null },
   { slot: 'experience_certificate', label: 'Experience certificate', hint: 'Optional. From the latest employer.', readable: false, multiple: false, always: false, fromStage: null },
   { slot: 'google_review', label: 'Google review', hint: 'Optional. Proof of the candidate’s Google review.', readable: false, multiple: false, always: false, fromStage: null },
   { slot: 'visa_stamping', label: 'Visa stamping', hint: 'Optional. The stamped passport page.', readable: false, multiple: false, always: false, fromStage: null },

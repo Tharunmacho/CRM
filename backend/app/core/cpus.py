@@ -29,3 +29,12 @@ def available_cpus() -> int:
     except AttributeError:
         pass
     return max(1, min(limits))
+
+
+def default_page_workers(cpus: int | None = None) -> int:
+    """Pages the local OCR reads at once when OCR_PAGE_WORKERS is not set: half the usable CPUs, at most 4, at least 1.
+
+    Measured on 12 scanned pages (8 cores / 12 logical): 1 worker 21 s, 2 workers 9 s, 4 workers 5.5 s, 8 workers 4.3 s. Past 4 the
+    gain is small while every worker holds a page bitmap and a Tesseract process, and the machine also runs the API, the database
+    and the other readers; half the CPUs leaves them room (a 2-core host reads one page at a time, as its operators already set)."""
+    return max(1, min(4, (cpus if cpus is not None else available_cpus()) // 2))

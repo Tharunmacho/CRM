@@ -121,6 +121,22 @@ def _uploaded_file(row: Attachment) -> dict:
             "key": row.object_key, "url": f"/api/files/{row.id}", "uploadedAt": row.uploaded_at.isoformat()}
 
 
+def _invoice_tickets_of(db: Session, pieces: list, user: User) -> None:
+    """After a scan was filed and committed: a part that landed in the air ticket field starts the invoice request like a single
+    ticket upload does. A failing invoice request cannot undo the filing, and never fails the upload."""
+    for piece in pieces:
+        if piece.slot == "air_ticket" and not piece.duplicate:
+            try:
+                from app.services.candidate_invoices import on_ticket_uploaded
+                on_ticket_uploaded(db, piece.attachment, user)
+            except Exception:
+                try:
+                    db.rollback()
+                except SQLAlchemyError:
+                    pass
+                logger.exception("Ticket saved; its invoice can be retried from the candidate form")
+
+
 def _mirror_stage_document_on_candidate(db: Session, application: Application, row: Attachment, user: User) -> Attachment | None:
     """Record a stage upload in the matching candidate document slot without copying its bytes.
 
@@ -201,6 +217,20 @@ def upload(
     if entity_type == "candidate" and slot == "photo" and not content_type.startswith("image/"):
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "The photo must be an image (JPG, PNG, WebP or HEIC).")
 
+    # A scan that holds several documents is cut by what is on each page and every part is filed in its own field. The analysis is
+    # slow (local reading, bounded), so it runs before any lock is taken, and only for someone who may work on this candidate.
+    split_plan = None
+    if entity_type == "candidate":
+        from app.services import document_splitting
+        if document_splitting.worth_analysing(slot, file.filename or "file", content_type, payload):
+            ensure_can_work_candidate(_entity(db, entity_type, entity_id), user, db)
+            # The reading takes up to ~2 minutes of OCR: give the pooled connection (and the transaction the check above
+            # opened) back first. The session reconnects by itself for the locked work below, which checks permission again.
+            db.close()
+            split_plan = document_splitting.plan_split(slot, file.filename or "file", payload, content_type)
+    written: list[str] = []
+    stored_pieces: list = []
+
     # Sharded by the first two characters so one directory never holds every file.
     key = f"{uuid.uuid4().hex}-{_safe_name(file.filename or 'file')}"
     target = STORAGE / key[:2] / key
@@ -222,6 +252,29 @@ def upload(
             lead_sheet.ensure_can_work_lead(db, record, user)
         if entity_type == "candidate" and slot == "source_bundle":
             raise HTTPException(422, "The original upload is kept as it was received and cannot be replaced by hand")
+        if split_plan is not None:
+            stored_pieces = document_splitting.store_pieces(db, user, record, split_plan, file.filename or "file", settings=settings,
+                                                            written=written, deferred=deferred)
+            # The whole scan is kept as received (the pieces are cuts of it), so nothing is lost and it can be cut again.
+            document_splitting.store_source_bundle(db, user, record, payload, content_type, file.filename or "file",
+                                                   settings=settings, written=written)
+            if not deferred:
+                from app.services.application_form import queue_reading, requeue_failed
+                queued: set[str] = set()
+                for piece in stored_pieces:
+                    if piece.slot not in document_splitting.READ_SLOTS:
+                        continue
+                    if piece.duplicate:
+                        requeue_failed(db, entity_id, piece.attachment.id)
+                    elif piece.attachment.object_key not in queued:   # one reading per stored file, however many fields it fills
+                        queued.add(piece.attachment.object_key)
+                        queue_reading(db, user, record, piece.attachment, "application/pdf")
+            row = next((piece.attachment for piece in stored_pieces if piece.slot == slot), stored_pieces[0].attachment)
+            answer = {**_uploaded_file(row), "split": document_splitting.report(stored_pieces)}
+            db.flush()
+            db.commit()
+            _invoice_tickets_of(db, stored_pieces, user)
+            return answer
         digest = hashlib.sha256(payload).hexdigest()
         if entity_type == "candidate" and slot in ("passport", "aadhaar"):
             # Front/back scans coexist in this slot. Check every file while holding the candidate
@@ -247,6 +300,7 @@ def upload(
             .order_by(Attachment.version.desc())
             .limit(1)
         )
+        from app.services.bulk_candidate_import import SENT_TO_READER
         row = Attachment(
             id=str(uuid.uuid4()),
             entity_type=entity_type,
@@ -269,14 +323,14 @@ def upload(
             entity_type=entity_type,
             entity_id=entity_id,
             meta={"attachment_id": row.id, "slot": slot, "version": row.version,
-                  **({"extraction_deferred": True} if deferred and entity_type == "candidate" and slot in ("resume", "passport", "aadhaar") else {})},
+                  **({"extraction_deferred": True} if deferred and entity_type == "candidate" and slot in SENT_TO_READER else {})},
             at=row.uploaded_at,
         ))
         if entity_type == "application":
             _mirror_stage_document_on_candidate(db, record, row, user)
         if entity_type == "lead":
             lead_sheet.note_resume_uploaded(db, record, user, row)
-        if entity_type == "candidate" and slot in ("resume", "passport", "aadhaar") and not deferred:
+        if entity_type == "candidate" and slot in SENT_TO_READER and not deferred:
             # A resume or passport stored for a candidate is read, and what it says fills the application form
             # (empty fields only; see services/form_extraction.py). The extraction worker picks the job up.
             from app.services.application_form import queue_reading
@@ -302,6 +356,9 @@ def upload(
             # that points at a document we have just deleted.
             logger.warning("Document transaction outcome is unknown; stored bytes retained.")
         else:
+            if written:
+                from app.services.bulk_candidate_import import discard_written
+                discard_written(settings, written)
             if object_key.startswith("s3://") and storage_attempted:
                 try: document_storage.delete_bytes(settings, object_key)
                 except Exception: logger.warning("An uncommitted remote document requires storage reconciliation.")

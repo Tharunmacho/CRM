@@ -14,6 +14,7 @@ from app.integrations.ocr.mapping import resume_text_from
 from app.integrations.whatsapp import download_media, WhatsAppError, WhatsAppReviewError
 from app.services.candidate_identity import enrich_empty, identity_matches
 from app.services.document_extraction import extract_attachment, ExtractionPending, request_extraction_retry
+from app.services import intake_documents
 from app.services.document_storage import put_bytes, read_bytes
 
 log = logging.getLogger(__name__)
@@ -94,6 +95,13 @@ def attach_original(db, message, candidate):
         db.add(Attachment(entity_type="candidate", entity_id=candidate.id, version=version, **link))
         db.flush()
         added.add(link["slot"])
+    # Every other document of a combined PDF (offer, visa, medical, police clearance, ticket, certificates ...) in its own field.
+    split = (message.processing_state or {}).get("split")
+    if split:
+        from app.services import intake_documents
+        filed = intake_documents.file_pieces(db, candidate, [{**split, "original_name": message.file_name or split.get("original_name")}],
+                                             origin={"channel": "whatsapp", "whatsapp_message_id": message.id})
+        added.update(item["slot"] for item in filed)
     return added
 
 
@@ -158,7 +166,8 @@ def commit_candidate(db, message, output):
     # its text (the database trigger refreshes the search index on this update).
     if text and ("resume" in new_slots or not candidate.resume_text):
         candidate.resume_text = text
-    message.candidate_id, message.status, message.last_error = candidate.id, "completed", None
+    message.candidate_id, message.status = candidate.id, "completed"
+    message.last_error = str(((message.processing_state or {}).get("split") or {}).get("note") or "")[:500] or None
     db.flush()
     # The sender's conversation belongs to this candidate, so the owner can message them.
     from app.services.whatsapp_chat import link_message_sender
@@ -201,6 +210,7 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             if paused:
                 raise WhatsAppReviewError("This message is being checked or is already saved.")
             connected_channel(db, phone_id, settings)
+    readings = {}   # the local reading of the file made in this run (in memory only: it holds page text)
     try:
         with sessions() as db:
             connected_channel(db, phone_id, settings)
@@ -255,6 +265,8 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                     if valid:
                         output = deepcopy(cached)
                         state.update(output=output, reusedReceiptId=receipt.id, extraction=deepcopy(saved_extraction))
+                        if isinstance((receipt.processing_state or {}).get("page_kinds"), dict):   # its page kinds (no text) cut this file too
+                            state["page_kinds"] = deepcopy(receipt.processing_state["page_kinds"])
                         break
             if output is not None:
                 checkpoint(state)
@@ -264,7 +276,18 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
                 state["extraction"] = deepcopy(value)
                 checkpoint(state)
             from app.services.extraction_scheduling import handoff_settings
-            output = extract(data, state=extraction_state, save=save_extraction, settings=handoff_settings(settings), designations=titles)
+            # The local reading made here is kept in memory for cutting the other documents out of the file (the pages are not read
+            # a second time); its page kinds, with no text, are saved with the message for a retry in another process.
+            fresh = {}
+            try:
+                with intake_documents.reading_scope() as fresh:
+                    output = extract(data, state=extraction_state, save=save_extraction, settings=handoff_settings(settings), designations=titles)
+            except ExtractionPending:
+                if intake_documents.remember_kinds(state, state["originalHash"], fresh):
+                    checkpoint(state)
+                raise
+            intake_documents.keep_readings(readings, fresh)
+            intake_documents.remember_kinds(state, state["originalHash"], fresh)
             state["output"] = output
             checkpoint(state)
         from app.services.document_extraction import checked_person_output
@@ -303,6 +326,14 @@ def process_message(message_id, *, sessions, settings, fetch_media=download_medi
             content = read_bytes(settings, document["object_key"])
             if hashlib.sha256(content).hexdigest() != document["content_hash"]:
                 raise WhatsAppReviewError("The saved file looks damaged. Restore the original file, then try again.")
+        # The other documents of a combined PDF are cut out here, outside any transaction, and checkpointed; the commit files them.
+        if not intake_documents.usable(state.get("split"), state["originalHash"], lambda piece_key: read_bytes(settings, piece_key)):
+            state["split"] = intake_documents.build_split(
+                data, lambda index, content: put_bytes(
+                    settings, f"whatsapp/{message_id}/piece{index}-{hashlib.sha256(content).hexdigest()}.bin", content, "application/octet-stream"),
+                covered=[number for part in output["extractions"].values() for number in part.get("selected_pages") or []],
+                extracted=True, readings=readings, report=output.get("inspection"), page_kinds=state.get("page_kinds"))
+            checkpoint(state)
         with sessions() as db:
             connected_channel(db, phone_id, settings, lock=True)
             lock_assignment_cursor(db)

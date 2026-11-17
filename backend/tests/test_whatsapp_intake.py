@@ -32,6 +32,14 @@ def setup(workspace, tmp_path, monkeypatch):
     # native person inspection remains enabled for the stored PDF.
     from app.integrations.ocr import inspection
     monkeypatch.setattr(inspection, "find_tesseract", lambda _command=None: None)
+    # The split of a combined PDF reads the OCR settings: never the real .env.
+    from app.services import bulk_candidate_import as bulk
+    monkeypatch.setattr(bulk, "get_settings", lambda: SimpleNamespace(tesseract_cmd=None, ocr_languages="eng"))
+    # Synthetic reader results do not mirror the PDF's content; filing the other documents of a combined PDF is covered by
+    # test_email_intake_split.py, so here the cutting step finds nothing.
+    from app.services import intake_documents
+    monkeypatch.setattr(intake_documents, "build_split", lambda data, store, **kw: {
+        "source_sha256": hashlib.sha256(data).hexdigest(), "original_name": "", "pieces": [], "note": None})
     settings = SimpleNamespace(whatsapp_enabled=True, whatsapp_phone_number_id="12345", whatsapp_graph_version="v24.0",
         whatsapp_access_token="synthetic-access-token", whatsapp_app_secret="synthetic-app-secret", whatsapp_verify_token="synthetic-verify-token",
         storage_dir=str(tmp_path), storage_backend="local", ocr_document_timeout_seconds=600)

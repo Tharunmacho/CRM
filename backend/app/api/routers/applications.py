@@ -26,6 +26,10 @@ from app.services import agency_settings
 from app.services import document_storage
 from app.services.traveller_id import assign_traveller_id
 
+# Closure reasons where the candidate themselves turned the placement down (stage exits "Declined", "Offer declined",
+# "Candidate not interested", "Not travelling").
+CANDIDATE_SAID_NO = frozenset({"stage_declined", "offer_declined", "not_interested", "not_travelling"})
+
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
 
@@ -487,7 +491,15 @@ def complete_stage(application_id: str, body: CompleteIn,
         app.draft = {}
         if result.closes:
             app.status, app.closure_reason = ApplicationStatus.closed, ClosureReason(result.closes)
-            candidate.status = (CandidateStatus.not_interested if app.current_stage == 2
+            # The candidate said no (declined at any stage, declined the offer, not interested, not travelling): they go back to the
+            # Data Bank marked "Not interested", so nobody reads them as a fresh "New" candidate to call again; they can still be
+            # mapped to another job. A rejection by the client or the authorities (rejected, not paid, visa refused ...) is not
+            # their choice: they return to the pool as "New" (or "Needs review") for the next job.
+            # A candidate whose data still needs review keeps the "Needs review" status after their own no (the status is what carries
+            # the flag): they stay off the Tasks list because daily_work._parked reads the closure, not the status.
+            # A stage 2 closure that is not their own no (resume not received) has no such rule, so it still parks by status.
+            candidate.status = (CandidateStatus.needs_review if candidate.needs_review and result.closes in CANDIDATE_SAID_NO
+                                else CandidateStatus.not_interested if app.current_stage == 2 or result.closes in CANDIDATE_SAID_NO
                                 else CandidateStatus.needs_review if candidate.needs_review else CandidateStatus.new)
         elif result.repeats:
             app.draft = {"applied": "yes", "appliedDate": data["retestDate"]}

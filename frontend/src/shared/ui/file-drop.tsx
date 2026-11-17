@@ -4,6 +4,7 @@ import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { DOCUMENT_ACCEPT, DOCUMENT_HELP, documentFileError, fileDownloadPath, newestFileVersions } from '@/shared/lib/document-files'
 import { fileHref } from '@/shared/api/client'
+import { splitSourceCaption } from '@/shared/lib/split-source'
 import type { FileVersion } from '@/shared/model/types'
 import { IconButton } from './primitives'
 
@@ -361,6 +362,7 @@ export function DocumentSlotRow({
           ) : (
             <p className="text-micro text-ink-400">{emptyLabel}</p>
           )}
+          {latest?.splitFrom && <p className="truncate text-micro text-ink-400" title={splitSourceCaption(latest.splitFrom)}>{splitSourceCaption(latest.splitFrom)}</p>}
         </div>
         {versions.length > 0 && (
           <button
@@ -426,6 +428,7 @@ export function DocumentSlotRow({
               <div className="min-w-0 flex-1">
                 <p className="break-words"><span className="tnum">v{v.version}{index === 0 ? ' · Latest' : ''}</span> · {v.url ? <FileLink url={v.url}>{v.name}</FileLink> : v.name}</p>
                 <p>{uploaderName?.(v.uploadedBy) || v.uploadedBy || 'Unknown uploader'} · {dateTimeLabel(v.uploadedAt)} · {v.sizeKb} KB</p>
+                {v.splitFrom && <p className="break-words">{splitSourceCaption(v.splitFrom)}</p>}
               </div>
               <DownloadLink file={v} />
             </li>

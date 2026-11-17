@@ -207,6 +207,7 @@ def candidate_detail(candidate_id: str, response: Response,
     """
     from app.api.routers.data import DOCUMENT_SLOTS, FORM_DOCUMENT_SLOTS, _candidate_out
     from app.db.models import Attachment
+    from app.services.application_form import split_sources, split_sources_statement
     from app.services.desk_snapshot import _fields, _rows
     from app.services.document_status import latest_statement, statuses_by_candidate
 
@@ -217,6 +218,8 @@ def candidate_detail(candidate_id: str, response: Response,
             Attachment.file_name, Attachment.size_kb, Attachment.uploaded_by, Attachment.uploaded_at, pending_expression(), rejected_expression())
             .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id), ("version", False)),
         _rows("manual_documents", latest_statement([candidate_id])),
+        # Which scan each split file was cut from, in the same statement (no extra round trip).
+        _rows("splits", split_sources_statement(candidate_id)),
     )
     result = db.execute(statement).mappings().one()
     if not result["candidate"]:
@@ -228,7 +231,8 @@ def candidate_detail(candidate_id: str, response: Response,
     manual_records = statuses_by_candidate(result["manual_documents"]).get(candidate_id, {})
     # The Invoice document is the admin's: no other role gets the slot, its file links or its manual status.
     slots = [slot for slot in DOCUMENT_SLOTS + FORM_DOCUMENT_SLOTS if slot[0] != "invoice" or can_see_invoices(user)]
-    return _candidate_out(result["candidate"][0], files, CandidateDetailOut, slots, manual_records)
+    splits = split_sources(row["meta"] for row in result["splits"] or [])
+    return _candidate_out(result["candidate"][0], files, CandidateDetailOut, slots, manual_records, splits)
 
 
 class OcrDataIn(BaseModel):

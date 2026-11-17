@@ -15,6 +15,7 @@ const model = await import(modelUrl)
 const bridge = await import(moduleUrl((await read('entry-bridge.ts')).replace("'./form-model'", `'${modelUrl}'`)))
 const phone = await import(moduleUrl(await read('parts/phone.ts')))
 const interest = await import(moduleUrl(await read('parts/interest.ts')))
+const merge = await import(moduleUrl(await read('duplicate-merge.ts')))
 
 const server = (patch = {}) => ({
   candidate: { id: 'c1', ref: 'CND-1', name: 'Asha Rao', canEdit: true, ownerName: 'Ravi' },
@@ -89,6 +90,15 @@ test('manual document marks preserve attribution without inventing file links, a
   assert.equal(older.capabilities.deferredDocumentReading, false)
 })
 
+test('a file cut from a larger scan keeps the scan name and pages; a malformed splitFrom is dropped', () => {
+  const file = (splitFrom) => ({ attachmentId: 'p', fileName: 'passport.pdf', url: '/api/files/p', splitFrom })
+  const read = (splitFrom) => model.normalizeForm(server({ documents: { passport: { current: file(splitFrom), files: [file(splitFrom)] } } })).documents.passport
+  assert.deepEqual(read({ fileName: 'scan.pdf', pages: [2, 3] }).files[0].splitFrom, { fileName: 'scan.pdf', pages: [2, 3] })
+  assert.equal(read(undefined).files[0].splitFrom, undefined)
+  assert.equal(read({ fileName: 'scan.pdf', pages: ['x'] }).files[0].splitFrom, undefined)
+  assert.equal('splitFrom' in read(undefined).files[0], false)
+})
+
 test('missing-field detection preserves older payloads without counting optional photos', () => {
   const form = model.normalizeForm(server())
   const live = model.completenessOf(model.toDraft(form), form.documents)
@@ -143,6 +153,16 @@ test('the extraction note says reading, filled N fields, or enter manually', () 
   assert.equal(model.isReading({ processing: false, documents: { resume: slot({ status: 'processing' }), passport: slot(null), photo: slot(null) } }), true)
 })
 
+test('the extraction note lists the fields the document had but the form did not take, never silently', () => {
+  const slot = (extraction) => ({ uploaded: true, extraction })
+  const done = model.describeExtraction('resume', slot({ status: 'done', filled: ['personal.fatherName'], kept: ['personal.dateOfBirth', 'personal.mobileNumber', 'personal.fatherName', 'document.identity'], message: '' }))
+  assert.equal(done.text, 'Filled 1 field on the form. Not changed: Date of birth, Mobile number. Check them against the document.')
+  assert.equal(model.describeExtraction('resume', slot({ status: 'done', filled: [], kept: ['personal.email', 'personal.email'], message: '' })).text,
+    'Read. Nothing new to fill in. Not changed: Email address. Check it against the document.')
+  const review = model.describeExtraction('resume', slot({ status: 'needs_review', filled: ['a'], kept: ['personal.dateOfBirth'], message: 'Some pages could not be read.' }))
+  assert.match(review.text, /^Filled 1 field\. Some pages could not be read\. Not changed: Date of birth\./)
+})
+
 test('a rejected identity stays viewable but never counts as an accepted document or a successful reading', () => {
   const extraction = { status: 'needs_review', identityMismatch: true, filled: [], coverage: { complete: false }, message: 'Different person' }
   const file = { attachmentId: 'wrong', fileName: 'wrong-person.pdf', url: '/api/files/wrong', identityMismatch: true, extractionPending: true, extraction }
@@ -152,12 +172,35 @@ test('a rejected identity stays viewable but never counts as an accepted documen
   assert.equal(slot.fileUploaded, true)
   assert.equal(slot.files[0].identityMismatch, true)
   assert.equal(slot.extraction.identityMismatch, true)
-  assert.deepEqual(model.describeExtraction('passport', slot), { tone: 'failed', text: 'Wrong document. No details were filled. Upload the correct document.' })
+  assert.deepEqual(model.describeExtraction('passport', slot), { tone: 'failed', text: "This document was stopped as another person's. No details were filled. Choose Read again to see why." })
+  assert.deepEqual(model.identityActions(slot.extraction), [{ kind: 'read_again' }])
   assert.ok(model.completenessOf(model.toDraft(form), form.documents).missing.some(item => item.key === 'documents.passport'))
   const valid = { attachmentId: 'valid', fileName: 'correct-back.pdf', url: '/api/files/valid' }
   const mixed = model.normalizeForm(server({ documents: { passport: { uploaded: true, current: file, files: [file, valid], extraction } } }))
   assert.equal(mixed.documents.passport.uploaded, true)
   assert.equal(mixed.documents.passport.files.length, 2)
+})
+
+test('a rejected document says what was read and what it was compared with, and never a number', () => {
+  const rejected = (identityReasons, extra = {}) =>
+    ({ uploaded: true, extraction: { status: 'needs_review', identityMismatch: true, filled: [], kept: [], kindsFound: [], message: '', updatedAt: '', identityReasons, ...extra } })
+  const text = (reasons, extra) => model.describeExtraction('resume', rejected(reasons, extra)).text
+  assert.equal(
+    text([{ field: 'name', documentKind: 'resume', found: 'Rashid K. Faizal', expected: 'Rashid Khan', expectedFrom: 'candidate' }]),
+    'The resume names "Rashid K. Faizal", but this candidate is "Rashid Khan". No details were filled. Open the document to check it. If it is the right person, confirm it below.')
+  assert.match(text([{ field: 'name', documentKind: 'resume', found: 'A B', expected: 'C D', expectedFrom: 'other_document', expectedKind: 'passport' }]), /but the passport read with it names "C D"/)
+  assert.match(text([{ field: 'name', documentKind: 'resume', found: 'A B', expected: 'C D', expectedFrom: 'stored_document' }]), /this candidate's other documents name "C D"/)
+  assert.match(text([{ field: 'passport_no', documentKind: 'resume' }]), /^The resume's passport number differs from the passport already on this candidate\./)
+  assert.match(text([{ field: 'candidate', documentKind: 'passport', matchedOn: ['phone number'] }]), /phone number already belongs to another candidate/)
+  assert.match(text([{ field: 'candidate' }], { duplicateOf: { candidateId: 'x', careId: 'CI-157', name: 'Rashid Khan' } }), /^Already in the CRM as CI-157 · Rashid Khan/)
+  assert.equal(text([]), "This document was stopped as another person's. No details were filled. Choose Read again to see why.")
+  const actions = (identityReasons, extra = {}) => model.identityActions(rejected(identityReasons, extra).extraction)
+  assert.deepEqual(actions([{ field: 'name' }]), [{ kind: 'read_again' }, { kind: 'confirm_name' }])
+  assert.deepEqual(actions([{ field: 'name' }, { field: 'passport_no' }]), [{ kind: 'read_again' }, { kind: 'upload' }])
+  assert.deepEqual(actions([{ field: 'passport_no' }]), [{ kind: 'check_passport' }, { kind: 'read_again' }])
+  assert.deepEqual(actions([{ field: 'candidate' }], { duplicateOf: { candidateId: 'x', careId: 'CI-157', name: 'Rashid Khan' } }),
+    [{ kind: 'open_candidate', candidateId: 'x', label: 'Open CI-157' }, { kind: 'read_again' }])
+  assert.deepEqual(actions([{ field: 'name' }, { field: 'candidate' }]), [{ kind: 'read_again' }])
 })
 
 test('tracking: rows map to the docx wording, untracked rows are not progress, the current stage is flagged', () => {
@@ -400,4 +443,87 @@ test('the warning banner shows at most three plain warnings, once each, and hide
   ]), [])
   assert.deepEqual(visibleWarnings(['One.', 'Two.', 'Three.', 'Four.', 'Five.']), ['One.', 'Two.', 'Three.'])
   assert.deepEqual(visibleWarnings(['Crop it.', 'Photo is missing.']), ['Photo is missing.'])
+})
+
+const DUPLICATE = { candidateId: 'c139', careId: 'CI-139', name: 'Rashid Khan' }
+const PLAN = { dryRun: true, allowed: true, source: { id: 'c167', careId: 'CI-167', name: 'Rashid K' }, mergedInto: { id: 'c139', careId: 'CI-139', name: 'Rashid Khan' },
+  moved: { documents: 12, jobs: 4, notes: 3, tasks: 1, applications: 0, links: 0 }, skipped: [{ kind: 'document', name: 'cv.pdf', reason: 'The same file is already on CI-139.' }], refusals: [] }
+
+test('an admin is offered Merge into CI-139 beside the already-in-the-CRM note; anybody else is told to ask an admin', () => {
+  assert.deepEqual(merge.mergeOffer(DUPLICATE, { isAdmin: true, candidateId: 'c167' }), { kind: 'merge', targetId: 'c139', targetLabel: 'CI-139' })
+  assert.equal(merge.mergeButtonLabel('CI-139'), 'Merge into CI-139')
+  assert.deepEqual(merge.mergeOffer(DUPLICATE, { isAdmin: false, candidateId: 'c167' }), { kind: 'ask_admin', text: 'Ask an admin to merge it' })
+  assert.equal(merge.mergeOffer({ ...DUPLICATE, careId: null }, { isAdmin: true, candidateId: 'c167' }).targetLabel, 'Rashid Khan')
+  assert.equal(merge.mergeOffer(DUPLICATE, { isAdmin: true, candidateId: 'c139' }), null)       // never a merge with oneself
+  assert.equal(merge.mergeOffer(null, { isAdmin: true, candidateId: 'c167' }), null)
+  // The note itself and its other buttons are unchanged.
+  assert.match(model.describeExtraction('passport', { uploaded: true, extraction: { identityMismatch: true, duplicateOf: DUPLICATE, identityReasons: [] } }).text, /^Already in the CRM as CI-139 · Rashid Khan/)
+})
+
+test('the merge confirmation says what moves and that the duplicate is removed', () => {
+  const plan = merge.parseMergePlan(PLAN)
+  assert.equal(merge.mergeConfirmText(plan, 'CI-167', 'CI-139'),
+    '12 documents, 3 notes, 1 task will be moved to CI-139; this candidate CI-167 is then removed. Files already on CI-139 are kept as they are.')
+  assert.equal(merge.movedSummary({ documents: 1, notes: 0, tasks: 2, applications: 1 }), '1 document, 2 tasks, 1 placement')
+  assert.equal(merge.mergeConfirmText({ moved: { documents: 0, notes: 0, tasks: 0 } }, 'CI-167', 'CI-139'),
+    'Nothing needs to move to CI-139; this candidate CI-167 is removed. Files already on CI-139 are kept as they are.')
+  assert.equal(merge.mergeDoneText({ identityCheck: { accepted: 1, stillNeedReview: 0, requeued: 0 } }, { source: 'CI-167', target: 'CI-139' }),
+    'CI-167 was merged into CI-139. 1 stopped document is now read for CI-139.')
+  assert.equal(merge.mergeDoneText({ identityCheck: null }, { source: 'CI-167', target: 'CI-139' }), 'CI-167 was merged into CI-139.')
+})
+
+test('the merge dialog state: checking, ready, refused, confirmable refusal, merging, failed', () => {
+  const labels = { source: 'CI-167', target: 'CI-139' }
+  const plan = merge.parseMergePlan(PLAN)
+  const checking = merge.mergeDialogView({ phase: 'checking', plan: null }, labels)
+  assert.deepEqual([checking.busy, checking.confirmEnabled], [true, false])
+  const ready = merge.mergeDialogView({ phase: 'ready', plan }, labels)
+  assert.equal(ready.title, 'Merge CI-167 into CI-139')
+  assert.equal(ready.confirmLabel, 'Merge and remove CI-167')
+  assert.equal(ready.cancelLabel, 'Cancel')
+  assert.deepEqual([ready.confirmEnabled, ready.blocked, ready.needsIdentityConfirm], [true, false, false])
+  assert.deepEqual(ready.skipped, ['cv.pdf: The same file is already on CI-139.'])
+  assert.equal(ready.lines.length, 1)                                                      // no deployed notice for an ordinary target
+  const deployed = merge.parseMergePlan({ ...PLAN, targetDeployed: true, notice: 'CI-139 is deployed: documents and empty details are added, its stages are not touched.',
+    skipped: [{ kind: 'placement', name: 'ORD-2', reason: 'CI-139 is deployed, so its stages are not touched: the active placement on ORD-2 is not carried over and goes with CI-167.' }] })
+  const deployedView = merge.mergeDialogView({ phase: 'ready', plan: deployed }, labels)
+  assert.equal(deployedView.lines[0], 'CI-139 is deployed: documents and empty details are added, its stages are not touched.')
+  assert.match(deployedView.lines[1], /^12 documents, 3 notes, 1 task will be moved to CI-139/)
+  assert.equal(deployedView.confirmEnabled, true)
+  assert.match(deployedView.skipped[0], /^ORD-2: CI-139 is deployed/)
+  assert.equal(merge.mergeDialogView({ phase: 'ready', plan: merge.parseMergePlan({ ...PLAN, targetDeployed: true }) }, labels).lines[0], 'CI-139 is deployed: documents and empty details are added, its stages are not touched.')   // an older server's answer still says it
+  const hard = merge.parseMergePlan({ allowed: false, refusals: [{ code: 'kept_on_record', message: 'CI-139 has travelled.', canConfirm: false }] })
+  const refused = merge.mergeDialogView({ phase: 'ready', plan: hard, identityConfirmed: true }, labels)
+  assert.deepEqual([refused.blocked, refused.confirmEnabled, refused.needsIdentityConfirm, refused.cancelLabel, refused.lines], [true, false, false, 'Close', ['CI-139 has travelled.']])
+  const soft = merge.parseMergePlan({ allowed: false, refusals: [{ code: 'identity_unconfirmed', message: 'Nothing shows they are one person.', canConfirm: true }] })
+  assert.deepEqual([merge.mergeDialogView({ phase: 'ready', plan: soft }, labels).confirmEnabled, merge.mergeDialogView({ phase: 'ready', plan: soft, identityConfirmed: true }, labels).confirmEnabled], [false, true])
+  const mixed = merge.parseMergePlan({ allowed: false, refusals: [{ code: 'kept_on_record', message: 'a', canConfirm: false }, { code: 'identity_unconfirmed', message: 'b', canConfirm: true }] })
+  assert.equal(merge.mergeDialogView({ phase: 'ready', plan: mixed, identityConfirmed: true }, labels).confirmEnabled, false)   // a confirmation never overrides a hard refusal
+  const merging = merge.mergeDialogView({ phase: 'merging', plan }, labels)
+  assert.deepEqual([merging.busy, merging.confirmEnabled, merging.confirmLabel], [true, false, 'Merging…'])
+  assert.deepEqual(merge.mergeDialogView({ phase: 'failed', plan: null, error: 'Both candidates are on an order.' }, labels).lines, ['Both candidates are on an order.'])
+  assert.match(merge.mergeDialogView({ phase: 'failed', plan: null }, labels).lines[0], /could not be checked/)
+  assert.equal(merge.mergeDialogView({ phase: 'ready', plan: merge.parseMergePlan({ alreadyMerged: true, mergedInto: PLAN.mergedInto }) }, labels).lines[0], 'CI-167 was already merged into CI-139.')
+})
+
+test('the server answer is read defensively', () => {
+  const empty = merge.parseMergePlan(null)
+  assert.deepEqual([empty.allowed, empty.alreadyMerged, empty.source, empty.mergedInto, empty.skipped, empty.refusals, empty.identityCheck, empty.targetDeployed, empty.notice], [true, false, null, null, [], [], null, false, null])
+  assert.deepEqual(empty.moved, { documents: 0, jobs: 0, notes: 0, tasks: 0, applications: 0 })
+  assert.equal(merge.parseMergePlan({ moved: { documents: -3, notes: 'x', tasks: 2.7 } }).moved.tasks, 2)
+})
+
+test('the candidate to merge into is found by name, Care India ID, reference or phone, never the candidate itself', () => {
+  const people = [
+    { id: 'a', careId: 'CI-139', ref: 'CND-01', name: 'Rashid Khan', phone: '+91 98765 43210' },
+    { id: 'b', careId: 'CI-167', ref: 'CND-02', name: 'Rashid K', phone: '90000 11111' },
+    { id: 'c', careId: 'CI-140', ref: 'CND-03', name: 'Asha Rao', phone: '' },
+  ]
+  assert.deepEqual(merge.findMergeTargets(people, 'ci-139', 'b').map((p) => p.id), ['a'])
+  assert.deepEqual(merge.findMergeTargets(people, 'rashid', 'b').map((p) => p.id), ['a'])         // the duplicate itself is left out
+  assert.deepEqual(merge.findMergeTargets(people, 'rashid', 'zzz').map((p) => p.id), ['b', 'a'])  // both start with the search: sorted by name
+  assert.deepEqual(merge.findMergeTargets(people, '98765', 'b').map((p) => p.id), ['a'])
+  assert.deepEqual(merge.findMergeTargets(people, 'cnd-03', 'b').map((p) => p.id), ['c'])
+  assert.deepEqual(merge.findMergeTargets(people, 's', 'b'), [])                                   // one letter searches nothing
+  assert.deepEqual(merge.findMergeTargets(people, 'nobody', 'b'), [])
 })

@@ -400,6 +400,49 @@ def _other_evidence(text: str) -> bool:
     )
 
 
+# A degree, diploma or mark-sheet: proof of the candidate's education, so it is read together with the resume (the
+# qualification, institution and year go to the Education section, and the name on it is the candidate's).
+_EDU_STRONG = re.compile(
+    r"\b(?:hereby\s+makes?\s+known|(?:has\s+been\s+)?admitted\s+to\s+the\s+degree|degree\s+certificate|provisional\s+(?:degree\s+)?certificate|"
+    r"consolidated\s+mark|statement\s+of\s+marks|mark\s*sheet|marks?\s+(?:memo|card)|school\s+leaving\s+certificate|"
+    r"convocation|transfer\s+certificate|diploma\s+certificate|secondary\s+school\s+certificate|"
+    r"higher\s+secondary\s+(?:course\s+)?(?:certificate|examination)|statement\s+of\s+grades)\b", re.I)
+_EDU_BODY = re.compile(r"\b(?:university|college|polytechnic|institute\s+of\s+technology|board\s+of\s+(?:secondary|higher|school|technical)|"
+                       r"directorate\s+of\s+(?:government\s+)?examinations?)\b", re.I)
+_EDU_AWARD = re.compile(r"\b(?:bachelor\s+of|master\s+of|diploma\s+in|doctor\s+of|b\.?\s?tech|m\.?\s?tech|sslc|hsc)\b", re.I)
+# 'B.E' / 'BE' is only a degree when it is written in capitals (the lowercase word 'be' is ordinary English), either dotted ('B.E',
+# 'B.E.') or as a standalone upper-case 'BE' followed by a branch name.
+_EDU_BE = re.compile(
+    r"(?<![A-Za-z.])B\.\s?E\b\.?|(?<![A-Za-z.])BE\s+(?:Mechanical|Civil|Computer|Electrical|Electronics|ECE|EEE|EE|CSE|IT|Mech|"
+    r"Automobile|Chemical|Aeronautical|Production|Instrumentation|Biomedical|Marine|Metallurgy)\b")
+# What a degree page also says: a certificate / pass / award / marks wording, or the student's register or roll number.
+_EDU_MARKER = re.compile(
+    r"\b(?:certif(?:y|ies|ied|icate)|passed|awarded|conferred|first\s+class|second\s+class|distinction|marks?|grades?|cgpa|convocation|"
+    r"register\s+(?:no|number)|roll\s+(?:no|number)|reg\.?\s*no)\b", re.I)
+
+
+_NOT_EDUCATION = re.compile(
+    r"\b(?:worked|employed|employment|experience\s+(?:certificate|letter)|offer|salary|hospital|medical|physically\s+fit|fit\s+for|"
+    r"police|criminal|clearance|emigration|passport\s+no|flight|ticket|training\s+course|course\s+of\s+\d+|hours|safety\s+training|"
+    r"verification|receipts?|undertaking|declaration|fees?|invoice|insurance|self[-\s]declaration|affidavit|"
+    r"curriculum\s+vitae|resume|career\s+objective|work\s+experience)\b", re.I)
+
+
+def education_certificate(text: str) -> bool:
+    """A degree certificate, mark-sheet or school certificate (by its wording, never its file name)."""
+    text = text or ""
+    if len(text.strip()) < 60:
+        return False
+    if _EDU_STRONG.search(text):
+        return True
+    # A university and a degree named on a page are only education evidence when the page is not about work, health, police,
+    # emigration or travel (an experience letter or a medical certificate also names the doctor's or employee's degree).
+    # It also needs two independent signals besides: an institution AND a degree/award phrase AND a certificate/marks marker.
+    if not (_EDU_BODY.search(text) and (_EDU_AWARD.search(text) or _EDU_BE.search(text)) and _EDU_MARKER.search(text)):
+        return False
+    return not _NOT_EDUCATION.search(text) and not _supporting_marker(text)
+
+
 def _evidence(text: str) -> dict:
     """Checksum-backed evidence (validators.identity_evidence): a passport machine-readable zone whose check digits
     pass, or a 12-digit number that passes the Verhoeff check. Ordinary text cannot pass these by accident, so
@@ -411,6 +454,18 @@ def _evidence(text: str) -> dict:
         return validators.identity_evidence(text)
     except Exception:  # an aid; never a reason to fail a page
         return {"passport": False, "aadhaar": False}
+
+
+def kind_known(text: str) -> bool:
+    """Whether the page is already one of the candidate's other documents (medical, police clearance, visa, offer ...) on its own
+    wording (kind_classifier). Reading such a page again under rotated or sparse settings only buries a clean read in noise, so the
+    escalation stops there. Never raises."""
+    try:
+        from .kind_classifier import classify_kind
+        guess = classify_kind(text)
+        return guess.kind is not None and not guess.alongside_identity and not guess.inherited
+    except Exception:
+        return False
 
 
 def needs_more_reading(text: str, index: int | None = None) -> bool:
@@ -429,6 +484,8 @@ def needs_more_reading(text: str, index: int | None = None) -> bool:
         return False
     if classify_page(text).document_type != "unknown":
         return False
+    if kind_known(text):
+        return False
     lines = sum(1 for line in stripped.splitlines() if line.strip())
     return not (len(stripped) >= 300 and lines >= 8 and _reads_like_language(stripped) and not identity_hint(text))
 
@@ -446,6 +503,32 @@ def _reads_like_language(text: str) -> bool:
     return common >= max(6, 0.08 * len(words))
 
 
+# Words and marks of a passport data page that survive even a badly read scan ('Pasaport', 'Govern Name(s)', the '<' filler
+# of the machine-readable zone, the 'IND...' country-code run of its first line). Any of them rules out an Aadhaar card.
+_PASSPORT_NOISE = re.compile(
+    r"p[a@]s+[a@]?p[o0]rt|\bnationality\b|\bsurname\b|\bgiven\s+name|\bgovern\s+name|\brepublic\s+of\s+india\b|"
+    r"\bplace\s+of\s+(?:birth|issue)\b|<<|(?-i:\bIND(?!IA\b)[A-Z]{3,})", re.I,
+)
+
+
+def _aadhaar_by_number_alone(text: str) -> bool:
+    """Whether a checksum-valid 12-digit number, with no card structure around it, is enough to call a page an Aadhaar card.
+
+    A number the checksum accepted only after changing a digit (a repaired number) is a coin toss on a noisy page, and a page
+    that still shows passport words or the '<' filler is a badly read passport, never a card: neither counts. A repaired
+    number needs at least one card caption (date of birth, sex, address ...) beside it."""
+    if _PASSPORT_NOISE.search(text):
+        return False
+    try:
+        from . import validators
+        numbers = [n for n in validators.find_aadhaar_numbers(text) if n.valid]
+    except Exception:  # an aid; never a reason to fail a page
+        return True
+    if any(not n.repaired for n in numbers):
+        return True
+    return bool(_AADHAAR_BRAND.search(text) or _AADHAAR_ISSUER.search(text) or any(p.search(text) for p in _AADHAAR_FIELDS))
+
+
 def classify_page(text: str) -> PageClassification:
     """Unknown means review is needed; it never means an empty/blank page."""
     text = text or ""
@@ -455,7 +538,8 @@ def classify_page(text: str) -> PageClassification:
     aadhaar = _is_aadhaar(text)
     # A valid Aadhaar number alone is not card evidence on a résumé, passport, certificate or invoice:
     # unrelated long numbers can pass the checksum. Genuine Aadhaar structure still allows a mixed page above.
-    if not aadhaar and evidence["aadhaar"] and not seed and not passport and not _supporting_marker(text):
+    if not aadhaar and evidence["aadhaar"] and not seed and not passport and not _supporting_marker(text) \
+            and _aadhaar_by_number_alone(text):
         aadhaar = True
     # A visa page is a supporting document; a résumé that merely lists visa details is not.
     supporting = _supporting_marker(text) or (_is_visa(text) and not seed)
@@ -478,6 +562,8 @@ def classify_page(text: str) -> PageClassification:
         return PageClassification("aadhaar", 0.95, "Aadhaar issuing authority with card number or identity fields.")
     if passport:
         return PageClassification("passport", 0.95, "Passport document structure or machine-readable zone.")
+    if education_certificate(text) and not _is_visa(text):
+        return PageClassification("resume", 0.85, "Education certificate; read together with the resume.")
     if supporting:
         return PageClassification("other", 0.9, "Certificate, identity document, invoice or other supporting document.")
     if seed:

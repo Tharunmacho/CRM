@@ -18,6 +18,9 @@ import { HistoryImport } from '@/features/inbox/history-import'
 import { ConnectMailbox } from '@/features/inbox/connect-mailbox'
 import { AttachmentPreview, type PreviewFile } from '@/features/inbox/attachment-preview'
 import { MailCompose } from '@/features/inbox/mail-compose'
+import { IngestedLog } from '@/features/inbox/ingested-log'
+import { useIngestedSummary } from '@/features/inbox/use-ingested'
+import { readMode, writeMode, type InboxMode } from '@/features/inbox/ingested-view'
 import { AccountRail } from '@/features/inbox/account-strip'
 import { CandidateChip, FileIcon, ProviderMark, SenderAvatar, fileSize } from '@/features/inbox/mail-parts'
 import type { DraftMode, MailDraft, MailFolder, MailboxMessage, MailboxResult } from '@/features/inbox/mailbox-types'
@@ -28,6 +31,10 @@ const PAGE_SIZE = 25
 type InboxTab = 'all' | 'unread' | 'starred' | 'archived'
 const TABS: [InboxTab, string][] = [['all', 'All'], ['unread', 'Unread'], ['starred', 'Starred'], ['archived', 'Archived']]
 const DRAFT_STATUS: Record<string, string> = { draft: 'Draft', sending: 'Sending', sent: 'Sent', unknown: 'Not confirmed as sent', failed: 'Not sent', discarded: 'Discarded' }
+const MODES: [InboxMode, string][] = [['from', 'From email'], ['mail', 'All mail']]
+const modeStorage = () => { try { return window.localStorage } catch { return null } }
+/** Links that point at a mailbox, folder or message (candidate source links, OAuth returns) always open the mail view. */
+const initialMode = (): InboxMode => { const q = new URLSearchParams(window.location.search); return ['message', 'account', 'folder', 'mail_connected', 'mail_error'].some((key) => q.has(key)) ? 'mail' : readMode(modeStorage()) }
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'We could not load the mailbox. Check your internet and try again.'
 /** The plain-English state of a mailbox for the manager dialog. */
 const accountState = (account: InboxAccount): { tone: 'neutral' | 'green' | 'amber' | 'stamp'; text: string } => {
@@ -44,6 +51,9 @@ export default function InboxScreen() {
   const location = useLocation()
   const admin = store.can('connect_sources')
   const [bundleSource, setBundleSource] = useState<string | null>(null)
+  // The default view is the candidate-intake log ("From email"); the full mail experience is the "All mail" tab. The choice is remembered.
+  const [mode, setMode] = useState<InboxMode>(initialMode)
+  const [fromLog, setFromLog] = useState(false)
   // The chosen mailbox and folder live in the address (?account=<id>&folder=<name>) so reload, deep links and Back all work.
   const [accountId, setAccountId] = useState(() => new URLSearchParams(window.location.search).get('account') ?? '')
   const [folder, setFolder] = useState(() => new URLSearchParams(window.location.search).get('folder') ?? 'INBOX')
@@ -97,6 +107,9 @@ export default function InboxScreen() {
   const composeAccount = isLiveAccount(account) ? account : accounts.find(isLiveAccount)
   const providerName = account ? PROVIDER_LABEL[account.provider] : 'mailbox'
   const busy = inbox.busy !== null
+  // A server without the intake-log endpoints keeps the old mail view and hides the tab switch.
+  const ingested = useIngestedSummary(store.me.id, mode === 'from', revision)
+  const showLog = mode === 'from' && !ingested.unavailable
   const currentFolder = folders.find((item) => item.name === folder)
   const currentRole = currentFolder?.role ?? 'inbox'
   const summaryMessages = inbox.data?.messages ?? []
@@ -256,6 +269,9 @@ export default function InboxScreen() {
   // "All accounts" and mailboxes that are not connected have no folders on a server, so the folder list shows the saved mail only.
   const folderChoices = useMemo<{ name: string; label: string }[]>(() => liveMailbox && folders.length ? folders.map((item) => ({ name: item.name, label: folderLabel(item.name, item.role) })) : [{ name: 'INBOX', label: liveMailbox ? 'Inbox' : 'Saved mail' }], [folders, liveMailbox])
   const refresh = () => { bump(); void inbox.refresh().catch(() => {}) }
+  const chooseMode = (next: InboxMode) => { setMode(next); writeMode(modeStorage(), next); if (next === 'from') { setOpenId(null); setFocusMessage(null); setFromLog(false) } }
+  // A row of the intake log opens the original email in the mail reader, the same way a candidate's source-message link does.
+  const openFromLog = (messageId: string) => { resetContext(''); setFocusMessage(messageId); setOpenId(messageId); setFromLog(true); setMode('mail') }
   // Gmail and Microsoft sign-in return here with the outcome in the address.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -292,23 +308,24 @@ export default function InboxScreen() {
   const listLoading = remoteView ? !mailbox && !mailError : !inbox.data && !inbox.error
 
   return <div className={cn('inbox-v2 mb-page', reading && 'is-reading')}>
-    <PageHeader title="Inbox" eyebrow="Mail" description="All your mailboxes in one list. Read mail, reply, and turn resumes into candidates."
+    <PageHeader title="Inbox" eyebrow="Mail" description={showLog ? 'Every resume that arrived by email, and what became of it.' : 'All your mailboxes in one list. Read mail, reply, and turn resumes into candidates.'}
       actions={<>
         <Button icon={<RefreshCw size={15} />} disabled={loading || busy} onClick={refresh}>Refresh</Button>
         {admin && <Button icon={<Settings2 size={15} />} disabled={busy} onClick={() => setManaging(true)}>Mailboxes</Button>}
         {liveMailbox && admin && <Button icon={<FolderPlus size={15} />} disabled={busy} onClick={() => { setFolderName(''); setNewFolder(true) }}>New folder</Button>}
         <Button variant="primary" icon={<Pencil size={15} />} disabled={busy || !composeAccount || composeAccount.connectionStatus === 'disconnected'} title={composeAccount ? undefined : 'Connect a mailbox to compose'} onClick={() => createDraft('compose')}>Compose</Button>
       </>} />
-    {(inbox.error || inbox.actionError || mailError) && <div role="alert" className="mb-alert is-error"><AlertTriangle size={18} /><div><p className="break-words">{inbox.actionError || mailError || inbox.error}</p>{mailError && mailbox && <p className="mb-alert-sub">Showing the last mail we loaded. Press Refresh to try again.</p>}</div><Button size="sm" onClick={refresh}>Try again</Button></div>}
+    {!ingested.unavailable && <div className="ig-modebar"><Tabs variant="pill" className="ig-mode" tabs={MODES.map(([key, label]) => ({ key, label }))} active={mode} onChange={(key) => chooseMode(key as InboxMode)} /><span className="ig-modehint">{mode === 'from' ? 'Emails that became candidates, and what needs a look' : 'Read, reply and compose mail'}</span></div>}
+    {(showLog ? inbox.actionError : (inbox.error || inbox.actionError || mailError)) && <div role="alert" className="mb-alert is-error"><AlertTriangle size={18} /><div><p className="break-words">{showLog ? inbox.actionError : (inbox.actionError || mailError || inbox.error)}</p>{!showLog && mailError && mailbox && <p className="mb-alert-sub">Showing the last mail we loaded. Press Refresh to try again.</p>}</div><Button size="sm" onClick={refresh}>Try again</Button></div>}
     {inbox.notice && <p role="status" className="mb-alert is-info"><Info size={18} /><span>{inbox.notice}</span></p>}
-    {!ready && !inbox.error && <div role="status" aria-label="Loading mailbox" className="mb-skeleton">
+    {!showLog && !ready && !inbox.error && <div role="status" aria-label="Loading mailbox" className="mb-skeleton">
       <div className="mb-card mb-skel-rail">{[0, 1, 2].map((row) => <i key={row} />)}</div>
       <div className="mb-card mb-skel-list"><div className="mb-skel-bar" />{[0, 1, 2, 3, 4, 5].map((row) => <div key={row} className="mb-skel-row"><span /><div><i /><i /></div></div>)}</div>
       <div className="mb-card mb-skel-reader" />
     </div>}
-    {!ready && inbox.error && <Panel className="mb-empty-panel"><EmptyState icon={<AlertTriangle size={24} />} title="We could not load your mail" description="Check your internet connection, then try again. Nothing was lost." action={<Button variant="primary" icon={<RefreshCw size={15} />} onClick={refresh}>Try again</Button>} /></Panel>}
-    {focusMessage && <p className="mb-focus-note">Showing a candidate source message. <button type="button" onClick={() => { setFocusMessage(null); setOpenId(null); navigate('/inbox', { replace: true }) }}>Return to mailbox</button></p>}
-    {inbox.data && accounts.length === 0 ? <Panel className="mb-empty-panel"><EmptyState icon={<Mail size={24} />} title="No mailbox connected yet" description={admin ? 'Connect Gmail, Microsoft 365, Zoho or any other mailbox. Add as many as you need and read them all here.' : 'An admin can connect the recruitment mailboxes.'} action={admin ? <Button variant="primary" icon={<Plus size={15} />} onClick={() => setConnect({ address: '' })}>Connect mailbox</Button> : undefined} /></Panel> : ready && <>
+    {!showLog && !ready && inbox.error && <Panel className="mb-empty-panel"><EmptyState icon={<AlertTriangle size={24} />} title="We could not load your mail" description="Check your internet connection, then try again. Nothing was lost." action={<Button variant="primary" icon={<RefreshCw size={15} />} onClick={refresh}>Try again</Button>} /></Panel>}
+    {!showLog && focusMessage && <p className="mb-focus-note">{fromLog ? 'Showing the original email.' : 'Showing a candidate source message.'} {fromLog && <><button type="button" onClick={() => chooseMode('from')}>Back to From email</button>{' · '}</>}<button type="button" onClick={() => { setFocusMessage(null); setOpenId(null); setFromLog(false); navigate('/inbox', { replace: true }) }}>Return to mailbox</button></p>}
+    {inbox.data && accounts.length === 0 ? <Panel className="mb-empty-panel"><EmptyState icon={<Mail size={24} />} title="No mailbox connected yet" description={admin ? 'Connect Gmail, Microsoft 365, Zoho or any other mailbox. Add as many as you need and read them all here.' : 'An admin can connect the recruitment mailboxes.'} action={admin ? <Button variant="primary" icon={<Plus size={15} />} onClick={() => setConnect({ address: '' })}>Connect mailbox</Button> : undefined} /></Panel> : showLog ? <div className="mb"><div className="mb-shell"><IngestedLog summary={ingested} identityId={store.me.id} revision={revision} admin={admin} openingCandidate={openingCandidate} onOpenMessage={openFromLog} onOpenCandidate={(id) => void openCandidate(id)} onManage={() => setManaging(true)} /></div></div> : ready && <>
       {account && (account.lastError || !liveMailbox) && <div className="mb-alert is-warn">
         <AlertTriangle size={18} />
         <div className="min-w-0 flex-1">

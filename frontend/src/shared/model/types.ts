@@ -74,6 +74,8 @@ export interface FileVersion {
   uploadedAt: string
   extractionPending?: boolean
   identityMismatch?: boolean
+  /** Set when this file was cut from a larger scan at import: that scan's name and the pages of it this file holds. */
+  splitFrom?: { fileName: string; pages: number[] }
 }
 
 export interface DocumentSlot {

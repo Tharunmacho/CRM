@@ -121,7 +121,7 @@ def test_an_empty_database_gets_zero_counters_so_the_first_numbers_are_001(schem
         db.commit()
 
 
-def test_new_ids_continue_after_the_maximum_and_numbers_are_never_reused(schema_database):
+def test_new_ids_continue_after_the_maximum_and_the_deleted_tail_numbers_are_given_again(schema_database):
     engine = schema_database
     _migrate(engine, PREVIOUS)
     seed(engine)
@@ -137,28 +137,34 @@ def test_new_ids_continue_after_the_maximum_and_numbers_are_never_reused(schema_
         # A direct insert that forgets the ID is numbered by the database trigger from the same counter.
         assert db.execute(text("INSERT INTO crm_candidates (id, ref, name, phone, source) VALUES ('h', 'CND-h', 'h', '90000000300', 'walk_in') RETURNING care_id")).scalar_one() == "CI-008"
         db.commit()
-        # Deleting the highest candidate (and the highest traveller) frees nothing.
+        # Deleting the highest candidates frees their Data Bank numbers: the next one is the Data Bank maximum (CI-006) + 1.
+        # Traveller numbers are a separate series and are still never reused: CI-T-005 went to g and stays used.
         db.delete(db.get(Candidate, "g"))
         db.delete(db.get(Candidate, "h"))
         db.commit()
-        assert allocate_care_id(db) == "CI-009"
+        assert allocate_care_id(db) == "CI-007"
         assert allocate_traveller_id(db) == "CI-T-006"
         db.commit()
-        assert counters(db.connection(), "crm_candidate_id_counters") == {"GLOBAL": 9}
+        assert counters(db.connection(), "crm_candidate_id_counters") == {"GLOBAL": 7}   # the counter row equals the number just given
 
 
 def test_ids_grow_naturally_past_999(schema_database):
     engine = schema_database
     _migrate(engine, "head")
     with sessionmaker(bind=engine)() as db:
-        db.execute(text("UPDATE crm_candidate_id_counters SET last_serial = 998"))
-        db.execute(text("INSERT INTO crm_candidate_id_counters (series, last_serial) VALUES ('GLOBAL', 998) ON CONFLICT (series) DO UPDATE SET last_serial = 998"))
+        # The Data Bank holds CI-998 as its highest number; the Care India number is read from there (the counter row is ignored).
+        db.execute(text("INSERT INTO crm_candidates (id, ref, care_id, name, phone, source) VALUES ('top', 'CND-TOP', 'CI-998', 'top', '90000000399', 'walk_in')"))
         db.execute(text("INSERT INTO crm_traveller_id_counters (series, last_serial) VALUES ('GLOBAL', 998) ON CONFLICT (series) DO UPDATE SET last_serial = 998"))
-        assert [allocate_care_id(db) for _ in range(3)] == ["CI-999", "CI-1000", "CI-1001"]
+        given = []
+        for index in range(3):
+            given.append(allocate_care_id(db))
+            db.add(Candidate(id=f"n{index}", ref=f"CND-N{index}", name="n", phone=f"9000000040{index}", source="walk_in", care_id=given[-1]))
+            db.flush()
+        assert given == ["CI-999", "CI-1000", "CI-1001"]
         assert [allocate_traveller_id(db) for _ in range(3)] == ["CI-T-999", "CI-T-1000", "CI-T-1001"]
         # The database-side backstop agrees (it must not truncate to three digits).
-        db.execute(text("UPDATE crm_candidate_id_counters SET last_serial = 999"))
-        assert db.execute(text("INSERT INTO crm_candidates (id, ref, name, phone, source) VALUES ('big', 'CND-BIG', 'big', '90000000400', 'walk_in') RETURNING care_id")).scalar_one() == "CI-1000"
+        db.execute(text("UPDATE crm_candidate_id_counters SET last_serial = 1001"))
+        assert db.execute(text("INSERT INTO crm_candidates (id, ref, name, phone, source) VALUES ('big', 'CND-BIG', 'big', '90000000410', 'walk_in') RETURNING care_id")).scalar_one() == "CI-1002"
         db.commit()
 
 

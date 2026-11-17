@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Download, FileText, Image as ImageIcon, LoaderCircle, Plus } from 'lucide-react'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { DOCUMENT_ACCEPT, fileDownloadPath, newestFileVersions } from '@/shared/lib/document-files'
+import { splitSourceCaption } from '@/shared/lib/split-source'
 import { fileHref } from '@/shared/api/client'
 import type { FileVersion } from '@/shared/model/types'
 import { FileLink } from '@/shared/ui/file-drop'
@@ -50,6 +51,7 @@ export function CertificateSlotRow({ label, files, onUpload, uploaderName, empty
                 <div className="cp-cert-main">
                   <p className="cp-cert-name">{file.url ? <FileLink url={file.url} title={`Open ${file.name}`}>{file.name}</FileLink> : file.name}</p>
                   <p className="cp-cert-meta">{file.sizeKb} KB · {uploaderName?.(file.uploadedBy) || file.uploadedBy || 'Unknown'} · {dateTimeLabel(file.uploadedAt)}</p>
+                  {file.splitFrom && <p className="cp-cert-meta" title={splitSourceCaption(file.splitFrom)}>{splitSourceCaption(file.splitFrom)}</p>}
                   {file.identityMismatch && <p className="document-identity-error" role="alert">Wrong document. No details were filled. Upload the correct file using Add files.</p>}
                 </div>
                 {file.url && <div className="cp-cert-acts">

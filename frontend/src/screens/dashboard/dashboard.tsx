@@ -6,13 +6,14 @@ import { useReportData } from '@/features/reports/report-api'
 import type { LeadSummaryResponse } from '@/features/leads/lead-api'
 import { DashboardGraphs } from '@/features/dashboard/components/source-graph'
 import { candidatesAfterPrescreening, inView } from '@/features/dashboard/summary'
+import { inboxCard, type InboxCardData } from '@/features/dashboard/inbox-card'
 import { useFollowUp } from '@/features/daily-work/use-daily-work'
 import { useTravelled } from '@/features/travelled/travelled-api'
 import { EMPTY_FILTERS } from '@/features/travelled/travelled-model'
 import '@/styles/dashboard-simple.css'
 
 type Tone = 'blue' | 'green' | 'amber' | 'violet' | 'teal' | 'slate' | 'red'
-interface Card { key: string; label: string; value: number | null; note: string; icon: typeof Users; tone: Tone; to: string; danger?: boolean }
+interface Card { key: string; label: string; value: number | null; note: string; detail?: string; icon: typeof Users; tone: Tone; to: string; danger?: boolean }
 
 const count = (value: number | null) => value === null ? '–' : value.toLocaleString('en-IN')
 const noun = (value: number | null, one: string, many: string) => value === 1 ? one : many
@@ -23,10 +24,10 @@ export default function DashboardPage() {
   const store = useStore()
   const navigate = useNavigate()
   const isTeam = store.me.role === 'admin' || store.me.role === 'manager'
-  // Emails across every connected email account: the total number of messages in their inboxes, so adding an account raises it.
-  const mail = useReportData<{ accounts: { messageCount: number; disconnectedAt?: string | null }[] }>('/inbox?limit=1', store.me.id, '', ['mail'])
-  const accounts = mail.data ? mail.data.accounts.filter(account => !account.disconnectedAt) : null
-  const emails = accounts ? accounts.reduce((sum, account) => sum + (account.messageCount ?? 0), 0) : null
+  // Candidates ingested from email (with how many need review and how many accounts feed them). A server that does not send the
+  // intake numbers yet keeps the old card: the total number of messages across the connected accounts.
+  const mail = useReportData<InboxCardData>('/inbox?limit=1', store.me.id, '', ['mail'])
+  const inbox = inboxCard(mail.data)
   const leads = useReportData<LeadSummaryResponse>(`/leads/summary?scope=${isTeam ? 'all' : 'mine'}`, store.me.id, '', ['leads'])
 
   // Admin and manager see the whole team; staff see their own candidates and tasks.
@@ -46,7 +47,7 @@ export default function DashboardPage() {
   const travelledTotal = travelled.data ? travelled.data.total : null
 
   const cards: Card[] = [
-    { key: 'inbox', label: 'Inbox', value: emails, note: !accounts ? 'loading emails' : accounts.length === 0 ? 'no email account added' : `${noun(emails, 'email', 'emails')} · ${accounts.length} ${noun(accounts.length, 'account', 'accounts')}`, icon: Mail, tone: 'blue', to: '/inbox' },
+    { key: 'inbox', label: 'Inbox', value: inbox.value, note: inbox.note, detail: inbox.detail, icon: Mail, tone: 'blue', to: '/inbox' },
     { key: 'clients', label: 'Clients', value: store.clients.length, note: `${noun(store.clients.length, 'client', 'clients')} created`, icon: Building2, tone: 'green', to: '/clients' },
     { key: 'jobs', label: 'Jobs', value: store.orders.length, note: `${noun(store.orders.length, 'job', 'jobs')} created`, icon: BriefcaseBusiness, tone: 'amber', to: '/jobs' },
     { key: 'candidates', label: 'Candidates', value: afterPrescreening, note: 'from prescreening onward', icon: UserCheck, tone: 'violet', to: '/mapped' },
@@ -67,6 +68,7 @@ export default function DashboardPage() {
       <span className="ds-label">{card.label}</span>
       <span className="ds-value">{count(card.value)}</span>
       <span className={`ds-note${card.danger ? ' is-danger' : ''}`}>{card.note}</span>
+      {card.detail && <span className="ds-note ds-note2">{card.detail}</span>}
     </button>)}</div>
     <DashboardGraphs candidates={candidates} anchor={leads.data ? String(leads.data.total) : ''} onOpen={() => navigate('/data-bank')} />
   </div>

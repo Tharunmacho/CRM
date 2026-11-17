@@ -2,7 +2,7 @@
  * The thin API layer for the application form (docs/workflows/application-form-contract.md). Everything the server's
  * contract names lives here and in `normalizeForm`, so a change to an endpoint or a payload key touches those two only.
  */
-import { api } from '@/shared/api/client'
+import { api, type SplitReport } from '@/shared/api/client'
 import { normalizeForm } from './form-model'
 import type { ApplicationFormData, AssignmentChange, DocumentKind, FeedbackKind, FeedbackReason } from './types'
 
@@ -28,18 +28,31 @@ export async function saveApplicationForm(candidateId: string, target: FormTarge
 }
 
 /** Upload a file into one document slot (resume, passport, photo, education certificate, ...). The server answers at once, reads the document in the background, and the form refreshes live. */
-export async function uploadFormDocument(candidateId: string, kind: DocumentKind, file: File, target: FormTarget = {}): Promise<ApplicationFormData | null> {
+export async function uploadFormDocument(candidateId: string, kind: DocumentKind, file: File, target: FormTarget = {}): Promise<{ form: ApplicationFormData | null; split: SplitReport | null }> {
   const form = new FormData()
   form.append('slot', kind)
   form.append('file', file)
-  if (['resume', 'passport', 'aadhaar'].includes(kind)) form.append('defer_extraction', 'true')
-  const result = await api.form<{ form?: unknown }>(formPath(candidateId, target, '/documents'), form)
-  return result.form ? normalizeForm(result.form) : null
+  if (['resume', 'passport', 'aadhaar', 'education_certificate'].includes(kind)) form.append('defer_extraction', 'true')
+  const result = await api.form<{ form?: unknown; split?: SplitReport }>(formPath(candidateId, target, '/documents'), form)
+  return { form: result.form ? normalizeForm(result.form) : null, split: result.split ?? null }
 }
 
 export async function extractFormDocuments(candidateId: string, attachmentIds: string[], target: FormTarget = {}): Promise<ApplicationFormData | null> {
   const result = await api.post<{ form?: unknown }>(formPath(candidateId, target, '/extract'), { attachmentIds })
   return result.form ? normalizeForm(result.form) : null
+}
+
+/** The plain-text report of how this candidate's documents were read (no names or numbers in it): what the owner pastes to the developer. */
+export async function loadDocumentReport(candidateId: string): Promise<string> {
+  const result = await api.get<{ report?: unknown }>(`/candidates/${encodeURIComponent(candidateId)}/documents/diagnostics`)
+  return typeof result.report === 'string' ? result.report : ''
+}
+
+export type IdentityCheck = 'read_again' | 'confirm_name'
+
+/** Judge a rejected document's SAVED reading again (nothing is sent to the reader), or confirm that a name-only mismatch is the right person. */
+export async function checkDocumentIdentity(candidateId: string, attachmentId: string, action: IdentityCheck, target: FormTarget = {}): Promise<ApplicationFormData> {
+  return normalizeForm(await api.post<unknown>(formPath(candidateId, target, '/identity'), { attachmentId, action }))
 }
 
 export async function saveDocumentStatus(candidateId: string, target: FormTarget, kind: DocumentKind, uploaded: boolean, note: string): Promise<ApplicationFormData> {

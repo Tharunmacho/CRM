@@ -18,18 +18,30 @@ from test_database_naming import _migrate, schema_database  # noqa: F401
 
 
 class CounterSession:
-    """Stands in for the database: one serial counter per counter table, like the real upserts."""
+    """Stands in for the database.
+
+    Traveller IDs: one serial counter row, bumped by one upsert per call.  Care India IDs: the number is read from the Data Bank
+    (highest existing number + 1, here the last number given, as nothing is ever deleted in this fake) and written back to the
+    counter row, so the fake keeps ``care_last`` and answers the "highest + 1" read from it.
+    """
 
     def __init__(self):
         self.serials: dict[str, int] = {}
+        self.care_last = 0
         self.calls = []
 
-    def execute(self, statement, params):
+    def execute(self, statement, params=None):
         sql = str(statement)
-        table = "traveller" if "crm_traveller_id_counters" in sql else "candidate"
-        self.serials[table] = self.serials.get(table, 0) + 1
         self.calls.append((sql, params))
-        return SimpleNamespace(scalar_one=lambda value=self.serials[table]: value)
+        if "crm_traveller_id_counters" in sql:
+            self.serials["traveller"] = self.serials.get("traveller", 0) + 1
+            return SimpleNamespace(scalar_one=lambda value=self.serials["traveller"]: value)
+        if "pg_advisory_xact_lock" in sql:
+            return SimpleNamespace()
+        if "FROM crm_candidates" in sql:                           # ONE statement: highest existing number + 1, written back to the counter row
+            self.care_last += 1
+            return SimpleNamespace(scalar_one=lambda value=self.care_last: value)
+        raise AssertionError(sql)
 
 
 def test_format_is_ci_t_and_a_serial_that_grows_past_three_digits():
@@ -49,9 +61,10 @@ def test_serial_is_one_continuous_series_independent_of_the_data_bank_care_id():
     assert allocate_care_id(db) == "CI-001"
     assert allocate_traveller_id(db) == "CI-T-004"
     assert allocate_care_id(db) == "CI-002"
-    tables = [("crm_traveller_id_counters" in sql, "crm_candidate_id_counters" in sql) for sql, _ in db.calls]
-    assert tables == [(True, False)] * 3 + [(False, True), (True, False), (False, True)]
-    assert {params["series"] for _, params in db.calls} == {"GLOBAL"}
+    tables = [("crm_traveller_id_counters" in sql, "crm_candidate_id_counters" in sql or "FROM crm_candidates" in sql) for sql, _ in db.calls]
+    # Each traveller call is one statement on its own table; each Care India call is the lock + one read-and-write statement, never the traveller table.
+    assert tables == [(True, False)] * 3 + [(False, False), (False, True)] + [(True, False)] + [(False, False), (False, True)]
+    assert {params["series"] for sql, params in db.calls if "crm_traveller_id_counters" in sql or "INSERT INTO crm_candidate_id_counters" in sql} == {"GLOBAL"}
 
 
 def test_assignment_is_idempotent_and_never_renumbers():
@@ -244,5 +257,5 @@ def test_deleting_a_traveller_never_frees_their_number_for_the_next_one(schema_d
         fresh = Candidate(id="four", ref="CND-four", name="four", phone="90000009999", source="walk_in", care_id=allocate_care_id(db))
         db.add(fresh)
         db.flush()
-        assert assign_traveller_id(db, fresh) == "CI-T-004"    # ... and CI-T-003 is not issued again
-        assert fresh.care_id == "CI-004"
+        assert assign_traveller_id(db, fresh) == "CI-T-004"    # ... and CI-T-003 is not issued again (a traveller number is never reused)
+        assert fresh.care_id == "CI-003"                        # but the Data Bank ID IS: "three" held CI-003, the highest, and it is given again

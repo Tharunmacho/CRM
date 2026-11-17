@@ -238,6 +238,7 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
     payload = file.file.read(files_router.MAX_BYTES + 1)
     if not payload:
         raise HTTPException(400, "The file is empty.")
+    split = None   # set when the file held several documents and was filed in their own fields
     import hashlib
     digest = hashlib.sha256(payload).hexdigest()
     latest = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
@@ -256,14 +257,34 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
             db.commit()
     else:
         file.file.seek(0)
-        files_router.upload(entity_type="candidate", entity_id=candidate_id, slot=slot, file=file, defer_extraction=defer_extraction, db=db, user=user)
+        stored = files_router.upload(entity_type="candidate", entity_id=candidate_id, slot=slot, file=file, defer_extraction=defer_extraction, db=db, user=user)
+        split = stored.get("split") if isinstance(stored, dict) else None
     form = service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
     document = form["documents"][slot]
     extraction = document["extraction"]
     if extraction is None and not document.get("extractionPending"):
         extraction = {"status": "done", "message": None, "jobId": None, "updatedAt": None,
                       "kindsFound": [], "filled": [], "kept": []}
-    return {"document": document, "extraction": extraction, "form": form}
+    return {"document": document, "extraction": extraction, "form": form, **({"split": split} if split else {})}
+
+
+class IdentityCheckIn(_Section):
+    attachmentId: str = Field(min_length=1, max_length=36)
+    # read_again: judge the saved reading by today's rules (nothing is sent to the reader again).
+    # confirm_name: "this is the right person": only for a document stopped for its name alone.
+    action: Literal["read_again", "confirm_name"]
+
+
+@router.post("/identity")
+def check_document_identity(candidate_id: str, body: IdentityCheckIn, response: Response,
+                            applicationId: str | None = Query(default=None, max_length=36),
+                            orderId: str | None = Query(default=None, max_length=36),
+                            db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Judge a rejected document's saved reading again, or confirm a name-only mismatch. Same permission as Extract details."""
+    _no_store(response)
+    with applications_router._mutation(db):
+        service.reconsider_identity_rejection(db, user, candidate_id, body.attachmentId, confirm_name=body.action == "confirm_name")
+    return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
 
 
 class StartReadingIn(_Section):

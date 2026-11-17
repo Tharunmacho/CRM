@@ -451,3 +451,55 @@ def test_single_picture_without_text_is_a_decorative_image(monkeypatch):
     monkeypatch.setattr(subject, "_ocr_image", lambda *a, **k: subject.OCRRead("A few words only here", 30, "weak"))
     weak = subject.inspect_document(image_bytes())
     assert weak.unread_pages == [1] and not weak.decorative_image
+
+
+# --- the photo heuristic: a page is only a photo when it is photo-like AND carries almost no text -----------------------------
+
+def _ocr_with_metrics(monkeypatch, text, metrics, words):
+    def read(image, command, languages, timeout, **options):
+        return subject.OCRRead(text, 70, words=words, good_words=words)
+    monkeypatch.setattr(subject, "_tesseract", read)
+    monkeypatch.setattr(subject.enhance, "photo_metrics", lambda _image: metrics)
+    monkeypatch.setattr(subject.second_opinion, "available", lambda: False)
+    with Image.new("L", (40, 60), 255) as image:
+        return subject._ocr_image(image, command="test-tesseract", languages="eng", deadline=time.monotonic() + 30)
+
+
+def test_a_sparse_stamped_page_that_is_merely_dark_is_not_a_photo(monkeypatch):
+    sparse = "PAID stamped approval"          # a stamp and two words: next to no text, but a dark scan is not a picture
+    result = _ocr_with_metrics(monkeypatch, sparse, {"paper": 200, "nonpaper": 0.10, "dark": 0.06}, words=3)
+    assert result.photo is False and result.text.strip() == sparse
+
+
+def test_dark_alone_or_nonpaper_alone_is_not_photo_like_for_a_page_with_some_text(monkeypatch):
+    sparse = "PAID stamped approval"
+    assert _ocr_with_metrics(monkeypatch, sparse, {"paper": 255, "nonpaper": 0.45, "dark": 0.01}, words=3).photo is False
+
+
+def test_a_dark_photo_like_page_with_a_few_stray_words_is_a_photo(monkeypatch):
+    result = _ocr_with_metrics(monkeypatch, "PAID stamped approval", {"paper": 255, "nonpaper": 0.42, "dark": 0.055}, words=3)
+    assert result.photo is True
+
+
+def test_a_dark_page_with_a_short_certificate_of_real_words_is_not_a_photo(monkeypatch):
+    seven = "Certificate awarded after training completion under supervision with distinction and honour"   # 8+ real words
+    result = _ocr_with_metrics(monkeypatch, seven, {"paper": 255, "nonpaper": 0.42, "dark": 0.055}, words=11)
+    assert result.photo is False
+    six = "Training certificate awarded after completion under supervision"           # 6 real words, 62 characters: still text
+    assert _ocr_with_metrics(monkeypatch, six, {"paper": 255, "nonpaper": 0.42, "dark": 0.055}, words=7).photo is False
+
+
+def test_a_photo_page_keeps_the_little_text_it_has_and_a_short_certificate_scanned_dark_stays_a_read_page(monkeypatch):
+    monkeypatch.setattr(subject, "_ocr_image", lambda *a, **k: subject.OCRRead("PAID stamped approval", 70, words=3, photo=True))
+    photo = subject.inspect_document(image_bytes()).pages[0]
+    assert photo.method == "photo_no_text" and photo.status == "blank" and "PAID stamped" in photo.text
+    short = "Training certificate awarded after completion under supervision to the candidate named above"
+    monkeypatch.setattr(subject, "_ocr_image", lambda *a, **k: subject.OCRRead(short, 70, words=12, photo=True))
+    kept = subject.inspect_document(image_bytes()).pages[0]
+    assert kept.method != "photo_no_text" and kept.text.strip() == short
+
+
+def test_a_photo_page_with_no_text_at_all_has_an_empty_text(monkeypatch):
+    monkeypatch.setattr(subject, "_ocr_image", lambda *a, **k: subject.OCRRead("", 0, words=0, photo=True))
+    page = subject.inspect_document(image_bytes()).pages[0]
+    assert page.method == "photo_no_text" and page.text == ""

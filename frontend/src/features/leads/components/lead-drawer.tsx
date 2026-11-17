@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ExternalLink, FileUp, Link2, ListChecks, Lock, Pencil, MessageCircle, PhoneCall, Trash2, UserCheck, UserMinus, UserPlus, UserRoundX, Loader2, Undo2 } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FileUp, Link2, ListChecks, Lock, Pencil, MessageCircle, PhoneCall, Trash2, UserCheck, UserMinus, UserPlus, UserRoundX, Loader2, Undo2, History } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { User } from '@/shared/model/types'
 import { Sheet } from '@/shared/ui/overlay'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { FileLink } from '@/shared/ui/file-drop'
 import { primaryId } from '@/features/candidates/candidate-ids'
-import { gateFromRefusal, leadApi, type LeadActivity, type LeadDetail } from '../lead-api'
+import { gateFromRefusal, leadApi, type LeadDetail } from '../lead-api'
 import {
   PLATFORM_LABEL, RESUME_REQUIRED_REASON, SETTABLE_STATUSES, cleanPhone, createdParts, dobLabel, experienceLabel, followUpLabel, followUpState, fromLocalInput, leadDate, leadStatus, platformKind, toLocalInput, whatsappLink,
   type Lead, type LeadActor,
@@ -47,6 +47,8 @@ interface Props {
   onNotInterested?: (lead: Lead) => void
   /** The status was saved from here: the screen offers an Undo toast. */
   onStatusChange?: (lead: Lead, from: string, to: string) => void
+  /** Opens the log (calls, notes, status changes, assignments) in its own panel. */
+  onViewLog?: (lead: Lead) => void
 }
 
 const Row = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -57,30 +59,9 @@ const Section = ({ title, children }: { title: string; children: ReactNode }) =>
 )
 
 const CONVERTED_REASON = 'This lead is already a candidate.'
-const KIND_LABEL: Record<string, string> = { call: 'Remarks', note: 'Note', status: 'Status', assign: 'Assigned', import: 'Imported', convert: 'Converted', unconvert: 'Moved back to Lead', resume: 'Resume', edit: 'Edited' }
-
-function Timeline({ items }: { items: LeadActivity[] }) {
-  if (items.length === 0) return <p className="ld-hint">Nothing has happened with this lead yet.</p>
-  return (
-    <ol className="ld-timeline">
-      {items.map((item) => {
-        const parts = createdParts(item.createdAt)
-        return (
-          <li key={item.id} className={cn('ld-tl', `is-${item.kind}`)}>
-            <span className="ld-tl-dot" aria-hidden="true" />
-            <div className="ld-tl-body">
-              <p><b>{KIND_LABEL[item.kind] ?? item.kind}</b>{item.userName ? ` · ${item.userName}` : ''}<time dateTime={item.createdAt}>{parts ? `${parts.day} ${parts.year}, ` : ''}{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></p>
-              {item.summary && <p className="ld-tl-text">{item.summary}</p>}
-            </div>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
 
 /** The side drawer of one lead: everything we know, what to do next, and the timeline. */
-export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUnassign, onUploadResume, onGateRefusal, canDelete, onDelete, onUnconvert, onEdit, onChangeStatus, onNotInterested, onStatusChange }: Props) {
+export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, canAssign, onClose, onChanged, onLogCall, onConvert, onAssign, onUnassign, onUploadResume, onGateRefusal, canDelete, onDelete, onUnconvert, onEdit, onChangeStatus, onNotInterested, onStatusChange, onViewLog }: Props) {
   const navigate = useNavigate()
   const [detail, setDetail] = useState<LeadDetail | null>(null)
   const [error, setError] = useState('')
@@ -182,6 +163,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
 
         <div className="ld-d-more" role="group" aria-label="More actions">
           <span className="ld-d-more-label">More actions</span>
+          {onViewLog && <Button size="sm" variant="secondary" icon={<History className="h-4 w-4" />} onClick={() => onViewLog(shown)}>View log</Button>}
           <Button size="sm" variant="secondary" icon={<MessageCircle className="h-4 w-4" />} disabled={!wa} title={wa ? undefined : 'No valid phone number'} aria-haspopup="dialog"
             onClick={(event) => { if (wa) openWhatsApp({ id: shown.id, name: shown.name, phone, positionApplied: shown.positionApplied }, event.currentTarget) }}>WhatsApp message</Button>
           {onChangeStatus && <Button size="sm" variant="secondary" icon={<ListChecks className="h-4 w-4" />} disabled={Boolean(blocked) || converted} title={blocked ?? (converted ? CONVERTED_REASON : undefined)} onClick={() => onChangeStatus(shown)}>Change status</Button>}
@@ -253,10 +235,6 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
           </Section>
         )}
 
-        <section className="ld-dsec">
-          <h3>Timeline</h3>
-          {detail ? <Timeline items={detail.activities} /> : <p className="ld-hint" role="status">Loading…</p>}
-        </section>
       </div>
     </Sheet>
   )

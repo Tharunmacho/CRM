@@ -501,12 +501,14 @@ export default function CandidateProfilePage() {
                   if (slot.key === 'source_bundle') return undefined
                   const multi = slot.multiple
                   return async (file) => {
-                    await api.upload('candidate', cand.id, slot.key, file, { deferExtraction: ['resume', 'passport', 'aadhaar'].includes(slot.key) })
+                    const stored = await api.upload('candidate', cand.id, slot.key, file, { deferExtraction: ['resume', 'passport', 'aadhaar', 'education_certificate'].includes(slot.key) })
+                    // A scan that held several documents is filed in their own fields; the list is refreshed so every one of them shows.
+                    const filed = stored.split?.message
                     try {
                       await store.refresh()
-                      store.notify(multi ? `${file.name} added to ${slot.label.toLowerCase()}` : `${slot.label} uploaded`)
+                      store.notify(filed || (multi ? `${file.name} added to ${slot.label.toLowerCase()}` : `${slot.label} uploaded`))
                     } catch {
-                      store.notify(multi ? `${file.name} was uploaded. Reload the page to see it.` : `${slot.label} was uploaded. Reload the page to see the saved version.`, 'warn')
+                      store.notify(filed ? `${filed} Reload the page to see them.` : multi ? `${file.name} was uploaded. Reload the page to see it.` : `${slot.label} was uploaded. Reload the page to see the saved version.`, 'warn')
                     }
                   }
                 } : undefined}

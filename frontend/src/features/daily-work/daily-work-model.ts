@@ -23,6 +23,12 @@ export interface DailyItem {
   /** open: still to work; done: a stage was finished or the initial call answered today. */
   status: 'open' | 'done'
   completedAt: string | null
+  /** The candidate declined (e.g. the offer) and is listed in Done today. Optional: older API responses omit it (treated as false). */
+  declined?: boolean
+  /** Why the candidate declined ("Offer declined"); shown as the tag's tooltip. */
+  declinedReason?: string
+  /** The candidate went back to the Data Bank after declining. */
+  movedToDataBank?: boolean
   client: string | null
   clientContact: string | null
   /** The order's country, else (not matched yet) the candidate's preferred country from the application form. */
@@ -267,6 +273,26 @@ export function referralLabel(referral: DailyItem['referral']): string {
 /** The row's button: Complete (a placement to finish a stage on), Open (the application form), View once done today. */
 export function rowAction(item: Pick<DailyItem, 'status' | 'applicationId'>): 'Complete' | 'Open' | 'View' {
   return item.status === 'done' ? 'View' : item.applicationId ? 'Complete' : 'Open'
+}
+
+/** What a declined row shows besides the normal layout: a small "Declined" tag (the reason is its tooltip) and a calm "Moved to Data Bank" line. */
+export interface DeclinedInfo { label: 'Declined'; reason: string; title: string; movedNote: string | null }
+
+/** Null for every row that is not declined (including rows from an API that does not send the field yet). */
+export function declinedInfo(item: Pick<DailyItem, 'declined' | 'declinedReason' | 'movedToDataBank'>): DeclinedInfo | null {
+  if (item.declined !== true) return null
+  const reason = item.declinedReason?.trim() ?? ''
+  return {
+    label: 'Declined',
+    reason,
+    title: !reason ? 'Declined' : /declin/i.test(reason) ? reason : `Declined: ${reason}`,
+    movedNote: item.movedToDataBank === true ? 'Moved to Data Bank' : null,
+  }
+}
+
+/** Where the row's button goes: a declined row has no stage left to work, so it opens the candidate profile; every other row opens its stage / form as before. */
+export function rowTarget(item: Pick<DailyItem, 'declined'>): 'profile' | 'stage' {
+  return item.declined === true ? 'profile' : 'stage'
 }
 
 // ------------------------------------------------------------------------------------------------ table cells
