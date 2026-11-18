@@ -71,6 +71,12 @@
 .aff .aff-lab-aux, .aff .ac-lab-aux { display: inline-flex; flex: none; align-items: center; gap: 8px; }
 .aff .aff-from { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); font-size: 11.5px; font-weight: 500; line-height: 20px; white-space: nowrap; }
 .aff .aff-from svg { width: 11px; height: 11px; flex: none; }
+/* In a narrow column the chip keeps only its icon (the words stay as its tooltip), so the label is never cut: "Passport number", not "Passport n…". */
+.aff .aff-field:has(.aff-from) { container-type: inline-size; }
+@container (max-width: 330px) {
+  .aff .aff-from { padding: 0; width: 20px; justify-content: center; }
+  .aff .aff-from .aff-from-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 .aff .aff-note, .aff .ac-hint { display: block; margin: 4px 0 0; font-size: 12.5px; line-height: 18px; color: var(--text-muted); }
 .aff .aff-note.is-error { color: var(--error-ink); }
 .aff .aff-note.is-warn { color: var(--warning-ink); }

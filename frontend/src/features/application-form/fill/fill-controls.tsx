@@ -43,7 +43,7 @@ export function SourceBadge({ kind }: { kind: SourceChip }) {
   return (
     <span className="aff-from" title={`${SOURCE_CHIP_TEXT[kind]}. Check it before you save.`}>
       <Sparkles aria-hidden="true" />
-      {SOURCE_CHIP_TEXT[kind]}
+      <span className="aff-from-text">{SOURCE_CHIP_TEXT[kind]}</span>
     </span>
   )
 }
