@@ -134,6 +134,11 @@ def answers(port: int, timeout: float = 5.0) -> bool:
         return False
 
 
+def healthy(port: int) -> bool:
+    """A tunnel worth keeping answers twice in a row within 3 seconds each (a half-stalled one answers some and not others)."""
+    return answers(port, 3.0) and answers(port, 3.0)
+
+
 def stop_owned(state: dict) -> None:
     if process_identity(state["pid"]) != state["identity"]:
         raise RuntimeError("The database tunnel process changed; refusing to stop it")
@@ -158,7 +163,7 @@ def ensure_tunnel(config_path: Path) -> str:
         raise RuntimeError("The database tunnel port is already occupied by an unrecognized process")
     address = remote_endpoint(config)
     if owned:
-        if port_open and state.get("remote_host") == address and answers(config["local_port"]):
+        if port_open and state.get("remote_host") == address and healthy(config["local_port"]):
             return f"Database tunnel ready at 127.0.0.1:{config['local_port']}"
         stop_owned(state)
         if listening(config["local_port"]):
