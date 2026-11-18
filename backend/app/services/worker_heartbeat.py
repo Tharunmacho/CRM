@@ -176,6 +176,14 @@ def reset_cache() -> None:
         _cache.clear()
 
 
+def _autocommit(db) -> bool:
+    """True for the autocommit sessions that serve GET requests (see app.db.session.get_db)."""
+    try:
+        return str(db.get_bind().get_execution_options().get("isolation_level", "")).upper() == "AUTOCOMMIT"
+    except Exception:
+        return False
+
+
 def reader_status(db, *, kind: str = "document", now: datetime | None = None, version: str | None = None) -> dict | None:
     """The ``reader`` object for ``kind`` workers, or ``None`` when the heartbeat table cannot be read.
 
@@ -193,9 +201,13 @@ def reader_status(db, *, kind: str = "document", now: datetime | None = None, ve
             return dict(hit[1]) if hit[1] is not None else None
     moment = now or datetime.now(timezone.utc)
     try:
-        with db.begin_nested():
-            rows = db.execute(select(WorkerHeartbeat.seen_at, WorkerHeartbeat.busy, WorkerHeartbeat.version)
-                              .where(WorkerHeartbeat.kind == kind).order_by(WorkerHeartbeat.seen_at.desc()).limit(50)).all()
+        statement = (select(WorkerHeartbeat.seen_at, WorkerHeartbeat.busy, WorkerHeartbeat.version)
+                     .where(WorkerHeartbeat.kind == kind).order_by(WorkerHeartbeat.seen_at.desc()).limit(50))
+        if _autocommit(db):
+            rows = db.execute(statement).all()  # no transaction to poison, and PostgreSQL refuses a SAVEPOINT outside one
+        else:
+            with db.begin_nested():
+                rows = db.execute(statement).all()
         value = summarize(rows, now=moment, version=version)
     except Exception:
         log.debug("Could not read worker heartbeats.", exc_info=True)

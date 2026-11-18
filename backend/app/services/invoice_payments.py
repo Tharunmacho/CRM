@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.db.models import ApplicationStage, AuditEntry, Candidate, CandidateInvoice, InvoicePayment, InvoiceSettings, Role, User
 from app.services import candidate_invoices as invoices
 from app.services.invoice_access import can_see_invoices, ensure_can_see_invoices
+from app.services.parallel_reads import parallel_reads
 
 
 def _received(db, invoice_id):
@@ -223,13 +224,19 @@ def finance_summary(db, user, *, search="", status="all", limit=50, offset=0):
     if status != "all":
         query = query.where(payment_status == status)
     matches = query.subquery()
-    sums = db.execute(select(func.count().label("count"), *[
-        func.coalesce(func.sum(matches.c[field]), 0).label(label) for field, label in (
-            ("fee", "feeSubtotal"), ("gst", "gst"), ("total", "agreedTotal"), ("totalInvoiced", "totalInvoiced"),
-            ("received", "received"), ("balance", "balance"), ("credit", "credit"))])).mappings().one()
+    # The totals and the page are independent: read them side by side (one round trip of waiting instead of two).
+    sums, page = parallel_reads(
+        db,
+        lambda session: session.execute(select(func.count().label("count"), *[
+            func.coalesce(func.sum(matches.c[field]), 0).label(label) for field, label in (
+                ("fee", "feeSubtotal"), ("gst", "gst"), ("total", "agreedTotal"), ("totalInvoiced", "totalInvoiced"),
+                ("received", "received"), ("balance", "balance"), ("credit", "credit"))])).mappings().one(),
+        lambda session: [dict(item) for item in session.execute(
+            select(matches).order_by(matches.c.createdAt.desc(), matches.c.invoiceId).offset(offset).limit(limit)).mappings()],
+    )
     totals = {key: int(value) if key == "count" else invoices.money(value) for key, value in sums.items()}
     rows = []
-    for record in db.execute(select(matches).order_by(matches.c.createdAt.desc(), matches.c.invoiceId).offset(offset).limit(limit)).mappings():
+    for record in page:
         row = dict(record)
         for key in ("fee", "gst", "total", "totalInvoiced", "received", "balance", "credit"):
             row[key] = invoices.money(row[key]) if row[key] is not None else None

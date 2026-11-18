@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from starlette.requests import Request
 
 from app.core.security import SESSION_COOKIE
-from app.db.session import SessionLocal
+from app.db.session import ReadSessionLocal
 from app.services import change_feed
 from app.services.live_hub import CLOSE, RECHECK, Subscriber, hub
 
@@ -40,7 +40,9 @@ def _identify(session_id: str | None) -> tuple[str, str] | None:
     from app.core.deps import current_user
 
     try:
-        with SessionLocal() as db:
+        # An autocommit session: the check is one SELECT (one round trip) instead of BEGIN + SELECT + ROLLBACK (three), and it
+        # holds a pooled connection for a third of the time. Every browser repeats it about every 40 s.
+        with ReadSessionLocal() as db:
             user = current_user(db=db, crm_session=session_id)
             return user.id, getattr(user.role, "value", str(user.role))
     except HTTPException:

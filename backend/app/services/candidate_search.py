@@ -388,28 +388,41 @@ def export_candidates(db, filters):
     # them in the main candidate query so an Excel export never creates one query per row.
     candidates = db.scalars(search_statement(filters).options(undefer(Candidate.source_claims))).all()
     from app.services.candidate_review import review_reasons
-    flagged = [candidate for candidate in candidates if candidate.needs_review or candidate.status == CandidateStatus.needs_review]
-    reasons = review_reasons(db, flagged)
-    users = {u.id: u.name for u in db.scalars(select(User))}
-    shown = displayed_applications()
-    current_apps = {a.candidate_id: a for a in db.scalars(select(Application).join(shown, Application.id == shown.c.id))}
-    orders = {o.id: o.ref for o in db.scalars(select(Order))}
-    # The labels an admin has set for service charges and interest level; a stored value with no option reads as itself.
-    labels: dict[str, dict[str, str]] = {}
-    for category, value, label in db.execute(select(FormOption.category, FormOption.value, FormOption.label).where(FormOption.category.in_(("service_charges_status", "interest_level")))):
-        labels.setdefault(category, {})[value] = label
     from app.services.application_form import LEGACY_SLOTS, required_for_deployment
     from app.services.document_status import read_manual_document_statuses
     from app.services.document_identity import rejected_expression
+    flagged = [candidate for candidate in candidates if candidate.needs_review or candidate.status == CandidateStatus.needs_review]
+    shown = displayed_applications()
     required = required_for_deployment()
     matching_ids = search_statement(filters).order_by(None).with_only_columns(Candidate.id)
-    manual_records = read_manual_document_statuses(db, matching_ids)
-    agencies = dict(db.execute(select(Candidate.id, agency_display_expression()).where(Candidate.id.in_(matching_ids))).all())
-    uploaded, rejected_files = {}, {}
-    for candidate_id, slot, rejected in db.execute(select(Attachment.entity_id, Attachment.slot, rejected_expression()).where(
-        Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
-    ).distinct()):
-        (rejected_files if rejected else uploaded).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
+
+    def read_labels(session):
+        # The labels an admin has set for service charges and interest level; a stored value with no option reads as itself.
+        found: dict[str, dict[str, str]] = {}
+        for category, value, label in session.execute(select(FormOption.category, FormOption.value, FormOption.label).where(FormOption.category.in_(("service_charges_status", "interest_level")))):
+            found.setdefault(category, {})[value] = label
+        return found
+
+    def read_uploaded(session):
+        have, wrong_files = {}, {}
+        for candidate_id, slot, rejected in session.execute(select(Attachment.entity_id, Attachment.slot, rejected_expression()).where(
+            Attachment.entity_type == "candidate", Attachment.entity_id.in_(matching_ids),
+        ).distinct()):
+            (wrong_files if rejected else have).setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))
+        return have, wrong_files
+
+    # Everything the sheet needs besides the candidates is independent of each other: one round trip together (these were nine in a row).
+    reasons, users, current_apps, orders, labels, manual_records, agencies, (uploaded, rejected_files) = parallel_reads(
+        db,
+        lambda session: review_reasons(session, flagged),
+        lambda session: {u.id: u.name for u in session.scalars(select(User))},
+        lambda session: {a.candidate_id: a for a in session.scalars(select(Application).join(shown, Application.id == shown.c.id))},
+        lambda session: {o.id: o.ref for o in session.scalars(select(Order))},
+        read_labels,
+        lambda session: read_manual_document_statuses(session, matching_ids),
+        lambda session: dict(session.execute(select(Candidate.id, agency_display_expression()).where(Candidate.id.in_(matching_ids))).all()),
+        read_uploaded,
+    )
     rows = [["Care India ID", "Traveller ID", "Name", "Phone", "Email", "Designation", "Skills", "Experience", "Exact source wording", "Passport available", "Source", "Assigned recruiter", "Mapped order", "Stage", "Status", "Added at",
              "Date of birth", "WhatsApp", "Preferred country", "Service charges", "Interest level", "Agency", "Profile review issues",
              *[label + " document" for _slot, label in required], "Missing mandatory documents"]]

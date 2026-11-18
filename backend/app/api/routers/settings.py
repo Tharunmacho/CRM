@@ -104,7 +104,7 @@ def public_profile(db: Session = Depends(get_db)) -> dict:
 @router.get("")
 def read_settings(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     # Four sequential reads, identical for everyone signed in, changed only by an administrator ("settings" topic).
-    return cached(("agency-settings", scope_of(db)), ("settings",), 120, lambda: agency.read_payload(db))
+    return cached(("agency-settings", scope_of(db)), ("settings",), 120, lambda: agency.read_payload(db, side_by_side=True))
 
 
 @router.put("")
@@ -299,7 +299,7 @@ def _locked_category(db: Session, category_id: str) -> JobCategory:
 
 @router.get("/categories")
 def read_categories(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    payload = agency.read_payload(db)
+    payload = agency.read_payload(db, side_by_side=True)
     return {"categories": payload["categories"], "editable": payload["categoriesEditable"]}
 
 

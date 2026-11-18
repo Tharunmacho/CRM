@@ -19,6 +19,7 @@ from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, Role, User
 from app.db.session import get_db
 from app.services import lead_import, lead_parsing, lead_report, lead_sheet
+from app.services.response_cache import cached, scope_of
 from app.services.lead_sheet import fail
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
@@ -146,28 +147,46 @@ def batch_delete_permanently(batch_id: str, body: PermanentBatchDeletion, backgr
 
 # ------------------------------------------------------------------ reads
 
+# The sheet's reads are kept for a few seconds (and dropped the moment a lead, its batch, a candidate it points at or a recruiter's
+# name changes, see services/response_cache.py): the screen asks for the list, the cards, the filter choices and the question columns
+# together on every visit, tab and live update. A viewer who only sees their own leads has their own entry.
+LEAD_TOPICS = ("leads", "candidates", "users")
+LEAD_SECONDS = 10
+CACHED_PAGE_ROWS = 100  # a bigger page is not kept: it is rare and heavy
+
+
+def _viewer(user: User):
+    return "all" if lead_sheet.sees_all_leads(user) else user.id
+
 @router.get("")
 def list_leads(filters: dict = Depends(lead_filters), page: int = Query(default=0, ge=0), page_size: int = Query(default=25, ge=1, le=1000),
                sort: str = "created", direction: Literal["asc", "desc"] = "desc", extra: list[str] = Query(default=[], max_length=12),
                db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return lead_sheet.search_leads(db, user, filters, page, page_size, sort, direction, extra_keys=[k[:200] for k in extra])
+    def read():
+        return lead_sheet.search_leads(db, user, filters, page, page_size, sort, direction, extra_keys=[k[:200] for k in extra])
+    if page_size > CACHED_PAGE_ROWS:
+        return read()
+    key = ("lead-list", scope_of(db), _viewer(user), user.id if filters.get("owner") == "me" else None, repr(sorted(filters.items())), page, page_size, sort, direction, tuple(extra))
+    return cached(key, LEAD_TOPICS, LEAD_SECONDS, read)
 
 
 @router.get("/summary")
 def lead_summary(scope: Literal["mine", "all"] | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return lead_sheet.summary(db, user, scope)
+    # The cards read the viewer's own follow-ups and the unassigned pool, so the signed-in person is part of the key.
+    return cached(("lead-summary", scope_of(db), user.id, user.role.value, scope), LEAD_TOPICS, LEAD_SECONDS, lambda: lead_sheet.summary(db, user, scope))
 
 
 @router.get("/facets")
 def lead_facets(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    return lead_sheet.facets(db, user)
+    return cached(("lead-facets", scope_of(db), _viewer(user)), LEAD_TOPICS, LEAD_SECONDS, lambda: lead_sheet.facets(db, user))
 
 
 @router.get("/columns")
 def lead_columns(campaign: list[str] = Query(default=[]), form: list[str] = Query(default=[]), batch_id: str | None = Query(default=None, max_length=36),
                  db: Session = Depends(get_db), user: User = Depends(current_user)):
     """The custom question columns of the stored sheets (optionally of one campaign, form or upload): `{columns: [{key, label, count}]}`."""
-    return {"columns": lead_sheet.extra_columns(db, {"campaign": campaign, "form": form, "batch_id": batch_id}, user)}
+    return cached(("lead-columns", scope_of(db), _viewer(user), tuple(campaign), tuple(form), batch_id), LEAD_TOPICS, LEAD_SECONDS,
+                  lambda: {"columns": lead_sheet.extra_columns(db, {"campaign": campaign, "form": form, "batch_id": batch_id}, user)})
 
 
 @router.get("/export.{fmt}")

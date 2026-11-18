@@ -196,7 +196,7 @@ def test_the_travelled_checklist_does_not_list_the_invoice_for_others(access):
         as_user(access, user_id, role)
         rows = [{"candidateId": "candidate"}]
         with access.sessions() as db:
-            travelled._add_documents(db, rows, access.actor)
+            travelled._add_documents(rows, db.execute(travelled._stored_documents_statement(access.actor)).all(), access.actor)
         documents = rows[0]["documents"]
         assert ("Invoice" in documents["missing"]) is shown, user_id
         assert documents["required"] == len(application_form.required_for_deployment(shown))

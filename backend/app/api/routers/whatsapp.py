@@ -85,14 +85,17 @@ def inbox(q: str = "", page: int = Query(1, ge=1), page_size: int = Query(20, ge
             WhatsAppMessage.attempts, WhatsAppMessage.last_error, WhatsAppMessage.candidate_id))
             .where(*conditions).order_by(WhatsAppMessage.received_at.desc(), WhatsAppMessage.id).offset((page - 1) * page_size).limit(page_size)))
 
-    total, rows, channels = parallel_reads(
+    # The page's ids are a subquery, so the document-bundle lookup runs in the same wave as the page itself.
+    from app.services.document_bundle_summary import source_summaries
+    on_page = select(select(WhatsAppMessage.id).where(*conditions).order_by(WhatsAppMessage.received_at.desc(), WhatsAppMessage.id)
+                     .offset((page - 1) * page_size).limit(page_size).subquery().c.id)
+    total, rows, channels, bundles = parallel_reads(
         db,
         lambda session: session.scalar(select(func.count()).select_from(WhatsAppMessage).where(*conditions)) or 0,
         read_rows,
         lambda session: list(session.scalars(select(WhatsAppChannel))),
+        lambda session: source_summaries(session, "whatsapp", on_page),
     )
-    from app.services.document_bundle_summary import source_summaries
-    bundles = source_summaries(db, "whatsapp", [row.id for row in rows])
     return {"configured": settings.whatsapp_enabled and not missing_settings(settings), "missingSettings": missing_settings(settings) if user.role == Role.admin else [],
         "enabled": settings.whatsapp_enabled, "configuredPhoneNumberId": settings.whatsapp_phone_number_id if user.role == Role.admin else None,
         "webhookPath": "/api/whatsapp/webhook", "total": total, "page": page, "pageSize": page_size,

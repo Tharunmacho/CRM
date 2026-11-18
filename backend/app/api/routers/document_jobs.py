@@ -235,7 +235,7 @@ def save_draft(group_id: str, body: DraftIn, db: Session = Depends(get_db), user
 @router.get("/{job_id}")
 def detail(job_id: str, response: Response, db: Session = Depends(get_db), user: User = Depends(current_user)):
     response.headers["Cache-Control"] = "no-store"
-    job = owned_job(db, job_id, user.id)
+    job = owned_job(db, job_id, user.id, full=True)
     return job_out(job, detail=True, queue=queue_positions(db, [job]), reader=reader_status(db))
 
 

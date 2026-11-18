@@ -62,34 +62,33 @@ def drafts(account_id: str | None = None, status: str | None = None,
     offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=200)] = 200,
     search: Annotated[str, Query(max_length=200)] = "",
     db: Session = Depends(get_db), user: User = Depends(current_user)):
-    query = select(MailDraft).where(MailDraft.actor_id == user.id, MailDraft.status != "discarded")
+    conditions = [MailDraft.actor_id == user.id, MailDraft.status != "discarded"]
     if account_id:
-        query = query.where(MailDraft.account_id == account_id)
+        conditions.append(MailDraft.account_id == account_id)
     if status and status != "all":
-        query = query.where(MailDraft.status == status)
+        conditions.append(MailDraft.status == status)
     if search.strip():
         pattern = "%" + search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        query = query.where(or_(*[column.ilike(pattern, escape="\\") for column in
+        conditions.append(or_(*[column.ilike(pattern, escape="\\") for column in
             (MailDraft.subject, MailDraft.body, cast(MailDraft.to_addresses, Text), cast(MailDraft.cc_addresses, Text), cast(MailDraft.bcc_addresses, Text))]))
-    total, rows = parallel_reads(
+    query = select(MailDraft).where(*conditions)
+    # The page's ids are a subquery, so the attempts and attachments of its drafts are read in the same wave as the page itself.
+    on_page = select(select(MailDraft.id).where(*conditions).order_by(MailDraft.updated_at.desc(), MailDraft.id.desc())
+                     .offset(offset).limit(limit).subquery().c.id)
+    total, rows, sent, files = parallel_reads(
         db,
         lambda session: session.scalar(select(func.count()).select_from(query.subquery())),
         lambda session: list(session.scalars(query.order_by(MailDraft.updated_at.desc(), MailDraft.id.desc()).offset(offset).limit(limit))),
+        lambda session: list(session.scalars(select(MailSendAttempt).where(MailSendAttempt.draft_id.in_(on_page)).order_by(MailSendAttempt.created_at.desc()))),
+        lambda session: list(session.scalars(select(MailDraftAttachment).where(MailDraftAttachment.draft_id.in_(on_page)).order_by(MailDraftAttachment.id))),
     )
     ids = [row.id for row in rows]
     attempts: dict[str, list] = {row_id: [] for row_id in ids}
     attachments: dict[str, list] = {row_id: [] for row_id in ids}
-    if ids:
-        # Two reads for the whole page, not one of each per draft.
-        sent, files = parallel_reads(
-            db,
-            lambda session: list(session.scalars(select(MailSendAttempt).where(MailSendAttempt.draft_id.in_(ids)).order_by(MailSendAttempt.created_at.desc()))),
-            lambda session: list(session.scalars(select(MailDraftAttachment).where(MailDraftAttachment.draft_id.in_(ids)).order_by(MailDraftAttachment.id))),
-        )
-        for item in sent:
-            attempts[item.draft_id].append(item)
-        for item in files:
-            attachments[item.draft_id].append(item)
+    for item in sent:
+        attempts[item.draft_id].append(item)
+    for item in files:
+        attachments[item.draft_id].append(item)
     db.add_all(rows)  # the reads ran in their own sessions; a state fix below is saved through this one
     db.add_all([item for group in attempts.values() for item in group])
     for row in rows:
@@ -188,9 +187,9 @@ def create(body: CreateIn, db: Session = Depends(get_db), user: User = Depends(c
 
 @router.get("/drafts/{draft_id}")
 def get_draft(draft_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    row = service.owned(db, draft_id, user.id)
-    service.expire_sending(db, row)
-    return service.draft_out(db, row)
+    row, attempts, files = service.owned_with_attempts(db, draft_id, user.id, attachments=True)
+    service.expire_sending(db, row, attempts)
+    return service.draft_out(db, row, files)
 
 
 @router.put("/drafts/{draft_id}")
@@ -356,8 +355,8 @@ def send(draft_id: str, body: SendIn, db: Session = Depends(get_db), user: User 
 
 @router.get("/drafts/{draft_id}/attempts")
 def attempts(draft_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    row = service.owned(db, draft_id, user.id)
-    return {"attempts": [service.attempt_out(item) for item in service.expire_sending(db, row)]}
+    row, found, _ = service.owned_with_attempts(db, draft_id, user.id)
+    return {"attempts": [service.attempt_out(item) for item in service.expire_sending(db, row, found)]}
 
 
 @router.post("/drafts/{draft_id}/reconcile")

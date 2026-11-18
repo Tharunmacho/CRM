@@ -11,8 +11,9 @@ from app.db.models import AuditEntry, IntakeAcknowledgement, IntakeAcknowledgeme
 from app.db.session import get_db
 from app.services.agency_settings import default_acknowledgement
 from app.services.intake_acknowledgements import (TEMPLATE_VALUES, attempt_out, channel, completed_source,
-    configuration, connected, email_suppression, read_template_choice, utcnow, validate_template_choice,
-    write_template_choice)
+    configuration, connected, email_suppression, read_template_choice, read_template_choice_for, utcnow,
+    validate_template_choice, write_template_choice)
+from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(prefix="/api/intake-acknowledgements", tags=["Intake acknowledgements"])
 admin = require_role(Role.admin)
@@ -20,12 +21,20 @@ SourceKind = Literal["email", "whatsapp"]
 
 
 def snapshot(db, source_kind, channel_id):
-    account = channel(db, source_kind, channel_id)
-    config = configuration(db, source_kind, channel_id)
-    rows = list(db.scalars(select(IntakeAcknowledgement).where(IntakeAcknowledgement.source_kind == source_kind,
-        IntakeAcknowledgement.channel_id == channel_id).order_by(IntakeAcknowledgement.created_at.desc(), IntakeAcknowledgement.id.desc()).limit(20)))
+    """The channel, its settings, the chosen template and the last 20 attempts (each with its WhatsApp send attempt) in
+    one round trip: the four reads are independent, and the send attempts come with the rows in one statement."""
+    whatsapp = source_kind == "whatsapp"
+    reads = [lambda session: channel(session, source_kind, channel_id),
+             lambda session: configuration(session, source_kind, channel_id),
+             lambda session: session.execute(select(IntakeAcknowledgement, WhatsAppSendAttempt)
+                 .outerjoin(WhatsAppSendAttempt, WhatsAppSendAttempt.id == IntakeAcknowledgement.outbound_id)
+                 .where(IntakeAcknowledgement.source_kind == source_kind, IntakeAcknowledgement.channel_id == channel_id)
+                 .order_by(IntakeAcknowledgement.created_at.desc(), IntakeAcknowledgement.id.desc()).limit(20)).all()]
+    if whatsapp:
+        reads.append(lambda session: read_template_choice_for(session, source_kind, channel_id))
+    account, config, rows, *chosen = parallel_reads(db, *reads)
     settings = get_settings()
-    template, template_ready = read_template_choice(db, config) if source_kind == "whatsapp" else (None, False)
+    template, template_ready = chosen[0] if whatsapp else (None, False)
     return {"sourceKind": source_kind, "channelId": channel_id, "enabled": bool(config and config.enabled),
         # WhatsApp only: the approved template sent instead of the plain text, or null for the plain text.
         "template": template, "templateAvailable": source_kind == "whatsapp" and template_ready,
@@ -33,7 +42,7 @@ def snapshot(db, source_kind, channel_id):
         "body": config.body if config else default_acknowledgement(db), "enabledAt": config.enabled_at if config else None,
         "connected": connected(source_kind, account),
         "workerEnabled": settings.email_ingestion_enabled if source_kind == "email" else settings.whatsapp_enabled,
-        "attempts": [attempt_out(db, row) for row in rows]}
+        "attempts": [attempt_out(db, row, outgoing) for row, outgoing in rows]}
 
 
 @router.get("/{source_kind}/{channel_id}")

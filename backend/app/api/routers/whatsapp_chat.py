@@ -84,8 +84,12 @@ def conversations(response: Response, q: str = Query("", max_length=200), page: 
 def candidate_conversation(candidate_id: str, response: Response, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """The conversation linked to a candidate, for the profile's WhatsApp button (one cheap read)."""
     response.headers["Cache-Control"] = "private, no-store"
-    row = chat.conversation_for_candidate(db, candidate_id)
-    return {"conversation": chat.conversation_json(db, row, user, get_settings()) if row else None}
+    found = chat.conversation_context(db, WhatsAppConversation.candidate_id == candidate_id,
+                                      order=(WhatsAppConversation.last_message_at.desc().nullslast(), WhatsAppConversation.id))
+    if found is None:
+        return {"conversation": None}
+    row, candidate, channel = found
+    return {"conversation": chat.conversation_json(db, row, user, get_settings(), candidate=candidate, channel=channel)}
 
 
 @router.post("/conversations/open")
@@ -116,11 +120,14 @@ def _inbound_json(row):
 @router.get("/conversations/{conversation_id}/messages")
 def messages(conversation_id: str, response: Response, before: str | None = Query(None, max_length=160),
              limit: int = Query(40, ge=1, le=100), db: Session = Depends(get_db), user: User = Depends(current_user)):
-    conversation = chat.get_conversation(db, conversation_id)
+    # Both reads need only the conversation id, so they run side by side: the conversation header (with its candidate and
+    # channel) and the page of messages, whose own rows are joined onto the page's ids in the same statement.
+    peer = select(WhatsAppConversation.phone_number_id, WhatsAppConversation.peer_number).where(WhatsAppConversation.id == conversation_id).subquery()
     inbound = select(WhatsAppMessage.id, literal("inbound").label("direction"), WhatsAppMessage.received_at.label("at")).where(
-        WhatsAppMessage.phone_number_id == conversation.phone_number_id, WhatsAppMessage.sender_number == conversation.peer_number)
+        WhatsAppMessage.phone_number_id == select(peer.c.phone_number_id).scalar_subquery(),
+        WhatsAppMessage.sender_number == select(peer.c.peer_number).scalar_subquery())
     outbound = select(WhatsAppSendAttempt.id, literal("outbound").label("direction"), WhatsAppSendAttempt.created_at.label("at")).where(
-        WhatsAppSendAttempt.conversation_id == conversation.id)
+        WhatsAppSendAttempt.conversation_id == conversation_id)
     timeline = union_all(inbound, outbound).subquery("timeline")
     query = select(timeline)
     if before:
@@ -132,35 +139,30 @@ def messages(conversation_id: str, response: Response, before: str | None = Quer
         query = query.where(or_(timeline.c.at < stamp, (timeline.c.at == stamp) & (timeline.c.direction < direction),
             (timeline.c.at == stamp) & (timeline.c.direction == direction) & (timeline.c.id < identifier)))
     settings = get_settings()
-    # The page and the conversation header (candidate, channel, send permission) are independent.
-    page, header = parallel_reads(
-        db,
-        lambda session: session.execute(query.order_by(timeline.c.at.desc(), timeline.c.direction.desc(), timeline.c.id.desc()).limit(limit + 1)).mappings().all(),
-        lambda session: chat.conversation_json(session, conversation, user, settings),
-    )
-    ids = {direction: [r["id"] for r in page[:limit] if r["direction"] == direction] for direction in ("inbound", "outbound")}
+    page_ids = query.order_by(timeline.c.at.desc(), timeline.c.direction.desc(), timeline.c.id.desc()).limit(limit + 1).subquery("page")
+    page_with_rows = (select(page_ids.c.id, page_ids.c.direction, page_ids.c.at, WhatsAppMessage, WhatsAppSendAttempt)
+        .select_from(page_ids)
+        .outerjoin(WhatsAppMessage, (page_ids.c.direction == "inbound") & (WhatsAppMessage.id == page_ids.c.id))
+        .outerjoin(WhatsAppSendAttempt, (page_ids.c.direction == "outbound") & (WhatsAppSendAttempt.id == page_ids.c.id))
+        .options(load_only(WhatsAppMessage.id, WhatsAppMessage.message_type, WhatsAppMessage.body,
+            WhatsAppMessage.received_at, WhatsAppMessage.status, WhatsAppMessage.provider_message_id, WhatsAppMessage.candidate_id,
+            WhatsAppMessage.file_name, WhatsAppMessage.content_type, WhatsAppMessage.object_key, WhatsAppMessage.media_id))
+        .order_by(page_ids.c.at.desc(), page_ids.c.direction.desc(), page_ids.c.id.desc()))
 
-    def read_rows(model, direction, serializer):
-        def read(session):
-            if not ids[direction]:
-                return {}
-            statement = select(model).where(model.id.in_(ids[direction]))
-            if model is WhatsAppMessage:
-                statement = statement.options(load_only(WhatsAppMessage.id, WhatsAppMessage.message_type, WhatsAppMessage.body,
-                    WhatsAppMessage.received_at, WhatsAppMessage.status, WhatsAppMessage.provider_message_id, WhatsAppMessage.candidate_id,
-                    WhatsAppMessage.file_name, WhatsAppMessage.content_type, WhatsAppMessage.object_key, WhatsAppMessage.media_id))
-            return {(direction, row.id): serializer(row) for row in session.scalars(statement)}
-        return read
+    def read_header(session):
+        found = chat.conversation_context(session, WhatsAppConversation.id == conversation_id)
+        if found is None: return None
+        row, candidate, channel = found
+        return chat.conversation_json(session, row, user, settings, candidate=candidate, channel=channel)
 
-    rows = {}
-    for found in parallel_reads(db, read_rows(WhatsAppMessage, "inbound", _inbound_json),
-                                read_rows(WhatsAppSendAttempt, "outbound", chat.outbound_json)):
-        rows.update(found)
+    header, page = parallel_reads(db, read_header, lambda session: session.execute(page_with_rows).all())
+    if header is None: raise HTTPException(404, "Conversation not found")
+    shown = page[:limit]
     last = page[limit - 1] if len(page) > limit else None
     response.headers["Cache-Control"] = "private, no-store"
     return {"conversation": header,
-        "messages": [rows[(row["direction"], row["id"])] for row in reversed(page[:limit])],
-        "nextBefore": f"{last['at'].isoformat()}|{last['direction']}|{last['id']}" if last else None}
+        "messages": [_inbound_json(row.WhatsAppMessage) if row.direction == "inbound" else chat.outbound_json(row.WhatsAppSendAttempt) for row in reversed(shown)],
+        "nextBefore": f"{last.at.isoformat()}|{last.direction}|{last.id}" if last else None}
 
 
 def _queue(db, user, conversation_id, body, request_key, *, kind="text", template=None, media=None):

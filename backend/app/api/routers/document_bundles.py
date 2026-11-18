@@ -90,7 +90,7 @@ def start(body: StartIn, response: Response, db: Session = Depends(get_db), user
 @router.get("/{identifier}")
 def detail(identifier: UUID, response: Response, db: Session = Depends(get_db), user: User = Depends(current_user)):
     response.headers["Cache-Control"] = "private, no-store"
-    return service.bundle_out(db, service.get_bundle(db, str(identifier), user))
+    return service.bundle_detail(db, str(identifier), user)
 
 
 @router.get("/candidates/{candidate_id}/sources")

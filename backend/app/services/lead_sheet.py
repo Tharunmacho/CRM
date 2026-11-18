@@ -409,19 +409,30 @@ def search_leads(db: Session, user: User, filters: dict, page: int, page_size: i
 
 
 def get_lead_detail(db: Session, user: User, lead_id: str) -> dict:
-    query, _, _ = _base_query()
-    row = db.execute(query.where(Lead.id == lead_id, visible_leads(user)).options()).first()
+    """The lead, its history and its resume in ONE round trip: the three reads are independent, so they run side by side
+    (the raw row is read with the lead instead of in a lazy statement of its own)."""
+    from app.services.parallel_reads import parallel_reads
+
+    def read_lead(session):
+        query, _, _ = _base_query()
+        return session.execute(query.where(Lead.id == lead_id, visible_leads(user)).options(undefer(Lead.raw))).first()
+
+    def read_activities(session):
+        return session.execute(select(LeadActivity, User.name).outerjoin(User, User.id == LeadActivity.user_id)
+                               .where(LeadActivity.lead_id == lead_id).order_by(LeadActivity.created_at.desc(), LeadActivity.id).limit(100)).all()
+
+    def read_resume(session):
+        return session.scalar(select(Attachment).where(Attachment.entity_type == "lead", Attachment.entity_id == lead_id, Attachment.slot == "resume")
+                              .order_by(Attachment.version.desc()).limit(1))
+
+    row, activities, resume = parallel_reads(db, read_lead, read_activities, read_resume)
     if row is None:
         raise fail(404, "not_found", "This lead was not found.")
     lead = row[0]
     data = _row_out(row)
     data["extra"], data["raw"] = lead.extra or {}, lead.raw or {}
-    activities = db.execute(select(LeadActivity, User.name).outerjoin(User, User.id == LeadActivity.user_id)
-                            .where(LeadActivity.lead_id == lead_id).order_by(LeadActivity.created_at.desc(), LeadActivity.id).limit(100)).all()
     data["activities"] = [{"id": a.id, "kind": a.kind, "summary": a.summary, "userId": a.user_id, "userName": name,
                            "meta": a.meta, "createdAt": iso(a.created_at)} for a, name in activities]
-    resume = db.scalar(select(Attachment).where(Attachment.entity_type == "lead", Attachment.entity_id == lead_id, Attachment.slot == "resume")
-                       .order_by(Attachment.version.desc()).limit(1))
     data["resume"] = ({"id": resume.id, "name": resume.file_name, "sizeKb": resume.size_kb, "version": resume.version,
                        "url": f"/api/files/{resume.id}", "uploadedAt": iso(resume.uploaded_at)} if resume else None)
     data["dailyWorkGate"] = daily_work_gate(db, user)

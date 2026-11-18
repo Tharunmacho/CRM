@@ -88,8 +88,18 @@ def original_url(source_type, source_id):
 
 
 def candidate_manual_sources(db, candidate_id, user):
-    if db.scalar(select(Candidate.id).where(Candidate.id == candidate_id)) is None:
+    from app.services.parallel_reads import parallel_reads
+    # Does the candidate exist, and which reviews touched it: independent reads, one round trip.
+    exists, rows = parallel_reads(db, lambda session: session.scalar(select(Candidate.id).where(Candidate.id == candidate_id)) is not None,
+                                  lambda session: _manual_source_rows(session, candidate_id, user))
+    if not exists:
         raise HTTPException(404, "Candidate not found")
+    return {"reviews": [{"bundleId": row.id, "sourceId": row.source_id, "completedAt": row.updated_at,
+        "originals": [{"id": identifier, "name": name, "url": original_url("manual", identifier)}
+            for identifier, name in zip(row.source_ids, row.source_names)]} for row in rows[:100]], "hasMore": len(rows) > 100}
+
+
+def _manual_source_rows(db, candidate_id, user):
     # Project filenames/IDs inside PostgreSQL: source JSON also contains local OCR
     # evidence and must not be downloaded just to render these history links.
     rows = db.execute(select(MultiPersonIntake.id, MultiPersonIntake.source_id, MultiPersonIntake.updated_at,
@@ -100,13 +110,22 @@ def candidate_manual_sources(db, candidate_id, user):
                    DocumentPersonGroup.bundle_id == MultiPersonIntake.id, DocumentPersonGroup.status == "committed",
                    DocumentPersonGroup.candidate_id == candidate_id).exists())
         .order_by(MultiPersonIntake.updated_at.desc(), MultiPersonIntake.id.desc()).limit(101)).all()
-    return {"reviews": [{"bundleId": row.id, "sourceId": row.source_id, "completedAt": row.updated_at,
-        "originals": [{"id": identifier, "name": name, "url": original_url("manual", identifier)}
-            for identifier, name in zip(row.source_ids, row.source_names)]} for row in rows[:100]], "hasMore": len(rows) > 100}
+    return rows
 
 
-def bundle_out(db, bundle):
-    groups = groups_for(db, bundle)
+def bundle_detail(db, identifier, user):
+    """get_bundle + bundle_out with the bundle and its groups read side by side (one round trip instead of two)."""
+    from app.services.parallel_reads import parallel_reads
+    bundle, groups = parallel_reads(
+        db, lambda session: session.scalar(select(MultiPersonIntake).where(MultiPersonIntake.id == identifier)),
+        lambda session: list(session.scalars(select(DocumentPersonGroup).where(DocumentPersonGroup.bundle_id == identifier).order_by(DocumentPersonGroup.ordinal))))
+    if not bundle or (bundle.source_type == "manual" and bundle.owner_id != user.id):
+        raise HTTPException(404, "Document review not found")
+    return bundle_out(db, bundle, groups)
+
+
+def bundle_out(db, bundle, groups=None):
+    groups = groups_for(db, bundle) if groups is None else groups
     return {"id": bundle.id, "sourceType": bundle.source_type, "sourceId": bundle.source_id,
             "status": bundle.status, "revision": bundle.revision, "lastError": bundle.last_error,
             "sources": [{"id": source["id"], "name": source["name"], "pageCount": source.get("page_count"),

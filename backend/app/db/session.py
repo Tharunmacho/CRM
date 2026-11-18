@@ -264,6 +264,17 @@ def _flag_writes_on_reads(conn, cursor, statement, parameters, context, executem
         log.error("A write ran on an autocommit read request; mark the handler with @writes_on_get: %s", statement[:120])
 
 
+def transaction_session(db: Session) -> Session:
+    """A session with an ordinary transaction on the database `db` reads from.
+
+    For a GET that only SOMETIMES writes (a stale status fixed on read): it keeps the cheap autocommit session of
+    `get_db` for the read, which costs one round trip, and opens this only for the rare write, instead of marking the
+    whole handler `writes_on_get`, which costs a BEGIN and a COMMIT round trip on every call. Use as `with ... as tx`.
+    """
+    bind = db.get_bind()
+    return Session(getattr(bind, "_proxied", bind), autoflush=False, expire_on_commit=False)
+
+
 def get_db(request: Request) -> Generator[Session, None, None]:
     endpoint = request.scope.get("endpoint")
     read_only = request.method in ("GET", "HEAD") and not getattr(endpoint, "writes_on_get", False)

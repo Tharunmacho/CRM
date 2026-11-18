@@ -131,8 +131,11 @@ class JobFinished(Exception):
     """An operator attached/dismissed the original while processing was in flight."""
 
 
-def owned_job(db, identifier, owner_id, *, lock=False):
+def owned_job(db, identifier, owner_id, *, lock=False, full=False):
+    """The caller's own job. `full` reads the result and the draft with the row (they are deferred: touching them later costs a statement each)."""
     statement = select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier, DocumentExtractionJob.owner_id == owner_id)
+    if full:
+        statement = statement.options(undefer(DocumentExtractionJob.result), undefer(DocumentExtractionJob.draft))
     if lock:
         statement = statement.with_for_update().execution_options(populate_existing=True)
     job = db.scalar(statement)

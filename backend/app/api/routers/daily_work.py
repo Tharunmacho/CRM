@@ -10,6 +10,14 @@ from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, DailyGoal, Role, User
 from app.db.session import get_db
 from app.services import daily_work
+from app.services.parallel_reads import parallel_reads
+from app.services.response_cache import cached, scope_of
+
+# Both lists read candidates, placements (with their order, company, client and job title), stage history, open tasks, task
+# remarks and the recruiter roster. A change to any of those drops the memo at once; the time limit covers what no hook can see
+# (another server, the clock: "done today" turns over at agency midnight).
+WORK_TOPICS = ("candidates", "applications", "tasks", "users", "orders", "companies", "clients", "designations")
+WORK_SECONDS = 10
 
 router = APIRouter(prefix="/api", tags=["daily-work"])
 
@@ -51,6 +59,11 @@ def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), us
     Admin and Manager get every recruiter's, or one recruiter's for `staff=<id>`, plus a per-recruiter count (to work, done today).
     A read only: nothing is allocated.
     """
+    # Every open tab refetches when a task or candidate changes; tabs of the same person (or a second supervisor) share one build.
+    return cached(("daily-work", scope_of(db), user.id, user.role.value, staff), WORK_TOPICS, WORK_SECONDS, lambda: _daily_work(db, user, staff))
+
+
+def _daily_work(db: Session, user: User, staff: str | None) -> dict:
     now = datetime.now(timezone.utc)
     supervisor, selector, shown, roster, counts, fetched = _read(
         db, user, staff, lambda s, owners: daily_work.owner_counts(s, owners, now=now), lambda s, owners: daily_work.fetch_rows(s, owners, now=now))
@@ -75,6 +88,10 @@ def follow_up(staff: str | None = None, db: Session = Depends(get_db), user: Use
     A closed application (a negative exit) or a deployed one (it shows on Travelled) is not listed. Same scoping as `/daily-work`:
     a recruiter sees their own, admin and manager everyone's or `staff=<id>`'s, with a per-recruiter count. A read only.
     """
+    return cached(("follow-up", scope_of(db), user.id, user.role.value, staff), WORK_TOPICS, WORK_SECONDS, lambda: _follow_up(db, user, staff))
+
+
+def _follow_up(db: Session, user: User, staff: str | None) -> dict:
     now = datetime.now(timezone.utc)
     supervisor, selector, shown, roster, counts, fetched = _read(
         db, user, staff, lambda s, owners: daily_work.follow_up_counts(s, owners), lambda s, owners: daily_work.fetch_follow_up(s, owners))
@@ -143,8 +160,11 @@ def _goals_json(goals: dict) -> dict:
 @router.get("/daily-goals")
 def daily_goals(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
     """The agency defaults, and for every recruiter the goals in force and which ones are their own override."""
-    staff = list(db.execute(select(User.id, User.name, User.active).where(User.role == Role.staff).order_by(User.name, User.id)).all())
-    goals = daily_work.load_goals(db, [s.id for s in staff] + ["__agency__"])
+    # The roster and the (few) goal rows are independent: one round trip for both (every caller has already committed its change).
+    staff, rows = parallel_reads(
+        db, lambda session: list(session.execute(select(User.id, User.name, User.active).where(User.role == Role.staff).order_by(User.name, User.id)).all()),
+        lambda session: session.execute(select(DailyGoal.user_id, DailyGoal.metric, DailyGoal.target, DailyGoal.morning_target)).all())
+    goals = daily_work.goals_from_rows(rows, [s.id for s in staff] + ["__agency__"])
     return {
         "default": _goals_json(goals["__agency__"]),
         "staff": [{"userId": s.id, "name": s.name, "active": s.active, "goals": _goals_json(goals[s.id]),

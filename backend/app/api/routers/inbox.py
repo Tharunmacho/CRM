@@ -132,8 +132,10 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
         filters.append(MailMessage.id == message_id)
     elif scope != "stored":
         filters.append(MailMessage.folder == "INBOX")
+    selected = None  # the mailboxes asked for (at most 100), or None for all of them
     if account_ids is not None:
-        filters.append(MailMessage.account_id.in_([value for value in account_ids.split(",") if value][:100]))
+        selected = [value for value in account_ids.split(",") if value][:100]
+        filters.append(MailMessage.account_id.in_(selected))
     if unread is not None:
         filters.append(MailMessage.unread == unread)
     if has_attachments is not None:
@@ -158,15 +160,28 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
             select(MailMessage.account_id, func.count(), func.sum(case((MailMessage.unread.is_(True), 1), else_=0)))
             .where(MailMessage.remote_deleted.is_(False), MailMessage.folder == "INBOX").group_by(MailMessage.account_id))}
 
+    # The mailbox view that the sidebar totals already describe (INBOX, not deleted, optionally limited to some mailboxes)
+    # takes its total from the per-mailbox counts read alongside it, so the page query need not count anything.
+    plain = not (message_id or q.strip() or unread is not None or has_attachments is not None or scope == "stored")
+
     def read_page(session):
         if message_id:
-            rows = [(m, m.body, 1) for m in session.scalars(select(MailMessage).where(*filters))]
-        else:
-            rows = [(m, head, count) for m, head, count in session.execute(
-                select(MailMessage, func.left(MailMessage.body, LIST_BODY_CHARS), func.count().over())
-                .options(defer(MailMessage.body)).where(*filters).order_by(*order).offset(offset).limit(limit))]
-        total = rows[0][2] if rows else (0 if offset == 0 else session.scalar(select(func.count()).select_from(select(MailMessage.id).where(*filters).subquery())))
-        return rows, total
+            rows = [(m, m.body) for m in session.scalars(select(MailMessage).where(*filters))]
+            return rows, len(rows)
+        # Choose the page's ids first (a narrow index walk, plus a window count only when nothing else counts the matches),
+        # then read just those rows. A window count over the full rows made PostgreSQL carry every matching message's wide
+        # row through a sort that spilled to disk, on every page, however few rows were shown.
+        chosen = select(MailMessage.id.label("id"), *(() if plain else (func.count().over().label("total"),))).where(
+            *filters).order_by(*order).offset(offset).limit(limit).subquery()
+        columns = [MailMessage, func.left(MailMessage.body, LIST_BODY_CHARS)] + ([] if plain else [chosen.c.total])
+        found = session.execute(select(*columns).join(chosen, chosen.c.id == MailMessage.id)
+                                .options(defer(MailMessage.body)).order_by(*order)).all()
+        rows = [(row[0], row[1]) for row in found]
+        if plain:
+            return rows, None
+        if found:
+            return rows, found[0][2]
+        return rows, 0 if offset == 0 else session.scalar(select(func.count()).select_from(select(MailMessage.id).where(*filters).subquery()))
 
     # The page's ids are a subquery, so the per-message lookups do not wait for the page itself.
     page_ids = select(MailMessage.id).where(*filters).order_by(*order).offset(0 if message_id else offset).limit(1 if message_id else limit).subquery()
@@ -183,6 +198,8 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
 
     account_rows, counts, (page, total), attachments, jobs, bundles = parallel_reads(
         db, read_accounts, read_counts, read_page, read_attachments, read_jobs, read_bundles)
+    if total is None:
+        total = sum(count for account_id, (count, _) in counts.items() if selected is None or account_id in selected)
     messages = [row[0] for row in page]
     bodies = {row[0].id: row[1] or "" for row in page}
     # Administrators configure accounts; other roles never receive credential names/values.
@@ -252,14 +269,16 @@ def _health(db: Session):
     def read_counts(session):
         return session.execute(select(EmailIngestionJob.status, func.count()).group_by(EmailIngestionJob.status)).all()
 
-    accounts, grouped = parallel_reads(db, read_accounts, read_counts)
+    # The two reader heartbeats (usually answered from their own short memo) ride in the same wave.
+    accounts, grouped, document_reader, mail_reader = parallel_reads(
+        db, read_accounts, read_counts, lambda session: reader_status(session), lambda session: reader_status(session, kind="email"))
     counts = {name: 0 for name in (
         "pending", "processing", "retry", "needs_review", "failed", "completed", "ignored",
     )}
     for name, count in grouped:
         if name in counts:
             counts[name] = count
-    readers = {key: value for key, value in (("reader", reader_status(db)), ("mailReader", reader_status(db, kind="email"))) if value is not None}
+    readers = {key: value for key, value in (("reader", document_reader), ("mailReader", mail_reader)) if value is not None}
     return {
         "accounts": [{
             "id": account.id, "address": account.address, "lastSyncAt": account.last_sync_at,

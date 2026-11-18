@@ -80,14 +80,19 @@ def _candidate(db, candidate_id, user, *, lock=False):
     return row
 
 
-def _application(db, candidate_id, application_id):
+def _placements(db, candidate_id):
+    return list(db.scalars(select(Application).where(Application.candidate_id == candidate_id,
+        Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed]))))
+
+
+def _application(db, candidate_id, application_id, placements=None):
+    """`placements` (the candidate's active or deployed applications) may be passed when the caller already read them."""
     if application_id:
         app = db.get(Application, application_id)
         if app is None or app.candidate_id != candidate_id:
             raise HTTPException(404, "Application not found for this candidate")
         return app
-    choices = list(db.scalars(select(Application).where(Application.candidate_id == candidate_id,
-        Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed]))))
+    choices = placements if placements is not None else _placements(db, candidate_id)
     return choices[0] if len(choices) == 1 else None
 
 
@@ -97,14 +102,13 @@ def _record(db, candidate_id, app, *, lock=False):
     return db.scalar(query.with_for_update().execution_options(populate_existing=True) if lock else query)
 
 
-def _ticket(db, candidate_id, app, row=None):
+def _ticket(db, candidate_id, app, row=None, placements=None):
     matches = [(Attachment.entity_type == "candidate") & (Attachment.entity_id == candidate_id) & (Attachment.slot == "air_ticket")]
     if app:
         matches.append((Attachment.entity_type == "application") & (Attachment.entity_id == app.id) & (Attachment.slot == "stage_11_file"))
     options = list(db.scalars(select(Attachment).where(or_(*matches)).order_by(Attachment.uploaded_at.desc(), Attachment.version.desc())))
     options.sort(key=lambda ticket: ticket.entity_type != "application")
-    placements = list(db.scalars(select(Application.id).where(Application.candidate_id == candidate_id,
-        Application.status.in_([ApplicationStatus.active, ApplicationStatus.deployed]))))
+    placements = [placement.id for placement in (placements if placements is not None else _placements(db, candidate_id))]
     for ticket in options:
         if ticket.entity_type == "candidate" and app:
             bound = row and row.application_id == app.id and row.scope_key == app.id and row.ticket_attachment_id == ticket.id
@@ -135,12 +139,13 @@ def _status(app, ticket, row, config):
 def state(db, candidate_id, user, application_id=None):
     from app.services.invoice_payments import summary as payment_summary
     _candidate(db, candidate_id, user)
-    app = _application(db, candidate_id, application_id)
+    placements = _placements(db, candidate_id)  # read once: both the application choice and the ticket check need it
+    app = _application(db, candidate_id, application_id, placements)
     row = _record(db, candidate_id, app)
     if row is None and app:
         row = _record(db, candidate_id, None)
     config = db.get(InvoiceSettings, 1)
-    ticket = _ticket(db, candidate_id, app, row)
+    ticket = _ticket(db, candidate_id, app, row, placements)
     invoice = None
     reviewed = settings_values(config)
     reserved = (row.snapshot or {}).get("amounts", {}) if row else {}

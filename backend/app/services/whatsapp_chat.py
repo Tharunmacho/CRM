@@ -170,6 +170,19 @@ def link_conversations_for_candidate(db, candidate):
     return True
 
 
+def conversation_context(db, *where, order=()):
+    """(conversation, candidate or None, channel) for the first conversation matching `where`, in ONE statement; None if there is none.
+
+    `conversation_json` otherwise looks the candidate and the channel up one statement each, which is two more round trips."""
+    row = db.execute(select(WhatsAppConversation, Candidate, WhatsAppChannel)
+        .outerjoin(Candidate, Candidate.id == WhatsAppConversation.candidate_id)
+        .join(WhatsAppChannel, WhatsAppChannel.phone_number_id == WhatsAppConversation.phone_number_id)
+        .options(load_only(Candidate.id, Candidate.ref, Candidate.care_id, Candidate.name, Candidate.owner_id),
+                 load_only(WhatsAppChannel.phone_number_id, WhatsAppChannel.enabled))
+        .where(*where).order_by(*order).limit(1)).first()
+    return tuple(row) if row else None
+
+
 def conversation_for_candidate(db, candidate_id):
     """The most recently active conversation linked to a candidate, or None."""
     return db.scalar(select(WhatsAppConversation).where(WhatsAppConversation.candidate_id == candidate_id)

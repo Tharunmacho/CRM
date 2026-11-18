@@ -30,6 +30,23 @@ def owned(db, draft_id, actor_id, *, lock=False):
     return row
 
 
+def owned_with_attempts(db, draft_id, actor_id, *, attachments=False):
+    """(draft, its send attempts, its attachments or None) for the owner, read side by side: nothing here waits on the draft row.
+
+    The rows came from other sessions, so they are attached to `db` before the caller settles a stale attempt through it."""
+    from app.services.parallel_reads import parallel_reads
+    reads = [lambda session: session.scalar(select(MailDraft).where(MailDraft.id == draft_id, MailDraft.actor_id == actor_id)),
+             lambda session: list(session.scalars(select(MailSendAttempt).where(MailSendAttempt.draft_id == draft_id).order_by(MailSendAttempt.created_at.desc())))]
+    if attachments:
+        reads.append(lambda session: attachment_rows(session, draft_id))
+    row, attempts, *files = parallel_reads(db, *reads)
+    if row is None:
+        raise HTTPException(404, "Draft not found")
+    db.add(row)
+    db.add_all(attempts)
+    return row, attempts, (files[0] if attachments else None)
+
+
 def check_edit(row, version):
     if row.lock_version != version:
         raise HTTPException(409, "This draft changed in another request. Reload the saved draft before editing.")

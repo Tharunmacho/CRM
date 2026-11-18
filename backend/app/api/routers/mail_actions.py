@@ -6,14 +6,14 @@ import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.deps import current_user, require_role
 from app.db.models import Attachment, AuditEntry, Candidate, EmailIngestionJob, MailAccount, MailAttachment, MailMessage, MailReply, Role, User
-from app.db.session import get_db, writes_on_get
+from app.db.session import get_db, transaction_session
 from app.integrations.mail.base import MailAdapterError
 from app.integrations.mail.smtp import MailSendError, address as valid_address, send_reply
 from app.services import mail_providers
@@ -127,15 +127,23 @@ def reply_out(reply):
 
 
 @router.get("/messages/{message_id}/replies")
-@writes_on_get
 def replies(message_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    if db.get(MailMessage, message_id) is None:
-        raise HTTPException(404, "Message not found")
+    # One read when the message has replies (the foreign key proves the message exists); a second only to tell "no replies"
+    # from "no such message". An old reply still marked pending/sending is settled in its own short transaction, so the
+    # ordinary call stays a plain autocommit read instead of paying BEGIN and COMMIT round trips.
     rows = list(db.scalars(select(MailReply).where(MailReply.message_id == message_id).order_by(MailReply.created_at)))
-    for row in rows:
-        if row.status in {"pending", "sending"} and row.created_at < datetime.now(timezone.utc) - timedelta(minutes=3):
-            row.status, row.last_error = "unknown", "We could not confirm this reply was sent. Check the Sent folder before writing another one."
-    db.commit()
+    if not rows and db.get(MailMessage, message_id) is None:
+        raise HTTPException(404, "Message not found")
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=3)
+    stale = [row for row in rows if row.status in {"pending", "sending"} and row.created_at < cutoff]
+    if stale:
+        unconfirmed = "We could not confirm this reply was sent. Check the Sent folder before writing another one."
+        with transaction_session(db) as writer:
+            writer.execute(update(MailReply).where(MailReply.id.in_([row.id for row in stale]), MailReply.status.in_(("pending", "sending")))
+                           .values(status="unknown", last_error=unconfirmed))
+            writer.commit()
+        for row in stale:
+            row.status, row.last_error = "unknown", unconfirmed
     return [reply_out(row) for row in rows]
 
 

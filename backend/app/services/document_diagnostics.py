@@ -185,19 +185,26 @@ def _reading(job, state: dict) -> dict:
 
 
 def build(db: Session, user: User, candidate_id: str) -> dict:
-    candidate = db.get(Candidate, candidate_id)
+    from app.services.document_identity import rejected_expression
+    from app.services.parallel_reads import parallel_reads
+    # The candidate, its files, the scans they were cut from and the reading jobs are independent reads: one round trip together.
+    candidate, files, split_rows, jobs = parallel_reads(
+        db,
+        lambda session: session.get(Candidate, candidate_id),
+        lambda session: session.execute(select(Attachment.id, Attachment.slot, Attachment.version, Attachment.file_name, Attachment.size_kb,
+                                               Attachment.content_type, Attachment.uploaded_at, rejected_expression())
+                                        .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
+                                               Attachment.slot.in_([slot for slot in form.STORED_SLOTS if slot != form.INVOICE_SLOT]))
+                                        .order_by(Attachment.slot, Attachment.uploaded_at)).all(),
+        lambda session: list(session.scalars(form.split_sources_statement(candidate_id))),
+        lambda session: list(session.scalars(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))
+                                             .where(DocumentExtractionJob.candidate_id == candidate_id).order_by(DocumentExtractionJob.created_at.desc()))),
+    )
     if candidate is None:
         raise HTTPException(404, "Candidate not found")
-    form.ensure_can_edit(user, candidate)
-    from app.services.document_identity import rejected_expression
-    files = db.execute(select(Attachment.id, Attachment.slot, Attachment.version, Attachment.file_name, Attachment.size_kb,
-                              Attachment.content_type, Attachment.uploaded_at, rejected_expression())
-                       .where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
-                              Attachment.slot.in_([slot for slot in form.STORED_SLOTS if slot != form.INVOICE_SLOT]))
-                       .order_by(Attachment.slot, Attachment.uploaded_at)).all()
-    splits = form.split_sources(db.scalars(form.split_sources_statement(candidate_id)))
-    jobs = list(db.scalars(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))
-                           .where(DocumentExtractionJob.candidate_id == candidate_id).order_by(DocumentExtractionJob.created_at.desc())))
+    from app.core.deps import ensure_can_work_candidate
+    ensure_can_work_candidate(candidate, user, db)  # the refusal names the owner, read through the request's own session
+    splits = form.split_sources(split_rows)
     used: set[str] = set()
     documents = []
     for row in files:

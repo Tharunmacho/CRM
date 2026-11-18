@@ -675,19 +675,32 @@ def status_of(body: StatusIn, db: Session = Depends(get_db), user: User = Depend
     from sqlalchemy import func, select
     from app.db.models import Attachment, DocumentExtractionJob
     from app.services import form_extraction as fx
-    candidates = _workable(db, user, list(dict.fromkeys(body.candidateIds)), sources=True)
+    from app.services.parallel_reads import parallel_reads
+    asked = list(dict.fromkeys(body.candidateIds))
+    if not asked:
+        return {"items": []}
+    # The candidates, their reading jobs counted and their documents are three independent reads (the screen polls this): one round trip
+    # together. Jobs and documents are read for every id asked and only the workable candidates' are used.
+    candidates, job_counts, stored = parallel_reads(
+        db,
+        lambda session: _workable(session, user, asked, sources=True),
+        lambda session: session.execute(
+            select(DocumentExtractionJob.candidate_id, DocumentExtractionJob.status, func.count())
+            .where(DocumentExtractionJob.candidate_id.in_(asked)).group_by(DocumentExtractionJob.candidate_id, DocumentExtractionJob.status)).all(),
+        lambda session: list(session.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id.in_(asked))
+                                             .order_by(Attachment.version))),
+    )
     if not candidates:
         return {"items": []}
-    wanted = [candidate.id for candidate in candidates]
+    wanted = {candidate.id for candidate in candidates}
     counts: dict[str, dict[str, int]] = {}
-    for candidate_id, job_status, count in db.execute(
-            select(DocumentExtractionJob.candidate_id, DocumentExtractionJob.status, func.count())
-            .where(DocumentExtractionJob.candidate_id.in_(wanted)).group_by(DocumentExtractionJob.candidate_id, DocumentExtractionJob.status)):
-        counts.setdefault(candidate_id, {})[job_status] = count
+    for candidate_id, job_status, count in job_counts:
+        if candidate_id in wanted:
+            counts.setdefault(candidate_id, {})[job_status] = count
     latest: dict[str, dict[str, Attachment]] = {}
-    for attachment in db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id.in_(wanted))
-                                 .order_by(Attachment.version)):
-        latest.setdefault(attachment.entity_id, {})[attachment.slot] = attachment      # the highest version of each kind is the current one
+    for attachment in stored:
+        if attachment.entity_id in wanted:
+            latest.setdefault(attachment.entity_id, {})[attachment.slot] = attachment      # the highest version of each kind is the current one
     items = []
     for candidate in candidates:
         jobs = counts.get(candidate.id, {})

@@ -49,7 +49,10 @@ def test_rejected_identity_file_is_retained_and_excluded_from_every_checklist(ex
         assert next(item for item in snapshot["files"] if item["id"] == identifier)["identity_mismatch"]
         assert "resume" in {item["slot"] for item in application_form.missing_required_documents(db, "candidate")}
         rows = [{"candidateId": "candidate"}]
-        travelled._add_documents(db, rows)
+        from app.services.document_identity import rejected_expression
+        stored = db.execute(select(Attachment.entity_id, Attachment.slot).where(
+            Attachment.entity_type == "candidate", Attachment.entity_id == "candidate", ~rejected_expression()).distinct()).all()
+        travelled._add_documents(rows, stored)
         assert "Resume" in rows[0]["documents"]["missing"]
         bank = sheets(candidate_search.export_candidates(db, candidate_search.Search()))["Candidates"]
         person = next(item for item in bank[1:] if item[bank[0].index("Name")] == "Alex Example")

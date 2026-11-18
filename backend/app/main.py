@@ -103,8 +103,13 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     """Initialize the assignment cursor without modifying user accounts."""
+    # Open the resident connections NOW, side by side with the checks below: against a hosted database each new connection
+    # costs ~1 s, and starting them afterwards made the first page wait for those seconds one after the other.
+    threading.Thread(target=warm_pool, name="db-pool-warmup", daemon=True).start()
     try:
         with connect_with_retry() as connection:
+            # One SELECT with no BEGIN and no ROLLBACK around it: two round trips fewer on every boot.
+            connection.execution_options(isolation_level="AUTOCOMMIT")
             schema = schema_status(connection)
         if schema["status"] == "ok":
             with SessionLocal() as db:
@@ -114,8 +119,6 @@ def on_startup() -> None:
             log.error("Database migration required: current=%s expected=%s. No startup data was changed.", schema["current"], schema["expected"])
     except Exception:  # reported by /api/health; account login never seeds data
         log.error("Application state initialization failed.")
-
-    threading.Thread(target=warm_pool, name="db-pool-warmup", daemon=True).start()
 
     def warm_first_page() -> None:
         try:
@@ -199,7 +202,8 @@ def health(response: Response = None) -> dict:
     schema = {"status": "unavailable", "current": [], "expected": []}
     try:
         with engine.connect() as conn:
-            conn.execute(text("select 1"))
+            # No separate `select 1`: reading the revision table already proves the connection works (and a failure
+            # there is reported as "database unavailable" just the same).
             schema = schema_status(conn)
             try:
                 accounts = conn.execute(select(func.count()).select_from(User)).scalar()

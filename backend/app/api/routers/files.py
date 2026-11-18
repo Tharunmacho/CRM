@@ -32,6 +32,7 @@ from app.core.deps import current_user, ensure_can_work, ensure_can_work_candida
 from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, Lead, User
 from app.services import document_storage, file_ownership
 from app.services.invoice_access import can_see_invoices, ensure_can_see_invoices
+from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 logger = logging.getLogger(__name__)
@@ -85,12 +86,17 @@ def _safe_name(name: str) -> str:
     return cleaned[:150] or "file"
 
 
-def _entity(db: Session, entity_type: str, entity_id: str, *, lock: bool = False):
+def _entity_model(entity_type: str, entity_id: str):
     model = ENTITIES.get(entity_type)
     if model is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Files cannot be added to this kind of record ({entity_type}).")
     if not entity_id or not entity_id.strip() or len(entity_id) > 36:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "We could not tell which record this file belongs to.")
+    return model
+
+
+def _entity(db: Session, entity_type: str, entity_id: str, *, lock: bool = False):
+    model = _entity_model(entity_type, entity_id)
     statement = select(model).where(model.id == entity_id)
     if lock:
         # Lock the parent even when the slot has no versions yet. Locking only a
@@ -467,13 +473,19 @@ def list_for(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> list[dict]:
-    _entity(db, entity_type, entity_id)
-    _own_stage_files_only(db, entity_type, entity_id, user)
-    rows = db.scalars(
-        select(Attachment)
-        .where(Attachment.entity_type == entity_type, Attachment.entity_id == entity_id)
-        .order_by(Attachment.slot, Attachment.version)
+    model = _entity_model(entity_type, entity_id)
+    # Does the record exist, and what are its files: two independent reads, one round trip (the record itself is never needed, so its
+    # resume text and other wide columns are not read either).
+    found, rows = parallel_reads(
+        db,
+        lambda session: session.scalar(select(model.id).where(model.id == entity_id)) is not None,
+        lambda session: list(session.scalars(
+            select(Attachment).where(Attachment.entity_type == entity_type, Attachment.entity_id == entity_id)
+            .order_by(Attachment.slot, Attachment.version))),
     )
+    if not found:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "The record for this file was not found.")
+    _own_stage_files_only(db, entity_type, entity_id, user)
     if not can_see_invoices(user):
         rows = [r for r in rows if r.slot != "invoice"]
     return [

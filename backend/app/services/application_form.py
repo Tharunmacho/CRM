@@ -32,7 +32,8 @@ from app.services.candidate_identity import identity_matches, normalize_candidat
 from app.services.invoice_access import INVOICE_SLOT, can_see_invoices
 from app.services.parallel_reads import parallel_reads
 from app.services.reading_notes import plain_issues, plain_notes, review_reasons
-from app.services.document_status import ACTION as DOCUMENT_STATUS_ACTION, manual_document_statuses, read_manual_document_statuses
+from app.services.document_status import ACTION as DOCUMENT_STATUS_ACTION, latest_statement, manual_document_statuses, read_manual_document_statuses, statuses_by_candidate
+from app.services.response_cache import cached, scope_of
 from app.services.document_identity import rejected_expression
 
 # Document slots of the form, in the order shown (docs/workflows/application-form-v2-contract.md section 2):
@@ -623,23 +624,32 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
             Application.candidate_id == candidate_id)
         return dict(session.execute(select(User.id, User.name).where(or_(User.id.in_(uploaders), User.id.in_(completers)))).all())
 
-    def read_notes(session):
-        # Recruiter notes, and the open stage tasks whose 48-hour SLA window is the stage clock.
-        tasks = list(session.execute(
+    def read_feedback(session):
+        return form_feedback.read_items(session, candidate_id)  # recruiter notes
+
+    def read_tasks(session):
+        # The open stage tasks whose 48-hour SLA window is the stage clock.
+        return list(session.execute(
             select(Task.application_id, Task.stage, Task.created_at, Task.sla_started_at, Task.due_at)
             .where(Task.candidate_id == candidate_id, Task.application_id.is_not(None),
                    Task.completed_at.is_(None), Task.cancelled_at.is_(None))).all())
-        return form_feedback.read_items(session, candidate_id), tasks
 
     def read_lists(session):
-        # Reference agencies and recruiters for the assignment pickers.
-        return form_assignment.read_agencies(session), form_assignment.read_recruiters(session)
+        # Reference agencies and recruiters for the assignment pickers: the same for everybody and rarely changed, so they are kept
+        # for half a minute (dropped at once by a change to an agency or a recruiter) instead of being read again for every form.
+        return cached(("form-pickers", scope_of(db)), ("reference_agencies", "users"), 30,
+                      lambda: (form_assignment.read_agencies(session), form_assignment.read_recruiters(session)))
 
-    found, application_rows, attachments, jobs, stages, names, (feedback_items, tasks), job_rows, (agencies, recruiters), manual_records, split_metas = parallel_reads(
-        db, read_candidate, read_applications, read_attachments, read_jobs, read_stages, read_names, read_notes,
-        lambda session: form_assignment.read_job_options(session, candidate_id), read_lists,
-        lambda session: manual_document_statuses(session, candidate_id),
-        lambda session: list(session.scalars(split_sources_statement(candidate_id))))   # one read for every split file's origin
+    def read_audit(session):
+        # Two small reads of the same audit rows in ONE statement: each document's manual "uploaded" mark and which scan each split file was cut from.
+        from app.services.desk_snapshot import _rows
+        row = session.execute(select(_rows("manual", latest_statement([candidate_id])), _rows("splits", split_sources_statement(candidate_id)))).mappings().one()
+        return statuses_by_candidate(row["manual"]).get(candidate_id, {}), [item["meta"] for item in row["splits"] or []]
+
+    # Every read is one statement, and there are no more of them than parallel_reads has slots, so the whole form is one round trip.
+    found, application_rows, attachments, jobs, stages, names, feedback_items, tasks, job_rows, (agencies, recruiters), (manual_records, split_metas) = parallel_reads(
+        db, read_candidate, read_applications, read_attachments, read_jobs, read_stages, read_names, read_feedback, read_tasks,
+        lambda session: form_assignment.read_job_options(session, candidate_id), read_lists, read_audit)
     if found is None:
         raise HTTPException(404, "Candidate not found")
     candidate, owner_name = found

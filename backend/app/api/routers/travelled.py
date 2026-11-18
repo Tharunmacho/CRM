@@ -32,6 +32,8 @@ from app.db.session import get_db
 from app.services.agency_display import agency_display_expression
 from app.services.application_form import LEGACY_SLOTS, required_for_deployment
 from app.services.invoice_access import can_see_invoices
+from app.services.parallel_reads import parallel_reads
+from app.services.response_cache import cached, scope_of
 
 router = APIRouter(prefix="/api/travelled", tags=["travelled"])
 
@@ -137,8 +139,24 @@ def query_filters(year: int | None = None, month: int | None = None, day: int | 
     return Filters(year, month, day, from_, to, client, agency, country, q, incomplete, undated, order)
 
 
+# What the placements, their people and their documents are built from; any change to one of them drops the kept answer at once.
+TRAVELLED_TOPICS = ("applications", "candidates", "documents", "orders", "companies", "clients", "designations", "users", "reference_agencies")
+TRAVELLED_SECONDS = 30
+
+
 def read_rows(db: Session, user: User) -> list[dict]:
-    """Every travelled placement the user may see, newest travel first. One statement."""
+    """Every travelled placement the user may see, newest travel first.
+
+    The list is the same for every request of the same person until a placement, candidate, document or order changes, so it is kept
+    for a short while (see services/response_cache.py): opening the screen again, changing a filter and exporting cost no statement.
+    The rows are shared between requests: callers only read them."""
+    return cached(("travelled", scope_of(db), user.role.value, user.id if user.role.value == "staff" else None), TRAVELLED_TOPICS,
+                  TRAVELLED_SECONDS, lambda: _read_rows(db, user))
+
+
+def _read_rows(db: Session, user: User) -> list[dict]:
+    """Every travelled placement the user may see, newest travel first. The placements and the documents of their candidates are two
+    independent reads, so they run side by side: one round trip."""
     ranked = select(
         ApplicationStage.application_id.label("application_id"), ApplicationStage.data.label("data"),
         ApplicationStage.reopened_reason.label("reopened_reason"),
@@ -164,9 +182,11 @@ def read_rows(db: Session, user: User) -> list[dict]:
     )
     if user.role.value == "staff":
         statement = statement.where(Application.owner_id == user.id)
+    stored_statement = _stored_documents_statement(user)
+    found, stored_rows = parallel_reads(db, lambda session: session.execute(statement).all(), lambda session: session.execute(stored_statement).all())
     rows = []
     for (app_id, status, cand_id, ref, name, agency, order_ref, order_country, company, company_country, client_id,
-         job, recruiter, travel_date, airline, pnr, passport, order_id, traveller_id, care_id) in db.execute(statement).all():
+         job, recruiter, travel_date, airline, pnr, passport, order_id, traveller_id, care_id) in found:
         day = None
         if isinstance(travel_date, str) and _DAY.fullmatch(travel_date):
             try:
@@ -181,24 +201,30 @@ def read_rows(db: Session, user: User) -> list[dict]:
             "travelDate": day, "airline": airline or None, "pnr": pnr or None, "recruiter": recruiter,
             "status": getattr(status, "value", status),
         })
-    _add_documents(db, rows, user)
+    _add_documents(rows, stored_rows, user)
     rows.sort(key=lambda r: (r["name"] or "").lower())
     rows.sort(key=lambda r: r["travelDate"] or "", reverse=True)   # stable: newest first, then by name; undated last
     return rows
 
 
-def _add_documents(db: Session, rows: list[dict], user: User | None = None) -> None:
+def _stored_documents_statement(user: User):
+    """The (candidate, slot) pairs on file for every candidate the user's travelled list holds, in one statement."""
+    from app.services.document_identity import rejected_expression
+    deployed = select(Application.candidate_id).where(Application.status == ApplicationStatus.deployed)
+    if user.role.value == "staff":
+        deployed = deployed.where(Application.owner_id == user.id)
+    return select(Attachment.entity_id, Attachment.slot).where(
+        Attachment.entity_type == "candidate", Attachment.entity_id.in_(deployed), ~rejected_expression()).distinct()
+
+
+def _add_documents(rows: list[dict], stored_rows, user: User | None = None) -> None:
     """`documents` on every row: {have, required, missing[labels]} against the mandatory list, from ONE statement for all candidates.
 
     The Invoice document is the admin's, so for anyone else it is neither required nor listed as missing."""
     required = required_for_deployment(user is None or can_see_invoices(user))
-    from app.services.document_identity import rejected_expression
     stored: dict[str, set[str]] = {}
-    ids = sorted({row["candidateId"] for row in rows})
-    if ids:
-        for candidate_id, slot in db.execute(select(Attachment.entity_id, Attachment.slot).where(
-                Attachment.entity_type == "candidate", Attachment.entity_id.in_(ids), ~rejected_expression()).distinct()).all():
-            stored.setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))   # an older slot key counts for its new slot
+    for candidate_id, slot in stored_rows:
+        stored.setdefault(candidate_id, set()).add(LEGACY_SLOTS.get(slot, slot))   # an older slot key counts for its new slot
     for row in rows:
         have = stored.get(row["candidateId"], set())
         missing = [label for slot, label in required if slot not in have]

@@ -144,7 +144,7 @@ class Database:
         entity = statement.column_descriptions[0]["entity"].__name__
         if entity == "MailAccount":  # account list with a has-credentials flag; never the secret itself
             return Rows((account, account.secrets is not None) for account in self.accounts)
-        if entity == "MailMessage" and len(statement.column_descriptions) == 3:  # page + body head + window total
+        if entity == "MailMessage" and len(statement.column_descriptions) in (2, 3):  # page + body head (+ window total when filtered)
             return Rows((message, (message.body or "")[:600], len(self.messages)) for message in self.messages)
         counts = {}
         for item in self.jobs:

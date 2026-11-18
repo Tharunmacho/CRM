@@ -170,6 +170,17 @@ def read_template_choice(db, config):
         return None, False
 
 
+def read_template_choice_for(db, source_kind, channel_id):
+    """`read_template_choice` addressed by the channel instead of by an already loaded settings row, so it can run beside
+    the settings read. Meant for a session of its own (a failed read, on a database without migration 0018, ends with it)."""
+    try:
+        value = db.scalar(select(IntakeAcknowledgementSettings.whatsapp_template).where(
+            IntakeAcknowledgementSettings.source_kind == source_kind, IntakeAcknowledgementSettings.channel_id == channel_id))
+        return (value if isinstance(value, dict) and value.get("name") else None), True
+    except DBAPIError:
+        return None, False
+
+
 def write_template_choice(db, config, choice):
     """Store (or with None clear) the template. Returns False when the database has no column for it yet."""
     try:
@@ -239,11 +250,17 @@ def enqueue_whatsapp(db, row):
     row.status, row.last_error = "failed", str(error.detail)[:500]
 
 
-def attempt_out(db, row):
+_LOOK_UP = object()
+
+
+def attempt_out(db, row, outgoing=_LOOK_UP):
+    """One attempt as the screen shows it. A caller listing many attempts passes each row's WhatsApp send attempt
+    (or None) it already loaded together with the rows, so a list costs one statement instead of one per row."""
     state = row.status
     error, provider_id, sent_at = row.last_error, row.provider_message_id, row.sent_at
     if row.source_kind == "whatsapp" and row.outbound_id:
-        outgoing = db.get(WhatsAppSendAttempt, row.outbound_id)
+        if outgoing is _LOOK_UP:
+            outgoing = db.get(WhatsAppSendAttempt, row.outbound_id)
         if outgoing:
             state = {"queued": "pending", "preparing": "sending", "accepted": "sent",
                 "delivered": "sent", "read": "sent", "cancelled": "suppressed"}.get(outgoing.state, outgoing.state)

@@ -12,13 +12,14 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from app.core.config import get_settings
 from app.core.deps import ensure_can_work_candidate
 from app.db.models import Application, ApplicationFeedback, ApplicationStage, Attachment, Candidate, Remark, Role, Task, User
 from app.services import application_form, document_storage
 from app.services.invoice_access import INVOICE_SLOT, can_see_invoices
+from app.services.parallel_reads import parallel_reads
 from app.services.report_exports import stage_name, xlsx_rows
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -88,7 +89,7 @@ class Inspection:
 
 
 def load_inspection(db: Session, candidate_id: str, user: User, *, application_id=None, order_id=None) -> Inspection:
-    candidate = db.get(Candidate, candidate_id)
+    candidate = db.get(Candidate, candidate_id, options=[undefer(Candidate.source_claims)])  # read with the row, not in a statement of its own
     if candidate is None:
         raise HTTPException(404, "Candidate not found")
     # Full inspection exports include private stage answers/history, not only the
@@ -101,26 +102,32 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
     )
     if not can_see_invoices(user):
         scope = scope & (Attachment.slot != "invoice")  # invoice PDFs are the admin's, also in the record package
-    attachments = list(db.scalars(select(Attachment).where(scope).order_by(Attachment.entity_type, Attachment.entity_id, Attachment.slot,
-                Attachment.uploaded_at.desc(), Attachment.version.desc(), Attachment.id.desc()).limit(MAX_DOCUMENTS + 1)))
-    if len(attachments) > MAX_DOCUMENTS:
-        raise HTTPException(413, "This candidate has too many document versions for one export. Contact your administrator.")
-    form = application_form.build_form(db, candidate_id, user, application_id=application_id, order_id=order_id)
-    if application_id and order_id and form["application"]["orderId"] != order_id:
-        raise HTTPException(404, "This candidate's selected application is not on that order.")
-    applications = list(db.scalars(select(Application).where(Application.candidate_id == candidate_id)
-                                  .order_by(Application.created_at.desc(), Application.id.desc())))
-    stages = list(db.scalars(select(ApplicationStage).where(ApplicationStage.application_id.in_(app_ids))
-                            .order_by(ApplicationStage.application_id, ApplicationStage.stage, ApplicationStage.attempt)
-                            .limit(MAX_HISTORY_ROWS + 1)))
-    feedback = list(db.scalars(select(ApplicationFeedback).where(ApplicationFeedback.candidate_id == candidate_id)
-                              .order_by(ApplicationFeedback.created_at, ApplicationFeedback.id).limit(MAX_HISTORY_ROWS + 1)))
     task_scope = [Task.candidate_id == candidate_id]
     if user.role not in (Role.admin, Role.manager):
         task_scope.append(Task.owner_id == user.id)
-    tasks = list(db.scalars(select(Task).where(*task_scope).order_by(Task.created_at, Task.id).limit(MAX_HISTORY_ROWS + 1)))
-    remarks = list(db.scalars(select(Remark).where(Remark.task_id.in_(select(Task.id).where(*task_scope)))
-                             .order_by(Remark.created_at, Remark.id).limit(MAX_HISTORY_ROWS + 1)))
+    form = application_form.build_form(db, candidate_id, user, application_id=application_id, order_id=order_id)
+    if application_id and order_id and form["application"]["orderId"] != order_id:
+        raise HTTPException(404, "This candidate's selected application is not on that order.")
+    # The rest of the record is seven independent reads: one round trip together instead of seven in a row.
+    attachments, applications, stages, feedback, tasks, remarks, everybody = parallel_reads(
+        db,
+        lambda session: list(session.scalars(select(Attachment).where(scope).order_by(Attachment.entity_type, Attachment.entity_id, Attachment.slot,
+                    Attachment.uploaded_at.desc(), Attachment.version.desc(), Attachment.id.desc()).limit(MAX_DOCUMENTS + 1))),
+        lambda session: list(session.scalars(select(Application).where(Application.candidate_id == candidate_id)
+                                            .order_by(Application.created_at.desc(), Application.id.desc()))),
+        lambda session: list(session.scalars(select(ApplicationStage).where(ApplicationStage.application_id.in_(app_ids))
+                                            .order_by(ApplicationStage.application_id, ApplicationStage.stage, ApplicationStage.attempt)
+                                            .limit(MAX_HISTORY_ROWS + 1))),
+        lambda session: list(session.scalars(select(ApplicationFeedback).where(ApplicationFeedback.candidate_id == candidate_id)
+                                            .order_by(ApplicationFeedback.created_at, ApplicationFeedback.id).limit(MAX_HISTORY_ROWS + 1))),
+        lambda session: list(session.scalars(select(Task).where(*task_scope).order_by(Task.created_at, Task.id).limit(MAX_HISTORY_ROWS + 1))),
+        lambda session: list(session.scalars(select(Remark).where(Remark.task_id.in_(select(Task.id).where(*task_scope)))
+                                            .order_by(Remark.created_at, Remark.id).limit(MAX_HISTORY_ROWS + 1))),
+        # Every person's name (the team is small): read with the rest, not in a statement of its own once the ids are known.
+        lambda session: dict(session.execute(select(User.id, User.name)).all()),
+    )
+    if len(attachments) > MAX_DOCUMENTS:
+        raise HTTPException(413, "This candidate has too many document versions for one export. Contact your administrator.")
     if any(len(rows) > MAX_HISTORY_ROWS for rows in (stages, feedback, tasks, remarks)):
         raise HTTPException(413, "This candidate has too much history for one export. Contact your administrator; no records were omitted.")
     person_ids = {candidate.owner_id, candidate.intake_owner_id, candidate.created_by}
@@ -131,7 +138,7 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
     person_ids.update(row.author_id for row in feedback)
     person_ids.update(row.owner_id for row in tasks)
     person_ids.update(row.author_id for row in remarks)
-    names = dict(db.execute(select(User.id, User.name).where(User.id.in_(person_ids - {None}))).all())
+    names = {person: name for person, name in everybody.items() if person in person_ids}
     return Inspection(candidate, form, applications, stages, attachments, names, feedback, tasks, remarks)
 
 

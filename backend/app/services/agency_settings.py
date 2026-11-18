@@ -166,12 +166,20 @@ def agency_row(db: Session) -> AgencySettings | None:
     return db.get(AgencySettings, 1) if tables_present(db) else None
 
 
-def read_payload(db: Session) -> dict:
+def read_payload(db: Session, *, side_by_side: bool = False) -> dict:
+    """The settings payload. `side_by_side` reads the three tables at the same time (one round trip instead of three) on
+    sessions of their own, so it is only for a read that has no uncommitted changes of its own to show."""
     if not tables_present(db):
         return build_payload(None, None)
-    agency = db.get(AgencySettings, 1)
-    currencies = db.scalars(select(Currency)).all()
-    categories = db.scalars(select(JobCategory)).all() if categories_present(db) else None
+    if side_by_side:
+        from app.services.parallel_reads import parallel_reads
+        agency, currencies, categories = parallel_reads(
+            db, lambda session: session.get(AgencySettings, 1), lambda session: session.scalars(select(Currency)).all(),
+            (lambda session: session.scalars(select(JobCategory)).all()) if categories_present(db) else (lambda session: None))
+    else:
+        agency = db.get(AgencySettings, 1)
+        currencies = db.scalars(select(Currency)).all()
+        categories = db.scalars(select(JobCategory)).all() if categories_present(db) else None
     raw = None if agency is None else {
         "name": agency.name, "short_name": agency.short_name, "default_order_currency": agency.default_order_currency,
         "default_advance_currency": agency.default_advance_currency, "home_calling_code": agency.home_calling_code,

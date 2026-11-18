@@ -762,9 +762,12 @@ def update_order(order_id: str, body: OrderIn, db: Session = Depends(get_db), us
 def master_audit(kind: Literal["client", "company", "designation", "order", "reference_agency"], record_id: str,
                  db: Session = Depends(get_db), user: User = Depends(current_user)):
     model = {"client": Client, "company": Company, "designation": Designation, "order": Order, "reference_agency": ReferenceAgency}[kind]
-    if db.get(model, record_id) is None: raise HTTPException(404, "Record not found")
-    rows = db.scalars(select(AuditEntry).where(AuditEntry.entity_type == kind, AuditEntry.entity_id == record_id)
-                      .order_by(AuditEntry.at.desc(), AuditEntry.id.desc()).limit(100)).all()
+    # The record check and the history are independent: one round trip for both.
+    found, rows = parallel_reads(
+        db, lambda session: session.scalar(select(model.id).where(model.id == record_id)) is not None,
+        lambda session: session.scalars(select(AuditEntry).where(AuditEntry.entity_type == kind, AuditEntry.entity_id == record_id)
+                                        .order_by(AuditEntry.at.desc(), AuditEntry.id.desc()).limit(100)).all())
+    if not found: raise HTTPException(404, "Record not found")
     return [{"id": row.id, "action": row.action, "actorId": row.actor_id, "at": row.at,
              "target": row.target, "meta": row.meta} for row in rows]
 
