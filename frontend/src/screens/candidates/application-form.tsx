@@ -22,6 +22,7 @@ import { SectionHeader } from '@/features/application-form/components/section-he
 import { AssignmentBar } from '@/features/application-form/components/assignment-bar'
 import { DocumentsSection } from '@/features/application-form/components/documents-section'
 import { MergeIntoPicker } from '@/features/application-form/components/candidate-merge'
+import { SHOW_MERGE_UI } from '@/features/application-form/duplicate-merge'
 import { RecordDownloads } from '@/features/application-form/components/record-downloads'
 import { InvoiceCard } from '@/features/application-form/components/invoice-card'
 import { FillView } from '@/features/application-form/fill/fill-view'
@@ -247,7 +248,7 @@ export default function ApplicationFormPage() {
               <Button variant="primary" disabled={saving} onClick={() => void state.save()} icon={saving ? <Loader2 className="animate-spin" /> : <Save />}>{saving ? 'Saving…' : 'Save changes'}</Button>
             </>
           )}
-          {form && me.role === 'admin' && <MergeIntoPicker sourceId={id} sourceLabel={primaryId(ids) || name} />}
+          {SHOW_MERGE_UI && form && me.role === 'admin' && <MergeIntoPicker sourceId={id} sourceLabel={primaryId(ids) || name} />}
           <Button ref={previewButton} onClick={() => setPreviewOpen(true)} icon={<Eye />} disabled={!form} aria-haspopup="dialog">Preview form</Button>
           {/* The paper form is always rendered, so this prints it from anywhere. */}
           <Button onClick={() => window.print()} icon={<Printer />} disabled={!form}>Print or save as PDF</Button>

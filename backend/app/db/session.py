@@ -51,6 +51,15 @@ _managed_connect_retry = ContextVar("managed_connect_retry", default=False)
 IDLE_VERIFY_SECONDS = 30
 
 
+def verify_idle_after(seconds: float) -> None:
+    """Ping a pooled connection that rested this long before it is used (default 30 s; 0 = at every checkout, i.e. pre-ping).
+
+    The reading workers use a few seconds: they wait on a remote reader between statements, and a tunnel that dropped in the
+    meantime must cost one fresh connection, not a failed save of a document's progress."""
+    global IDLE_VERIFY_SECONDS
+    IDLE_VERIFY_SECONDS = max(0.0, float(seconds))
+
+
 def _ping(dbapi_connection) -> None:
     """``SELECT 1`` in ONE round trip: autocommit means no BEGIN before it and no ROLLBACK after it."""
     previous = dbapi_connection.autocommit

@@ -114,10 +114,10 @@ def test_retrying_older_front_page_reuses_file_and_job(desk, profile):
     if profile:
         response = desk.client.post("/api/files", data={"entity_type": "candidate", "entity_id": "candidate", "slot": "passport"},
                                     files={"file": ("renamed-front.pdf", contents[0], "application/pdf")})
-        assert response.status_code == 201 and response.json()["id"] == files[0]["id"]
+        assert response.status_code == 200 and response.json()["id"] == files[0]["id"] and response.json()["alreadyUploaded"] is True
     else:
         response = upload(desk, "passport", contents[0], "renamed-front.pdf")
-        assert response.status_code == 202
+        assert response.status_code == 200 and response.json()["alreadyUploaded"] is True   # the same bytes again: nothing stored
     with desk.sessions() as db:
         assert db.scalar(select(func.count()).select_from(Attachment).where(Attachment.entity_id == "candidate")) == 2
         assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 2
@@ -197,7 +197,7 @@ def test_aadhaar_front_back_remain_optional_and_wait_for_explicit_start(desk, pr
     if profile:
         params.update(entity_type="candidate", entity_id="candidate")
     repeated = desk.client.post(path, data=params, files={"file": ("renamed-front.pdf", contents[0], "application/pdf")})
-    assert repeated.status_code in (201, 202)
+    assert repeated.status_code == 200 and repeated.json()["alreadyUploaded"] is True
     assert len(form(desk)["documents"]["aadhaar"]["files"]) == 2 and jobs_by_file(desk) == {}
     started = desk.client.post(url() + "/extract", json={"attachmentIds": [file["id"] for file in files]})
     assert started.status_code == 202 and started.json()["queued"] == 2
@@ -225,7 +225,7 @@ def test_deferred_duplicate_failed_file_waits_for_explicit_retry(desk):
         db.commit()
     response = desk.client.post("/api/files", data={"entity_type": "candidate", "entity_id": "candidate", "slot": "passport", "defer_extraction": "true"},
                                 files={"file": ("front-again.pdf", contents[0], "application/pdf")})
-    assert response.status_code == 201 and response.json()["id"] == files[0]["id"]
+    assert response.status_code == 200 and response.json()["id"] == files[0]["id"] and response.json()["alreadyUploaded"] is True
     with desk.sessions() as db:
         assert db.get(DocumentExtractionJob, jobs[files[0]["id"]]).status == "failed"
     versions = next(slot["versions"] for slot in desk.client.get("/api/candidates/candidate").json()["documents"] if slot["key"] == "passport")

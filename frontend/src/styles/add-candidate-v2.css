@@ -364,10 +364,10 @@
 .rr-notes { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .rr-notes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .rr-notes li > span { min-width: 0; overflow-wrap: anywhere; }
-.rr-notes li { color: var(--warning-ink); }
+.rr-notes li { color: var(--text-muted); }
 .rr-notes li > svg { flex: none; }
-.rr-retry { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--warning-edge); border-radius: 8px; background: var(--warning-fill); color: var(--warning-ink); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
-.rr-retry:hover:not(:disabled) { border-color: var(--warning-ink); }
+.rr-retry { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.rr-retry:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); }
 .rr-retry:disabled { opacity: .5; cursor: default; }
 .af-docs-card > .rr { margin-top: 12px; }
 .ac .ac-result-owner strong.ac-unassigned { color: var(--text-light); font-weight: 500; }
@@ -378,7 +378,7 @@
 .rr-log-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .14s, background-color .14s, color .14s; }
 .rr-log-btn:hover { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
 .rr-log-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.rr-log-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--warning-fill); color: var(--warning-ink); font-size: 11px; font-weight: 700; }
+.rr-log-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11px; font-weight: 700; }
 .rr-log-chev { transition: transform .16s; }
 .rr-log-btn.is-open .rr-log-chev { transform: rotate(180deg); }
 .rr-panel { padding: 10px 12px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--tint-1); }

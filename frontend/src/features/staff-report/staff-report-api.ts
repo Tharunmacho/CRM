@@ -17,7 +17,7 @@ export async function downloadStaffReport(format: 'xlsx' | 'csv', range: { from:
     const url = URL.createObjectURL(await response.blob())
     const link = document.createElement('a')
     link.href = url
-    link.download = `staff-report-${range.from}-to-${range.to}.${format}`
+    link.download = `recruiter-report-${range.from}-to-${range.to}.${format}`
     document.body.appendChild(link)
     link.click()
     link.remove()

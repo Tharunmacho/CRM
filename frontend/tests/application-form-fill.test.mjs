@@ -10,7 +10,8 @@ function moduleUrl(source) {
 const src = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
 const slotsUrl = moduleUrl(await src('shared/model/document-slots.ts'))
-const modelUrl = moduleUrl((await src('features/application-form/form-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`))
+const readReportUrl = moduleUrl(await src('features/candidates/read-report.ts'))
+const modelUrl = moduleUrl((await src('features/application-form/form-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`).replace("'@/features/candidates/read-report'", `'${readReportUrl}'`))
 const expiryUrl = moduleUrl(await src('features/candidates/passport-expiry.ts'))
 const fillUrl = moduleUrl((await src('features/application-form/fill/fill-fields.ts'))
   .replace("'../form-model'", `'${modelUrl}'`)

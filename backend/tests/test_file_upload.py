@@ -62,6 +62,11 @@ class FakeSession:
             key=lambda row: (row.slot, row.version),
         )
 
+    def execute(self, statement, params=None):
+        """The duplicate-file check (hash lock and one lookup by content hash): this fake database holds no other candidate's files."""
+        self._require_worker_thread()
+        return SimpleNamespace(all=lambda: [])
+
     def get(self, model, identifier):
         self._require_worker_thread()
         if model is Attachment:

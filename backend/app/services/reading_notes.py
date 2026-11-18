@@ -60,6 +60,8 @@ _UNREADABLE_PAGES = tuple(re.compile(pattern, re.I) for pattern in (
     r"^we could not tell what kind of pages?\b",
     r"^some pages are unread or unclassified",
 ))
+# A note that already names the pages and what to do ("... Check page 6 in the original file.") is the specific one: kept as it is.
+_PAGE_ACTION = re.compile(r"Check pages? \d[\d, -]* in the original file")
 # Pages with no content of their own that took the neighbouring document's kind.
 _ASSIGNED_PAGES = re.compile(r"^pages? \d[^.]*\bassigned to the adjoining document", re.I)
 
@@ -133,6 +135,8 @@ def plain_notes(raw_warnings: list[str], *, kind: str | None = None) -> list[str
                 if word not in passport_fields:
                     passport_fields.append(word)
             ordered.setdefault("passport", None)
+        elif _PAGE_ACTION.search(text):
+            ordered.setdefault(text, text)
         elif any(pattern.search(text) for pattern in _UNREADABLE_PAGES):
             ordered.setdefault("pages", PAGES_NOTE)
         elif _ASSIGNED_PAGES.search(text):
@@ -157,3 +161,73 @@ def plain_issues(raw_issues: list[str]) -> list[str]:
     if not notes and any(isinstance(i, str) and i.strip() for i in raw_issues or []):
         return [CHECK_ORIGINAL_NOTE]
     return notes
+
+
+# ------------------------------------------------------------------ why a reading needs review
+
+FALLBACK_REVIEW = "Check the details against the original file."
+
+
+def _day(value) -> str | None:
+    text = str(value or "")[:10]
+    return text if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text) else None
+
+
+def passport_reasons(passport: dict | None) -> list[str]:
+    """What is wrong with a read passport, one plain sentence each ("Review: the passport number failed its check digit."). Only
+    facts about the answer (which check failed, which field is missing); never a value from the document."""
+    raw = (passport or {}).get("raw") if isinstance((passport or {}).get("raw"), dict) else {}
+    if not raw:
+        return []
+    mrz = raw.get("mrz") if isinstance(raw.get("mrz"), dict) else {}
+    out: list[str] = []
+    if raw.get("mrz_source") not in (None, "mrz"):
+        out.append("Review: the passport was read from the printed page, not from its coded lines, so check every value against the scan.")
+    elif mrz.get("all_check_digits_valid") is False:
+        digits = mrz.get("individual_check_digits") if isinstance(mrz.get("individual_check_digits"), dict) else {}
+        failed = [label for key, label in (("passport_number", "the passport number"), ("date_of_birth", "the date of birth"),
+                                           ("expiry_date", "the date of expiry"), ("personal_number", "the personal number"))
+                  if digits.get(key) is False]
+        out.extend(f"Review: {label} failed its check digit." for label in failed)
+        if not failed:
+            out.append("Review: the check digits of the coded lines of the passport do not match, so a number or a date may be misread.")
+    fields = (passport or {}).get("fields") if isinstance((passport or {}).get("fields"), dict) else {}
+    for key, label in (("passport_no", "passport number"), ("dob", "date of birth"), ("passport_expiry", "date of expiry"), ("name", "name")):
+        if not fields.get(key):
+            out.append(f"Review: the reader could not read the {label}.")
+    issue, expiry = _day(fields.get("passport_issue")), _day(fields.get("passport_expiry"))
+    if issue and expiry and expiry < issue:
+        out.append("Review: the date of expiry is earlier than the date of issue.")
+    birth = _day(fields.get("dob"))
+    if birth and issue and issue < birth:
+        out.append("Review: the date of issue is earlier than the date of birth.")
+    return out
+
+
+def review_reasons(output: dict | None) -> list[str]:
+    """The plain reasons a reading needs a person's review, from the reading's own output; never an empty list for a reading that
+    needs review (a last line says to check the original). Passport checks first, then what is left of the coverage: kinds that could
+    not be read, pages that could not be read, disagreements between readings, then the notes of the reader."""
+    output = output if isinstance(output, dict) else {}
+    coverage = output.get("coverage") if isinstance(output.get("coverage"), dict) else {}
+    out: list[str] = []
+
+    def add(text) -> None:
+        if isinstance(text, str) and text.strip() and text.strip() not in out:
+            out.append(text.strip())
+
+    for text in coverage.get("failed") or []:
+        add(text)
+    # What happened to the scan as a whole (the reader found it where the local check could not, ...) comes first, then the checks.
+    for text in plain_notes([w for w in output.get("warnings") or [] if isinstance(w, str)]):
+        add(text)
+    extractions = output.get("extractions") if isinstance(output.get("extractions"), dict) else {}
+    for text in passport_reasons(extractions.get("passport")):
+        add(text)
+    pages = coverage.get("pages") if isinstance(coverage.get("pages"), dict) else {}
+    for item in pages.get("not_sent") or []:
+        if isinstance(item, dict) and item.get("blocking") and type(item.get("page")) is int:
+            add(f"Check page {item['page']} in the original file: {str(item.get('reason') or 'it could not be read').rstrip('.')}.")
+    for text in plain_issues(list(coverage.get("issues") or [])) if coverage.get("issues") else []:
+        add(text)
+    return out or [FALLBACK_REVIEW]

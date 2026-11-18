@@ -16,6 +16,9 @@ from app.services.extraction_queue import (Dispatcher, WakeListener, bundle_queu
 
 STOP = threading.Event()
 log = logging.getLogger("document_extraction_worker")
+# A pooled database connection that rested longer than this is proven alive before the worker uses it (one cheap ping), so a
+# dropped tunnel is noticed at checkout and not in the middle of saving a document's progress.
+WORKER_VERIFY_IDLE_SECONDS = 5.0
 
 
 def build_dispatcher(*, sessions=SessionLocal, settings=None, stop=None, wake=None, concurrency=None, presence="document", **options) -> Dispatcher:
@@ -68,6 +71,8 @@ def configure_logging() -> None:
 def main():
     configure_logging()
     settings = get_settings()
+    from app.db.session import verify_idle_after
+    verify_idle_after(WORKER_VERIFY_IDLE_SECONDS)
     wake = threading.Event()
     dispatcher = build_dispatcher(settings=settings, wake=wake)
 

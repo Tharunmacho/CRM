@@ -146,6 +146,14 @@ def _person(candidate: Candidate, original_name: str) -> str:
     return stem or "Candidate"
 
 
+def derived_file_name(candidate: Candidate | None, slot: str, taken: set[str], original_name: str = "") -> str:
+    """The name of a file the reader derived from a scan (the pages of one kind): "<Candidate>-<Document>.pdf", like every other
+    stored file, never the generic "resume.pdf". `taken` keeps the names of one filing apart."""
+    from app.api.routers.files import _safe_name
+    person = _person(candidate, original_name) if candidate is not None else "Candidate"
+    return _safe_name(bulk.import_file_name(person, [slot], "derived.pdf", taken))
+
+
 def _already_filed(piece: PlannedPiece, slot: str, versions: list[Attachment], settings) -> Attachment | None:
     """The file of this field that already shows every page of the piece (the same physical pages, even scanned again or cut
     differently), or None when any page is new: a piece that truly differs is stored as before. Fields that keep every file

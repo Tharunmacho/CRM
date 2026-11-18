@@ -337,7 +337,8 @@ AutoCAD and SketchUp
         "experience": [{"company": "Designhaus", "title": "Interior Designer", "start": "2023-08", "end": "2024-11",
                         "country": "India", "is_overseas": False, "duration_months": 16}]}
     first = environment.extract(data, partial=True)
-    assert first["inspection"]["resume_pages"] == [1] and first["status"] == "needs_review"
+    # (page 2 is read but not recognised: it is filed under Other documents, not a reason to review)
+    assert first["inspection"]["resume_pages"] == [1] and first["status"] == "complete"
     assert len(environment.submissions) == 1
     paid = deepcopy(environment.state["provider_jobs"]["resume"])
     assert paid["selected_pages"] == [1] and paid["status"] == "succeeded"
@@ -615,7 +616,7 @@ def gray_png(width=600, height=800):
 def test_unclassified_page_no_longer_holds_the_rest_of_the_file_back(environment):
     data = pdf(CV, UNCLASSIFIED)
     output = environment.extract(data)
-    assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume"}
+    assert output["status"] == "complete" and set(output["extractions"]) == {"resume"}   # the unrecognised page goes to Other documents
     held = environment.extract(data, partial=False, state={})
     assert held["status"] == "needs_review" and not held["extractions"]
 
@@ -623,10 +624,12 @@ def test_unclassified_page_no_longer_holds_the_rest_of_the_file_back(environment
 def test_partial_extraction_sends_the_classified_pages_and_names_the_rest(environment):
     output = environment.extract(pdf(CV, UNCLASSIFIED), partial=True)
 
-    assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume"}
+    assert output["status"] == "complete" and set(output["extractions"]) == {"resume"}
     assert output["extractions"]["resume"]["selected_pages"] == [1]
     assert output["inspection"]["unknown_pages"] == [2]
-    assert any("Pages 2" in warning and "not extracted" in warning for warning in output["warnings"])
+    assert not any("could not be read" in warning for warning in output["warnings"])   # read, not recognised: no alarm
+    page = output["coverage"]["pages"]["not_sent"][0]
+    assert page["page"] == 2 and page["blocking"] is False and "Other documents" in page["reason"]
     assert [entry[0] for entry in environment.submissions] == ["resume"]
     with fitz.open(stream=environment.submissions[0][1].data, filetype="pdf") as sent:
         assert sent.page_count == 1

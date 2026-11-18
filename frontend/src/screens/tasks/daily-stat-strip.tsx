@@ -12,6 +12,8 @@ export interface StatTileData {
   unit?: string
   /** One muted line under the number. */
   detail?: ReactNode
+  /** Hover text for the whole tile (used when its explanation is not printed on it). */
+  title?: string
   icon: LucideIcon
   /** Only the ink of the icon: green and amber and red carry meaning, blue is neutral. */
   tone?: 'blue' | 'green' | 'amber' | 'red'
@@ -49,9 +51,9 @@ function StatTile({ tile }: { tile: StatTileData }) {
       </span>
     </>
   )
-  if (!onSelect) return <div className="dwb-stat">{body}</div>
+  if (!onSelect) return <div className="dwb-stat" title={tile.title}>{body}</div>
   return (
-    <button type="button" className={cn('dwb-stat is-action', active && 'is-active')} aria-pressed={active === undefined ? undefined : !!active}
+    <button type="button" title={tile.title} className={cn('dwb-stat is-action', active && 'is-active')} aria-pressed={active === undefined ? undefined : !!active}
       aria-label={tile.actionLabel ? `${tile.label}: ${tile.value}. ${tile.actionLabel}` : undefined} onClick={onSelect}>
       {body}
     </button>

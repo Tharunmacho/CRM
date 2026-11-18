@@ -1,6 +1,7 @@
 """Durable manual-document extraction, independent of candidate creation."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -9,11 +10,14 @@ import logging
 import os
 import random
 import socket
+import time
 import traceback
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import cast, func, select, text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import undefer
 
 from app.db.models import Attachment, AuditEntry, Candidate, Designation, DocumentExtractionJob, Role
@@ -237,6 +241,98 @@ def _expected_kind(draft) -> str | None:
     return _SLOT_KIND.get(slot) if isinstance(slot, str) else None
 
 
+# ------------------------------------------------------------------ timings of a reading, a dropped connection, parallel uploads
+
+TIMING_RUNS = 6                  # attempts whose timings stay in a job's state
+DB_RETRY_PAUSES = (1.0, 2.0, 4.0)
+_pause = time.sleep              # replaced in tests
+
+
+def _when(value):
+    try:
+        return datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def begin_run(state: dict, queued_at, claimed_at: datetime) -> dict:
+    """Open this attempt's record in ``state["timings"]`` and return it.
+
+    Numbers and times only, never anything from a document. ``waitSeconds`` is how long the job waited before this attempt:
+    since it was queued for the first attempt, since the previous attempt ended for a later one (that includes the pause the
+    reader asked for). Only the last ``TIMING_RUNS`` attempts are kept."""
+    before = state.get("timings") if isinstance(state.get("timings"), dict) else {}
+    runs = [dict(item) for item in (before.get("runs") or []) if isinstance(item, dict)][-(TIMING_RUNS - 1):]
+    since = _when(runs[-1].get("endedAt")) if runs else queued_at
+    try:
+        waited = (claimed_at - since).total_seconds() if isinstance(since, datetime) else None
+    except TypeError:    # one side without a time zone: say nothing rather than guess
+        waited = None
+    run = {"claimedAt": claimed_at.isoformat(), "waitSeconds": round(max(0.0, waited), 1) if waited is not None else None,
+           "afterEarlierRun": bool(runs)}
+    state["timings"] = {"queuedAt": before.get("queuedAt") or (queued_at.isoformat() if isinstance(queued_at, datetime) else None),
+                        "firstClaimedAt": before.get("firstClaimedAt") or run["claimedAt"], "runs": [*runs, run]}
+    return run
+
+
+def end_run(run: dict, seconds: float, outcome: str) -> None:
+    run.update(totalSeconds=round(seconds, 1), outcome=outcome, endedAt=now().isoformat())
+
+
+def record_read(record) -> bool:
+    """Has this reader job (or every chunk of a long document) its result?"""
+    if not isinstance(record, dict):
+        return False
+    chunks = record.get("chunks")
+    return "result" in record or bool(chunks) and all(isinstance(chunk, dict) and "result" in chunk for chunk in chunks)
+
+
+def noted_readers(run: dict, provider_jobs, done: set) -> None:
+    """Note, once per kind, how long the reader took (from the job being sent to the save that holds its result)."""
+    for kind, record in (provider_jobs or {}).items():
+        if kind in done or not record_read(record):
+            continue
+        done.add(kind)
+        sent = [part.get("submitted_at") for part in [record, *(record.get("chunks") or [])] if isinstance(part.get("submitted_at"), (int, float))]
+        if sent:
+            run.setdefault("readerSeconds", {})[str(kind)[:20]] = round(max(0.0, time.time() - min(sent)), 1)
+
+
+def transient_database_error(exc: BaseException) -> bool:
+    """A connection that dropped or could not be opened (a tunnel to the hosted database): worth trying again in a moment."""
+    return isinstance(exc, OperationalError) or (isinstance(exc, DBAPIError) and bool(exc.connection_invalidated))
+
+
+def with_db_retry(call, pauses=None):
+    """``call()``, tried again after 1, 2 and 4 seconds when the database connection dropped. For idempotent statements only:
+    a lost connection must cost a few seconds, not an attempt of the document (which waits 30 s or more before the next)."""
+    for pause in (*(DB_RETRY_PAUSES if pauses is None else pauses), None):
+        try:
+            return call()
+        except DBAPIError as exc:
+            if pause is None or not transient_database_error(exc):
+                raise
+            log.warning("The database connection dropped (%s); trying again in %.0fs.", type(exc).__name__, pause)
+            _pause(pause)
+
+
+def object_missing(exc: BaseException) -> bool:
+    """The object store says there is no such file (as opposed to being unreachable)."""
+    code = ((getattr(exc, "response", None) or {}).get("Error") or {}).get("Code")
+    return code in {"NoSuchKey", "404", "NotFound"}
+
+
+def put_all(settings, items: list[tuple[str, bytes]]) -> list[str]:
+    """Store ``[(key, bytes)]`` as PDFs and return the object keys in the same order; on a remote store side by side
+    (every upload is a trip over the internet). Each put is idempotent, so a failed one can simply be run again."""
+    def one(item):
+        return put_bytes(settings, item[0], item[1], "application/pdf")
+    if str(getattr(settings, "storage_backend", "local")) == "s3" and len(items) > 1:
+        with ThreadPoolExecutor(min(4, len(items)), thread_name_prefix="put") as pool:
+            return list(pool.map(one, items))
+    return [one(item) for item in items]
+
+
 def process_job(identifier, *, sessions, settings, claimed_by=None):
     """Read one document. ``claimed_by`` is the worker that leased it (see services/extraction_queue.py); a lease that
     has moved to another worker makes this run stop writing. Without it (direct calls) the job is taken here."""
@@ -254,6 +350,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             key, digest = job.object_key, job.content_hash
             owner, group_id, form_candidate = job.owner_id, job.group_id, job.candidate_id
             attempts = job.attempts
+            queued_at = job.queued_at or job.created_at
             if not state.get("output"):
                 titles = list(db.scalars(select(Designation.title)))
             db.commit()
@@ -263,11 +360,12 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             row = db.execute(select(DocumentExtractionJob.status, DocumentExtractionJob.claimed_by, DocumentExtractionJob.state,
                 DocumentExtractionJob.object_key, DocumentExtractionJob.content_hash, DocumentExtractionJob.owner_id,
                 DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id, DocumentExtractionJob.attempts,
-                DocumentExtractionJob.draft,
+                DocumentExtractionJob.draft, DocumentExtractionJob.queued_at, DocumentExtractionJob.created_at,
                 select(func.array_agg(Designation.title)).scalar_subquery().label("titles"))
                 .where(DocumentExtractionJob.id == identifier)).one_or_none()
             if row is None or row.status not in READY or row.claimed_by != claimed_by:
                 return
+            queued_at = row.queued_at or row.created_at
             state = deepcopy(row.state or {})
             key, digest, owner, group_id, form_candidate = row.object_key, row.content_hash, row.owner_id, row.group_id, row.candidate_id
             attempts = row.attempts
@@ -284,21 +382,37 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
     # so a 300-page inspection report is not uploaded again with every small step.
     saved_keys = {name: json.dumps(item, sort_keys=True, default=_plain) for name, item in state.items()}
     saved_keys.pop("reader", None)  # always written by the first checkpoint of this attempt
+    saved_keys.pop("timings", None)  # the timings ride along with a write that happens anyway; they never cause one
+
+    # Where this attempt's time goes (numbers and times only, see document_diagnostics): kept in the job's own state.
+    run_began = time.monotonic()
+    run = begin_run(state, queued_at, now())
+    reader_done = {kind for kind, record in (state.get("provider_jobs") or {}).items() if record_read(record)}
 
     def checkpoint(value):
         # One statement: merge the changed keys into the saved state and renew the lease (a checkpoint proves the worker is alive).
-        changed = {name: json.dumps(item, sort_keys=True, default=_plain) for name, item in value.items()}
+        changed = {name: json.dumps(item, sort_keys=True, default=_plain) for name, item in value.items() if name != "timings"}
         changed = {name: text_ for name, text_ in changed.items() if saved_keys.get(name) != text_}
         if not changed:
             return
+        run.setdefault("localReadSeconds", round(time.monotonic() - run_began - run.get("downloadSeconds", 0.0), 1))   # up to the first save
+        noted_readers(run, value.get("provider_jobs"), reader_done)
         stamp = now()
-        with sessions() as db:
-            _autocommit(db)
-            row = db.execute(text(
-                "UPDATE document_extraction_jobs SET state = state || CAST(:value AS JSONB), updated_at = :stamp, "
-                "lease_until = CASE WHEN claimed_by IS NOT NULL THEN :lease ELSE lease_until END "
-                "WHERE id = :id AND (CAST(:fence AS TEXT) IS NULL OR claimed_by = :fence) RETURNING status"),
-                {"value": "{" + ",".join(json.dumps(name) + ":" + body for name, body in changed.items()) + "}", "stamp": stamp, "lease": stamp + timedelta(seconds=getattr(settings, "extraction_lease_seconds", LEASE_SECONDS)), "id": identifier, "fence": claimed_by}).first()
+        began = time.monotonic()
+        payload = {**changed, "timings": json.dumps(state.get("timings"), sort_keys=True, default=_plain)}
+
+        def write():
+            with sessions() as db:
+                _autocommit(db)
+                return db.execute(text(
+                    "UPDATE document_extraction_jobs SET state = state || CAST(:value AS JSONB), updated_at = :stamp, "
+                    "lease_until = CASE WHEN claimed_by IS NOT NULL THEN :lease ELSE lease_until END "
+                    "WHERE id = :id AND (CAST(:fence AS TEXT) IS NULL OR claimed_by = :fence) RETURNING status"),
+                    {"value": "{" + ",".join(json.dumps(name) + ":" + body for name, body in payload.items()) + "}", "stamp": stamp, "lease": stamp + timedelta(seconds=getattr(settings, "extraction_lease_seconds", LEASE_SECONDS)), "id": identifier, "fence": claimed_by}).first()
+        # A dropped connection costs a short pause and the same idempotent statement again, not an attempt of the document.
+        row = with_db_retry(write)
+        run["saveSeconds"] = round(run.get("saveSeconds", 0.0) + time.monotonic() - began, 2)
+        run["saves"] = run.get("saves", 0) + 1
         # A reviewer can reserve the source while a provider acceptance is in flight. The returned ID/result
         # is kept, but the job is never reopened. A job leased to someone else is not ours to write.
         if row is None or row.status not in READY:
@@ -319,13 +433,22 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             checkpoint(value)
 
     from app.services.instance_guard import NOT_HERE, stored_here
-    if not stored_here(settings, key):
+    # A key in the shared object store is readable from every server: the existence check (one more trip over the internet)
+    # is only for local files, which may live on another computer. A missing shared object shows when it is read, below.
+    if not str(key).startswith("s3://") and not stored_here(settings, key):
         _hand_back(identifier, claimed_by, sessions, NOT_HERE)
         return
     try:
         try:
+            fetched = time.monotonic()
             data = read_bytes(settings, key)
+            run["downloadSeconds"] = round(time.monotonic() - fetched, 2)
         except FileNotFoundError:
+            _hand_back(identifier, claimed_by, sessions, NOT_HERE)
+            return
+        except Exception as missing:
+            if not object_missing(missing):
+                raise
             _hand_back(identifier, claimed_by, sessions, NOT_HERE)
             return
         if hashlib.sha256(data).hexdigest() != digest:
@@ -336,11 +459,12 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             output = extract_attachment(data, state=state, save=save_and_fill, settings=handoff_settings(settings), designations=titles or [],
                                         final_attempt=attempts + 1 >= MAX_ATTEMPTS, expected_kind=expected_kind)
             state["output"] = deepcopy(output)
-            checkpoint(state)
         from app.services.document_extraction import checked_person_output
         output = checked_person_output(data, output, state, settings)
         state["output"] = deepcopy(output)
-        checkpoint(state)
+        # The derived output is saved together with the stored documents below (one statement, not one per step): the paid
+        # reader results themselves were already saved by the reading as they arrived, so a crash in between loses only the
+        # cheap mapping, never a reader job.
         # Retain selected PDFs beside the original bundle; later attachment is a
         # short transaction and never needs to resubmit paid extraction work.
         documents = state.setdefault("documents", {})
@@ -353,9 +477,9 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             if not selected or document.get("selected_pages") != selected:
                 state.setdefault("document_history", {}).setdefault(kind, []).append(deepcopy(document))
                 del documents[kind]
-        checkpoint(state)
         if current_extractions:
             inspected = restore_inspection(data, output["inspection"], document_timeout=settings.ocr_document_timeout_seconds, allow_partial=True)
+            cut = []
             for kind, extraction in output["extractions"].items():
                 if kind in documents:
                     continue
@@ -364,14 +488,28 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 if not selected or not set(selected) <= set(getattr(inspected, kind + "_pages")):
                     raise ExtractionFailure("The selected pages no longer match what was checked earlier. Check the pages and try again.")
                 content = inspected.pdf_for_pages(selected)
-                digest = hashlib.sha256(content).hexdigest()
-                # Classification can add pages to a previously read document. Storage is
-                # immutable: retain its earlier PDF and publish the expanded bytes at a
-                # distinct key. Repeating the same bytes reuses that key safely.
-                document_key = put_bytes(settings, "manual/" + owner + "/" + identifier + "/" + kind + "-" + digest + ".pdf", content, "application/pdf")
+                cut.append((kind, selected, content, hashlib.sha256(content).hexdigest()))
+            if form_candidate and "other" not in documents:
+                # The pages of the file that are none of the three kinds (read but not recognised, or unreadable) are kept as ONE file
+                # for the candidate's Other documents; blank pages are only listed. The whole file stays as the source evidence.
+                from app.services.bulk_candidate_import import cut_pdf_pages
+                from app.services.document_extraction import other_pages
+                rest = other_pages(output["inspection"], current_extractions)
+                if rest:
+                    content = cut_pdf_pages(data, rest)
+                    cut.append(("other", rest, content, hashlib.sha256(content).hexdigest()))
+            # Classification can add pages to a previously read document. Storage is
+            # immutable: retain its earlier PDF and publish the expanded bytes at a
+            # distinct key. Repeating the same bytes reuses that key safely. The documents of one file go up side by side.
+            stored_began = time.monotonic()
+            keys = put_all(settings, [("manual/" + owner + "/" + identifier + "/" + kind + "-" + digest + ".pdf", content)
+                                      for kind, _selected, content, digest in cut])
+            for (kind, selected, content, digest), document_key in zip(cut, keys):
                 documents[kind] = {"object_key": document_key, "file_name": kind + ".pdf", "content_type": "application/pdf",
                                    "size_kb": max(1, (len(content) + 1023) // 1024), "content_hash": digest, "selected_pages": list(selected)}
-                checkpoint(state)
+            if cut:
+                run["storeSeconds"] = round(time.monotonic() - stored_began, 2)
+        checkpoint(state)    # the output and every stored document in ONE statement (the final write below keeps them too)
         with sessions() as db:
             # A file read for a candidate's application form fills that candidate's form in this same transaction.
             # Candidate before job, the order every other writer uses.
@@ -380,13 +518,13 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
             if _lost(job, claimed_by):
                 return
+            end_run(run, time.monotonic() - run_began, "read")
             job.state = json.loads(json.dumps(state, default=_plain))
             job.result = json.loads(json.dumps(_scan_results(output), default=_plain))
             job.status = "completed" if output["status"] == "complete" else "needs_review"
             # A kind the reader could not read is named for the person (the upload row shows this line).
-            unread = (output.get("coverage") or {}).get("failed") or []
-            job.last_error = None if job.status == "completed" else (
-                " ".join(unread)[:500] if unread else "Review the saved reading report or enter details manually.")
+            from app.services.reading_notes import review_reasons
+            job.last_error = None if job.status == "completed" else " ".join(review_reasons(output))[:500]   # never a bare "review"
             job.updated_at = job.finished_at = now()
             job.claimed_by = job.lease_until = None
             if (job.draft or {}).get("readerFailure"):   # an earlier attempt's failure no longer applies
@@ -412,6 +550,10 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
             if not _lost(job, claimed_by):
                 job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=getattr(exc, "retry_seconds", 2))
+                end_run(run, time.monotonic() - run_began, "waiting for the reader")
+                # The run's timings join the saved state inside this very UPDATE (a jsonb merge: nothing is read first).
+                # (a Python dict, bound once as jsonb: a string would be stored as a jsonb string and turn the state into an array)
+                job.state = DocumentExtractionJob.state.op("||")(cast(json.loads(json.dumps({"timings": state.get("timings")}, default=_plain)), JSONB))
                 job.last_error = str(exc) if hasattr(exc, "retry_seconds") else "The document is still being read. Its progress is saved."
                 if getattr(exc, "reason", None):   # a busy or slow reader is named on the document line, with a Details disclosure
                     job.draft = {**dict(job.draft or {}), "readerFailure": reader_failure_view(
@@ -438,6 +580,8 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 # Why, for whoever has to look: the exception type and where it was raised, never the document.
                 saved["failure"] = failure_record(exc, attempt=job.attempts, worker=claimed_by)
                 saved["reader"] = state.get("reader")
+                end_run(run, time.monotonic() - run_began, "failed")
+                saved["timings"] = state.get("timings")
                 job.status = "failed" if gives_up else "retry"
                 # Exponential backoff (30 s, 1 min, 2 min) with jitter, so many files that failed together do not return together.
                 delay = 30 * 2 ** (job.attempts - 1) * random.uniform(0.85, 1.25)
@@ -499,6 +643,7 @@ def _plan_split_of_original(db, user, identifier, candidate_id, settings):
 def attach_original(db, user, identifier, candidate_id, settings, *, original_only=False):
     from app.api.routers.candidates import lock_assignment_cursor
     from app.services.document_person_split import ensure_single_person_source
+    from app.services import document_splitting
     split_plan = None if original_only else _plan_split_of_original(db, user, identifier, candidate_id, settings)
     lock_assignment_cursor(db)
     source_job = owned_job(db, identifier, user.id)
@@ -528,6 +673,7 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
     if not original_only and job.kind in {"photo", "education", "experience"}:
         documents[job.kind] = deepcopy(documents["source_bundle"])
     attached = {}
+    named: set[str] = set()
     for slot, document in documents.items():
         data = original if slot == "source_bundle" else read_bytes(settings, document["object_key"])
         if hashlib.sha256(data).hexdigest() != document["content_hash"]:
@@ -535,7 +681,10 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
         previous = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate",
             Attachment.entity_id == candidate.id, Attachment.slot == slot).order_by(Attachment.version.desc()).limit(1))
         row = Attachment(id=str(uuid4()), entity_type="candidate", entity_id=candidate.id, slot=slot,
-            version=(previous.version if previous else 0) + 1, file_name=document["file_name"],
+            version=(previous.version if previous else 0) + 1,
+            # A file the reader derived is named like every other stored file ("<Candidate>-Resume.pdf"), not "resume.pdf".
+            file_name=(document_splitting.derived_file_name(candidate, slot, named, job.filename)
+                       if slot != "source_bundle" and document["file_name"] == slot + ".pdf" else document["file_name"]),
             content_type=document["content_type"], object_key=document["object_key"], content_hash=document["content_hash"], size_kb=document["size_kb"],
             uploaded_by=user.id, uploaded_at=now())
         db.add(row)

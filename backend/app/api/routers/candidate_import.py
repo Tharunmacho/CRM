@@ -513,6 +513,7 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
         elif not entry["kinds"]:
             entry["kinds"] = bulk.classify_content(entry["data"]) or ["other"]
 
+    receiving_done = time.perf_counter()
     reading, first_of = [], {}
     for entry in candidates:
         if bulk.wants_split(entry["kinds"], entry["content_type"]) or not entry["kinds"]:
@@ -600,8 +601,17 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
             result["issues"] = result["issues"] + dropped
             return result
         db.commit()
+        committed_at = time.perf_counter()
         logger.info("Import %s: %d files, receiving and sorting %.1fs (of which reading unnamed files %.1fs), saving %.1fs, commit %.1fs",
-                    parsed.folder, len(uploads), saving_at - started, sorted_at - started, saved_at - saving_at, time.perf_counter() - saved_at)
+                    parsed.folder, len(uploads), saving_at - started, sorted_at - started, saved_at - saving_at, committed_at - saved_at)
+        # Numbers only (no names): what the screen could show when an import is slow. ``checkSeconds`` is everything before the
+        # candidate is written (receiving, reading unnamed files, sorting, de-duplicating, who they are); ``storeSeconds`` the
+        # uploads to the document store; ``saveSeconds`` the rows (statements to the database) and ``commitSeconds`` the commit.
+        stored_in = (result.get("timings") or {}).get("storeSeconds", 0.0)
+        result["timings"] = {**(result.get("timings") or {}), "checkSeconds": round(saving_at - started, 2),
+                             "receiveSeconds": round(receiving_done - started, 2), "readUnnamedSeconds": round(sorted_at - receiving_done, 2),
+                             "saveSeconds": round(max(0.0, saved_at - saving_at - stored_in), 2),
+                             "commitSeconds": round(committed_at - saved_at, 2), "totalSeconds": round(committed_at - started, 2)}
     except bulk.ImportRefused as refused:
         db.rollback()
         bulk.discard_written(settings, written)

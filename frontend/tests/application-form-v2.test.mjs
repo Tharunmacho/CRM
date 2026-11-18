@@ -9,7 +9,8 @@ function moduleUrl(source) {
 }
 const slotsUrl = moduleUrl(await readFile(new URL('../src/shared/model/document-slots.ts', import.meta.url), 'utf8'))
 const modelSource = await readFile(new URL('../src/features/application-form/form-model.ts', import.meta.url), 'utf8')
-const modelUrl = moduleUrl(modelSource.replace("'@/shared/model/document-slots'", `'${slotsUrl}'`))
+const readReportUrl = moduleUrl(await readFile(new URL('../src/features/candidates/read-report.ts', import.meta.url), 'utf8'))
+const modelUrl = moduleUrl(modelSource.replace("'@/shared/model/document-slots'", `'${slotsUrl}'`).replace("'@/features/candidates/read-report'", `'${readReportUrl}'`))
 const model = await import(modelUrl)
 const fallbackSource = await readFile(new URL('../src/features/application-form/assignment-fallback.ts', import.meta.url), 'utf8')
 const fallback = await import(moduleUrl(fallbackSource.replace("'./form-model'", `'${modelUrl}'`)))

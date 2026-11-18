@@ -21,6 +21,7 @@ from app.api.routers import candidate_merge as candidate_merge_router
 from app.api.routers import application_form, document_diagnostics, form_options, daily_work as daily_work_router, document_bundles, events, intake_acknowledgements, settings as agency_settings_router, whatsapp_chat
 from app.api.routers import reference_agencies as reference_agencies_router
 from app.api.routers import travelled as travelled_router
+from app.api.routers import daily_work_report as daily_work_report_router
 from app.api.routers import candidate_exports
 from app.api.routers import candidate_invoices, invoice_payments
 from app.core.config import get_settings
@@ -158,6 +159,7 @@ app.include_router(ocr.router)
 app.include_router(inbox.router)
 app.include_router(users.router)
 app.include_router(staff_directory.router)
+app.include_router(daily_work_report_router.router)  # before reports: /api/reports/daily-work/export must not be read as /api/reports/{report}/export
 app.include_router(reports.router)
 app.include_router(reports.dashboard_router)
 app.include_router(travelled_router.router)

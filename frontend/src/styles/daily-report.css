@@ -1,0 +1,195 @@
+/*
+ * Reports: Daily CRM Work Report, Lead sheet monitoring and Candidate monitoring. Built from the Tasks screen's own parts
+ * (the summary strip, the Recruiters board, .dw-panel and .dw-table: styles/daily-work.css, daily-work-board.css,
+ * tasks-page.css), so only what is specific to these views is here. Colours are the app's tokens: the accent is the
+ * palette's primary, green / amber / red appear only as status (the same pills Tasks uses). Light and dark follow the tokens.
+ */
+.dwr, .dr-drill {
+  --rt-accent: var(--primary);
+  --dr-ring: var(--primary);
+}
+.dwr { min-width: 0; }
+.dwr .dw-tabs { margin-bottom: 16px; }
+.dwr-sr, .dr-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.dwr :is(button, [tabindex]):focus-visible, .dr-drill :is(button, a):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* The period row: a pill group on the left, the client and the Live label on the right */
+.dwr-period { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 16px; }
+.dwr-period-main, .dwr-period-end { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dwr-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); }
+.dwr-seg button { min-height: 34px; padding: 0 14px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--text-muted); white-space: nowrap; transition: background .14s, color .14s; }
+.dwr-seg button:hover:not([aria-pressed='true']) { background: var(--tint-2); color: var(--text-main); }
+.dwr-seg button[aria-pressed='true'] { background: var(--primary); color: var(--on-primary); }
+.dwr-seg.is-small button { min-height: 30px; padding: 0 11px; font-size: 12.5px; }
+.dwr-custom { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+.dwr-custom input { width: 148px; }
+.dwr-period-end .tk-select { min-width: 170px; }
+.rt-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-light); white-space: nowrap; }
+.rt-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--text-light); }
+.rt-live b { font-weight: 500; color: var(--text-muted); }
+.rt-live.is-up i { background: var(--success-ink); }
+.rt-live.is-up i.is-busy { animation: rt-blink .9s ease-in-out infinite; }
+.rt-live.is-down i { background: var(--warning-ink); }
+.rt-live.is-down b { color: var(--warning-ink); }
+@keyframes rt-blink { 50% { opacity: .35; } }
+
+.dwr-body { transition: opacity .14s; }
+.dwr-body.is-stale { opacity: .55; pointer-events: none; }
+.dwr .dw-alerts button { padding: 0; margin-left: 6px; }
+.dwr-textlink { font: inherit; font-weight: 500; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; background: none; }
+.dwr-textlink:hover { text-decoration: none; }
+.dwr-quiet { font-size: 12.5px; line-height: 1.6; color: var(--text-muted); }
+.dwr-head-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
+.dwr-head-tools .dwr-textlink { font-size: 13px; }
+.dwr-empty-title { font-weight: 600; color: var(--text-main); }
+.dwr .dw-state { padding: 40px 20px; }
+.dwr .dwb-none { padding: 4px 20px 22px; }
+.dwr .dwb-board .dwb-card.is-none { background: var(--tint-1); }
+
+/* The people table, on the Tasks table's .dw-table: names left, every figure right-aligned under its right-aligned heading */
+.dwr-table :is(th, td) { padding-block: 0; }
+.dwr-table thead th { height: 48px; }
+.dwr-table thead th.is-left { padding-left: 20px; }
+.dwr-table thead th.is-num { text-align: right; padding-right: 20px; }
+.dwr-table thead th.is-tail, .dwr-table td.is-tail { text-align: left; padding-left: 16px; }
+.dwr-table .dw-staff-row > * { height: 60px; }
+.dwr-table.is-dense .dw-staff-row > * { height: 56px; }
+.dwr-table.is-dense thead th.is-num { padding-right: 12px; }
+.dwr-table.is-dense td.is-num { padding-right: 12px; font-size: 15px; }
+.dwr-table th.dwr-name { padding-left: 20px; text-align: left; font-weight: 500; background: inherit; }
+.dwr-table td.is-num { padding-right: 20px; text-align: right; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-main); }
+.dwr-table td.is-strong { font-weight: 700; }
+.dwr-table td.is-flash { animation: dwr-flash .6s ease-out; }
+@keyframes dwr-flash { from { background-color: color-mix(in srgb, var(--primary) 20%, transparent); } to { background-color: transparent; } }
+.dwr-table .dw-none { text-align: right; opacity: .55; font-weight: 400; }
+.dwr-person { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dwr-table .record-avatar { width: 32px; height: 32px; flex: none; font-size: 11.5px; }
+.dwr-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; text-align: left; color: var(--text-main); background: none; }
+button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.dwr-table tr.is-idle .dwr-who { color: var(--text-muted); font-weight: 500; }
+.dwr-link { padding: 3px 6px; margin: -3px -6px; border-radius: 6px; font: inherit; color: inherit; text-align: right; background: none; }
+.dwr-link:hover { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.dwr-pct { display: inline-flex; align-items: center; gap: 10px; width: 100%; }
+.dwr-pct .dwb-meter { flex: 1; max-width: 72px; margin: 0; }
+.dwr-pct b { min-width: 38px; font-size: 13px; font-weight: 600; }
+.dwr-status table { width: 100%; }
+.dwr-status .dwr-status-name { padding-left: 20px; font-weight: 500; }
+.dwr-status td.is-num { padding-right: 20px; font-size: 14px; font-weight: 600; }
+.dwr-status thead th.is-left { padding-left: 20px; }
+.dwr-status thead th.is-num { text-align: right; padding-right: 20px; }
+.dwr-status tbody tr { height: 44px; }
+.dwr-skeleton { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.dwr-skeleton i { display: block; height: 40px; border-radius: 8px; background: var(--tint-1); animation: dr-pulse 1.4s ease-in-out infinite; }
+@keyframes dr-pulse { 50% { background: var(--tint-2); } }
+
+/* My day */
+.dwr-myday { padding-bottom: 18px; }
+.dwr-myday .dw-panel-head h2 { font-size: 16px; }
+.dwr-myday .dwr-note, .dwr-myday-foot, .dwr-myday .dwr-error { margin: 0 20px; }
+.dwr-note { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
+.dwr-note small { font-weight: 400; color: var(--text-light); }
+.dwr-note textarea { width: 100%; font-weight: 400; }
+.dwr-myday-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin-top: 12px !important; }
+.dwr-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+.dwr-state.is-ok { font-weight: 600; color: var(--success-ink); }
+.dwr-error { margin-top: 8px !important; font-size: 13px; font-weight: 500; color: var(--error-ink); }
+
+.dr-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 16px; border: 1px solid var(--warning-edge); border-radius: 10px; background: var(--warning-fill); font-size: 13px; color: var(--warning-ink); }
+.dr-alert > span { display: inline-flex; align-items: center; gap: 8px; }
+.dr-alert button { min-height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid currentColor; background: var(--bg-card); font-size: 13px; font-weight: 500; color: inherit; }
+.dr-empty-note { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; border: 1px dashed var(--border-control); border-radius: 12px; background: var(--tint-1); text-align: center; font-size: 13px; color: var(--text-muted); }
+.dr-empty-note strong { font-size: 14px; font-weight: 600; color: var(--text-main); }
+
+/* Drill-down drawer */
+.dr-drill { padding: 14px 20px 20px; font-size: 13.5px; color: var(--text-main); }
+.dr-drill .dr-alert { margin-bottom: 12px; }
+.dr-drill-skel { display: flex; flex-direction: column; gap: 10px; }
+.dr-drill-skel i { display: block; height: 44px; border-radius: 10px; background: var(--tint-1); animation: dr-pulse 1.4s ease-in-out infinite; }
+.dr-drill-scroll { overflow-x: auto; transition: opacity .14s; }
+.dr-drill-scroll.is-stale { opacity: .5; }
+.dr-drill-table { width: 100%; min-width: 640px; border-collapse: collapse; }
+.dr-drill-table th { position: sticky; top: 0; padding: 8px 10px; background: var(--bg-card); border-bottom: 1px solid var(--border-main); text-align: left; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.dr-drill-table td { padding: 10px; border-bottom: 1px solid var(--border-faint); vertical-align: top; overflow-wrap: anywhere; }
+.dr-when { white-space: nowrap; }
+.dr-when b { display: block; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dr-when small, .dr-ci { font-size: 11.5px; color: var(--text-light); }
+.dr-who { min-width: 160px; }
+.dr-link { font-weight: 600; color: var(--primary); }
+.dr-link:hover { text-decoration: underline; }
+.dr-ci { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--tint-2); font-variant-numeric: tabular-nums; }
+.dr-ci.is-lead { background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary); }
+.dr-detail { min-width: 180px; color: var(--text-muted); }
+.dr-drill-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; width: 100%; }
+.dr-drill-range { font-size: 13px; color: var(--text-muted); }
+.dr-drill-pager { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+
+
+
+/* Print: the summary tiles and the table only, landscape */
+@media print {
+  @page { size: A4 landscape; margin: 9mm; }
+  html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+  body:has(.dwr) :is(.rail, .rail-backdrop, .topbar, .toast, .ui-toast) { display: none !important; }
+  body:has(.dwr) .app-shell { display: block; background: #fff; }
+  body:has(.dwr) .workspace { padding: 0 !important; background: #fff; }
+  .dwr .workspace-header-actions, .dwr .dw-tabs, .dwr-period, .dw-alerts, .dwb-board, .dwr-myday, .dwr-textlink, .dwr-status { display: none !important; }
+  .dwr .workspace-page-header { margin-bottom: 8px; }
+  .dwr .dw-panel, .dwr .dwb-stat { break-inside: avoid; }
+  .dwr .dw-scroll { overflow: visible; }
+  .dwr .tk-table-wrap { overflow: visible; }
+  .dwr-table { min-width: 0 !important; font-size: 10px; }
+  .dwr-table .dw-staff-row > * { height: 30px; }
+  .dwr-table td.is-num { font-size: 11px; }
+  .dwr-table .record-avatar { display: none; }
+  .dwr-table thead th { height: 36px; }
+  .dwr .dwb-stats { gap: 6px; margin-bottom: 8px; }
+}
+
+/* Narrow panels: the Tasks list turns each row into a labelled card; give a person's name the full width */
+@container dw (max-width: 760px) {
+  .dwr-table .dw-staff-row > td.is-num { text-align: left; padding: 0; font-size: 15px; }
+  .dwr-table .dw-staff-row > td.is-tail { padding: 0; }
+  .dwr-table th.dwr-name { grid-column: 1 / -1; padding: 0; }
+  .dwr-table .dw-none { text-align: left; }
+}
+@media (max-width: 640px) {
+  .dwr-seg { width: 100%; }
+  .dwr-seg button { flex: 1 1 auto; padding: 0 8px; }
+  .dwr-period-end .tk-select, .dwr-custom input { width: 100%; }
+  .dwr-custom { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dwr *, .dr-drill * { animation: none !important; transition: none !important; }
+}
+
+/* The "Submitted" pill as a button, and the report panel that it opens */
+.dwr-pillbtn { padding: 0; border-radius: 999px; background: none; cursor: pointer; }
+.dwr-pillbtn:hover .ui-badge { filter: brightness(.96); text-decoration: underline; text-underline-offset: 2px; }
+.dwr-pillbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dwr-changed { margin-left: 8px; font-size: 11.5px; color: var(--text-light); }
+.dr-block { padding: 4px 0 18px; }
+.dr-block h3 { margin-bottom: 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.dr-note-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; color: var(--text-main); }
+.dr-muted { margin-top: 8px; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+.dr-mini { min-width: 0; }
+.dr-mini th, .dr-mini td { padding: 8px 6px; font-size: 13px; font-weight: 400; }
+.dr-mini thead th { font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+.dr-mini .dr-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.dr-mini td.is-changed { color: var(--warning-ink); }
+
+/* Column headings and group bands are bold, in the normal text colour (the Tasks headings, one step stronger) */
+.dwr .dwr-table thead th, .dwr .dwr-status thead th { font-size: 12px; font-weight: 700; color: var(--text-main); }
+.dwr .dw-group th, .dwr .dw-group-title { font-weight: 700; }
+.dr-drill .dr-drill-table thead th, .dr-drill .dr-mini thead th { font-size: 12px; font-weight: 700; color: var(--text-main); }
+.dr-drill .dr-mini tbody th { font-weight: 600; }
+
+/* One column template for the heading and every row: numbers and their headings are right-aligned with the same 16px padding */
+.dwr .dwr-table thead th { height: 44px; padding-top: 0; padding-bottom: 0; vertical-align: middle; white-space: nowrap; text-transform: none; letter-spacing: 0; text-wrap: nowrap; }
+.dwr .dwr-table thead th.is-num, .dwr .dwr-table.is-dense thead th.is-num { text-align: right; padding-left: 4px; padding-right: 16px; }
+.dwr .dwr-table td.is-num, .dwr .dwr-table.is-dense td.is-num { text-align: right; padding-left: 4px; padding-right: 16px; vertical-align: middle; }
+.dwr .dwr-table td.is-num > .dw-none, .dwr .dwr-table td.is-num > .dwr-plain, .dwr .dwr-table td.is-num > .dwr-link { display: block; margin-left: auto; text-align: right; }
+.dwr .dwr-table .dwr-link { margin-right: -6px; }
+.dwr .dwr-table .dw-staff-row > * { vertical-align: middle; }
+.dwr .dwr-table tfoot .dwr-total > * { height: 56px; background: var(--tint-2); border-top: 1px solid var(--text-light); font-weight: 700; color: var(--text-main); }
+.dwr .dwr-table tfoot .dwr-total .dwr-link { font-weight: 700; }
+@media (min-width: 1100px) { .dwr .dwb-stats.has-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); } }

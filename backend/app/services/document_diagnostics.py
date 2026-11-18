@@ -44,11 +44,11 @@ def _reader_jobs(state: dict) -> list[dict]:
     """One row per reader job (or chunk of a long document) in the saved state, plus the earlier attempts that were replaced."""
     rows = []
 
-    def describe(kind: str, record: dict, part: str, earlier: bool) -> dict:
+    def describe(kind: str, record: dict, part: str, earlier: bool, merged: bool = False) -> dict:
         failure = _safe_failure(record.get("reader_failure")) or {}
         provider = record.get("provider_error") if isinstance(record.get("provider_error"), dict) else {}
         row = {"kind": safe_text(kind, 20), "part": part, "earlierAttempt": earlier, "status": safe_text(record.get("status"), 20),
-               "pagesSent": _ints(record.get("selected_pages")), "hasResult": "result" in record,
+               "pagesSent": _ints(record.get("selected_pages")), "hasResult": "result" in record or merged,
                "readerJobId": safe_text(record.get("job_id"), 60) or None, "duplicateAtReader": bool(record.get("duplicate")),
                "validation": safe_text(record.get("validation_status"), 20) or None,
                "coverage": safe_text(record.get("coverage_status"), 20) or None,
@@ -64,12 +64,71 @@ def _reader_jobs(state: dict) -> list[dict]:
             continue
         chunks = record.get("chunks")
         if chunks:
-            rows.extend(describe(kind, chunk, f"{index} of {len(chunks)}", False) for index, chunk in enumerate(chunks, 1))
+            # Once the parts are merged the parts' own copies are dropped and the merged answer sits on the kind: that is a result.
+            merged = "result" in record
+            rows.extend(describe(kind, chunk, f"{index} of {len(chunks)}", False, merged) for index, chunk in enumerate(chunks, 1))
         else:
             rows.append(describe(kind, record, "1 of 1", False))
     for kind, history in (state.get("provider_job_history") or {}).items():
         rows.extend(describe(kind, old, "earlier", True) for old in history or [] if isinstance(old, dict))
     return rows
+
+
+_NUMBER_KEYS = ("waitSeconds", "downloadSeconds", "localReadSeconds", "saveSeconds", "storeSeconds", "totalSeconds")
+_READER_KINDS = ("resume", "passport", "aadhaar")
+
+
+def _seconds(value):
+    return round(float(value), 1) if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value < 10 ** 7 else None
+
+
+def _timings(state: dict) -> dict | None:
+    """Where the time of each attempt went, from the job's saved state: numbers, ISO times, the three reader kinds and a short
+    outcome word. Anything else that might be in the state is dropped (an allow-list, like everything in this report)."""
+    saved = state.get("timings")
+    if not isinstance(saved, dict):
+        return None
+    runs = []
+    for item in (saved.get("runs") or [])[-6:]:
+        if not isinstance(item, dict):
+            continue
+        run = {key: _seconds(item.get(key)) for key in _NUMBER_KEYS if _seconds(item.get(key)) is not None}
+        readers = item.get("readerSeconds") if isinstance(item.get("readerSeconds"), dict) else {}
+        run["readerSeconds"] = {kind: _seconds(readers[kind]) for kind in _READER_KINDS if _seconds(readers.get(kind)) is not None}
+        run.update(saves=item["saves"] if isinstance(item.get("saves"), int) and not isinstance(item.get("saves"), bool) else None,
+                   afterEarlierRun=bool(item.get("afterEarlierRun")), outcome=safe_text(item.get("outcome"), 30) or None,
+                   claimedAt=safe_text(item.get("claimedAt"), 40) or None, endedAt=safe_text(item.get("endedAt"), 40) or None)
+        runs.append(run)
+    return {"queuedAt": safe_text(saved.get("queuedAt"), 40) or None, "firstClaimedAt": safe_text(saved.get("firstClaimedAt"), 40) or None,
+            "runs": runs} if runs else None
+
+
+def _span(value) -> str:
+    return "?" if value is None else (f"{value:.1f} s" if value < 10 else f"{value:.0f} s")
+
+
+def timing_lines(timings: dict | None) -> list[str]:
+    """One plain sentence per attempt: 'waited 3 s in the queue, read pages locally 12 s, reader 41 s (resume 38 s, passport 22 s),
+    saved 2 s (6 saves), took 60 s in all'. No names or numbers of any document."""
+    out = []
+    runs = (timings or {}).get("runs") or []
+    for number, run in enumerate(runs, 1):
+        parts = [f"waited {_span(run.get('waitSeconds'))} " + ("before this attempt, after the previous one ended" if run.get("afterEarlierRun") else "in the queue")]
+        if "downloadSeconds" in run:
+            parts.append(f"fetched the file {_span(run['downloadSeconds'])}")
+        if "localReadSeconds" in run:
+            parts.append(f"read pages locally {_span(run['localReadSeconds'])}")
+        readers = run.get("readerSeconds") or {}
+        if readers:
+            parts.append(f"reader {_span(max(readers.values()))} (" + ", ".join(f"{kind} {_span(seconds)}" for kind, seconds in readers.items()) + ")")
+        if "saveSeconds" in run:
+            parts.append(f"saved {_span(run['saveSeconds'])}" + (f" ({run['saves']} saves)" if run.get("saves") else ""))
+        if "storeSeconds" in run:
+            parts.append(f"stored the cut documents {_span(run['storeSeconds'])}")
+        if "totalSeconds" in run:
+            parts.append(f"took {_span(run['totalSeconds'])} in all" + (f" - {run['outcome']}" if run.get("outcome") else ""))
+        out.append(f"timing, attempt {number} of {len(runs)}: " + ", ".join(parts))
+    return out
 
 
 def _identity(draft: dict) -> tuple[list[dict], dict | None]:
@@ -95,6 +154,16 @@ def _local_pages(state: dict) -> list[dict]:
     return pages
 
 
+def _review_reasons(draft: dict) -> list[str]:
+    """The plain reasons the reading went to review, as saved on the form result (what the screen lists). Wording only: the
+    sentences name checks and fields, never a value."""
+    saved = ((draft or {}).get("applicationForm") or {}).get("result") or {}
+    if saved.get("status") != "needs_review" or saved.get("identityMismatch"):
+        return []
+    issues = (saved.get("coverage") or {}).get("issues") or [saved.get("message")]
+    return [safe_text(item, 240) for item in issues if isinstance(item, str) and item.strip()][:8]
+
+
 def _reading(job, state: dict) -> dict:
     draft = job.draft or {}
     reasons, duplicate = _identity(draft)
@@ -109,8 +178,9 @@ def _reading(job, state: dict) -> dict:
         "lastFault": {"type": safe_text(recorded.get("type"), 60), "where": safe_text(recorded.get("where"), 80),
                       "at": safe_text(recorded.get("at"), 40), "attempt": recorded.get("attempt")} if recorded else None,
         "readerJobs": _reader_jobs(state), "localPages": _local_pages(state), "localFallback": (failure or {}).get("localFallback"),
-        "identityReasons": reasons, "duplicateOf": duplicate,
+        "identityReasons": reasons, "duplicateOf": duplicate, "reviewReasons": _review_reasons(draft),
         "readerVersion": safe_text((state.get("reader") or {}).get("version"), 20) or None,
+        "timings": _timings(state),
     }
 
 
@@ -175,6 +245,7 @@ def _reading_lines(reading: dict) -> list[str]:
            f", queued {reading['queuedAt']}, started {reading['startedAt']}, finished {reading['finishedAt']}"]
     if reading.get("nextAttemptAt"):
         out.append(f"next automatic attempt: {reading['nextAttemptAt']}")
+    out.extend(timing_lines(reading.get("timings")))
     if reading.get("message"):
         out.append(f"shown to the user: {reading['message']}")
     failure = reading.get("failure")
@@ -190,6 +261,8 @@ def _reading_lines(reading: dict) -> list[str]:
     pages = reading.get("localPages") or []
     if pages:
         out.append("local page reading: " + "; ".join(f"p{page['page']}={page['kind'] or '?'}/{page['status']}" for page in pages[:80]))
+    for reason in reading.get("reviewReasons") or []:
+        out.append(f"needs review because: {reason}")
     if reading.get("identityReasons"):
         out.append("identity: " + "; ".join(f"{item['field']} ({item['documentKind']})" for item in reading["identityReasons"]))
     if reading.get("duplicateOf"):

@@ -6,7 +6,7 @@ import { Button } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import { applicationFormHref } from '../form-model'
-import { findMergeTargets, mergeButtonLabel, mergeDialogView, mergeDoneText, mergeOffer, type MergePhase, type MergePlan } from '../duplicate-merge'
+import { SHOW_MERGE_UI, findMergeTargets, mergeButtonLabel, mergeDialogView, mergeDoneText, mergeOffer, type MergePhase, type MergePlan } from '../duplicate-merge'
 import { mergeCandidate, previewMerge } from '../merge-api'
 
 /** The duplicate-merge dialog: asks the server what would move (a dry run), says it, and only then merges. Admin only (the server checks too). */
@@ -85,7 +85,7 @@ export function DuplicateMergeAction({ duplicate }: { duplicate: { candidateId: 
   const store = useStore()
   const { id = '' } = useParams()
   const [open, setOpen] = useState(false)
-  const offer = mergeOffer(duplicate, { isAdmin: store.me.role === 'admin', candidateId: id })
+  const offer = SHOW_MERGE_UI ? mergeOffer(duplicate, { isAdmin: store.me.role === 'admin', candidateId: id }) : null
   if (!offer) return null
   if (offer.kind === 'ask_admin') return <small className="af-merge-ask">{offer.text}</small>
   const here = store.candidates.find((candidate) => candidate.id === id)
@@ -107,7 +107,7 @@ export function MergeIntoPicker({ sourceId, sourceLabel }: { sourceId: string; s
   const [query, setQuery] = useState('')
   const [target, setTarget] = useState<{ id: string; label: string } | null>(null)
   const results = useMemo(() => findMergeTargets(store.candidates, query, sourceId), [store.candidates, query, sourceId])
-  if (store.me.role !== 'admin') return null
+  if (!SHOW_MERGE_UI || store.me.role !== 'admin') return null
   const closeAll = () => { setOpen(false); setTarget(null); setQuery('') }
   return (
     <>

@@ -396,6 +396,11 @@ export interface UploadedFile {
   uploadedAt: string
   /** Present only when the file held several documents and was filed in their own fields. */
   split?: SplitReport
+  /** True when these exact bytes were already filed in this field: nothing was stored and `message` says "This file is already uploaded (version N)." */
+  alreadyUploaded?: boolean
+  message?: string
+  /** Quiet information (the file is also filed in another field, or for another candidate's shared document). */
+  notes?: string[]
 }
 
 interface FormRequestOptions extends RequestOptions {
@@ -466,7 +471,11 @@ async function upload(
   form.append('slot', slot)
   form.append('file', file)
   if (options.deferExtraction) form.append('defer_extraction', 'true')
-  return postForm<UploadedFile>('/files', form, 'The file was not uploaded.')
+  const stored = await postForm<UploadedFile>('/files', form, 'The file was not uploaded.')
+  // The server never stores a file twice: say so quietly. The screens already show `split.message` as their neutral toast, so the
+  // "already uploaded" sentence (or a note that the file is also filed elsewhere) rides on it. A refused duplicate is a 409 error.
+  const quiet = stored.alreadyUploaded ? stored.message : stored.notes?.join(' ')
+  return quiet && !stored.split ? { ...stored, split: { message: quiet, pieces: [] } } : stored
 }
 
 /** What the OCR read, named after the add-candidate form's fields. Absent means unsure. */

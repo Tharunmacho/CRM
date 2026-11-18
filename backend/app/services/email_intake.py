@@ -358,6 +358,8 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
     attachments = list(db.scalars(select(MailAttachment).where(MailAttachment.message_id == message.id)))
     for attachment in attachments:
         document = job.state.get(attachment.id, {})
+        if (document.get("output") or {}).get("alreadyFiled"):
+            continue   # these exact bytes are already filed as a personal document: never filed again
         links = [{
             "slot": "source_bundle", "file_name": attachment.file_name,
             "size_kb": attachment.size_kb, "object_key": attachment.object_key,
@@ -382,6 +384,12 @@ def commit_candidate(db: Session, job: EmailIngestionJob, results: list[dict], n
         (job.state.get(attachment.id) or {}).get("split") for attachment in sorted(attachments, key=lambda item: item.id)) if split]
     intake_documents.file_pieces(db, candidate, splits, origin={"channel": "email", "email_message_id": message.id})
     info = [split["note"] for split in splits if split.get("note")]
+    for result in results:   # an attachment skipped because its bytes are already filed (see process_job): said in plain words
+        held = result.get("alreadyFiled")
+        if held:
+            name = (result.get("source") or {}).get("file_name") or "An attachment"
+            info.append(f"{name}: already filed for this candidate, so it was not filed again." if held.get("candidateId") == candidate.id
+                        else f"{name}: this file is already filed for {held.get('label')}, so it was not filed again.")
     # A different resume file is the latest resume, so Data Bank search must find its
     # text (the database trigger refreshes the search index when resume_text changes).
     if text and (new_resume or not candidate.resume_text):
@@ -553,6 +561,7 @@ def process_job(job_id, *, sessions, settings):
         attachments = list(db.scalars(select(MailAttachment).where(MailAttachment.message_id == job.message_id).order_by(MailAttachment.id)))
         titles = list(db.scalars(select(Designation.title)))
         account_id = db.get(MailMessage, job.message_id).account_id
+        own_candidate_id = job.candidate_id
         db.commit()
 
     def checkpoint(attachment_id, document_state):
@@ -576,6 +585,15 @@ def process_job(job_id, *, sessions, settings):
         pending = None
         from app.services.extraction_scheduling import handoff_settings, PENDING_RECHECK_SECONDS
         extraction_settings = handoff_settings(settings)
+        # A file that is already filed as a personal document of a candidate is not read or filed again (one indexed query for the
+        # whole message; services/file_ownership.py). Files stored from this very receipt never count, so a retry cannot refuse itself.
+        filed = {}
+        if any((state.get(attachment.id) or {}).get("output") is None for attachment in attachments):
+            from app.services import file_ownership
+            with sessions() as db:
+                filed = file_ownership.hashes_held_elsewhere(
+                    db, [attachment.content_hash for attachment in attachments], own_candidate_id=own_candidate_id,
+                    own_object_keys=[attachment.object_key for attachment in attachments])
         for attachment in attachments:
             document_state = state.get(attachment.id, {})
             result = document_state.get("output")
@@ -586,6 +604,13 @@ def process_job(job_id, *, sessions, settings):
                 reason = _set_aside_reason(data)
                 if reason:
                     result = _synthetic_output("ignored", reason, attachment.file_name)
+                    document_state["output"] = result
+                    document_state["extraction_status"] = "ignored"
+                    checkpoint(attachment.id, document_state)
+                elif attachment.content_hash in filed:
+                    holder_id, holder = filed[attachment.content_hash]
+                    result = _synthetic_output("ignored", f"This file is already filed for {holder}.", attachment.file_name)
+                    result["alreadyFiled"] = {"candidateId": holder_id, "label": holder}
                     document_state["output"] = result
                     document_state["extraction_status"] = "ignored"
                     checkpoint(attachment.id, document_state)
@@ -697,7 +722,10 @@ def process_job(job_id, *, sessions, settings):
             elif unresolved:
                 job.status, job.last_error = "needs_review", "One or more document pages need review. No candidate was changed."
             else:
-                job.status, job.last_error = "ignored", "No resume, passport or Aadhaar pages identified."
+                already = [f'{result["source"]["file_name"]}: {result["reason"]}' for result in results if result.get("alreadyFiled")]
+                job.status = "ignored"
+                job.last_error = ("; ".join(dict.fromkeys(already))[:500] if already and len(already) == len(results)
+                                  else "No resume, passport or Aadhaar pages identified.")
             db.commit()
     except ExtractionPending as exc:
         with sessions() as db:

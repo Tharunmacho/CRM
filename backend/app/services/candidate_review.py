@@ -84,10 +84,11 @@ def _document_review_scope(meta) -> tuple[str, str] | None:
 
 
 def record_review_flag(db, candidate, *, ocr_warning: bool, attachment_id: str | None = None,
-                       document_job_id: str | None = None) -> None:
-    """Remember that the documents, not the missing owner, need a person's attention."""
+                       document_job_id: str | None = None, reason: str = "ocr_warning") -> None:
+    """Remember that the documents, not the missing owner, need a person's attention. `reason` names the soft flag
+    ("name_unclear": a name on a document could not be read, check it) so the review list can say why; it stays an OCR flag."""
     if ocr_warning:
-        meta = {"reasons": ["ocr_warning"]}
+        meta = {"reasons": ["ocr_warning"] if reason == "ocr_warning" else ["ocr_warning", reason]}
         scope = _document_review_scope({"attachment_id": attachment_id, "document_job_id": document_job_id})
         if scope:
             meta.update({"attachment_id": scope[0], "document_job_id": scope[1]})

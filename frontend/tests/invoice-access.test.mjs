@@ -15,7 +15,8 @@ const read = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf
 
 const slotsUrl = moduleUrl(await read('shared/model/document-slots.ts'))
 const { DOCUMENT_SLOT_KEYS } = await import(slotsUrl)
-const modelUrl = moduleUrl((await read('features/application-form/form-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`))
+const readReportUrl = moduleUrl(await read('features/candidates/read-report.ts'))
+const modelUrl = moduleUrl((await read('features/application-form/form-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`).replace("'@/features/candidates/read-report'", `'${readReportUrl}'`))
 const model = await import(modelUrl)
 const stages = await import(moduleUrl((await read('features/application-form/process-stages.ts')).replace("'./form-model'", `'${modelUrl}'`).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`)))
 const profile = await import(moduleUrl((await read('features/candidates/profile-documents-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`)))
@@ -40,7 +41,7 @@ test('profile and stage documents render through a list that hides the Invoice r
 })
 
 test('Fee collections is not offered, and not opened by a link, unless the viewer may see invoices', async () => {
-  const page = await read('screens/reports/reports.tsx')
+  const page = await read('screens/reports/other-reports.tsx')
   assert.match(page, /const invoices = store\.can\('view_invoices'\)/)
   assert.match(page, /reportTabFromParams\(params, supervisor, invoices\)/)
   assert.match(page, /REPORTS\.filter\(item => invoices \|\| item\.key !== 'collections'\)/)

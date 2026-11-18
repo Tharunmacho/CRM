@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, Plane, Repeat2, UserCheck, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
+import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { useReportData } from '@/features/reports/report-api'
 import type { LeadSummaryResponse } from '@/features/leads/lead-api'
 import { DashboardGraphs } from '@/features/dashboard/components/source-graph'
@@ -59,6 +60,7 @@ export default function DashboardPage() {
   ]
 
   return <div className="dashref dashsimple">
+    <ReminderBanner />
     <header className="ds-head">
       <h1>Dashboard</h1>
     </header>

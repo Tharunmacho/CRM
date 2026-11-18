@@ -238,34 +238,25 @@ def upload_document(candidate_id: str, response: Response, slot: str = Form(...)
     payload = file.file.read(files_router.MAX_BYTES + 1)
     if not payload:
         raise HTTPException(400, "The file is empty.")
-    split = None   # set when the file held several documents and was filed in their own fields
-    import hashlib
-    digest = hashlib.sha256(payload).hexdigest()
-    latest = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
-                                                Attachment.slot == slot).order_by(Attachment.version.desc()).limit(1))
-    if slot in ("passport", "aadhaar", "other") and latest is not None and latest.content_hash != digest:
-        # Multi-file slots keep every page: repeated bytes are not stored twice.
-        latest = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == candidate_id,
-                                                    Attachment.slot == slot, Attachment.content_hash == digest).limit(1)) or latest
-    if latest is not None and latest.content_hash == digest:
-        # The same file again: no new version. If reading it had failed, put it back in the queue.
-        candidate = db.get(Candidate, candidate_id)
-        if candidate is None:
-            raise HTTPException(404, "Candidate not found")
-        service.ensure_can_edit(user, candidate)
-        if not defer_extraction and slot in service.READ_SLOTS and service.requeue_failed(db, candidate_id, latest.id):
-            db.commit()
-    else:
-        file.file.seek(0)
-        stored = files_router.upload(entity_type="candidate", entity_id=candidate_id, slot=slot, file=file, defer_extraction=defer_extraction, db=db, user=user)
-        split = stored.get("split") if isinstance(stored, dict) else None
+    # One path for every file: the upload checks, under the candidate's lock, whether these exact bytes are already filed. In this field
+    # (any version) it stores nothing and answers `alreadyUploaded` (and puts a failed reading of that file back in the queue); as a
+    # personal document of another candidate it answers 409 with that candidate's Care India ID and name.
+    file.file.seek(0)
+    stored = files_router.upload(entity_type="candidate", entity_id=candidate_id, slot=slot, file=file, defer_extraction=defer_extraction, db=db, user=user)
+    split = stored.get("split") if isinstance(stored, dict) else None
+    already = bool(isinstance(stored, dict) and stored.get("alreadyUploaded"))
+    notes = stored.get("notes") if isinstance(stored, dict) else None
+    if already:
+        response.status_code = 200
     form = service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
     document = form["documents"][slot]
     extraction = document["extraction"]
     if extraction is None and not document.get("extractionPending"):
         extraction = {"status": "done", "message": None, "jobId": None, "updatedAt": None,
                       "kindsFound": [], "filled": [], "kept": []}
-    return {"document": document, "extraction": extraction, "form": form, **({"split": split} if split else {})}
+    return {"document": document, "extraction": extraction, "form": form, **({"split": split} if split else {}),
+            **({"alreadyUploaded": True, "message": stored["message"], "existing": stored["existing"]} if already else {}),
+            **({"notes": notes} if notes else {})}
 
 
 class IdentityCheckIn(_Section):

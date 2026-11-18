@@ -39,10 +39,12 @@ test('choosing a tab writes ?tab= and drops the dates and person that belonged t
   assert.equal(t.paramsForTab(q('x=1'), 'staff').toString(), 'x=1&tab=staff')
 })
 
-test('the former /staff-report address lands on the Staff performance tab and keeps the week and person', () => {
-  assert.equal(t.staffReportRedirect(''), '/reports?tab=staff')
-  assert.equal(t.staffReportRedirect('?from=2026-11-02&to=2026-11-08&staff=abc'), '/reports?from=2026-11-02&to=2026-11-08&staff=abc&tab=staff')
-  assert.equal(t.staffReportRedirect('?tab=orders'), '/reports?tab=staff')
+test('the former /staff-report address opens the Daily report filtered to that person and week (the Staff performance tab only while legacy reports are on)', () => {
+  assert.equal(t.staffReportRedirect(''), '/reports')
+  assert.equal(t.staffReportRedirect('?from=2026-11-02&to=2026-11-08&staff=abc'), '/reports?from=2026-11-02&to=2026-11-08&staff=abc')
+  assert.equal(t.staffReportRedirect('?tab=orders&staff=abc'), '/reports?staff=abc')
+  assert.equal(t.staffReportRedirect('', true), '/reports?tab=staff')
+  assert.equal(t.staffReportRedirect('?from=2026-11-02&to=2026-11-08&staff=abc', true), '/reports?from=2026-11-02&to=2026-11-08&staff=abc&tab=staff')
 })
 
 test('the sidebar has one Reports item and /staff-report only redirects', async () => {
@@ -53,4 +55,47 @@ test('the sidebar has one Reports item and /staff-report only redirects', async 
   assert.match(routes, /path="staff-report" element=\{<StaffReportRedirect \/>\}/)
   const page = await readFile(new URL('../src/screens/reports/reports.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(page, /Weekly staff report|navigate\('\/staff-report'\)/)
+})
+
+test('the page tabs are exactly the three report views; Accounts and the legacy reports are behind constants', () => {
+  const three = ['Daily report', 'Lead sheet monitoring', 'Candidate monitoring']
+  assert.deepEqual(t.pageTabs(false).map(x => x.label), three)
+  assert.deepEqual(t.pageTabs(true).map(x => x.label), three) // even for the admin: Accounts is not a visible tab
+  assert.equal(t.SHOW_ACCOUNTS_TAB, false)
+  assert.equal(t.SHOW_LEGACY_REPORTS, false)
+  // switched on, they come back
+  assert.deepEqual(t.pageTabs(true, false, true).map(x => x.key), ['daily', 'lead', 'stages', 'accounts'])
+  assert.deepEqual(t.pageTabs(true, true, true).map(x => x.key), ['daily', 'lead', 'stages', 'accounts', 'legacy'])
+  assert.deepEqual(t.pageTabs(false, false, true).map(x => x.key), ['daily', 'lead', 'stages']) // never for a non-admin
+})
+
+test('which tab an address opens: no tab is the Daily report; old Fee/Advance collections links still open for the admin; old report keys fall back', () => {
+  assert.equal(t.pageTabFromParams(q(''), true, false), 'daily')
+  assert.equal(t.pageTabFromParams(q('tab=lead'), false, false), 'lead')
+  assert.equal(t.pageTabFromParams(q('tab=stages'), false, false), 'stages')
+  for (const tab of ['accounts', 'collections', 'advance']) {
+    assert.equal(t.pageTabFromParams(q(`tab=${tab}`), true, false), 'accounts', tab)
+    assert.equal(t.pageTabFromParams(q(`tab=${tab}`), false, false), 'daily', tab)
+  }
+  // the removed reports open the Daily report (older bookmarks keep working) unless the legacy flag is on
+  for (const tab of ['funnel', 'staff', 'source', 'orders', 'rejections']) {
+    assert.equal(t.pageTabFromParams(q(`tab=${tab}`), true, false), 'daily', tab)
+    assert.equal(t.pageTabFromParams(q(`tab=${tab}`), true, true), 'legacy', tab)
+  }
+  assert.equal(t.pageTabFromParams(q('staff=abc&from=2026-10-01&to=2026-10-30'), true, false), 'daily') // the person filter is applied by the page
+  assert.equal(t.pageTabFromParams(q('tab=nonsense'), true, false), 'daily')
+})
+
+test('choosing a page tab writes ?tab= and drops dates and person from the address', () => {
+  assert.equal(t.paramsForPageTab(q('from=2026-11-02&to=2026-11-08&staff=abc'), 'lead').toString(), 'tab=lead')
+  assert.equal(t.paramsForPageTab(q('tab=stages&staff=abc'), 'daily').toString(), '')
+  assert.equal(t.paramsForPageTab(q(''), 'accounts').toString(), 'tab=accounts')
+  assert.equal(t.paramsForPageTab(q(''), 'legacy').toString(), 'tab=funnel')
+})
+
+test('the code of the removed reports is kept: only their tabs are gated by one constant', async () => {
+  const other = await readFile(new URL('../src/screens/reports/other-reports.tsx', import.meta.url), 'utf8')
+  assert.match(other, /SHOW_LEGACY_REPORTS/)
+  assert.match(other, /next\.set\('tab', key\)/)
+  assert.ok(t.ACCOUNT_TABS.includes('collections') && t.ACCOUNT_TABS.includes('advance') && t.ACCOUNT_TABS.length === 2)
 })

@@ -47,15 +47,49 @@ def test_s3_does_not_overwrite_existing_immutable_document(monkeypatch, tmp_path
     monkeypatch.setattr(storage, "_s3", lambda _: client)
     with Stubber(client) as stub:
         stub.add_client_error("put_object", "PreconditionFailed", http_status_code=412)
+        stub.add_response("head_object", {"Metadata": {"sha256": hashlib.sha256(b"different").hexdigest()}}, {"Bucket": "crm-test-bucket", "Key": "document.pdf"})
         stub.add_response("get_object", {"Body": StreamingBody(BytesIO(b"different"), 9)}, {"Bucket": "crm-test-bucket", "Key": "document.pdf"})
         with pytest.raises(ValueError, match="different document"):
             storage.put_bytes(settings, "document.pdf", b"original")
 
 
+def test_s3_identical_bytes_already_at_the_key_are_recognised_by_the_stored_checksum_without_a_download(monkeypatch, tmp_path):
+    settings = SimpleNamespace(storage_dir=str(tmp_path), storage_backend="s3", s3_bucket="crm-test-bucket", s3_prefix="")
+    client = boto3.client("s3", region_name="us-east-1", aws_access_key_id="synthetic", aws_secret_access_key="synthetic")
+    monkeypatch.setattr(storage, "_s3", lambda _: client)
+    digest = hashlib.sha256(b"original").hexdigest()
+    with Stubber(client) as stub:
+        stub.add_client_error("put_object", "PreconditionFailed", http_status_code=412)
+        stub.add_response("head_object", {"Metadata": {"sha256": digest}}, {"Bucket": "crm-test-bucket", "Key": "document.pdf"})
+        assert storage.put_bytes(settings, "document.pdf", b"original") == "s3://crm-test-bucket/document.pdf"
+        stub.assert_no_pending_responses()     # no get_object was queued: a download would have failed the call
+
+
 def test_blank_optional_s3_settings_use_standard_endpoint_and_credential_chain(monkeypatch):
     captured = {}
+    storage.forget_clients()
     monkeypatch.setattr(boto3, "client", lambda service, **kwargs: captured.update(kwargs) or object())
-    storage._s3(SimpleNamespace(s3_endpoint_url="", s3_region="", s3_access_key_id="", s3_secret_access_key=""))
+    try:
+        storage._s3(SimpleNamespace(s3_endpoint_url="", s3_region="", s3_access_key_id="", s3_secret_access_key=""))
+    finally:
+        storage.forget_clients()
     assert captured["endpoint_url"] is None
     assert captured["region_name"] == "us-east-1"
+    assert captured["config"].max_pool_connections >= 16
     assert captured["aws_access_key_id"] is None and captured["aws_secret_access_key"] is None
+
+
+def test_one_client_is_built_per_configuration_and_shared_by_every_thread(monkeypatch):
+    built = []
+    storage.forget_clients()
+    monkeypatch.setattr(boto3, "client", lambda service, **kwargs: built.append(kwargs) or object())
+    first = SimpleNamespace(s3_endpoint_url="https://one.invalid", s3_region="r", s3_access_key_id="a", s3_secret_access_key="b")
+    other = SimpleNamespace(s3_endpoint_url="https://two.invalid", s3_region="r", s3_access_key_id="a", s3_secret_access_key="b")
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            clients = list(pool.map(lambda _: storage._s3(first), range(32)))
+        assert len({id(client) for client in clients}) == 1 and len(built) == 1
+        assert storage._s3(other) is not clients[0] and len(built) == 2
+        assert storage._s3(first) is clients[0] and len(built) == 2
+    finally:
+        storage.forget_clients()

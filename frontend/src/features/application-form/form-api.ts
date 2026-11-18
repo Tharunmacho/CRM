@@ -33,8 +33,12 @@ export async function uploadFormDocument(candidateId: string, kind: DocumentKind
   form.append('slot', kind)
   form.append('file', file)
   if (['resume', 'passport', 'aadhaar', 'education_certificate'].includes(kind)) form.append('defer_extraction', 'true')
-  const result = await api.form<{ form?: unknown; split?: SplitReport }>(formPath(candidateId, target, '/documents'), form)
-  return { form: result.form ? normalizeForm(result.form) : null, split: result.split ?? null }
+  const result = await api.form<{ form?: unknown; split?: SplitReport; alreadyUploaded?: boolean; message?: string; notes?: string[] }>(formPath(candidateId, target, '/documents'), form)
+  // The server never stores a file twice. The same bytes again answer `alreadyUploaded` ("This file is already uploaded (version 2).") and a file that is
+  // also filed elsewhere answers quiet `notes`; the screens show `split.message` as their neutral line, so these ride on it. (A file that is another
+  // candidate's personal document is a 409: the server's sentence is the error the upload already shows.)
+  const quiet = result.alreadyUploaded ? result.message : result.notes?.join(' ')
+  return { form: result.form ? normalizeForm(result.form) : null, split: result.split ?? (quiet ? { message: quiet, pieces: [] } : null) }
 }
 
 export async function extractFormDocuments(candidateId: string, attachmentIds: string[], target: FormTarget = {}): Promise<ApplicationFormData | null> {

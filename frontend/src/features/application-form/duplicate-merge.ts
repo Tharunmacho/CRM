@@ -6,6 +6,13 @@
  * refuse, so the dialog can say it before anything changes.
  */
 
+/**
+ * The merge UI is switched off (the owner deletes a duplicate by hand). The code, this model and the backend endpoint stay, so
+ * setting this to true brings back the "Merge duplicate into…" header button and the "Merge into CI-xxx" button beside the
+ * "Already in the CRM" note. Every place that mounts merge UI checks this one constant.
+ */
+export const SHOW_MERGE_UI = false
+
 export interface MergeRefusal { code: string; message: string; canConfirm: boolean }
 export interface MergedCounts { documents: number; jobs: number; notes: number; tasks: number; applications: number }
 export interface MergeSkip { kind: string; name: string; reason: string }

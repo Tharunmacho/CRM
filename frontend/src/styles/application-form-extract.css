@@ -1,0 +1,36 @@
+/*
+ * The document line under a file (Documents list): ONE alert box for a blocking state (red failed, blue reading, green filled) and,
+ * for everything advisory, the quiet "Notes (n)" line. Colour comes only from the error / primary / success tokens and the plain
+ * greys, nothing else. tests/extraction-line-tone.test.mjs fails if this file gains any other kind of alert colour.
+ */
+.af-extract-line { display: grid; gap: 4px; min-width: 0; }
+.af-extract { display: flex; align-items: center; gap: 7px; margin: 0; padding: 5px 10px; border-radius: 6px; font-size: 12.5px; font-weight: 500; }
+.af-extract svg { width: 14px; height: 14px; flex: none; }
+.af-extract.is-running { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); color: var(--primary-deep); }
+[data-theme="dark"] .af-extract.is-running { color: var(--primary); }
+.af-extract.is-running svg { animation: af-spin 1s linear infinite; }
+.af-extract.is-filled { background: var(--success-fill); color: var(--success-ink); }
+.af-extract.is-failed { background: var(--error-fill); color: var(--error-ink); }
+.af-extract:has(.af-extract-details) { flex-wrap: wrap; }
+.af-extract-details { flex: 1 0 100%; font-size: 12px; font-weight: 400; }
+.af-extract-details summary { cursor: pointer; font-weight: 600; width: max-content; }
+.af-extract-details ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* A reading with only advisory notes: plain muted words, no box. */
+.af-extract-quiet { margin: 0; padding: 0 2px; color: var(--text-muted); font-size: 12px; }
+
+/* Notes (n): a small muted button that opens a plain list in a very light grey panel. */
+.af-xnotes { display: grid; gap: 4px; justify-items: start; min-width: 0; }
+.af-xnotes-btn { display: inline-flex; align-items: center; gap: 5px; margin: 0 0 0 -4px; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.af-xnotes-btn:hover { background: var(--tint-1); color: var(--text-main); }
+.af-xnotes-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.af-xnotes-btn svg { width: 13px; height: 13px; flex: none; }
+.af-xnotes-panel { align-self: stretch; margin: 0; padding: 8px 12px 8px 28px; border-radius: 8px; background: var(--tint-1); color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.af-xnotes-panel[hidden] { display: none; }
+.af-xnotes-panel li + li { margin-top: 3px; }
+
+/* Printed, the notes are always open and the button is not needed. */
+@media print {
+  .af-xnotes-btn { display: none; }
+  .af-xnotes-panel[hidden] { display: block; }
+}

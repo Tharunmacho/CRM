@@ -26,6 +26,7 @@ CLASSES: dict[str, tuple[bool, str]] = {
     "reader_slow": (True, "The reader is taking longer than usual"),
     "reader_server_error": (True, "The reader had a fault on its side"),
     "reader_key_conflict": (True, "The reader already had this upload key for a different file"),
+    "reader_result_expired": (True, "The reader no longer holds the result of an earlier reading of these pages (it expired), so they are sent again"),
     "reader_job_failed": (True, "The reader could not read the file"),
     "reader_answer_unusable": (True, "The reader answered, but we could not use the answer"),
     "reader_no_result": (True, "The reader finished but sent no result"),
@@ -108,6 +109,8 @@ def classify(error: BaseException) -> dict:
         return _make("reader_busy", http_status=status or 429, code=code, detail=extra)
     if isinstance(error, VerisOCRServerError) or (status is not None and status >= 500):
         return _make("reader_server_error", http_status=status, code=code, detail=f"HTTP {status}" if status else "")
+    if status == 410 or code == "result_expired":
+        return _make("reader_result_expired", http_status=410, code=code or "result_expired", detail="the saved result of the earlier job is gone")
     if status == 409:
         return _make("reader_key_conflict", http_status=409, code=code, detail="the same key was used for other file contents")
     if isinstance(error, VerisOCRAuthenticationError) or status in (401, 403):

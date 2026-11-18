@@ -170,7 +170,7 @@ def test_a_new_version_moves_the_old_one_to_history_and_other_keeps_every_file(d
     for n in (1, 2, 3):
         assert upload(desk, "other", pdf(f"Other file {n}"), name=f"other-{n}.pdf").status_code == 202
     again = upload(desk, "other", pdf("Other file 1"), name="other-1.pdf")  # the same bytes are not stored twice
-    assert again.status_code == 202
+    assert again.status_code == 200 and again.json()["alreadyUploaded"] is True
     other = form(desk)["documents"]["other"]
     assert [f["fileName"] for f in other["files"]] == ["other-3.pdf", "other-2.pdf", "other-1.pdf"]  # newest first
     assert other["current"]["fileName"] == "other-3.pdf" and other["versions"] == 3

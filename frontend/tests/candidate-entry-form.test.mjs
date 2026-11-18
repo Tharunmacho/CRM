@@ -19,7 +19,8 @@ const phoneModule = await load('candidates/entry-phone.ts')
 const modelModule = await load('candidates/entry-model.ts')
 const extrasModule = await load('candidates/entry-extras.ts', { './entry-phone': phoneModule.url })
 const slotsUrl = moduleUrl(await readFile(new URL('../src/shared/model/document-slots.ts', import.meta.url), 'utf8'))
-const formModelModule = await load('application-form/form-model.ts', { '@/shared/model/document-slots': slotsUrl })
+const readReportModule = await load('candidates/read-report.ts')
+const formModelModule = await load('application-form/form-model.ts', { '@/shared/model/document-slots': slotsUrl, '@/features/candidates/read-report': readReportModule.url })
 const bridgeModule = await load('application-form/entry-bridge.ts', { './form-model': formModelModule.url })
 const completenessModule = await load('candidates/entry-completeness.ts', {
   '@/features/application-form/entry-bridge': bridgeModule.url, './entry-extras': extrasModule.url, '@/shared/model/document-slots': slotsUrl,

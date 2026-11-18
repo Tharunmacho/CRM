@@ -62,7 +62,7 @@ def staff_weekly_export_file(format: Literal["xlsx", "csv"], from_date: date | N
     payload = staff_weekly_export.xlsx(data) if format == "xlsx" else staff_weekly_export.csv_bytes(data)
     mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if format == "xlsx" else "text/csv; charset=utf-8"
     return Response(payload, media_type=mime, headers={
-        "Content-Disposition": f'attachment; filename="staff-weekly-{data["range"]["from"]}-{data["range"]["to"]}.{format}"',
+        "Content-Disposition": f'attachment; filename="recruiter-weekly-{data["range"]["from"]}-{data["range"]["to"]}.{format}"',
         "Cache-Control": "private, no-store",
     })
 

@@ -117,7 +117,7 @@ def document_names(extractions: dict) -> list[tuple[str, str]]:
         fields = extraction.get("fields") if isinstance(extraction.get("fields"), dict) else {}
         raw = extraction.get("raw") if isinstance(extraction.get("raw"), dict) else {}
         name = str(fx.values_for(kind, raw).get("name") or fields.get("name") or "").strip()
-        if name and _is_strong(kind, fields, raw):
+        if name and _is_strong(kind, fields, raw) and name_readable(name, kind):
             found.append((kind, name))
     return found
 
@@ -138,11 +138,43 @@ def names_conflict_within(extractions: dict) -> bool:
     return name_disagreement(extractions) is not None
 
 
+def _scattered_capitals(word: str) -> bool:
+    """A word with a capital letter inside it ("GguGoof", "uLL"): how OCR junk looks, never how a name is written. An
+    all-capitals word, "McKay", "MacLeod", "O'Neil" and "Anne-Marie" are names."""
+    letters = re.sub(r"[^A-Za-z]", "", word)
+    if len(letters) < 2 or letters.isupper() or letters.islower():
+        return False
+    core = re.sub(r"^(?:Mc|Mac|De|Di|Le|La|Van|Von)(?=[A-Z])", "", word)
+    core = re.sub(r"['\-.][A-Za-z]", lambda match: match.group(0).lower(), core)
+    return any(char.isupper() for char in core[1:])
+
+
+def name_readable(name, kind: str | None = None) -> bool:
+    """Whether what the reader wrote as a person's name can be a name at all. Junk (a Tamil/English card read as "GguGoof m uLL")
+    is UNREADABLE, never a different person: it is not compared, not applied and not stored as the name.
+
+    An Aadhaar card is judged strictly (a printed card in two scripts is where junk comes from); a passport leniently (its coded
+    lines are not guessed, check digits cover them); a name that is empty is not junk, it is absent (readable here)."""
+    text = " ".join(str(name or "").split())
+    if not text:
+        return True
+    if any(_scattered_capitals(word) for word in text.split(" ")):
+        return False
+    # An initial is a CAPITAL letter ("S", "K."): a lone lowercase letter between words ("Ggugoof m ull") is a misread.
+    if any(len(word.strip(".")) == 1 and word.strip(".").islower() for word in text.split(" ")):
+        return False
+    from app.services.people_by_content import plausible_name
+    # Lenient for every kind: the scattered-capitals test above catches the card junk ("GguGoof m uLL"), and the strict name-pattern test
+    # would also call a real but unusual name unreadable (a good card then never names the candidate).
+    return plausible_name(text, lenient=True)
+
+
 def plausible_full_name(name) -> bool:
     """Two or more words of letters (no digits or symbols): good enough to replace a folder stand-in."""
     text = " ".join(str(name or "").split())
     words = text.split(" ")
-    return bool(text) and len(text) <= 120 and len(words) >= 2 and all(re.fullmatch(r"[^\W\d_]+(?:['.-][^\W\d_]+)*\.?", word) for word in words)
+    return (bool(text) and len(text) <= 120 and len(words) >= 2
+            and all(re.fullmatch(r"[^\W\d_]+(?:['.-][^\W\d_]+)*\.?", word) for word in words) and name_readable(text, "passport"))
 
 
 def best_known_name(extractions: dict, record=None) -> str | None:
@@ -164,29 +196,53 @@ def best_known_name(extractions: dict, record=None) -> str | None:
     return None
 
 
-def identity_findings(record, values: dict, db=None) -> list[dict]:
+def _clearly_different(left, right) -> bool:
+    """Names that are different people, not one person written two ways: nothing in common (see `names_differ`), and no word that
+    is the start of another ("Ganesh" / "Ganeshkumar")."""
+    if not names_differ(left, right):
+        return False
+    a, b = _name_tokens(left), _name_tokens(right)
+    return not any(len(x) >= 3 and len(y) >= 3 and (x.startswith(y) or y.startswith(x)) for x in a for y in b)
+
+
+def _dob_differs(record, values: dict) -> bool:
+    current, incoming = getattr(record, "dob", None), values.get("dob")
+    return bool(current and incoming and str(current)[:10] != str(incoming)[:10])
+
+
+def identity_findings(record, values: dict, db=None, *, kind: str | None = None, same_source: bool = False) -> list[dict]:
     """Why a document does not belong to this record, one entry per cause: {"field": "name" | "passport_no" | "candidate", ...}.
 
     A name finding carries the name read (`found`) and the name it was compared with (`expected`, said to come `expectedFrom`
     the "candidate" or one of the candidate's "stored_document"s). A passport finding says nothing but its field. A candidate
     finding says which identifier is already owned (`matchedOn`: "phone number" / "email" / "passport number", never the value)
-    and by whom (`duplicate`). Initials, reordered names and missing middle names are tolerated."""
+    and by whom (`duplicate`). Initials, reordered names and missing middle names are tolerated.
+
+    A name that is not readable (OCR junk, see `name_readable`) is never compared: it is not another person. `kind` says which
+    document it was read from (an Aadhaar card is judged strictly). `same_source` says the document was cut from the very scan
+    of another document of this candidate that was already read and accepted: then a name alone never rejects it, the name must
+    be readable and clearly another person's AND the passport number or the date of birth must differ as well."""
     findings: list[dict] = []
     current_name = str(getattr(record, "name", None) or "").strip()
     incoming_name = str(values.get("name") or "").strip()
+    if incoming_name and not name_readable(incoming_name, kind):
+        incoming_name = ""   # unreadable, not different
+    differs = _clearly_different if same_source else names_differ
+    current_passport = normalize_passport(getattr(record, "passport_no", None))
+    incoming_passport = normalize_passport(values.get("passport_no"))
+    passport_differs = bool(current_passport and incoming_passport and current_passport != incoming_passport)
+    second_signal = passport_differs or _dob_differs(record, values)
     from app.services.form_extraction import provisional_name
-    if current_name and current_name.casefold() != UNNAMED.casefold() and incoming_name and not provisional_name(record) \
-            and names_differ(current_name, incoming_name):
-        findings.append({"field": "name", "found": incoming_name, "expected": current_name, "expectedFrom": "candidate"})
+    if current_name and current_name.casefold() != UNNAMED.casefold() and incoming_name and not provisional_name(record)             and differs(current_name, incoming_name):
+        if second_signal or not same_source:
+            findings.append({"field": "name", "found": incoming_name, "expected": current_name, "expectedFrom": "candidate"})
     elif incoming_name and provisional_name(record):
         # The folder-name stand-in is the only name exempt from the check: a document still has to agree with the names the
         # candidate's other stored documents already carry.
-        stored = next((name for name in stored_document_names(record) if names_differ(name, incoming_name)), None)
-        if stored:
+        stored = next((name for name in stored_document_names(record) if name_readable(name) and differs(name, incoming_name)), None)
+        if stored and (second_signal or not same_source):
             findings.append({"field": "name", "found": incoming_name, "expected": stored, "expectedFrom": "stored_document"})
-    current_passport = normalize_passport(getattr(record, "passport_no", None))
-    incoming_passport = normalize_passport(values.get("passport_no"))
-    if current_passport and incoming_passport and current_passport != incoming_passport:
+    if passport_differs:
         findings.append({"field": "passport_no"})
     # Fail closed on database errors; an identity check must not silently approve an uncertain match.
     if db is not None and any(values.get(key) for key in ("phone", "email", "passport_no")):
@@ -200,13 +256,13 @@ def identity_findings(record, values: dict, db=None) -> list[dict]:
     return findings
 
 
-def identity_conflicts(record, values: dict, db=None) -> list[str]:
+def identity_conflicts(record, values: dict, db=None, *, kind: str | None = None, same_source: bool = False) -> list[str]:
     """Return field names only (see `identity_findings` for the reasons).
 
     Missing identity is not proof of a mismatch: complementary back pages may carry only an address.
     Contact details alone may differ, but identifiers already owned by another candidate cannot enrich this one.
     """
-    return [finding["field"] for finding in identity_findings(record, values, db)]
+    return [finding["field"] for finding in identity_findings(record, values, db, kind=kind, same_source=same_source)]
 
 
 def public_reason(finding: dict, document_kind: str | None = None) -> dict:

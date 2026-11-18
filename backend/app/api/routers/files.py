@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
@@ -30,7 +30,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate
 from app.db.models import Application, Attachment, AuditEntry, Candidate, Client, Company, Lead, User
-from app.services import document_storage
+from app.services import document_storage, file_ownership
 from app.services.invoice_access import can_see_invoices, ensure_can_see_invoices
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -121,6 +121,19 @@ def _uploaded_file(row: Attachment) -> dict:
             "key": row.object_key, "url": f"/api/files/{row.id}", "uploadedAt": row.uploaded_at.isoformat()}
 
 
+def _already_uploaded(db: Session, row: Attachment, slot: str, deferred: bool, response: Response | None) -> dict:
+    """The very same bytes are already filed in this field (any version): nothing is stored. HTTP 200 with `alreadyUploaded`, so the
+    screen shows a quiet message instead of a new version. A reading that had failed for that file is put back in the queue."""
+    from app.services.application_form import READ_SLOTS, requeue_failed
+    if not deferred and slot in READ_SLOTS:
+        requeue_failed(db, row.entity_id, row.id)
+    db.commit()
+    if response is not None:
+        response.status_code = status.HTTP_200_OK
+    existing = _uploaded_file(row)
+    return {**existing, "alreadyUploaded": True, "existing": existing, "message": f"This file is already uploaded (version {row.version})."}
+
+
 def _invoice_tickets_of(db: Session, pieces: list, user: User) -> None:
     """After a scan was filed and committed: a part that landed in the air ticket field starts the invoice request like a single
     ticket upload does. A failing invoice request cannot undo the filing, and never fails the upload."""
@@ -185,6 +198,7 @@ def upload(
     defer_extraction: bool = Form(False),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
+    response: Response = None,  # type: ignore[assignment]  # FastAPI fills it in; direct callers may leave it out
 ) -> dict:
     if entity_type not in ENTITIES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Files cannot be added to this kind of record ({entity_type}).")
@@ -223,7 +237,13 @@ def upload(
     if entity_type == "candidate":
         from app.services import document_splitting
         if document_splitting.worth_analysing(slot, file.filename or "file", content_type, payload):
-            ensure_can_work_candidate(_entity(db, entity_type, entity_id), user, db)
+            early = _entity(db, entity_type, entity_id)
+            ensure_can_work_candidate(early, user, db)
+            # The same bytes again, or a personal file that is another candidate's, is answered BEFORE the slow reading (the check is
+            # repeated under the lock below, which is what makes it race-safe).
+            seen = file_ownership.check_file(db, user, early, slot, hashlib.sha256(payload).hexdigest(), file.filename or "file", lock=False)
+            if seen.same_slot is not None:
+                return _already_uploaded(db, seen.same_slot, slot, deferred, response)
             # The reading takes up to ~2 minutes of OCR: give the pooled connection (and the transaction the check above
             # opened) back first. The session reconnects by itself for the locked work below, which checks permission again.
             db.close()
@@ -252,6 +272,18 @@ def upload(
             lead_sheet.ensure_can_work_lead(db, record, user)
         if entity_type == "candidate" and slot == "source_bundle":
             raise HTTPException(422, "The original upload is kept as it was received and cannot be replaced by hand")
+        digest = hashlib.sha256(payload).hexdigest()
+        notes: list[str] = []
+        if entity_type == "candidate":
+            # Never ingest a file twice (services/file_ownership.py): the same bytes already in this field (any version) are not stored
+            # again, and a personal document that is another candidate's is refused with 409, before anything is written.
+            seen = file_ownership.check_file(db, user, record, slot, digest, file.filename or "file")
+            if seen.same_slot is not None:
+                return _already_uploaded(db, seen.same_slot, slot, deferred, response)
+            notes = seen.notes
+            if split_plan is not None:
+                file_ownership.check_pieces(db, user, record, [(hashlib.sha256(piece.data).hexdigest(), target_slot)
+                                                               for piece in split_plan.pieces for target_slot in piece.slots], file.filename or "file")
         if split_plan is not None:
             stored_pieces = document_splitting.store_pieces(db, user, record, split_plan, file.filename or "file", settings=settings,
                                                             written=written, deferred=deferred)
@@ -270,26 +302,11 @@ def upload(
                         queued.add(piece.attachment.object_key)
                         queue_reading(db, user, record, piece.attachment, "application/pdf")
             row = next((piece.attachment for piece in stored_pieces if piece.slot == slot), stored_pieces[0].attachment)
-            answer = {**_uploaded_file(row), "split": document_splitting.report(stored_pieces)}
+            answer = {**_uploaded_file(row), "split": document_splitting.report(stored_pieces), **({"notes": notes} if notes else {})}
             db.flush()
             db.commit()
             _invoice_tickets_of(db, stored_pieces, user)
             return answer
-        digest = hashlib.sha256(payload).hexdigest()
-        if entity_type == "candidate" and slot in ("passport", "aadhaar"):
-            # Front/back scans coexist in this slot. Check every file while holding the candidate
-            # lock, including a retry racing another upload or repeating an older front page.
-            duplicate = db.scalar(select(Attachment).where(
-                Attachment.entity_type == entity_type, Attachment.entity_id == entity_id,
-                Attachment.slot == slot, Attachment.content_hash == digest,
-            ).order_by(Attachment.version.desc()).limit(1))
-            if duplicate is not None:
-                from app.services.application_form import requeue_failed
-                if not deferred:
-                    requeue_failed(db, entity_id, duplicate.id)
-                response = _uploaded_file(duplicate)
-                db.commit()
-                return response
         previous = db.scalar(
             select(Attachment)
             .where(
@@ -385,7 +402,7 @@ def upload(
             db.rollback()
             logger.exception("Ticket saved; its invoice can be retried from the candidate form")
 
-    return _uploaded_file(row)
+    return {**_uploaded_file(row), **({"notes": notes} if notes else {})}
 
 
 def _own_stage_files_only(db: Session, entity_type: str, entity_id: str, user: User) -> None:

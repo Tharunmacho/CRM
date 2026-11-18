@@ -8,8 +8,10 @@ write here. See docs/workflows/application-form-contract.md for the wire format.
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import re
 import uuid
+from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -29,7 +31,7 @@ from app.services import form_extraction as fx
 from app.services.candidate_identity import identity_matches, normalize_candidate_values, normalize_passport, normalize_phone, normalized_labels
 from app.services.invoice_access import INVOICE_SLOT, can_see_invoices
 from app.services.parallel_reads import parallel_reads
-from app.services.reading_notes import plain_issues, plain_notes
+from app.services.reading_notes import plain_issues, plain_notes, review_reasons
 from app.services.document_status import ACTION as DOCUMENT_STATUS_ACTION, manual_document_statuses, read_manual_document_statuses
 from app.services.document_identity import rejected_expression
 
@@ -1017,6 +1019,14 @@ def requeue_failed(db: Session, candidate_id: str, attachment_id: str) -> bool:
     return True
 
 
+def _pages_text(pages) -> str:
+    pages = sorted(int(page) for page in pages)
+    return ("page " if len(pages) == 1 else "pages ") + ", ".join(str(page) for page in pages)
+
+
+_FILING_NOTES: ContextVar[list[str] | None] = ContextVar("filing_notes", default=None)
+
+
 def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict, meta: dict, *,
                            derive_source_slot: bool = False) -> dict[str, str]:
     """Link the checked PDFs from a combined upload to their actual document slots.
@@ -1024,45 +1034,101 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
     The original remains in version history. A newer upload in another slot wins
     over an older queued scan, and a retry reuses the same derived attachments.
     The caller already holds the candidate lock used by ordinary uploads.
+
+    Every derived file is named like the other stored files ("<Candidate>-<Document>.pdf"). When the scan itself sits in the slot of
+    a kind that is only PART of it, the derived pages become that slot's file and the whole scan moves to the source evidence
+    (`source_bundle`): nothing is lost, and the slot shows its own pages. A kind whose pages the slot already holds (the same
+    passport cut from another scan, a second copy of the Aadhaar) is not filed again. The pages the reader found that are none of
+    the three kinds go to Other documents as one file. What happened to each page is added, in plain words, to the list
+    `apply_job_output` has open (`_FILING_NOTES`).
     """
+    notes = _FILING_NOTES.get()
     source = db.get(Attachment, meta.get("attachmentId") or job.attachment_id)
     if source is None or source.entity_type != "candidate" or source.entity_id != job.candidate_id:
         return {}
+    from app.services import document_splitting as splitting
+    from app.services.document_storage import read_bytes
     inspection = output.get("inspection") or {}
-    mixed = sum(bool(inspection.get(kind + "_pages")) for kind in fx.SLOT_KINDS) > 1
+    extractions = output.get("extractions") or {}
     documents = (job.state or {}).get("documents") or {}
+    other_document = documents.get("other") if isinstance(documents.get("other"), dict) else None
+    mixed = sum(bool(inspection.get(kind + "_pages")) for kind in fx.SLOT_KINDS) > 1 or other_document is not None
     attached = dict(meta.get("attachedDocuments") or {})
-    for kind in output.get("extractions") or {}:
+    candidate = db.get(Candidate, job.candidate_id)
+    settings = get_settings()
+    taken: set[str] = set()
+    whole = inspection.get("page_count")
+    superseded = False
+    for kind in [*extractions, *(["other"] if other_document is not None else [])]:
         document = documents.get(kind)
-        if kind not in fx.SLOT_KINDS or not document or (not mixed and kind == source.slot and not derive_source_slot):
+        if not document:
+            continue
+        if kind != "other" and (kind not in fx.SLOT_KINDS or (not mixed and kind == source.slot and not derive_source_slot)):
             continue
         if source.slot in JOB_KIND and kind == JOB_KIND[source.slot]:
             continue   # an education certificate is typed as a resume to be read: its pages are never filed as a Resume
-        previous = db.scalar(select(Attachment).where(
+        versions = db.scalars(select(Attachment).where(
             Attachment.entity_type == "candidate", Attachment.entity_id == job.candidate_id, Attachment.slot == kind)
-            .order_by(Attachment.uploaded_at.desc(), Attachment.version.desc()).limit(1))
-        if previous and previous.content_hash == document["content_hash"]:
-            attached[kind] = previous.id
+            .order_by(Attachment.uploaded_at.desc(), Attachment.version.desc())).all()
+        previous = versions[0] if versions else None
+        pages = [number for number in document.get("selected_pages") or [] if type(number) is int]
+        label = splitting.label_of(kind)
+        own_slot = kind == source.slot
+        same_bytes = next((row for row in versions if row.content_hash == document["content_hash"]
+                           and (kind in splitting.MULTI_SLOTS or row is previous)), None)
+        if same_bytes is not None:
+            attached[kind] = same_bytes.id
+            superseded = superseded or (own_slot and same_bytes.id != source.id)
+            if notes is not None and pages:
+                if kind == "other":
+                    notes.append(f"{_pages_text(pages).capitalize()} of this file {'was' if len(pages) == 1 else 'were'} filed under Other documents.")
+                elif same_bytes.id != source.id and kind in splitting.MULTI_SLOTS:
+                    notes.append(f"{label} {_pages_text(pages)} of this file {'is' if len(pages) == 1 else 'are'} already filed in "
+                                 f"{same_bytes.file_name}; not added again.")
             continue
-        # In a bulk folder a later dedicated passport should remain current even
-        # if the older combined resume finishes reading after it.
-        if previous and previous.object_key != source.object_key and previous.uploaded_at >= source.uploaded_at:
+        held = [row for row in versions if row.id != source.id]
+        if held and kind in (*splitting.MULTI_SLOTS, "resume"):
+            # The very same pages may already be filed in this slot (a passport cut from another scan of the same candidate): nothing
+            # new is stored, and the note says where they already are.
+            try:
+                piece = splitting.PlannedPiece([kind], read_bytes(settings, document["object_key"]), pages)
+                same = splitting._already_filed(piece, kind, held, settings)
+            except Exception:
+                same = None
+            if same is not None:
+                attached[kind] = same.id
+                if notes is not None and pages:
+                    notes.append(f"{label} {_pages_text(pages)} of this file {'is' if len(pages) == 1 else 'are'} already filed in "
+                                 f"{same.file_name}; not added again.")
+                superseded = superseded or own_slot
+                continue
+        # In a bulk folder a later dedicated resume should remain current even if the older combined file finishes reading after it
+        # (a slot that keeps every file, passport / Aadhaar / other, has no "current" file: its pages are only compared above).
+        if previous and previous.object_key != source.object_key and previous.uploaded_at >= source.uploaded_at and kind not in splitting.MULTI_SLOTS:
             continue
+        file_name = splitting.derived_file_name(candidate, kind, taken, source.file_name)
         row = Attachment(id=str(uuid.uuid4()), entity_type="candidate", entity_id=job.candidate_id,
             slot=kind, version=(previous.version if previous else 0) + 1,
             object_key=document["object_key"], content_hash=document["content_hash"],
-            file_name=document["file_name"], content_type=document["content_type"], size_kb=document["size_kb"],
+            file_name=file_name, content_type=document["content_type"], size_kb=document["size_kb"],
             uploaded_by=job.owner_id, uploaded_at=source.uploaded_at)
         db.add(row)
         attached[kind] = row.id
         db.add(AuditEntry(actor_id=job.owner_id, action="Separated a document from a combined upload",
             target=row.file_name, entity_type="candidate", entity_id=job.candidate_id,
-            meta={"attachment_id": row.id, "source_attachment_id": source.id, "document_job_id": job.id, "slot": kind}))
-    recognized = any(kind in fx.SLOT_KINDS and kind in documents for kind in output.get("extractions") or {})
-    if recognized and source.slot in fx.SLOT_KINDS and source.slot not in (output.get("extractions") or {}) \
-            and not inspection.get(source.slot + "_pages"):
-        # A passport uploaded in the resume control must not count as an uploaded
-        # resume. Retain the original by the same ID as a source bundle instead.
+            meta={"attachment_id": row.id, "source_attachment_id": source.id, "document_job_id": job.id, "slot": kind,
+                  "original_name": source.file_name, **({"split_pages": pages} if pages else {})}))
+        superseded = superseded or own_slot
+        if kind == "other" and notes is not None and pages:
+            notes.append(f"{_pages_text(pages).capitalize()} of this file {'was' if len(pages) == 1 else 'were'} filed under Other documents.")
+    recognized = any(kind in fx.SLOT_KINDS and kind in documents for kind in extractions)
+    own_pages = (documents.get(source.slot) or {}).get("selected_pages") if source.slot in fx.SLOT_KINDS else None
+    partial = bool(own_pages) and source.slot in extractions and isinstance(whole, int) and len(own_pages) < whole
+    if (recognized and source.slot in fx.SLOT_KINDS and source.slot not in extractions
+            and not inspection.get(source.slot + "_pages")) or (superseded and partial and mixed):
+        # A passport uploaded in the resume control must not count as an uploaded resume, and a whole scan whose own kind was
+        # filed as a file of just its pages must not stay beside it as a second copy. Retain the original by the same ID as a
+        # source bundle instead.
         previous_bundle = db.scalar(select(Attachment).where(Attachment.entity_type == "candidate",
             Attachment.entity_id == job.candidate_id, Attachment.slot == "source_bundle")
             .order_by(Attachment.version.desc()).limit(1))
@@ -1106,6 +1172,80 @@ def _mixed_resume_passport_ignores(candidate: Candidate, output: dict, extractio
 
 def _without_ignored_fields(values, ignored: frozenset[str]) -> dict:
     return {key: value for key, value in (values or {}).items() if key not in ignored}
+
+
+NAME_UNCLEAR_NOTE = {"aadhaar": "The name on the card could not be read clearly (check it against the document).",
+                     "passport": "The name on the passport could not be read clearly (check it against the document)."}
+
+
+def _name_unclear(kind: str, extraction: dict) -> bool:
+    """A name was read from this card but it is OCR junk (see `document_identity.name_readable`): it is not a different person,
+    just unreadable. Nothing is read from an absent name."""
+    from app.services.document_identity import name_readable
+    raw = extraction.get("raw") if isinstance(extraction.get("raw"), dict) else {}
+    fields = extraction.get("fields") if isinstance(extraction.get("fields"), dict) else {}
+    name = fx.values_for(kind, raw).get("name") or fields.get("name")
+    return bool(name) and not name_readable(name, kind)
+
+
+def _without_unreadable_name(raw: dict) -> dict:
+    """The stored Aadhaar result with the junk name blanked and marked as not read (the reader's answer stays in the job's state)."""
+    copy = json.loads(json.dumps(raw, default=str))
+    identity = copy.get("aadhaar")
+    if isinstance(identity, dict):
+        identity["name"] = None
+        identity["name_not_read"] = True
+    return copy
+
+
+def _unfiled_page_notes(output: dict, meta: dict, filed_as_other: bool) -> list[str]:
+    """The plain notes about pages that are not documents of their own: unrecognised pages that were read (filed under Other
+    documents with the kind the file was expected to be named), and blank pages (listed, not filed)."""
+    pages = ((output or {}).get("inspection") or {}).get("pages") or []
+    expected = SLOT_LABELS.get(meta.get("slot"), "").lower() or "resume, passport or Aadhaar"
+    out: list[str] = []
+    read_unknown = [page["page_number"] for page in pages if isinstance(page, dict) and page.get("status") == "read"
+                    and page.get("document_type") == "unknown" and type(page.get("page_number")) is int]
+    if read_unknown and filed_as_other:
+        out.append(f"{_pages_text(read_unknown).capitalize()} {'was' if len(read_unknown) == 1 else 'were'} filed under Other documents "
+                   f"(not recognised as a {expected} page).")
+    blank = [page["page_number"] for page in pages if isinstance(page, dict) and page.get("status") == "blank"
+             and type(page.get("page_number")) is int]
+    if blank:
+        out.append(f"{_pages_text(blank).capitalize()} {'is' if len(blank) == 1 else 'are'} blank and {'was' if len(blank) == 1 else 'were'} not filed.")
+    return out
+
+
+def _same_source_evidence(db, candidate, attachment_id) -> bool:
+    """Whether the file was cut from the very scan of another document of this candidate that was already read and accepted (or
+    cut together with it): the office put those pages in one person's hands, so they are one person's unless proven otherwise.
+    Never raises: without evidence the normal rules apply."""
+    if candidate is None or not attachment_id:
+        return False
+    try:
+        rows = db.execute(select(AuditEntry.meta).where(
+            AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate.id,
+            AuditEntry.action.in_(("Uploaded document", "Separated a document from a combined upload")))).scalars().all()
+        metas = [meta for meta in rows if isinstance(meta, dict) and meta.get("attachment_id")]
+        own = next((meta for meta in metas if meta["attachment_id"] == attachment_id), None)
+        if own is None or not (own.get("split_pages") or own.get("source_attachment_id")):
+            return False
+        siblings = {meta["attachment_id"] for meta in metas if meta["attachment_id"] != attachment_id and (
+            (own.get("original_name") and meta.get("original_name") == own["original_name"] and meta.get("split_pages"))
+            or (own.get("source_attachment_id") and meta.get("source_attachment_id") == own["source_attachment_id"]))}
+        if not siblings:
+            return False
+        jobs = db.scalars(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.draft))
+                          .where(DocumentExtractionJob.candidate_id == candidate.id, DocumentExtractionJob.attachment_id.in_(siblings))).all()
+        for sibling in jobs:
+            saved = ((sibling.draft or {}).get("applicationForm") or {}).get("result") or {}
+            if saved.get("identityMismatch"):
+                continue
+            if sibling.status in ("completed", "attached") or saved.get("status") == "done" or (saved.get("kindsFound") and saved.get("filled")):
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def _partial_resume_replay_ignores(extraction: object, candidate: Candidate | None = None) -> frozenset[str]:
@@ -1216,13 +1356,22 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
                       identity_resume_ignores) if candidate else frozenset()
     # Every cause is kept (not just a field name): the screen says what was read, what it was compared with, or who owns the
     # phone / e-mail / passport. The fields the reader mapped and the stored reader output are both checked, as before.
-    findings: list[dict] = []
-    for kind, extraction in (extractions.items() if candidate else ()):
-        ignored = identity_resume_ignores if kind == "resume" else frozenset()
-        for source in (extraction.get("fields") or {}, fx.values_for(kind, extraction.get("raw") or {})):
-            for finding in identity_findings(candidate, _without_ignored_fields(source, ignored), db):
-                if not any(known["field"] == finding["field"] and known["documentKind"] == kind for known in findings):
-                    findings.append({**finding, "documentKind": kind})
+    def find(same_source: bool) -> list[dict]:
+        found_: list[dict] = []
+        for kind, extraction in (extractions.items() if candidate else ()):
+            ignored = identity_resume_ignores if kind == "resume" else frozenset()
+            for source in (extraction.get("fields") or {}, fx.values_for(kind, extraction.get("raw") or {})):
+                for finding in identity_findings(candidate, _without_ignored_fields(source, ignored), db, kind=kind, same_source=same_source):
+                    if not any(known["field"] == finding["field"] and known["documentKind"] == kind for known in found_):
+                        found_.append({**finding, "documentKind": kind})
+        return found_
+
+    findings: list[dict] = find(False)
+    same_source = False
+    if any(finding["field"] == "name" for finding in findings) and _same_source_evidence(db, candidate, meta.get("attachmentId") or job.attachment_id):
+        # A piece cut from the very scan of a document already read and accepted for this person is the same person's unless the
+        # name is clearly another's AND the passport number or the date of birth differ too.
+        findings, same_source = find(True), True
     stand_in_name = candidate.name if candidate and fx.provisional_name(candidate) else None
     if _confirm_name:
         findings = [finding for finding in findings if finding["field"] != "name"]
@@ -1283,6 +1432,7 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
     warnings = plain_notes([w for w in (output or {}).get("warnings") or [] if isinstance(w, str)])
     result = fx.ApplyResult()
     found: list[str] = []
+    unclear: list[str] = []   # kinds whose name could not be read (OCR junk): everything else of the card is applied
     if candidate is not None:
         fx.mark_stored_applied(candidate)
         stand_in_name = candidate.name if fx.provisional_name(candidate) else None
@@ -1292,6 +1442,10 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
             if not isinstance(raw, dict) or not raw:
                 continue
             found.append(kind)
+            if kind in ("aadhaar", "passport") and _name_unclear(kind, extraction):
+                unclear.append(kind)
+                if kind == "aadhaar":
+                    raw = _without_unreadable_name(raw)   # stored as "not read", never as a name
             if kind == JOB_KIND.get(meta.get("slot")):
                 # An education certificate (read as a "resume"): its raw output is kept under its own key so it never becomes the
                 # primary resume, and ONLY its education rows are applied, merged with the existing ones.
@@ -1313,7 +1467,8 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
             if kind in fx.SLOT_KINDS:
                 result.merge(fx.apply_document(
                     candidate, kind, raw, db, ignore_fields=ignored,
-                    only_fill_empty=_partial_verified_resume_replay and kind == "resume", allow_name_conflict=_confirm_name))
+                    only_fill_empty=_partial_verified_resume_replay and kind == "resume", allow_name_conflict=_confirm_name,
+                    same_source=same_source))
             if kind == "resume" and meta.get("slot") not in JOB_KIND and not candidate.resume_text:
                 candidate.resume_text = resume_text_from({"resume": raw})
         if stand_in_name and candidate.name != stand_in_name:
@@ -1331,25 +1486,46 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
         message = f"This file holds a {' and '.join(found)}, not a {slot}. It was read for what it contains."
     elif job.status == "needs_review" and not resolving_identity_rejection:
         status = "needs_review"
-        message = warnings[0] if warnings else "Some pages could not be read. Check the details against the original."
+        reasons_ = review_reasons(output)
+        message = reasons_[0]   # never a bare "needs review": the first check that raised it, in plain words (all of them are in coverage.issues)
     else:
         status = "done"
         message = None
+    settled = status   # the reading itself; a name that could not be read only adds a soft note below
+    soft_notes = [NAME_UNCLEAR_NOTE[kind] for kind in unclear]
+    if soft_notes and candidate is not None:
+        from app.services.candidate_review import record_review_flag
+        candidate.needs_review = True
+        record_review_flag(db, candidate, ocr_warning=True, attachment_id=meta.get("attachmentId"), document_job_id=job.id,
+                           reason="name_unclear")
+        if status == "done":
+            status, message = "needs_review", " ".join(soft_notes)
     form = dict(meta)
+    filing: list[str] = []   # what became of each page of the file: filed, already filed, blank (plain words)
     if candidate is not None:
-        if _partial_verified_resume_replay:
-            form["attachedDocuments"] = _attach_read_documents(
-                db, job, output, meta, derive_source_slot=True)
-        else:
-            form["attachedDocuments"] = _attach_read_documents(db, job, output, meta)
+        token = _FILING_NOTES.set(filing)
+        try:
+            if _partial_verified_resume_replay:
+                form["attachedDocuments"] = _attach_read_documents(
+                    db, job, output, meta, derive_source_slot=True)
+            else:
+                form["attachedDocuments"] = _attach_read_documents(db, job, output, meta)
+        finally:
+            _FILING_NOTES.reset(token)
+        filing.extend(_unfiled_page_notes(output, meta, bool((((getattr(job, "state", None) or {}).get("documents")) or {}).get("other"))))
     coverage = (output or {}).get("coverage") or {}
+    issues = plain_issues(coverage.get("issues") or [])
+    if status == "needs_review" and settled == "needs_review":
+        issues = list(dict.fromkeys([*review_reasons(output), *issues]))
+    issues = list(dict.fromkeys([*issues, *soft_notes]))
     form["result"] = {"status": status, "message": message, "kindsFound": found, "filled": result.filled, "kept": result.kept + result.conflicts,
-                      "unmapped": coverage.get("unmapped") or [],
+                      "unmapped": coverage.get("unmapped") or [], **({"nameUnclear": list(unclear)} if unclear else {}),
                       "coverage": {"summary": coverage.get("summary"), "pages": coverage.get("pages"),
-                                   "issues": plain_issues(coverage.get("issues") or []), "notes": plain_notes(coverage.get("notes") or []),
-                                   "kinds": coverage.get("kinds"), "complete": coverage.get("complete")} if coverage else None}
+                                   "issues": issues, "notes": plain_notes(coverage.get("notes") or []), **({"filing": filing} if filing else {}),
+                                   "kinds": coverage.get("kinds"),
+                                   "complete": False if soft_notes else coverage.get("complete")} if coverage else None}
     job.draft = {**dict(job.draft or {}), "applicationForm": form}
-    if resolving_identity_rejection and status == "done" and candidate is not None:
+    if resolving_identity_rejection and settled == "done" and candidate is not None:
         job.status, job.last_error = "completed", None
         attachment_id = meta.get("attachmentId")
         db.add(AuditEntry(actor_id=_confirmed_by or job.owner_id, action=IDENTITY_RESOLVED_ACTION,

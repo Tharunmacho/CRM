@@ -610,8 +610,8 @@ def test_coverage_says_which_pages_were_sent_and_which_were_not_and_why(world):
     reasons = {p["page"]: p for p in pages["not_sent"]}
     assert set(reasons) == {1, 3}
     assert reasons[1]["blocking"] is False and "stays in the stored original" in reasons[1]["reason"]
-    assert reasons[3]["blocking"] is True and "could not be identified" in reasons[3]["reason"]
-    assert output["status"] == "needs_review" and output["coverage"]["complete"] is False
+    assert reasons[3]["blocking"] is False and "filed under Other documents" in reasons[3]["reason"]   # read, not recognised
+    assert output["status"] == "complete" and output["coverage"]["complete"] is True
     assert world.state["coverage"] == output["coverage"]
 
 

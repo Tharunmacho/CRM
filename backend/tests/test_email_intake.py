@@ -628,13 +628,15 @@ def test_same_content_in_another_message_and_account_reuses_completed_extraction
     run(intake, first)
     second, second_part = receipt(intake, uid=12, account="account-b")
     run(intake, second)
+    # A file never ingested twice (services/file_ownership.py): the bytes are already filed as the first candidate's personal
+    # document, so this receipt is kept as ignored (with the reason) and nothing is read, created or filed again.
     with intake.sessions() as db:
         job = db.get(EmailIngestionJob, second)
-        assert job.status == "completed"
-        assert job.candidate_id == db.get(EmailIngestionJob, first).candidate_id
-        assert job.state[second_part]["reused_from_attachment_id"]
+        assert job.status == "ignored" and job.candidate_id is None
+        assert "This file is already filed for" in job.last_error
+        assert job.state[second_part]["output"]["alreadyFiled"]["candidateId"] == db.get(EmailIngestionJob, first).candidate_id
         assert row_count(db, Candidate) == row_count(db, Task) == 1
-        assert row_count(db, Attachment) == 2
+        assert row_count(db, Attachment) == 2   # the first receipt's original and its resume: nothing was added by the second
         assert row_count(db, Notification) == 1  # the owner's notice only
         assert row_count(db, MailMessage) == row_count(db, MailAttachment) == 2
     assert len(calls) == 1
@@ -1152,3 +1154,88 @@ def test_unmatched_resume_designation_is_kept_as_free_text(intake, monkeypatch):
     run(intake, job_id)
     with intake.sessions() as db:
         assert db.scalar(select(Candidate)).designations == ["Senior Pipe Fitter"]
+
+
+# ------------------------------------------------------------------ a file is never filed twice (services/file_ownership.py)
+
+def _held_by_another(intake, data=ORIGINAL, *, slot="passport", phone="9000000099", **fields):
+    """A candidate who already has these exact bytes filed in `slot` (Care India ID CI-139)."""
+    with intake.sessions() as db:
+        candidate = Candidate(ref="CND-HOLDER", care_id="CI-139", name="Asha Nair", phone=phone, owner_id="staff-b", source=Source.walk_in, **fields)
+        db.add(candidate)
+        db.flush()
+        db.add(Attachment(entity_type="candidate", entity_id=candidate.id, slot=slot, version=1, file_name="held.pdf", size_kb=1,
+                          content_type="application/pdf", object_key="held/held.pdf", content_hash=hashlib.sha256(data).hexdigest()))
+        db.commit()
+        return candidate.id
+
+
+def _two_attachments(intake, first, second):
+    keys = [subject.store_original(intake.settings, "account-a", "21", index, data) for index, data in enumerate((first, second))]
+    with intake.sessions() as db:
+        message = MailMessage(account_id="account-a", provider_message_id="synthetic:21", received_at=STAMP)
+        db.add(message)
+        db.flush()
+        for data, key, name in zip((first, second), keys, ("already-filed.pdf", "new-resume.pdf")):
+            db.add(MailAttachment(message_id=message.id, file_name=name, content_hash=hashlib.sha256(data).hexdigest(), object_key=key, size_kb=1))
+        job = EmailIngestionJob(message_id=message.id, state={})
+        db.add(job)
+        db.commit()
+        return job.id
+
+
+def test_an_attachment_already_filed_for_another_candidate_is_ignored_with_the_reason_and_never_read(intake, monkeypatch):
+    holder = _held_by_another(intake)
+    job_id, part_id = receipt(intake)
+    monkeypatch.setattr(subject, "extract_attachment", lambda *a, **kw: pytest.fail("A file that is already filed must not be read"))
+    run(intake, job_id)
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        assert job.status == "ignored" and job.candidate_id is None
+        assert "misleading-name.jpg: This file is already filed for CI-139 · Asha Nair." in job.last_error
+        assert job.inspection[0]["status"] == "ignored" and job.inspection[0]["reason"] == "This file is already filed for CI-139 · Asha Nair."
+        assert row_count(db, Candidate) == 1 and row_count(db, Task) == 0 and row_count(db, Notification) == 0
+        assert [row.entity_id for row in db.scalars(select(Attachment))] == [holder]      # nothing new was filed for anybody
+
+
+def test_a_message_with_one_filed_attachment_and_one_new_resume_files_only_the_new_one(intake, monkeypatch):
+    _held_by_another(intake)
+    revised = pdf("Page one: certificate", "Page two: resume revised", "Page three: passport")
+    job_id = _two_attachments(intake, ORIGINAL, revised)
+    calls = fake_extraction(monkeypatch)
+    run(intake, job_id)
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        assert job.status == "completed" and calls == [revised]                              # the filed one was not even read
+        assert "already-filed.pdf: this file is already filed for CI-139 · Asha Nair, so it was not filed again." in job.last_error
+        created = db.get(Candidate, job.candidate_id)
+        assert created.name == "Alex Example" and created.care_id != "CI-139"
+        mine = list(db.scalars(select(Attachment).where(Attachment.entity_id == created.id)))
+        assert mine and hashlib.sha256(ORIGINAL).hexdigest() not in {row.content_hash for row in mine}
+        assert {row.content_hash for row in mine if row.slot == "source_bundle"} == {hashlib.sha256(revised).hexdigest()}
+
+
+def test_when_the_message_resolves_to_the_candidate_that_already_has_the_file_nothing_is_filed_again(intake, monkeypatch):
+    holder = _held_by_another(intake, phone="9000000001", email="alex@example.test")      # the identity the reader finds
+    revised = pdf("Page one: certificate", "Page two: resume revised", "Page three: passport")
+    job_id = _two_attachments(intake, ORIGINAL, revised)
+    calls = fake_extraction(monkeypatch)
+    run(intake, job_id)
+    with intake.sessions() as db:
+        job = db.get(EmailIngestionJob, job_id)
+        assert job.status == "completed" and job.candidate_id == holder and calls == [revised]
+        assert "already-filed.pdf: already filed for this candidate, so it was not filed again." in job.last_error
+        held = list(db.scalars(select(Attachment).where(Attachment.entity_id == holder, Attachment.content_hash == hashlib.sha256(ORIGINAL).hexdigest())))
+        assert len(held) == 1 and held[0].slot == "passport"                                 # no second copy, no source_bundle copy
+        assert row_count(db, Candidate) == 1
+
+
+def test_a_shared_field_does_not_hide_a_file_from_intake(intake, monkeypatch):
+    """A group ticket filed for one candidate is not a personal document: a message that carries it is read as usual."""
+    _held_by_another(intake, slot="air_ticket")
+    job_id, _ = receipt(intake)
+    calls = fake_extraction(monkeypatch)
+    run(intake, job_id)
+    assert calls == [ORIGINAL]
+    with intake.sessions() as db:
+        assert db.get(EmailIngestionJob, job_id).status == "completed"

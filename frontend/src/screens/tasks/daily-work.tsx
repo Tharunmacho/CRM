@@ -4,6 +4,7 @@ import { CheckCircle2, Layers, ListChecks, RefreshCw, TriangleAlert, UserX, User
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader } from '@/shared/ui/display'
+import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { listTitle, splitItems, statusCounts, summaryLine, teamTotals } from '@/features/daily-work/daily-work-model'
@@ -76,6 +77,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
 
   return (
     <div className="tk dw dwb">
+      <ReminderBanner />
       <PageHeader
         title="Tasks"
         description={mine

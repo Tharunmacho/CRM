@@ -12,7 +12,7 @@ import httpx
 import pytest
 from sqlalchemy import func, select
 
-from app.db.models import Attachment, AuditEntry, Candidate, IntakeAcknowledgement, Task, User, WhatsAppChannel, WhatsAppMessage
+from app.db.models import Attachment, AuditEntry, Candidate, IntakeAcknowledgement, Source, Task, User, WhatsAppChannel, WhatsAppMessage
 from app.integrations.whatsapp import download_media, verify_signature, WhatsAppError
 from app.services.document_extraction import ExtractionFailure, ExtractionPending
 from app.services.whatsapp_intake import process_message, receive_payload
@@ -544,3 +544,25 @@ def test_disconnect_during_extraction_keeps_checkpoint_and_resumes_after_reconne
                     fetch_media=lambda *_: pytest.fail("The original must survive disconnect"), extract=resumed)
     with sessions() as db:
         assert db.get(WhatsAppMessage, message_id).status == "completed"
+
+
+def test_a_whatsapp_file_already_filed_for_a_candidate_is_ignored_with_that_candidates_care_id(setup):
+    """A file is never ingested twice: a document that is already filed for a candidate is not read and not filed again."""
+    sessions, settings = setup
+    with sessions() as db:
+        holder = Candidate(ref="CND-HOLDER", care_id="CI-139", name="Asha Nair", phone="9000000099", owner_id="owner", source=Source.walk_in)
+        db.add(holder)
+        db.flush()
+        db.add(Attachment(entity_type="candidate", entity_id=holder.id, slot="passport", version=1, file_name="held.pdf", size_kb=1,
+                          content_type="application/pdf", object_key="held/held.pdf", content_hash=hashlib.sha256(ORIGINAL).hexdigest()))
+        db.commit()
+        holder_id = holder.id
+    message_id = receipt(sessions, settings)
+    process_message(message_id, sessions=sessions, settings=settings, fetch_media=lambda *_: (ORIGINAL, "application/pdf"),
+                    extract=lambda *_, **__: pytest.fail("A file that is already filed must not be read"))
+    with sessions() as db:
+        message = db.get(WhatsAppMessage, message_id)
+        assert message.status == "ignored" and message.candidate_id is None
+        assert "Asha Nair (CI-139)" in message.last_error and message.last_error.startswith("Duplicate file")
+        assert [row.entity_id for row in db.scalars(select(Attachment))] == [holder_id]
+        assert db.scalar(select(func.count()).select_from(IntakeAcknowledgement)) == 0

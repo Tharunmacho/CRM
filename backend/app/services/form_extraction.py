@@ -725,12 +725,13 @@ def _conflicts(db: Session | None, candidate, column: str, value: Any) -> bool:
 _OWNED_LABELS = {"phone number": "phone", "email": "email", "passport number": "passport_no"}
 
 
-def _identity_skips(candidate, values: dict[str, Any], db: Session | None) -> list[tuple[str, str, str | None]]:
+def _identity_skips(candidate, values: dict[str, Any], db: Session | None, kind: str | None = None,
+                    same_source: bool = False) -> list[tuple[str, str, str | None]]:
     """(form field, reason, other candidate's CARE id) for every identifier of a refused document, so the refusal says WHICH
     phone / e-mail / passport number belongs to ANOTHER candidate (never the value itself) and whose it is."""
     from app.services.document_identity import identity_findings
     try:
-        findings = identity_findings(candidate, values, db)
+        findings = identity_findings(candidate, values, db, kind=kind, same_source=same_source)
     except Exception:
         return []
     out: list[tuple[str, str, str | None]] = []
@@ -767,13 +768,17 @@ def note_unfilled(candidate, result: ApplyResult, kind: str, raw: Any, values: d
 
 
 def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | None = None, *, fill_all: bool = True,
-                 only_fill_empty: bool = False, allow_name_conflict: bool = False) -> ApplyResult:
+                 only_fill_empty: bool = False, allow_name_conflict: bool = False, same_source: bool = False) -> ApplyResult:
     """Apply one document's values to a candidate under the fill rule. `kind` is resume | passport.
 
     With `fill_all=False` only the application-form-only columns (NEW_COLUMNS) are filled; every other column is merely
     stamped "extracted" when it already equals the document (so it counts as read, not typed)."""
-    from app.services.document_identity import identity_conflicts
-    conflicts = identity_conflicts(candidate, values, db)
+    from app.services.document_identity import identity_conflicts, name_readable
+    conflicts = identity_conflicts(candidate, values, db, kind=kind, same_source=same_source)
+    unreadable_name = bool(values.get("name")) and not name_readable(values.get("name"), kind)
+    if unreadable_name and kind in ("aadhaar", "passport"):
+        # OCR junk is never the candidate's name: the other details of the card are applied, the name is left out.
+        values = {key: value for key, value in values.items() if key != "name"}
     if allow_name_conflict:
         # A person confirmed that this document is the right person's: only the name difference is waived, never a passport
         # number or an identifier owned by another candidate.
@@ -782,13 +787,15 @@ def apply_values(candidate, kind: str, values: dict[str, Any], db: Session | Non
         if hasattr(candidate, "needs_review"):
             candidate.needs_review = True
         refused = ApplyResult(conflicts=[SPECS[key].key if key in SPECS else "document.identity" for key in conflicts])
-        for key, reason, owner in _identity_skips(candidate, values, db):
+        for key, reason, owner in _identity_skips(candidate, values, db, kind, same_source):
             refused.skipped.append({"field": key, "reason": reason, **({"candidate": owner} if owner else {})})
         return refused
     sources = sources_of(candidate)
     from_passport = set(sources.get("_fromPassport") or [])
     from_aadhaar = set(sources.get("_fromAadhaar") or [])
     result = ApplyResult()
+    if unreadable_name and kind in ("aadhaar", "passport"):
+        result.skip(SPECS["name"].key, "name_unreadable")
     for column, spec in SPECS.items():
         if column not in values:
             continue
@@ -943,12 +950,13 @@ def mark_stored_applied(candidate) -> None:
 
 
 def apply_document(candidate, kind: str, raw: Any, db: Session | None = None, *, ignore_fields=(),
-                   only_fill_empty: bool = False, allow_name_conflict: bool = False) -> ApplyResult:
+                   only_fill_empty: bool = False, allow_name_conflict: bool = False, same_source: bool = False) -> ApplyResult:
     """Apply a freshly read document, then remember it. Marks the candidate so the ocr_data hook does not repeat it."""
     ignored = frozenset(ignore_fields)
     every_value = values_for(kind, raw)
     values = {key: value for key, value in every_value.items() if key not in ignored}
-    result = apply_values(candidate, kind, values, db, only_fill_empty=only_fill_empty, allow_name_conflict=allow_name_conflict)
+    result = apply_values(candidate, kind, values, db, only_fill_empty=only_fill_empty, allow_name_conflict=allow_name_conflict,
+                          same_source=same_source)
     note_unfilled(candidate, result, kind, raw, every_value, ignored)
     if kind == "aadhaar" and not result.conflicts:
         note_aadhaar(candidate, raw)

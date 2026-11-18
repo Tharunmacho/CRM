@@ -1,6 +1,7 @@
 """Immutable local/S3 storage behind the same authenticated document endpoints."""
 import hashlib
 import os
+import threading
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse, quote
 from uuid import uuid4
@@ -26,14 +27,37 @@ def _local(settings, key):
     return target
 
 
+_clients: dict = {}
+_clients_lock = threading.Lock()
+
+
 def _s3(settings):
-    import boto3
-    from botocore.config import Config
-    return boto3.client("s3", endpoint_url=getattr(settings, "s3_endpoint_url", None) or None,
-        region_name=getattr(settings, "s3_region", "us-east-1") or "us-east-1",
-        aws_access_key_id=getattr(settings, "s3_access_key_id", None) or None,
-        aws_secret_access_key=getattr(settings, "s3_secret_access_key", None) or None,
-        config=Config(connect_timeout=10, read_timeout=30, retries={"max_attempts": 2}, s3={"addressing_style": "path"}))
+    """One client per (endpoint, region, credentials), shared by every thread of the process.
+
+    A boto3 client is thread safe and keeps its HTTPS connections open. Building a new one for every file (as this did)
+    costs the client set-up plus a fresh TCP + TLS handshake to the storage server on EVERY upload and download, which
+    over the internet is several round trips of ~100-300 ms before a single byte moves."""
+    endpoint = getattr(settings, "s3_endpoint_url", None) or None
+    region = getattr(settings, "s3_region", "us-east-1") or "us-east-1"
+    access = getattr(settings, "s3_access_key_id", None) or None
+    secret = getattr(settings, "s3_secret_access_key", None) or None
+    identity = (endpoint, region, access, secret)
+    with _clients_lock:
+        client = _clients.get(identity)
+        if client is None:
+            import boto3
+            from botocore.config import Config
+            client = _clients[identity] = boto3.client("s3", endpoint_url=endpoint, region_name=region,
+                aws_access_key_id=access, aws_secret_access_key=secret,
+                config=Config(connect_timeout=10, read_timeout=30, retries={"max_attempts": 2}, s3={"addressing_style": "path"},
+                              max_pool_connections=16))   # the default 10 would make parallel uploads of one candidate queue up
+    return client
+
+
+def forget_clients() -> None:
+    """Drop the shared clients (tests; also after a configuration change)."""
+    with _clients_lock:
+        _clients.clear()
 
 
 def storage_key(settings, key):
@@ -55,6 +79,18 @@ def _parts(key):
     return parsed.netloc, parsed.path.lstrip("/")
 
 
+def _same_object(client, bucket, path, digest) -> bool:
+    """The object already at this key carries the sha256 this very code stored with it: the same bytes, without downloading them.
+
+    Objects are immutable (``IfNoneMatch``), so the metadata written with the object cannot drift from its content. An object
+    without the metadata, or any trouble asking, answers False and the caller compares the downloaded bytes as before."""
+    try:
+        head = client.head_object(Bucket=bucket, Key=path)
+        return (head.get("Metadata") or {}).get("sha256") == digest
+    except Exception:
+        return False
+
+
 def put_bytes(settings, key, data, content_type="application/octet-stream"):
     key = storage_key(settings, key)
     digest = hashlib.sha256(data).hexdigest()
@@ -67,7 +103,7 @@ def put_bytes(settings, key, data, content_type="application/octet-stream"):
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
                 raise
-            if hashlib.sha256(read_bytes(settings, key)).hexdigest() != digest:
+            if not _same_object(client, bucket, path, digest) and hashlib.sha256(read_bytes(settings, key)).hexdigest() != digest:
                 raise ValueError("A different document is already saved in this place. Try uploading it again.") from exc
     else:
         target = _local(settings, key)

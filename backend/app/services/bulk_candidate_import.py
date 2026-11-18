@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
+from time import perf_counter   # (``time`` here is datetime.time)
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
 from difflib import SequenceMatcher
@@ -1101,6 +1102,61 @@ def _store_bytes(settings, payload: bytes, filename: str, content_type: str, wri
     return object_key, hashlib.sha256(payload).hexdigest()
 
 
+STORE_THREADS = 4   # files of ONE candidate written to the object store side by side (each upload is a round trip over the internet)
+
+
+def store_many(settings, items: list[tuple[bytes, str, str]], written: list[str]) -> list[tuple[str, str, float]]:
+    """Store the files of one candidate: ``items`` is ``[(bytes, file name, content type)]``; the answer is
+    ``[(object key, sha256, seconds)]`` in the SAME order.
+
+    * On a remote object store up to ``STORE_THREADS`` files are uploaded side by side (twelve files over a 300 ms link took
+      twelve times as long one after another); on local disk they are written one by one as before.
+    * The same bytes twice are stored ONCE: the later item shares the first one's object key (0 seconds), as the rows of a file
+      that counts as several documents already do.
+    * All or nothing as far as the caller can tell: when one upload fails, uploads not yet started are skipped, the running ones
+      finish, and the first failure (in file order) is raised. Every key that DID get stored is in ``written``, so the caller's
+      ``discard_written`` removes exactly those; nothing half-stored is left behind and no row was written.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    first_of: dict[str, int] = {}
+    unique: list[int] = []
+    digests: list[str] = []
+    for index, (payload, _name, _type) in enumerate(items):
+        digest = hashlib.sha256(payload).hexdigest()
+        digests.append(digest)
+        if digest not in first_of:
+            first_of[digest] = index
+            unique.append(index)
+    stored: dict[int, tuple[str, str, float]] = {}
+    abort = threading.Event()
+
+    def one(index: int) -> None:
+        if abort.is_set():
+            return
+        payload, name, content_type = items[index]
+        began = perf_counter()
+        try:
+            key, digest = _store_bytes(settings, payload, name, content_type, written)
+        except BaseException:
+            abort.set()
+            raise
+        stored[index] = (key, digest, perf_counter() - began)
+
+    remote = document_storage.storage_key(settings, "00/x").startswith("s3://")
+    if remote and len(unique) > 1:
+        with ThreadPoolExecutor(min(STORE_THREADS, len(unique)), thread_name_prefix="store") as pool:
+            futures = [pool.submit(one, index) for index in unique]
+        for future in futures:                 # the pool has finished every upload that was running
+            if future.exception() is not None:
+                raise future.exception()
+    else:
+        for index in unique:
+            one(index)
+    return [stored[first_of[digest]] if index == first_of[digest] else (stored[first_of[digest]][0], digest, 0.0)
+            for index, digest in enumerate(digests)]
+
+
 def discard_written(settings, keys: list[str]) -> None:
     """Remove bytes written for a transaction that did not commit (best effort: an orphaned file cannot be reached from any row)."""
     from app.api.routers.files import STORAGE
@@ -1409,10 +1465,16 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     # below, once the Care India ID exists.
     to_attach: list[tuple[Upload, str, str, str]] = []
     ordered = sorted(uploads, key=lambda item: (item.kinds == [SOURCE_BUNDLE], len(item.kinds) == 1, item.path.lower()))
-    for number, upload in enumerate(ordered, 1):
-        extension = PurePosixPath(upload.path.replace("\\", "/")).suffix.lower()
-        object_key, digest = _store_bytes(settings, upload.data, f"document-{number}{extension}", upload.content_type, written)   # once, whatever it counts as
+    store_started = perf_counter()
+    # Once, whatever the file counts as; the files of this candidate go up side by side (see store_many).
+    outcome = store_many(settings, [(upload.data, f"document-{number}{PurePosixPath(upload.path.replace(chr(92), '/')).suffix.lower()}",
+                                     upload.content_type) for number, upload in enumerate(ordered, 1)], written)
+    for upload, (object_key, digest, _seconds) in zip(ordered, outcome):
         to_attach.append((upload, "", object_key, digest))
+    store_seconds = perf_counter() - store_started
+    per_file = [{"index": number, "sizeKb": max(1, round(len(upload.data) / 1024)), "storeSeconds": round(seconds, 2),
+                 "sharedKey": outcome[number][0] in {item[0] for item in outcome[:number]}}
+                for number, (upload, (_key, _digest, seconds)) in enumerate(zip(ordered, outcome))]
 
     phone = plan["phone"] or ""
     candidate = Candidate(
@@ -1494,7 +1556,9 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
     # it (Extract details on the candidate's form, or "Read the documents" on the Import screen), never by itself.
     result = {"candidateId": candidate.id, "ref": candidate.ref, "careId": candidate.care_id, "name": candidate.name, "action": plan["action"], "issues": plan["issues"],
               "files": sum(1 for upload in uploads if upload.kinds != [SOURCE_BUNDLE]), "order": None, "completedThrough": 0, "currentStage": None,
-              "status": "imported", "nameSource": plan["nameSource"]}
+              "status": "imported", "nameSource": plan["nameSource"],
+              # Where the time went (numbers only, files by their position: no names). The endpoint adds what it measured itself.
+              "timings": {"storeSeconds": round(store_seconds, 2), "perFile": per_file}}
     # What was filed, and which pages were NOT filed again because the same page is already in one of these files.
     names = {id(upload): file_name for upload, file_name, _, _ in to_attach}
     skipped = list(duplicates or [])

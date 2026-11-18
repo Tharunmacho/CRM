@@ -562,7 +562,7 @@ def test_exports_are_real_files_with_the_report_content(api):
     seed_leads(api.desk)
     book = api.client.get("/api/reports/staff-weekly/export?format=xlsx&from_date=2026-11-02&to_date=2026-11-08")
     assert book.status_code == 200 and "spreadsheetml" in book.headers["content-type"]
-    assert 'filename="staff-weekly-2026-11-02-2026-11-08.xlsx"' in book.headers["content-disposition"]
+    assert 'filename="recruiter-weekly-2026-11-02-2026-11-08.xlsx"' in book.headers["content-disposition"]
     with ZipFile(BytesIO(book.content)) as archive:
         workbook = archive.read("xl/workbook.xml").decode()
         for name in ("Recruiter summary", "Day by day", "Stages by recruiter", "Leads by recruiter", "Team funnel", "Questions to ask"):

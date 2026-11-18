@@ -1,0 +1,11 @@
+/* The slim end-of-day reminder on Tasks and the Dashboard: tokens only, one row, quiet. */
+.dwr-reminder { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; padding: 8px 10px 8px 14px; border: 1px solid var(--warning-edge); border-radius: 10px; background: var(--warning-fill); font-size: 13px; line-height: 1.4; color: var(--warning-ink); }
+.dwr-reminder > svg { flex: none; }
+.dwr-reminder p { flex: 1 1 auto; min-width: 0; }
+.dwr-reminder b { font-weight: 600; }
+.dwr-reminder span { color: var(--text-muted); }
+.dwr-reminder-x { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 6px; color: var(--warning-ink); background: none; }
+.dwr-reminder-x:hover { background: color-mix(in srgb, var(--warning-ink) 12%, transparent); }
+.dwr-reminder-x:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+@media (max-width: 640px) { .dwr-reminder span { display: none; } }
+@media print { .dwr-reminder { display: none; } }

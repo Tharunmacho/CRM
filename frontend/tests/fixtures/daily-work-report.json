@@ -1,0 +1,766 @@
+{
+  "team": {
+    "period": {
+      "from": "2026-11-17",
+      "to": "2026-11-17",
+      "days": 1,
+      "previousFrom": "2026-11-16",
+      "previousTo": "2026-11-16",
+      "bucket": "day",
+      "partial": true,
+      "previousUntil": "2026-11-16T13:20:00+00:00"
+    },
+    "generatedAt": "2026-11-17T13:20:00+00:00",
+    "scope": "team",
+    "metrics": [
+      {
+        "key": "leadsContacted",
+        "label": "Leads contacted",
+        "definition": "Distinct leads from the lead sheet that the person called or whose status they changed in the period.",
+        "value": 31,
+        "previous": 24,
+        "changePct": 29.2,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 31
+          }
+        ]
+      },
+      {
+        "key": "prescreened",
+        "label": "Resumes prescreened",
+        "definition": "Candidates whose Prescreening stage was completed in the period.",
+        "value": 18,
+        "previous": 20,
+        "changePct": -10,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 18
+          }
+        ]
+      },
+      {
+        "key": "forwarded",
+        "label": "Resumes forwarded to clients",
+        "definition": "Forwarded to client stage completed as forwarded.",
+        "value": 9,
+        "previous": 9,
+        "changePct": 0,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 9
+          }
+        ]
+      },
+      {
+        "key": "shortlisted",
+        "label": "Workers shortlisted by clients",
+        "definition": "Interview scheduled by the client.",
+        "value": 4,
+        "previous": 0,
+        "changePct": null,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 4
+          }
+        ]
+      },
+      {
+        "key": "interviews",
+        "label": "Interviews conducted",
+        "definition": "Interview result recorded as Selected or Rejected.",
+        "value": 5,
+        "previous": 2,
+        "changePct": 150,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 5
+          }
+        ]
+      },
+      {
+        "key": "offers",
+        "label": "Offer letters received",
+        "definition": "Offer letter stage recorded as Agreed or Declined.",
+        "value": 2,
+        "previous": 3,
+        "changePct": -33.3,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 2
+          }
+        ]
+      },
+      {
+        "key": "visas",
+        "label": "Visas received",
+        "definition": "Visa arrival stage completed as arrived.",
+        "value": 1,
+        "previous": 0,
+        "changePct": null,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 1
+          }
+        ]
+      },
+      {
+        "key": "travelled",
+        "label": "Workers travelled",
+        "definition": "Air ticket stage completed in the period.",
+        "value": 0,
+        "previous": 0,
+        "changePct": null,
+        "series": [
+          {
+            "date": "2026-11-17",
+            "value": 0
+          }
+        ]
+      }
+    ],
+    "extra": {
+      "interviewsOnline": 3,
+      "leadsAssigned": 120,
+      "leadsContactedPct": 25.8
+    },
+    "leadFeedback": {
+      "contacted": 31,
+      "byOutcome": [
+        {
+          "key": "interested",
+          "label": "Interested",
+          "count": 6
+        },
+        {
+          "key": "callback",
+          "label": "Call back",
+          "count": 7
+        },
+        {
+          "key": "answered",
+          "label": "Spoke, no decision yet",
+          "count": 3
+        },
+        {
+          "key": "noAnswer",
+          "label": "No answer",
+          "count": 8
+        },
+        {
+          "key": "notInterested",
+          "label": "Not interested",
+          "count": 4
+        },
+        {
+          "key": "wrongNumber",
+          "label": "Wrong number",
+          "count": 2
+        },
+        {
+          "key": "notReachable",
+          "label": "Not reachable",
+          "count": 1
+        },
+        {
+          "key": "notContacted",
+          "label": "Not contacted in this period",
+          "count": 89
+        }
+      ],
+      "resumesReceived": 5,
+      "interested": 6,
+      "callbacksDue": 4
+    },
+    "funnel": [
+      {
+        "key": "prescreened",
+        "label": "Resumes prescreened",
+        "value": 18
+      },
+      {
+        "key": "forwarded",
+        "label": "Resumes forwarded to clients",
+        "value": 9
+      },
+      {
+        "key": "shortlisted",
+        "label": "Workers shortlisted by clients",
+        "value": 4
+      },
+      {
+        "key": "interviews",
+        "label": "Interviews conducted",
+        "value": 5
+      },
+      {
+        "key": "offers",
+        "label": "Offer letters received",
+        "value": 2
+      },
+      {
+        "key": "visas",
+        "label": "Visas received",
+        "value": 1
+      },
+      {
+        "key": "travelled",
+        "label": "Workers travelled",
+        "value": 0
+      }
+    ],
+    "staff": [
+      {
+        "id": "u-meera",
+        "name": "Meera Nair",
+        "role": "staff",
+        "initials": "MN",
+        "metrics": {
+          "leadsContacted": 20,
+          "prescreened": 11,
+          "forwarded": 6,
+          "shortlisted": 3,
+          "interviews": 3,
+          "offers": 2,
+          "visas": 1,
+          "travelled": 0
+        },
+        "total": 46,
+        "interviewsOnline": 2,
+        "leadFeedback": {
+          "contacted": 20,
+          "interested": 4,
+          "notInterested": 2,
+          "noAnswer": 6,
+          "wrongNumber": 1,
+          "callback": 5,
+          "other": 2
+        },
+        "submitted": true,
+        "submittedAt": "2026-11-17T13:12:00+00:00",
+        "note": "Two callbacks for tomorrow",
+        "idle": false,
+        "leads": {
+          "assigned": 60,
+          "contacted": 20,
+          "interested": 4,
+          "notInterested": 2,
+          "noAnswer": 6,
+          "wrongNumber": 1,
+          "callback": 5,
+          "notContacted": 40,
+          "assignedInPeriod": 8,
+          "notContactedInPeriod": 3,
+          "neverContacted": 55
+        },
+        "tasks": {
+          "done": 8,
+          "pending": 3,
+          "overdue": 1
+        },
+        "submittedFigures": {
+          "forwarded": 5,
+          "prescreened": 11,
+          "shortlisted": 3,
+          "interviewsOnline": 2,
+          "offers": 2,
+          "visas": 1,
+          "travelled": 0
+        },
+        "changedSinceSubmit": true
+      },
+      {
+        "id": "u-anil",
+        "name": "Anil Kumar",
+        "role": "staff",
+        "initials": "AK",
+        "metrics": {
+          "leadsContacted": 11,
+          "prescreened": 7,
+          "forwarded": 3,
+          "shortlisted": 1,
+          "interviews": 2,
+          "offers": 0,
+          "visas": 0,
+          "travelled": 0
+        },
+        "total": 24,
+        "interviewsOnline": 1,
+        "leadFeedback": {
+          "contacted": 11,
+          "interested": 2,
+          "notInterested": 2,
+          "noAnswer": 2,
+          "wrongNumber": 1,
+          "callback": 2,
+          "other": 2
+        },
+        "submitted": false,
+        "submittedAt": null,
+        "note": null,
+        "idle": false,
+        "leads": {
+          "assigned": 40,
+          "contacted": 11,
+          "interested": 2,
+          "notInterested": 2,
+          "noAnswer": 2,
+          "wrongNumber": 1,
+          "callback": 2,
+          "notContacted": 29,
+          "assignedInPeriod": 10,
+          "notContactedInPeriod": 5,
+          "neverContacted": 75
+        },
+        "tasks": {
+          "done": 5,
+          "pending": 2,
+          "overdue": 0
+        },
+        "submittedFigures": null,
+        "changedSinceSubmit": false
+      },
+      {
+        "id": "u-zoya",
+        "name": "Zoya Khan",
+        "role": "staff",
+        "initials": "ZK",
+        "metrics": {
+          "leadsContacted": 0,
+          "prescreened": 0,
+          "forwarded": 0,
+          "shortlisted": 0,
+          "interviews": 0,
+          "offers": 0,
+          "visas": 0,
+          "travelled": 0
+        },
+        "total": 0,
+        "interviewsOnline": 0,
+        "leadFeedback": {
+          "contacted": 0,
+          "interested": 0,
+          "notInterested": 0,
+          "noAnswer": 0,
+          "wrongNumber": 0,
+          "callback": 0,
+          "other": 0
+        },
+        "submitted": false,
+        "submittedAt": null,
+        "note": null,
+        "idle": true,
+        "leads": {
+          "assigned": 20,
+          "contacted": 0,
+          "interested": 0,
+          "notInterested": 0,
+          "noAnswer": 0,
+          "wrongNumber": 0,
+          "callback": 0,
+          "notContacted": 20,
+          "assignedInPeriod": 2,
+          "notContactedInPeriod": 1,
+          "neverContacted": 20
+        },
+        "tasks": {
+          "done": 0,
+          "pending": 0,
+          "overdue": 4
+        },
+        "submittedFigures": null,
+        "changedSinceSubmit": false
+      }
+    ],
+    "compliance": {
+      "expected": 3,
+      "submitted": 1,
+      "missing": [
+        {
+          "id": "u-anil",
+          "name": "Anil Kumar"
+        },
+        {
+          "id": "u-zoya",
+          "name": "Zoya Khan"
+        }
+      ]
+    },
+    "clients": [
+      {
+        "id": "co-1",
+        "name": "Al Noor Contracting"
+      },
+      {
+        "id": "co-2",
+        "name": "Gulf Build"
+      }
+    ],
+    "tasks": {
+      "total": 23,
+      "done": 13,
+      "pending": 5,
+      "overdue": 5
+    },
+    "leadSheet": {
+      "totalLeads": 150,
+      "assigned": 120,
+      "unassigned": {
+        "total": 30,
+        "neverContacted": 30,
+        "newInPeriod": 4
+      },
+      "contacted": 31,
+      "notContacted": 89,
+      "byStatus": [
+        {
+          "key": "new",
+          "label": "Not contacted",
+          "count": 70
+        },
+        {
+          "key": "contacted",
+          "label": "Contacted",
+          "count": 30
+        },
+        {
+          "key": "interested",
+          "label": "Interested",
+          "count": 18
+        },
+        {
+          "key": "resume_requested",
+          "label": "Resume requested",
+          "count": 6
+        },
+        {
+          "key": "resume_received",
+          "label": "Resume received",
+          "count": 4
+        },
+        {
+          "key": "converted",
+          "label": "Converted",
+          "count": 10
+        },
+        {
+          "key": "not_interested",
+          "label": "Not interested",
+          "count": 6
+        },
+        {
+          "key": "invalid",
+          "label": "Not reachable",
+          "count": 3
+        },
+        {
+          "key": "wrong_number",
+          "label": "Wrong number",
+          "count": 3
+        }
+      ],
+      "newInPeriod": 12,
+      "assignedInPeriod": 20,
+      "notContactedInPeriod": 9,
+      "backlog": 89,
+      "previous": {
+        "assignedInPeriod": 18,
+        "contacted": 24,
+        "newInPeriod": 10
+      },
+      "neverContacted": 180
+    },
+    "stages": {
+      "totals": [
+        {
+          "no": 0,
+          "key": "none",
+          "label": "Not on an order yet",
+          "count": 5
+        },
+        {
+          "no": 1,
+          "key": "stage1",
+          "label": "Prescreening",
+          "count": 15
+        },
+        {
+          "no": 2,
+          "key": "stage2",
+          "label": "Forwarded to client",
+          "count": 9
+        },
+        {
+          "no": 3,
+          "key": "stage3",
+          "label": "Interview scheduling",
+          "count": 5
+        },
+        {
+          "no": 4,
+          "key": "stage4",
+          "label": "Interview result",
+          "count": 3
+        },
+        {
+          "no": 5,
+          "key": "stage5",
+          "label": "Offer letter",
+          "count": 1
+        },
+        {
+          "no": 6,
+          "key": "stage6",
+          "label": "Medical",
+          "count": 0
+        },
+        {
+          "no": 7,
+          "key": "stage7",
+          "label": "Visa documents",
+          "count": 1
+        },
+        {
+          "no": 8,
+          "key": "stage8",
+          "label": "Visa processing",
+          "count": 0
+        },
+        {
+          "no": 9,
+          "key": "stage9",
+          "label": "Visa arrival",
+          "count": 1
+        },
+        {
+          "no": 10,
+          "key": "stage10",
+          "label": "Flight documents",
+          "count": 0
+        },
+        {
+          "no": 11,
+          "key": "stage11",
+          "label": "Air ticket",
+          "count": 1
+        }
+      ],
+      "perStaff": [
+        {
+          "id": "u-meera",
+          "counts": {
+            "0": 3,
+            "1": 10,
+            "2": 6,
+            "3": 4,
+            "4": 2,
+            "5": 1,
+            "6": 0,
+            "7": 1,
+            "8": 0,
+            "9": 1,
+            "10": 0,
+            "11": 0
+          },
+          "total": 28
+        },
+        {
+          "id": "u-anil",
+          "counts": {
+            "0": 2,
+            "1": 5,
+            "2": 3,
+            "3": 1,
+            "4": 1,
+            "5": 0,
+            "6": 0,
+            "7": 0,
+            "8": 0,
+            "9": 0,
+            "10": 0,
+            "11": 1
+          },
+          "total": 13
+        },
+        {
+          "id": "u-zoya",
+          "counts": {
+            "0": 0,
+            "1": 0,
+            "2": 0,
+            "3": 0,
+            "4": 0,
+            "5": 0,
+            "6": 0,
+            "7": 0,
+            "8": 0,
+            "9": 0,
+            "10": 0,
+            "11": 0
+          },
+          "total": 0
+        }
+      ]
+    },
+    "byClient": [
+      {
+        "id": "co-2",
+        "name": "Gulf Build",
+        "metrics": {
+          "prescreened": 8,
+          "forwarded": 4,
+          "shortlisted": 1,
+          "interviews": 2,
+          "offers": 1,
+          "visas": 0,
+          "travelled": 0
+        },
+        "interviewsOnline": 1,
+        "total": 15
+      },
+      {
+        "id": "co-1",
+        "name": "Al Noor Contracting",
+        "metrics": {
+          "prescreened": 10,
+          "forwarded": 5,
+          "shortlisted": 3,
+          "interviews": 3,
+          "offers": 1,
+          "visas": 1,
+          "travelled": 0
+        },
+        "interviewsOnline": 2,
+        "total": 22
+      }
+    ]
+  },
+  "weeklyLeads": {
+    "period": {
+      "from": "2026-08-03",
+      "to": "2026-11-15",
+      "days": 105,
+      "previousFrom": "2026-04-21",
+      "previousTo": "2026-08-02",
+      "bucket": "week"
+    },
+    "metric": {
+      "key": "leadsContacted",
+      "label": "Leads contacted",
+      "value": 10,
+      "previous": 0,
+      "changePct": null,
+      "series": [
+        {
+          "date": "2026-08-03",
+          "value": 6,
+          "bucket": "week"
+        },
+        {
+          "date": "2026-08-10",
+          "value": 7,
+          "bucket": "week"
+        },
+        {
+          "date": "2026-08-17",
+          "value": 0,
+          "bucket": "week"
+        }
+      ]
+    }
+  },
+  "mine": {
+    "date": "2026-11-17",
+    "id": "u-meera",
+    "name": "Meera Nair",
+    "role": "staff",
+    "initials": "MN",
+    "metrics": {
+      "leadsContacted": 20,
+      "prescreened": 11,
+      "forwarded": 6,
+      "shortlisted": 3,
+      "interviews": 3,
+      "offers": 2,
+      "visas": 1,
+      "travelled": 0
+    },
+    "total": 46,
+    "interviewsOnline": 2,
+    "leadFeedback": {
+      "contacted": 20,
+      "interested": 4,
+      "notInterested": 2,
+      "noAnswer": 6,
+      "wrongNumber": 1,
+      "callback": 5,
+      "other": 2
+    },
+    "submitted": true,
+    "submittedAt": "2026-11-17T13:12:00+00:00",
+    "note": "Two callbacks for tomorrow",
+    "idle": false
+  },
+  "submit": {
+    "date": "2026-11-17",
+    "submittedAt": "2026-11-17T13:12:00+00:00",
+    "figures": {
+      "leadsContacted": 20,
+      "prescreened": 11,
+      "forwarded": 6,
+      "shortlisted": 3,
+      "interviews": 3,
+      "offers": 2,
+      "visas": 1,
+      "travelled": 0,
+      "interviewsOnline": 2
+    },
+    "note": "Two callbacks for tomorrow"
+  },
+  "history": {
+    "total": 2,
+    "page": 0,
+    "pageSize": 25,
+    "rows": [
+      {
+        "date": "2026-11-17",
+        "staffId": "u-meera",
+        "staffName": "Meera Nair",
+        "submittedAt": "2026-11-17T13:12:00+00:00",
+        "note": "Two callbacks for tomorrow",
+        "figures": {
+          "forwarded": 5,
+          "prescreened": 11,
+          "shortlisted": 3,
+          "interviewsOnline": 2,
+          "offers": 2,
+          "visas": 1,
+          "travelled": 0
+        }
+      },
+      {
+        "date": "2026-11-16",
+        "staffId": "u-anil",
+        "staffName": "Anil Kumar",
+        "submittedAt": "2026-11-16T12:40:00+00:00",
+        "note": null,
+        "figures": {
+          "forwarded": 2,
+          "prescreened": 4,
+          "shortlisted": 0,
+          "interviewsOnline": 0,
+          "offers": 0,
+          "visas": 0,
+          "travelled": 0
+        }
+      }
+    ]
+  }
+}

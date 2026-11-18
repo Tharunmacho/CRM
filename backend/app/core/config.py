@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     # A passport of several pages is sent one page per job (the reader fails on heavy multi-page passport PDFs), the
     # strongest page first; once a page gave the number, birth date and name, a further scan of the data page is skipped.
     veris_passport_one_page: bool = True
+    # ... except a passport of up to this many pages (the data page and the back page), which is ONE job: each page alone gives only
+    # part of the fields. A pair above veris_passport_job_max_bytes (or one the reader refuses as too heavy) goes page by page.
+    veris_passport_together_pages: int = Field(default=2, ge=0, le=4)
+    veris_passport_job_max_bytes: int = Field(default=2_500_000, ge=100_000)
     # A job file (after the local preparation, see integrations/ocr/payload.py) above this many bytes is split page by page
     # before it is sent. Pictures are re-encoded when a file is above veris_prepare_target_bytes.
     veris_job_max_bytes: int = Field(default=8_000_000, ge=100_000)

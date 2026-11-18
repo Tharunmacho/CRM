@@ -54,20 +54,23 @@ test('unresolved pages give one plain note with Read again; ignored pages are no
   const data = coverage({ pages: { total: 16, sent: [1], not_sent: [{ page: 16, reason: 'x', blocking: true }], ignored: [7, 15], unresolved: [16], probed: [] } })
   const report = buildReadReport(data)
   const unresolved = report.notes.find((note) => note.key === 'unresolved')
-  assert.equal(unresolved.text, 'Page 16 could not be fully read.')
+  assert.equal(unresolved.text, 'Page 16 could not be fully read. Check page 16 in the original file.')
   assert.equal(unresolved.retry, true)
   assert.equal(unresolved.tone, 'warn')
   assert.equal(report.notes.some((note) => note.key === 'ignored'), false)
   assert.deepEqual(buildReadReport(coverage({ pages: { ignored: [4] } })).notes, [])
-  assert.equal(buildReadReport(coverage({ pages: { unresolved: [3, 4] } })).notes[0].text, 'Pages 3 and 4 could not be fully read.')
+  assert.equal(buildReadReport(coverage({ pages: { unresolved: [3, 4] } })).notes[0].text, 'Pages 3 and 4 could not be fully read. Check pages 3 and 4 in the original file.')
 })
 
 test('incomplete coverage is never silently presented as a complete reading for any document kind', () => {
   for (const kind of ['resume', 'passport', 'aadhaar']) {
     const data = { kinds: { [kind]: {} }, complete: false }
-    assert.equal(buildReadReport(data).notes[0].text, 'The extracted details need review.')
+    assert.match(buildReadReport(data).notes[0].text, /no reason was recorded/)   // never a bare "needs review"
+    data.issues = ['Review: the passport number failed its check digit.', 'Review: the reader could not read the date of birth.']
+    assert.deepEqual(buildReadReport(data).notes.map((note) => note.text), data.issues)   // each reason on its own line
+    delete data.issues
     data.pages = { not_sent: [{ page: 2, blocking: true }], unresolved: [] }
-    assert.equal(buildReadReport(data).notes[0].text, 'Page 2 could not be fully read.')
+    assert.equal(buildReadReport(data).notes[0].text, 'Page 2 could not be fully read. Check page 2 in the original file.')
   }
   assert.equal(buildReadReport({ complete: false }).notes[0].retry, true)
 })
@@ -171,4 +174,12 @@ test('multi-file passport reports retain each page reading instead of only the l
   assert.deepEqual(reports.map(item => item.id), ['j-address', 'j-front'])
   assert.equal(reports[0].caption, 'Passport · address.pdf')
   assert.equal(reports[1].caption, 'Passport · front.pdf')
+})
+
+test('what became of the pages is listed as plain info lines, not warnings', () => {
+  const data = coverage({ filing: ['Pages 6, 7 of this file were filed under Other documents.', 'Page 8 is blank and was not filed.'] })
+  const notes = buildReadReport(data).notes
+  assert.deepEqual(notes.map((note) => [note.tone, note.text]), [
+    ['info', 'Pages 6, 7 of this file were filed under Other documents.'], ['info', 'Page 8 is blank and was not filed.']])
+  assert.equal(notes.some((note) => note.retry), false)
 })

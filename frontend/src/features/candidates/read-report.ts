@@ -20,7 +20,8 @@ export type ReportChip = {
 }
 export type ReportNote = {
   key: string
-  tone: 'warn'
+  /** warn: something to check. info: what became of the pages (filed under Other documents, already filed, blank). */
+  tone: 'warn' | 'info'
   text: string
   /** The note is about pages that could not be read: the host may offer Read again. */
   retry?: boolean
@@ -128,13 +129,28 @@ function leftOutNotes(kind: string, part: Record<string, unknown>): ReportNote[]
 /** "Resume, Passport and Aadhaar read." */
 const headlineFor = (chips: ReportChip[]) => (chips.length ? `${joinWords(chips.map((chip) => chip.label))} read.` : '')
 
-/** Missing pages stay visible even if an older/partial response forgot to mark complete=false. */
-export function incompleteReadingText(coverage: unknown): string | null {
+/** Pages the server could not read (really unreadable ones), with what to do about them; null when there are none. */
+function unresolvedPagesText(coverage: unknown): string | null {
   const data = rec(coverage)
   const pages = rec(data.pages)
   const unresolved = numbers([...arr(pages.unresolved), ...arr(pages.not_sent).map(rec).filter((page) => page.blocking === true).map((page) => page.page)])
-  if (unresolved.length) return `${plural(unresolved.length, 'Page')} ${joinWords(unresolved.map(String))} could not be fully read.`
-  return data.complete === false ? 'The extracted details need review.' : null
+  if (!unresolved.length) return null
+  const list = joinWords(unresolved.map(String))
+  return `${plural(unresolved.length, 'Page')} ${list} could not be fully read. Check ${plural(unresolved.length, 'page')} ${list} in the original file.`
+}
+
+/** Why a reading needs review, in the server's own plain words (coverage.issues), one sentence each. */
+export function reviewReasons(coverage: unknown): string[] {
+  return [...new Set(arr(rec(coverage).issues).map(text).filter(Boolean))]
+}
+const NO_REASON_TEXT = 'This reading needs review, but no reason was recorded. Open the document reading report to see which check raised it, or read the document again.'
+
+/** Missing pages stay visible even if an older/partial response forgot to mark complete=false. Never a bare "needs review". */
+export function incompleteReadingText(coverage: unknown): string | null {
+  const pageText = unresolvedPagesText(coverage)
+  if (rec(coverage).complete !== false) return pageText
+  const reasons = reviewReasons(coverage)
+  return [pageText, ...(reasons.length ? reasons : pageText ? [] : [NO_REASON_TEXT])].filter(Boolean).join(' ')
 }
 
 /**
@@ -154,11 +170,41 @@ export function buildReadReport(coverage: unknown, unmapped?: unknown): ReadRepo
   })
   const rowNotes = kindOrder.flatMap((kind) => leftOutNotes(kind, rec(kinds[kind])))
   const notes: ReportNote[] = [...conflictNotes, ...rowNotes]
-  const incomplete = incompleteReadingText(coverage)
-  if (incomplete) notes.push({ key: 'unresolved', tone: 'warn', retry: true, text: incomplete })
+  const pageText = unresolvedPagesText(coverage)
+  if (pageText) notes.push({ key: 'unresolved', tone: 'warn', retry: true, text: pageText })
+  if (data.complete === false) {
+    // The reasons are listed one by one, so each can be read (and copied) on its own line.
+    const reasons = reviewReasons(coverage)
+    if (reasons.length) reasons.forEach((reason, index) => notes.push({ key: `reason:${index}`, tone: 'warn', retry: !pageText && index === 0, text: reason }))
+    else if (!pageText) notes.push({ key: 'unresolved', tone: 'warn', retry: true, text: NO_REASON_TEXT })
+  }
+  // What became of every page of the file (filed under Other documents, already filed, blank): plain lines, not warnings.
+  arr(data.filing).map(text).filter(Boolean).forEach((line, index) => notes.push({ key: `filing:${index}`, tone: 'info', text: line }))
   if (!chips.length && !notes.length) return null
 
   return { headline: headlineFor(chips), chips, notes, unmapped: unmappedViews(arr(unmapped).length ? unmapped : data.unmapped) }
+}
+
+// ------------------------------------------------------------------ notes of one line
+
+/** One plain sentence about a reading. `about` is the kind of document the sentence names ("Passport: ..."), null when it is about the file itself. */
+export type KindNote = { text: string; about: string | null }
+const NAMED_KIND = /^\s*(resume|passport|aadhaar)\s*:/i
+
+function noteAbout(note: ReportNote): string | null {
+  const keyed = /^(?:check|rows|parts):(.+)$/.exec(note.key)
+  if (keyed) return keyed[1]
+  const named = NAMED_KIND.exec(note.text)
+  return named ? named[1].toLowerCase() : null
+}
+
+/**
+ * Every advisory sentence of one reading (pages not fully read, the reasons it needs review, cross-check differences, entries not
+ * placed, what became of the pages), each tagged with the kind it names so the form can show it on that kind's line only. These are
+ * quiet notes, never alerts: nothing here says the reading failed.
+ */
+export function readingNotes(coverage: unknown): KindNote[] {
+  return (buildReadReport(coverage)?.notes ?? []).map((note) => ({ text: note.text, about: noteAbout(note) }))
 }
 
 // ------------------------------------------------------------------ where the data sits

@@ -30,6 +30,7 @@ def reader_agrees_with_the_local_zone(world):
     """The fake reader reads the synthetic zone the way the local check does (so no cross-check conflict sends the file to review)."""
     mrz = {"given_names": "TESTER", "surname": "SAMPLE1", "passport_number": hard.valid_mrz(1)[2], "all_check_digits_valid": True}
     world.veris.build = lambda mode, index, texts: {"mrz": mrz} if mode == "passport" else {}
+    world.settings.veris_passport_together_pages = 0   # these tests are about the page-by-page jobs (a pair is one job by default: test_read_reliability)
 
 
 def sent_pages(state: dict, kind: str = "passport") -> list[int]:

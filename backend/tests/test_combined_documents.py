@@ -116,10 +116,10 @@ def test_an_unrelated_page_never_blocks_the_documents_that_are_there(combined, f
     output = combined.extract(composite_pdf(["resume", "passport", "unrelated", "aadhaar"], form=form))
     assert combined.plan() == {"resume": [1], "passport": [2], "aadhaar": [4]}
     assert set(output["extractions"]) == {"resume", "passport", "aadhaar"}
-    assert output["status"] == "needs_review"  # page 3 is named for a person to check ...
-    assert {p["page"]: p["blocking"] for p in output["coverage"]["pages"]["not_sent"]} == {3: True}
-    assert any("Pages 3" in w for w in output["warnings"])
-    # ... but it was not sent anywhere: nothing about it looked like an identity document.
+    assert output["status"] == "complete"  # page 3 was read but is nothing known: it is filed under Other documents, no alarm ...
+    assert {p["page"]: p["blocking"] for p in output["coverage"]["pages"]["not_sent"]} == {3: False}
+    assert not any("Pages 3" in w for w in output["warnings"])
+    # ... and it was not sent anywhere: nothing about it looked like an identity document.
     assert combined.veris.peak <= 3
 
 
@@ -466,8 +466,8 @@ def test_a_file_with_one_classified_page_gets_no_extra_probes_from_the_slot(comb
     assert combined.plan() == {"resume": [1], "passport": [2], "aadhaar": [4]}
     assert len(combined.veris.submissions) == 3 and combined.state["probe_plan"] == {}
     assert output["coverage"]["pages"]["probed"] == {}
-    assert {p["page"]: p["blocking"] for p in output["coverage"]["pages"]["not_sent"]} == {3: True}
-    assert output["status"] == "needs_review" and not any("scan" in w for w in output["warnings"])
+    assert {p["page"]: p["blocking"] for p in output["coverage"]["pages"]["not_sent"]} == {3: False}
+    assert output["status"] == "complete" and not any("scan" in w for w in output["warnings"])
 
 
 def test_at_most_six_pages_of_an_unidentified_file_are_sent_and_the_rest_stay_in_the_original(combined, monkeypatch):

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, ChevronDown, RotateCw, ScrollText } from 'lucide-react'
+import { ChevronDown, Info, RotateCw, ScrollText } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { ReadReportView } from '../read-report'
 import '@/styles/add-candidate-v2.css'
@@ -12,7 +12,7 @@ export function ReadNotes({ notes, onRetry, busy = false }: { notes: Notes; onRe
     <ul className="rr-notes">
       {notes.map((note) => (
         <li key={note.key}>
-          <AlertTriangle size={14} aria-hidden />
+          <Info size={14} aria-hidden />
           <span>{note.text}</span>
           {note.retry && onRetry && (
             <button type="button" className="rr-retry" disabled={busy} onClick={onRetry}><RotateCw size={13} aria-hidden />Read again</button>

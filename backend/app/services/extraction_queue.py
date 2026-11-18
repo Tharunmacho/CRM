@@ -18,8 +18,11 @@ How it works now.
   ``busy_poll`` seconds for a couple of seconds after work was found, otherwise every ``idle_poll`` seconds (15 by
   default; ``degraded_poll`` seconds while the NOTIFY listener is not connected). Against a hosted database every
   statement costs a round trip, so an idle round is ONE read-only ``SELECT EXISTS`` over all the queues (``peek``); the
-  claiming ``UPDATE`` only runs when the peek found something. A worker that cannot reach the database backs off
-  exponentially (2 s, 4 s ... 60 s) instead of retrying every poll.
+  claiming ``UPDATE`` only runs when the peek found something. For
+  ``RECENT_SECONDS`` after work was last found or finished the loop looks every ``RECENT_POLL`` (2) seconds. A dispatcher in
+  the SAME process as the code that queues a document is woken in-process after the commit (``notify_work``). A worker that
+  cannot reach the database backs off exponentially but briefly (1, 2, 4, 8 s, then 8 s) and starts again at 1 s after the
+  first success, so a dropped tunnel costs seconds, not a minute.
 * On stop it waits for the running jobs for ``grace`` seconds, then releases the claims it still holds so that no
   job waits for a lease to expire.
 """
@@ -58,12 +61,44 @@ def threads_per_worker(settings) -> int:
     return max(1, min(int(getattr(settings, "extraction_concurrency", 4)), cap // workers))
 
 
+_LOCAL_WAKES: list = []   # wake events of dispatchers running in THIS process (tests, a single-process setup)
+_LOCAL_LOCK = threading.Lock()
+
+
+def register_wake(event: threading.Event) -> None:
+    with _LOCAL_LOCK:
+        if not any(known is event for known in _LOCAL_WAKES):
+            _LOCAL_WAKES.append(event)
+
+
+def unregister_wake(event: threading.Event) -> None:
+    with _LOCAL_LOCK:
+        _LOCAL_WAKES[:] = [known for known in _LOCAL_WAKES if known is not event]
+
+
+def wake_local(*_args) -> None:
+    """Wake every dispatcher of this process at once, without any database round trip."""
+    with _LOCAL_LOCK:
+        events = list(_LOCAL_WAKES)
+    for event in events:
+        event.set()
+
+
 def notify_work(db, source: str = "manual") -> None:
-    """Wake sleeping workers. Delivered by Postgres only when the surrounding transaction commits."""
+    """Wake sleeping workers. Delivered by Postgres only when the surrounding transaction commits.
+
+    A dispatcher in this same process is woken through its in-process event, also only after the commit (the rows must be
+    visible when it looks)."""
     try:
         db.execute(text("SELECT pg_notify(:channel, :source)"), {"channel": WAKE_CHANNEL, "source": source})
     except Exception:  # never fail a request because a wake-up could not be queued; workers poll anyway
         log.debug("Could not queue the worker wake-up.", exc_info=True)
+    if _LOCAL_WAKES:
+        try:
+            from sqlalchemy import event as sa_event
+            sa_event.listen(db, "after_commit", wake_local, once=True)
+        except Exception:
+            log.debug("Could not queue the in-process wake-up.", exc_info=True)
 
 
 @dataclass(eq=False)
@@ -130,6 +165,8 @@ class LeasedQueue:
         params = {"now": now, "lease": now + timedelta(seconds=lease_seconds), "worker": worker, "limit": limit,
                   "preferred_lane": self._preferred_lane, **self.extra_params}
         with self.sessions() as db:
+            # A real transaction on purpose: the COMMIT is what announces "this document is now being read" to the open browsers
+            # (services/change_feed.py); an autocommit claim would be silent. An empty claim never gets here (see ``peek``).
             rows = db.execute(statement, params).all()
             db.commit()
         if rows:
@@ -221,7 +258,7 @@ class WakeListener(threading.Thread):
                 self.listening.clear()
                 failures += 1
                 log.debug("Wake-up listener lost its connection (%s); polling continues.", type(exc).__name__)
-                self.halt.wait(min(60, 5 * 2 ** min(failures - 1, 4)))
+                self.halt.wait(min(10, 2 ** min(failures - 1, 4)))   # 1, 2, 4, 8, 10 s: a dropped tunnel is back soon
 
     def stop(self):
         self.halt.set()
@@ -234,12 +271,15 @@ class Dispatcher:
     REVISIT_SECONDS = 5.0       # after a job ends the loop looks every REVISIT_POLL seconds for this long: a document handed back
     REVISIT_POLL = 1.0          # because the reader is still busy is due again in about two seconds; waiting for the idle poll
                                 # (15 s) instead left it sitting there. One cheap read-only peek per second, five times per job.
-    BACKOFF_BASE = 2.0          # first wait after the database could not be reached; doubles up to BACKOFF_MAX
-    BACKOFF_MAX = 60.0
+    BACKOFF_BASE = 1.0          # first wait after the database could not be reached; doubles up to BACKOFF_MAX (1, 2, 4, 8, 8 ... s).
+    BACKOFF_MAX = 8.0           # It was 2 ... 60 s: after a dropped tunnel the reader sat in a 60 s sleep while the database was back.
+    RELEASE_PAUSES = (1.0, 2.0, 4.0)   # handing a claim back is tried again after these pauses (seconds) when the database is away
+    RECENT_SECONDS = 90.0      # after work was last found or finished the loop keeps looking every RECENT_POLL seconds (cheap peek)
+    RECENT_POLL = 2.0           # and only then falls back to the idle poll (15 s)
 
     def __init__(self, queues: list[LeasedQueue], *, concurrency: int, worker: str | None = None,
                  stop: threading.Event | None = None, lease_seconds: float = 180, busy_poll: float = 0.5,
-                 idle_poll: float = 15.0, degraded_poll: float = 5.0, grace: float = 30.0,
+                 idle_poll: float = 15.0, degraded_poll: float = 2.0, grace: float = 30.0,
                  heartbeat_seconds: float | None = None,
                  before_claim: Callable[[], None] | None = None, wake: threading.Event | None = None,
                  presence: str | None = None, presence_seconds: float | None = None,
@@ -261,6 +301,7 @@ class Dispatcher:
         self._busy_until = 0.0
         self._revisit_until = 0.0
         self._started_last = False  # the previous round started jobs, so more may be waiting: claim without peeking
+        self._recent_until = 0.0    # until then an idle loop looks every RECENT_POLL seconds (see poll_seconds)
         self.abandoned = 0
         self.idle_rounds = 0  # consecutive claim rounds that found nothing
         self.failures = 0     # consecutive rounds that could not reach the database
@@ -282,10 +323,17 @@ class Dispatcher:
             # The runners record their own failures; anything that escapes (database down ...) is not the document's
             # fault, so hand the claim back for a quick retry instead of waiting for the lease to run out.
             log.warning("Reading %s %s stopped unexpectedly (%s); it will be tried again.", queue.name, identifier, type(exc).__name__, exc_info=True)
-            try:
-                queue.release(self.worker, [identifier], delay=5)
-            except Exception:
-                log.warning("Could not release %s %s; its lease will expire.", queue.name, identifier)
+            # Handing the claim back needs the database too, which is usually the very thing that just failed: try for a few
+            # seconds before leaving the claim to expire with its lease (minutes).
+            for pause in (*self.RELEASE_PAUSES, None):
+                try:
+                    queue.release(self.worker, [identifier], delay=5)
+                    break
+                except Exception:
+                    if pause is None or self.stop.is_set():
+                        log.warning("Could not release %s %s; its lease will expire.", queue.name, identifier)
+                        break
+                    self.stop.wait(pause)
 
     def _reap(self) -> None:
         for future in [future for future in self.inflight if future.done()]:
@@ -296,6 +344,7 @@ class Dispatcher:
         self.inflight[future] = (queue, identifier)
         def ended(_):
             self._revisit_until = max(self._revisit_until, self.clock() + self.REVISIT_SECONDS)
+            self._recent_until = max(self._recent_until, self.clock() + self.RECENT_SECONDS)
             self.wake.set()
         future.add_done_callback(ended)
 
@@ -383,6 +432,8 @@ class Dispatcher:
             return self.busy_poll
         if self.clock() < self._revisit_until:
             return min(self.REVISIT_POLL, fallback)
+        if self.clock() < self._recent_until:
+            return min(self.RECENT_POLL, fallback)   # a person who just uploaded one file usually uploads the next within a minute
         return fallback
 
     def backoff_seconds(self) -> float:
@@ -392,6 +443,7 @@ class Dispatcher:
     def run(self) -> int:
         """Run until ``stop`` is set. Returns the number of jobs still running when it gave up waiting."""
         pool = ThreadPoolExecutor(self.concurrency, thread_name_prefix="extract")
+        register_wake(self.wake)
         halt = threading.Event()
         beat = threading.Thread(target=self._heartbeat_loop, args=(halt,), daemon=True, name="extraction-heartbeat")
         beat.start()
@@ -420,9 +472,11 @@ class Dispatcher:
                 self.idle_rounds = 0 if started else self.idle_rounds + 1
                 if started:
                     self._busy_until = max(self._busy_until, self.clock() + self.ACTIVE_SECONDS)
+                    self._recent_until = max(self._recent_until, self.clock() + self.RECENT_SECONDS)
                 full = len(self.inflight) >= self.concurrency
                 self.wake.wait(self.poll_seconds(started=started, full=full))
         finally:
+            unregister_wake(self.wake)
             self.abandoned = self._shutdown(pool)
             halt.set()
             if self.heartbeat_thread is not None:

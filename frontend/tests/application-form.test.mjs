@@ -10,7 +10,8 @@ function moduleUrl(source) {
 const read = (path) => readFile(new URL(`../src/features/application-form/${path}`, import.meta.url), 'utf8')
 
 const slotsUrl = moduleUrl(await readFile(new URL('../src/shared/model/document-slots.ts', import.meta.url), 'utf8'))
-const modelUrl = moduleUrl((await read('form-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`))
+const readReportUrl = moduleUrl(await readFile(new URL('../src/features/candidates/read-report.ts', import.meta.url), 'utf8'))
+const modelUrl = moduleUrl((await read('form-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`).replace("'@/features/candidates/read-report'", `'${readReportUrl}'`))
 const model = await import(modelUrl)
 const bridge = await import(moduleUrl((await read('entry-bridge.ts')).replace("'./form-model'", `'${modelUrl}'`)))
 const phone = await import(moduleUrl(await read('parts/phone.ts')))
@@ -143,7 +144,7 @@ test('provenance names the document an extracted value came from, and manual win
 test('the extraction note says reading, filled N fields, or enter manually', () => {
   const slot = (extraction, uploaded = true) => ({ uploaded, extraction })
   assert.equal(model.describeExtraction('passport', slot(null, false)).tone, 'none')
-  assert.equal(model.describeExtraction('passport', slot({ status: 'processing', filled: [], message: '' })).tone, 'reading')
+  assert.equal(model.describeExtraction('passport', slot({ status: 'processing', filled: [], message: '' })).tone, 'running')
   assert.equal(model.describeExtraction('passport', slot({ status: 'done', filled: ['a', 'b', 'c'], message: '' })).text, 'Filled 3 fields on the form')
   assert.equal(model.describeExtraction('resume', slot({ status: 'done', filled: ['a'], message: '' })).text, 'Filled 1 field on the form')
   const failed = model.describeExtraction('resume', slot({ status: 'unreadable', filled: [], message: 'No resume pages were found.' }))
@@ -156,11 +157,15 @@ test('the extraction note says reading, filled N fields, or enter manually', () 
 test('the extraction note lists the fields the document had but the form did not take, never silently', () => {
   const slot = (extraction) => ({ uploaded: true, extraction })
   const done = model.describeExtraction('resume', slot({ status: 'done', filled: ['personal.fatherName'], kept: ['personal.dateOfBirth', 'personal.mobileNumber', 'personal.fatherName', 'document.identity'], message: '' }))
-  assert.equal(done.text, 'Filled 1 field on the form. Not changed: Date of birth, Mobile number. Check them against the document.')
-  assert.equal(model.describeExtraction('resume', slot({ status: 'done', filled: [], kept: ['personal.email', 'personal.email'], message: '' })).text,
-    'Read. Nothing new to fill in. Not changed: Email address. Check it against the document.')
+  // The green line says what was filled; what was left alone is a quiet note, never part of an alert box.
+  assert.equal(done.text, 'Filled 1 field on the form')
+  assert.deepEqual(done.notes, ['Not changed: Date of birth, Mobile number. Check them against the document.'])
+  const nothing = model.describeExtraction('resume', slot({ status: 'done', filled: [], kept: ['personal.email', 'personal.email'], message: '' }))
+  assert.equal(nothing.tone, 'note')
+  assert.deepEqual(nothing.notes, ['Not changed: Email address. Check it against the document.'])
   const review = model.describeExtraction('resume', slot({ status: 'needs_review', filled: ['a'], kept: ['personal.dateOfBirth'], message: 'Some pages could not be read.' }))
-  assert.match(review.text, /^Filled 1 field\. Some pages could not be read\. Not changed: Date of birth\./)
+  assert.equal(review.text, 'Filled 1 field on the form')
+  assert.deepEqual(review.notes, ['Some pages could not be read.', 'Not changed: Date of birth. Check it against the document.'])
 })
 
 test('a rejected identity stays viewable but never counts as an accepted document or a successful reading', () => {
@@ -172,7 +177,7 @@ test('a rejected identity stays viewable but never counts as an accepted documen
   assert.equal(slot.fileUploaded, true)
   assert.equal(slot.files[0].identityMismatch, true)
   assert.equal(slot.extraction.identityMismatch, true)
-  assert.deepEqual(model.describeExtraction('passport', slot), { tone: 'failed', text: "This document was stopped as another person's. No details were filled. Choose Read again to see why." })
+  assert.deepEqual(model.describeExtraction('passport', slot), { tone: 'failed', notes: [], text: "This document was stopped as another person's. No details were filled. Choose Read again to see why." })
   assert.deepEqual(model.identityActions(slot.extraction), [{ kind: 'read_again' }])
   assert.ok(model.completenessOf(model.toDraft(form), form.documents).missing.some(item => item.key === 'documents.passport'))
   const valid = { attachmentId: 'valid', fileName: 'correct-back.pdf', url: '/api/files/valid' }
@@ -449,7 +454,25 @@ const DUPLICATE = { candidateId: 'c139', careId: 'CI-139', name: 'Rashid Khan' }
 const PLAN = { dryRun: true, allowed: true, source: { id: 'c167', careId: 'CI-167', name: 'Rashid K' }, mergedInto: { id: 'c139', careId: 'CI-139', name: 'Rashid Khan' },
   moved: { documents: 12, jobs: 4, notes: 3, tasks: 1, applications: 0, links: 0 }, skipped: [{ kind: 'document', name: 'cv.pdf', reason: 'The same file is already on CI-139.' }], refusals: [] }
 
-test('an admin is offered Merge into CI-139 beside the already-in-the-CRM note; anybody else is told to ask an admin', () => {
+test('the merge UI is switched off: no header button, no Merge into button, no Ask an admin text (the code and the endpoint stay)', async () => {
+  assert.equal(merge.SHOW_MERGE_UI, false)
+  const src = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
+  const screen = await src('screens/candidates/application-form.tsx')
+  assert.match(screen, /SHOW_MERGE_UI && form && me\.role === 'admin' && <MergeIntoPicker/)   // the only mount of the header button
+  const line = await src('features/application-form/components/extraction-line.tsx')
+  assert.match(line, /SHOW_MERGE_UI && wrongDocument && slot\.extraction\?\.duplicateOf && <DuplicateMergeAction/)
+  assert.doesNotMatch(await src('features/application-form/components/documents-section.tsx'), /DuplicateMergeAction|MergeIntoPicker|candidate-merge/)
+  // Even if mounted by mistake, the components render nothing while the flag is false.
+  const merged = await src('features/application-form/components/candidate-merge.tsx')
+  assert.match(merged, /SHOW_MERGE_UI \? mergeOffer\(/)
+  assert.match(merged, /!SHOW_MERGE_UI \|\| store\.me\.role !== 'admin'/)
+  // The note keeps its words and the Open / Read again buttons; there is no merge action among them.
+  const note = model.describeExtraction('passport', { uploaded: true, extraction: { identityMismatch: true, duplicateOf: DUPLICATE, identityReasons: [] } })
+  assert.match(note.text, /^Already in the CRM as CI-139 · Rashid Khan/)
+  assert.deepEqual(model.identityActions({ identityMismatch: true, duplicateOf: DUPLICATE, identityReasons: [] }).map((action) => action.kind), ['open_candidate', 'read_again'])
+})
+
+test('merge helpers (kept for when the UI is switched back on): an admin is offered Merge into CI-139; anybody else is told to ask an admin', () => {
   assert.deepEqual(merge.mergeOffer(DUPLICATE, { isAdmin: true, candidateId: 'c167' }), { kind: 'merge', targetId: 'c139', targetLabel: 'CI-139' })
   assert.equal(merge.mergeButtonLabel('CI-139'), 'Merge into CI-139')
   assert.deepEqual(merge.mergeOffer(DUPLICATE, { isAdmin: false, candidateId: 'c167' }), { kind: 'ask_admin', text: 'Ask an admin to merge it' })

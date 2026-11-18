@@ -145,7 +145,7 @@ OWNER_TOPICS = frozenset({"todos", "notifications"})
 CLIENT_TOPICS = frozenset({
     "candidates", "applications", "tasks", "clients", "companies", "orders", "designations", "notifications",
     "todos", "users", "attendance", "mail", "whatsapp", "documents", "reports", "settings", "form_options", "leads",
-    "reference_agencies", "feedback",
+    "reference_agencies", "feedback", "daily_report",
 })
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
 ID_ROLES = frozenset({"admin", "manager"})
@@ -269,6 +269,17 @@ def announce_document_status(db, candidate_id):
     pending = _pending(connection.info)
     pending.topics.update(("candidates", "documents", "reports"))
     pending.note_object("crm_candidates", candidate_id, None, candidate_id)
+
+
+def announce_daily_report(db, user_id):
+    """A day-close submission is stored as an audit entry (an ignored table) but changes the Daily Work Report's Day-closed column and
+    compliance line for everyone: announce the `daily_report` topic with the submitting user's id (opaque, supervisors only)."""
+    connection = db.connection()
+    if not enabled() or not _postgres(connection):
+        return
+    pending = _pending(connection.info)
+    pending.topics.add("daily_report")
+    pending.ids.setdefault("daily_report", set()).add(user_id)
 
 
 # ------------------------------------------------------------------ what a given user may be told

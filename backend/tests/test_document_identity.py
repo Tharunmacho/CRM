@@ -43,7 +43,7 @@ def test_existing_other_candidate_identifier_rejects_all_enrichment(monkeypatch)
 
 def test_stored_wrong_ocr_cannot_backfill_fields_or_masked_aadhaar():
     person = candidate("Original Person")
-    person.ocr_data = {"aadhaar": {"aadhaar": {"name": "Unrelated Applicant", "aadhaar_number": "000000001234", "address": "Wrong address"}}}
+    person.ocr_data = {"aadhaar": {"aadhaar": {"name": "Ramesh Kumar", "aadhaar_number": "000000001234", "address": "Wrong address"}}}
     result = fx.apply_stored_ocr(person, force=True)
     assert result.filled == []
     assert person.current_address is None and fx.aadhaar_of(person) is None
@@ -199,7 +199,7 @@ def test_partial_verified_resume_only_fills_empty_fields_and_keeps_replay_ignore
     monkeypatch.setattr(application_form, "_attach_read_documents", lambda *args, **kwargs: {})
     raw = {
         "name": "Alex Example", "contact": {"phones": ["9000000000"], "address": "Old resume address"},
-        "personal_info": {"father_name": "Suresh Example"},
+        "personal_info": {"father_name": "Ganesh Example"},
         "passport_details": {"passport_number": "ZZ999999", "place_of_issue": "Wrong place"},
     }
     job = SimpleNamespace(id="partial-job", candidate_id=person.id, owner_id="staff", status="needs_review",
@@ -209,7 +209,7 @@ def test_partial_verified_resume_only_fills_empty_fields_and_keeps_replay_ignore
         "resume": {"fields": {"name": "Alex Example", "passport_no": "ZZ999999"}, "raw": raw}}}
     application_form.apply_job_output(db, job, output, _partial_verified_resume_replay=True)
 
-    assert person.father_name == "Suresh Example"
+    assert person.father_name == "Ganesh Example"
     assert person.current_address == "Trusted passport address" and person.passport_no == "AA145638"
     ignored = fx.ignored_fields_for(person.ocr_data, "resume", raw)
     assert fx.PASSPORT_DOCUMENT_COLUMNS <= ignored and "current_address" in ignored

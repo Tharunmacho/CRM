@@ -7,6 +7,7 @@
  * absent parts: an application with no order, a candidate with no passport yet, or an older server.
  */
 import { DOCUMENT_SLOTS, documentExpected, documentLabel, documentSlot } from '@/shared/model/document-slots'
+import { readingNotes, type KindNote } from '@/features/candidates/read-report'
 import type {
   ApplicationFormData,
   ApplicationRef,
@@ -743,9 +744,24 @@ export function provenanceOf(
 
 /* ------------------------------------------------------------------ Extraction */
 
+/**
+ * How a document line looks, decided in ONE place (`lineTone`) and nowhere else.
+ *   failed   red alert box: wrong person, duplicate, the reader failed, no file could be read.
+ *   running  blue alert box: reading in progress.
+ *   filled   green line: "Filled N fields on the form".
+ *   note     no box at all, only the quiet "Notes (n)" line. Advisory things (a page not fully read, "please check ...",
+ *            a name that was unclear, fields left unchanged, what became of the pages) and a reading that needs review.
+ *   none     nothing to show.
+ * There is deliberately no amber/warning tone: a document line never shows a yellow alert.
+ */
+export type LineTone = 'failed' | 'running' | 'filled' | 'note' | 'none'
+
 export interface ExtractionNote {
-  tone: 'reading' | 'done' | 'review' | 'failed' | 'none'
+  tone: LineTone
+  /** The one line shown in the box (or beside the Notes button for a `note` line). Empty when there is nothing to say. */
   text: string
+  /** The advisory sentences for the quiet Notes line, exact text, not yet routed to the kind they name. */
+  notes: string[]
 }
 
 /** What a document's last reading did, in the words a recruiter needs. */
@@ -792,48 +808,112 @@ export function identityActions(extraction: Pick<Extraction, 'identityMismatch' 
 }
 
 /**
- * " Not changed: Date of birth, Mobile number. Check them against the document." The fields the document has a value for but the form did
+ * "Not changed: Date of birth, Mobile number. Check them against the document." The fields the document has a value for but the form did
  * not take (a person's own entry stays, the date or number could not be read, another candidate owns the phone): the server lists them in
  * `kept`, so a missing field is never silent. A field that was filled after all is left out; a key with no field on the form is skipped.
  */
-function notChangedNote(extraction: Pick<Extraction, 'kept' | 'filled'>, lead: string): string {
+function notChangedNote(extraction: Pick<Extraction, 'kept' | 'filled'>): string {
   const labels = new Map<string, string>([...PERSONAL_FIELDS, ...PASSPORT_FIELDS, ...EXPERIENCE_FIELDS].map((def) => [def.path, def.label]))
   labels.set('education', 'Education')
   labels.set('experience.history', 'Work history')
   const names = [...new Set((extraction.kept ?? []).filter((key) => !(extraction.filled ?? []).includes(key)).map((key) => labels.get(key)).filter((label): label is string => !!label))]
-  return names.length ? `${lead}Not changed: ${names.join(', ')}. Check ${names.length === 1 ? 'it' : 'them'} against the document.` : ''
+  return names.length ? `Not changed: ${names.join(', ')}. Check ${names.length === 1 ? 'it' : 'them'} against the document.` : ''
+}
+
+const REVIEW_FALLBACK = 'Some pages could not be read. Please check the details.'
+
+/**
+ * Every advisory note of one reading, with the kind of document each one names ("Passport: ..." has `about: 'passport'`, a note about
+ * the file itself has `about: null`). Never a failure: a rejected document (red) carries its own words and has no notes, and a reading
+ * in progress has none yet. A reading that needs review is told in the reader's own words unless the coverage already says why.
+ */
+export function extractionNotes(extraction: Extraction | null | undefined): KindNote[] {
+  if (!extraction || extraction.identityMismatch || extraction.status === 'processing') return []
+  const coverage = readingNotes(extraction.coverage)
+  const failed = extraction.status === 'failed' || extraction.status === 'unreadable'
+  const review = extraction.status === 'needs_review' && !coverage.length ? [{ text: extraction.message || REVIEW_FALLBACK, about: null }] : []
+  const kept = failed ? '' : notChangedNote(extraction)
+  const all: KindNote[] = [...review, ...coverage, ...(kept ? [{ text: kept, about: null }] : [])]
+  return all.filter((note, index) => all.findIndex((other) => other.text === note.text) === index)
+}
+
+/**
+ * THE tone of a document line, the only place it is decided. Only blocking states get an alert box: failed (red), running (blue),
+ * filled (green). Everything advisory is `note`: no box, just the quiet Notes line. A reading that needs review is a note, not an error.
+ */
+export function lineTone(extraction: Extraction | null | undefined): LineTone {
+  if (!extraction) return 'none'
+  if (extraction.identityMismatch) return 'failed'
+  if (extraction.status === 'processing') return 'running'
+  const filled = (extraction.filled ?? []).length
+  if (extraction.status === 'failed' || extraction.status === 'unreadable') return 'failed'
+  if (extraction.failure && !(filled > 0 && extraction.failure.localFallback)) return 'failed'
+  if (filled > 0) return 'filled'
+  if (extraction.status === 'done' && !extractionNotes(extraction).length) return 'filled'
+  return 'note'
 }
 
 export function describeExtraction(kind: DocumentKind, slot: Pick<DocumentSlot, 'uploaded' | 'extraction'>): ExtractionNote {
   const extraction = slot.extraction
   if (extraction?.identityMismatch && extraction.duplicateOf) {
     const other = extraction.duplicateOf
-    return { tone: 'failed', text: `Already in the CRM as ${other.careId ? `${other.careId} · ` : ''}${other.name || 'another candidate'}. Open that candidate, or remove the duplicate, then read again.` }
+    return { tone: 'failed', notes: [], text: `Already in the CRM as ${other.careId ? `${other.careId} · ` : ''}${other.name || 'another candidate'}. Open that candidate, or remove the duplicate, then read again.` }
   }
   if (extraction?.identityMismatch) {
     const reasons = (extraction.identityReasons ?? []).map((reason) => describeIdentityReason(reason, kind))
-    if (!reasons.length) return { tone: 'failed', text: 'This document was stopped as another person\'s. No details were filled. Choose Read again to see why.' }
+    if (!reasons.length) return { tone: 'failed', notes: [], text: 'This document was stopped as another person\'s. No details were filled. Choose Read again to see why.' }
     const fields = new Set((extraction.identityReasons ?? []).map((reason) => reason.field))
     const advice = fields.size === 1 && fields.has('name')
       ? 'Open the document to check it. If it is the right person, confirm it below.'
       : fields.has('name') && fields.has('passport_no')
         ? 'The name and the passport number both differ. Open the document to check it, then upload the correct one.'
         : fields.has('passport_no') ? 'Open the document and the passport to check the number.' : 'Open the document to check it.'
-    return { tone: 'failed', text: `${reasons.join(' ')} No details were filled. ${advice}` }
+    return { tone: 'failed', notes: [], text: `${reasons.join(' ')} No details were filled. ${advice}` }
   }
-  if (kind === 'photo' || !slot.uploaded || !extraction) return { tone: 'none', text: '' }
-  const filled = extraction.filled.length
-  const fields = `${filled} ${filled === 1 ? 'field' : 'fields'}`
-  switch (extraction.status) {
-    case 'processing':
-      return { tone: 'reading', text: extraction.message || `Reading the ${kind.replaceAll('_', ' ')}…` }
-    case 'done':
-      return { tone: 'done', text: `${filled > 0 ? `Filled ${fields} on the form` : 'Read. Nothing new to fill in'}${notChangedNote(extraction, '. ')}` }
-    case 'needs_review':
-      return { tone: 'review', text: `${filled > 0 ? `Filled ${fields}. ` : ''}${extraction.message || 'Some pages could not be read. Please check the details.'}${notChangedNote(extraction, ' ')}` }
-    default:
-      return { tone: 'failed', text: `${extraction.message || 'Could not read this document.'} Enter the details manually.` }
+  if (kind === 'photo' || !slot.uploaded || !extraction) return { tone: 'none', text: '', notes: [] }
+  const tone = lineTone(extraction)
+  const filled = (extraction.filled ?? []).length
+  const notes = extractionNotes(extraction).map((note) => note.text)
+  switch (tone) {
+    case 'running': return { tone, notes, text: extraction.message || `Reading the ${kind.replaceAll('_', ' ')}…` }
+    case 'failed': return { tone, notes, text: `${extraction.message || 'Could not read this document.'} Enter the details manually.` }
+    case 'filled': return { tone, notes, text: filled > 0 ? `Filled ${filled} ${filled === 1 ? 'field' : 'fields'} on the form` : 'Read. Nothing new to fill in' }
+    default: return { tone, notes, text: extraction.status === 'done' ? 'Read. Nothing new to fill in' : 'Read. Please check the notes' }
   }
+}
+
+/** Where one document line sits: one per file for a multi-file slot whose files carry a reading, otherwise one per slot. */
+export const extractionLineKey = (kind: string, attachmentId?: string | null): string => (attachmentId ? `${kind}:${attachmentId}` : kind)
+
+/**
+ * The notes of every document line, de-duplicated across the whole Documents list. A note that names another kind ("Passport: ...")
+ * is shown only on that kind's line, never on the line it came from (the resume's reading also cross-checks the passport); when that
+ * kind has no line to show it on, it stays where it was found so nothing is hidden. The same sentence is never shown twice on a line.
+ */
+export function routeLineNotes(documents: Record<string, Pick<DocumentSlot, 'slot' | 'uploaded' | 'multiple' | 'files' | 'extraction'> | undefined>): Record<string, string[]> {
+  type Line = { key: string; kind: string; extraction: Extraction }
+  const lines: Line[] = []
+  for (const slot of Object.values(documents)) {
+    if (!slot) continue
+    const files = slot.multiple ? (slot.files ?? []).filter((file) => file.extraction) : []
+    const sources: [string, Extraction][] = files.length
+      ? files.map((file): [string, Extraction] => [extractionLineKey(slot.slot, file.attachmentId), file.extraction as Extraction])
+      : slot.extraction ? [[extractionLineKey(slot.slot), slot.extraction]] : []
+    for (const [key, extraction] of sources) {
+      if (describeExtraction(slot.slot, { uploaded: slot.uploaded, extraction }).tone !== 'none') lines.push({ key, kind: slot.slot, extraction })
+    }
+  }
+  const first = new Map<string, string>()
+  for (const line of lines) if (!first.has(line.kind)) first.set(line.kind, line.key)
+  const out: Record<string, string[]> = Object.fromEntries(lines.map((line) => [line.key, []]))
+  for (const line of lines) {
+    for (const note of extractionNotes(line.extraction)) {
+      const home = note.about && note.about !== line.kind ? first.get(note.about) : undefined
+      const target = out[home ?? line.key]
+      if (!target.includes(note.text)) target.push(note.text)
+    }
+  }
+  return out
 }
 
 export const isReading = (form: Pick<ApplicationFormData, 'documents' | 'processing'>): boolean =>
