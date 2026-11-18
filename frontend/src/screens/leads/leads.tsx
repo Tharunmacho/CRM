@@ -229,11 +229,11 @@ export default function LeadsPage() {
 
   const fmt = (value?: number) => (value === undefined ? '–' : value.toLocaleString())
   const kpis = [
-    { label: 'Total leads', value: fmt(summary?.total), detail: summary?.scope === 'mine' ? 'Assigned to you' : 'Everyone who answered your ads', icon: Users, active: card === 'total', onSelect: () => pickCard('total') },
-    { label: NEW_CARD_LABEL, value: fmt(summary?.newToday), detail: NEW_CARD_DETAIL, icon: CalendarPlus, active: card === 'new_today', onSelect: () => pickCard('new_today') },
-    { label: 'Not contacted', value: fmt(summary?.uncontacted), detail: 'Nobody has called yet', icon: PhoneOff, tone: 'warn' as const, active: card === 'not_contacted', onSelect: () => pickCard('not_contacted') },
-    { label: 'Interested', value: fmt(summary ? summary.interested + summary.resumeReceived : undefined), detail: 'Said yes, or sent a resume', icon: ThumbsUp, tone: 'ok' as const, active: card === 'interested', onSelect: () => pickCard('interested') },
-    { label: 'Follow-ups due', value: fmt(summary?.followUpsDueMine), detail: 'Yours, due today or overdue', icon: BellRing, tone: 'warn' as const, active: card === 'follow_ups', onSelect: () => pickCard('follow_ups') },
+    { label: 'Total leads', value: fmt(summary?.total), hint: summary?.scope === 'mine' ? 'Assigned to you' : 'Everyone who answered your ads', icon: Users, active: card === 'total', onSelect: () => pickCard('total') },
+    { label: NEW_CARD_LABEL, value: fmt(summary?.newToday), hint: NEW_CARD_DETAIL, icon: CalendarPlus, active: card === 'new_today', onSelect: () => pickCard('new_today') },
+    { label: 'Not contacted', value: fmt(summary?.uncontacted), hint: 'Nobody has called yet', icon: PhoneOff, tone: 'warn' as const, active: card === 'not_contacted', onSelect: () => pickCard('not_contacted') },
+    { label: 'Interested', value: fmt(summary ? summary.interested + summary.resumeReceived : undefined), hint: 'Said yes, or sent a resume', icon: ThumbsUp, tone: 'ok' as const, active: card === 'interested', onSelect: () => pickCard('interested') },
+    { label: 'Follow-ups due', value: fmt(summary?.followUpsDueMine), hint: 'Yours, due today or overdue', icon: BellRing, tone: 'warn' as const, active: card === 'follow_ups', onSelect: () => pickCard('follow_ups') },
   ]
 
   const neverUploaded = !data.loading && !data.error && total === 0 && !hasFilters && (summary?.total ?? 0) === 0

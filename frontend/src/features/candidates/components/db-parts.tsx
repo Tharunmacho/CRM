@@ -68,6 +68,8 @@ export interface KpiCardItem {
   label: string
   value: number | string
   detail?: string
+  /** Shown only on hover, never as text under the number. */
+  hint?: string
   icon: LucideIcon
   /** Real arrival history for this slice, when there is some. */
   trend?: ArrivalTrend
@@ -101,7 +103,7 @@ function Spark({ points }: { points: number[] }) {
 export function KpiCards({ items }: { items: KpiCardItem[] }) {
   return (
     <div className="db-kpis" data-count={items.length} style={{ '--db-kpi-cols': items.length } as CSSProperties}>
-      {items.map(({ label, value, detail, icon: Icon, trend, spark, tone, active, onSelect }) => {
+      {items.map(({ label, value, detail, hint, icon: Icon, trend, spark, tone, active, onSelect }) => {
         const caption = trend ? trendCaption(trend) : null
         const body = (
           <>
@@ -129,6 +131,7 @@ export function KpiCards({ items }: { items: KpiCardItem[] }) {
             tabIndex={0}
             aria-pressed={!!active}
             aria-label={label}
+            title={hint}
             onClick={onSelect}
             onKeyDown={(event: KeyboardEvent<HTMLElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }}
           >
