@@ -143,7 +143,7 @@ export type BucketKey = 'daily' | 'follow-up' | 'travelled'
  */
 export function bucketTabs(counts: { today: number | null; followUp: number | null }): { key: BucketKey; label: string }[] {
   return [
-    { key: 'daily', label: tabLabel("Today's candidates", counts.today) },
+    { key: 'daily', label: 'Candidates' },
   ]
 }
 
@@ -363,4 +363,86 @@ const SHORT_COUNTRIES: Record<string, string> = {
 /** The short form recruiters use for the longest Gulf/English names so a pill stays compact; the full name is the tooltip. */
 export function countryShort(name: string): string {
   return SHORT_COUNTRIES[name.trim().toLowerCase().replace(/\s+/g, ' ')] ?? name.trim()
+}
+
+
+/* ---------------------------------------------------------------- one list per recruiter: what was done today */
+
+/** What happened to a candidate today: the initial call was answered, a stage was finished, a remark was written. */
+export interface TodayWork { called: boolean; moved: boolean; remarked: boolean }
+
+export interface TaskRow extends DailyItem { today: TodayWork }
+
+/** The calendar day ("2026-11-18") of a moment on the agency clock; '' when the moment is not a date. */
+export function dayOf(iso: string | null | undefined, timeZone?: string): string {
+  const date = new Date(iso ?? '')
+  if (!Number.isFinite(date.getTime())) return ''
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+}
+
+/** A follow-up row (one per placement) in the shape of a daily row, so both lists share every cell. */
+export function followUpAsDaily(item: FollowUpItem): DailyItem {
+  return {
+    ...item, kind: 'stage', waiting: false, status: 'open', completedAt: null,
+    referral: { source: '', label: '', detail: null },
+  } as DailyItem
+}
+
+/**
+ * One row per candidate a recruiter holds: the daily list (initial calls and waiting stages, with what was finished today) plus
+ * the follow-up list (placements moving through stages 2 to 11). A candidate in both appears once, from the daily list.
+ * Candidates nobody touched today come first; inside each half the ones with a stage waiting, then the furthest along.
+ */
+export function taskRows(daily: DailyItem[], followUp: FollowUpItem[], today: string, timeZone?: string): TaskRow[] {
+  const merged = new Map<string, DailyItem>()
+  for (const item of daily) merged.set(item.candidateId, item)
+  for (const item of followUp) if (!merged.has(item.candidateId)) merged.set(item.candidateId, followUpAsDaily(item))
+  const rows = [...merged.values()].map((item): TaskRow => ({
+    ...item,
+    today: {
+      called: item.status === 'done' && item.kind === 'call',
+      moved: item.status === 'done' && item.kind === 'stage',
+      remarked: !!item.remark && dayOf(item.remark.at, timeZone) === today,
+    },
+  }))
+  const touched = (row: TaskRow) => (row.today.called || row.today.moved || row.today.remarked ? 1 : 0)
+  return rows.sort((a, b) => touched(a) - touched(b) || Number(b.waiting) - Number(a.waiting) || (b.stage ?? 0) - (a.stage ?? 0))
+}
+
+export interface RecruiterWork { assigned: number; called: number; moved: number; remarks: number; untouched: number }
+
+/** Per recruiter: candidates held, called today, stages moved today, remarks written today, and candidates nothing happened to. */
+export function recruiterWork(rows: TaskRow[]): Map<string, RecruiterWork> {
+  const work = new Map<string, RecruiterWork>()
+  for (const row of rows) {
+    const entry = work.get(row.ownerId) ?? { assigned: 0, called: 0, moved: 0, remarks: 0, untouched: 0 }
+    entry.assigned += 1
+    if (row.today.called) entry.called += 1
+    if (row.today.moved) entry.moved += 1
+    if (row.today.remarked) entry.remarks += 1
+    if (!row.today.called && !row.today.moved && !row.today.remarked) entry.untouched += 1
+    work.set(row.ownerId, entry)
+  }
+  return work
+}
+
+export const NO_WORK: RecruiterWork = { assigned: 0, called: 0, moved: 0, remarks: 0, untouched: 0 }
+
+export type WorkStatus = 'idle' | 'working' | 'done' | 'none'
+
+/** Idle: nothing happened to any candidate yet. Done: every candidate has been touched. Otherwise working. */
+export function workStatus(work: RecruiterWork): WorkStatus {
+  if (work.assigned === 0) return 'none'
+  if (work.untouched === 0) return 'done'
+  return work.untouched === work.assigned ? 'idle' : 'working'
+}
+
+export const WORK_LABEL: Record<WorkStatus, string> = { idle: 'Nothing done yet', working: 'In progress', done: 'All touched', none: 'No candidates' }
+
+/** Whose card comes first: nothing done yet (largest list first), then in progress (most still untouched first), then all touched. */
+export function peopleByWork<T extends { userId: string; name: string }>(people: T[], work: Map<string, RecruiterWork>): T[] {
+  const rank: Record<WorkStatus, number> = { idle: 0, working: 1, done: 2, none: 3 }
+  const of = (id: string) => work.get(id) ?? NO_WORK
+  return [...people].sort((a, b) => rank[workStatus(of(a.userId))] - rank[workStatus(of(b.userId))]
+    || of(b.userId).untouched - of(a.userId).untouched || a.name.localeCompare(b.name))
 }

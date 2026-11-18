@@ -3,8 +3,8 @@ import { CircleAlert, CircleCheck, Clock, Minus, Users, X, type LucideIcon } fro
 import { cn } from '@/shared/lib/cn'
 import { initials } from '@/shared/lib/format'
 import {
-  STATUS_LABEL, donePercent, followUpByCount, recruiterStatus, staffByAttention,
-  type DailyStaffSummary, type RecruiterStatus,
+  NO_WORK, STATUS_LABEL, WORK_LABEL, donePercent, followUpByCount, peopleByWork, recruiterStatus, staffByAttention, workStatus,
+  type DailyStaffSummary, type RecruiterStatus, type RecruiterWork, type WorkStatus,
 } from '@/features/daily-work/daily-work-model'
 
 const STATUS_ICON: Record<RecruiterStatus, LucideIcon> = { idle: CircleAlert, behind: Clock, 'on-track': CircleCheck, none: Minus }
@@ -118,5 +118,57 @@ export function FollowUpBoard({ staff, selected, onSelect }: {
           )
         })}</ul>}
     </section>
+  )
+}
+
+
+const WORK_ICON: Record<WorkStatus, LucideIcon> = { idle: CircleAlert, working: Clock, done: CircleCheck, none: Minus }
+const WORK_CLASS: Record<WorkStatus, string> = { idle: 'idle', working: 'behind', done: 'on-track', none: 'none' }
+
+/**
+ * Admin and manager: one card per recruiter with what they hold and what they did today: candidates assigned, called, stages
+ * moved and remarks written. Recruiters with nothing done yet come first. A card filters the list below to that recruiter.
+ */
+export function WorkBoard({ people, work, selected, onSelect, idleOnly, onClearIdle }: {
+  people: { userId: string; name: string; active: boolean }[]; work: Map<string, RecruiterWork>
+  selected: string; onSelect: (id: string) => void; idleOnly: boolean; onClearIdle: () => void
+}) {
+  const sorted = useMemo(() => peopleByWork(people, work), [people, work])
+  const shown = idleOnly ? sorted.filter((p) => workStatus(work.get(p.userId) ?? NO_WORK) === 'idle') : sorted
+  return (
+    <section className="dw-panel dwb-board" id="recruiters" aria-label="Recruiters">
+      <BoardHead title="Recruiters" selected={selected} onSelect={onSelect} hint="">
+        {idleOnly && <button type="button" className="tk-chip is-active dwb-chip-x" onClick={onClearIdle}>Nothing done yet<X size={14} aria-hidden="true" /><span className="sr-only">Show every recruiter</span></button>}
+      </BoardHead>
+      {shown.length === 0
+        ? <p className="dwb-none">{people.length === 0 ? 'No recruiters yet.' : 'Every recruiter has done something today.'}</p>
+        : <ul className="dwb-cards">{shown.map((p) => <li key={p.userId}><WorkCard person={p} work={work.get(p.userId) ?? NO_WORK} active={selected === p.userId} onSelect={() => onSelect(selected === p.userId ? 'all' : p.userId)} /></li>)}</ul>}
+    </section>
+  )
+}
+
+function WorkCard({ person, work, active, onSelect }: { person: { name: string; active: boolean }; work: RecruiterWork; active: boolean; onSelect: () => void }) {
+  const status = workStatus(work)
+  const Icon = WORK_ICON[status]
+  const touched = work.assigned - work.untouched
+  return (
+    <button type="button" className={cn('dwb-card', `is-${WORK_CLASS[status]}`, active && 'is-active')} aria-pressed={active}
+      aria-label={`${person.name}: ${work.assigned} assigned, ${work.called} called, ${work.moved} stages moved, ${work.remarks} remarks today. ${active ? 'Showing their candidates. Press to show everyone.' : 'Show their candidates.'}`} onClick={onSelect}>
+      <span className="dwb-card-top">
+        <Avatar name={person.name} />
+        <span className="dwb-card-name"><b title={person.name}>{person.name}</b>{!person.active && <small>Inactive</small>}</span>
+        <span className={cn('dwb-chip', `is-${WORK_CLASS[status]}`)}><Icon size={13} strokeWidth={2} aria-hidden="true" />{WORK_LABEL[status]}</span>
+      </span>
+      {work.assigned === 0
+        ? <span className="dwb-card-empty">Nothing assigned</span>
+        : <>
+          <span className="dwb-card-numbers tnum"><span><b>{work.assigned}</b> assigned</span><em>{donePercent({ toWork: work.untouched, doneToday: touched })}%</em></span>
+          <span className="dwb-work tnum"><span><b>{work.called}</b> called</span><span><b>{work.moved}</b> stage moved</span><span><b>{work.remarks}</b> remarks</span></span>
+          <span className="dwb-stack" aria-hidden="true">
+            {touched > 0 && <i className="is-done" style={{ flexGrow: touched }} />}
+            {work.untouched > 0 && <i className="is-todo" style={{ flexGrow: work.untouched }} />}
+          </span>
+        </>}
+    </button>
   )
 }

@@ -1,26 +1,24 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CheckCircle2, Layers, ListChecks, RefreshCw, TriangleAlert, UserX, Users } from 'lucide-react'
+import { ListChecks, PhoneCall, RefreshCw, TriangleAlert, UserX, Users, Workflow } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader } from '@/shared/ui/display'
 import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
-import { listTitle, splitItems, statusCounts, summaryLine, teamTotals } from '@/features/daily-work/daily-work-model'
-import { useDailyWork, useFollowUp, useTicker } from '@/features/daily-work/use-daily-work'
-import { DailyTable, type DailyGroup } from './daily-table'
-import { StaffBoard } from './daily-staff-board'
+import { NO_WORK, listTitle, recruiterWork, taskRows, workStatus } from '@/features/daily-work/daily-work-model'
+import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
+import { TaskTable } from './task-table'
+import { WorkBoard } from './daily-staff-board'
 import { StatStrip, type StatTileData } from './daily-stat-strip'
-import { FollowUpTable } from './follow-up-table'
-import { TravelledPanel } from './travelled-panel'
 import '@/styles/daily-work.css'
 import '@/styles/daily-work-board.css'
 
 /**
- * The recruiter's own candidates that are still being worked, as one flat list: no daily quota, no morning/evening, no hourly
- * slots, no deadlines. Candidates with a stage waiting come first, then the newest assigned; the ones finished today sit under
- * "Done today". Admin and manager see everyone's candidates with a Recruiter column and can filter by recruiter.
+ * Every recruiter's candidates on one page: the ones they hold (to call, and moving through the stages) and what happened to each
+ * today: called, stage moved, remark written. The cards show, per recruiter, how many candidates they hold and how many of them
+ * were called, moved or remarked today; a card filters the list. A recruiter sees only their own.
  */
 export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const store = useStore()
@@ -28,11 +26,12 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const navigate = useNavigate()
   const supervisor = store.can('all_reports')
   const staffFilter = supervisor ? params.get('staff') || 'all' : undefined
-  const { data, error, loading, refresh } = useDailyWork({ staff: staffFilter })
-  // The follow-up total for the summary strip: the whole team's, whichever recruiter the list below is showing (same request the tab counts make).
-  const followUp = useFollowUp({ staff: 'all', enabled: supervisor })
-  const followUpList = useFollowUp({ staff: staffFilter })
-  const now = useTicker(60_000, !!followUpList.data)
+  const daily = useDailyWork({ staff: staffFilter })
+  const follow = useFollowUp({ staff: staffFilter })
+  // The cards and the strip always cover everyone, whichever recruiter the list below is filtered to.
+  const filtered = supervisor && staffFilter !== 'all'
+  const everyoneDaily = useDailyWork({ staff: 'all', enabled: filtered })
+  const everyoneFollow = useFollowUp({ staff: 'all', enabled: filtered })
   const [idleOnly, setIdleOnly] = useState(false)
   const [openApp, setOpenApp] = useState<{ id: string; stage?: number } | null>(null)
   const zone = store.agencyTimezone
@@ -42,106 +41,88 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
     if (value && value !== 'all') next.set('staff', value); else next.delete('staff')
     return next
   })
+  const refreshAll = async () => { await Promise.all([daily.refresh(), follow.refresh(), ...(filtered ? [everyoneDaily.refresh(), everyoneFollow.refresh()] : [])]) }
 
-  const items = data?.items
-  const groups: DailyGroup[] = useMemo(() => {
-    const { toWork, done } = splitItems(items ?? [])
-    return [
-      { key: 'to-work', title: 'To work', icon: <ListChecks size={15} aria-hidden="true" />, items: toWork },
-      { key: 'done-today', title: 'Done today', icon: <CheckCircle2 size={15} aria-hidden="true" />, items: done, tone: 'done' as const },
-    ].filter((g) => g.items.length > 0)
-  }, [items])
+  const today = daily.data?.agencyDate ?? ''
+  const rows = useMemo(() => taskRows(daily.data?.items ?? [], follow.data?.items ?? [], today, zone), [daily.data, follow.data, today, zone])
+  const boardDaily = filtered ? everyoneDaily.data : daily.data
+  const boardFollow = filtered ? everyoneFollow.data : follow.data
+  const everyoneRows = useMemo(() => taskRows(boardDaily?.items ?? [], boardFollow?.items ?? [], today, zone), [boardDaily, boardFollow, today, zone])
+  const work = useMemo(() => recruiterWork(everyoneRows), [everyoneRows])
 
-  if (loading && !data) return <div className="tk dw"><PageHeader title="Tasks" description="Your candidates." />
+  if (daily.loading && !daily.data) return <div className="tk dw"><PageHeader title="Tasks" />
     <section className="dw-panel dw-state" aria-busy="true"><p role="status">Loading your candidates…</p></section></div>
-  if (error && !data) return <div className="tk dw"><PageHeader title="Tasks" description="Your candidates." />
+  if (daily.error && !daily.data) return <div className="tk dw"><PageHeader title="Tasks" />
     <section className="dw-panel dw-state"><TriangleAlert size={22} aria-hidden="true" />
-      <p role="alert" className="dw-state-title">{error}</p><p>We could not load the list. Check your connection and try again.</p>
-      <Button variant="primary" onClick={() => void refresh()}>Try again</Button></section></div>
-  if (!data) return null
+      <p role="alert" className="dw-state-title">{daily.error}</p><p>We could not load the list. Check your connection and try again.</p>
+      <Button variant="primary" onClick={() => void refreshAll()}>Try again</Button></section></div>
+  if (!daily.data) return null
 
-  const summary = data.summary
+  const data = daily.data
   const mine = !supervisor
-  const roster = data.staff ?? []
+  const roster = (data.staff ?? []).map((s) => ({ userId: s.userId, name: s.name, active: s.active }))
+  for (const s of follow.data?.staff ?? []) if (!roster.some((r) => r.userId === s.userId)) roster.push({ userId: s.userId, name: s.name, active: s.active })
   const person = supervisor && staffFilter && staffFilter !== 'all' ? roster.find((s) => s.userId === staffFilter)?.name ?? store.user(staffFilter)?.name ?? 'Recruiter' : ''
-  const title = mine ? "Today's candidates" : listTitle(person)
-  // The strip is always the whole team (the per-recruiter list covers everyone), so picking a recruiter below never changes it.
-  const team = teamTotals(roster)
-  const counts = statusCounts(roster)
+  const title = mine ? 'My candidates' : listTitle(person)
+
+  // The strip: the whole team for an admin or manager, the person's own numbers for a recruiter.
+  const totals = [...work.values()].reduce((sum, w) => ({ assigned: sum.assigned + w.assigned, called: sum.called + w.called, moved: sum.moved + w.moved,
+    remarks: sum.remarks + w.remarks, untouched: sum.untouched + w.untouched }), { ...NO_WORK })
+  const idle = roster.filter((s) => workStatus(work.get(s.userId) ?? NO_WORK) === 'idle').length
   const tiles: StatTileData[] = [
-    { key: 'to-work', label: 'Candidates to work today', value: team.toWork, icon: ListChecks, detail: `Across ${roster.length} ${roster.length === 1 ? 'recruiter' : 'recruiters'}` },
-    { key: 'done', label: 'Done today', value: team.doneToday, unit: `of ${team.total}`, icon: CheckCircle2, tone: 'green', progress: { done: team.doneToday, total: team.total } },
-    { key: 'follow-up', label: 'Follow-up candidates', value: followUp.data?.summary.total ?? '–', icon: Layers, detail: 'Selected and still moving', actionLabel: 'Show below', onSelect: () => document.getElementById('follow-up')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) },
-    { key: 'idle', label: 'Nothing done yet', value: counts.idle, unit: counts.idle === 1 ? 'recruiter' : 'recruiters', icon: UserX, tone: counts.idle > 0 ? 'red' : 'green',
-      detail: counts.idle > 0 ? (idleOnly ? 'Showing them above' : 'Select to see who') : 'Everyone has started',
-      ...(counts.idle > 0 ? { onSelect: () => { setIdleOnly((v) => !v); document.getElementById('recruiters')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, active: idleOnly, actionLabel: 'Show only these recruiters' } : {}) },
+    { key: 'assigned', label: 'Candidates assigned', value: totals.assigned, icon: ListChecks, unit: supervisor ? `${roster.length} ${roster.length === 1 ? 'recruiter' : 'recruiters'}` : undefined },
+    { key: 'called', label: 'Called today', value: totals.called, unit: `of ${totals.assigned}`, icon: PhoneCall, tone: 'green', progress: { done: totals.called, total: totals.assigned } },
+    { key: 'moved', label: 'Stages moved today', value: totals.moved, icon: Workflow, tone: 'blue', title: 'Stages finished today across all candidates' },
+    supervisor
+      ? { key: 'idle', label: 'Nothing done yet', value: idle, unit: idle === 1 ? 'recruiter' : 'recruiters', icon: UserX, tone: idle > 0 ? 'red' : 'green',
+        ...(idle > 0 ? { onSelect: () => { setIdleOnly((v) => !v); document.getElementById('recruiters')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, active: idleOnly, actionLabel: 'Show only recruiters with nothing done' } : {}) }
+      : { key: 'untouched', label: 'Not touched yet', value: totals.untouched, unit: `of ${totals.assigned}`, icon: UserX, tone: totals.untouched > 0 ? 'amber' : 'green' },
   ]
+
+  const summary = `${rows.length} ${rows.length === 1 ? 'candidate' : 'candidates'}${supervisor && !person ? ` · ${data.staffCount} ${data.staffCount === 1 ? 'recruiter' : 'recruiters'}` : ''}`
+  const open = (row: { applicationId: string | null; candidateId: string; stage: number | null }) =>
+    row.applicationId ? setOpenApp({ id: row.applicationId, stage: row.stage ?? undefined }) : navigate(applicationFormHref(row.candidateId))
 
   return (
     <div className="tk dw dwb">
       <ReminderBanner />
-      <PageHeader
-        title="Tasks"
-        description={mine
-          ? 'Candidates assigned to you who still need prescreening.'
-          : 'Candidates who still need prescreening, for every recruiter.'}
+      <PageHeader title="Tasks"
         actions={<>
           <Button onClick={onOpenAll}><ListChecks size={15} aria-hidden="true" />All 48-hour tasks</Button>
-          <Button onClick={() => void refresh()}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
-        </>}
-      />
+          <Button onClick={() => void refreshAll()}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
+        </>} />
 
       <div className="dw-alerts">
-        {data.truncated && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />
-          Only the first {data.items.length} of {summary.total} candidates are listed. {supervisor ? 'Pick a recruiter to see all of theirs.' : 'The counts above are complete.'}</p>}
-        {error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({error}). Showing the last version.</p>}
+        {(data.truncated || follow.data?.truncated) && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />
+          Not every candidate is listed. {supervisor ? 'Pick a recruiter to see all of theirs.' : ''}</p>}
+        {daily.error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({daily.error}). Showing the last version.</p>}
       </div>
 
-      {supervisor && <StatStrip tiles={tiles} label="Today at a glance, whole team" />}
-      {supervisor && <StaffBoard staff={roster} selected={staffFilter ?? 'all'} onSelect={setStaff} idleOnly={idleOnly} onClearIdle={() => setIdleOnly(false)} />}
+      <StatStrip tiles={tiles} label={supervisor ? 'Today at a glance, whole team' : 'Today at a glance'} />
+      {supervisor && <WorkBoard people={roster} work={work} selected={staffFilter ?? 'all'} onSelect={setStaff} idleOnly={idleOnly} onClearIdle={() => setIdleOnly(false)} />}
 
-      <section className="dw-panel" aria-label="Today's candidates">
+      <section className="dw-panel" aria-label="Candidates">
         <div className="dw-panel-head">
           <div><h2>{supervisor && <Users size={16} aria-hidden="true" />} {title}</h2>
-            <p className="dw-summary" aria-live="polite">{summaryLine(summary)}{supervisor && !person ? ` · ${data.staffCount} ${data.staffCount === 1 ? 'recruiter' : 'recruiters'}` : ''}</p></div>
+            <p className="dw-summary" aria-live="polite">{summary}</p></div>
           {supervisor && <Select value={staffFilter ?? 'all'} onChange={(e) => setStaff(e.target.value)} className="tk-select" aria-label="Filter by recruiter">
             <option value="all">All recruiters</option>
-            {(data.staff ?? []).map((s) => <option key={s.userId} value={s.userId}>{s.name}{!s.active ? ' (inactive)' : ''}</option>)}
+            {roster.map((s) => <option key={s.userId} value={s.userId}>{s.name}{!s.active ? ' (inactive)' : ''}</option>)}
           </Select>}
         </div>
 
-        {data.items.length === 0 ? (
-          <EmptyState title={mine ? 'No candidates to work' : person ? `${person} has no candidates today` : 'No candidates to work today'}
-            description={mine
-              ? 'Candidates assigned to you appear here until prescreening is finished. Nothing needs prescreening right now.'
-              : person ? 'Nothing is assigned to this recruiter that still needs prescreening. Pick another recruiter, or show everyone.'
-                : 'Candidates appear here once they are assigned to a recruiter and still need prescreening.'}
+        {rows.length === 0 ? (
+          <EmptyState title={mine ? 'No candidates assigned' : person ? `${person} has no candidates` : 'No candidates assigned'}
+            description={mine ? 'Candidates assigned to you appear here.' : person ? 'Pick another recruiter, or show everyone.' : 'Candidates appear here once they are assigned to a recruiter.'}
             action={person ? <Button onClick={() => setStaff('all')}>Show all recruiters</Button> : undefined} />
         ) : (
-          <DailyTable groups={groups} zone={zone} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
-            canWork={(item) => !!item.taskId && (store.can('work_any_candidate') || item.ownerId === store.me.id)}
-            onOpen={(item) => item.applicationId ? setOpenApp({ id: item.applicationId, stage: item.stage ?? undefined }) : navigate(applicationFormHref(item.candidateId))}
-            onProfile={(item) => navigate(`/candidates/${item.candidateId}`)}
-            onRemark={async (item, text) => { if (item.taskId) { await store.addRemark(item.taskId, text); await refresh() } }} />
+          <TaskTable rows={rows} zone={zone} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
+            canWork={(row) => !!row.taskId && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
+            onOpen={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
+            onRemark={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text); await refreshAll() } }} />
         )}
       </section>
-
-      <section className="dw-panel" aria-label="Follow-up" id="follow-up">
-        <div className="dw-panel-head">
-          <div><h2><Layers size={16} aria-hidden="true" /> Follow-up</h2>
-            <p className="dw-summary" aria-live="polite">{followUpList.data?.summary.total ?? 0} {(followUpList.data?.summary.total ?? 0) === 1 ? 'candidate' : 'candidates'}</p></div>
-        </div>
-        {!followUpList.data ? <p className="dw-state" role="status">Loading follow-up candidates…</p>
-          : followUpList.data.items.length === 0 ? <EmptyState title={mine ? 'No candidates to follow up' : 'No follow-up candidates for this selection'} description="A candidate shows here once prescreening is finished and stays while the application is still going forward." />
-            : <FollowUpTable items={followUpList.data.items} now={now} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
-              canWork={(item) => !!item.taskId && (store.can('work_any_candidate') || item.ownerId === store.me.id)}
-              onOpen={(item) => navigate(applicationFormHref(item.candidateId))}
-              onStage={(item) => setOpenApp({ id: item.applicationId, stage: item.stage })}
-              onProfile={(item) => navigate(`/candidates/${item.candidateId}`)}
-              onRemark={async (item, text) => { if (item.taskId) { await store.addRemark(item.taskId, text); await followUpList.refresh(); await refresh() } }} />}
-      </section>
-      <TravelledPanel supervisor={supervisor} recruiterName={person} onOpen={(row) => navigate(applicationFormHref(row.candidateId))} />
-      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onClose={() => { setOpenApp(null); void refresh(); void followUpList.refresh() }} />
+      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onClose={() => { setOpenApp(null); void refreshAll() }} />
     </div>
   )
 }

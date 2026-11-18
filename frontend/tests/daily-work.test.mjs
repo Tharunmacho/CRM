@@ -81,7 +81,7 @@ test('the table has the agreed sheet columns and no Deadline column; the Recruit
   assert.doesNotMatch(table, /secondaryId|cid-ref/)
   // Open goes to the application form, the row menu keeps both entries, remarks stay.
   const screen = await code('../src/screens/tasks/daily-work.tsx')
-  assert.match(screen, /navigate\(applicationFormHref\(item\.candidateId\)\)/)
+  assert.match(screen, /navigate\(applicationFormHref\(row\.candidateId\)\)/)
   assert.match(table, /Open candidate profile/)
   assert.match(table, /Open stage/)
   assert.match(table, /Add remark/)
@@ -94,13 +94,13 @@ test('the screen has no morning/evening, postponed, quota, goals or hourly check
     assert.doesNotMatch(text, /Morning|Evening|Postponed|carried over|quota|GoalsPanel|GoalsDialog|daily-goals|Checkpoint|Next deadline|overdue/i)
     assert.doesNotMatch(text, /All staff|Filter by staff/)
   }
-  assert.match(screen, /Today's candidates/)
   assert.match(screen, /listTitle\(person\)/)
   assert.match(screen, /All recruiters/)
-  assert.match(screen, /Done today/)
-  assert.match(screen, /summaryLine\(summary\)/)
+  assert.match(screen, /Called today/)
+  assert.match(screen, /Stages moved today/)
   assert.match(board, /staffByAttention/)
   assert.match(board, /recruiterStatus/)
+  assert.match(board, /WorkBoard/)
 })
 
 test('the status chip rule: no candidates, all done, idle (nothing done), behind (under a third done), on track', () => {
@@ -190,9 +190,8 @@ test('the remark box starts at one line, grows with the text to about four lines
   assert.ok(m.remarkBox(48).height < m.remarkBox(90).height, 'grows with the text and shrinks back when it is deleted')
 })
 
-test("the Tasks page has one tab, Today's candidates with its count: Follow-up and Travelled are lists on the same page", () => {
-  assert.deepEqual(m.bucketTabs({ today: 12, followUp: 7 }), [{ key: 'daily', label: "Today's candidates (12)" }])
-  assert.deepEqual(m.bucketTabs({ today: null, followUp: null }).map((t) => t.label), ["Today's candidates"])
+test("the Tasks page has one 'Candidates' tab; Follow-up and Travelled are not tabs", () => {
+  assert.deepEqual(m.bucketTabs({ today: 12, followUp: 7 }), [{ key: 'daily', label: 'Candidates' }])
   assert.equal(m.tabLabel('Follow-up', 0), 'Follow-up (0)')
 })
 
@@ -205,75 +204,46 @@ test('follow-up says how long ago the last update was', () => {
   assert.equal(m.staleLabel('bad', now), '')
 })
 
-test('the Tasks page shows Today, Follow-up and Travelled as lists on one page, with no Follow-up or Travelled tab', async () => {
+test('the Tasks page is one list of every recruiter\'s candidates with what happened to each today, and no Follow-up or Travelled tab', async () => {
   const tasks = await code('../src/screens/tasks/tasks.tsx')
   assert.match(tasks, /wantsFollowUp/)
   assert.match(tasks, /bucketTabs\(bucketCounts\)/)
   const daily = await code('../src/screens/tasks/daily-work.tsx')
-  assert.doesNotMatch(daily, /TasksTabs/)
-  assert.match(daily, /id="follow-up"/)
-  assert.match(daily, /FollowUpTable/)
-  assert.match(daily, /TravelledPanel/)
-  assert.match(daily, /All recruiters/)
-  assert.doesNotMatch(daily, /Deadline|Postponed|Morning|Evening|All staff/i)
-  const travelled = await code('../src/screens/tasks/travelled-panel.tsx')
-  assert.match(travelled, /useTravelled/)
-  // Follow-up reuses the Today's candidates cells instead of copying them.
-  const table = await code('../src/screens/tasks/follow-up-table.tsx')
-  assert.match(table, /from '\.\/daily-table'/)
-  assert.match(table, /TASK_COLUMNS/) // one column plan for both tables, so their headers and widths cannot drift apart
-  assert.doesNotMatch(table, /const COLUMNS/)
-  assert.match(table, /AmountCell/)
-  assert.match(table, /ReviewCell/)
-  assert.match(table, /Open stage/)
-  assert.match(table, /Open candidate profile/)
-  assert.match(table, /applicationFormHref|onOpen/)
-  assert.match(daily, /navigate\(applicationFormHref\(item\.candidateId\)\)/)
+  assert.doesNotMatch(daily, /TasksTabs|TravelledPanel|FollowUpTable/)
+  assert.match(daily, /taskRows\(/)
+  assert.match(daily, /recruiterWork\(/)
+  assert.match(daily, /WorkBoard/)
+  const table = await code('../src/screens/tasks/task-table.tsx')
+  assert.match(table, /title: 'TODAY'/)
+  assert.match(table, /Called/)
+  assert.match(table, /Stage moved/)
+  assert.match(table, /Remark added/)
+  assert.match(table, /from '\.\/daily-table'/) // the cells are the Tasks cells, not copies
 })
 
-test('a stage finished or an application closed refreshes both lists without a reload (the live topics they follow)', async () => {
-  const hook = await code('../src/features/daily-work/use-daily-work.ts')
-  assert.match(hook, /\['tasks', 'users', 'candidates', 'applications'\]/)
-  assert.match(hook, /useFollowUp/)
-  assert.match(hook, /'\/follow-up'/)
-})
-
-test("a recruiter's Tasks badge counts today's candidates to work; no overdue or deadline wording and no banner", async () => {
-  const shell = await code('../src/app/layout/app-shell.tsx')
-  assert.match(shell, /summary\.toWork/)
-  assert.match(shell, /to work today/)
-  assert.doesNotMatch(shell, /Complete your tasks first/)
-})
-
-test('AMOUNT is the advance collected, as money; blank when none is recorded', () => {
-  assert.equal(m.advanceLabel({ advanceAmount: 5000, advanceCurrency: 'INR' }), '₹5,000.00')
-  assert.equal(m.advanceLabel({ advanceAmount: 125000.5, advanceCurrency: null }), '₹1,25,000.50')
-  assert.equal(m.advanceLabel({ advanceAmount: null, advanceCurrency: null }), null)
-  assert.equal(m.advanceLabel({ advanceAmount: 0, advanceCurrency: 'INR' }), null)
-  assert.match(m.advanceLabel({ advanceAmount: 100, advanceCurrency: 'AED' }), /100\.00/)
-})
-
-test('the AMOUNT and GOOGLE REVIEW cells show Yes, Pending or a dash, and never read invoice figures', async () => {
-  const table = await code('../src/screens/tasks/daily-table.tsx')
-  assert.match(table, /googleReview === 'obtained'[\s\S]*>Yes</)
-  assert.match(table, /googleReview === 'pending'[\s\S]*>Pending</)
-  assert.match(table, /advanceLabel\(item\)/)
-  const model = await code('../src/features/daily-work/daily-work-model.ts')
-  assert.match(model, /advanceAmount: number \| null/)
-  assert.match(model, /googleReview: GoogleReview/)
-  for (const text of [table, model]) assert.doesNotMatch(text, /invoice|cgst|gst/i)
-})
-
-test('the Tasks tables carry no explanatory filler: no group sentence, no "Not saved", "pref.", "from location" or "No order yet" notes', async () => {
-  for (const path of ['daily-table.tsx', 'follow-up-table.tsx', 'daily-work.tsx', 'travelled-panel.tsx']) {
-    const text = await code(`../src/screens/tasks/${path}`)
-    assert.doesNotMatch(text, /Candidates with prescreening waiting|Work them in the order|Finished candidates are in Follow-up|Finished candidates move to Travelled|Not saved|from location|from skills|No order yet|'pref\.'|dw-sub|dw-pref|dw-add/, path)
-  }
-  const table = await code('../src/screens/tasks/daily-table.tsx')
-  assert.match(table, /const bands = groups\.length > 1/) // a single group has no band
-  assert.match(table, /placeholder="Add remark"/)
-  assert.match(table, /useAutoGrow/)
-  assert.match(table, /remarkBox\(/)
+test('what a recruiter did today: called, stage moved, remarked; the board counts them and the idle ones come first', () => {
+  const zone = 'Asia/Kolkata'
+  const base = { kind: 'stage', status: 'open', waiting: false, completedAt: null, referral: { source: '', label: '', detail: null }, remark: null, stage: 3 }
+  const daily = [
+    { ...base, id: 'a', candidateId: 'c1', ownerId: 'u1', kind: 'call', status: 'done', stage: null, completedAt: '2026-11-18T05:00:00Z' },
+    { ...base, id: 'b', candidateId: 'c2', ownerId: 'u1', status: 'done', completedAt: '2026-11-18T06:00:00Z' },
+    { ...base, id: 'c', candidateId: 'c3', ownerId: 'u1', remark: { body: 'x', at: '2026-11-18T07:00:00Z', by: 'G', count: 1 } },
+    { ...base, id: 'd', candidateId: 'c4', ownerId: 'u2' },
+  ]
+  const follow = [
+    { ...base, id: 'e', applicationId: 'e', candidateId: 'c2', ownerId: 'u1' },   // already in the daily list: shown once
+    { ...base, id: 'f', applicationId: 'f', candidateId: 'c5', ownerId: 'u2', remark: { body: 'old', at: '2026-11-10T07:00:00Z', by: 'Y', count: 1 } },
+  ]
+  const rows = m.taskRows(daily, follow, '2026-11-18', zone)
+  assert.equal(rows.length, 5)
+  assert.deepEqual(rows.slice(0, 2).map((r) => r.candidateId).sort(), ['c4', 'c5'], 'candidates nothing happened to come first')
+  const work = m.recruiterWork(rows)
+  assert.deepEqual(work.get('u1'), { assigned: 3, called: 1, moved: 1, remarks: 1, untouched: 0 })
+  assert.deepEqual(work.get('u2'), { assigned: 2, called: 0, moved: 0, remarks: 0, untouched: 2 })
+  assert.equal(m.workStatus(work.get('u1')), 'done')
+  assert.equal(m.workStatus(work.get('u2')), 'idle')
+  assert.deepEqual(m.peopleByWork([{ userId: 'u1', name: 'A' }, { userId: 'u2', name: 'B' }], work).map((p) => p.userId), ['u2', 'u1'])
+  assert.equal(m.dayOf('2026-11-18T20:00:00Z', zone), '2026-11-19', 'the agency clock, not UTC')
 })
 
 test('a declined row gets the "Declined" tag with its reason as the tooltip and a calm "Moved to Data Bank" note', () => {
