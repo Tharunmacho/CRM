@@ -61,18 +61,21 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const data = daily.data
   const mine = !supervisor
   const roster = (data.staff ?? []).map((s) => ({ userId: s.userId, name: s.name, active: s.active }))
+  // A recruiter's own card: the same figures, for themselves only.
+  if (!supervisor && !roster.some((r) => r.userId === store.me.id)) roster.push({ userId: store.me.id, name: store.me.name, active: true })
   for (const s of follow.data?.staff ?? []) if (!roster.some((r) => r.userId === s.userId)) roster.push({ userId: s.userId, name: s.name, active: s.active })
   const person = supervisor && staffFilter && staffFilter !== 'all' ? roster.find((s) => s.userId === staffFilter)?.name ?? store.user(staffFilter)?.name ?? 'Recruiter' : ''
   const title = mine ? 'My candidates' : listTitle(person)
 
   // The strip: the whole team for an admin or manager, the person's own numbers for a recruiter.
   const totals = [...work.values()].reduce((sum, w) => ({ assigned: sum.assigned + w.assigned, called: sum.called + w.called, moved: sum.moved + w.moved,
-    remarks: sum.remarks + w.remarks, untouched: sum.untouched + w.untouched }), { ...NO_WORK })
+    remarks: sum.remarks + w.remarks, untouched: sum.untouched + w.untouched, calledAll: sum.calledAll + w.calledAll, movedAll: sum.movedAll + w.movedAll }), { ...NO_WORK })
   const idle = roster.filter((s) => workStatus(work.get(s.userId) ?? NO_WORK) === 'idle').length
   const tiles: StatTileData[] = [
     { key: 'assigned', label: 'Candidates assigned', value: totals.assigned, icon: ListChecks, unit: supervisor ? `${roster.length} ${roster.length === 1 ? 'recruiter' : 'recruiters'}` : undefined },
-    { key: 'called', label: 'Called today', value: totals.called, unit: `of ${totals.assigned}`, icon: PhoneCall, tone: 'green', progress: { done: totals.called, total: totals.assigned } },
-    { key: 'moved', label: 'Stages moved today', value: totals.moved, icon: Workflow, tone: 'blue', title: 'Stages finished today across all candidates' },
+    { key: 'called', label: 'Called today', value: totals.called, unit: `of ${totals.assigned}`, icon: PhoneCall, tone: 'green', progress: { done: totals.called, total: totals.assigned },
+      detail: `Overall ${totals.calledAll}`, title: 'Candidates called or remarked today. Overall: candidates called or remarked at any time.' },
+    { key: 'moved', label: 'Stages moved today', value: totals.moved, icon: Workflow, tone: 'blue', detail: `Overall ${totals.movedAll}`, title: 'Stages finished today. Overall: the stages the candidates have been through.' },
     supervisor
       ? { key: 'idle', label: 'Nothing done yet', value: idle, unit: idle === 1 ? 'recruiter' : 'recruiters', icon: UserX, tone: idle > 0 ? 'red' : 'green',
         ...(idle > 0 ? { onSelect: () => { setIdleOnly((v) => !v); document.getElementById('recruiters')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, active: idleOnly, actionLabel: 'Show only recruiters with nothing done' } : {}) }
@@ -99,7 +102,9 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
       </div>
 
       <StatStrip tiles={tiles} label={supervisor ? 'Today at a glance, whole team' : 'Today at a glance'} />
-      {supervisor && <WorkBoard people={roster} work={work} selected={staffFilter ?? 'all'} onSelect={setStaff} idleOnly={idleOnly} onClearIdle={() => setIdleOnly(false)} />}
+      {supervisor
+        ? <WorkBoard people={roster} work={work} selected={staffFilter ?? 'all'} onSelect={setStaff} idleOnly={idleOnly} onClearIdle={() => setIdleOnly(false)} />
+        : <WorkBoard solo people={roster.filter((r) => r.userId === store.me.id)} work={work} selected={store.me.id} onSelect={() => undefined} idleOnly={false} onClearIdle={() => undefined} />}
 
       <section className="dw-panel" aria-label="Candidates">
         <div className="dw-panel-head">

@@ -19,15 +19,15 @@ function Avatar({ name }: { name: string }) {
 }
 
 /** The "All recruiters" reset chip plus, while a recruiter is picked, who is showing. */
-function BoardHead({ title, hint, selected, onSelect, children }: {
-  title: string; hint: string; selected: string; onSelect: (id: string) => void; children?: ReactNode
+function BoardHead({ title, hint, selected, onSelect, children, solo }: {
+  title: string; hint: string; selected: string; onSelect: (id: string) => void; children?: ReactNode; solo?: boolean
 }) {
   return (
     <div className="dw-panel-head dwb-head">
       <div><h2><Users size={16} aria-hidden="true" /> {title}</h2><p>{hint}</p></div>
       <div className="dwb-head-tools">
         {children}
-        <button type="button" className={cn('tk-chip', selected === 'all' && 'is-active')} aria-pressed={selected === 'all'} onClick={() => onSelect('all')}>All recruiters</button>
+        {!solo && <button type="button" className={cn('tk-chip', selected === 'all' && 'is-active')} aria-pressed={selected === 'all'} onClick={() => onSelect('all')}>All recruiters</button>}
       </div>
     </div>
   )
@@ -129,20 +129,22 @@ const WORK_CLASS: Record<WorkStatus, string> = { idle: 'idle', working: 'behind'
  * Admin and manager: one card per recruiter with what they hold and what they did today: candidates assigned, called, stages
  * moved and remarks written. Recruiters with nothing done yet come first. A card filters the list below to that recruiter.
  */
-export function WorkBoard({ people, work, selected, onSelect, idleOnly, onClearIdle }: {
+export function WorkBoard({ people, work, selected, onSelect, idleOnly, onClearIdle, solo }: {
   people: { userId: string; name: string; active: boolean }[]; work: Map<string, RecruiterWork>
   selected: string; onSelect: (id: string) => void; idleOnly: boolean; onClearIdle: () => void
+  /** A recruiter's own page: one card, titled "My day", with nothing to pick. */
+  solo?: boolean
 }) {
   const sorted = useMemo(() => peopleByWork(people, work), [people, work])
   const shown = idleOnly ? sorted.filter((p) => workStatus(work.get(p.userId) ?? NO_WORK) === 'idle') : sorted
   return (
     <section className="dw-panel dwb-board" id="recruiters" aria-label="Recruiters">
-      <BoardHead title="Recruiters" selected={selected} onSelect={onSelect} hint="">
+      <BoardHead title={solo ? 'My day' : 'Recruiters'} selected={selected} onSelect={onSelect} hint="" solo={solo}>
         {idleOnly && <button type="button" className="tk-chip is-active dwb-chip-x" onClick={onClearIdle}>Nothing done yet<X size={14} aria-hidden="true" /><span className="sr-only">Show every recruiter</span></button>}
       </BoardHead>
       {shown.length === 0
         ? <p className="dwb-none">{people.length === 0 ? 'No recruiters yet.' : 'Every recruiter has done something today.'}</p>
-        : <ul className="dwb-cards">{shown.map((p) => <li key={p.userId}><WorkCard person={p} work={work.get(p.userId) ?? NO_WORK} active={selected === p.userId} onSelect={() => onSelect(selected === p.userId ? 'all' : p.userId)} /></li>)}</ul>}
+        : <ul className="dwb-cards">{shown.map((p) => <li key={p.userId}><WorkCard person={p} work={work.get(p.userId) ?? NO_WORK} active={!solo && selected === p.userId} onSelect={() => { if (!solo) onSelect(selected === p.userId ? 'all' : p.userId) }} /></li>)}</ul>}
     </section>
   )
 }
@@ -153,14 +155,15 @@ function WorkCard({ person, work, active, onSelect }: { person: { name: string; 
   const touched = work.assigned - work.untouched
   return (
     <button type="button" className={cn('dwb-card', `is-${WORK_CLASS[status]}`, active && 'is-active')} aria-pressed={active}
-      aria-label={`${person.name}: ${work.assigned} assigned, ${work.called} called, ${work.moved} stages moved, ${work.remarks} remarks today. ${active ? 'Showing their candidates. Press to show everyone.' : 'Show their candidates.'}`} onClick={onSelect}>
+      aria-label={`${person.name}: ${work.assigned} assigned. Today ${work.called} called, ${work.moved} stages moved, ${work.remarks} remarks. Overall ${work.calledAll} called, ${work.movedAll} stages moved. ${active ? 'Showing their candidates. Press to show everyone.' : 'Show their candidates.'}`} onClick={onSelect}>
       <span className="dwb-card-top">
         <Avatar name={person.name} />
         <span className="dwb-card-name"><b title={person.name}>{person.name}</b>{!person.active && <small>Inactive</small>}</span>
         <span className={cn('dwb-chip', `is-${WORK_CLASS[status]}`)}><Icon size={13} strokeWidth={2} aria-hidden="true" />{WORK_LABEL[status]}</span>
       </span>
       <span className="dwb-card-numbers tnum"><span><b>{work.assigned}</b> assigned</span><em>{work.assigned === 0 ? '–' : `${donePercent({ toWork: work.untouched, doneToday: touched })}%`}</em></span>
-      <span className={cn('dwb-work tnum', work.assigned === 0 && 'is-quiet')}><span><b>{work.called}</b> called</span><span><b>{work.moved}</b> stage moved</span><span><b>{work.remarks}</b> remarks</span></span>
+      <span className={cn('dwb-work tnum', work.assigned === 0 && 'is-quiet')}><em>Today</em><span><b>{work.called}</b> called</span><span><b>{work.moved}</b> stage moved</span><span><b>{work.remarks}</b> remarks</span></span>
+      <span className={cn('dwb-work tnum', work.assigned === 0 && 'is-quiet')}><em>Overall</em><span><b>{work.calledAll}</b> called</span><span><b>{work.movedAll}</b> stage moved</span></span>
       <span className="dwb-stack" aria-hidden="true">
         {touched > 0 && <i className="is-done" style={{ flexGrow: touched }} />}
         {work.untouched > 0 && <i className="is-todo" style={{ flexGrow: work.untouched }} />}

@@ -409,16 +409,25 @@ export function taskRows(daily: DailyItem[], followUp: FollowUpItem[], today: st
   return rows.sort((a, b) => touched(a) - touched(b) || Number(b.waiting) - Number(a.waiting) || (b.stage ?? 0) - (a.stage ?? 0))
 }
 
-export interface RecruiterWork { assigned: number; called: number; moved: number; remarks: number; untouched: number }
+/**
+ * What a recruiter holds and did: `called` is the candidates they called or wrote a remark on today (a remark is the daily
+ * update of a call), `moved` the stages finished today, `remarks` the remarks written today. The `*All` figures are the same
+ * over all time: candidates ever called or remarked, and the stages their candidates have been through (a candidate now at
+ * stage 8 has finished seven).
+ */
+export interface RecruiterWork { assigned: number; called: number; moved: number; remarks: number; untouched: number; calledAll: number; movedAll: number }
 
 /** Per recruiter: candidates held, called today, stages moved today, remarks written today, and candidates nothing happened to. */
 export function recruiterWork(rows: TaskRow[]): Map<string, RecruiterWork> {
   const work = new Map<string, RecruiterWork>()
   for (const row of rows) {
-    const entry = work.get(row.ownerId) ?? { assigned: 0, called: 0, moved: 0, remarks: 0, untouched: 0 }
+    const entry = work.get(row.ownerId) ?? { ...NO_WORK }
     entry.assigned += 1
-    if (row.today.called) entry.called += 1
+    if (row.today.called || row.today.remarked) entry.called += 1
+    // Past the first call (matched to an order) or at least one remark ever: this candidate has been called.
+    if (row.today.called || row.today.remarked || row.kind === 'stage' || (row.remark?.count ?? 0) > 0) entry.calledAll += 1
     if (row.today.moved) entry.moved += 1
+    if (row.kind === 'stage') entry.movedAll += Math.max(0, (row.stage ?? 0) - 1)
     if (row.today.remarked) entry.remarks += 1
     if (!row.today.called && !row.today.moved && !row.today.remarked) entry.untouched += 1
     work.set(row.ownerId, entry)
@@ -426,7 +435,8 @@ export function recruiterWork(rows: TaskRow[]): Map<string, RecruiterWork> {
   return work
 }
 
-export const NO_WORK: RecruiterWork = { assigned: 0, called: 0, moved: 0, remarks: 0, untouched: 0 }
+export const NO_WORK: RecruiterWork = { assigned: 0, called: 0, moved: 0, remarks: 0, untouched: 0, calledAll: 0, movedAll: 0 }
+
 
 export type WorkStatus = 'idle' | 'working' | 'done' | 'none'
 
