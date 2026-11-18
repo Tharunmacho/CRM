@@ -81,3 +81,11 @@
 .tw-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: 1px solid var(--success-edge); border-radius: 999px; background: var(--success-fill); font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; color: var(--success-ink); }
 .tw-chip.is-remark { border-color: var(--border-main); background: var(--tint-2); color: var(--text-muted); }
 .tw-chip.is-none { border-color: var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); }
+
+.dwb-work.is-quiet { opacity: .55; }
+.dwb-work { min-height: 20px; }
+/* The remark box and the row's buttons each get their own room: the box never runs into the Open / Complete button. */
+.tw-table td[data-label="REMARKS"] { padding-right: 16px; }
+.tw-table td.is-actions { padding-left: 4px; padding-right: 14px; }
+.tw-table td.is-actions .dw-actions { justify-content: flex-end; gap: 8px; }
+.tw-table td[data-label="TODAY"] .tw-today { align-items: center; }

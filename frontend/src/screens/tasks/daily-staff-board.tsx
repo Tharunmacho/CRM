@@ -159,16 +159,12 @@ function WorkCard({ person, work, active, onSelect }: { person: { name: string; 
         <span className="dwb-card-name"><b title={person.name}>{person.name}</b>{!person.active && <small>Inactive</small>}</span>
         <span className={cn('dwb-chip', `is-${WORK_CLASS[status]}`)}><Icon size={13} strokeWidth={2} aria-hidden="true" />{WORK_LABEL[status]}</span>
       </span>
-      {work.assigned === 0
-        ? <span className="dwb-card-empty">Nothing assigned</span>
-        : <>
-          <span className="dwb-card-numbers tnum"><span><b>{work.assigned}</b> assigned</span><em>{donePercent({ toWork: work.untouched, doneToday: touched })}%</em></span>
-          <span className="dwb-work tnum"><span><b>{work.called}</b> called</span><span><b>{work.moved}</b> stage moved</span><span><b>{work.remarks}</b> remarks</span></span>
-          <span className="dwb-stack" aria-hidden="true">
-            {touched > 0 && <i className="is-done" style={{ flexGrow: touched }} />}
-            {work.untouched > 0 && <i className="is-todo" style={{ flexGrow: work.untouched }} />}
-          </span>
-        </>}
+      <span className="dwb-card-numbers tnum"><span><b>{work.assigned}</b> assigned</span><em>{work.assigned === 0 ? '–' : `${donePercent({ toWork: work.untouched, doneToday: touched })}%`}</em></span>
+      <span className={cn('dwb-work tnum', work.assigned === 0 && 'is-quiet')}><span><b>{work.called}</b> called</span><span><b>{work.moved}</b> stage moved</span><span><b>{work.remarks}</b> remarks</span></span>
+      <span className="dwb-stack" aria-hidden="true">
+        {touched > 0 && <i className="is-done" style={{ flexGrow: touched }} />}
+        {work.untouched > 0 && <i className="is-todo" style={{ flexGrow: work.untouched }} />}
+      </span>
     </button>
   )
 }

@@ -12,14 +12,14 @@ import {
 /** One list for every recruiter's candidates, with what happened to each of them today. */
 const COLUMNS = [
   { key: 'no', title: 'S NO', width: 40 },
-  { key: 'client', title: 'CLIENT / COUNTRY', width: 130, left: true },
-  { key: 'candidate', title: 'CANDIDATE NAME', width: 170, left: true },
+  { key: 'client', title: 'CLIENT / COUNTRY', width: 124, left: true },
+  { key: 'candidate', title: 'CANDIDATE NAME', width: 160, left: true },
   { key: 'staff', title: 'Recruiter', width: 100, supervisor: true, left: true },
   { key: 'position', title: 'JOB', width: 120, left: true },
   { key: 'stage', title: 'STAGE', width: 156 },
   { key: 'today', title: 'TODAY', width: 130, left: true },
-  { key: 'remarks', title: 'REMARKS', width: 170, left: true },
-  { key: 'actions', title: 'Actions', width: 110, quiet: true },
+  { key: 'remarks', title: 'REMARKS', width: 176, left: true },
+  { key: 'actions', title: 'Actions', width: 160, quiet: true },
 ] as const
 
 export interface TaskTableProps {
@@ -38,7 +38,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
   const layout = columnLayout(columns)
   return (
     <ScrollEdges label="Candidates, scroll sideways for more columns">
-      <table className="dw-table dw-main" aria-label="Candidates" style={{ minWidth: layout.minWidth }}>
+      <table className="dw-table dw-main tw-table" aria-label="Candidates" style={{ minWidth: layout.minWidth }}>
         <colgroup>{columns.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left', c.key === 'actions' && 'is-actions')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
