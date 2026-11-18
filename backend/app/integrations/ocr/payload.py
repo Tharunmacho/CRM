@@ -218,6 +218,35 @@ def prepare_job(content: bytes, rotations: list[int] | None = None, *, max_side:
         return Prepared(content, count, len(content), fallback=True)
 
 
+FLAT_SIDE = 1600         # px on the long side when a refused page is drawn as one picture
+FLAT_QUALITY = 72
+
+
+def flatten(content: bytes, rotations: list[int] | None = None, *, max_side: int = FLAT_SIDE, quality: int = FLAT_QUALITY) -> bytes | None:
+    """The pages of ``content`` each drawn as ONE JPEG picture on a page of its own: the last resort for a page the reader refused
+    as too heavy to draw (thousands of vector strokes, a huge paper size, hundreds of small pictures). Text is kept as pixels, which
+    the reader reads like any scan. ``None`` when it cannot be done (the caller then keeps the job as it was)."""
+    try:
+        with fitz.open(stream=content, filetype="pdf") as src, fitz.open() as out:
+            turns = [*(rotations or []), *([0] * src.page_count)][:src.page_count]
+            for index, page in enumerate(src):
+                turn = turns[index] % 360
+                scale = max_side / max(1.0, page.rect.width, page.rect.height)
+                shown = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False)
+                image = Image.frombytes("RGB", (shown.width, shown.height), shown.samples)
+                if turn:
+                    image = image.transpose(_TURNS[turn])
+                width, height = image.size
+                sheet = out.new_page(width=width * 72 / 150, height=height * 72 / 150)   # an A4-sized sheet at 150 px per inch
+                sheet.insert_image(sheet.rect, stream=_encode(image, quality), keep_proportion=False)
+            if out.page_count != src.page_count:
+                return None
+            return out.tobytes(garbage=4, deflate=True, no_new_id=True)
+    except Exception as exc:
+        log.warning("Reading: could not draw the heavy page as a picture (%s)", type(exc).__name__)
+        return None
+
+
 def unsendable(source: bytes, candidates: dict[int, tuple], unread: set[int] | None = None, lock=None) -> dict[int, str]:
     """{page: reason} for pages of the original PDF that are not worth a job: ``"blank"`` (a page the local reading could not
     read whose picture has no ink) or ``"duplicate of page N"`` (the very same picture, with the same role, as an earlier page).

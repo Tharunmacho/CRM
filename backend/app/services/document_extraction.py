@@ -58,7 +58,7 @@ from app.integrations.ocr.inspection import READING_FILE, InspectionError, inspe
 from app.integrations.ocr.inspection import _real_words as _real_word_count
 from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields
 from app.integrations.ocr.merge import merge_results
-from app.integrations.ocr.payload import prepare_job, rotations_from, unsendable
+from app.integrations.ocr.payload import flatten, prepare_job, rotations_from, unsendable
 from app.integrations.ocr.person_split import page_identity, incompatible
 
 
@@ -390,10 +390,42 @@ def _split_oversize(state: dict, units: list[_Unit], source_hash, cap: int, pass
     return redone
 
 
-def _prepared_job(unit: _Unit, content: bytes, rotations: dict, *, settings) -> bytes:
+def _flatten_heavy(state: dict, units: list[_Unit]) -> bool:
+    """A page the reader refused as too heavy even on its own (and that it says trying again cannot help) is sent once more drawn as
+    a picture. Called once per page: a page already drawn that fails again stays a terminal failure."""
+    done = state.setdefault("flattened", [])
+    redone = False
+    for unit in units:
+        if not (unit.outcome == "failed" and len(unit.pages) == 1 and _resource_limited(unit.record)) or unit.pages[0] in done:
+            continue
+        log.warning("%s: the reader refused page %d as too heavy; sending it once more drawn as a picture", _step(unit), unit.pages[0])
+        done.append(unit.pages[0])
+        record = state["provider_jobs"][unit.kind]
+        state.setdefault("provider_job_history", {}).setdefault(unit.kind, []).append(deepcopy(unit.record))
+        if record is unit.record:
+            generations = state.setdefault("provider_generations", {})
+            generations[unit.kind] = generations.get(unit.kind, 0) + 1
+            del state["provider_jobs"][unit.kind]
+        else:  # one chunk of a long document
+            keep = {name: unit.record[name] for name in ("index", "selected_pages", "positions") if name in unit.record}
+            generation = unit.record.get("retry_generation", 0) + 1
+            unit.record.clear()
+            unit.record.update(keep, retry_generation=generation, status="submitting")
+            for name in ("result", "merge", "coverage_status", "validation_status", "error"):
+                record.pop(name, None)
+            record["status"] = "submitting"
+        redone = True
+    return redone
+
+
+def _prepared_job(unit: _Unit, content: bytes, rotations: dict, *, settings, flat: bool = False) -> bytes:
     """The file of one job as sent (see integrations/ocr/payload.py), with the one log line of safe numbers."""
     pages = sorted(set(unit.pages))
     turns = [int(rotations.get(str(page), rotations.get(page, 0)) or 0) for page in pages]
+    if flat:
+        drawn = flatten(content, turns)
+        if drawn is not None:
+            return drawn
     prepared = prepare_job(content, turns, max_bytes=int(_setting(settings, "veris_prepare_target_bytes", 3_000_000)))
     if prepared.fallback:
         return content
@@ -1088,7 +1120,8 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
     for unit in work:
         if not unit.record.get("job_id"):
             content = _for(_mode(unit.kind), inspected).pdf_for_pages(unit.pages, allow_unresolved=True)
-            content = _prepared_job(unit, content, rotations, settings=settings)
+            content = _prepared_job(unit, content, rotations, settings=settings,
+                                    flat=len(unit.pages) == 1 and unit.pages[0] in (state.get("flattened") or ()))
             unit.document = FileDescriptor(content, filename=f"{_mode(unit.kind)}.pdf", content_type="application/pdf")
             unit.size = len(content)
     if _split_oversize(state, work, source_hash, int(_setting(settings, "veris_job_max_bytes", 8_000_000)),
@@ -1121,6 +1154,10 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
         # A job of several pages was refused as too heavy: its pages go again one by one in this same pass, before any
         # degrading. The paid results of this pass are kept; a page that fails alone is terminal as before.
         checkpoint()
+        return _fetch(selected_by_kind, inspected, state=state, save=save, settings=settings, source_hash=source_hash,
+                      checkpoint=checkpoint, ready=ready, failures=failures, final=final, resubmitted=resubmitted)
+    if _flatten_heavy(state, work):
+        checkpoint()   # the paid results of this pass are kept; the page goes again, drawn as a picture
         return _fetch(selected_by_kind, inspected, state=state, save=save, settings=settings, source_hash=source_hash,
                       checkpoint=checkpoint, ready=ready, failures=failures, final=final, resubmitted=resubmitted)
     if not resubmitted and _resubmit_duplicates(state, work):

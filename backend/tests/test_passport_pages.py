@@ -278,17 +278,46 @@ def test_other_limit_codes_split_too_but_a_retryable_failure_does_not(world):
     assert len(passport_submissions(world)) == 1
 
 
-def test_a_single_page_that_is_too_heavy_is_terminal_and_degrades(world):
-    world.veris.script[("passport", 0)] = "failed"
-    world.veris.errors[("passport", 0)] = too_heavy()
+def test_a_single_page_that_is_too_heavy_is_sent_once_more_drawn_as_a_picture_and_is_terminal_only_if_that_fails_too(world):
+    world.veris.script = {("passport", 0): "failed", ("passport", 1): "failed"}
+    world.veris.errors = {("passport", 0): too_heavy(), ("passport", 1): too_heavy()}
     state: dict = {}
 
     output = world.extract(pdf(CV, data_page(1)), state=state)
 
-    assert len(passport_submissions(world)) == 1  # nothing smaller to send
+    sent = passport_submissions(world)
+    assert len(sent) == 2 and sent[0]["key"] != sent[1]["key"]  # the page, then once more drawn as a picture; never a third time
+    assert state["flattened"] == [2]
     assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume"}
     assert any("passport" in w for w in output["warnings"])
     assert state["provider_jobs"]["passport"]["provider_error"]["code"] == "pdf_resource_limit"
+
+
+def test_a_page_the_reader_refused_is_read_when_it_is_sent_again_drawn_as_a_picture(world):
+    world.veris.script = {("passport", 0): "failed"}
+    world.veris.errors = {("passport", 0): too_heavy()}
+    state: dict = {}
+
+    output = world.extract(pdf(CV, data_page(1)), state=state)
+
+    assert len(passport_submissions(world)) == 2 and state["flattened"] == [2]
+    assert output["status"] == "complete" and set(output["extractions"]) == {"resume", "passport"}
+
+
+def test_drawing_a_page_as_a_picture_keeps_every_page_and_its_size_small():
+    import pymupdf
+    from app.integrations.ocr.payload import flatten
+    with pymupdf.open() as doc:
+        for number in range(2):
+            page = doc.new_page(width=595, height=842)
+            for line in range(60):
+                page.insert_text((40, 40 + line * 12), f"Line {line} of page {number} " * 4, fontsize=9)
+        original = doc.tobytes()
+    drawn = flatten(original)
+    with pymupdf.open(stream=drawn, filetype="pdf") as out:
+        assert out.page_count == 2 and all(len(page.get_images()) == 1 for page in out)
+        assert all(abs(page.rect.width - 595) < 60 or page.rect.width > 0 for page in out)
+    assert flatten(b"not a pdf") is None
 
 
 def test_an_aadhaar_front_and_back_that_are_too_heavy_are_read_one_side_at_a_time(world):
