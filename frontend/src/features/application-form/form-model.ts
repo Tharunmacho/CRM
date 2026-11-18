@@ -764,6 +764,27 @@ export interface ExtractionNote {
   notes: string[]
 }
 
+/** Shown when a file cannot be read and trying again will not change that: the way forward is a clearer copy, or typing the details. */
+export const UNREADABLE_FILE_TEXT = 'We could not read this file. Upload a clearer copy, or fill the details here.'
+const RETRY_FILE_TEXT = 'Reading did not finish. Choose Read again, or fill the details here.'
+const RETRY_LATER_TEXT = 'Reading did not finish. We will try again by ourselves, or you can fill the details here.'
+
+/**
+ * What a failed reading says, calmly, and what happens next. A reader that said trying again will not help (`retriable: false`), or a
+ * file with nothing readable on it (`unreadable`), is a file to replace; a reading that can be repeated says so, and says when the
+ * server will do it by itself. The technical reason is never in this sentence: it is under Details (`failureDetails`).
+ */
+export function failedReadingText(extraction: Pick<Extraction, 'status' | 'failure'>): string {
+  if (extraction.status === 'unreadable' || extraction.failure?.retriable === false) return UNREADABLE_FILE_TEXT
+  return extraction.failure?.retryAt ? RETRY_LATER_TEXT : RETRY_FILE_TEXT
+}
+
+/** The lines under "Details" of a failed reading: the reader's own reason, else the message it left. Empty when there is nothing technical to show. */
+export function failureDetails(extraction: Pick<Extraction, 'failure' | 'message'>): string[] {
+  if (extraction.failure) return readerFailureLines(extraction.failure)
+  return extraction.message ? [extraction.message] : []
+}
+
 /** What a document's last reading did, in the words a recruiter needs. */
 const docWord = (kind: string | null | undefined): string => (kind ? kind.replaceAll('_', ' ') : 'document')
 
@@ -876,7 +897,7 @@ export function describeExtraction(kind: DocumentKind, slot: Pick<DocumentSlot, 
   const notes = extractionNotes(extraction).map((note) => note.text)
   switch (tone) {
     case 'running': return { tone, notes, text: extraction.message || `Reading the ${kind.replaceAll('_', ' ')}…` }
-    case 'failed': return { tone, notes, text: `${extraction.message || 'Could not read this document.'} Enter the details manually.` }
+    case 'failed': return { tone, notes, text: failedReadingText(extraction) }
     case 'filled': return { tone, notes, text: filled > 0 ? `Filled ${filled} ${filled === 1 ? 'field' : 'fields'} on the form` : 'Read. Nothing new to fill in' }
     default: return { tone, notes, text: extraction.status === 'done' ? 'Read. Nothing new to fill in' : 'Read. Please check the notes' }
   }
@@ -918,6 +939,28 @@ export function routeLineNotes(documents: Record<string, Pick<DocumentSlot, 'slo
 
 export const isReading = (form: Pick<ApplicationFormData, 'documents' | 'processing'>): boolean =>
   form.processing || Object.values(form.documents).some((slot) => slot?.extraction?.status === 'processing')
+
+/**
+ * Which stored files of one slot still wait for a reading, and which had one that failed. The server marks a file `extractionPending` when it
+ * was stored without being read (`unread`: no reading exists for it yet) or when its reading failed (`failed`). A file stopped as another
+ * person's is neither: it needs a different document, not a reading. A single-file slot keeps its reading on the slot, a multi-file slot on each file.
+ */
+export function slotReadState(slot: Pick<DocumentSlot, 'multiple' | 'files' | 'current' | 'extraction'> | undefined): { unread: string[]; failed: string[] } {
+  const out = { unread: [] as string[], failed: [] as string[] }
+  if (!slot) return out
+  for (const file of slot.multiple ? slot.files : slot.current ? [slot.current] : []) {
+    if (!file.url || !file.attachmentId || !file.extractionPending || file.identityMismatch) continue
+    const reading = slot.multiple ? file.extraction : slot.extraction
+    if (reading?.identityMismatch) continue
+    if (!reading) out.unread.push(file.attachmentId)
+    else if (reading.status === 'failed') out.failed.push(file.attachmentId)
+  }
+  return out
+}
+
+/** Every stored file of the form that has never been read: the ones the form starts reading by itself (at most 100, what one request takes). */
+export const unreadFileIds = (form: Pick<ApplicationFormData, 'documents'>): string[] =>
+  [...new Set(Object.values(form.documents).flatMap((slot) => slotReadState(slot).unread))].slice(0, 100)
 
 /* ------------------------------------------------------------------ Dates, age, experience */
 

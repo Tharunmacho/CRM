@@ -4,7 +4,7 @@ import { cn } from '@/shared/lib/cn'
 import { DOCUMENT_ACCEPT } from '@/shared/lib/document-files'
 import { fileHref } from '@/shared/api/client'
 import { DocumentUploadQueue, useDocumentUploadQueue } from '@/shared/ui/document-upload-queue'
-import { DocumentExtractionAction } from '@/shared/ui/document-extraction-action'
+import { SlotReadingNote } from '../components/slot-reading'
 import { incompleteReadingText } from '@/features/candidates/read-report'
 import type { DocumentKind, DocumentSlot } from '../types'
 
@@ -12,9 +12,9 @@ import type { DocumentKind, DocumentSlot } from '../types'
  * The passport document in the header of section 2: a small status chip (Uploaded / details saved, scan not uploaded /
  * scan not uploaded) and an Upload passport /
  * Replace button. It is the same `passport` slot as the Passport row of the Documents list, so uploading from either place
- * shows in both; reading the passport then fills these fields.
+ * shows in both; the passport is read by itself and fills these fields.
  */
-export function PassportUpload({ slot, hasSavedDetails, canWork, busy, upload, onExtract }: { slot: DocumentSlot | undefined; hasSavedDetails: boolean; canWork: boolean; busy: boolean; upload: (kind: DocumentKind, file: File) => Promise<void>; onExtract?: (attachmentIds: string[]) => Promise<void> }) {
+export function PassportUpload({ slot, hasSavedDetails, canWork, busy, upload, onExtract, readError }: { slot: DocumentSlot | undefined; hasSavedDetails: boolean; canWork: boolean; busy: boolean; upload: (kind: DocumentKind, file: File) => Promise<void>; onExtract?: (attachmentIds: string[]) => Promise<void>; readError?: string }) {
   const input = useRef<HTMLInputElement>(null)
   const queue = useDocumentUploadQueue((file) => upload('passport', file), { multiple: true, disabled: busy || !canWork })
   const working = busy || queue.busy
@@ -38,7 +38,7 @@ export function PassportUpload({ slot, hasSavedDetails, canWork, busy, upload, o
       )}
       {files.length > 0 && <details className="aff-passport-files"><summary>Passport files ({files.length})</summary><ul>{files.map((file) => <li key={file.attachmentId}>{file.url ? <a href={fileHref(file.url)} target="_blank" rel="noreferrer"><Eye aria-hidden="true" />{file.fileName}</a> : <span>{file.fileName}</span>}{file.extraction && <small role={file.extraction.identityMismatch ? 'alert' : undefined}>{file.extraction.identityMismatch ? 'Wrong document. No details were filled. Upload the correct document.' : incompleteReadingText(file.extraction.coverage) || (file.extraction.status === 'processing' ? 'Reading this file…' : file.extraction.status === 'done' ? 'Reading completed' : file.extraction.message || 'Check this file: reading needs attention.')}</small>}</li>)}</ul></details>}
       <DocumentUploadQueue queue={queue} />
-      {canWork && <DocumentExtractionAction files={files} disabled={working} onExtract={onExtract} />}
+      <SlotReadingNote slot={slot} enabled={canWork && Boolean(onExtract)} error={readError ?? ''} onRead={onExtract} />
     </div>
   )
 }

@@ -2,21 +2,20 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactElement
 import { choosesRecruiter } from '@/features/candidates/candidate-access'
 import { followUpHint, NOT_ASSIGNED_YET, RECRUITER_FIELD_HINT, recruiterChoices, saveButtonLabel, savebarStatus, savedNotice, savedOwnerNote } from '@/features/candidates/assignment-labels'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ClipboardList, Briefcase, BriefcaseBusiness, Camera, Check, CheckCircle2, CalendarClock, FileText, Gauge, Image as ImageIcon, PhoneCall, FolderOpen, GraduationCap, IdCard, LoaderCircle, Share2, Sparkles, Target, UserRound, Contact, Trash2 } from 'lucide-react'
+import { AlertTriangle, ClipboardList, BriefcaseBusiness, Camera, Check, CheckCircle2, CalendarClock, Gauge, PhoneCall, FolderOpen, GraduationCap, IdCard, LoaderCircle, RotateCw, Share2, Target, UserRound, Contact, Trash2 } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
-import { api, ApiError, type OcrScan } from '@/shared/api/client'
+import { api, ApiError } from '@/shared/api/client'
 import { PageHeader } from '@/shared/ui/display'
 import { Button, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
-import { FileDrop } from '@/shared/ui/file-drop'
 import { documentFileError } from '@/shared/lib/document-files'
 import { documentLabel } from '@/shared/model/document-slots'
 import { dateTimeLabel } from '@/shared/lib/format'
 import { DatePicker } from '@/shared/ui/date-picker'
-import { hasOcrExtraction, mergeOcrForm, ocrSavePayload, type DocumentScans } from '@/features/candidates/ocr-form'
+import { mergeOcrForm, ocrSavePayload, type DocumentScans } from '@/features/candidates/ocr-form'
 import { normalizedSkills } from '@/features/candidates/candidate-skills'
 import { passportExpiryNotice } from '@/features/candidates/passport-expiry'
-import { IDLE_POLL_MS, scansFromJobs, useDocumentIntake, useQueueClock, MAX_FILES_PER_KIND, type IntakeJob } from '@/features/candidates/use-document-intake'
+import { IDLE_POLL_MS, scansFromJobs, useDocumentIntake, useQueueClock, type IntakeJob } from '@/features/candidates/use-document-intake'
 import { documentPresence, fileRows, foundChips, isDocumentJob, isWorking, MAX_DOCUMENT_FILES, readProgress, severalPeopleFound } from '@/features/candidates/entry-upload'
 import { jobReports } from '@/features/candidates/read-report'
 import { EntryUploadZone } from '@/features/candidates/components/entry-upload-zone'
@@ -30,7 +29,6 @@ import { effectiveNativePlace, effectiveWhatsapp, screeningPayload, whatsappIsSa
 import { useFormOptions, useFormSuggestions } from '@/features/form-options/use-form-options'
 import { activeOptions, choicesFor, FORM_OPTION_CATEGORIES as OPT } from '@/features/form-options/form-options-model'
 import { frequentValues } from '@/shared/lib/suggestions'
-import { MultiFileSlot } from '@/features/candidates/components/multi-file-slot'
 import { EntryAvatar } from '@/features/candidates/components/entry-avatar'
 import { DuplicateDialog } from '@/features/candidates/components/entry-dialogs'
 import { duplicateFromSaveError, finishSavedCandidate, freshWorkspace } from '@/features/candidates/save-flow'
@@ -54,21 +52,6 @@ type FormKey = keyof typeof EMPTY
 type SavedResult = { ref?: string; name?: string; ownerName: string | null; merged: boolean; at: number }
 type LiveCheck = { status: 'idle' | 'checking' | 'none' | 'found' | 'conflict' | 'unavailable'; match?: DuplicateMatch; message?: string }
 const SLA_MS = 48 * 3600 * 1000
-const IMAGE_FILE = /.(jpe?g|png|webp|heic|heif|tiff?)$/i
-type Pill = { tone: 'good' | 'warn' | 'bad' | 'busy' | 'muted'; label: string }
-/** The reading state shown on every document row, in plain words. */
-function documentPill(job: { status: string; kind: string } | undefined, reading: boolean, scan: OcrScan | undefined, scanned: boolean): Pill | null {
-  if (!job) return null
-  if (!scanned) return job.status === 'attached' ? { tone: 'good', label: 'Attached' } : { tone: 'muted', label: 'Saved' }
-  if (reading && !scan) return { tone: 'busy', label: 'Reading' }
-  if (scan) return hasOcrExtraction(scan) ? { tone: 'good', label: 'Ready' } : { tone: 'warn', label: 'Please check' }
-  if (job.status === 'failed') return { tone: 'bad', label: 'Try again' }
-  if (job.status === 'needs_review') return { tone: 'warn', label: 'Please check' }
-  if (job.status === 'processing') return { tone: 'busy', label: 'Reading' }
-  if (job.status === 'pending' || job.status === 'retry') return { tone: 'muted', label: 'Waiting' }
-  if (job.status === 'completed') return { tone: 'good', label: 'Ready' }
-  return { tone: 'muted', label: 'Saved' }
-}
 const VALIDATION_MESSAGE = 'Please fix the fields marked in red, then save again. Nothing you typed was lost.'
 
 export default function AddCandidatePage() {
@@ -105,7 +88,11 @@ export default function AddCandidatePage() {
   const [addProblems, setAddProblems] = useState<string[]>([])
   const [splitSuggested, setSplitSuggested] = useState(false)
   const [readMessage, setReadMessage] = useState('')
+  /** Why a reading round could not finish (plain words); shown with a Try again button until the next round starts. */
+  const [readError, setReadError] = useState('')
   const [reading, setReading] = useState(false)
+  // The newest readDocuments: files are read from inside async handlers whose own copy of the state may be a render old.
+  const readDocumentsRef = useRef<(options?: { retryFailed?: boolean; jobIds?: string[] }) => Promise<void>>(async () => {})
 
   useEffect(() => () => {
     readController.current?.abort()
@@ -209,7 +196,8 @@ export default function AddCandidatePage() {
     }
     if (!store.isCurrentSession()) return
     await intake.saveDraft(draftRef.current).catch(() => {})
-    setReadMessage('Files saved. Add all pages, then choose Extract details when you are ready.')
+    // No Extract step: the moment the files are saved the reader starts on them (a file the server already had is not read twice).
+    if (intake.hasUnqueued()) void readDocumentsRef.current({ retryFailed: false })
   }
 
   const removeDocument = async (id: string) => {
@@ -233,10 +221,12 @@ export default function AddCandidatePage() {
   const checkReader = async () => { await intake.refresh().then(applyJobs, () => {}) }
 
   const documentRows = useMemo(() => fileRows(intake.jobs, queueClock), [intake.jobs, queueClock])
-  const chips = useMemo(() => foundChips(intake.jobs, documentLabel), [intake.jobs])
+  const chips = useMemo(() => foundChips(intake.jobs), [intake.jobs])
   const readReports = useMemo(() => jobReports(intake.jobs.filter(isDocumentJob)), [intake.jobs])
   const presence = documentPresence(intake.jobs)
-  const chosen = documentRows
+  const failedFiles = documentRows.filter((row) => row.state === 'failed').length
+  // The strip under the zone: only while something is going on or went wrong; nothing to press otherwise.
+  const showFoot = reading || intake.uploading || Boolean(readError) || failedFiles > 0 || (severalPeopleFound(intake.jobs, splitSuggested) && Boolean(intake.jobs[0]?.groupId))
   const stillWorking = intake.jobs.some((job) => isDocumentJob(job) && isWorking(job))
   // After Stop waiting (or when a saved upload is opened) nothing is being waited on; a slower look keeps the rows and the form current.
   useEffect(() => {
@@ -247,13 +237,19 @@ export default function AddCandidatePage() {
   }, [reading, stillWorking, intake.jobs, savedCandidateId])
   // The server accepts a blank name or phone exactly when an upload is attached (intake_group_id is sent).
   const hasDocuments = intake.jobs.length > 0
+  /**
+   * Reads the files of this upload and fills the form. It starts by itself when files are saved (see addDocuments) and again for files
+   * added while a round is running; `retryFailed` is only for the Try again button. A round that ends with an error is not restarted
+   * by itself (that would loop): Try again does it.
+   */
   const readDocuments = async (options: { retryFailed?: boolean; jobIds?: string[] } = {}) => {
     if (readController.current || saving || savedCandidateId) return
-    if (intake.uploading || chosen.length === 0) return
+    const jobIds = options.jobIds ?? intake.latest().filter(isDocumentJob).map((job) => job.id)
+    if (jobIds.length === 0) return
     const controller = new AbortController()
-    const jobIds = options.jobIds ?? intake.jobs.filter(isDocumentJob).map((job) => job.id)
     readController.current = controller
-    setReading(true); setReadMessage('')
+    let failed = false
+    setReading(true); setReadMessage(''); setReadError('')
     try {
       // A failed autosave must never stop the document from being read; the draft banner already tells the user.
       await intake.saveDraft(draftRef.current).catch(() => {})
@@ -262,14 +258,17 @@ export default function AddCandidatePage() {
       if (readController.current !== controller || !store.isCurrentSession()) return
       applyJobs(jobs)
     } catch (error) {
-      if (readController.current === controller && store.isCurrentSession()) setReadMessage(error instanceof Error ? error.message : 'We could not finish reading. Your file is saved.')
+      failed = true
+      if (readController.current === controller && store.isCurrentSession()) setReadError(error instanceof Error && error.name !== 'AbortError' ? error.message : 'We could not finish reading. Your files are saved.')
     } finally {
       if (readController.current === controller) {
         readController.current = null; setReading(false)
-        if (!controller.signal.aborted && intake.hasUnqueued()) setReadMessage('Additional files are saved. Choose Extract details when all remaining pages are ready.')
+        // Files added while this round was running are read next, without anyone pressing anything.
+        if (!failed && !controller.signal.aborted && intake.hasUnqueued()) void readDocumentsRef.current({ retryFailed: false })
       }
     }
   }
+  readDocumentsRef.current = readDocuments
 
   const cancelReading = () => {
     readController.current?.abort()
@@ -418,12 +417,6 @@ export default function AddCandidatePage() {
   const agencyNames = useReferenceAgencies(form.source === 'referral').items?.map((agency) => agency.agencyName) ?? []
   const sourcePlaceholder = form.source === 'referral' ? 'Name of the person who referred them' : form.source === 'other' ? 'Where did this candidate come from?' : form.source === 'walk_in' ? 'Branch or event, e.g. Kochi office' : 'Optional note'
   const failedUploads = Object.keys(uploadErrors).length
-  /** The row icon follows the uploaded file's type; an empty slot keeps its own icon. */
-  const slotIcon = (fallback: typeof FileText, filename?: string) => filename ? (IMAGE_FILE.test(filename) ? ImageIcon : FileText) : fallback
-  const jobFile = (kind: string) => {
-    const job = intake.jobs.find((item) => item.kind === kind)
-    return job ? { id: job.id, name: job.filename, sizeKb: job.sizeKb, url: job.originalUrl } : null
-  }
   const sources = fieldSources(scans, edited.current)
   const filledCount = Object.keys(sources).length
   const expiryNotice = passportExpiryNotice(form.passportExpiry)
@@ -453,7 +446,7 @@ export default function AddCandidatePage() {
   const jump = (anchor: string) => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   /** "Upload passport" and the like: bring the upload zone (or the photo slot) into view and open its file picker. */
   const promptUpload = (kind: 'passport' | 'resume' | 'photo') => {
-    const slot = document.getElementById(kind === 'photo' ? 'slot-photo' : 'upload-zone')
+    const slot = document.getElementById(kind === 'photo' ? 'photo-box' : 'upload-zone')
     slot?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     window.setTimeout(() => slot?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.click(), 350)
   }
@@ -540,67 +533,37 @@ export default function AddCandidatePage() {
           <div className="ac-form-card">
             <fieldset disabled={disabledAll} className="ac-fieldset">
               {/* ------------------------------------------------------------------ Documents first */}
-              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field, then choose Extract details.">
+              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field and the details fill in by themselves, then you check them and save.">
                 <div className="ac-docs">
                   <EntryUploadZone rows={documentRows} chips={chips} reports={readReports} progress={readProgress(documentRows)} disabled={disabledAll} max={MAX_DOCUMENT_FILES} problems={addProblems}
                     onAdd={(files) => void addDocuments(files)} onRemove={removeDocument} onRetry={retryFile}
                     onCheckAgain={checkReader} onManual={() => jump('candidate-personal')} />
-                  <div className="ac-doc-foot">
-                    <div className="ac-doc-status" aria-live="polite">
-                      {(reading || intake.uploading) && <span className="ac-progress" role="progressbar" aria-label={reading ? 'Reading documents' : 'Saving your file'}><i /></span>}
-                      <span>
+                  {showFoot && (
+                    <div className="ac-doc-foot">
+                      <div className="ac-doc-status" aria-live="polite">
+                        {(reading || intake.uploading) && <span className="ac-progress" role="progressbar" aria-label={reading ? 'Reading documents' : 'Saving your file'}><i /></span>}
                         {reading
-                          ? <><LoaderCircle size={14} className="ac-spin" aria-hidden /> Reading. You can leave this page; we keep going.</>
-                          : intake.uploading ? <><LoaderCircle size={14} className="ac-spin" aria-hidden /> Saving your files…</>
+                          ? <span><LoaderCircle size={14} className="ac-spin" aria-hidden /> Reading documents… You can leave this page; we keep going.</span>
+                          : intake.uploading ? <span><LoaderCircle size={14} className="ac-spin" aria-hidden /> Saving your files…</span>
+                          : readError ? <span role="alert" className="ac-doc-error"><AlertTriangle size={14} aria-hidden /> {readError}</span>
+                          : failedFiles > 0 ? <span role="alert" className="ac-doc-error"><AlertTriangle size={14} aria-hidden /> {failedFiles === 1 ? 'One file could not be read. It is saved. Try again, or type the details yourself.' : `${failedFiles} files could not be read. They are saved. Try again, or type the details yourself.`}</span>
                           : null}
-                      </span>
+                      </div>
+                      <div className="ac-doc-buttons">
+                        {severalPeopleFound(intake.jobs, splitSuggested) && intake.jobs[0]?.groupId && <Button disabled={reading || saving || intake.uploading} onClick={() => setBundleSource(intake.jobs[0].groupId)}>Check people in documents</Button>}
+                        {reading && <Button variant="ghost" onClick={cancelReading}>Stop waiting</Button>}
+                        {!reading && (readError || failedFiles > 0) && <Button onClick={() => void readDocuments({ retryFailed: true })} disabled={saving || intake.uploading} icon={<RotateCw className="h-4 w-4" />}>Try again</Button>}
+                      </div>
                     </div>
-                    <div className="ac-doc-buttons">
-                      {severalPeopleFound(intake.jobs, splitSuggested) && intake.jobs[0]?.groupId && <Button disabled={reading || saving || intake.uploading} onClick={() => setBundleSource(intake.jobs[0].groupId)}>Check people in documents</Button>}
-                      {reading && <Button variant="ghost" onClick={cancelReading}>Stop waiting</Button>}
-                      {chosen.length > 0 && <Button variant="primary" onClick={() => void readDocuments()} disabled={reading || saving || intake.uploading} icon={<Sparkles className="h-4 w-4" />}>
-                        {reading ? 'Reading…' : intake.hasUnqueued() ? 'Extract details' : 'Read again'}
-                      </Button>}
-                    </div>
-                  </div>
+                  )}
                   {readMessage && <p aria-live="polite" className="ac-muted ac-small ac-read-message">{readMessage}</p>}
-
-                  <p className="ac-subhead ac-more-head">More documents (optional)</p>
-                  <div className="ac-slots">
-                    {(() => {
-                      const job = intake.jobs.find((item) => item.kind === 'photo')
-                      const pill = documentPill(job, false, undefined, false)
-                      return <div id="slot-photo" className={`ac-slot ${pill ? 'has-pill' : ''}`}>
-                        <FileDrop variant="row" optional icon={slotIcon(Camera, job?.filename)} label={documentLabel('photo')} disabled={saving || Boolean(savedCandidateId)}
-                          value={jobFile('photo')}
-                          help={job ? 'Shown on the application form.' : undefined}
-                          onFile={async (file) => { await intake.upload('photo', file); await intake.saveDraft(draftRef.current).catch(() => {}) }} />
-                        {pill && <span className={`ac-pill ac-slot-pill is-${pill.tone}`}><i aria-hidden />{pill.label}</span>}
-                      </div>
-                    })()}
-                    {([
-                      { slot: 'education', label: 'Education certificates', icon: GraduationCap },
-                      { slot: 'experience', label: 'Experience certificates', icon: Briefcase },
-                    ] as const).map(({ slot, label, icon }) => (
-                      <div key={slot} className="ac-slot ac-slot-multi">
-                        <MultiFileSlot label={label} icon={icon} help="More than one file is fine." max={MAX_FILES_PER_KIND}
-                          disabled={saving || Boolean(savedCandidateId)}
-                          files={intake.jobs.filter((item) => item.kind === slot).map((item) => ({ id: item.id, name: item.filename, sizeKb: item.sizeKb, url: item.originalUrl, status: documentPill(item, false, undefined, false) ? { label: documentPill(item, false, undefined, false)!.label, tone: documentPill(item, false, undefined, false)!.tone } : undefined }))}
-                          onAdd={async (files) => {
-                            for (const file of files) await intake.upload(slot, file)
-                            await intake.saveDraft(draftRef.current).catch(() => {})
-                          }}
-                          onRemove={async (id) => { await intake.remove(id); await intake.saveDraft(draftRef.current).catch(() => {}) }} />
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </FormSection>
 
               {/* ------------------------------------------------------------------ Personal information */}
               <FormSection id="candidate-personal" icon={UserRound} title="Personal information" subtitle="Name and mobile number are required unless a document is attached." aside={sectionMissing('name', 'fatherName', 'dob', 'maritalStatus', 'gender', 'nationality', 'languages', 'phone', 'currentAddress')}>
                 <div className="ac-personal">
-                  <div className="ac-photo-box">
+                  <div id="photo-box" className="ac-photo-box">
                     <div className="ac-photo-frame">
                       {photoJob ? <img src={fileHref(photoJob.originalUrl)} alt={documentLabel('photo')} /> : <><Camera size={22} aria-hidden /><span>{documentLabel('photo')}</span></>}
                     </div>

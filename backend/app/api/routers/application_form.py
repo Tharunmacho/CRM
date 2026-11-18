@@ -222,10 +222,12 @@ def document_status(candidate_id: str, slot: str, body: DocumentStatusIn, respon
 
 @router.post("/documents", status_code=status.HTTP_202_ACCEPTED)
 def upload_document(candidate_id: str, response: Response, slot: str = Form(...), file: UploadFile = File(...),
-                    defer_extraction: bool = Form(True),
+                    defer_extraction: bool = Form(False),
                     orderId: str | None = Query(default=None, max_length=36), applicationId: str | None = Query(default=None, max_length=36),
                     db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    """Store a document; manual form uploads await explicit Extract details by default."""
+    """Store a document. A resume, passport, Aadhaar card or education certificate is queued for the reader at once and fills the form by
+    itself; only an explicit `defer_extraction=true` (kept for older callers) stores it without reading, and `POST
+    /api/candidates/{id}/read-pending` queues such a file later."""
     _no_store(response)
     slot = slot.strip()
     if slot not in service.SLOTS:

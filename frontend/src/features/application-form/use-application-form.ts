@@ -3,8 +3,8 @@ import { ApiError } from '@/shared/api/client'
 import { classifyLoadError, type LoadErrorView } from './load-error'
 import { liveInterval } from '@/shared/state/live'
 import { isOtherRecord } from '@/shared/state/live-events'
-import { FORM_LIVE_TOPICS, addFeedback, checkDocumentIdentity, deleteFeedback, extractFormDocuments, loadApplicationForm, saveApplicationForm, saveAssignment, saveDocumentStatus, uploadFormDocument, type FeedbackDraft, type FormTarget, type IdentityCheck } from './form-api'
-import { applyAssignmentChange, applyOptimisticUploads, buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, validateDraft } from './form-model'
+import { FORM_LIVE_TOPICS, addFeedback, checkDocumentIdentity, deleteFeedback, extractFormDocuments, loadApplicationForm, readPending, saveApplicationForm, saveAssignment, saveDocumentStatus, uploadFormDocument, type FeedbackDraft, type FormTarget, type IdentityCheck } from './form-api'
+import { applyAssignmentChange, applyOptimisticUploads, buildSavePayload, changedPaths, completenessOf, isDirty, isReading, rebaseDraft, toDraft, unreadFileIds, validateDraft } from './form-model'
 import type { ApplicationFormData, AssignmentChange, AssignmentData, DocumentKind, FormDraft } from './types'
 
 /** What the screen adds to the assignment block of an older server; it is told who may work the candidate and which job the form shows. */
@@ -25,6 +25,8 @@ const READING_POLL_MS = 4_000
 const READING_POLL_MAX_MS = 30_000
 /** A burst of live events (a document being read announces page after page) becomes one read. */
 const LIVE_WINDOW_MS = 1_200
+/** Files that were just uploaded one after another are started together: reading waits this long after the last change. */
+const AUTO_READ_DELAY_MS = 1_200
 
 /**
  * Loads the form, keeps it current (live topics, plus a fast poll while a document is being read), and holds the
@@ -48,6 +50,10 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
   const [assignmentErrors, setAssignmentErrors] = useState<Partial<Record<AssignmentField, string>>>({})
   const [feedbackBusy, setFeedbackBusy] = useState(false)
   const [feedbackError, setFeedbackError] = useState('')
+  /** Why reading could not be started by itself (the files stay saved; "Read again" beside the file tries once more). Empty when it is fine. */
+  const [readError, setReadError] = useState('')
+  /** Files whose reading was already asked for in this visit: each is asked for once, so a failure or a repeated effect never loops. */
+  const requestedReads = useRef(new Set<string>())
   const assignmentInFlight = useRef(0)
   /** Fills in what an older server leaves out of the assignment block (options, permissions); the server's own values win. */
   const completeRef = useRef(completeAssignment)
@@ -113,12 +119,17 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
     lastSignature.current = ''
     quietPolls.current = 0
     setForm(null); setDraft(null); setEditing(false); setError(null); setSaveError('')
+    requestedReads.current = new Set(); setReadError('')
     setPendingUploads({}); setAssignmentDraft(null); setAssignmentSaving({}); setAssignmentErrors({}); setFeedbackError('')
     void reload(false)
     return () => { seq.current += 1 }
   }, [reload])
 
-  const reading = form ? isReading(form) : false
+  const canReadByItself = Boolean(form?.candidate.canEdit && form.capabilities?.deferredDocumentReading)
+  const unreadIds = useMemo(() => (form ? unreadFileIds(form) : []), [form])
+  /** Stored files that nobody has read yet, which the form is about to read (or is reading) without being asked. */
+  const waitingToRead = canReadByItself && !readError && unreadIds.length > 0
+  const reading = form ? isReading(form) || waitingToRead : false
   // While a document is being read the form is polled quickly, backing off while nothing changes (a reader that is
   // not running should not be asked every four seconds for as long as the page stays open).
   useEffect(
@@ -209,8 +220,53 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
 
   const extractDocuments = useCallback(async (attachmentIds: string[]) => {
     const saved = await extractFormDocuments(candidateId, attachmentIds, { orderId, applicationId: baseFormRef.current?.application?.id ?? applicationId })
+    setReadError('')
     if (saved) { lastSignature.current = JSON.stringify(saved); apply(saved) } else await reload(true)
   }, [candidateId, orderId, applicationId, apply, reload])
+
+  /**
+   * Nobody starts a reading by hand: a stored resume, passport, Aadhaar or education file that has never been read is sent to the reader as
+   * soon as the form shows it (on opening, and right after an upload). Each file is asked for once per visit; a request that fails is not
+   * repeated by itself (the person sees the reason and Read again), and files being uploaded are waited for so a batch goes together.
+   */
+  const unreadKey = unreadIds.join(',')
+  const uploading = Object.keys(pendingUploads).length > 0
+  useEffect(() => {
+    if (!canReadByItself || uploading) return
+    const fresh = unreadKey ? unreadKey.split(',').filter((id) => !requestedReads.current.has(id)) : []
+    if (!fresh.length) return
+    const timer = window.setTimeout(() => {
+      const ids = fresh.filter((id) => !requestedReads.current.has(id))
+      if (!ids.length) return
+      ids.forEach((id) => requestedReads.current.add(id))
+      void extractDocuments(ids).catch((cause) => {
+        setReadError(messageOf(cause, 'Reading could not be started. Your files are saved.'))
+      })
+    }, AUTO_READ_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [canReadByItself, uploading, unreadKey, extractDocuments])
+
+  /**
+   * Once per visit, as soon as the form is on screen: queue whatever stored documents of this candidate were never read (a candidate imported
+   * before reading started by itself) and file the other pages of bundles already read. The answer is not waited for; when it queued or
+   * filed something the form is read again, and a capped call (`more`) is repeated a few times.
+   */
+  const visited = useRef('')
+  const canWork = Boolean(form?.candidate.canEdit)
+  useEffect(() => {
+    if (!canWork || visited.current === candidateId) return
+    visited.current = candidateId
+    let alive = true
+    void (async () => {
+      for (let round = 0; round < 4 && alive; round += 1) {
+        const answer = await readPending(candidateId).catch(() => null)
+        if (!answer || !answer.allowed) return
+        if (answer.changed && alive) await reload(true)
+        if (!answer.more) return
+      }
+    })()
+    return () => { alive = false }
+  }, [canWork, candidateId, reload])
 
   /**
    * Save one change to the assignment block. The block shows the new value at once; the server's answer (the whole form) replaces it,
@@ -271,5 +327,5 @@ export function useApplicationForm(candidateId: string, target: FormTarget, comp
     }
   }, [candidateId, apply, reload])
 
-  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, markDocument, extractDocuments, checkIdentity, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
+  return { form: view, draft, setDraft, editing, setEditing, loading, error, saving, saveError, dirty, errors, justUpdated, save, discard, reload, upload, markDocument, extractDocuments, readError, checkIdentity, reading, completeness, changeAssignment, assignmentSaving, assignmentErrors, sendFeedback, removeFeedback, feedbackBusy, feedbackError }
 }

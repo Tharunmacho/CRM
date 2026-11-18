@@ -300,7 +300,8 @@ def test_an_education_certificate_is_sent_to_the_reader_like_the_other_read_slot
     base = "/api/candidates/candidate/application-form"
     assert splitting.READ_SLOTS == bulk.SENT_TO_READER and "education_certificate" in splitting.READ_SLOTS
     assert len("education_certificate") > 20
-    upload = desk.client.post(base + "/documents", data={"slot": "education_certificate"},
+    # (an explicit deferral: with no flag the form upload is queued at once, see test_auto_reading.py)
+    upload = desk.client.post(base + "/documents", data={"slot": "education_certificate", "defer_extraction": "true"},
                               files={"file": ("degree.pdf", composite_pdf(["unrelated"]), "application/pdf")})
     assert upload.status_code == 202, upload.text
     slot = upload.json()["form"]["documents"]["education_certificate"]

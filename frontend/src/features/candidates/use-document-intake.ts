@@ -148,7 +148,7 @@ export function useDocumentIntake(ownerId: string) {
     return current.current
   }
   const isReadable = (job: IntakeJob) => SCAN_KINDS.includes(job.kind)
-  /** A saved file awaiting the user's explicit Extract details action. */
+  /** A saved file the reader has not been asked to read yet (the screen starts the reading itself as soon as files are saved). */
   const hasUnqueued = () => current.current.some((job) => isReadable(job) && job.status === 'uploaded')
   /** Puts one file back in the queue (Failed, or Needs a look). */
   const retry = async (jobId: string) => {
@@ -157,7 +157,7 @@ export function useDocumentIntake(ownerId: string) {
     return saved
   }
   /**
-   * Reads only the files present when the user presses Extract details. Files added later wait for another explicit action.
+   * Reads the files present when it starts. Files added later are not part of this round; the screen starts another round for them.
    * Polls once a second while this batch is queued or reading. `jobIds` scopes a single-file retry without starting other uploads.
    */
   const read = async (signal: AbortSignal, options: { retryFailed?: boolean; jobIds?: string[]; onProgress?: (jobs: IntakeJob[]) => void } = {}) => {
@@ -223,5 +223,7 @@ export function useDocumentIntake(ownerId: string) {
     update([])
     setDraftError('')
   }
-  return { jobs, uploading, draftError, upload, remove, read, retry, refresh, hasUnqueued, attach, saveDraft, queueDraft, flushDraft, reset }
+  /** The jobs as they are right now (the state may still be one render behind inside an async handler). */
+  const latest = () => current.current
+  return { jobs, latest, uploading, draftError, upload, remove, read, retry, refresh, hasUnqueued, attach, saveDraft, queueDraft, flushDraft, reset }
 }

@@ -127,6 +127,9 @@ body.af-open { overflow: hidden; }
 }
 .af-banner-link { margin-left: auto; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .af-banner.is-error { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
+.af-banner.is-reading { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); border-color: color-mix(in srgb, var(--primary) 22%, var(--af-line)); color: var(--primary-deep); }
+[data-theme="dark"] .af-banner.is-reading { color: var(--primary); }
+.af-banner.is-reading svg { width: 15px; height: 15px; flex: none; }
 
 /* ------------------------------------------------------------ Side panel */
 .af-side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-height: calc(100dvh - 64px - 32px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px 4px 6px 2px; margin: -2px -4px -6px -2px; }

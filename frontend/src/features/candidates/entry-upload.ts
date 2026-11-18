@@ -8,7 +8,7 @@ import type { IntakeJob } from './use-document-intake'
 export type DocKind = 'resume' | 'passport' | 'aadhaar'
 export const DOC_KINDS: readonly DocKind[] = ['resume', 'passport', 'aadhaar']
 export const KIND_NAME: Record<DocKind, string> = { resume: 'Resume', passport: 'Passport', aadhaar: 'Aadhaar' }
-/** The draft endpoint accepts 20 job ids; the documents zone leaves room for the photo and the certificates. */
+/** The draft endpoint accepts 20 job ids; the documents zone leaves room for the photo. */
 export const MAX_DOCUMENT_FILES = 12
 
 export type Tone = 'good' | 'warn' | 'bad' | 'busy' | 'muted'
@@ -171,7 +171,7 @@ const NEEDS_LOOK = 'We could not find anything we can read here. Check the file,
 function queuedRow(job: IntakeJob, base: Omit<FileRow, 'state' | 'label' | 'tone'>, clock?: QueueClock): FileRow {
   const now = clock?.now ?? Date.now()
   const queued = { ...base, state: 'queued' as const }
-  if (job.status === 'uploaded') return { ...queued, label: 'Ready to extract', tone: 'muted' }
+  if (job.status === 'uploaded') return { ...queued, label: 'Waiting to read', tone: 'muted' }
   if (job.status === 'retry' && (job.attempts ?? 0) > 0) {
     // A reading attempt ended without a result: say so, and that it is being tried again. Never "restart the server".
     const down = readerDown(job)
@@ -226,44 +226,62 @@ export interface FoundChip {
   /** idle: not found yet. reading: found, being read. done: read and the form filled. review: found but could not be read. */
   state: 'idle' | 'reading' | 'done' | 'review'
   label: string
-  /** "page 4", "pages 2, 3" or "2 files". */
+  /** "2 pages", "5 pages · 2 files" or "2 files" (empty when the server has not said which pages). */
   detail: string
+  /** The pages found, merged over all files (page numbers, for the record). */
   pages: number[]
+  /** How many pages of this kind were found over all files (a page counted once per file). */
+  pageCount: number
   files: number
   /** True for a kind found beyond the three identity kinds: it is only filed on the candidate, not read. */
   extra?: boolean
 }
 
-/** "Education certificate" for a field the screen has no label for (the screen passes the slot labels as `labelOf`). */
-const plainLabel = (kind: string) => kind.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
+/** The chip names, plural where the candidate usually has several ("Education certificates"). */
+export const CHIP_LABEL: Record<string, string> = {
+  resume: 'Resume', passport: 'Passport', aadhaar: 'Aadhaar',
+  education_certificate: 'Education certificates', experience_certificate: 'Experience certificates',
+  medical: 'Medical', signed_offer: 'Signed offer', visa: 'Visa', pcc: 'Police clearance', photo: 'Photo', other: 'Other',
+}
+/** The order the chips take after the three identity kinds, so they never jump about while the reading goes on. Unknown kinds go before "Other". */
+const CHIP_ORDER = ['education_certificate', 'experience_certificate', 'medical', 'signed_offer', 'visa', 'pcc', 'photo']
+const chipRank = (kind: string) => {
+  const at = CHIP_ORDER.indexOf(kind)
+  return at >= 0 ? at : kind === 'other' ? CHIP_ORDER.length + 1 : CHIP_ORDER.length
+}
+/** "Education certificates" for a kind; one the screen has no name for gets its field name in plain words. */
+export const chipLabel = (kind: string) => CHIP_LABEL[kind] ?? kind.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
+const pageCountText = (count: number) => `${count} ${count === 1 ? 'page' : 'pages'}`
+const chipDetail = (pageCount: number, files: number) => [pageCount > 0 ? pageCountText(pageCount) : '', files > 1 ? `${files} files` : ''].filter(Boolean).join(' · ')
 
 /**
- * The three identity kinds in a fixed order (found ones carry the state of the reading, the others stay muted), then one chip for
- * every other kind found in the files, in page order, each with its pages. A kind that was not found has no chip.
+ * The three identity kinds in a fixed order (found ones carry the state of the reading, the others stay `idle`: the screen shows only
+ * the found ones), then one chip for every other kind found in the files in the order of `CHIP_LABEL`, each with its page count.
  */
-export function foundChips(jobs: IntakeJob[], labelOf: (kind: string) => string = plainLabel): FoundChip[] {
+export function foundChips(jobs: IntakeJob[], labelOf: (kind: string) => string = chipLabel): FoundChip[] {
   const docs = jobs.filter(isDocumentJob)
   const identity = DOC_KINDS.map((kind): FoundChip => {
     const hits = docs.map((job) => ({ job, finding: jobFindings(job).find((item) => item.kind === kind) })).filter((hit) => hit.finding)
-    const name = KIND_NAME[kind]
-    if (!hits.length) return { kind, state: 'idle' as const, label: name, detail: '', pages: [], files: 0 }
+    const name = labelOf(kind)
+    if (!hits.length) return { kind, state: 'idle' as const, label: name, detail: '', pages: [], pageCount: 0, files: 0 }
     const pages = [...new Set(hits.flatMap((hit) => hit.finding!.pages))].sort((a, b) => a - b)
+    const pageCount = hits.reduce((sum, hit) => sum + new Set(hit.finding!.pages).size, 0)
     const read = hits.some((hit) => hit.finding!.read)
     const working = hits.some((hit) => isWorking(hit.job))
     const state = read ? 'done' as const : working ? 'reading' as const : 'review' as const
-    const label = state === 'review' ? `${name} needs a look` : `${name} found`
-    return { kind, state, label, detail: hits.length > 1 ? `${hits.length} files` : pagesText(pages), pages, files: hits.length }
+    const label = state === 'review' ? `${name} needs a look` : name
+    return { kind, state, label, detail: chipDetail(pageCount, hits.length), pages, pageCount, files: hits.length }
   })
-  const more = new Map<string, { pages: number[]; files: number }>()
+  const more = new Map<string, { pages: number[]; pageCount: number; files: number }>()
   for (const job of docs) {
     for (const found of extraKinds(job)) {
-      const seen = more.get(found.kind) ?? { pages: [], files: 0 }
-      more.set(found.kind, { pages: [...new Set([...seen.pages, ...found.pages])].sort((a, b) => a - b), files: seen.files + 1 })
+      const seen = more.get(found.kind) ?? { pages: [], pageCount: 0, files: 0 }
+      more.set(found.kind, { pages: [...new Set([...seen.pages, ...found.pages])].sort((a, b) => a - b), pageCount: seen.pageCount + found.pages.length, files: seen.files + 1 })
     }
   }
-  const extra = [...more].map(([kind, found]): FoundChip => ({
-    kind, state: 'done', label: `${labelOf(kind)} found`, detail: found.files > 1 ? `${found.files} files` : pagesText(found.pages),
-    pages: found.pages, files: found.files, extra: true,
+  const extra = [...more].sort((a, b) => chipRank(a[0]) - chipRank(b[0]) || a[0].localeCompare(b[0])).map(([kind, found]): FoundChip => ({
+    kind, state: 'done', label: labelOf(kind), detail: chipDetail(found.pageCount, found.files),
+    pages: found.pages, pageCount: found.pageCount, files: found.files, extra: true,
   }))
   return [...identity, ...extra]
 }

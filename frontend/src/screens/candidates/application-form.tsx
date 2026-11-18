@@ -265,6 +265,7 @@ export default function ApplicationFormPage() {
             <SidePanel percent={completeness.percent} missing={missing} documents={documentProgress} canEdit={canWork} onUpload={uploadNow} onFill={fillIn} onJump={jump} notes={feedback?.supported || canWork ? { count: feedback?.items.length ?? 0, overdue: Boolean(feedback?.stageClock?.needsReason), onOpen: openNotes } : undefined} />
             <div className="af-main">
               {saveError && <p className="af-banner is-error" role="alert"><span>{saveError}</span></p>}
+              {state.reading && <p className="af-banner is-reading" role="status"><Loader2 className="animate-spin" aria-hidden="true" /><span>Reading documents… The details fill in by themselves as each file is read.</span></p>}
               {shownWarnings.length > 0 && <ul className="af-banner is-warn" role="status">{shownWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
               {feedback && <StageClockBar feedback={feedback} actions={feedbackActions} canWrite={feedback.canWrite} />}
               {/* The assignment is a card of its own at the very top; it scrolls away with the page. */}
@@ -289,10 +290,10 @@ export default function ApplicationFormPage() {
               {/* One white card for the working area: details, documents, process tracking and notes, split by thin dividers. */}
               <div className="af-card af-work">
                 <div className="af-fill-wrap" ref={fillRef}>
-                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
+                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} />
                 </div>
                 <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[primaryId(ids), name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
-                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onIdentity={state.checkIdentity} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} />
+                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onIdentity={state.checkIdentity} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} />
                 {store.can('view_invoices') && <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />}
                 <NotesPanel feedback={feedback ?? EMPTY_FEEDBACK} actions={feedbackActions} viewer={{ id: store.me.id, role: store.me.role }} canWork={canWork} />
               </div>

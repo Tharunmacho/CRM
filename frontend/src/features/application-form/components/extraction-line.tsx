@@ -2,7 +2,7 @@ import { useId, useState } from 'react'
 import { CheckCircle2, Info, Loader2, ShieldAlert } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
-import { describeExtraction, identityActions, readerFailureLines } from '../form-model'
+import { describeExtraction, failureDetails, identityActions } from '../form-model'
 import { SHOW_MERGE_UI } from '../duplicate-merge'
 import type { IdentityCheck } from '../form-api'
 import type { DocumentKind, DocumentSlot } from '../types'
@@ -32,7 +32,7 @@ export function ExtractionNotes({ notes }: { notes: string[] }) {
  * asks `lineTone`) and by nothing else here: red box (failed), blue box (reading), green line (filled), or no box at all with
  * the quiet Notes line. `notes` is the list already routed and de-duplicated across the Documents list (`routeLineNotes`).
  */
-export function ExtractionLine({ kind, slot, onCorrect, disabled, attachmentId, onIdentity, notes }: {
+export function ExtractionLine({ kind, slot, onCorrect, disabled, attachmentId, onIdentity, onReadAgain, notes }: {
   kind: DocumentKind
   slot: DocumentSlot
   onCorrect?: () => void
@@ -40,6 +40,8 @@ export function ExtractionLine({ kind, slot, onCorrect, disabled, attachmentId, 
   /** The file this reading belongs to, and what to do about a rejected one (Read again / This is the right person). */
   attachmentId?: string
   onIdentity?: (attachmentId: string, action: IdentityCheck) => Promise<void>
+  /** Only for a reading that failed: asks for the same file to be read again (nothing for a file stopped as another person's). */
+  onReadAgain?: () => Promise<void>
   notes?: string[]
 }) {
   const [working, setWorking] = useState(false)
@@ -57,6 +59,14 @@ export function ExtractionLine({ kind, slot, onCorrect, disabled, attachmentId, 
     finally { setWorking(false) }
   }
   const actions = wrongDocument ? identityActions(slot.extraction) : []
+  const readAgain = async () => {
+    if (!onReadAgain || working) return
+    setWorking(true); setProblem('')
+    try { await onReadAgain() }
+    catch (cause) { setProblem(cause instanceof Error ? cause.message : 'Reading could not be started. Your file is saved.') }
+    finally { setWorking(false) }
+  }
+  const details = line.tone !== 'failed' || !slot.extraction ? [] : wrongDocument ? failureDetails({ failure: slot.extraction.failure, message: '' }) : failureDetails(slot.extraction)
   return (
     <div className="af-extract-line">
       {line.tone === 'note'
@@ -74,11 +84,12 @@ export function ExtractionLine({ kind, slot, onCorrect, disabled, attachmentId, 
                 case 'upload': return onCorrect ? <button key="upload" type="button" className="af-docbtn" disabled={disabled} onClick={onCorrect}>Upload correct file</button> : null
               }
             })}
+            {!wrongDocument && line.tone === 'failed' && onReadAgain && <button type="button" className="af-docbtn" disabled={disabled || working} onClick={() => void readAgain()}>{working ? 'Starting…' : 'Read again'}</button>}
             {problem && <small role="alert">{problem}</small>}
-            {slot.extraction?.failure && (
+            {details.length > 0 && (
               <details className="af-extract-details">
                 <summary>Details</summary>
-                <ul>{readerFailureLines(slot.extraction.failure).map((text) => <li key={text}>{text}</li>)}</ul>
+                <ul>{details.map((text) => <li key={text}>{text}</li>)}</ul>
               </details>
             )}
           </div>

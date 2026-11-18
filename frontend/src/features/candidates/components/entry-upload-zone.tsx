@@ -10,10 +10,10 @@ import { LogToggle, ReadNotes } from './read-report'
 const isImage = (name: string) => /\.(jpe?g|png|webp|heic|heif|tiff?)$/i.test(name)
 
 /**
- * The one place documents are added on Add candidate. Any file may hold a resume, a passport and an Aadhaar card, so
- * there is no slot per kind: files go in as they are, each row shows how far its reading is, and the three chips under
- * the list light up as the server finds each kind; every other kind found in a file (education and experience certificates, medical,
- * signed offer, visa ...) gets a chip of its own with its pages, and is filed in its own field when the candidate is saved.
+ * The one place documents are added on Add candidate. Any file may hold any mix of documents, so there is no slot per kind: files go in
+ * as they are and the screen reads them by itself. Each row shows how far its reading is, and a chip appears for every kind the server
+ * finds (resume, passport, Aadhaar, education and experience certificates, medical, signed offer, visa, police clearance, photo, other)
+ * with its page count. Resume, passport and Aadhaar are read into the form; the rest are filed in their own field when the candidate is saved.
  */
 export function EntryUploadZone({ rows, chips, reports = [], progress, disabled, max, problems, onAdd, onRemove, onRetry, onCheckAgain, onManual }: {
   rows: FileRow[]
@@ -37,6 +37,8 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
   const [removing, setRemoving] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const [logOpen, setLogOpen] = useState<string | null>(null)
+  // Only what was found has a chip (one per kind, with its pages); a kind that is not in the files is not listed.
+  const found = chips.filter((chip) => chip.state !== 'idle')
   const full = rows.length >= max
   const locked = disabled || full
 
@@ -74,6 +76,8 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
         <input ref={input} type="file" multiple accept={DOCUMENT_ACCEPT} aria-label="Choose documents" className="sr-only" tabIndex={-1} disabled={locked}
           onChange={(event) => { const list = event.currentTarget.files; take(list); event.currentTarget.value = '' }} />
       </div>
+
+      {rows.length === 0 && <p className="uz-hint">One file or many. We sort every page for you: resume, passport, Aadhaar, education and experience certificates, medical, signed offer, visa, police clearance and photo.</p>}
 
       {problems.length > 0 && <ul role="alert" className="uz-problems">{problems.map((message) => <li key={message}>{message}</li>)}</ul>}
 
@@ -138,15 +142,20 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
         </ul>
       )}
 
-      <ul className="uz-chips" aria-label="What we found" aria-live="polite">
-        {chips.map((chip) => (
-          <li key={chip.kind} className={`uz-chip is-${chip.state}`}>
-            {chip.state === 'done' ? <Check size={14} strokeWidth={3} aria-hidden /> : chip.state === 'reading' ? <LoaderCircle size={14} className="ac-spin" aria-hidden /> : chip.state === 'review' ? <AlertTriangle size={14} aria-hidden /> : <i aria-hidden />}
-            <span>{chip.label}</span>
-            {chip.detail && <small>{chip.detail}</small>}
-          </li>
-        ))}
-      </ul>
+      {found.length > 0 && (
+        <div className="uz-found-block">
+          <p className="uz-chips-head" id="uz-chips-head">Found in your files</p>
+          <ul className="uz-chips" aria-labelledby="uz-chips-head" aria-live="polite">
+            {found.map((chip) => (
+              <li key={chip.kind} className={`uz-chip is-${chip.state}`}>
+                {chip.state === 'done' ? <Check size={14} strokeWidth={3} aria-hidden /> : chip.state === 'reading' ? <LoaderCircle size={14} className="ac-spin" aria-hidden /> : <AlertTriangle size={14} aria-hidden />}
+                <span>{chip.label}</span>
+                {chip.detail && <small>{chip.detail}</small>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

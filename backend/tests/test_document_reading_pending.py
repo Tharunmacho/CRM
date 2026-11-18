@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.db.models import Attachment, AuditEntry, DocumentExtractionJob
 from app.services.document_reading import pending_expression
-from test_bulk_candidate_import import _read_again, env, send  # noqa: F401  (the fixture and helpers)
+from test_bulk_candidate_import import _read_again, env, import_only_stores, send  # noqa: F401  (the fixtures and helpers)
 from test_database_naming import schema_database  # noqa: F401
 
 FILES = ["Resume.pdf", "Passport.pdf", "Visa.pdf", "Medical.pdf"]

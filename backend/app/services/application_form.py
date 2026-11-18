@@ -11,6 +11,7 @@ from copy import deepcopy
 import json
 import re
 import uuid
+import logging
 from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -73,6 +74,8 @@ LEGACY_SLOTS = {"education": "education_certificate", "experience": "experience_
 STORED_SLOTS = SLOTS + tuple(LEGACY_SLOTS)
 PROCESSING = {"uploaded", "pending", "processing", "retry"}
 EXPIRING_DAYS = 180
+
+log = logging.getLogger(__name__)
 
 HEADER = {
     "company": "Careindia Overseas Pvt Ltd",
@@ -1146,6 +1149,118 @@ def _attach_read_documents(db: Session, job: DocumentExtractionJob, output: dict
     return attached
 
 
+IDENTITY_SLOTS = ("resume", "passport", "aadhaar")   # the fields whose file the reader takes the identity documents from
+OTHERS_FILED = "othersFiled"                           # job.draft key: the other documents of this read file were looked at (once)
+
+
+def _cut_from_a_larger_scan(db: Session, source: Attachment) -> bool:
+    """Whether this stored file is itself a piece cut from a larger scan (its upload says which pages): such a piece is never cut again."""
+    metas = db.scalars(select(AuditEntry.meta).where(
+        AuditEntry.entity_type == "candidate", AuditEntry.entity_id == source.entity_id,
+        AuditEntry.action.in_(("Uploaded document", "Separated a document from a combined upload")),
+        AuditEntry.meta["attachment_id"].astext == source.id)).all()
+    return any(isinstance(meta, dict) and (meta.get("split_pages") or meta.get("source_attachment_id")) for meta in metas)
+
+
+def file_other_documents(db: Session, job: DocumentExtractionJob, output: dict, meta: dict) -> list:
+    """After a stored file (a resume, passport or Aadhaar upload that holds a whole bundle) was read: file the pages that are
+    experience or education certificates, a signed offer, a visa, a medical report or a police clearance in their own fields, as the
+    upload-time split does (`document_splitting.store_pieces`).
+
+    Everything comes from the reading the job already saved (its inspection and page kinds): no page is read again, nothing is sent to
+    the reader. The whole file stays where it is (or becomes the source evidence, see `_attach_read_documents`), a page already filed
+    in a field is not filed again, and a page the classifier is not sure of goes to Other documents with the reader's own file. An
+    education certificate that was filed is queued for reading like any upload to that field. The caller holds the candidate lock and
+    commits. Done once per job (`othersFiled` in its draft). When the filing itself fails the pages go to Other documents instead,
+    so nothing is lost and the reading of the three kinds is never held back. Returns the pieces stored."""
+    if (job.draft or {}).get(OTHERS_FILED) or meta.get("slot") not in IDENTITY_SLOTS or not job.candidate_id:
+        return []
+    state = job.state if isinstance(job.state, dict) else {}
+    inspection = (output or {}).get("inspection") or {}
+    saved = state.get("page_kinds")
+    if not inspection or not isinstance(saved, dict):
+        return []                      # no saved reading of the page kinds: nothing can be said without reading the pages again
+    source = db.get(Attachment, meta.get("attachmentId") or job.attachment_id)
+    candidate = db.get(Candidate, job.candidate_id)
+    if source is None or candidate is None or source.entity_type != "candidate" or source.entity_id != job.candidate_id:
+        return []
+    if source.content_type != "application/pdf" or _cut_from_a_larger_scan(db, source):
+        return []
+    from types import SimpleNamespace
+    from app.services import document_splitting as splitting
+    from app.services.bulk_candidate_import import cut_pdf_pages, discard_written
+    from app.services.document_storage import read_bytes
+    settings = get_settings()
+    try:
+        data = read_bytes(settings, source.object_key)
+    except Exception:
+        return []                      # the file cannot be fetched now: the next look tries again
+    known, plan = splitting.plan_other_documents(source.file_name, data, inspection, saved)
+    if not known:
+        return []
+    job.draft = {**dict(job.draft or {}), OTHERS_FILED: datetime.now(timezone.utc).isoformat()}
+    if plan is None:
+        return []
+    owner = SimpleNamespace(id=job.owner_id)
+    written: list[str] = []
+    audit = {"document_job_id": job.id, "source_attachment_id": source.id}
+    try:
+        with db.begin_nested():
+            stored = splitting.store_pieces(db, owner, candidate, plan, source.file_name, settings=settings, written=written,
+                                            skip_slots=set(splitting.READER_FILED), audit_extra=audit, uploaded_at=source.uploaded_at)
+    except Exception:
+        discard_written(settings, written)
+        log.warning("Filing the other documents of job %s failed; their pages go to Other documents.", job.id, exc_info=True)
+        taken = {number for kind in IDENTITY_SLOTS for number in _page_numbers(inspection.get(kind + "_pages"))}
+        pages = sorted({number for piece in plan.pieces for number in piece.pages} - taken)
+        written = []
+        try:
+            with db.begin_nested():
+                stored = splitting.store_pieces(db, owner, candidate, splitting.SplitPlan([splitting.PlannedPiece(["other"], cut_pdf_pages(data, pages), pages)]),
+                                                source.file_name, settings=settings, written=written, audit_extra=audit, uploaded_at=source.uploaded_at) if pages else []
+        except Exception:
+            discard_written(settings, written)
+            raise
+    queued: set[str] = set()
+    for piece in stored:     # an education certificate is read like one uploaded to its field (once per stored file)
+        if piece.slot in splitting.READ_SLOTS and not piece.duplicate and piece.attachment.object_key not in queued:
+            queued.add(piece.attachment.object_key)
+            queue_reading(db, owner, candidate, piece.attachment, "application/pdf")
+    notes = _FILING_NOTES.get()
+    if notes is not None:
+        message = splitting.filing_message(stored)
+        if message:
+            notes.append(message)
+        check = splitting.inherited_pages(saved, {number for piece in stored if not piece.duplicate for number in piece.pages})
+        if check:
+            notes.append(f"{_pages_text(check).capitalize()} took the kind of the page before {'it' if len(check) == 1 else 'them'}: check "
+                         f"{'it' if len(check) == 1 else 'them'}.")
+    return stored
+
+
+def file_other_documents_of_read_files(db: Session, candidate: Candidate, *, limit: int = 3) -> list:
+    """The same filing for files that were read before it existed: each read resume / passport / Aadhaar file of this candidate whose
+    other documents were not looked at yet, from the reading it saved (a job without its page kinds is never loaded). At most
+    `limit` files per call. In the caller's transaction, under the candidate's lock. Returns the pieces stored."""
+    from sqlalchemy.orm import undefer
+    ids = list(db.scalars(select(DocumentExtractionJob.id).where(
+        DocumentExtractionJob.candidate_id == candidate.id, DocumentExtractionJob.status.in_(("completed", "needs_review")),
+        DocumentExtractionJob.attachment_id.is_not(None), DocumentExtractionJob.draft["applicationForm"]["slot"].astext.in_(IDENTITY_SLOTS),
+        DocumentExtractionJob.draft[OTHERS_FILED].astext.is_(None), DocumentExtractionJob.state["page_kinds"].is_not(None),
+    ).order_by(DocumentExtractionJob.created_at).limit(limit)))
+    filed: list = []
+    for identifier in ids:
+        job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))
+                        .where(DocumentExtractionJob.id == identifier).with_for_update())
+        meta = (job.draft or {}).get("applicationForm") if job is not None else None
+        if not isinstance(meta, dict) or (meta.get("result") or {}).get("identityMismatch"):
+            continue                   # a document held back for another person's name is never filed into this candidate
+        output = (job.state or {}).get("output")
+        if isinstance(output, dict):
+            filed += file_other_documents(db, job, output, meta)
+    return filed
+
+
 def _page_numbers(value) -> set[int]:
     return {number for number in (value or []) if type(number) is int and number > 0}
 
@@ -1208,14 +1323,16 @@ def _without_unreadable_name(raw: dict) -> dict:
     return copy
 
 
-def _unfiled_page_notes(output: dict, meta: dict, filed_as_other: bool) -> list[str]:
+def _unfiled_page_notes(output: dict, meta: dict, filed_as_other: bool, own_field: set[int] = frozenset()) -> list[str]:
     """The plain notes about pages that are not documents of their own: unrecognised pages that were read (filed under Other
-    documents with the kind the file was expected to be named), and blank pages (listed, not filed)."""
+    documents with the kind the file was expected to be named), and blank pages (listed, not filed). A page that was filed in a field of
+    its own (`own_field`: a medical report, an offer ...) is neither."""
     pages = ((output or {}).get("inspection") or {}).get("pages") or []
     expected = SLOT_LABELS.get(meta.get("slot"), "").lower() or "resume, passport or Aadhaar"
     out: list[str] = []
     read_unknown = [page["page_number"] for page in pages if isinstance(page, dict) and page.get("status") == "read"
-                    and page.get("document_type") == "unknown" and type(page.get("page_number")) is int]
+                    and page.get("document_type") == "unknown" and type(page.get("page_number")) is int
+                    and page["page_number"] not in own_field]
     if read_unknown and filed_as_other:
         out.append(f"{_pages_text(read_unknown).capitalize()} {'was' if len(read_unknown) == 1 else 'were'} filed under Other documents "
                    f"(not recognised as a {expected} page).")
@@ -1521,9 +1638,12 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
                     db, job, output, meta, derive_source_slot=True)
             else:
                 form["attachedDocuments"] = _attach_read_documents(db, job, output, meta)
+            # The other documents of the same file (experience / education certificates, offer, visa, medical, police clearance) are
+            # filed in their own fields from the reading just made.
+            own_field = {number for piece in file_other_documents(db, job, output, meta) for number in piece.pages}
         finally:
             _FILING_NOTES.reset(token)
-        filing.extend(_unfiled_page_notes(output, meta, bool((((getattr(job, "state", None) or {}).get("documents")) or {}).get("other"))))
+        filing.extend(_unfiled_page_notes(output, meta, bool((((getattr(job, "state", None) or {}).get("documents")) or {}).get("other")), own_field))
     coverage = (output or {}).get("coverage") or {}
     issues = plain_issues(coverage.get("issues") or [])
     if status == "needs_review" and settled == "needs_review":

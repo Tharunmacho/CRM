@@ -189,6 +189,39 @@ def plan_split_saved(slot: str | None, filename: str, data: bytes, report: dict 
         return False, None
 
 
+# ------------------------------------------------------------------ the other documents of a stored, read file
+
+# The fields the reader fills (and `_attach_read_documents` files from what the reader was given) and "Other documents" (the pages
+# the reader left, filed as one file by the reader's own cut): none of them is ever filed from a piece of the stored file's reading.
+READER_FILED = ("resume", "passport", "aadhaar", "other")
+
+
+def own_field_pages(kinds: dict[str, list[int]] | None) -> set[int]:
+    """The pages of a read file that the content classifier gives a field of their own (a medical report, an experience certificate, a
+    signed offer ...), from `kinds_found`: every field but the ones the reader files itself. Those pages are filed by
+    `file_other_documents`, so the reader's "Other documents" file leaves them out. Empty when nothing is known."""
+    return {number for slot, pages in (kinds or {}).items() if slot not in READER_FILED for number in pages}
+
+
+def plan_other_documents(filename: str, data: bytes, report: dict | None, saved_kinds: dict | None) -> tuple[bool, SplitPlan | None]:
+    """(known, plan) for a file that was already read: its saved inspection and page kinds are used, nothing is read again. `known`
+    is False when that reading is missing or damaged (nothing can be said without reading the pages); the plan is None when the file
+    holds no document for a field other than the reader's. Never raises."""
+    known, plan = plan_split_saved(None, filename, data, report, saved_kinds)
+    if not known or plan is None:
+        return known, None
+    pieces = [piece for piece in plan.pieces if any(slot not in READER_FILED for slot in piece.slots)]
+    return True, (SplitPlan(pieces, plan.note) if pieces else None)
+
+
+def inherited_pages(saved_kinds: dict | None, pages: set[int]) -> list[int]:
+    """The pages (among `pages`) whose kind was only taken from the page before them: the person is told to check these."""
+    saved = (saved_kinds or {}).get("pages") if isinstance(saved_kinds, dict) else None
+    if not isinstance(saved, dict):
+        return []
+    return sorted(number for number in pages if isinstance(saved.get(str(number)), dict) and saved[str(number)].get("inherited"))
+
+
 def _person(candidate: Candidate, original_name: str) -> str:
     """The name the pieces carry: the candidate's; a candidate without a name yet keeps the file's own name."""
     name = (candidate.name or "").strip()

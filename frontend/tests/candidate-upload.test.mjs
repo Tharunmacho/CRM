@@ -34,7 +34,7 @@ test('a queued file says how many are ahead of it, then Reading, then Done', () 
   // Without word from the reader, being first in line is just "Queued" (an older server cannot promise anything).
   assert.equal(fileRow(job({ status: 'retry', aheadOfYou: 0 }), early).label, 'Queued')
   assert.equal(fileRow(job({ status: 'pending' }), early).label, 'Queued')
-  assert.equal(fileRow(job({ status: 'uploaded' }), early).label, 'Ready to extract')
+  assert.equal(fileRow(job({ status: 'uploaded' }), early).label, 'Waiting to read')
   assert.equal(queueText({ queuePosition: 5 }), 'Waiting, 4 ahead of you')
   assert.equal(queueText({ aheadOfYou: null, queuePosition: null }), 'Queued')
   const reading = fileRow(job({ status: 'processing' }))
@@ -64,14 +64,14 @@ test('one file with a resume, a passport and an Aadhaar card lights the chips on
   // 2. Classified, reading: pages are known, so the kinds are found but not read yet.
   const classified = { inspection: { page_count: 6, resume_pages: [1, 2], passport_pages: [4], aadhaar_pages: [5, 6], unread_pages: [], unknown_pages: [3], pages: [], warnings: [] } }
   chips = foundChips([file(classified, 'processing')])
-  assert.deepEqual(chips.map((chip) => [chip.state, chip.label, chip.detail]), [['reading', 'Resume found', 'pages 1, 2'], ['reading', 'Passport found', 'page 4'], ['reading', 'Aadhaar found', 'pages 5, 6']])
+  assert.deepEqual(chips.map((chip) => [chip.state, chip.label, chip.detail]), [['reading', 'Resume', '2 pages'], ['reading', 'Passport', '1 page'], ['reading', 'Aadhaar', '2 pages']])
   // 3. The resume is read first (partial result): it turns done, the others keep reading.
   chips = foundChips([file({ ...classified, scans: { resume: scan([1, 2]) } }, 'processing')])
   assert.deepEqual(chips.map((chip) => chip.state), ['done', 'reading', 'reading'])
   // 4. Everything read.
   chips = foundChips([file({ ...classified, scans: { resume: scan([1, 2]), passport: scan([4]), aadhaar: scan([5, 6]) } }, 'completed')])
   assert.deepEqual(chips.map((chip) => chip.state), ['done', 'done', 'done'])
-  assert.equal(chips[1].detail, 'page 4')
+  assert.equal(chips[1].detail, '1 page')
 })
 
 test('a found kind that could not be read asks for a look; a resume with no pages is not found', () => {
@@ -86,7 +86,7 @@ test('several files: pages are merged per kind, more than one file shows a count
   const b = job({ kind: 'resume', status: 'completed', result: { scans: { resume: scan([1, 2]), passport: scan([3]) } } })
   const legacy = job({ kind: 'aadhaar', status: 'completed', result: { scans: { aadhaar: { ...data, inspection: undefined } } } })
   const chips = foundChips([a, b, legacy])
-  assert.deepEqual(chips.map((chip) => [chip.kind, chip.state, chip.detail]), [['resume', 'done', '2 files'], ['passport', 'done', 'page 3'], ['aadhaar', 'done', '']])
+  assert.deepEqual(chips.map((chip) => [chip.kind, chip.state, chip.detail]), [['resume', 'done', '3 pages · 2 files'], ['passport', 'done', '1 page'], ['aadhaar', 'done', '']])
   assert.deepEqual(jobFindings(b).map((f) => [f.kind, f.pages, f.read]), [['resume', [1, 2], true], ['passport', [3], true]])
 })
 
@@ -144,8 +144,8 @@ test('Check people in documents shows only when the server finds more than one p
 test('the page sends every file as kind resume without replacing the others, and uses the one-second poll', async () => {
   const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
   assert.match(page, /intake\.upload\('resume', file, \{ many: true \}\)/)
-  assert.match(page, /title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field, then choose Extract details/)
-  assert.match(page, /More documents \(optional\)/)
+  assert.match(page, /title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field and the details fill in by themselves/)
+  assert.doesNotMatch(page, /More documents \(optional\)|Extract details|choose Extract|MultiFileSlot|<FileDrop/)
   assert.doesNotMatch(page, /Kept on the profile when you save/)
   assert.doesNotMatch(page, /Aadhaar copy'/)
   assert.match(page, /Check people in documents/)
@@ -276,7 +276,7 @@ test('files that are being read, finished or failed never carry the reader warni
     const row = fileRow(job({ status, reader: dead, waitingReason: 'reader_not_running' }), { now: T0 })
     assert.deepEqual([row.stalled, row.canCheckAgain], [null, false], status)
   }
-  assert.equal(fileRow(job({ status: 'uploaded', reader: dead }), { now: T0 }).label, 'Ready to extract') // not queued for reading yet
+  assert.equal(fileRow(job({ status: 'uploaded', reader: dead }), { now: T0 }).label, 'Waiting to read') // not queued for reading yet
 })
 
 test('fileRows passes the clock to every row and keeps their order', () => {
@@ -299,18 +299,33 @@ test('polling waits for the previous answer, then READ_POLL_MS, and sends nothin
 
 const slots = await loadSource('../src/shared/model/document-slots.ts')
 
-test('a chip is added for every other kind found in the upload, with its pages, after the three that are always listed', () => {
+test('a chip is added for every other kind found in the upload, with its page count, after the three that are always listed', () => {
   const combined = job({ status: 'completed', result: {
     scans: { resume: scan([1, 2]), passport: scan([3]) },
     kinds: { medical: [7], education_certificate: [5, 6], resume: [1, 2], passport: [3], experience_certificate: [4], other: [8] },
   } })
-  const chips = foundChips([combined], slots.documentLabel)
-  assert.deepEqual(chips.map((chip) => chip.kind), ['resume', 'passport', 'aadhaar', 'experience_certificate', 'education_certificate', 'medical', 'other'])
+  const chips = foundChips([combined])
+  // the extra chips follow one fixed order (education, experience, medical ... other), not the order of the pages
+  assert.deepEqual(chips.map((chip) => chip.kind), ['resume', 'passport', 'aadhaar', 'education_certificate', 'experience_certificate', 'medical', 'other'])
   assert.deepEqual(chips.slice(3).map((chip) => [chip.state, chip.label, chip.detail, chip.extra]), [
-    ['done', 'Experience certificate found', 'page 4', true], ['done', 'Education certificate found', 'pages 5, 6', true],
-    ['done', 'Medical found', 'page 7', true], ['done', 'Other documents found', 'page 8', true]])
-  assert.deepEqual(chips.slice(0, 3).map((chip) => [chip.state, chip.label, chip.extra]), [['done', 'Resume found', undefined], ['done', 'Passport found', undefined], ['idle', 'Aadhaar', undefined]])
+    ['done', 'Education certificates', '2 pages', true], ['done', 'Experience certificates', '1 page', true],
+    ['done', 'Medical', '1 page', true], ['done', 'Other', '1 page', true]])
+  assert.deepEqual(chips.slice(0, 3).map((chip) => [chip.state, chip.label, chip.detail, chip.extra]), [['done', 'Resume', '2 pages', undefined], ['done', 'Passport', '1 page', undefined], ['idle', 'Aadhaar', '', undefined]])
   assert.deepEqual(chips[1].pages, [3])                    // the identity chips still come from the scans, not from `kinds`
+  assert.equal(chips[3].pageCount, 2)
+})
+
+test('every kind the owner lists has its own plain chip name, in one fixed order', () => {
+  const everything = job({ status: 'completed', result: { scans: { resume: scan([1]), passport: scan([2, 3]), aadhaar: scan([4]) }, kinds: {
+    other: [14], photo: [13], pcc: [12], visa: [11], signed_offer: [10], medical: [9], experience_certificate: [8], education_certificate: [5, 6, 7],
+  } } })
+  assert.deepEqual(foundChips([everything]).map((chip) => [chip.label, chip.detail]), [
+    ['Resume', '1 page'], ['Passport', '2 pages'], ['Aadhaar', '1 page'], ['Education certificates', '3 pages'], ['Experience certificates', '1 page'],
+    ['Medical', '1 page'], ['Signed offer', '1 page'], ['Visa', '1 page'], ['Police clearance', '1 page'], ['Photo', '1 page'], ['Other', '1 page']])
+  assert.equal(upload.chipLabel('google_review'), 'Google review')   // a kind with no name of its own is still readable
+  // a kind the server names that this screen does not know sorts before "Other"
+  const odd = job({ status: 'completed', result: { scans: {}, kinds: { other: [1], insurance: [2], medical: [3] } } })
+  assert.deepEqual(foundChips([odd]).slice(3).map((chip) => chip.kind), ['medical', 'insurance', 'other'])
 })
 
 test('without kinds nothing changes: exactly the three chips, and the same file in two files adds up its pages', () => {
@@ -319,10 +334,10 @@ test('without kinds nothing changes: exactly the three chips, and the same file 
   const a = job({ status: 'completed', result: { scans: {}, kinds: { visa: [2] } } })
   const b = job({ status: 'completed', result: { scans: {}, kinds: { visa: [1, 2] } } })
   const chips = foundChips([a, b])
-  assert.deepEqual(chips.slice(3).map((chip) => [chip.kind, chip.label, chip.detail, chip.pages]), [['visa', 'Visa found', '2 files', [1, 2]]])
+  assert.deepEqual(chips.slice(3).map((chip) => [chip.kind, chip.label, chip.detail, chip.pages]), [['visa', 'Visa', '3 pages · 2 files', [1, 2]]])
   // damaged or hostile values are ignored, never shown
   const odd = job({ status: 'completed', result: { scans: {}, kinds: { 'x<b>': [1], medical: 'all', visa: [-0, 'two'], pcc: [3] } } })
-  assert.deepEqual(foundChips([odd], slots.documentLabel).slice(3).map((chip) => [chip.kind, chip.label]), [['pcc', 'Police clearance certificate (PCC) found'], ['visa', 'Visa found']].sort((x, y) => (x[0] === 'visa' ? 0 : 1) - (y[0] === 'visa' ? 0 : 1)))
+  assert.deepEqual(foundChips([odd]).slice(3).map((chip) => [chip.kind, chip.label]), [['visa', 'Visa'], ['pcc', 'Police clearance']])
 })
 
 test('a file that holds only filed-only kinds is Done, not "Needs a look", and presence still lists the three kinds only', () => {
@@ -334,4 +349,32 @@ test('a file that holds only filed-only kinds is Done, not "Needs a look", and p
   assert.deepEqual(upload.extraKinds(job({ status: 'completed' })), [])
   // a file with nothing found at all still needs a look
   assert.equal(fileRow(job({ status: 'completed', result: { scans: {} } })).label, 'Needs a look')
+})
+
+test('there is no Extract step: saving the dropped files starts the reading, new files are read after the running round, an error is never retried in a loop', async () => {
+  const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
+  const add = page.slice(page.indexOf('const addDocuments = async'), page.indexOf('const removeDocument'))
+  // after every file is saved (and the draft is), the screen asks for the reading itself
+  assert.ok(add.indexOf('await intake.saveDraft') < add.indexOf('readDocumentsRef.current({ retryFailed: false })'))
+  assert.match(add, /if \(intake\.hasUnqueued\(\)\) void readDocumentsRef\.current/)
+  const read = page.slice(page.indexOf('const readDocuments = async'), page.indexOf('const cancelReading'))
+  // a file dropped while a round runs is picked up when the round ends, but never after an error or a stop
+  assert.match(read, /if \(!failed && !controller\.signal\.aborted && intake\.hasUnqueued\(\)\) void readDocumentsRef\.current\(\{ retryFailed: false \}\)/)
+  assert.match(read, /intake\.latest\(\)/)           // never the render-old list: the files were added a moment ago
+  assert.match(read, /setReadError\(/)
+  // progress and failure are said plainly; the only button is Try again, shown after a failure
+  assert.match(page, /Reading documents… You can leave this page/)
+  assert.match(page, /\{!reading && \(readError \|\| failedFiles > 0\) && <Button onClick=\{\(\) => void readDocuments\(\{ retryFailed: true \}\)\}[^>]*icon=\{<RotateCw className="h-4 w-4" \/>\}>Try again<\/Button>\}/)
+  assert.doesNotMatch(page, /Read again|Sparkles/)
+  // the photo, education and experience cards are gone: one drop zone holds everything
+  assert.doesNotMatch(page, /Education certificates|Experience certificates|slot-photo|ac-slots/)
+  assert.equal((page.match(/<EntryUploadZone/g) ?? []).length, 1)
+})
+
+test('the zone lists a chip only for a kind that was found, under one heading, and says what it sorts while it is empty', async () => {
+  const zone = await readFile(new URL('../src/features/candidates/components/entry-upload-zone.tsx', import.meta.url), 'utf8')
+  assert.match(zone, /chips\.filter\(\(chip\) => chip\.state !== 'idle'\)/)
+  assert.match(zone, /found\.length > 0 && \(/)
+  assert.match(zone, /aria-labelledby="uz-chips-head"/)
+  assert.match(zone, /rows\.length === 0 && <p className="uz-hint">/)
 })

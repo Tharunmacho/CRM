@@ -17,7 +17,7 @@ const compiled = { exports: {} }
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), compiled, compiled.exports)
 const { useDocumentIntake } = compiled.exports
 
-test('uploads wait for explicit extraction; later files are excluded from the running batch and a retry is scoped', async () => {
+test('the hook never starts reading by itself (the screen asks for it); later files are excluded from the running batch and a retry is scoped', async () => {
   const jobs = []
   const started = []
   const originalFetch = globalThis.fetch

@@ -32,13 +32,20 @@ export async function uploadFormDocument(candidateId: string, kind: DocumentKind
   const form = new FormData()
   form.append('slot', kind)
   form.append('file', file)
-  if (['resume', 'passport', 'aadhaar', 'education_certificate'].includes(kind)) form.append('defer_extraction', 'true')
   const result = await api.form<{ form?: unknown; split?: SplitReport; alreadyUploaded?: boolean; message?: string; notes?: string[] }>(formPath(candidateId, target, '/documents'), form)
   // The server never stores a file twice. The same bytes again answer `alreadyUploaded` ("This file is already uploaded (version 2).") and a file that is
   // also filed elsewhere answers quiet `notes`; the screens show `split.message` as their neutral line, so these ride on it. (A file that is another
   // candidate's personal document is a 409: the server's sentence is the error the upload already shows.)
   const quiet = result.alreadyUploaded ? result.message : result.notes?.join(' ')
   return { form: result.form ? normalizeForm(result.form) : null, split: result.split ?? (quiet ? { message: quiet, pieces: [] } : null) }
+}
+
+export interface ReadPendingResult { allowed: boolean; queued: number; more: boolean; changed: boolean }
+
+/** Queue the reading of this candidate's stored resume, passport, Aadhaar and education files that were never read, and file the other pages of a bundle already read. Nothing to press: the form calls it when it opens. */
+export async function readPending(candidateId: string): Promise<ReadPendingResult> {
+  const result = await api.post<Partial<ReadPendingResult>>(`/candidates/${encodeURIComponent(candidateId)}/read-pending`, {})
+  return { allowed: result.allowed !== false, queued: Number(result.queued) || 0, more: result.more === true, changed: result.changed === true }
 }
 
 export async function extractFormDocuments(candidateId: string, attachmentIds: string[], target: FormTarget = {}): Promise<ApplicationFormData | null> {

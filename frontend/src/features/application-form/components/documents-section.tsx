@@ -10,16 +10,16 @@ import { FileLink } from '@/shared/ui/file-drop'
 import { DOCUMENT_ACCEPT } from '@/shared/lib/document-files'
 import { splitSourceCaption } from '@/shared/lib/split-source'
 import { DocumentUploadQueue, useDocumentUploadQueue } from '@/shared/ui/document-upload-queue'
-import { DocumentExtractionAction } from '@/shared/ui/document-extraction-action'
 import { Button, Field, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { documentLabel, documentSlot } from '@/shared/model/document-slots'
-import { extractionLineKey, routeLineNotes, sizeLabel } from '../form-model'
+import { extractionLineKey, routeLineNotes, sizeLabel, slotReadState } from '../form-model'
 import { loadDocumentReport, type IdentityCheck } from '../form-api'
 import { documentRowStates, documentRowsProgress, documentsCountText, type DocumentRowIcon, type DocumentRowState } from '../document-rows'
 import type { ApplicationFormData, DocumentKind, DocumentSlot, FormDocument } from '../types'
 import { SectionHeader } from './section-header'
 import { ExtractionLine } from './extraction-line'
+import { SlotReadingNote } from './slot-reading'
 import { ReadReport } from '@/features/candidates/components/read-report'
 import { formReports } from '@/features/candidates/read-report'
 import '@/styles/application-form-aadhaar.css'
@@ -85,7 +85,7 @@ function useSlotUpload(slot: DocumentSlot, canUpload: boolean, busy: boolean, on
  * One document on one compact row, on fixed columns so the rows line up from top to bottom:
  * status icon, name, status chip, file (name, size, date), actions (Upload or Replace, View).
  */
-function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, onExtract, onIdentity, lineNotes }: {
+function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, onExtract, readError, onIdentity, lineNotes }: {
   slot: DocumentSlot
   state: DocumentRowState
   canUpload: boolean
@@ -93,7 +93,10 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
   onUpload: (kind: DocumentKind, file: File) => Promise<void>
   onIdentity?: (attachmentId: string, action: IdentityCheck) => Promise<void>
   onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
+  /** Reads stored files again. Nobody starts a first reading: the form does that by itself; this is for Read again. */
   onExtract?: (attachmentIds: string[]) => Promise<void>
+  /** Why the form could not start a reading by itself; empty when it could. */
+  readError?: string
   /** The notes of every line, routed and de-duplicated across the list (`routeLineNotes`). */
   lineNotes: Record<string, string[]>
 }) {
@@ -103,6 +106,8 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
   const [manualBusy, setManualBusy] = useState(false)
   const [manualError, setManualError] = useState('')
   const upload = useSlotUpload(slot, canUpload && !state.disabled, busy, onUpload)
+  const failedReads = slotReadState(slot).failed
+  const readAgain = (attachmentId?: string) => (canUpload && onExtract && attachmentId && failedReads.includes(attachmentId) ? () => onExtract([attachmentId]) : undefined)
   const files = slot.multiple ? slot.files : slot.current ? [slot.current] : []
   const hasFile = files.some((file) => Boolean(file.url))
   const rejectedOnly = hasFile && files.every((file) => file.identityMismatch)
@@ -130,12 +135,12 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
       <b className="af-docrow-name" title={label}>{label}</b>
       <span className={cn('af-doc-chip', `is-${state.key}`, rejectedOnly && 'is-rejected')}>{working ? 'Uploading' : rejectedOnly ? 'Wrong document' : state.chip}</span>
       <div className="af-docrow-file">
-        {files.map((file, index) => <div key={file.attachmentId}><FileRow file={file} action={index === 0 && hasFile ? uploadButton : undefined} />{slot.multiple && file.extraction && <ExtractionLine kind={slot.slot} slot={{ ...slot, extraction: file.extraction }} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={file.attachmentId} onIdentity={canUpload ? onIdentity : undefined} notes={lineNotes[extractionLineKey(slot.slot, file.attachmentId)]} />}</div>)}
+        {files.map((file, index) => <div key={file.attachmentId}><FileRow file={file} action={index === 0 && hasFile ? uploadButton : undefined} />{slot.multiple && file.extraction && <ExtractionLine kind={slot.slot} slot={{ ...slot, extraction: file.extraction }} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={file.attachmentId} onIdentity={canUpload ? onIdentity : undefined} onReadAgain={readAgain(file.attachmentId)} notes={lineNotes[extractionLineKey(slot.slot, file.attachmentId)]} />}</div>)}
         {marked && <div className="af-doc-manual"><b>Marked manually · No file attached</b><small>{slot.manualStatus?.by.name || 'Former team member'}{slot.manualStatus?.at ? ` · ${dateTimeLabel(slot.manualStatus.at)}` : ''}</small>{slot.manualStatus?.note && <p>{slot.manualStatus.note}</p>}</div>}
-        {slot.multiple && !hasFile && !marked && <p className="af-doc-hint">{slot.slot === 'passport' ? 'Add the photo page, address page or other passport pages together.' : slot.slot === 'aadhaar' ? 'Add both front and back pages before extracting details.' : 'Choose or drop several files.'}</p>}
-        {(!slot.multiple || !files.some((file) => file.extraction)) && <ExtractionLine kind={slot.slot} slot={slot} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={slot.current?.attachmentId} onIdentity={canUpload ? onIdentity : undefined} notes={lineNotes[extractionLineKey(slot.slot)]} />}
+        {slot.multiple && !hasFile && !marked && <p className="af-doc-hint">{slot.slot === 'passport' ? 'Add the photo page, address page or other passport pages together.' : slot.slot === 'aadhaar' ? 'Add both the front and back pages.' : 'Choose or drop several files.'}</p>}
+        {(!slot.multiple || !files.some((file) => file.extraction)) && <ExtractionLine kind={slot.slot} slot={slot} onCorrect={canUpload ? upload.open : undefined} disabled={upload.blocked} attachmentId={slot.current?.attachmentId} onIdentity={canUpload ? onIdentity : undefined} onReadAgain={readAgain(slot.current?.attachmentId)} notes={lineNotes[extractionLineKey(slot.slot)]} />}
         <DocumentUploadQueue queue={upload.queue} />
-        {canUpload && <DocumentExtractionAction files={files} disabled={working} onExtract={onExtract} />}
+        <SlotReadingNote slot={slot} enabled={canUpload && Boolean(onExtract)} error={readError ?? ''} onRead={onExtract} />
       </div>
       {!hasFile && <div className="af-docrow-actions">
         {uploadButton}
@@ -170,6 +175,7 @@ export function DocumentsSection({
   busyKinds,
   onManualStatus,
   onExtract,
+  readError,
   onIdentity,
 }: {
   form: ApplicationFormData
@@ -179,6 +185,7 @@ export function DocumentsSection({
   busyKinds: DocumentKind[]
   onManualStatus?: (kind: DocumentKind, uploaded: boolean, note: string) => Promise<void>
   onExtract?: (attachmentIds: string[]) => Promise<void>
+  readError?: string
 }) {
   const rows = documentRowStates(form, canUpload)
   const progress = documentRowsProgress(rows.map((row) => row.state))
@@ -212,6 +219,7 @@ export function DocumentsSection({
             onUpload={onUpload}
             onManualStatus={onManualStatus}
             onExtract={onExtract}
+            readError={readError}
             onIdentity={onIdentity}
             lineNotes={lineNotes}
           />

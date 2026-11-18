@@ -32,12 +32,13 @@ const ICONS: Record<FillCard['kind'], LucideIcon> = { fields: UserRound, passpor
  * completeness and the "N to add" counts follow every keystroke. Sections 5 to 7 (Documents, Client and recruitment,
  * Recruitment process tracking) are the shell's; the passport document itself is also a row of the Documents list.
  */
-export function FillView({ ctx, canWork, upload, busyKinds, onExtract }: {
+export function FillView({ ctx, canWork, upload, busyKinds, onExtract, readError }: {
   ctx: FormContext
   canWork: boolean
   upload: (kind: DocumentKind, file: File) => Promise<void>
   busyKinds: DocumentKind[]
   onExtract?: (attachmentIds: string[]) => Promise<void>
+  readError?: string
 }): JSX.Element {
   const env = useFillEnv(ctx)
   const { form, draft, setDraft, errors } = ctx
@@ -88,6 +89,7 @@ export function FillView({ ctx, canWork, upload, busyKinds, onExtract }: {
         busy={busyKinds.includes('passport')}
         upload={upload}
         onExtract={onExtract}
+        readError={readError}
       />
       <PassportDetailsFields ctx={ctx} canWork={canWork} />
     </>

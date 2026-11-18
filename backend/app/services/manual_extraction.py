@@ -264,6 +264,13 @@ def _expected_kind(draft) -> str | None:
     return _SLOT_KIND.get(slot) if isinstance(slot, str) else None
 
 
+def _form_slot(draft) -> str | None:
+    """The form field the file was uploaded to (kept in the job's draft by `application_form.queue_reading`), or None."""
+    form = draft.get("applicationForm") if isinstance(draft, dict) else None
+    slot = form.get("slot") if isinstance(form, dict) else None
+    return slot if isinstance(slot, str) else None
+
+
 # ------------------------------------------------------------------ timings of a reading, a dropped connection, parallel uploads
 
 TIMING_RUNS = 6                  # attempts whose timings stay in a job's state
@@ -368,7 +375,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 return
             job.status = "processing"
             job.updated_at = job.started_at = now()
-            expected_kind = _expected_kind(job.draft)
+            expected_kind, form_slot = _expected_kind(job.draft), _form_slot(job.draft)
             state = deepcopy(job.state or {})
             key, digest = job.object_key, job.content_hash
             owner, group_id, form_candidate = job.owner_id, job.group_id, job.candidate_id
@@ -393,7 +400,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             key, digest, owner, group_id, form_candidate = row.object_key, row.content_hash, row.owner_id, row.group_id, row.candidate_id
             attempts = row.attempts
             titles = list(row.titles or [])
-            expected_kind = _expected_kind(row.draft)
+            expected_kind, form_slot = _expected_kind(row.draft), _form_slot(row.draft)
 
     # Which reader ran this attempt (a job that has no "reader" in its state was handled by older code).
     from app.services.worker_heartbeat import code_version
@@ -523,7 +530,13 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 # for the candidate's Other documents; blank pages are only listed. The whole file stays as the source evidence.
                 from app.services.bulk_candidate_import import cut_pdf_pages
                 from app.services.document_extraction import other_pages
+                from app.services import document_splitting
                 rest = other_pages(output["inspection"], current_extractions)
+                if kinds and form_slot in ("resume", "passport", "aadhaar"):
+                    # The pages the content classifier gave a field of their own (medical, experience certificate, offer ...) are filed
+                    # in those fields when the reading is applied (`application_form.file_other_documents`), not twice.
+                    own = document_splitting.own_field_pages(kinds)
+                    rest = [number for number in rest if number not in own]
                 if rest:
                     content = cut_pdf_pages(data, rest)
                     cut.append(("other", rest, content, hashlib.sha256(content).hexdigest()))

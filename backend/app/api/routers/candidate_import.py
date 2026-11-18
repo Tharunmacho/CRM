@@ -742,56 +742,142 @@ def status_of(body: StatusIn, db: Session = Depends(get_db), user: User = Depend
     return {"items": items}
 
 
+def queue_unread(db: Session, user: User, candidates: list, *, retry_failed: bool = True, limit: int | None = None) -> tuple[int, int, bool]:
+    """Queue the reading of every stored resume, passport, Aadhaar and education certificate file of these (already permitted) candidates
+    that has no reading job yet; with `retry_failed` a reading that failed is queued again. Three queries find what to do, however many
+    candidates (their documents, their reading jobs). A stored file is queued once (a job in ANY state, including finished, review and
+    held-back ones, counts as queued), however many slots hold it.
+
+    `limit` caps the NEW files queued by this call: the answer's last value says some are still waiting. Returns (queued, readable,
+    more): queued jobs (new, and failed ones put back), the stored files that can be read at all (read or not), and whether the cap
+    left files unqueued. The caller commits."""
+    from sqlalchemy import select
+    from app.db.models import Attachment, AuditEntry, DocumentExtractionJob
+    from app.services.application_form import requeue_failed
+    queued = 0
+    readable = 0        # stored files that can be read (resume, passport, Aadhaar, education certificate), read or not: tells "nothing to read" from "all read"
+    more = False
+    if not candidates:
+        return queued, readable, more
+    wanted = [candidate.id for candidate in candidates]
+    by_slot: dict[tuple[str, str], list[Attachment]] = {}       # newest version first
+    for attachment in db.scalars(select(Attachment).where(
+            Attachment.entity_type == "candidate", Attachment.entity_id.in_(wanted), Attachment.slot.in_(bulk.SENT_TO_READER))
+            .order_by(Attachment.version.desc())):
+        by_slot.setdefault((attachment.entity_id, attachment.slot), []).append(attachment)
+    keys = {attachment.object_key for rows in by_slot.values() for attachment in rows}
+    newest_job: dict[tuple[str, str], tuple[str, str | None]] = {}      # (candidate, stored file) -> (status, attachment) of its latest job
+    if keys:
+        for candidate_id, object_key, job_status, attachment_id in db.execute(
+                select(DocumentExtractionJob.candidate_id, DocumentExtractionJob.object_key, DocumentExtractionJob.status,
+                       DocumentExtractionJob.attachment_id)
+                .where(DocumentExtractionJob.candidate_id.in_(wanted), DocumentExtractionJob.object_key.in_(keys))
+                .order_by(DocumentExtractionJob.created_at.desc())):
+            newest_job.setdefault((candidate_id, object_key), (job_status, attachment_id))
+    waiting: dict[str, dict[str, list[Attachment]]] = {}     # candidate -> slot -> stored files with no reading job yet
+    for candidate in candidates:
+        unread: dict[str, list[Attachment]] = {}
+        seen: set[str] = set()
+        for slot in bulk.SENT_TO_READER:
+            versions = by_slot.get((candidate.id, slot))
+            if not versions:
+                continue
+            latest = versions[0]
+            # Every file stored together with the latest one (an import stores a passport's data page and back page as two versions of
+            # the slot in one go) is read; a version replaced by a later, separate upload is not.
+            batch = [latest] + [row for row in versions[1:] if row.uploaded_at == latest.uploaded_at]
+            for attachment in batch:
+                if attachment.object_key in seen:
+                    continue        # one stored file may sit in several slots (a scan of passport + Aadhaar + resume): it is read once
+                seen.add(attachment.object_key)
+                readable += 1
+                job = newest_job.get((candidate.id, attachment.object_key))
+                if job is None:
+                    unread.setdefault(slot, []).append(attachment)
+                elif retry_failed and job[0] == "failed" and requeue_failed(db, candidate.id, job[1] or attachment.id):
+                    queued += 1
+        if unread:
+            waiting[candidate.id] = unread
+    if waiting:
+        # A file the reader itself cut out of a bigger file it read (its resume, passport and Aadhaar pages, see
+        # `application_form._attach_read_documents`) was read together with that file: it has no job of its own and needs none.
+        derived = {meta.get("attachment_id") for meta in db.scalars(select(AuditEntry.meta).where(
+            AuditEntry.entity_type == "candidate", AuditEntry.entity_id.in_(list(waiting)),
+            AuditEntry.action == "Separated a document from a combined upload")) if isinstance(meta, dict)}
+        for candidate in candidates:
+            unread = {slot: [row for row in rows if row.id not in derived] for slot, rows in waiting.get(candidate.id, {}).items()}
+            unread = {slot: rows for slot, rows in unread.items() if rows}
+            if limit is not None:
+                room = max(0, limit - queued)
+                count = sum(len(rows) for rows in unread.values())
+                if count > room:
+                    more = True
+                    trimmed: dict[str, list[Attachment]] = {}
+                    for slot, rows in unread.items():
+                        take = rows[:room]
+                        room -= len(take)
+                        if take:
+                            trimmed[slot] = take
+                    unread = trimmed
+            if unread:
+                bulk.queue_reads(db, user, candidate, unread)
+                queued += sum(len(items) for items in unread.values())
+    return queued, readable, more
+
+
 @router.post("/read-again")
 def read_again(body: ReadAgainIn, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     """Read the imported documents: the passport, Aadhaar card, resume and education certificates of each of these candidates that nobody has read yet are
     put in the queue, and a reading that failed (the reading service was down, a timeout) is queued again. Importing only stores.
     Three queries find what to do, however many candidates (the candidates, their documents, their reading jobs)."""
-    from sqlalchemy import select
-    from app.db.models import Attachment, DocumentExtractionJob
-    from app.services.application_form import requeue_failed
-    candidates = _workable(db, user, list(dict.fromkeys(body.candidateIds)))
-    queued = 0
-    readable = 0        # stored files that can be read (resume, passport, Aadhaar, education certificate), read or not: tells "nothing to read" from "all read"
-    if candidates:
-        wanted = [candidate.id for candidate in candidates]
-        by_slot: dict[tuple[str, str], list[Attachment]] = {}       # newest version first
-        for attachment in db.scalars(select(Attachment).where(
-                Attachment.entity_type == "candidate", Attachment.entity_id.in_(wanted), Attachment.slot.in_(bulk.SENT_TO_READER))
-                .order_by(Attachment.version.desc())):
-            by_slot.setdefault((attachment.entity_id, attachment.slot), []).append(attachment)
-        keys = {attachment.object_key for rows in by_slot.values() for attachment in rows}
-        newest_job: dict[tuple[str, str], tuple[str, str | None]] = {}      # (candidate, stored file) -> (status, attachment) of its latest job
-        if keys:
-            for candidate_id, object_key, job_status, attachment_id in db.execute(
-                    select(DocumentExtractionJob.candidate_id, DocumentExtractionJob.object_key, DocumentExtractionJob.status,
-                           DocumentExtractionJob.attachment_id)
-                    .where(DocumentExtractionJob.candidate_id.in_(wanted), DocumentExtractionJob.object_key.in_(keys))
-                    .order_by(DocumentExtractionJob.created_at.desc())):
-                newest_job.setdefault((candidate_id, object_key), (job_status, attachment_id))
-        for candidate in candidates:
-            unread: dict[str, list[Attachment]] = {}
-            seen: set[str] = set()
-            for slot in bulk.SENT_TO_READER:
-                versions = by_slot.get((candidate.id, slot))
-                if not versions:
-                    continue
-                latest = versions[0]
-                # Every file stored together with the latest one (an import stores a passport's data page and back page as two versions of
-                # the slot in one go) is read; a version replaced by a later, separate upload is not.
-                batch = [latest] + [row for row in versions[1:] if row.uploaded_at == latest.uploaded_at]
-                for attachment in batch:
-                    if attachment.object_key in seen:
-                        continue        # one stored file may sit in several slots (a scan of passport + Aadhaar + resume): it is read once
-                    seen.add(attachment.object_key)
-                    readable += 1
-                    job = newest_job.get((candidate.id, attachment.object_key))
-                    if job is None:
-                        unread.setdefault(slot, []).append(attachment)
-                    elif job[0] == "failed" and requeue_failed(db, candidate.id, job[1] or attachment.id):
-                        queued += 1
-            if unread:
-                bulk.queue_reads(db, user, candidate, unread)
-                queued += sum(len(items) for items in unread.values())
+    queued, readable, _more = queue_unread(db, user, _workable(db, user, list(dict.fromkeys(body.candidateIds))))
     db.commit()
     return {"queued": queued, "readable": readable}
+
+
+# ------------------------------------------------------------------ reading what is already stored, by itself
+
+MAX_AUTO_READS = 12       # new files one call queues for the reader (the form is opened again to queue the rest)
+MAX_AUTO_FILINGS = 3      # read files whose other documents one call files
+
+
+candidate_reading_router = APIRouter(prefix="/api/candidates", tags=["candidate-import"])
+
+
+@candidate_reading_router.post("/{candidate_id}/read-pending")
+def read_pending(candidate_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
+    """Read the stored documents of ONE candidate by themselves, for the application form / profile to call when it opens (nobody presses
+    "Extract details"):
+
+    * every stored resume, passport, Aadhaar and education certificate file that has no reading job yet is queued for the reader (a
+      file whose reading was deferred, an imported file, an earlier upload): at most `MAX_AUTO_READS` new files per call, never one
+      that already has a job in any state, and a FAILED reading is not queued again here (that stays with Read documents);
+    * every file that was already read, whose bundle also holds experience / education certificates, a signed offer, a visa, a medical
+      report or a police clearance, has those pages filed in their own fields from the reading it saved (nothing is read again), at
+      most `MAX_AUTO_FILINGS` files per call, each only once.
+
+    Safe to call again and from two screens at once: the candidate row is locked, so a file is never queued twice. Only a person who may
+    work this candidate (the owner, a manager or an admin, exactly like read-again) changes anything: anyone else gets 200 with
+    `allowed: false` and nothing is queued. An unknown candidate is 404."""
+    from sqlalchemy import select
+    from app.db.models import Candidate
+    from app.services import application_form, document_splitting
+    candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
+    if candidate is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
+    if not _may_work(candidate, user):
+        db.rollback()
+        return {"candidateId": candidate_id, "allowed": False, "queued": 0, "readable": 0, "filed": [], "more": False, "changed": False}
+    queued, readable, more = queue_unread(db, user, [candidate], retry_failed=False, limit=MAX_AUTO_READS)
+    filed = []
+    try:
+        with db.begin_nested():
+            filed = application_form.file_other_documents_of_read_files(db, candidate, limit=MAX_AUTO_FILINGS)
+    except Exception:       # the documents stay where they are (in the file that was read): a later call tries again
+        logger.warning("The other documents of a read file could not be filed.", exc_info=True)
+        filed = []
+    db.commit()
+    pieces = [piece.as_dict() for piece in filed if not piece.duplicate]
+    return {"candidateId": candidate_id, "allowed": True, "queued": queued, "readable": readable, "more": more,
+            "filed": pieces, "message": document_splitting.filing_message(filed) if pieces else None,
+            "changed": bool(queued or pieces)}
