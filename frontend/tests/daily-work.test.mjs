@@ -96,8 +96,9 @@ test('the screen has no morning/evening, postponed, quota, goals or hourly check
   }
   assert.match(screen, /listTitle\(person\)/)
   assert.match(screen, /All recruiters/)
-  assert.match(screen, /Called today/)
-  assert.match(screen, /Stages moved today/)
+  assert.doesNotMatch(screen, /StatStrip|Called today|Stages moved today/, 'no summary cards above the recruiters: each recruiter card carries the figures')
+  assert.match(board, /called/)
+  assert.match(board, /stage moved/)
   assert.match(board, /staffByAttention/)
   assert.match(board, /recruiterStatus/)
   assert.match(board, /WorkBoard/)

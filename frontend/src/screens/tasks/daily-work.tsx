@@ -1,17 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ListChecks, PhoneCall, RefreshCw, TriangleAlert, UserX, Users, Workflow } from 'lucide-react'
+import { ListChecks, RefreshCw, TriangleAlert, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader } from '@/shared/ui/display'
 import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
-import { NO_WORK, listTitle, recruiterWork, taskRows, workStatus } from '@/features/daily-work/daily-work-model'
+import { listTitle, recruiterWork, taskRows } from '@/features/daily-work/daily-work-model'
 import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
 import { TaskTable } from './task-table'
 import { WorkBoard } from './daily-staff-board'
-import { StatStrip, type StatTileData } from './daily-stat-strip'
 import '@/styles/daily-work.css'
 import '@/styles/daily-work-board.css'
 
@@ -67,21 +66,6 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const person = supervisor && staffFilter && staffFilter !== 'all' ? roster.find((s) => s.userId === staffFilter)?.name ?? store.user(staffFilter)?.name ?? 'Recruiter' : ''
   const title = mine ? 'My candidates' : listTitle(person)
 
-  // The strip: the whole team for an admin or manager, the person's own numbers for a recruiter.
-  const totals = [...work.values()].reduce((sum, w) => ({ assigned: sum.assigned + w.assigned, called: sum.called + w.called, moved: sum.moved + w.moved,
-    remarks: sum.remarks + w.remarks, untouched: sum.untouched + w.untouched, calledAll: sum.calledAll + w.calledAll, movedAll: sum.movedAll + w.movedAll }), { ...NO_WORK })
-  const idle = roster.filter((s) => workStatus(work.get(s.userId) ?? NO_WORK) === 'idle').length
-  const tiles: StatTileData[] = [
-    { key: 'assigned', label: 'Candidates assigned', value: totals.assigned, icon: ListChecks, unit: supervisor ? `${roster.length} ${roster.length === 1 ? 'recruiter' : 'recruiters'}` : undefined },
-    { key: 'called', label: 'Called today', value: totals.called, unit: `of ${totals.assigned}`, icon: PhoneCall, tone: 'green', progress: { done: totals.called, total: totals.assigned },
-      detail: `Overall ${totals.calledAll}`, title: 'Candidates called today: the first call answered, a remark written, or a stage finished. Overall: candidates called at any time.' },
-    { key: 'moved', label: 'Stages moved today', value: totals.moved, icon: Workflow, tone: 'blue', detail: `Overall ${totals.movedAll}`, title: 'Stages finished today. Overall: the stages the candidates have been through.' },
-    supervisor
-      ? { key: 'idle', label: 'Nothing done yet', value: idle, unit: idle === 1 ? 'recruiter' : 'recruiters', icon: UserX, tone: idle > 0 ? 'red' : 'green',
-        ...(idle > 0 ? { onSelect: () => { setIdleOnly((v) => !v); document.getElementById('recruiters')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, active: idleOnly, actionLabel: 'Show only recruiters with nothing done' } : {}) }
-      : { key: 'untouched', label: 'Not touched yet', value: totals.untouched, unit: `of ${totals.assigned}`, icon: UserX, tone: totals.untouched > 0 ? 'amber' : 'green' },
-  ]
-
   const summary = `${rows.length} ${rows.length === 1 ? 'candidate' : 'candidates'}${supervisor && !person ? ` · ${data.staffCount} ${data.staffCount === 1 ? 'recruiter' : 'recruiters'}` : ''}`
   const open = (row: { applicationId: string | null; candidateId: string; stage: number | null }) =>
     row.applicationId ? setOpenApp({ id: row.applicationId, stage: row.stage ?? undefined }) : navigate(applicationFormHref(row.candidateId))
@@ -101,7 +85,6 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         {daily.error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({daily.error}). Showing the last version.</p>}
       </div>
 
-      <StatStrip tiles={tiles} label={supervisor ? 'Today at a glance, whole team' : 'Today at a glance'} />
       {supervisor
         ? <WorkBoard people={roster} work={work} selected={staffFilter ?? 'all'} onSelect={setStaff} idleOnly={idleOnly} onClearIdle={() => setIdleOnly(false)} />
         : <WorkBoard solo people={roster.filter((r) => r.userId === store.me.id)} work={work} selected={store.me.id} onSelect={() => undefined} idleOnly={false} onClearIdle={() => undefined} />}
