@@ -132,8 +132,9 @@ def test_only_owner_manager_and_admin_can_change_details_record_the_call_and_upl
     for who in ("a", "manager", "admin"):
         act_as(env, who)
         assert env.client.patch(f"/api/candidates/{cid}", json={"name": "Changed", "phone": "9000000001"}).status_code == 200, who
+        # a file already on the candidate is never stored twice, so each person uploads a different document
         upload = env.client.post("/api/files", data={"entity_type": "candidate", "entity_id": cid, "slot": "education"},
-                                 files={"file": ("cert.pdf", PDF, "application/pdf")})
+                                 files={"file": (f"cert-{who}.pdf", PDF + f" from {who}".encode(), "application/pdf")})
         assert upload.status_code == 201, (who, upload.text)
     act_as(env, "a")
     assert env.client.post(f"/api/candidates/{cid}/call", json={"called": True, "interested": "yes"}).status_code == 200

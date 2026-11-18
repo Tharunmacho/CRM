@@ -215,7 +215,7 @@ def test_a_blank_unread_page_and_an_exact_duplicate_are_found_and_a_read_page_is
 # ------------------------------------------------------------------------------ what the reader receives
 
 
-def test_the_reader_receives_the_prepared_single_page_passport_job(world, caplog):
+def test_the_reader_receives_the_prepared_two_page_passport_as_one_job(world, caplog):
     caplog.set_level(logging.DEBUG, logger=subject.log.name)
     sent = []
     real = subject.prepare_job
@@ -242,12 +242,12 @@ def test_the_reader_receives_the_prepared_single_page_passport_job(world, caplog
 
     assert output["status"] == "complete"
     passport = [data for mode, data in received if mode == "passport"]
-    assert len(passport) == 2  # one page per job
-    prepared = [item for _size, item in sent if item.pages == 1]
+    assert len(passport) == 1  # the data page and the back page are ONE job: each alone gives only part of the fields
+    prepared = [item for _size, item in sent if item.pages == 2]
     assert {item.content for item in prepared} >= set(passport)
     for data in passport:
         with fitz.open(stream=data, filetype="pdf") as doc:
-            assert doc.page_count == 1 and len(doc[0].get_images()) == 0
+            assert doc.page_count == 2 and all(len(page.get_images()) == 0 for page in doc)
     text = " | ".join(r.getMessage() for r in caplog.records)
-    assert "passport (part 1 of 2): prepared 1 page, " in text and "rotation fixed on 0 pages" in text
+    assert "passport: prepared 2 pages, " in text and "rotation fixed on 0 pages" in text
     assert "resume: prepared 1 page, " in text

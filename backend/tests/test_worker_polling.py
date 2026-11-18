@@ -145,8 +145,8 @@ def test_an_idle_worker_asks_the_database_about_four_times_a_minute_and_never_cl
 def test_without_the_notify_connection_the_poll_is_quicker_but_still_bounded():
     database = FakeDatabase()
     _, wake, clock = run_virtual(database, seconds=300, wake_alive=False)
-    assert set(wake.waits) == {5.0}
-    assert database.count("SELECT") / (clock.now / 60) <= 12.5
+    assert set(wake.waits) == {Dispatcher.RECENT_POLL}, "without NOTIFY the loop looks every 2 s (degraded_poll)"
+    assert database.count("SELECT") / (clock.now / 60) <= 31, "one cheap peek every 2 s while the NOTIFY connection is down"
 
 
 def test_a_notify_starts_the_work_at_once_not_at_the_next_poll():
@@ -182,13 +182,14 @@ def test_polling_is_quick_only_for_a_couple_of_seconds_after_work_was_found():
     database = FakeDatabase()
     database.ready = [True, False]
     database.jobs = [SimpleNamespace(id="job-1", rn=1, lane_priority=0, due=utcnow())]
-    _, wake, clock = run_virtual(database, seconds=60)
+    _, wake, clock = run_virtual(database, seconds=180)
     quick = [seconds for seconds in wake.waits if seconds == 0.5]
-    assert 1 <= len(quick) <= 6, "0.5 s polling lasts ACTIVE_SECONDS, then it is the 15 s safety net again"
+    assert 1 <= len(quick) <= 6, "0.5 s polling lasts ACTIVE_SECONDS, then every 2 s for RECENT_SECONDS, then the 15 s safety net"
+    assert Dispatcher.RECENT_POLL in wake.waits, "a person who just uploaded one file usually uploads the next within a minute"
     assert wake.waits[-1] == 15.0
 
 
-def test_an_unreachable_database_backs_off_exponentially_up_to_a_minute():
+def test_an_unreachable_database_backs_off_exponentially_up_to_eight_seconds():
     database = FakeDatabase()
     database.down = True
     clock = VirtualTime()
@@ -206,9 +207,9 @@ def test_an_unreachable_database_backs_off_exponentially_up_to_a_minute():
     stop = Stop()
     dispatcher = Dispatcher(queues_over(database), concurrency=8, worker="doc:test:1", stop=stop, wake=VirtualEvent(clock), clock=clock, grace=0, heartbeat_seconds=3600)
     dispatcher.run()
-    assert waits[:6] == [2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
-    assert max(waits) == 60.0
-    assert len(database.statements) == 0 and len(waits) < 25, "a dead database is asked about once a minute, not every poll"
+    assert waits[:5] == [1.0, 2.0, 4.0, 8.0, 8.0]
+    assert max(waits) == 8.0, "after a dropped tunnel the reader looks again within 8 s, not after a minute"
+    assert len(database.statements) == 0 and len(waits) < 130, "a dead database is asked about every 8 s, not every poll"
 
 
 def test_a_database_that_comes_back_resets_the_back_off():
@@ -231,7 +232,7 @@ def test_a_database_that_comes_back_resets_the_back_off():
                             grace=0, heartbeat_seconds=3600)
     dispatcher.wake.stop_event = dispatcher.stop
     dispatcher.run()
-    assert waits[:3] == [2.0, 4.0, 8.0] and dispatcher.failures == 0
+    assert waits[:3] == [1.0, 2.0, 4.0] and dispatcher.failures == 0
 
 
 def test_lease_renewal_for_every_running_job_is_one_statement():
@@ -292,5 +293,7 @@ def test_a_document_handed_back_is_picked_up_again_within_seconds_not_after_the_
             time.sleep(0.01)
     assert dispatcher.poll_seconds(started=0, full=False) == Dispatcher.REVISIT_POLL  # just ended: look again soon
     clock.now += Dispatcher.REVISIT_SECONDS + 0.1
+    assert dispatcher.poll_seconds(started=0, full=False) == Dispatcher.RECENT_POLL  # then the two-second look while uploads are likely
+    clock.now += Dispatcher.RECENT_SECONDS + 0.1
     assert dispatcher.poll_seconds(started=0, full=False) == 15.0  # and back to the quiet poll
     assert Dispatcher.REVISIT_SECONDS > 2.0  # longer than the 2 s retry delay of a handed-back document
