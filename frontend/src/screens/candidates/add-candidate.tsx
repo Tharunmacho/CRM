@@ -540,7 +540,7 @@ export default function AddCandidatePage() {
           <div className="ac-form-card">
             <fieldset disabled={disabledAll} className="ac-fieldset">
               {/* ------------------------------------------------------------------ Documents first */}
-              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Add every resume, passport and Aadhaar page, then choose Extract details. You can add files one at a time.">
+              <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field, then choose Extract details.">
                 <div className="ac-docs">
                   <EntryUploadZone rows={documentRows} chips={chips} reports={readReports} progress={readProgress(documentRows)} disabled={disabledAll} max={MAX_DOCUMENT_FILES} problems={addProblems}
                     onAdd={(files) => void addDocuments(files)} onRemove={removeDocument} onRetry={retryFile}

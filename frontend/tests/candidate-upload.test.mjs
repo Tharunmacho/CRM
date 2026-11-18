@@ -144,7 +144,7 @@ test('Check people in documents shows only when the server finds more than one p
 test('the page sends every file as kind resume without replacing the others, and uses the one-second poll', async () => {
   const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
   assert.match(page, /intake\.upload\('resume', file, \{ many: true \}\)/)
-  assert.match(page, /title="Upload documents" subtitle="Add every resume, passport and Aadhaar page, then choose Extract details/)
+  assert.match(page, /title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field, then choose Extract details/)
   assert.match(page, /More documents \(optional\)/)
   assert.doesNotMatch(page, /Kept on the profile when you save/)
   assert.doesNotMatch(page, /Aadhaar copy'/)
