@@ -47,7 +47,7 @@ def test_reuses_only_recorded_live_process_and_refreshes_remote_address(configur
     state = saved_state(configured)
     monkeypatch.setattr(tunnel, "process_identity", lambda pid: state["identity"] if pid == 123 else None)
     monkeypatch.setattr(tunnel, "listening", lambda _: True)
-    monkeypatch.setattr(tunnel, "answers", lambda _: True)
+    monkeypatch.setattr(tunnel, "answers", lambda *_: True)
     inspected = []
     def endpoint(config):
         inspected.append(config["service_name"])
@@ -142,7 +142,7 @@ def test_a_tunnel_that_is_open_but_no_longer_answers_is_replaced(configured, mon
     monkeypatch.setattr(tunnel, "process_identity", lambda pid: state["identity"] if pid == 123 else "new")
     checks = iter([True, False, True])         # listening before, closed once stopped, listening again once restarted
     monkeypatch.setattr(tunnel, "listening", lambda _: next(checks))
-    monkeypatch.setattr(tunnel, "answers", lambda _: False)         # the port is open and the database behind it is silent
+    monkeypatch.setattr(tunnel, "answers", lambda *_: False)         # the port is open and the database behind it is silent
     monkeypatch.setattr(tunnel, "remote_endpoint", lambda _: state["remote_host"])
     stopped = []
     monkeypatch.setattr(tunnel, "stop_owned", lambda value: stopped.append(value["pid"]))
