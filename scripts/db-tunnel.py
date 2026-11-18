@@ -121,6 +121,19 @@ def listening(port: int) -> bool:
         return False
 
 
+def answers(port: int, timeout: float = 5.0) -> bool:
+    """Whether the database behind the tunnel replies through it. An open local port only says that the ssh process is alive; a tunnel that
+    stalled after a network change keeps listening and every connection through it then times out. This sends PostgreSQL's SSLRequest
+    (it logs in to nothing and reads nothing) and waits for the one-letter answer."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as connection:
+            connection.settimeout(timeout)
+            connection.sendall(bytes.fromhex("0000000804d2162f"))
+            return connection.recv(1) in (b"S", b"N")
+    except OSError:
+        return False
+
+
 def stop_owned(state: dict) -> None:
     if process_identity(state["pid"]) != state["identity"]:
         raise RuntimeError("The database tunnel process changed; refusing to stop it")
@@ -145,7 +158,7 @@ def ensure_tunnel(config_path: Path) -> str:
         raise RuntimeError("The database tunnel port is already occupied by an unrecognized process")
     address = remote_endpoint(config)
     if owned:
-        if port_open and state.get("remote_host") == address:
+        if port_open and state.get("remote_host") == address and answers(config["local_port"]):
             return f"Database tunnel ready at 127.0.0.1:{config['local_port']}"
         stop_owned(state)
         if listening(config["local_port"]):

@@ -47,6 +47,7 @@ def test_reuses_only_recorded_live_process_and_refreshes_remote_address(configur
     state = saved_state(configured)
     monkeypatch.setattr(tunnel, "process_identity", lambda pid: state["identity"] if pid == 123 else None)
     monkeypatch.setattr(tunnel, "listening", lambda _: True)
+    monkeypatch.setattr(tunnel, "answers", lambda _: True)
     inspected = []
     def endpoint(config):
         inspected.append(config["service_name"])
@@ -134,3 +135,34 @@ def test_stop_owned_refuses_pid_reuse(monkeypatch):
     monkeypatch.setattr(tunnel.os, "kill", lambda *_: pytest.fail("Unowned process must not be stopped"))
     with pytest.raises(RuntimeError, match="refusing to stop"):
         tunnel.stop_owned({"pid": 123, "identity": "our-original-process"})
+
+
+def test_a_tunnel_that_is_open_but_no_longer_answers_is_replaced(configured, monkeypatch):
+    state = saved_state(configured)
+    monkeypatch.setattr(tunnel, "process_identity", lambda pid: state["identity"] if pid == 123 else "new")
+    checks = iter([True, False, True])         # listening before, closed once stopped, listening again once restarted
+    monkeypatch.setattr(tunnel, "listening", lambda _: next(checks))
+    monkeypatch.setattr(tunnel, "answers", lambda _: False)         # the port is open and the database behind it is silent
+    monkeypatch.setattr(tunnel, "remote_endpoint", lambda _: state["remote_host"])
+    stopped = []
+    monkeypatch.setattr(tunnel, "stop_owned", lambda value: stopped.append(value["pid"]))
+    monkeypatch.setattr(tunnel.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(pid=456, poll=lambda: None))
+    assert "started" in tunnel.ensure_tunnel(configured)
+    assert stopped == [123]
+
+
+def test_answers_is_true_only_for_a_postgres_reply(monkeypatch):
+    class Wire:
+        def __init__(self, reply): self.reply, self.sent = reply, b""
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def settimeout(self, _): pass
+        def sendall(self, data): self.sent = data
+        def recv(self, _): return self.reply
+    for reply, expected in ((b"S", True), (b"N", True), (b"", False), (b"x", False)):
+        wire = Wire(reply)
+        monkeypatch.setattr(tunnel.socket, "create_connection", lambda *a, **k: wire)
+        assert tunnel.answers(55436) is expected and wire.sent == bytes.fromhex("0000000804d2162f")
+    def refuse(*a, **k): raise OSError("no route")
+    monkeypatch.setattr(tunnel.socket, "create_connection", refuse)
+    assert tunnel.answers(55436) is False
