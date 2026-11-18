@@ -60,6 +60,16 @@ from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume
 from app.integrations.ocr.merge import merge_results
 from app.integrations.ocr.payload import prepare_job, rotations_from, unsendable
 from app.integrations.ocr.person_split import page_identity, incompatible
+
+
+# Only a page that is itself the candidate's résumé, passport or Aadhaar says who the candidate is. A contract, a reference letter,
+# a work permit or a certificate names employers, signatories and officials ("Name: ..." of the establishment), and a passport-like
+# number that is not the candidate's; counting those stopped a real 24-page file as "different candidate identities".
+_IDENTITY_KINDS = ("resume", "passport", "aadhaar")
+
+
+def _identity_evidence(pages) -> list[dict]:
+    return [page_identity(page.text) for page in pages if page.status == "read" and page.document_type in _IDENTITY_KINDS]
 from app.integrations.ocr.page_coverage import physical_passport_payload, source_page_positions
 
 
@@ -136,7 +146,7 @@ def checked_person_output(data, output, state, settings):
                 document_timeout=getattr(settings, "ocr_document_timeout_seconds", 600))
         except InspectionError as exc:
             raise _unreadable(exc) from None
-        evidence = [page_identity(page.text) for page in inspected.pages if page.status == "read"]
+        evidence = _identity_evidence(inspected.pages)
         state["person_detection_version"] = 1
         state["person_identities"] = evidence
         state["splitSuggested"] = any(item["mixed"] for item in evidence) or any(
@@ -2014,7 +2024,7 @@ def _extract_attachment(
         if inspected is None:
             inspected = _inspect_and_send_early(
                 data, options, state=state, save=save, settings=settings, source_hash=source_hash, early=partial)
-            evidence = [page_identity(page.text) for page in inspected.pages if page.status == "read"]
+            evidence = _identity_evidence(inspected.pages)
             state["person_detection_version"] = 1
             state["inspection_version"] = INSPECTION_VERSION
             state["person_identities"] = evidence

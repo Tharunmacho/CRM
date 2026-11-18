@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from app.services.candidate_identity import name_relation, normalize_email, normalize_passport, normalize_phone
+from app.services.candidate_identity import name_relation, normalize_email, normalize_passport, normalize_phone, passports_differ
 
 NAME = re.compile(r"^\s*(?:candidate\s+name|full\s+name|name\s+of\s+(?:the\s+)?(?:candidate|applicant)|name)\s*[:\-]\s*([^\n|;]{3,150})", re.I | re.M)
 PHONE = re.compile(r"(?:mobile|phone|telephone|contact\s*(?:no\.?|number)?)\s*[:\-]?\s*(\+?[\d ()\-]{7,24})", re.I)
@@ -69,7 +69,8 @@ def incompatible(left, right):
     if lnames and rnames and all(name_relation(x, y) == "different" for x in lnames for y in rnames):
         return True
     a, b = {normalize_passport(value) for value in left.get("passports", [])}, {normalize_passport(value) for value in right.get("passports", [])}
-    return bool(a and b and a.isdisjoint(b))
+    # The same number read twice can differ by one wrong character (R7588777 / R7S88777); only numbers that cannot be one passport count.
+    return bool(a and b and all(passports_differ(x, y) for x in a for y in b))
 
 
 def same_person(left, right):

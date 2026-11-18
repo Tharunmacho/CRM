@@ -45,6 +45,29 @@ def normalize_passport(value):
     return re.sub(r"\s", "", text(value)).upper()
 
 
+def _within_one_edit(a: str, b: str) -> bool:
+    """Equal, or one character different, added or missing: what one wrong letter or digit in a reading looks like."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) <= 1
+    short, long = (a, b) if len(a) < len(b) else (b, a)
+    return any(long[:i] + long[i + 1:] == short for i in range(len(long)))
+
+
+def passports_differ(left, right) -> bool:
+    """Two passport numbers that cannot be the same one. A number read from a scan can carry one wrong character (a 5 read as
+    an S, a 0 as an O), so numbers one character apart are the same passport read twice, never two people."""
+    a, b = normalize_passport(left), normalize_passport(right)
+    if not a or not b:
+        return False
+    if min(len(a), len(b)) < 6:
+        return a != b   # too short for a one-character slip to be told from another number
+    return not _within_one_edit(a, b)
+
+
 def normalized_labels(values):
     seen, result = set(), []
     for raw in values or []:
