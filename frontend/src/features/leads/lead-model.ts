@@ -88,8 +88,8 @@ export interface LeadFilters {
   followUp?: '' | 'due'
   /** Which date `from`/`to` (and the Today / Yesterday / Last 7 days presets) filter on: when the lead was imported, or its own platform date. */
   dateField: DateField
-  /** '24h' = uploaded in the last 24 hours (rolling): the "Uploaded in 24 hrs" card. Independent of `from`/`to`. */
-  recent: '' | '24h'
+  /** 'today' = uploaded since midnight of the agency's day: the "Uploaded today" card. Independent of `from`/`to`. */
+  recent: '' | 'today'
 }
 
 export type DateField = 'uploaded' | 'created'
@@ -289,9 +289,9 @@ export function activePreset(filters: Pick<LeadFilters, 'from' | 'to'>, now: Dat
   return DATE_PRESETS.find(({ id }) => { const range = presetRange(id, now); return range.from === filters.from && range.to === filters.to })?.id ?? ''
 }
 
-/** What the "uploaded in 24 hrs" card is called, and what it counts. */
+/** What the "Uploaded today" card is called, and what it counts. */
 export const NEW_CARD_LABEL = 'Uploaded today'
-export const NEW_CARD_DETAIL = 'Uploaded in the last 24 hours'
+export const NEW_CARD_DETAIL = 'Since midnight'
 
 /** Query string for GET /leads (and the export): only the filters that are set, so equal views give equal strings. */
 export function buildLeadQuery(filters: LeadFilters, sort: { key: string; dir: 'asc' | 'desc' }): string {
@@ -307,7 +307,7 @@ export function buildLeadQuery(filters: LeadFilters, sort: { key: string; dir: '
   if (filters.from) params.set('created_from', filters.from)
   if (filters.to) params.set('created_to', filters.to)
   if (filters.from || filters.to) params.set('date_field', filters.dateField === 'created' ? 'created' : 'uploaded')
-  if (filters.recent === '24h') params.set('uploaded_within_hours', '24')
+  if (filters.recent === 'today') params.set('uploaded_today', 'true')
   if (filters.batchId) params.set('batch_id', filters.batchId)
   if (filters.followUp) params.set('follow_up', filters.followUp)
   params.set('sort', sort.key)
@@ -335,7 +335,7 @@ export function activeLeadFilterCount(filters: LeadFilters): number {
 /** What each KPI card sets on the filters. */
 export function cardFilters(card: LeadCard): Partial<LeadFilters> {
   switch (card) {
-    case 'new_today': return { status: '', from: '', to: '', recent: '24h' }  // uploaded in the last 24 hours, whatever the lead's own date says
+    case 'new_today': return { status: '', from: '', to: '', recent: 'today' }  // uploaded since midnight today, whatever the lead's own date says
     case 'not_contacted': return { status: 'new', from: '', to: '', recent: '' }
     case 'interested': return { status: 'interested,resume_received', from: '', to: '', recent: '' }  // said yes, or the resume has arrived
     case 'resume_received': return { status: 'resume_received', from: '', to: '', recent: '' }
@@ -348,7 +348,7 @@ export function cardFilters(card: LeadCard): Partial<LeadFilters> {
 /** Which KPI card the current filters correspond to (a card is lit only while the filters are exactly its own). */
 export function activeCard(filters: LeadFilters): LeadCard | '' {
   if (filters.followUp === 'due') return !filters.status && !filters.from && !filters.to && !filters.recent ? 'follow_ups' : ''
-  if (filters.recent === '24h') return !filters.status && !filters.from && !filters.to ? 'new_today' : ''
+  if (filters.recent === 'today') return !filters.status && !filters.from && !filters.to ? 'new_today' : ''
   if (filters.from || filters.to) return ''
   if (filters.status === 'new') return 'not_contacted'
   if (filters.status === 'interested' || filters.status === 'interested,resume_received') return 'interested'

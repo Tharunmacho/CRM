@@ -68,7 +68,7 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
       {(filters.batchId || filters.recent) && (
         <div className="db-chips" aria-label="Filters in use">
           {filters.batchId && <button type="button" className="db-chip" aria-label="Show every upload again" onClick={() => onChange({ batchId: '' })}>From one upload<X size={12} aria-hidden="true" /></button>}
-          {filters.recent && <button type="button" className="db-chip" aria-label="Stop showing only the last 24 hours of uploads" onClick={() => onChange({ recent: '' })}>{NEW_CARD_DETAIL}<X size={12} aria-hidden="true" /></button>}
+          {filters.recent && <button type="button" className="db-chip" aria-label="Stop showing only the leads uploaded today" onClick={() => onChange({ recent: '' })}>{NEW_CARD_DETAIL}<X size={12} aria-hidden="true" /></button>}
         </div>
       )}
       <div id="ld-more-filters" className="db-more" hidden={!moreOpen}>

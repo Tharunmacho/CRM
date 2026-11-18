@@ -32,7 +32,7 @@ CLOSED = ("converted", "not_interested", "invalid", "wrong_number")
 OUTCOMES = ("answered", "interested", "not_interested", "no_answer", "wrong_number")
 PLATFORM_LABELS = {"ig": "Instagram", "fb": "Facebook"}
 EXPORT_LIMIT = 50_000
-NEW_WINDOW_HOURS = 24      # "New today" = uploaded (stored in the CRM) within the last 24 hours, a rolling window
+NEW_WINDOW_HOURS = 24      # `uploaded_within_hours` default window; the "Uploaded today" card counts from midnight of the agency day instead
 MAX_RECENT_HOURS = 24 * 7  # largest `uploaded_within_hours` the list accepts
 DATE_FIELDS = ("uploaded", "created")  # which date created_from / created_to filter on
 SORTS = ("created", "uploaded", "name", "status", "owner", "campaign", "position", "follow_up", "last_contacted", "calls", "experience")
@@ -298,6 +298,9 @@ def apply_filters(query, owner, has_resume, user: User, f: dict):
     recent = recent_hours(f.get("uploaded_within_hours"))
     if recent:  # the "New today" card: uploaded within the last N hours (rolling), whatever the lead's own date says
         query = query.where(Lead.created_at >= datetime.now(timezone.utc) - timedelta(hours=recent))
+    if f.get("uploaded_today"):  # the "Uploaded today" card: stored in the CRM since midnight of the agency's day
+        from app.services.daily_work import agency_today
+        query = query.where(Lead.created_at >= agency_midnight(agency_today(datetime.now(timezone.utc)).isoformat(), "Today"))
     if f.get("has_resume") is not None:
         query = query.where(has_resume if f["has_resume"] else ~has_resume)
     if f.get("matched_candidate") is not None:
@@ -464,7 +467,7 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
         f"(SELECT count(*) FROM crm_leads WHERE owner_id IS NULL AND status NOT IN {closed}), 0, "
         f"(SELECT count(*) FROM crm_leads WHERE owner_id = :me AND next_follow_up_at < :horizon AND status NOT IN {closed}), 0, 0, 0, "
         "(SELECT max(created_at) FROM crm_lead_batches WHERE status = 'completed')"),
-        {"since": datetime.now(timezone.utc) - timedelta(hours=NEW_WINDOW_HOURS), "everyone": scope == "all", "me": user.id, "horizon": today_start + timedelta(days=1)}).all()
+        {"since": today_start, "everyone": scope == "all", "me": user.id, "horizon": today_start + timedelta(days=1)}).all()
     out = {"scope": scope, "total": 0, "newToday": 0, "unassigned": 0, "uncontacted": 0, "interested": 0, "resumeRequested": 0,
            "resumeReceived": 0, "converted": 0, "followUpsDue": 0, "followUpsDueMine": 0, "matchedCandidates": 0, "withResume": 0,
            "byStatus": {}, "byCampaign": [], "lastImportAt": None}

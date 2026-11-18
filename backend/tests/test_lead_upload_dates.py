@@ -47,13 +47,23 @@ def seed_ages(env):
     set_times(env, 5, created=now - timedelta(days=40))
 
 
-def test_new_today_counts_leads_uploaded_in_the_last_24_hours_whatever_their_own_date(env):
-    seed_ages(env)
+def test_uploaded_today_counts_only_leads_stored_since_midnight_of_the_agency_day(env):
+    imported(env, [lead_row(n) for n in range(4)])
+    midnight = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    set_times(env, 0, uploaded=midnight + timedelta(minutes=1))   # just after midnight: today
+    set_times(env, 1, uploaded=midnight - timedelta(minutes=1))   # just before midnight: yesterday, even though under 24 h ago
+    set_times(env, 2, uploaded=midnight - timedelta(days=3))
+    set_times(env, 3, uploaded=midnight + timedelta(minutes=2), created=midnight - timedelta(days=40))  # own date is old, still today
     summary = env.client.get("/api/leads/summary").json()
-    # leads 0, 1 and 5 were uploaded within 24 h; lead 5's platform date is 40 days old and still counts, the 25 h one does not
-    assert summary["total"] == 6 and summary["newToday"] == 3
+    assert summary["total"] == 4 and summary["newToday"] == 2
+    new, total = listing(env, uploaded_today="true")
+    assert new == names(0, 3) and total == summary["newToday"], "the card filter returns exactly the counted leads"
+
+
+def test_new_window_filter_still_counts_the_last_24_hours(env):
+    seed_ages(env)
     new, total = listing(env, uploaded_within_hours=24)
-    assert new == names(0, 1, 5) and total == summary["newToday"], "the card filter returns exactly the counted leads"
+    assert new == names(0, 1, 5) and total == 3
     assert listing(env, uploaded_within_hours=48)[1] == 4 and listing(env, uploaded_within_hours=168)[1] == 5
     assert listing(env, uploaded_within_hours=24, status="contacted")[1] == 0, "it combines with the other filters"
 
@@ -84,7 +94,6 @@ def test_the_rolling_window_is_checked_at_the_edge(env):
     set_times(env, 0, uploaded=now - timedelta(hours=23, minutes=55))
     set_times(env, 1, uploaded=now - timedelta(hours=24, minutes=5))
     assert listing(env, uploaded_within_hours=24)[0] == names(0)
-    assert env.client.get("/api/leads/summary").json()["newToday"] == 1
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "169", "abc"])
