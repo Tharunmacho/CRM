@@ -8,11 +8,12 @@ import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { listTitle, splitItems, statusCounts, summaryLine, teamTotals } from '@/features/daily-work/daily-work-model'
-import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
+import { useDailyWork, useFollowUp, useTicker } from '@/features/daily-work/use-daily-work'
 import { DailyTable, type DailyGroup } from './daily-table'
 import { StaffBoard } from './daily-staff-board'
 import { StatStrip, type StatTileData } from './daily-stat-strip'
-import { TasksTabs, useOpenBucket } from './tasks-tabs'
+import { FollowUpTable } from './follow-up-table'
+import { TravelledPanel } from './travelled-panel'
 import '@/styles/daily-work.css'
 import '@/styles/daily-work-board.css'
 
@@ -30,7 +31,8 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const { data, error, loading, refresh } = useDailyWork({ staff: staffFilter })
   // The follow-up total for the summary strip: the whole team's, whichever recruiter the list below is showing (same request the tab counts make).
   const followUp = useFollowUp({ staff: 'all', enabled: supervisor })
-  const openBucket = useOpenBucket()
+  const followUpList = useFollowUp({ staff: staffFilter })
+  const now = useTicker(60_000, !!followUpList.data)
   const [idleOnly, setIdleOnly] = useState(false)
   const [openApp, setOpenApp] = useState<{ id: string; stage?: number } | null>(null)
   const zone = store.agencyTimezone
@@ -69,7 +71,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const tiles: StatTileData[] = [
     { key: 'to-work', label: 'Candidates to work today', value: team.toWork, icon: ListChecks, detail: `Across ${roster.length} ${roster.length === 1 ? 'recruiter' : 'recruiters'}` },
     { key: 'done', label: 'Done today', value: team.doneToday, unit: `of ${team.total}`, icon: CheckCircle2, tone: 'green', progress: { done: team.doneToday, total: team.total } },
-    { key: 'follow-up', label: 'Follow-up candidates', value: followUp.data?.summary.total ?? '–', icon: Layers, detail: 'Selected and still moving', actionLabel: 'Open Follow-up', onSelect: () => openBucket('follow-up') },
+    { key: 'follow-up', label: 'Follow-up candidates', value: followUp.data?.summary.total ?? '–', icon: Layers, detail: 'Selected and still moving', actionLabel: 'Show below', onSelect: () => document.getElementById('follow-up')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) },
     { key: 'idle', label: 'Nothing done yet', value: counts.idle, unit: counts.idle === 1 ? 'recruiter' : 'recruiters', icon: UserX, tone: counts.idle > 0 ? 'red' : 'green',
       detail: counts.idle > 0 ? (idleOnly ? 'Showing them above' : 'Select to see who') : 'Everyone has started',
       ...(counts.idle > 0 ? { onSelect: () => { setIdleOnly((v) => !v); document.getElementById('recruiters')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, active: idleOnly, actionLabel: 'Show only these recruiters' } : {}) },
@@ -88,8 +90,6 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
           <Button onClick={() => void refresh()}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
         </>}
       />
-
-      <TasksTabs active="daily" staff={staffFilter} />
 
       <div className="dw-alerts">
         {data.truncated && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />
@@ -125,7 +125,23 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
             onRemark={async (item, text) => { if (item.taskId) { await store.addRemark(item.taskId, text); await refresh() } }} />
         )}
       </section>
-      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onClose={() => { setOpenApp(null); void refresh() }} />
+
+      <section className="dw-panel" aria-label="Follow-up" id="follow-up">
+        <div className="dw-panel-head">
+          <div><h2><Layers size={16} aria-hidden="true" /> Follow-up</h2>
+            <p className="dw-summary" aria-live="polite">{followUpList.data?.summary.total ?? 0} {(followUpList.data?.summary.total ?? 0) === 1 ? 'candidate' : 'candidates'}</p></div>
+        </div>
+        {!followUpList.data ? <p className="dw-state" role="status">Loading follow-up candidates…</p>
+          : followUpList.data.items.length === 0 ? <EmptyState title={mine ? 'No candidates to follow up' : 'No follow-up candidates for this selection'} description="A candidate shows here once prescreening is finished and stays while the application is still going forward." />
+            : <FollowUpTable items={followUpList.data.items} now={now} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
+              canWork={(item) => !!item.taskId && (store.can('work_any_candidate') || item.ownerId === store.me.id)}
+              onOpen={(item) => navigate(applicationFormHref(item.candidateId))}
+              onStage={(item) => setOpenApp({ id: item.applicationId, stage: item.stage })}
+              onProfile={(item) => navigate(`/candidates/${item.candidateId}`)}
+              onRemark={async (item, text) => { if (item.taskId) { await store.addRemark(item.taskId, text); await followUpList.refresh(); await refresh() } }} />}
+      </section>
+      <TravelledPanel supervisor={supervisor} recruiterName={person} onOpen={(row) => navigate(applicationFormHref(row.candidateId))} />
+      <StageModal applicationId={openApp?.id ?? null} open={!!openApp} focusStage={openApp?.stage} onClose={() => { setOpenApp(null); void refresh(); void followUpList.refresh() }} />
     </div>
   )
 }

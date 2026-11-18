@@ -190,10 +190,9 @@ test('the remark box starts at one line, grows with the text to about four lines
   assert.ok(m.remarkBox(48).height < m.remarkBox(90).height, 'grows with the text and shrinks back when it is deleted')
 })
 
-test("the three buckets: Today's candidates and Follow-up carry counts in their tab label, Travelled links to its own screen", () => {
-  assert.deepEqual(m.bucketTabs({ today: 12, followUp: 7 }), [
-    { key: 'daily', label: "Today's candidates (12)" }, { key: 'follow-up', label: 'Follow-up (7)' }, { key: 'travelled', label: 'Travelled' }])
-  assert.deepEqual(m.bucketTabs({ today: null, followUp: null }).map((t) => t.label), ["Today's candidates", 'Follow-up', 'Travelled'])
+test("the Tasks page has one tab, Today's candidates with its count: Follow-up and Travelled are lists on the same page", () => {
+  assert.deepEqual(m.bucketTabs({ today: 12, followUp: 7 }), [{ key: 'daily', label: "Today's candidates (12)" }])
+  assert.deepEqual(m.bucketTabs({ today: null, followUp: null }).map((t) => t.label), ["Today's candidates"])
   assert.equal(m.tabLabel('Follow-up', 0), 'Follow-up (0)')
 })
 
@@ -206,17 +205,19 @@ test('follow-up says how long ago the last update was', () => {
   assert.equal(m.staleLabel('bad', now), '')
 })
 
-test('the Tasks page has the Follow-up view and a Travelled tab that links to /travelled, and nothing is duplicated', async () => {
+test('the Tasks page shows Today, Follow-up and Travelled as lists on one page, with no Follow-up or Travelled tab', async () => {
   const tasks = await code('../src/screens/tasks/tasks.tsx')
   assert.match(tasks, /wantsFollowUp/)
   assert.match(tasks, /bucketTabs\(bucketCounts\)/)
-  const tabs = await code('../src/screens/tasks/tasks-tabs.tsx')
-  assert.match(tabs, /navigate\('\/travelled'\)/)
-  assert.match(tabs, /next\.set\('view', key\)/)
-  const followUp = await code('../src/screens/tasks/follow-up.tsx')
-  assert.match(followUp, /All recruiters/)
-  assert.match(followUp, /useFollowUp/)
-  assert.doesNotMatch(followUp, /Deadline|overdue|Postponed|Morning|Evening|All staff/i)
+  const daily = await code('../src/screens/tasks/daily-work.tsx')
+  assert.doesNotMatch(daily, /TasksTabs/)
+  assert.match(daily, /id="follow-up"/)
+  assert.match(daily, /FollowUpTable/)
+  assert.match(daily, /TravelledPanel/)
+  assert.match(daily, /All recruiters/)
+  assert.doesNotMatch(daily, /Deadline|Postponed|Morning|Evening|All staff/i)
+  const travelled = await code('../src/screens/tasks/travelled-panel.tsx')
+  assert.match(travelled, /useTravelled/)
   // Follow-up reuses the Today's candidates cells instead of copying them.
   const table = await code('../src/screens/tasks/follow-up-table.tsx')
   assert.match(table, /from '\.\/daily-table'/)
@@ -227,7 +228,7 @@ test('the Tasks page has the Follow-up view and a Travelled tab that links to /t
   assert.match(table, /Open stage/)
   assert.match(table, /Open candidate profile/)
   assert.match(table, /applicationFormHref|onOpen/)
-  assert.match(followUp, /navigate\(applicationFormHref\(item\.candidateId\)\)/)
+  assert.match(daily, /navigate\(applicationFormHref\(item\.candidateId\)\)/)
 })
 
 test('a stage finished or an application closed refreshes both lists without a reload (the live topics they follow)', async () => {
@@ -264,7 +265,7 @@ test('the AMOUNT and GOOGLE REVIEW cells show Yes, Pending or a dash, and never 
 })
 
 test('the Tasks tables carry no explanatory filler: no group sentence, no "Not saved", "pref.", "from location" or "No order yet" notes', async () => {
-  for (const path of ['daily-table.tsx', 'follow-up-table.tsx', 'daily-work.tsx', 'follow-up.tsx']) {
+  for (const path of ['daily-table.tsx', 'follow-up-table.tsx', 'daily-work.tsx', 'travelled-panel.tsx']) {
     const text = await code(`../src/screens/tasks/${path}`)
     assert.doesNotMatch(text, /Candidates with prescreening waiting|Work them in the order|Finished candidates are in Follow-up|Finished candidates move to Travelled|Not saved|from location|from skills|No order yet|'pref\.'|dw-sub|dw-pref|dw-add/, path)
   }

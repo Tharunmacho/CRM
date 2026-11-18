@@ -144,8 +144,6 @@ export type BucketKey = 'daily' | 'follow-up' | 'travelled'
 export function bucketTabs(counts: { today: number | null; followUp: number | null }): { key: BucketKey; label: string }[] {
   return [
     { key: 'daily', label: tabLabel("Today's candidates", counts.today) },
-    { key: 'follow-up', label: tabLabel('Follow-up', counts.followUp) },
-    { key: 'travelled', label: 'Travelled' },
   ]
 }
 

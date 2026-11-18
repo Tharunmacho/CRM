@@ -20,7 +20,6 @@ import { completedInPeriod, taskViewFromParams, validDateFilter, type TaskView }
 import { useDeadlineClock, useWorkspaceRead } from '@/features/staff/use-workspace-read'
 import { ClockCell, RemarkPanel, clockOf } from './task-parts'
 import { DailyWork } from './daily-work'
-import { FollowUp } from './follow-up'
 import { useBucketCounts, useOpenBucket } from './tasks-tabs'
 import { bucketTabs } from '@/features/daily-work/daily-work-model'
 import { Flag, OwnerTag, StageTrack } from './task-identity'
@@ -63,7 +62,7 @@ export default function TasksPage() {
   const [params, setParams] = useSearchParams()
   const openAll = () => setParams((previous) => { const next = new URLSearchParams(previous); next.set('view', 'open'); return next })
   if (wantsDailyWork(params)) return <DailyWork onOpenAll={openAll} />
-  if (wantsFollowUp(params)) return <FollowUp onOpenAll={openAll} />
+  if (wantsFollowUp(params)) return <DailyWork onOpenAll={openAll} />   // an old Follow-up link lands on the one Tasks list
   return <TaskList />
 }
 
