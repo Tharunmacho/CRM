@@ -16,6 +16,7 @@ from typing import Any
 from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 
 from app.api.schemas import Wire
+from app.integrations.ocr.validators import fix_filler_k
 
 
 class OcrFields(Wire):
@@ -429,6 +430,8 @@ def passport_fields(p: PassportResponse) -> tuple[OcrFields, list[str]]:
     mrz = p.mrz
     # MRZ names are upper case; the form wants them as a person would write them.
     words = f"{mrz.given_names or ''} {mrz.surname or ''}".replace("<", " ").split()
+    # A filler '<' read as a K leaves a stray K on a name word: dropped only when the printed fields show the name without it.
+    words = fix_filler_k(words, " ".join(_text(item.value) or "" for item in p.fields))
     name = " ".join(w.capitalize() for w in words) or None
 
     code = (mrz.nationality or "").strip().upper()

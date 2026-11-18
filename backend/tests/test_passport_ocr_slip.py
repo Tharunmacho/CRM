@@ -95,3 +95,30 @@ def test_a_second_persons_passport_page_is_still_found():
 
 def test_unread_pages_say_nothing():
     assert _identity_evidence([_page(RESUME, "resume", status="unread"), _page("", "other", status="blank")]) == []
+
+
+# ---- a filler '<' read as a K must not end up in the candidate's name ---------------------------------------------------
+
+from app.integrations.ocr.validators import fix_filler_k
+
+
+def test_a_stray_k_from_the_zone_filler_is_dropped_when_the_page_prints_the_name_without_it():
+    page = "Surname SUNDARAM Given Name(s) SEKAR Nationality INDIAN"
+    assert fix_filler_k(["SEKARK", "SUNDARAMK"], page) == ["SEKAR", "SUNDARAM"]
+    assert fix_filler_k(["Vivekanandhank", "Mani"], "MANI VIVEKANANDHAN") == ["Vivekanandhan", "Mani"]
+
+
+def test_a_name_that_really_ends_in_k_keeps_it():
+    assert fix_filler_k(["MANIK", "ROY"], "Surname ROY Given Name MANIK") == ["MANIK", "ROY"]
+    assert fix_filler_k(["MANIK", "ROY"], "") == ["MANIK", "ROY"], "nothing printed to prove it: left as read"
+    assert fix_filler_k(["MARK"], "Given Name MAR MARK") == ["MARK"], "the longer word is printed too"
+
+
+def test_short_words_are_never_shortened():
+    assert fix_filler_k(["ARK"], "AR") == ["ARK"]
+
+
+def test_a_k_glued_to_the_front_of_a_given_name_is_dropped_too():
+    fixed = fix_filler_k(["Arockia", "Kbeni", "Selvaraj"], "Given Name AROCKIA BENI Surname SELVARAJ")
+    assert [w.lower() for w in fixed] == ["arockia", "beni", "selvaraj"]
+    assert fix_filler_k(["KARTHIK"], "KARTHIK") == ["KARTHIK"], "printed as it is read: kept"

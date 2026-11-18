@@ -622,6 +622,11 @@ def extract(text: str, doc_type: str = "unknown") -> Evidence:
         given = name_tokens(re.sub(r"[^A-Za-z ]", " ", mrz.given_names or ""), lenient=True)
         surname = name_tokens(re.sub(r"[^A-Za-z ]", " ", mrz.surname or ""), lenient=True)
         full = (given or ()) + (surname or ())
+        if full:
+            # A filler '<' read as a K leaves a stray K on a name word (SUNDARAMK): dropped only when the printed page shows
+            # the name without it (the lines holding the zone itself are left out of that check).
+            printed = " ".join(line for line in text.splitlines() if "<" not in line)
+            full = tuple(validators.fix_filler_k(list(full), printed))
         if full and (given or surname):
             names.append(NameHit(full, "passport"))
         if _mrz_kind(text) == "passport":

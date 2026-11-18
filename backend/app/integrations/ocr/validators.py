@@ -127,6 +127,23 @@ def _fit(line: str) -> str | None:
     return line if len(line) == 44 else None
 
 
+def fix_filler_k(words, visible_text: str = "") -> list[str]:
+    """The machine-readable zone's filler '<' is often read as a K. A name word then ends or starts with a stray K (SUNDARAM<<
+    read as SUNDARAMK, AROCKIA<BENI as AROCKIAKBENI). The K is dropped only when the printed page proves it: the word without
+    the K is printed somewhere on the page and the word with it is not (a name that really has that K is printed with it)."""
+    printed = {w for w in re.findall(r"[A-Za-z]+", visible_text.upper()) if len(w) >= 3}
+    fixed = []
+    for word in words:
+        upper = word.upper()
+        if len(upper) >= 4 and upper not in printed:
+            if upper.endswith("K") and upper[:-1] in printed:
+                word = word[:-1]            # SUNDARAMK -> SUNDARAM
+            elif upper.startswith("K") and upper[1:] in printed:
+                word = word[1:]             # KBENI -> BENI (the filler between two given names read as a K)
+        fixed.append(word)
+    return fixed
+
+
 def parse_mrz_td3(line1: str, line2: str) -> MrzResult | None:
     """Parse and, where needed, repair a two-line passport MRZ. ``None`` when it is not TD3-shaped."""
     first, second = _fit(line1), _fit(line2)
