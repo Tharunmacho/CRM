@@ -12,7 +12,8 @@ const isImage = (name: string) => /\.(jpe?g|png|webp|heic|heif|tiff?)$/i.test(na
 /**
  * The one place documents are added on Add candidate. Any file may hold a resume, a passport and an Aadhaar card, so
  * there is no slot per kind: files go in as they are, each row shows how far its reading is, and the three chips under
- * the list light up as the server finds each kind.
+ * the list light up as the server finds each kind; every other kind found in a file (education and experience certificates, medical,
+ * signed offer, visa ...) gets a chip of its own with its pages, and is filed in its own field when the candidate is saved.
  */
 export function EntryUploadZone({ rows, chips, reports = [], progress, disabled, max, problems, onAdd, onRemove, onRetry, onCheckAgain, onManual }: {
   rows: FileRow[]
@@ -142,7 +143,7 @@ export function EntryUploadZone({ rows, chips, reports = [], progress, disabled,
           <li key={chip.kind} className={`uz-chip is-${chip.state}`}>
             {chip.state === 'done' ? <Check size={14} strokeWidth={3} aria-hidden /> : chip.state === 'reading' ? <LoaderCircle size={14} className="ac-spin" aria-hidden /> : chip.state === 'review' ? <AlertTriangle size={14} aria-hidden /> : <i aria-hidden />}
             <span>{chip.label}</span>
-            {chip.files > 1 && <small>{chip.detail}</small>}
+            {chip.detail && <small>{chip.detail}</small>}
           </li>
         ))}
       </ul>

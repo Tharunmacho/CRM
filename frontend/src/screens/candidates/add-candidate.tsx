@@ -233,7 +233,7 @@ export default function AddCandidatePage() {
   const checkReader = async () => { await intake.refresh().then(applyJobs, () => {}) }
 
   const documentRows = useMemo(() => fileRows(intake.jobs, queueClock), [intake.jobs, queueClock])
-  const chips = useMemo(() => foundChips(intake.jobs), [intake.jobs])
+  const chips = useMemo(() => foundChips(intake.jobs, documentLabel), [intake.jobs])
   const readReports = useMemo(() => jobReports(intake.jobs.filter(isDocumentJob)), [intake.jobs])
   const presence = documentPresence(intake.jobs)
   const chosen = documentRows

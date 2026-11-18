@@ -353,3 +353,30 @@ def test_a_run_of_one_repeated_letter_is_not_a_real_word():
     from app.integrations.ocr.kind_classifier import _noisy
     assert _noisy(" ".join(["cooool", "wooow", "baaad"] * 20)) is True      # tripled letters: scan noise, not words
     assert _noisy(" ".join(["cool", "wood", "bad", "toll"] * 20)) is False
+
+
+# ---- real-world wording that used to fall through to "Other documents" (invented names and companies) ----------------------------
+
+
+def test_an_experience_letter_with_only_ordinary_wording_is_still_an_experience_certificate():
+    text = ("Alpha Valve Services Pvt Ltd\nTO WHOM IT MAY CONCERN\nThis is to certify that Mr. Rashid Demo has worked with our "
+            "company as Instrument Technician from 01/02/2019 to 30/06/2022. His conduct was good.\nHR Manager")
+    assert classify_kind(text).kind == "experience_certificate"
+
+
+def test_a_letterhead_with_a_gst_number_is_not_an_invoice():
+    text = ("GSTIN NO. 09AAZCA1471H1Z8 BETA INDUSTRIES PRIVATE LIMITED CIN U01611UP2023\nTO WHOM IT MAY CONCERN\nThis is to certify that "
+            "Mr. Dinesh Demo was employed with us as Accountant from 03/2023 to date. Experience letter issued at his request.")
+    assert classify_kind(text).kind == "experience_certificate"
+
+
+def test_a_resume_that_mentions_invoices_is_not_an_invoice():
+    text = ("Profile: six years of experience in accounts payable and receivable, invoice processing, vendor reconciliation and "
+            "month-end closing in a manufacturing company. Skills: SAP, Tally, Excel. Declaration: all the above is true.")
+    assert classify_kind(text).kind != "invoice"
+
+
+def test_a_university_marks_statement_is_an_education_certificate():
+    text = ("GAMMA UNIVERSITY, DEMO CITY\nMARKS STATEMENT\nB.Com Part III Examination 2022\nRoll No 160582059791\n"
+            "Total marks obtained 1450 of 2000 Second Class")
+    assert classify_kind(text).kind == "education_certificate"

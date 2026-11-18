@@ -26,7 +26,7 @@ export type IntakeJob = {
   queuedAt?: string | null; startedAt?: string | null; finishedAt?: string | null; queuePosition?: number | null; aheadOfYou?: number | null;
   /** Why a waiting file is waiting: no reader is running (after about a minute) or others come first. Older servers omit it. */
   waitingReason?: WaitingReason; reader?: ReaderState | null;
-  result?: { scans?: DocumentScans; inspection?: OcrInspection; warnings?: string[]; /** What was read and what was not (additive: older servers omit it). */ coverage?: unknown }; draft?: IntakeDraft
+  result?: { scans?: DocumentScans; inspection?: OcrInspection; warnings?: string[]; /** What was read and what was not (additive: older servers omit it). */ coverage?: unknown; /** The pages of every other kind found in the file, by candidate document field (additive: older servers omit it). */ kinds?: Record<string, number[]> }; draft?: IntakeDraft
 }
 const active = new Set(['pending', 'processing', 'retry'])
 const SCAN_KINDS: readonly string[] = ['resume', 'passport', 'aadhaar']

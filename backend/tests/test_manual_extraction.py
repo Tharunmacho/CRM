@@ -570,3 +570,89 @@ def test_the_form_slot_of_a_job_reaches_the_reader_as_the_expected_kind(intake, 
     assert [mode for mode, _key in intake.submissions] == (["passport"] if expected == "passport" else
                                                           ["aadhaar"] if expected == "aadhaar" else
                                                           ["resume"] if expected == "resume" else [])
+
+
+# ------------------------------------------------------------------ one file holding everything: a chip per kind, each kind filed in its own field
+
+def _combined_file():
+    from test_kind_classifier import EXPERIENCE, MEDICAL, SSLC
+    return pdf(CV, PASSPORT, SSLC, EXPERIENCE, MEDICAL, "Minutes of the garden committee. Agenda: bench repairs and the summer picnic. Next meeting Monday evening.")
+
+
+def test_the_result_names_the_pages_of_every_kind_found_not_only_resume_passport_and_aadhaar(intake):
+    job = upload(intake, _combined_file())
+    assert "kinds" not in job["result"]                                    # nothing is known before the file is read
+    start(intake, job["id"]); process(intake, job["id"])
+    shown = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
+    kinds = shown["result"]["kinds"]
+    assert kinds["passport"] == [2] and kinds["education_certificate"] == [3] and kinds["experience_certificate"] == [4]
+    assert kinds["medical"] == [5] and kinds["other"] == [6]
+    assert kinds["resume"] == [1] and set(kinds) == {"resume", "passport", "education_certificate", "experience_certificate", "medical", "other"}
+    assert set(shown["result"]["scans"]) >= {"resume", "passport"}          # every existing key and shape is still there
+    assert {mode for mode, _ in intake.submissions} <= {"resume", "passport", "aadhaar"}   # only these are ever sent to the reader
+    with intake.sessions() as db:
+        state = db.get(DocumentExtractionJob, job["id"]).state
+        assert state["page_kinds"]["page_count"] == 6 and "text" not in str(state["page_kinds"])   # the page kinds are kept, never the text
+
+
+def test_a_job_read_by_an_earlier_run_shows_its_kinds_from_the_saved_page_kinds_without_reading_again(intake, monkeypatch):
+    job = upload(intake, _combined_file())
+    start(intake, job["id"]); process(intake, job["id"])
+    with intake.sessions() as db:
+        saved = db.get(DocumentExtractionJob, job["id"])
+        before = dict(saved.result["kinds"])
+        data = read_bytes(intake.settings, saved.object_key)
+        state = deepcopy(saved.state)
+    from app.services import document_splitting
+    monkeypatch.setattr(inspection, "inspect_document", lambda *a, **k: pytest.fail("the pages must not be read again"))
+    assert document_splitting.kinds_found(data, report=state["output"]["inspection"], saved_kinds=state["page_kinds"]) == before
+    assert document_splitting.kinds_found(data) is None                      # no reading at hand: no kinds, never a guess
+
+
+def test_attaching_a_combined_file_files_each_kind_in_its_own_field_once_with_every_page_kept_and_no_new_reading(intake, monkeypatch):
+    from pathlib import Path
+    from app.api.routers import files as files_router
+    monkeypatch.setattr(files_router, "STORAGE", Path(intake.settings.storage_dir))     # the pieces are written to this test's own folder
+    data = _combined_file()
+    job = upload(intake, data)
+    start(intake, job["id"]); process(intake, job["id"])
+    submissions = list(intake.submissions)
+    monkeypatch.setattr(inspection, "inspect_document", lambda *a, **k: pytest.fail("attach must cut the pages from the saved reading"))
+    attached = intake.client.post("/api/ocr/jobs/" + job["id"] + "/attach", json={"candidateId": "candidate"})
+    assert attached.status_code == 200, attached.text
+    with intake.sessions() as db:
+        rows = list(db.scalars(select(Attachment).where(Attachment.entity_id == "candidate").order_by(Attachment.slot)))
+        slots = [row.slot for row in rows]
+        assert sorted(slots) == sorted(set(slots)) and all(row.version == 1 for row in rows)           # nothing is filed twice
+        assert set(slots) == {"source_bundle", "resume", "passport", "education_certificate", "experience_certificate", "medical", "other"}
+        names = {row.slot: row.file_name for row in rows}
+        assert names["passport"] == "Human_reviewed_name-Passport.pdf" and names["education_certificate"] == "Human_reviewed_name-Education_certificate.pdf"
+        assert names["experience_certificate"] == "Human_reviewed_name-Experience_certificate.pdf" and names["resume"] == "Human_reviewed_name-Resume.pdf"
+        text = {}
+        for row in rows:
+            with fitz.open(stream=read_bytes(intake.settings, row.object_key), filetype="pdf") as doc:
+                text[row.slot] = (doc.page_count, " ".join(page.get_text() for page in doc).lower())
+        assert text["education_certificate"][0] == 1 and "karnataka" in text["education_certificate"][1]
+        assert text["experience_certificate"][0] == 1 and "to whom it may concern" in text["experience_certificate"][1]
+        assert "passport" in text["passport"][1] and "curriculum vitae" not in text["passport"][1]       # a page goes only to its own field
+        assert "karnataka" not in text["resume"][1] and "karnataka" not in text["passport"][1]
+        assert sum(text[slot][0] for slot in text if slot != "source_bundle") >= 6                      # every page of the file is in a field
+        assert text["source_bundle"][0] == 6                                                           # and the whole file is kept as received
+        assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 1                 # no reader job for the filed-only kinds
+    assert intake.submissions == submissions                                                            # attach sends nothing to the reader
+    assert "Education certificate" in attached.json()["split"]["message"] and "Medical" in attached.json()["split"]["message"]
+
+
+def test_a_combined_file_saved_without_choosing_extract_is_still_filed_in_all_its_fields_and_never_read_by_the_reader(intake, monkeypatch):
+    from pathlib import Path
+    from app.api.routers import files as files_router
+    monkeypatch.setattr(files_router, "STORAGE", Path(intake.settings.storage_dir))
+    job = upload(intake, _combined_file())
+    attached = intake.client.post("/api/ocr/jobs/" + job["id"] + "/attach", json={"candidateId": "candidate"})
+    assert attached.status_code == 200, attached.text
+    with intake.sessions() as db:
+        rows = list(db.scalars(select(Attachment).where(Attachment.entity_id == "candidate")))
+        assert sorted(row.slot for row in rows) == sorted({"source_bundle", "resume", "passport", "education_certificate",
+                                                            "experience_certificate", "medical", "other"})
+        assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 1
+    assert intake.submissions == []

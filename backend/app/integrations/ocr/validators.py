@@ -144,6 +144,117 @@ def fix_filler_k(words, visible_text: str = "") -> list[str]:
     return fixed
 
 
+_MRZ_NAME_DIGITS = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+
+
+def mrz_name_words(line1: str) -> tuple[list[str], list[str], bool]:
+    """(surname words, given-name words, field_is_full) from the name zone of the zone's first line, as the zone prints them.
+
+    A digit inside a name is a misread letter (RAH1M is RAHIM). A lone K between the words where the "<<" between surname and given
+    names belongs ("SEEMAN<SUNDARESAN<K<VEERA<AJITH": a filler read as a K) is that separator. `field_is_full` is True when the zone
+    line has no filler left at its end: the zone holds 39 letters at most, so the last word of a long name may be cut short."""
+    line = re.sub(r"[^A-Z0-9<]", "", normalise_mrz_line(line1))
+    field = line[5:46].translate(_MRZ_NAME_DIGITS)      # a zone line read one or two characters long is not cut: the filler or the page decides
+    full = len(line) >= 44 and not field.endswith("<")
+    # The name ends where the filler begins: three or more "<" in a row. What the reader makes of the filler after that
+    # ("<K<555KS", "<<KS") is noise, never part of the name.
+    field = re.split(r"<{3,}", field.lstrip("<") if field.startswith("<<<") else field, maxsplit=1)[0].rstrip("<")
+    if "<<" not in field:
+        field = re.sub(r"(?<=[A-Z])<K<(?=[A-Z])", "<<", field, count=1)
+    surname, _, given = field.partition("<<")
+    words = lambda part: [w for w in part.split("<") if w]
+    return words(surname), words(given), full
+
+
+def find_zone_name_line(text: str) -> str | None:
+    """The first line of a passport zone read on its own: the zone's second line may be unreadable (a check-digit failure, characters
+    outside the zone's alphabet), but its first line still carries the holder's name. Only used with the page's printed name as proof."""
+    for raw in text.splitlines():
+        flat = compact(raw).upper().translate({ord("«"): "<", ord("‹"): "<"})
+        if flat.startswith("P<") and flat.count("<") >= 3 and len(flat) >= 20 and set(flat) <= _MRZ_ALPHABET:
+            return flat
+    return None
+
+
+_PASSPORT_LABEL_WORDS = frozenset({"REPUBLIC", "INDIA", "INDIAN", "NATIONALITY", "SURNAME", "PASSPORT", "COUNTRY", "EXPIRY", "ISSUE", "BIRTH",
+                                   "PLACE", "GIVEN", "NAMES", "DATE", "TYPE", "CODE", "HOLDER", "SIGNATURE", "FATHER", "MOTHER", "SPOUSE", "ADDRESS"})
+
+
+def _printed_words(visible_text: str) -> list[str]:
+    return re.findall(r"[A-Z]+", visible_text.upper())
+
+
+def reconcile_mrz_name(given: list[str], surname: list[str], visible_text: str, field_is_full: bool = False) -> tuple[list[str], list[str]]:
+    """The words of a passport zone's name made to agree with the page's own printed name where the page proves it:
+
+    * a filler read as a K glued to a word, or standing alone ("NAWAZ<KKHAN<K": Nawaz Khan), is dropped (`fix_filler_k`; a lone K
+      stays only when the page prints it next to the word before it);
+    * one word split in two by the reader ("J OHAN" when the page prints JOHAN) is joined;
+    * the last word of a full zone, cut short by the 39-letter limit ("KRISHN" when the page prints KRISHNA), is completed.
+
+    Nothing is changed without the printed proof; with no printed text the words are returned as read."""
+    printed = _printed_words(visible_text)
+    if not printed:
+        return given, surname
+    known = set(printed)
+    joined = fix_filler_k(list(given) + list(surname), visible_text)
+    cut = len(given)
+
+    def mend(words: list[str]) -> list[str]:
+        out: list[str] = []
+        for index, word in enumerate(words):
+            if len(word) == 1 and word.upper() == "K":
+                before = out[-1].upper() if out else None
+                after = words[index + 1].upper() if index + 1 < len(words) else None
+                adjacent = re.search(rf"\b{re.escape(before)}\s+K\b", visible_text.upper()) if before else None
+                adjacent = adjacent or (re.search(rf"\bK\s+{re.escape(after)}\b", visible_text.upper()) if after else None)
+                if not adjacent:
+                    continue
+            out.append(word)
+        merged: list[str] = []
+        index = 0
+        while index < len(out):
+            word = out[index]
+            if index + 1 < len(out):
+                glued = word + out[index + 1]
+                if len(glued) >= 4 and glued.upper() in known and not (word.upper() in known and out[index + 1].upper() in known):
+                    merged.append(glued); index += 2
+                    continue
+            merged.append(word); index += 1
+        return merged
+
+    given_out, surname_out = mend(joined[:cut]), mend(joined[cut:])
+    if field_is_full:
+        last = given_out or surname_out
+        if last:
+            word = last[-1].upper()
+            longer = {p for p in known if len(p) > len(word) and len(p) - len(word) <= 3 and p.startswith(word)}
+            if len(word) >= 4 and word not in known and len(longer) == 1:
+                last[-1] = next(iter(longer)) if last[-1].isupper() else next(iter(longer)).capitalize()
+    return given_out, surname_out
+
+
+def names_corroborated(words: list[str], visible_text: str) -> bool:
+    """Is every word of a zone's name (of three letters or more) also printed on the page, give or take one letter, or glued of two
+    printed words (the reader split PANTHALATHODI into two)? The proof that a zone whose own check digits failed is still read well
+    enough to name the holder."""
+    from difflib import SequenceMatcher
+    printed = _printed_words(visible_text)
+    if not printed or not words:
+        return False
+    pairs = {a + b for a, b in zip(printed, printed[1:])}
+    for word in words:
+        word = word.upper()
+        if len(word) < 3:
+            continue
+        if word in printed or word in pairs:
+            continue
+        if any(abs(len(p) - len(word)) <= 1 and SequenceMatcher(None, p, word).ratio() >= 0.75 for p in printed):
+            continue
+        return False
+    return True
+
+
 def parse_mrz_td3(line1: str, line2: str) -> MrzResult | None:
     """Parse and, where needed, repair a two-line passport MRZ. ``None`` when it is not TD3-shaped."""
     first, second = _fit(line1), _fit(line2)

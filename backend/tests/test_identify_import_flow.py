@@ -13,7 +13,7 @@ from identify_fixtures import (
     aadhaar_number, aadhaar_text, garbled_aadhaar_text, offer_text, passport_text, pdf_of, resume_continuation, resume_text, unrelated_text,
 )
 from ocr_synthetic import page_lines
-from test_bulk_candidate_import import env, stored  # noqa: F401  (the fixture and a helper of the screen's tests)
+from test_bulk_candidate_import import env, import_only_stores, stored  # noqa: F401  (the fixture and a helper of the screen's tests)
 from test_database_naming import schema_database  # noqa: F401
 
 THARUN = ("Tharun Kumar", "Raman", "K1234567")

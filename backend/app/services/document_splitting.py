@@ -117,6 +117,18 @@ def _targets(kinds: list[str], claim: str | None, found: set[str]) -> list[str]:
     return slots
 
 
+def _plan_of(result, slot: str | None) -> SplitPlan | None:
+    """The plan for what `split_by_content` found: the pieces to file in their own fields, or None when the scan is one document."""
+    if not result.split:
+        return None
+    found = {kind for piece in result.pieces for kind in piece.kinds if kind != "other"}
+    pieces = [PlannedPiece(_targets(piece.kinds, slot, found), piece.data, list(piece.pages), result.reads_for(piece.pages))
+              for piece in result.pieces]
+    if len(pieces) < 2 or any(not piece.pages for piece in pieces):
+        return None   # a single piece is the whole scan: stored whole, byte for byte
+    return SplitPlan(pieces, result.note)
+
+
 def plan_split(slot: str | None, filename: str, data: bytes, content_type: str = "application/pdf") -> SplitPlan | None:
     """Analyse an upload. Returns the pieces to file in their own fields, or None when the file is to be stored whole in the
     field the person chose (one document throughout, not a PDF, too long, or the reading failed). Never raises; the cost is
@@ -124,17 +136,57 @@ def plan_split(slot: str | None, filename: str, data: bytes, content_type: str =
     if not worth_analysing(slot, filename, content_type, data):
         return None
     try:
-        result = bulk.split_by_content(data, content_type, [], filename)
-        if not result.split:
-            return None
-        found = {kind for piece in result.pieces for kind in piece.kinds if kind != "other"}
-        pieces = [PlannedPiece(_targets(piece.kinds, slot, found), piece.data, list(piece.pages), result.reads_for(piece.pages))
-                  for piece in result.pieces]
-        if len(pieces) < 2 or any(not piece.pages for piece in pieces):
-            return None   # a single piece is the whole scan: stored whole, byte for byte
-        return SplitPlan(pieces, result.note)
+        return _plan_of(bulk.split_by_content(data, content_type, [], filename), slot)
     except Exception:
         return None
+
+
+def _read_again(data: bytes, readings, report, saved_kinds):
+    """The local reading of `data` without OCR: the one made in this run (`readings`, by SHA-256), else the saved inspection with the
+    page kinds saved beside it (`intake_documents.remember_kinds`). None when neither is usable."""
+    from app.services import intake_documents
+    digest = hashlib.sha256(data).hexdigest()
+    return intake_documents._reading_of(data, digest, (readings or {}).get(digest), report, saved_kinds)
+
+
+def kinds_found(data: bytes, *, readings: dict | None = None, report: dict | None = None, saved_kinds: dict | None = None,
+                name: str = "") -> dict[str, list[int]] | None:
+    """Which pages of a read file are which document, for every kind the content classifier found: {field: [page numbers]},
+    the fields in the order of their first page (a page that is two documents is listed under both). The fields are the ones the
+    pages are filed in (a kind with no field of its own, or whose field cannot take a cut PDF, is "other"). Nothing is read: it is
+    the reading the job already made (see `_read_again`). None when no reading is at hand; {} when nothing was recognised. Never raises."""
+    try:
+        reading = _read_again(data, readings, report, saved_kinds)
+        if reading is None:
+            return None
+        result = bulk._split_inspected(reading, data, [], name)
+        everything = list(range(1, reading.page_count + 1))
+        found: dict[str, set[int]] = {}
+        for piece in result.pieces:
+            for slot in _targets(piece.kinds, None, set()):
+                found.setdefault(slot, set()).update(piece.pages or everything)
+        if set(found) <= {"other"}:
+            return {}
+        return {slot: sorted(pages) for slot, pages in sorted(found.items(), key=lambda item: min(item[1]))}
+    except Exception:
+        return None
+
+
+def plan_split_saved(slot: str | None, filename: str, data: bytes, report: dict | None, saved_kinds: dict | None,
+                     content_type: str = "application/pdf") -> tuple[bool, SplitPlan | None]:
+    """`plan_split` from the reading a job already made (no OCR, nothing slow): (True, the plan or None) when that reading is at hand,
+    (False, None) when it is not and the caller has to read the pages itself. Never raises."""
+    if not worth_analysing(slot, filename, content_type, data):
+        return False, None
+    try:
+        reading = _read_again(data, None, report, saved_kinds)
+        if reading is None:
+            return False, None
+        result = bulk._split_inspected(reading, data, [], filename)
+        result.page_reads = {}   # a restored reading holds no page text: the duplicate check reads the few pages it needs itself
+        return True, _plan_of(result, slot)
+    except Exception:
+        return False, None
 
 
 def _person(candidate: Candidate, original_name: str) -> str:

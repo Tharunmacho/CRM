@@ -184,9 +184,13 @@ def _with_form_fields(kind, extraction):
     return fields
 
 
-def _scan_results(output):
+def _scan_results(output, kinds=None):
     """What the person sees of a reading. The raw warnings stay in the job's state (diag_extraction reads them);
-    here they are plain, and a warning about one kind appears on that kind's card only."""
+    here they are plain, and a warning about one kind appears on that kind's card only.
+
+    ``kinds`` (additive) says which pages are which document for EVERY kind the content classifier found, the ones that are only
+    filed (education and experience certificates, medical, signed offer, visa ...) as well as resume, passport and Aadhaar:
+    ``{"education_certificate": [4, 5], ...}``, keyed by the candidate document field the pages are filed in."""
     report = output.get("inspection", {})
     raw_warnings = output.get("warnings", [])
     shown_report = {**report, "warnings": plain_notes(report.get("warnings") or [])} if "warnings" in report else report
@@ -204,7 +208,23 @@ def _scan_results(output):
             "warnings": plain_notes(raw_warnings, kind=kind),
             "extraction_status": "complete" if extraction else "no_resume" if kind == "resume" and not selected and output["status"] != "needs_review" else "needs_review",
         }
-    return {"scans": scans, "warnings": plain_notes(raw_warnings), "inspection": shown_report, "coverage": output.get("coverage")}
+    return {"scans": scans, "warnings": plain_notes(raw_warnings), "inspection": shown_report, "coverage": output.get("coverage"),
+            **({"kinds": kinds} if kinds else {})}
+
+
+def _page_kinds(data, output, state, fresh):
+    """Which pages of this file are which document, for every kind the content classifier found (`_scan_results` shows it), from the
+    reading made in this run or else the page kinds saved by an earlier one. The page kinds (no page text) are saved with the job so a
+    retry, and the filing when the upload is attached, need no second reading. None when no reading is at hand: the result then has
+    no `kinds` and the screen shows the three identity chips as before. Never raises."""
+    try:
+        from app.services import document_splitting, intake_documents
+        if fresh:
+            intake_documents.remember_kinds(state, hashlib.sha256(data).hexdigest(), fresh)
+        return document_splitting.kinds_found(data, readings=fresh, report=output.get("inspection"), saved_kinds=state.get("page_kinds"))
+    except Exception:
+        log.warning("The kinds of the pages of a document could not be worked out; the reading result is unchanged.", exc_info=True)
+        return None
 
 
 def _autocommit(db):
@@ -457,14 +477,20 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         if hashlib.sha256(data).hexdigest() != digest:
             raise ExtractionFailure("The saved copy of this document looks damaged. Upload the original again, then try again.")
         output = state.get("output")
+        fresh: dict = {}
         if output is None:
             from app.services.extraction_scheduling import handoff_settings
-            output = extract_attachment(data, state=state, save=save_and_fill, settings=handoff_settings(settings), designations=titles or [],
-                                        final_attempt=attempts + 1 >= MAX_ATTEMPTS, expected_kind=expected_kind)
+            from app.services import intake_documents
+            # The local reading of the file is kept in memory for this run (page text, never saved), so the kinds of its pages
+            # below are known without reading the pages again.
+            with intake_documents.reading_scope() as fresh:
+                output = extract_attachment(data, state=state, save=save_and_fill, settings=handoff_settings(settings), designations=titles or [],
+                                            final_attempt=attempts + 1 >= MAX_ATTEMPTS, expected_kind=expected_kind)
             state["output"] = deepcopy(output)
         from app.services.document_extraction import checked_person_output
         output = checked_person_output(data, output, state, settings)
         state["output"] = deepcopy(output)
+        kinds = _page_kinds(data, output, state, fresh)
         # The derived output is saved together with the stored documents below (one statement, not one per step): the paid
         # reader results themselves were already saved by the reading as they arrived, so a crash in between loses only the
         # cheap mapping, never a reader job.
@@ -523,7 +549,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 return
             end_run(run, time.monotonic() - run_began, "read")
             job.state = json.loads(json.dumps(state, default=_plain))
-            job.result = json.loads(json.dumps(_scan_results(output), default=_plain))
+            job.result = json.loads(json.dumps(_scan_results(output, kinds), default=_plain))
             job.status = "completed" if output["status"] == "complete" else "needs_review"
             # A kind the reader could not read is named for the person (the upload row shows this line).
             from app.services.reading_notes import review_reasons
@@ -634,7 +660,11 @@ def _plan_split_of_original(db, user, identifier, candidate_id, settings):
         data = read_bytes(settings, job.object_key)
         if hashlib.sha256(data).hexdigest() != job.content_hash:
             return None
-        return document_splitting.plan_split(None, job.filename, data)
+        # A scan that was read (Extract details) has its page kinds saved: the pieces are cut from that reading, with no second OCR.
+        state = job.state if isinstance(job.state, dict) else {}
+        known, plan = document_splitting.plan_split_saved(None, job.filename, data, (state.get("output") or {}).get("inspection"),
+                                                          state.get("page_kinds"))
+        return plan if known else document_splitting.plan_split(None, job.filename, data)
     except Exception:
         return None
     finally:

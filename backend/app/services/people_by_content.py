@@ -142,7 +142,9 @@ _STOP = {"s", "o", "so", "do", "wo", "co", "son", "daughter", "wife", "of", "hol
          "date", "birth", "born", "bearing", "having", "has", "is", "was", "residing", "male", "female", "indian", "gender", "sex",
          "nationality", "kuwait", "dear", "sir", "madam", "the", "and", "to", "from", "subject", "with", "for", "at", "in", "on", "pax",
          "adult", "child", "infant", "seat", "baggage", "meals", "mobile", "phone", "contact", "address", "father", "mother", "who", "which",
-         "that", "whose", "whom", "while", "where", "when", "male", "female", "fit", "unfit", "applied", "working"}
+         "that", "whose", "whom", "while", "where", "when", "male", "female", "fit", "unfit", "applied", "working",
+         "worked", "joined", "completed", "attended", "served", "employed", "associated", "passed", "holding", "bearing", "currently",
+         "since", "till", "until", "as", "an", "his", "her", "he", "she", "this", "these", "are", "were", "been", "be"}
 _NOT_NAME = {"government", "india", "unique", "identification", "authority", "aadhaar", "republic", "passport", "visa", "medical",
              "certificate", "clearance", "police", "hospital", "centre", "center", "limited", "ltd", "company", "trading", "general",
              "department", "ministry", "office", "resume", "curriculum", "vitae", "objective", "declaration", "offer", "employment",
@@ -150,7 +152,12 @@ _NOT_NAME = {"government", "india", "unique", "identification", "authority", "aa
              "details", "total", "amount", "number", "name", "page", "education", "experience", "skills", "profile", "personal",
              "diagnostic", "laboratory", "examination", "report", "candidate", "applicant", "employer", "kingdom", "state", "electronic",
              "university", "board", "school", "college", "institute", "regional", "bank", "account", "invoice", "receipt", "insurance",
-             "policy", "science", "computer", "commerce", "engineering", "bachelor", "diploma", "degree", "address", "sincerely", "regards", "signature", "authorised", "signatory", "manager", "director", "photo", "photograph"}
+             "policy", "science", "computer", "commerce", "engineering", "bachelor", "diploma", "degree", "address", "sincerely", "regards", "signature", "authorised", "signatory", "manager", "director", "photo", "photograph",
+             # organisations, schemes and forms whose heading is the first line of a certificate or of a test form (never a person)
+             "housing", "corporation", "corp", "association", "society", "foundation", "trust", "council", "commission", "enterprises",
+             "industries", "services", "solutions", "technologies", "construction", "contractors", "engineers", "academy", "training",
+             "welfare", "directorate", "municipality", "panchayat", "dravidar", "listening", "reading", "writing", "spoken", "speaking",
+             "band", "ielts", "toefl", "test", "form", "application", "assessment", "scheme", "project", "projects"}
 _VOWEL = re.compile(r"[aeiouy]")
 # Words of a resume's section headings ("Educational Qualification", "Work Experience", "Personal Details", "Declaration"): never a name.
 _HEADING_WORDS = frozenset({
@@ -305,8 +312,8 @@ def _word_built_like_a_name(word: str) -> bool:
         return False
     if _CONSONANT_RUN.search(low) or re.search(r"(.)\1\1", low) or _odd_case(word):
         return False
-    if size >= 4 and (max(low.count(c) for c in set(low)) * 2 > size or (size >= 5 and len(set(low)) <= 2)):
-        return False                       # mostly one letter
+    if size >= 4 and ((max(low.count(c) for c in set(low)) >= 4 and max(low.count(c) for c in set(low)) * 2 > size) or (size >= 5 and len(set(low)) <= 2)):
+        return False                       # mostly one letter (AMARA and OKORO, three of one letter in five, are names)
     return True
 
 
@@ -365,11 +372,12 @@ def name_tokens(raw: str, *, lenient: bool = False, sink: list | None = None) ->
     words = re.findall(r"[A-Za-z]+", text.replace("'", "").replace("’", ""))
     tokens: list[str] = []
     shown: list[str] = []
-    for word in words:
+    for position, word in enumerate(words):
         low = word.lower()
         if not tokens and low in _TITLES:
             continue
-        if low in _STOP:
+        # "S" is an initial ("Veera Ajith Chandran S"); it only ends the name as the first letter of "S O" / "S/O" (son of)
+        if low in _STOP and not (low == "s" and not (position + 1 < len(words) and words[position + 1].lower() == "o")):
             break
         if low in _NOT_NAME:
             return None
@@ -455,7 +463,8 @@ def relation(a: tuple[str, ...], b: tuple[str, ...]) -> str:
 
 
 def display_name(tokens: Iterable[str]) -> str:
-    return " ".join((t.upper() + ".") if len(t) == 1 else t.capitalize() for t in tokens)
+    """The name in normal case, initials kept exactly as printed: "Rathish V R", never "Rathish V. R." (a dot nobody printed)."""
+    return " ".join(t.upper() if len(t) == 1 else t.capitalize() for t in tokens)
 
 
 # --------------------------------------------------------------------------------------------- evidence of one page
@@ -563,6 +572,23 @@ def _aadhaar_names(text: str, sink: list | None = None) -> list[NameHit]:
     return hits
 
 
+def _starts_a_resume(text: str, heading_ok: bool = True) -> bool:
+    """Can the top of this page be a resume's heading with the person's name? Not a degree certificate, a mark sheet or a school
+    certificate (the page classifier files those under "resume" too: their first line is the university or the board), and, on a page
+    that continues a resume, only when the top of the page carries contact details (a second person's resume starting right after
+    the first one in one scan has its phone number or e-mail at the top)."""
+    from app.integrations.ocr import classification, validators
+    try:
+        if classification.education_certificate(text):
+            return False
+    except Exception:
+        pass
+    if heading_ok:
+        return bool(_RESUME_WORDS.search(text[:800]) or validators.find_emails(text[:800]) or validators.find_mobiles(text[:800]))
+    top = text[:600]
+    return bool(validators.find_emails(top) or validators.find_mobiles(top))
+
+
 def _resume_name(text: str, sink: list | None = None) -> NameHit | None:
     seen = 0
     for line in text.splitlines():
@@ -601,10 +627,43 @@ def _aadhaar_numbers(text: str) -> list:
     return found
 
 
-def extract(text: str, doc_type: str = "unknown") -> Evidence:
+def _word_fit(word: str) -> float:
+    """The share of a word's letter triples that occur in real names (see `_NAME_LEXICON`)."""
+    grams = _grams(word.lower())
+    return sum(g in _KNOWN_GRAMS for g in grams) / len(grams) if grams else 0.0
+
+
+def _mend_garbled_zone_words(given: list[str], surname: list[str], printed: str) -> tuple[list[str], list[str]]:
+    """The check digits of a passport zone do not cover its name, so a name word can be misread ("ONDRAM" for SUNDARAM) while the zone
+    still passes. A zone word that is not printed on the page is replaced by the ONE printed word it is plainly a misreading of (the same
+    letters at one end, a likeness of 0.7), and only when the printed word is built like a real name and the zone's word is not: a well
+    read zone word is never replaced because the printed line was the one misread."""
+    from app.integrations.ocr import validators
+    from difflib import SequenceMatcher
+    known = {w for w in validators._printed_words(printed) if len(w) >= 5 and w not in validators._PASSPORT_LABEL_WORDS}
+
+    def mend(word: str) -> str:
+        upper = word.upper()
+        if len(upper) < 5 or upper in known or _word_fit(upper) >= 0.8:
+            return word
+        near = []
+        for other in known:
+            if abs(len(other) - len(upper)) > 3 or SequenceMatcher(None, upper, other).ratio() < 0.7:
+                continue
+            tail = next((n for n in range(min(len(upper), len(other)), 0, -1) if upper[-n:] == other[-n:]), 0)
+            head = next((n for n in range(min(len(upper), len(other)), 0, -1) if upper[:n] == other[:n]), 0)
+            if max(tail, head) >= 3 and _word_fit(other) >= 0.8:
+                near.append(other)
+        return (near[0] if word.isupper() else near[0].capitalize()) if len(near) == 1 else word
+
+    return [mend(w) for w in given], [mend(w) for w in surname]
+
+
+def extract(text: str, doc_type: str = "unknown", *, heading_ok: bool = True) -> Evidence:
     """Everything on one page that says who it is about. Only checksum-backed numbers are kept as numbers: a passport number
     from the machine-readable zone (with its own check digit) or printed next to the word "passport"; an Aadhaar number only
-    when it passes the Verhoeff check."""
+    when it passes the Verhoeff check. `heading_ok` is False for a page that continues a resume (page 2, 3 ...): the lines at the
+    top of it are the middle of a sentence or a list, never the name of the person."""
     from app.integrations.ocr import validators
     ev = Evidence()
     text = unicodedata.normalize("NFKC", text or "")
@@ -617,18 +676,24 @@ def extract(text: str, doc_type: str = "unknown") -> Evidence:
         mrz = validators.find_mrz(text)
     except Exception:
         mrz = None
-    if mrz is not None and (mrz.valid or sum(bool(v) for v in mrz.checks.values()) >= 3):
-        # a zone with correct check digits is not a guess: its letters are not judged by how they sound
-        given = name_tokens(re.sub(r"[^A-Za-z ]", " ", mrz.given_names or ""), lenient=True)
-        surname = name_tokens(re.sub(r"[^A-Za-z ]", " ", mrz.surname or ""), lenient=True)
+    trusted = mrz is not None and (mrz.valid or sum(bool(v) for v in mrz.checks.values()) >= 3)
+    zone_line = mrz.line1 if mrz is not None else ""
+    if not any(validators.mrz_name_words(zone_line)[:2]):
+        zone_line = validators.find_zone_name_line(text) or ""      # the zone's second line was unreadable: its first line still names the holder
+    if zone_line:
+        # The name of the zone, made to agree with the page's own printed name where the page proves it (a filler read as a K, a word
+        # split in two, a last word cut by the zone's 39-letter limit). The zone's letters are not judged by how they sound. A zone
+        # whose check digits failed is still used when every word of its name is printed on the page too.
+        printed = " ".join(line for line in text.splitlines() if "<" not in line)
+        surname_words, given_words, full_field = validators.mrz_name_words(zone_line)
+        given_words, surname_words = validators.reconcile_mrz_name(given_words, surname_words, printed, full_field)
+        given_words, surname_words = _mend_garbled_zone_words(given_words, surname_words, printed)
+        given = name_tokens(" ".join(given_words), lenient=True)
+        surname = name_tokens(" ".join(surname_words), lenient=True)
         full = (given or ()) + (surname or ())
-        if full:
-            # A filler '<' read as a K leaves a stray K on a name word (SUNDARAMK): dropped only when the printed page shows
-            # the name without it (the lines holding the zone itself are left out of that check).
-            printed = " ".join(line for line in text.splitlines() if "<" not in line)
-            full = tuple(validators.fix_filler_k(list(full), printed))
-        if full and (given or surname):
+        if full and (given or surname) and (trusted or validators.names_corroborated(given_words + surname_words, printed)):
             names.append(NameHit(full, "passport"))
+    if trusted:
         if _mrz_kind(text) == "passport":
             number = _norm_passport(mrz.document_number)
             if number and mrz.checks.get("number") and re.fullmatch(r"[A-Z0-9]{6,9}", number) and sum(c.isdigit() for c in number) >= 4:
@@ -657,7 +722,7 @@ def extract(text: str, doc_type: str = "unknown") -> Evidence:
             ev.aadhaars.add(number.number)
     if ev.aadhaars or doc_type == "aadhaar":
         names += _aadhaar_names(text, garbled)
-    if doc_type == "resume":
+    if doc_type == "resume" and _starts_a_resume(text, heading_ok):
         heading = _resume_name(text, garbled)
         if heading:
             names.append(heading)
@@ -955,10 +1020,20 @@ def _has_strong(c: _Cluster) -> bool:
 def _best_name(c: _Cluster) -> tuple[tuple[str, ...] | None, str]:
     if _aadhaar_only(c):
         return None, ""                   # an identity card whose name was only read doubtfully: never named from that
-    hits = [h for h in c.names if usable(h.tokens)]
+    return pick_name([h for h in c.names if usable(h.tokens)])
+
+
+def pick_name(hits: list[NameHit]) -> tuple[tuple[str, ...] | None, str]:
+    """The one name these hits (all usable) stand for, and where it was read: the passport before the Aadhaar card before the
+    resume heading before any other line."""
     if not hits:
         return None, ""
-    key = lambda h: (h.weak, PRIORITY.get(h.source, 9), -len([t for t in h.tokens if len(t) > 1]), h.tokens)
+    # A name read with low confidence only ranks below the others when nothing trusted agrees with it: a passport name read from a blurry
+    # scan that is the very name (or the full form of the name) a clear resume heading gives is as good as the heading, and the passport's
+    # spelling is the one to keep.
+    firm = [h for h in hits if not h.weak]
+    doubtful = lambda h: h.weak and not any(relation(h.tokens, o.tokens) in ("equal", "contains") for o in firm)
+    key = lambda h: (doubtful(h), PRIORITY.get(h.source, 9), -len([t for t in h.tokens if len(t) > 1]), h.tokens)
     first = sorted(hits, key=key)[0]
     # Names are noisy: among the renderings of the first choice's own name, the spelling most pages agree on wins; the more trusted
     # source (the machine-readable zone before a printed name) only decides between spellings that are equally common.
@@ -973,6 +1048,25 @@ def _best_name(c: _Cluster) -> tuple[tuple[str, ...] | None, str]:
             if len(token) >= 6 and token[:-1] in others and token not in others:
                 tokens[i] = token[:-1]
     return tuple(tokens), best.source
+
+
+def agreed_name(hits: list[NameHit], *, verified_passport: bool = False) -> tuple[tuple[str, ...] | None, str]:
+    """`pick_name` for the documents of ONE candidate (the passport, Aadhaar card and resume files): when another document names
+    somebody with no word in common with the chosen name, the documents disagree (a page of somebody else, or a line that is no
+    name at all) and no name is chosen: the candidate stays "Name not read yet" for the reading of the documents to fill in. A
+    passport whose machine-readable zone passed its check digits is never put in doubt by a line of another document."""
+    tokens, source = pick_name([h for h in hits if usable(h.tokens)])
+    if not tokens:
+        return None, ""
+    if source == "passport" and verified_passport:
+        return tokens, source
+    others: dict[str, list[tuple[str, ...]]] = {}
+    for hit in hits:
+        if hit.source != source and usable(hit.tokens):
+            others.setdefault(hit.source, []).append(hit.tokens)
+    if any(all(relation(tokens, other) == "none" for other in group) for group in others.values()):
+        return None, ""
+    return tokens, source
 
 
 # --------------------------------------------------------------------------------------------- names in file names, first names
@@ -1259,9 +1353,11 @@ def _analyse(reads: dict[str, FileRead], rejected: list[tuple[str, str]], stoppe
     for key in sorted(pages):
         page = pages[key]
         if page.status == "read" or (page.status == "unread" and page.text.strip()):
-            evidence[key] = extract(page.text, page.doc_type) if page.status == "read" else Evidence()
+            evidence[key] = extract(page.text, page.doc_type, heading_ok=_starts_resume_run(pages, key)) if page.status == "read" else Evidence()
             if page.confidence < LOW_CONFIDENCE and page.method != "native_text":
-                evidence[key].names = [replace(h, weak=True) for h in evidence[key].names]
+                # a name read from a zone whose check digits passed is not made doubtful by a blurry photograph of the rest of the page
+                checked = any(evidence[key].passports.values())
+                evidence[key].names = [h if (h.source == "passport" and checked) else replace(h, weak=True) for h in evidence[key].names]
     verified = sorted({n for ev in evidence.values() for n, ok in ev.passports.items() if ok})
     for key, text in sorted(texts.items()):
         if key not in evidence or pages[key].status != "read":
@@ -1359,6 +1455,12 @@ def _analyse(reads: dict[str, FileRead], rejected: list[tuple[str, str]], stoppe
                              "method": "", "deep": False, "low": False, "carried": False, "unknown": True}
         file_pages.setdefault(path, [1])
     return _build(people_clusters, people_names, cl, status, file_pages, unreadable_files, pages, evidence, stopped)
+
+
+def _starts_resume_run(pages: dict, key: tuple[str, int]) -> bool:
+    """False when the page before this one (same file) is a resume page too: this page only continues that resume."""
+    before = pages.get((key[0], key[1] - 1))
+    return not (before is not None and before.status == "read" and before.doc_type == "resume")
 
 
 def _why_unplaced(page: PageRead, ev: Evidence | None, cl: _Clusters, key) -> str:

@@ -1217,6 +1217,7 @@ def read_identity(uploads: list[Upload], settings=None, budget: float = 60.0) ->
     from app.services import duplicate_pages as dup, people_by_content as pbc
     found = IdentityRead()
     hits: list = []
+    verified = False
     deadline = time.monotonic() + budget
     try:
         for upload in uploads:
@@ -1233,20 +1234,22 @@ def read_identity(uploads: list[Upload], settings=None, budget: float = 60.0) ->
                     continue
                 facts = doc.reads
                 upload.facts = facts
-            for read in facts:
+            for index, read in enumerate(facts):
                 if read is None or read.status == "blank" or not (read.text or "").strip():
                     continue
-                evidence = pbc.extract(read.text, kind)
+                # only the first page of a resume file can carry the heading with the name: a later page starts mid-list or mid-sentence
+                evidence = pbc.extract(read.text, kind, heading_ok=index == 0)
                 hits += [hit for hit in evidence.names if hit.source in ("passport", "aadhaar", "resume") and not hit.weak and pbc.usable(hit.tokens)]
+                verified = verified or any(evidence.passports.values())
                 found.passports |= set(evidence.passports)        # the zone's checked number, or one printed next to "passport"
                 found.aadhaars |= set(evidence.aadhaars)
                 found.phones |= set(evidence.phones)
                 found.emails |= set(evidence.emails)
     except Exception:
         pass
-    if hits:
-        best = sorted(hits, key=lambda hit: (pbc.PRIORITY.get(hit.source, 9), -len(hit.tokens)))[0]
-        found.name = pbc.display_name(best.tokens)
+    tokens, _source = pbc.agreed_name(hits, verified_passport=verified)
+    if tokens:
+        found.name = pbc.display_name(tokens)
     return found
 
 

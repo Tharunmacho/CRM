@@ -602,6 +602,7 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
             return result
         db.commit()
         committed_at = time.perf_counter()
+        _start_reading(db, user, result)
         logger.info("Import %s: %d files, receiving and sorting %.1fs (of which reading unnamed files %.1fs), saving %.1fs, commit %.1fs",
                     parsed.folder, len(uploads), saving_at - started, sorted_at - started, saved_at - saving_at, committed_at - saved_at)
         # Numbers only (no names): what the screen could show when an import is slow. ``checkSeconds`` is everything before the
@@ -636,6 +637,24 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
     result["issues"] = result["issues"] + dropped
     result["folder"] = parsed.folder
     return result
+
+
+def _start_reading(db: Session, user: User, result: dict) -> None:
+    """A candidate that was just imported has its resume, passport and Aadhaar (and education) pages queued for the reader at once,
+    so the name and the details fill in without anyone pressing "Read documents". The documents are already saved: a failure here
+    never undoes the import, and the "Read documents" button still queues whatever is left."""
+    candidate_id = result.get("candidateId")
+    if result.get("status") != "imported" or not candidate_id:
+        return
+    try:
+        queued = read_again(ReadAgainIn(candidateIds=[candidate_id]), db, user)
+        result["readingQueued"] = int(queued.get("queued", 0))
+    except Exception:       # the reader being down or a busy database must not make a saved candidate look unsaved
+        logger.warning("Reading was not started for an imported candidate; it can be started with Read documents.")
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
 
 
 class StatusIn(BaseModel):

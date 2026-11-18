@@ -294,3 +294,44 @@ test('polling waits for the previous answer, then READ_POLL_MS, and sends nothin
   assert.match(hook, /document\.visibilityState !== 'hidden'/)
   assert.match(hook, /addEventListener\('visibilitychange', changed\)/)
 })
+
+// ---------------------------------------------------------------------------------- every other kind found in a file
+
+const slots = await loadSource('../src/shared/model/document-slots.ts')
+
+test('a chip is added for every other kind found in the upload, with its pages, after the three that are always listed', () => {
+  const combined = job({ status: 'completed', result: {
+    scans: { resume: scan([1, 2]), passport: scan([3]) },
+    kinds: { medical: [7], education_certificate: [5, 6], resume: [1, 2], passport: [3], experience_certificate: [4], other: [8] },
+  } })
+  const chips = foundChips([combined], slots.documentLabel)
+  assert.deepEqual(chips.map((chip) => chip.kind), ['resume', 'passport', 'aadhaar', 'experience_certificate', 'education_certificate', 'medical', 'other'])
+  assert.deepEqual(chips.slice(3).map((chip) => [chip.state, chip.label, chip.detail, chip.extra]), [
+    ['done', 'Experience certificate found', 'page 4', true], ['done', 'Education certificate found', 'pages 5, 6', true],
+    ['done', 'Medical found', 'page 7', true], ['done', 'Other documents found', 'page 8', true]])
+  assert.deepEqual(chips.slice(0, 3).map((chip) => [chip.state, chip.label, chip.extra]), [['done', 'Resume found', undefined], ['done', 'Passport found', undefined], ['idle', 'Aadhaar', undefined]])
+  assert.deepEqual(chips[1].pages, [3])                    // the identity chips still come from the scans, not from `kinds`
+})
+
+test('without kinds nothing changes: exactly the three chips, and the same file in two files adds up its pages', () => {
+  assert.equal(foundChips([job({ status: 'completed', result: { scans: { resume: scan([1]) } } })]).length, 3)
+  assert.equal(foundChips([job({ status: 'completed', result: { scans: {}, kinds: {} } })]).length, 3)
+  const a = job({ status: 'completed', result: { scans: {}, kinds: { visa: [2] } } })
+  const b = job({ status: 'completed', result: { scans: {}, kinds: { visa: [1, 2] } } })
+  const chips = foundChips([a, b])
+  assert.deepEqual(chips.slice(3).map((chip) => [chip.kind, chip.label, chip.detail, chip.pages]), [['visa', 'Visa found', '2 files', [1, 2]]])
+  // damaged or hostile values are ignored, never shown
+  const odd = job({ status: 'completed', result: { scans: {}, kinds: { 'x<b>': [1], medical: 'all', visa: [-0, 'two'], pcc: [3] } } })
+  assert.deepEqual(foundChips([odd], slots.documentLabel).slice(3).map((chip) => [chip.kind, chip.label]), [['pcc', 'Police clearance certificate (PCC) found'], ['visa', 'Visa found']].sort((x, y) => (x[0] === 'visa' ? 0 : 1) - (y[0] === 'visa' ? 0 : 1)))
+})
+
+test('a file that holds only filed-only kinds is Done, not "Needs a look", and presence still lists the three kinds only', () => {
+  const only = job({ status: 'completed', result: { scans: {}, kinds: { medical: [1, 2] } } })
+  const row = fileRow(only)
+  assert.deepEqual([row.state, row.label], ['done', 'Done'])
+  assert.deepEqual(documentPresence([only]), { resume: false, passport: false, aadhaar: false })
+  assert.deepEqual(upload.extraKinds(only), [{ kind: 'medical', pages: [1, 2] }])
+  assert.deepEqual(upload.extraKinds(job({ status: 'completed' })), [])
+  // a file with nothing found at all still needs a look
+  assert.equal(fileRow(job({ status: 'completed', result: { scans: {} } })).label, 'Needs a look')
+})

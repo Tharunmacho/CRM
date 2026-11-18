@@ -99,6 +99,22 @@ export function queueText(job: Pick<IntakeJob, 'aheadOfYou' | 'queuePosition'>):
   return ahead === 0 ? 'Next in line' : `Waiting, ${ahead} ahead of you`
 }
 
+/**
+ * Every OTHER kind the server found in a file (`result.kinds`, keyed by the candidate document field the pages are filed in:
+ * education_certificate, experience_certificate, medical, signed_offer, visa, pcc, other ...), with its pages, in page order.
+ * Resume, passport and Aadhaar are not listed here: they come from `result.scans` as before. These pages are only filed on the
+ * candidate when the upload is saved; they are never sent to the document reader.
+ */
+export function extraKinds(job: Pick<IntakeJob, 'result'>): { kind: string; pages: number[] }[] {
+  const raw = (job.result as { kinds?: unknown } | undefined)?.kinds
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+  return Object.entries(raw as Record<string, unknown>)
+    .filter(([kind]) => /^[a-z][a-z_]{0,40}$/.test(kind) && !isDocKind(kind))
+    .map(([kind, pages]) => ({ kind, pages: [...new Set(pagesOf(pages))].sort((a, b) => a - b) }))
+    .filter((item) => item.pages.length > 0)
+    .sort((a, b) => a.pages[0] - b.pages[0])
+}
+
 export interface Finding { kind: DocKind; pages: number[]; read: boolean }
 /** What one file turned out to contain, as far as the server has said. A kind is found once pages were assigned to it or it was read. */
 export function jobFindings(job: IntakeJob): Finding[] {
@@ -190,7 +206,7 @@ export function fileRow(job: IntakeJob, clock?: QueueClock): FileRow {
     case 'needs_review': return { ...base, state: 'review', label: 'Needs a look', tone: 'warn', note: job.lastError || '', canRetry: true }
     case 'attached': return { ...base, state: 'attached', label: 'Attached', tone: 'good' }
     default: {
-      const readSomething = findings.length > 0 || !job.result
+      const readSomething = findings.length > 0 || !job.result || extraKinds(job).length > 0
       return readSomething ? { ...base, state: 'done', label: 'Done', tone: 'good' } : { ...base, state: 'review', label: 'Needs a look', tone: 'warn', note: NEEDS_LOOK, canRetry: true }
     }
   }
@@ -205,7 +221,8 @@ export function fileRows(jobs: IntakeJob[], clock?: QueueClock): FileRow[] {
 }
 
 export interface FoundChip {
-  kind: DocKind
+  /** resume, passport or aadhaar (always listed), or the field of another kind found in a file (education_certificate, medical ...). */
+  kind: string
   /** idle: not found yet. reading: found, being read. done: read and the form filled. review: found but could not be read. */
   state: 'idle' | 'reading' | 'done' | 'review'
   label: string
@@ -213,12 +230,20 @@ export interface FoundChip {
   detail: string
   pages: number[]
   files: number
+  /** True for a kind found beyond the three identity kinds: it is only filed on the candidate, not read. */
+  extra?: boolean
 }
 
-/** The three kinds in a fixed order: found ones carry the state of the reading, the others stay muted. */
-export function foundChips(jobs: IntakeJob[]): FoundChip[] {
+/** "Education certificate" for a field the screen has no label for (the screen passes the slot labels as `labelOf`). */
+const plainLabel = (kind: string) => kind.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
+
+/**
+ * The three identity kinds in a fixed order (found ones carry the state of the reading, the others stay muted), then one chip for
+ * every other kind found in the files, in page order, each with its pages. A kind that was not found has no chip.
+ */
+export function foundChips(jobs: IntakeJob[], labelOf: (kind: string) => string = plainLabel): FoundChip[] {
   const docs = jobs.filter(isDocumentJob)
-  return DOC_KINDS.map((kind) => {
+  const identity = DOC_KINDS.map((kind): FoundChip => {
     const hits = docs.map((job) => ({ job, finding: jobFindings(job).find((item) => item.kind === kind) })).filter((hit) => hit.finding)
     const name = KIND_NAME[kind]
     if (!hits.length) return { kind, state: 'idle' as const, label: name, detail: '', pages: [], files: 0 }
@@ -229,6 +254,18 @@ export function foundChips(jobs: IntakeJob[]): FoundChip[] {
     const label = state === 'review' ? `${name} needs a look` : `${name} found`
     return { kind, state, label, detail: hits.length > 1 ? `${hits.length} files` : pagesText(pages), pages, files: hits.length }
   })
+  const more = new Map<string, { pages: number[]; files: number }>()
+  for (const job of docs) {
+    for (const found of extraKinds(job)) {
+      const seen = more.get(found.kind) ?? { pages: [], files: 0 }
+      more.set(found.kind, { pages: [...new Set([...seen.pages, ...found.pages])].sort((a, b) => a - b), files: seen.files + 1 })
+    }
+  }
+  const extra = [...more].map(([kind, found]): FoundChip => ({
+    kind, state: 'done', label: `${labelOf(kind)} found`, detail: found.files > 1 ? `${found.files} files` : pagesText(found.pages),
+    pages: found.pages, files: found.files, extra: true,
+  }))
+  return [...identity, ...extra]
 }
 
 /** What is in the form for the progress strip: a kind counts once found, or while a file of that kind is still being read. */
@@ -236,7 +273,7 @@ export function documentPresence(jobs: IntakeJob[]): Record<DocKind, boolean> {
   const chips = foundChips(jobs)
   const docs = jobs.filter(isDocumentJob)
   const result = {} as Record<DocKind, boolean>
-  for (const chip of chips) result[chip.kind] = chip.state !== 'idle' || docs.some((job) => job.kind === chip.kind && (isWorking(job) || !job.result))
+  for (const chip of chips) if (isDocKind(chip.kind)) result[chip.kind] = chip.state !== 'idle' || docs.some((job) => job.kind === chip.kind && (isWorking(job) || !job.result))
   return result
 }
 

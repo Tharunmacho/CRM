@@ -187,9 +187,10 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
     ),
     "invoice": (
         _sig("invoice title", 3, ph("tax invoice", "invoice no", "invoice number", "invoice date", "proforma invoice", "invoice #",
-                                    "commercial invoice", "invoice")),
+                                    "commercial invoice")),
+        _sig("invoice word", 1, r"\binvoices?\b"),
         _sig("bill to", 2, ph("bill to", "billed to", "ship to", "invoice to")),
-        _sig("gst", 2, r"\b(?:gstin|gst\W+no|hsn|sac\W+code|vat\W+(?:no|number|reg))\b"),
+        _sig("gst", 1, r"\b(?:gstin|gst\W+no|hsn|sac\W+code|vat\W+(?:no|number|reg))\b"),
         _sig("totals", 2, ph("sub total", "subtotal", "amount due", "balance due", "grand total", "total amount", "amount in words")),
         _sig("lines", 1, ph("quantity", "unit price", "description of services", "qty")),
         _sig("bank", 1, ph("bank details", "ifsc", "account number", "account no", "payment terms", "due date")),
@@ -231,7 +232,10 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
         _sig("certificate title", 3, ph("degree certificate", "provisional certificate", "mark sheet", "marks sheet", "marks card", "marks memo",
                                         "statement of marks", "consolidated marks", "grade card", "statement of grades",
                                         "transfer certificate", "school leaving certificate", "convocation", "hereby makes known",
-                                        "admitted to the degree", "awarded the degree", "diploma certificate", "national trade certificate")),
+                                        "admitted to the degree", "awarded the degree", "diploma certificate", "national trade certificate",
+                                        "marks statement", "memorandum of marks", "grade sheet", "syndicate of the", "provisional degree",
+                                        "course completion certificate")),
+        _sig("university exam", 3, r"\buniversity\b[\s\S]{0,500}\b(?:examination|semester|marks|degree|bachelor|master)\b"),
         _sig("board", 3, ph("secondary education examination", "pre university", "higher secondary", "senior secondary", "board of secondary",
                             "board of school", "board of technical", "board of intermediate", "examination board", "technical education",
                             "council of higher", "directorate of government examinations", "department of school education")),
@@ -249,7 +253,11 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
                                        "relieving certificate", "experience cum relieving", "employment certificate",
                                        "certificate of employment", "employment verification", "employment letter",
                                        "work experience certificate")),
-        _sig("to whom", 2, ph("to whom it may concern", "to whomsoever it may concern")),
+        _sig("to whom", 2, ph("to whom it may concern", "to whomsoever it may concern", "to whom so ever it may concern", "to whom soever it may concern")),
+        _sig("certify employment", 3, r"\bcertify\W+that\W+[\s\S]{0,250}\b(?:worked|working|employed|serving|served|associated|joined|employee)\b"),
+        _sig("has worked", 2, r"\b(?:has|have|had)\W+(?:been\W+)?(?:worked|working|served|serving)\b"),
+        _sig("designation", 1, ph("designation", "designated as")),
+        _sig("joined", 1, ph("date of joining", "joined on", "joined the company", "joined us", "joined as")),
         _sig("was employed", 2, r"\b(?:was|is|has\W+been|had\W+been)\W+(?:employed|working|associated|engaged)\W+(?:with|in|at|by|as)\b"),
         _sig("worked with us", 2, r"\bworked\W+(?:with|for|in|as|at)\W+(?:us|our|the\W+company|m/s)\b|\bworked\W+as\b"),
         _sig("capacity", 2, ph("in the capacity of", "in the capacity as", "in the position of", "in the role of")),
@@ -311,8 +319,11 @@ def _decide(scores: dict[str, tuple[int, list[str], bool]], noisy: bool = False)
     """The winning kind of a page, or None with the reason there is none. A page that does not read like language (a poor scan,
     text read sideways) throws up chance matches, so it must clear a much higher bar."""
     floor, floor_no_strong = (NOISY_MIN_SCORE, NOISY_MIN_SCORE) if noisy else (MIN_SCORE, MIN_SCORE_NO_STRONG)
+    # A letter or a marks statement is mostly ordinary wording: several modest signals together ("was employed", a date range,
+    # "to whom it may concern") are the document even when none of them is a title. These two kinds need less on their own.
+    own_floor = {} if noisy else {"experience_certificate": 3, "education_certificate": 4}
     plausible = {kind: value for kind, value in scores.items()
-                 if (value[2] and value[0] >= floor) or value[0] >= floor_no_strong}
+                 if (value[2] and value[0] >= floor) or value[0] >= own_floor.get(kind, floor_no_strong)}
     if not plausible:
         best = max(scores.items(), key=lambda item: item[1][0])
         return None, best[1][0], [], f"No document kind has enough evidence (best: {best[0]} {best[1][0]})."

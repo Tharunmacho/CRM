@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from app.db.models import Attachment, Candidate
 from app.services import bulk_candidate_import as bulk, document_storage
-from test_bulk_candidate_import import ALL_DOCUMENTS, PDF, env, subject  # noqa: F401  (fixture)
+from test_bulk_candidate_import import ALL_DOCUMENTS, PDF, env, import_only_stores, subject  # noqa: F401  (fixture)
 from test_database_naming import schema_database  # noqa: F401
 
 PUT_SECONDS = 0.3

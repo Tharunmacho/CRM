@@ -62,6 +62,14 @@ def test_dates_amounts_and_times_are_read_the_way_the_office_writes_them():
 
 # ------------------------------------------------------------------ the database-backed screen
 
+@pytest.fixture(autouse=True)
+def import_only_stores(monkeypatch):
+    """These tests describe what an import stores and what "Read documents" then queues: the automatic start of reading right after
+    an import (see test_import_starts_reading.py) is switched off here so a person asking for the reading is still its own step."""
+    from app.api.routers import candidate_import
+    monkeypatch.setattr(candidate_import, "_start_reading", lambda db, user, result: None)
+
+
 @pytest.fixture
 def env(schema_database, tmp_path, monkeypatch):
     _migrate(schema_database, "head")

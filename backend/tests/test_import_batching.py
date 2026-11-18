@@ -15,7 +15,7 @@ from sqlalchemy import event, text
 
 from app.db.models import Role
 from app.services import bulk_candidate_import as bulk, care_india_id, people_by_content as pbc
-from test_bulk_candidate_import import TWO_PEOPLE, _check, _read_again, _status, env, send, subject  # noqa: F401  (the fixture and helpers)
+from test_bulk_candidate_import import TWO_PEOPLE, _check, _read_again, _status, env, import_only_stores, send, subject  # noqa: F401  (the fixture and helpers)
 from test_database_naming import schema_database  # noqa: F401
 
 
@@ -85,7 +85,7 @@ def test_status_for_twenty_five_candidates_runs_a_handful_of_statements(env):
     assert len(seen) <= 6, seen
     with statements_of(_engine(env)) as seen:
         assert _status(env, ["nobody"]) == []
-    assert len(seen) <= 2
+    assert len(seen) <= 3, seen     # the sign-in lookup (1 while the 30 s session memo is cold, 0 when it is warm) and the two reads
 
 
 def test_read_again_for_twenty_five_candidates_finds_its_work_in_a_handful_of_statements(env):
