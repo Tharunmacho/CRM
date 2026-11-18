@@ -74,7 +74,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const tiles: StatTileData[] = [
     { key: 'assigned', label: 'Candidates assigned', value: totals.assigned, icon: ListChecks, unit: supervisor ? `${roster.length} ${roster.length === 1 ? 'recruiter' : 'recruiters'}` : undefined },
     { key: 'called', label: 'Called today', value: totals.called, unit: `of ${totals.assigned}`, icon: PhoneCall, tone: 'green', progress: { done: totals.called, total: totals.assigned },
-      detail: `Overall ${totals.calledAll}`, title: 'Candidates called or remarked today. Overall: candidates called or remarked at any time.' },
+      detail: `Overall ${totals.calledAll}`, title: 'Candidates called today: the first call answered, a remark written, or a stage finished. Overall: candidates called at any time.' },
     { key: 'moved', label: 'Stages moved today', value: totals.moved, icon: Workflow, tone: 'blue', detail: `Overall ${totals.movedAll}`, title: 'Stages finished today. Overall: the stages the candidates have been through.' },
     supervisor
       ? { key: 'idle', label: 'Nothing done yet', value: idle, unit: idle === 1 ? 'recruiter' : 'recruiters', icon: UserX, tone: idle > 0 ? 'red' : 'green',

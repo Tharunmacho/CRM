@@ -238,7 +238,7 @@ test('what a recruiter did today: called, stage moved, remarked; the board count
   assert.equal(rows.length, 5)
   assert.deepEqual(rows.slice(0, 2).map((r) => r.candidateId).sort(), ['c4', 'c5'], 'candidates nothing happened to come first')
   const work = m.recruiterWork(rows)
-  assert.deepEqual(work.get('u1'), { assigned: 3, called: 2, moved: 1, remarks: 1, untouched: 0, calledAll: 3, movedAll: 4 })
+  assert.deepEqual(work.get('u1'), { assigned: 3, called: 3, moved: 1, remarks: 1, untouched: 0, calledAll: 3, movedAll: 4 })
   assert.deepEqual(work.get('u2'), { assigned: 2, called: 0, moved: 0, remarks: 0, untouched: 2, calledAll: 2, movedAll: 4 })
   assert.equal(m.workStatus(work.get('u1')), 'done')
   assert.equal(m.workStatus(work.get('u2')), 'idle')

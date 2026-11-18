@@ -423,7 +423,8 @@ export function recruiterWork(rows: TaskRow[]): Map<string, RecruiterWork> {
   for (const row of rows) {
     const entry = work.get(row.ownerId) ?? { ...NO_WORK }
     entry.assigned += 1
-    if (row.today.called || row.today.remarked) entry.called += 1
+    // A stage is never finished without speaking to the candidate, so a stage moved today counts as a call even when no remark was typed.
+    if (row.today.called || row.today.remarked || row.today.moved) entry.called += 1
     // Past the first call (matched to an order) or at least one remark ever: this candidate has been called.
     if (row.today.called || row.today.remarked || row.kind === 'stage' || (row.remark?.count ?? 0) > 0) entry.calledAll += 1
     if (row.today.moved) entry.moved += 1
