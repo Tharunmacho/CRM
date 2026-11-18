@@ -1493,7 +1493,8 @@ def apply_job_output(db: Session, job: DocumentExtractionJob, output: dict, *,
         message = warnings[0] if warnings else f"We could not find a {SLOT_LABELS.get(slot, slot).lower()} in this file. Check the file and upload it again, or enter the details by hand."
     elif slot in fx.SLOT_KINDS and slot not in found:
         status = "needs_review"
-        message = f"This file holds a {' and '.join(found)}, not a {slot}. It was read for what it contains."
+        names = {"resume": "a resume", "aadhaar": "an Aadhaar card", "passport": "a passport"}
+        message = f"This file holds {' and '.join(names.get(kind, f'a {kind}') for kind in found)}, not {names.get(slot, f'a {slot}')}. It was read for what it contains."
     elif job.status == "needs_review" and not resolving_identity_rejection:
         status = "needs_review"
         reasons_ = review_reasons(output)
