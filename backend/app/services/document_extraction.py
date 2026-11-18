@@ -390,16 +390,33 @@ def _split_oversize(state: dict, units: list[_Unit], source_hash, cap: int, pass
     return redone
 
 
+def _gave_no_text(rec: dict) -> bool:
+    """The reader's language model came back with nothing for the file ("resume_llm_unavailable: requires non-empty LLM
+    transcription") and said that trying again cannot help: a picture of the same pages is read by another route."""
+    reason = rec.get("provider_error") or {}
+    text = f"{reason.get('code') or ''} {reason.get('message') or ''}".lower()
+    return reason.get("retryable", True) is False and ("llm" in text or "transcription" in text)
+
+
+def _flat_key(pages: list[int]) -> str:
+    return "-".join(str(page) for page in pages)
+
+
 def _flatten_heavy(state: dict, units: list[_Unit]) -> bool:
-    """A page the reader refused as too heavy even on its own (and that it says trying again cannot help) is sent once more drawn as
-    a picture. Called once per page: a page already drawn that fails again stays a terminal failure."""
+    """A job the reader refused as too heavy even on one page, or answered with no text at all, and that it says trying again cannot
+    help, is sent once more with its pages drawn as pictures. Once per set of pages: a job already drawn that fails again stays a
+    terminal failure (and then asks for the details by hand)."""
     done = state.setdefault("flattened", [])
     redone = False
     for unit in units:
-        if not (unit.outcome == "failed" and len(unit.pages) == 1 and _resource_limited(unit.record)) or unit.pages[0] in done:
+        key = _flat_key(unit.pages)
+        if unit.outcome != "failed" or key in done:
             continue
-        log.warning("%s: the reader refused page %d as too heavy; sending it once more drawn as a picture", _step(unit), unit.pages[0])
-        done.append(unit.pages[0])
+        if not ((len(unit.pages) == 1 and _resource_limited(unit.record)) or _gave_no_text(unit.record)):
+            continue
+        log.warning("%s: the reader could not read page%s %s as sent; sending %s once more drawn as a picture", _step(unit),
+                    "" if len(unit.pages) == 1 else "s", key, "it" if len(unit.pages) == 1 else "them")
+        done.append(key)
         record = state["provider_jobs"][unit.kind]
         state.setdefault("provider_job_history", {}).setdefault(unit.kind, []).append(deepcopy(unit.record))
         if record is unit.record:
@@ -1121,7 +1138,7 @@ def _fetch(selected_by_kind, inspected, *, state, save, settings, source_hash, c
         if not unit.record.get("job_id"):
             content = _for(_mode(unit.kind), inspected).pdf_for_pages(unit.pages, allow_unresolved=True)
             content = _prepared_job(unit, content, rotations, settings=settings,
-                                    flat=len(unit.pages) == 1 and unit.pages[0] in (state.get("flattened") or ()))
+                                    flat=_flat_key(unit.pages) in (state.get("flattened") or ()))
             unit.document = FileDescriptor(content, filename=f"{_mode(unit.kind)}.pdf", content_type="application/pdf")
             unit.size = len(content)
     if _split_oversize(state, work, source_hash, int(_setting(settings, "veris_job_max_bytes", 8_000_000)),

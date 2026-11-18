@@ -287,7 +287,7 @@ def test_a_single_page_that_is_too_heavy_is_sent_once_more_drawn_as_a_picture_an
 
     sent = passport_submissions(world)
     assert len(sent) == 2 and sent[0]["key"] != sent[1]["key"]  # the page, then once more drawn as a picture; never a third time
-    assert state["flattened"] == [2]
+    assert state["flattened"] == ["2"]
     assert output["status"] == "needs_review" and set(output["extractions"]) == {"resume"}
     assert any("passport" in w for w in output["warnings"])
     assert state["provider_jobs"]["passport"]["provider_error"]["code"] == "pdf_resource_limit"
@@ -300,8 +300,21 @@ def test_a_page_the_reader_refused_is_read_when_it_is_sent_again_drawn_as_a_pict
 
     output = world.extract(pdf(CV, data_page(1)), state=state)
 
-    assert len(passport_submissions(world)) == 2 and state["flattened"] == [2]
+    assert len(passport_submissions(world)) == 2 and state["flattened"] == ["2"]
     assert output["status"] == "complete" and set(output["extractions"]) == {"resume", "passport"}
+
+
+def test_a_resume_the_reader_answered_with_no_text_is_sent_again_drawn_as_pictures_and_is_read(world):
+    world.veris.script = {("resume", 0): "failed"}
+    world.veris.errors = {("resume", 0): SimpleNamespace(code="resume_llm_unavailable", retryable=False,
+                                                          message="Resume LLM extraction requires non-empty LLM transcription")}
+    state: dict = {}
+
+    output = world.extract(pdf(CV, data_page(1)), state=state)
+
+    resumes = [s for s in world.veris.submissions if s["mode"] == "resume"]
+    assert len(resumes) == 2 and resumes[0]["key"] != resumes[1]["key"] and "1" in state["flattened"][0]
+    assert output["status"] == "complete" and "resume" in output["extractions"]
 
 
 def test_drawing_a_page_as_a_picture_keeps_every_page_and_its_size_small():
