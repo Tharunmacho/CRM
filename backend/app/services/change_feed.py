@@ -107,6 +107,7 @@ TOPIC_TABLES: dict[str, tuple[str, ...]] = {
     "agency_settings": ("settings",),
     "currencies": ("settings",),
     "job_categories": ("settings",),
+    "remark_templates": ("settings",),
     "crm_form_options": ("form_options", "settings"),
     "crm_leads": ("leads",),
     "crm_lead_batches": ("leads",),

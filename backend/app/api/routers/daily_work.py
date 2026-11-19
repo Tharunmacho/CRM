@@ -1,7 +1,8 @@
 """Daily work: each recruiter's own workable candidates as one flat list, the supervisors' per-recruiter view, goal settings."""
 from datetime import datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import current_user, require_role
 from app.db.models import AuditEntry, DailyGoal, Role, User
 from app.db.session import get_db
-from app.services import daily_work
+from app.services import daily_work, tasks_export
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
 
@@ -103,6 +104,21 @@ def _follow_up(db: Session, user: User, staff: str | None) -> dict:
         result["staff"] = [{"userId": r.id, "name": r.name, "active": r.active, "summary": {"total": counts.get(r.id, 0)}}
                            for r in roster if r.active or counts.get(r.id)]
     return result
+
+
+@router.get("/daily-work/export")
+def tasks_export_file(format: Literal["xlsx"] = "xlsx", staff: str | None = None, db: Session = Depends(get_db),
+                      user: User = Depends(current_user)):
+    """
+    The Tasks table as an Excel file (`tasks-<agency day>.xlsx`, sheet "Tasks"): S.No, DOC, Recruiter, Job, Client, Country, Candidate,
+    Care ID, Agency, Advance, Stage, Today, Remark; one row per candidate in the order the screen lists them. `staff=<userId|all>` and
+    the permissions are those of `GET /api/daily-work`: admin and manager any recruiter or all, a recruiter only themself.
+    """
+    daily = daily_work_today(staff, db, user)
+    follow = follow_up(staff, db, user)
+    rows = tasks_export.table(db, daily["items"], follow["items"], daily["agencyDate"])
+    return Response(tasks_export.xlsx_bytes(rows), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
+        "Content-Disposition": f'attachment; filename="tasks-{daily["agencyDate"]}.xlsx"', "Cache-Control": "private, no-store"})
 
 
 # ------------------------------------------------------------------ goals

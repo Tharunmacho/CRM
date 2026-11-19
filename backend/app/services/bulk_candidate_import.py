@@ -331,6 +331,10 @@ COLUMNS: tuple[Column, ...] = (
     Column("passport_collected_date", "Passport collected on", "Stage 7. Optional.", aliases=("passportcollected", "passportdate")),
     Column("advance_amount", "Advance amount", "Stage 8, the amount collected. Needed.", True, ("advance", "amount", "advancepayment", "advancecollected")),
     Column("advance_currency", "Advance currency", "Stage 8, e.g. INR. Defaults to the agency's advance currency.", aliases=("currency",)),
+    Column("advance_status", "Advance status", "Stage 8: collected or pending. Optional; collected when an amount is given. With pending, the amount is the advance expected.",
+           aliases=("advancestatus", "paymentstatus", "advancestate")),
+    Column("service_charge_total", "Total service charge", "Stage 8, the whole service charge, in the same currency. Optional.",
+           aliases=("servicecharge", "totalservicecharge", "servicefee", "totalservicefee", "totalcharge", "totalfee")),
     Column("advance_date", "Advance date", "Stage 8. Optional.", aliases=("advancedate", "paymentdate")),
     Column("advance_mode", "Advance mode", "Stage 8: cash, bank, upi or cheque. Optional.", aliases=("paymentmode",)),
     Column("receipt_no", "Receipt number", "Stage 8. Optional.", aliases=("receipt", "receiptno", "receiptnumber")),
@@ -439,6 +443,16 @@ def parse_amount(raw: Any) -> tuple[Decimal | None, str | None]:
     except InvalidOperation:
         return None, currency
     return (value if value > 0 else None), currency
+
+
+def parse_advance_status(raw: Any) -> str | None:
+    """'collected' or 'pending' from the sheet's Advance status cell; None when it is empty or not understood."""
+    text = re.sub(r"[^a-z]", "", str(raw or "").lower())
+    if text.startswith(("pend", "unpaid", "notpaid", "notyet", "due", "awaiting", "balance")):
+        return "pending"
+    if text.startswith(("collect", "paid", "receiv", "done", "yes")):
+        return "collected"
+    return None
 
 
 def parse_yes_no(raw: Any) -> bool | None:
@@ -576,6 +590,18 @@ def stage_inputs(row: dict, files: dict[str, dict], options: StageOptions) -> tu
     if row.get("advance_amount") and amount is None:
         problems.append({"level": "error", "message": f"Advance amount: '{row['advance_amount']}' is not an amount."})
     currency = (row.get("advance_currency") or written_currency or "").strip().upper() or None
+    # The status the sheet's Advance column needs. Collected unless the sheet says pending; nothing at all when there is
+    # neither an amount nor a status (the stage then reads as it always did).
+    status = parse_advance_status(row.get("advance_status"))
+    if row.get("advance_status") and status is None:
+        problems.append({"level": "warning", "message": f"Advance status '{row['advance_status']}' was not understood (use collected or pending) and is left out."})
+    if status is None and amount is not None:
+        status = "collected"
+    service_total, _total_currency = parse_amount(row.get("service_charge_total"))
+    if row.get("service_charge_total") and service_total is None:
+        problems.append({"level": "error", "message": f"Total service charge: '{row['service_charge_total']}' is not an amount."})
+    if service_total is not None and amount is not None and amount > service_total:
+        problems.append({"level": "error", "message": "Total service charge cannot be less than the advance amount."})
 
     interview_time = None
     if row.get("interview_time"):
@@ -603,8 +629,13 @@ def stage_inputs(row: dict, files: dict[str, dict], options: StageOptions) -> tu
         5: clean({"result": "agreed", "obtained": "yes", "file": _file_ref("signed_offer", files)}),
         6: clean({"applied": "yes", "appliedDate": medical, "result": "fit"}),
         7: clean({"collected": "yes", "collectedDate": collected, "copy": _file_ref("passport", files)}),
-        8: clean({"collected": "yes", "amount": str(amount) if amount is not None else None, "amountCurrency": currency,
-                  "date": advance_date, "mode": pay_mode, "receiptNo": row.get("receipt_no"), "receipt": _file_ref(ADVANCE_RECEIPT, files)}),
+        # A pending advance has no date, mode or receipt yet: the amount is the advance expected.
+        8: clean({"collected": "no", "advanceStatus": "pending", "amount": str(amount) if amount is not None else None,
+                  "amountCurrency": currency, "serviceChargeTotal": str(service_total) if service_total is not None else None})
+        if status == "pending" else
+        clean({"collected": "yes", "advanceStatus": status, "amount": str(amount) if amount is not None else None, "amountCurrency": currency,
+               "serviceChargeTotal": str(service_total) if service_total is not None else None,
+               "date": advance_date, "mode": pay_mode, "receiptNo": row.get("receipt_no"), "receipt": _file_ref(ADVANCE_RECEIPT, files)}),
         9: clean({"arrived": "yes", "date": visa, "file": _file_ref("visa", files), "googleReview": review}),
         10: clean({"done": "yes", "date": stamping, "file": _file_ref("visa_stamping", files)}),
         11: clean({"bookedBy": booked, "travelDate": travel, "airline": row.get("airline"), "pnr": row.get("pnr"), "file": _file_ref("air_ticket", files)}),
@@ -628,12 +659,12 @@ def for_rules(number: int, data: dict, historical: bool = False, travel_confirme
     """
     if number == 3 and data.get("scheduled") and not data.get("date"):
         return {**data, "date": "2000-01-01"}
-    if number == 8 and data.get("collected") and not data.get("amount") and data.get("receipt"):
+    if number == 8 and data.get("collected") == "yes" and not data.get("amount") and data.get("receipt"):
         return {**data, "amount": "1"}
     if historical:
         if number == 5 and data.get("obtained") and not data.get("file"):
             return {**data, "file": HISTORY_FILE}
-        if number == 8 and data.get("collected"):
+        if number == 8 and data.get("collected") == "yes":
             return {**data, "amount": data.get("amount") or "1", "receipt": data.get("receipt") or HISTORY_FILE}
         if number == 10 and data.get("done") and not data.get("file"):
             return {**data, "file": HISTORY_FILE}
@@ -688,7 +719,7 @@ def evidence_level(row: dict, kinds: set[str]) -> int:
     """
     shown = {
         3: bool(row.get("interview_date")), 5: "signed_offer" in kinds, 6: bool(row.get("medical_date")) or "medical" in kinds,
-        7: bool(row.get("passport_collected_date")), 8: bool(row.get("advance_amount")) or ADVANCE_RECEIPT in kinds,
+        7: bool(row.get("passport_collected_date")), 8: bool(row.get("advance_amount")) or parse_advance_status(row.get("advance_status")) is not None or ADVANCE_RECEIPT in kinds,
         9: bool(row.get("visa_arrival_date")) or "visa" in kinds, 10: bool(row.get("stamping_date")) or "visa_stamping" in kinds,
         11: "air_ticket" in kinds or bool(row.get("travel_date")) or bool(row.get("pnr")),
     }
@@ -807,7 +838,7 @@ def plan_candidate(db: Session, ctx: Context, *, folder: str, files: list[dict],
     if action in {"in_progress", "deploy"}:
         if completed >= 3 and not row.get("interview_date"):
             notes.append("No interview date was given, so the interview stage is recorded without one.")
-        if completed >= 8 and not row.get("advance_amount"):
+        if completed >= 8 and not row.get("advance_amount") and parse_advance_status(row.get("advance_status")) != "pending":
             notes.append("No advance amount was given, so the advance is recorded from the receipt without an amount.")
     issues.extend({"level": "info", "message": note} for note in notes)
     if gaps and by_name:        # computed from the file NAMES: wrong for a person found by reading the files, so not said then
@@ -1637,7 +1668,7 @@ def import_candidate(db: Session, user: User, ctx: Context, *, folder: str, row:
         db.add(ApplicationStage(
             application_id=application.id, stage=number, attempt=1, data=data, outcome=outcome, completed_by=user.id,
             owner_id=owner.id, completed_at=when[number],
-            amount=data.get("amount") if number == 8 else None, amount_currency=data.get("amountCurrency") if number == 8 else None))
+            amount=data.get("amount") if number == 8 and data.get("advanceStatus") != "pending" else None, amount_currency=data.get("amountCurrency") if number == 8 else None))
     if deploy:
         _sync_order(db, locked)
         # They have travelled: they get the next number in the traveller series (CI-T-001, CI-T-002 ...).

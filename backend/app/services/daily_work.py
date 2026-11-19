@@ -52,6 +52,7 @@ from sqlalchemy import and_, case, exists, false, func, or_, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.core.config import get_settings
+from app.services.advance_text import advance_status
 from app.services.parallel_reads import _SLOTS
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Candidate, CandidateStatus, Client, ClosureReason, Company, DailyGoal, Designation,
@@ -359,11 +360,18 @@ def stage_facts_query(*where):
 
 
 def stage_facts(rows) -> dict[str, dict]:
-    """{application id: {"advance": (amount, currency) or None, "review": bool}} from `stage_facts_query` rows.
+    """{application id: {"advance": (amount, currency) or None, "review": bool, "status", "total", "expected", "currency"}}
+    from `stage_facts_query` rows.
 
     The latest attempt of a stage is the effective record (the Advance collections report's rule). The advance is the amount the
     recruiter recorded on stage 8, in the currency recorded there (INR unless another was chosen); a missing, zero or unreadable
-    amount is no advance. It is the candidate's own money paid in; no invoice, CGST or GST figure is read here."""
+    amount is no advance, and so is the amount of a Pending advance (it is only the one expected). It is the candidate's own money
+    paid in; no invoice, CGST or GST figure is read here.
+
+    The stage-8 record also gives `status` ('collected', 'pending' or None; a record from before the status existed reads as
+    Collected when it holds an amount), `total` (the total service charge, or None), `expected` (the advance expected while
+    pending, or None) and `currency` of those amounts (None without a stage-8 record). `advance_text.advance_cell` turns an entry
+    into the tracker sheet's Advance cell."""
     latest: dict[tuple[str, int], tuple] = {}
     for row in rows:
         key = (row[0], row[1])
@@ -371,27 +379,49 @@ def stage_facts(rows) -> dict[str, dict]:
             latest[key] = row
     facts: dict[str, dict] = {}
     for (application_id, stage), (_a, _s, _attempt, _at, amount, currency, data) in latest.items():
-        entry = facts.setdefault(application_id, {"advance": None, "review": False})
+        entry = facts.setdefault(application_id, {"advance": None, "review": False, "status": None, "total": None, "expected": None, "currency": None})
         data = data or {}
         if stage == 8:
             raw = amount if amount is not None else data.get("amount")
+            value = None
             try:
                 value = Decimal(str(raw))
             except Exception:
-                continue
-            if value.is_finite() and value > 0:
-                entry["advance"] = (float(value.quantize(Decimal("0.01"))), (currency or data.get("amountCurrency") or data.get("currency") or "INR").upper())
+                pass
+            if value is not None and not (value.is_finite() and value > 0):
+                value = None
+            entry["currency"] = (currency or data.get("amountCurrency") or data.get("currency") or "INR").upper()
+            status = advance_status(data, raw)
+            entry["status"] = status
+            total = data.get("serviceChargeTotal")
+            try:
+                total = Decimal(str(total))
+                entry["total"] = float(total.quantize(Decimal("0.01"))) if total.is_finite() and total > 0 else None
+            except Exception:
+                entry["total"] = None
+            if value is not None:
+                figure = float(value.quantize(Decimal("0.01")))
+                if status == "pending":
+                    entry["expected"] = figure
+                else:
+                    entry["advance"] = (figure, entry["currency"])
         else:
             entry["review"] = data.get("googleReview") is True
     return facts
 
 
 def payment_fields(app, facts: dict[str, dict]) -> dict:
-    """`advanceAmount` / `advanceCurrency` (null when none recorded) and `googleReview` ('obtained', 'pending' from stage 9 on, else null)."""
+    """`advanceAmount` / `advanceCurrency` (null when none recorded) and `googleReview` ('obtained', 'pending' from stage 9 on, else null).
+
+    Also `advanceStatus` ('collected', 'pending' or null), `advanceExpected` (the amount of a pending advance) and `serviceChargeTotal`.
+    `advanceAmount` stays the money actually collected: a pending advance never shows there."""
     fact = facts.get(app.id) if app else None
     advance = fact["advance"] if fact else None
     review = "obtained" if fact and fact["review"] else "pending" if app and app.current_stage >= REVIEW_STAGE else None
-    return {"advanceAmount": advance[0] if advance else None, "advanceCurrency": advance[1] if advance else None, "googleReview": review}
+    currency = advance[1] if advance else fact["currency"] if fact and fact["expected"] is not None else None
+    return {"advanceAmount": advance[0] if advance else None, "advanceCurrency": currency, "googleReview": review,
+            "advanceStatus": fact["status"] if fact else None, "advanceExpected": fact["expected"] if fact else None,
+            "serviceChargeTotal": fact["total"] if fact else None}
 
 
 def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: bool = False, fetched: list | None = None) -> list[dict]:
@@ -450,6 +480,7 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
         out.append({
             "id": cand.id, "kind": "stage" if app else "call", "taskId": remark_task, "applicationId": app.id if app else None,
             "candidateId": cand.id, "ownerId": cand.owner_id,
+            "commencementDate": app.commencement_date.isoformat() if app and app.commencement_date else None,
             "stage": stage_no, "stageTitle": stage_by_no(stage_no).title if stage_no and 1 <= stage_no <= TOTAL_STAGES else None,
             "waiting": waiting is not None,
             "status": "done" if finished is not None else "open", "completedAt": finished,
@@ -481,14 +512,18 @@ def follow_up_counts(db, owner_ids) -> dict[str, int]:
 
 
 def fetch_follow_up(db, owner_ids) -> list:
-    """(application, candidate, order, company, client, designation, last update) for these recruiters, stalest first. One statement."""
+    """(application, candidate, order, company, client, designation, last update, last stage finished) for these recruiters, stalest first. One statement."""
     stage_at = (select(func.max(ApplicationStage.completed_at)).where(ApplicationStage.application_id == Application.id)
                 .correlate(Application).scalar_subquery())
     remark_at = (select(func.max(Remark.created_at)).select_from(Remark).join(Task, Task.id == Remark.task_id)
                  .where(Task.application_id == Application.id).correlate(Application).scalar_subquery())
     last = func.greatest(stage_at, remark_at, Application.draft_saved_at, Application.created_at).label("last_update")
+    # When a stage was last finished (never a reopened one): the Tasks screen shows "Stage moved" for a placement moved today.
+    moved_at = (select(func.max(ApplicationStage.completed_at)).where(ApplicationStage.application_id == Application.id,
+                                                                      ApplicationStage.reopened_reason.is_(None))
+                .correlate(Application).scalar_subquery().label("stage_moved_at"))
     return db.execute(
-        select(Application, Candidate, Order, Company, Client, Designation, last)
+        select(Application, Candidate, Order, Company, Client, Designation, last, moved_at)
         .join(Candidate, Candidate.id == Application.candidate_id).join(Order, Order.id == Application.order_id)
         .join(Company, Company.id == Order.company_id).join(Client, Client.id == Company.client_id)
         .join(Designation, Designation.id == Order.designation_id)
@@ -521,10 +556,11 @@ def load_follow_up(db, owner_ids, *, fetched: list | None = None, parallel: bool
         open_task.setdefault(application_id, task_id)
     facts = stage_facts(fact_rows)
     out = []
-    for app, cand, order, company, client, designation, last_update in rows:
+    for app, cand, order, company, client, designation, last_update, moved_at in rows:
         out.append({
             "id": app.id, "applicationId": app.id, "taskId": open_task.get(app.id), "candidateId": cand.id, "ownerId": cand.owner_id,
-            "stage": app.current_stage, "lastUpdateAt": last_update,
+            "commencementDate": app.commencement_date.isoformat() if app.commencement_date else None,
+            "stage": app.current_stage, "lastUpdateAt": last_update, "stageMovedAt": moved_at,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "orderRef": order.ref,
             **payment_fields(app, facts), "remark": latest.get(app.id),

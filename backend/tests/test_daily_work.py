@@ -1228,3 +1228,12 @@ def test_a_decline_then_a_new_mapping_the_same_day_is_ordinary_work_again(desk):
     assert desk.client.post("/api/applications", json={"candidate_id": "c0", "order_id": order2}).status_code == 201
     row = row_of(listing(desk, "asha"), "c0")
     assert row["stage"] == 1 and row["applicationId"] is not None
+
+
+def test_follow_up_rows_say_when_a_stage_was_last_finished_so_the_tasks_page_can_show_stage_moved(desk):
+    apps = mapped_candidates(desk, 2)
+    as_user(desk, "asha")
+    assert follow(desk, "asha")["items"] == []
+    finish(desk, apps["c0"], 1)
+    row = follow(desk, "asha")["items"][0]
+    assert row["stageMovedAt"] is not None and row["stageMovedAt"] <= row["lastUpdateAt"]   # the stage finished on the desk clock

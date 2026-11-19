@@ -577,6 +577,8 @@ class Application(Base, PkMixin, TimestampMixin):
     draft: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     draft_saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     draft_saved_by: Mapped[str | None] = mapped_column(ForeignKey("auth_users.id"))
+    # DOC: the day the candidate starts the job at the client. Filled by the recruiter in the application form, shown on the Tasks page.
+    commencement_date: Mapped[date | None] = mapped_column(Date, comment="Date of commencement: the day the candidate starts the job at the client (set in the application form).")
 
     # Optimistic lock. The client sends the version it loaded; a mismatch is a 409
     # rather than one person's edits silently overwriting another's.
@@ -1231,6 +1233,20 @@ class JobCategory(Base, PkMixin):
         Index("ux_job_categories_name_lower", func.lower(name), unique=True),
         CheckConstraint("char_length(btrim(name)) BETWEEN 2 AND 120", name="ck_job_categories_name"),
         {"comment": "Admin-managed job category list for job titles; names are unique ignoring case and inactive ones stay valid on saved job titles."},
+    )
+
+
+class RemarkTemplate(Base, PkMixin, TimestampMixin):
+    """A ready-made remark a recruiter picks on the Tasks page. Admin-managed; a retired one is switched off, never deleted."""
+
+    __tablename__ = "remark_templates"
+    body: Mapped[str] = mapped_column("text", String(120), nullable=False)   # the column is `text`; the attribute avoids shadowing sqlalchemy's text()
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    __table_args__ = (
+        Index("ux_remark_templates_text_lower", func.lower(body), unique=True),
+        CheckConstraint("char_length(btrim(text)) BETWEEN 1 AND 120", name="ck_remark_templates_text"),
+        {"comment": "Admin-managed remark templates recruiters pick on the Tasks page; text is unique ignoring case and inactive ones stay out of the picker."},
     )
 
 

@@ -4,8 +4,10 @@ The seeds must equal the values that used to be compiled into the code, writes a
 the order form and the stage-8 advance accept exactly the ACTIVE currencies, retired codes stay readable on stored
 records, and a database without the two tables keeps working on the last-resort defaults.
 """
+import importlib.util
 import json
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -39,6 +41,14 @@ OLD_ACKNOWLEDGEMENT = ("Thank you for contacting Care India Overseas. We have re
                        "your candidate documents. Our recruitment team will review them and contact "
                        "you when there is a suitable next step.")
 OLD_CODES = ["INR", "USD", "EUR", "SGD", "AED", "SAR", "QAR", "OMR", "KWD", "BHD", "GBP"]
+# Appended by migration 0045 so the job form can follow the country (Malaysia -> MYR ...): every currency the frontend's
+# country -> currency table can pick, in the order the migration appends them.
+_MIGRATION_0045 = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0045_more_currencies.py"
+_spec = importlib.util.spec_from_file_location("migration_0045", _MIGRATION_0045)
+_migration_0045 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_migration_0045)
+ADDED_CODES = [code for code, _ in _migration_0045.CURRENCIES]
+COUNTRY_CURRENCY_TS = Path(__file__).resolve().parents[2] / "frontend" / "src" / "features" / "jobs" / "country-currency.ts"
 GOOD = {"name": "Example Agency", "shortName": "Example", "defaultOrderCurrency": "SAR", "defaultAdvanceCurrency": "USD",
         "homeCallingCode": "+44", "defaultNationality": "", "acknowledgementText": "Thank you for writing to Example Agency."}
 
@@ -126,7 +136,8 @@ def test_seeds_equal_the_values_that_used_to_be_in_the_code(desk):
         assert row.default_nationality is None  # the 'Indian' pre-fill is gone and stays gone
         assert row.acknowledgement_text == OLD_ACKNOWLEDGEMENT
         listed = db.execute(select(Currency.code, Currency.active).order_by(Currency.sort_order)).all()
-    assert [code for code, _ in listed] == OLD_CODES == list(CURRENCY_CODES)
+    assert [code for code, _ in listed] == OLD_CODES + ADDED_CODES
+    assert OLD_CODES == list(CURRENCY_CODES)
     assert all(active for _, active in listed)
 
 
@@ -138,7 +149,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     with engine.begin() as connection:
         connection.execute(text("INSERT INTO auth_users (id,name,email,role,active,receives_auto_assign,on_leave) VALUES ('u','U','u@example.test','admin',true,false,false)"))
     _migrate(engine, "head")
-    assert set(inspect(engine).get_table_names()) - before == {"agency_settings", "currencies", "job_categories", "workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress", "crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_id_counters", "crm_traveller_id_counters"}  # Later table-creating revisions through 0044.
+    assert set(inspect(engine).get_table_names()) - before == {"agency_settings", "currencies", "job_categories", "workflow_daily_work_items", "workflow_daily_goals", "workflow_daily_goal_progress", "crm_form_options", "crm_lead_batches", "crm_leads", "crm_lead_activities", "crm_client_staff", "crm_reference_agencies", "crm_application_feedback", "crm_worker_heartbeats", "crm_invoice_settings", "crm_candidate_invoices", "crm_invoice_payments", "crm_candidate_id_counters", "crm_traveller_id_counters", "remark_templates"}  # Later table-creating revisions through 0046.
     with engine.begin() as connection:
         connection.execute(text("UPDATE agency_settings SET name = 'Edited', default_nationality = 'Kenyan'"))
         connection.execute(text("UPDATE currencies SET active = false WHERE code = 'GBP'"))
@@ -147,7 +158,7 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     _migrate(engine, "head")
     with engine.connect() as connection:
         assert connection.execute(text("SELECT name, default_nationality FROM agency_settings")).one() == ("Edited", "Kenyan")
-        assert connection.scalar(text("SELECT count(*) FROM currencies")) == 11
+        assert connection.scalar(text("SELECT count(*) FROM currencies")) == 11 + len(ADDED_CODES)
         assert connection.scalar(text("SELECT active FROM currencies WHERE code='GBP'")) is False  # an admin's edit survives
     _migrate(engine, "0016_intake_communications", downgrade=True)
     assert set(inspect(engine).get_table_names()) == before
@@ -156,6 +167,46 @@ def test_migration_is_additive_idempotent_and_reversible(schema_database):
     _migrate(engine, "head")
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT name FROM agency_settings")) == OLD_NAME
+
+
+def test_every_currency_the_country_mapping_can_pick_is_in_the_list():
+    """The job form's country -> currency table (frontend) and migration 0045 must never drift apart."""
+    import re
+    source = COUNTRY_CURRENCY_TS.read_text(encoding="utf-8")
+    table = source[source.index("const TABLE ="):source.index("/** Lower-case ISO alpha-2")]
+    mapped = set(re.findall(r"([A-Z]{3}):", table))
+    assert len(mapped) > 100
+    assert mapped == set(OLD_CODES + ADDED_CODES)
+    assert len(ADDED_CODES) == len(set(ADDED_CODES)) and not set(ADDED_CODES) & set(OLD_CODES)
+    names = dict(_migration_0045.CURRENCIES)
+    assert all(re.fullmatch(r"[A-Z]{3}", code) and 0 < len(name) <= 80 for code, name in names.items())
+
+
+def test_more_currencies_migration_is_idempotent_and_keeps_admin_edits(schema_database):
+    engine = schema_database
+    _migrate(engine, "0044_simple_continuous_ids")
+    with engine.begin() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM currencies")) == 11
+        # An administrator had already added MYR under their own name and switched KWD off before this revision ran.
+        connection.execute(text("INSERT INTO currencies (code, name, sort_order, active) VALUES ('MYR', 'Ringgit (renamed)', 5, false)"))
+        connection.execute(text("UPDATE currencies SET active = false WHERE code = 'KWD'"))
+    _migrate(engine, "head")
+    with engine.connect() as connection:
+        rows = {code: (name, active, order) for code, name, active, order in connection.execute(text("SELECT code, name, active, sort_order FROM currencies"))}
+        assert set(rows) == set(OLD_CODES + ADDED_CODES)
+        assert rows["MYR"] == ("Ringgit (renamed)", False, 5)  # an existing row is left exactly as it was
+        assert rows["KWD"][1] is False
+        assert rows["LKR"][1] is True and rows["LKR"][2] > rows["GBP"][2]  # new rows are active and appended after the list
+    # Run again after losing the revision: nothing changes.
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE alembic_version SET version_num = '0044_simple_continuous_ids'"))
+    _migrate(engine, "head")
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM currencies")) == 11 + len(ADDED_CODES)
+    # Downgrading removes the added rows nothing uses (MYR goes too: it cannot be told apart from the one this revision adds).
+    _migrate(engine, "0044_simple_continuous_ids", downgrade=True)
+    with engine.connect() as connection:
+        assert {code for (code,) in connection.execute(text("SELECT code FROM currencies"))} == set(OLD_CODES)
 
 
 def test_singleton_and_code_rules_are_enforced_by_the_database(desk):
@@ -180,11 +231,11 @@ def test_everyone_signed_in_reads_but_only_an_admin_writes(desk):
     for who in ("staff", "manager"):
         desk.sign_in(who)
         assert put(desk).status_code == 403
-        assert desk.client.post("/api/settings/currencies", json={"code": "JPY", "name": "Yen"}).status_code == 403
+        assert desk.client.post("/api/settings/currencies", json={"code": "BGN", "name": "Lev"}).status_code == 403
         assert desk.client.put("/api/settings/currencies/AED", json={"name": "Dirham"}).status_code == 403
         assert desk.client.delete("/api/settings/currencies/AED").status_code == 403
     with desk.sessions() as db:
-        assert db.get(AgencySettings, 1).name == OLD_NAME and db.get(Currency, "JPY") is None
+        assert db.get(AgencySettings, 1).name == OLD_NAME and db.get(Currency, "BGN") is None
         assert db.scalar(select(func.count()).select_from(AuditEntry)) == 0
 
 
@@ -218,10 +269,10 @@ def test_invalid_settings_are_refused_with_a_message_for_the_field(desk, changes
 
 
 def test_a_default_currency_must_be_active(desk):
-    add_currency(desk, "JPY")
-    assert set_active(desk, "JPY", False).status_code == 200
-    assert put(desk, defaultOrderCurrency="JPY").status_code == 422
-    assert put(desk, defaultAdvanceCurrency="JPY").status_code == 422
+    add_currency(desk, "BGN")
+    assert set_active(desk, "BGN", False).status_code == 200
+    assert put(desk, defaultOrderCurrency="BGN").status_code == 422
+    assert put(desk, defaultAdvanceCurrency="BGN").status_code == 422
 
 
 def test_saving_changes_everything_is_audited_and_the_calling_code_applies(desk):
@@ -261,20 +312,21 @@ def test_bootstrap_carries_the_same_settings(desk):
 # ------------------------------------------------------------------ the currency list
 
 def test_currencies_can_be_added_changed_and_deleted_with_an_audit_trail(desk):
-    after = add_currency(desk, " jpy ", "Japanese Yen", symbol="¥")
-    assert after["currencies"][-1] == {"code": "JPY", "name": "Japanese Yen", "symbol": "¥", "active": True, "sortOrder": 120}
-    assert desk.client.post("/api/settings/currencies", json={"code": "JPY", "name": "Again"}).status_code == 409
+    after = add_currency(desk, " bgn ", "Bulgarian Lev", symbol="лв")
+    last = max(item["sortOrder"] for item in after["currencies"] if item["code"] != "BGN")
+    assert after["currencies"][-1] == {"code": "BGN", "name": "Bulgarian Lev", "symbol": "лв", "active": True, "sortOrder": last + 10}
+    assert desk.client.post("/api/settings/currencies", json={"code": "BGN", "name": "Again"}).status_code == 409
     for bad in ({"code": "yen!", "name": "x"}, {"code": "JP", "name": "x"}, {"code": "JPX", "name": ""}, {"code": "JPX", "name": "x", "symbol": "123456789"}):
         assert desk.client.post("/api/settings/currencies", json=bad).status_code == 422
-    changed = desk.client.put("/api/settings/currencies/JPY", json={"name": "Yen", "symbol": "", "active": False, "sortOrder": 5})
+    changed = desk.client.put("/api/settings/currencies/BGN", json={"name": "Lev", "symbol": "", "active": False, "sortOrder": 5})
     assert changed.status_code == 200
-    assert next(item for item in changed.json()["currencies"] if item["code"] == "JPY") == {"code": "JPY", "name": "Yen", "symbol": None, "active": False, "sortOrder": 5}
+    assert next(item for item in changed.json()["currencies"] if item["code"] == "BGN") == {"code": "BGN", "name": "Lev", "symbol": None, "active": False, "sortOrder": 5}
     assert desk.client.put("/api/settings/currencies/NOPE", json={"name": "x"}).status_code == 404
-    deleted = desk.client.delete("/api/settings/currencies/JPY")
-    assert deleted.status_code == 200 and "JPY" not in [item["code"] for item in deleted.json()["currencies"]]
+    deleted = desk.client.delete("/api/settings/currencies/BGN")
+    assert deleted.status_code == 200 and "BGN" not in [item["code"] for item in deleted.json()["currencies"]]
     with desk.sessions() as db:
         actions = [(row.action, row.target, row.actor_id) for row in db.scalars(select(AuditEntry).where(AuditEntry.entity_type == "currency").order_by(AuditEntry.at, AuditEntry.id))]
-    assert actions == [("Added currency", "JPY", "admin"), ("Updated currency", "JPY", "admin"), ("Deleted currency", "JPY", "admin")]
+    assert actions == [("Added currency", "BGN", "admin"), ("Updated currency", "BGN", "admin"), ("Deleted currency", "BGN", "admin")]
 
 
 def test_a_currency_that_is_used_cannot_be_deleted_only_switched_off(desk):
@@ -316,21 +368,21 @@ def order_body(**extra):
 
 
 def test_orders_accept_exactly_the_active_currencies(desk):
-    assert desk.client.post("/api/orders", json=order_body(currency="JPY")).status_code == 422
-    add_currency(desk, "JPY")
-    created = desk.client.post("/api/orders", json=order_body(currency="JPY"))
-    assert created.status_code == 201 and created.json()["currency"] == "JPY"
-    assert set_active(desk, "JPY", False).status_code == 200
-    refused = desk.client.post("/api/orders", json=order_body(currency="JPY"))
+    assert desk.client.post("/api/orders", json=order_body(currency="BGN")).status_code == 422
+    add_currency(desk, "BGN")
+    created = desk.client.post("/api/orders", json=order_body(currency="BGN"))
+    assert created.status_code == 201 and created.json()["currency"] == "BGN"
+    assert set_active(desk, "BGN", False).status_code == 200
+    refused = desk.client.post("/api/orders", json=order_body(currency="BGN"))
     assert refused.status_code == 422
     assert refused.json()["detail"]["errors"][0]["field"] == "currency"
     # An old order keeps its retired currency: editing other terms is fine, switching to another retired code is not.
     order_id = created.json()["id"]
-    same = desk.client.put(f"/api/orders/{order_id}", json=order_body(currency="JPY", openings=3))
-    assert same.status_code == 200 and same.json()["currency"] == "JPY" and same.json()["openings"] == 3
+    same = desk.client.put(f"/api/orders/{order_id}", json=order_body(currency="BGN", openings=3))
+    assert same.status_code == 200 and same.json()["currency"] == "BGN" and same.json()["openings"] == 3
     assert desk.client.put(f"/api/orders/{order_id}", json=order_body(currency="GBP")).status_code == 200
     assert set_active(desk, "GBP", False).status_code == 200
-    assert desk.client.put(f"/api/orders/{order_id}", json=order_body(currency="JPY")).status_code == 422
+    assert desk.client.put(f"/api/orders/{order_id}", json=order_body(currency="BGN")).status_code == 422
     assert desk.client.get("/api/bootstrap").json()["orders"]  # stored values stay readable
 
 
@@ -359,17 +411,17 @@ def test_the_advance_accepts_exactly_the_active_currencies(desk):
     assert refused.status_code == 422 and "available currencies" in json.dumps(refused.json())
     assert advance_draft(desk, app_id, amountCurrency="AED").json()["draft"]["amountCurrency"] == "AED"
     assert advance_draft(desk, app_id, amountCurrency="XXX").status_code == 422
-    add_currency(desk, "JPY")
+    add_currency(desk, "BGN")
     receipt = attachment(desk, app_id, 8, "receipt")
-    result = complete(desk, app_id, {"collected": "yes", "amount": "1500", "amountCurrency": "JPY", "receipt": receipt})
+    result = complete(desk, app_id, {"collected": "yes", "amount": "1500", "amountCurrency": "BGN", "receipt": receipt})
     assert result["currentStage"] == 9
     with desk.sessions() as db:
         record = db.scalar(select(ApplicationStage).where(ApplicationStage.application_id == app_id, ApplicationStage.stage == 8))
-        assert (record.amount_currency, record.data["amountCurrency"]) == ("JPY", "JPY")
+        assert (record.amount_currency, record.data["amountCurrency"]) == ("BGN", "BGN")
     # The retired code stays readable on what was already stored.
-    assert set_active(desk, "JPY", False).status_code == 200
+    assert set_active(desk, "BGN", False).status_code == 200
     stages = [row for item in desk.client.get("/api/bootstrap").json()["applications"] if item["id"] == app_id for row in item["stages"]]
-    assert any(row["data"].get("amountCurrency") == "JPY" for row in stages)
+    assert any(row["data"].get("amountCurrency") == "BGN" for row in stages)
 
 
 def test_the_advance_currency_defaults_to_the_agency_setting(desk):
@@ -381,9 +433,9 @@ def test_the_advance_currency_defaults_to_the_agency_setting(desk):
 
 def test_stage_validation_is_pure_and_falls_back_without_options():
     assert validate_payload(8, {"amount": "10"})["amountCurrency"] == "INR"
-    assert validate_payload(8, {"amount": "10"}, StageOptions(frozenset({"JPY"}), "JPY"))["amountCurrency"] == "JPY"
+    assert validate_payload(8, {"amount": "10"}, StageOptions(frozenset({"BGN"}), "BGN"))["amountCurrency"] == "BGN"
     with pytest.raises(Exception):
-        validate_payload(8, {"amount": "10", "amountCurrency": "INR"}, StageOptions(frozenset({"JPY"}), "JPY"))
+        validate_payload(8, {"amount": "10", "amountCurrency": "INR"}, StageOptions(frozenset({"BGN"}), "BGN"))
 
 
 # ------------------------------------------------------------------ database without the tables
@@ -402,7 +454,7 @@ def test_a_database_without_the_tables_keeps_working_on_the_last_resort_defaults
     assert [item["code"] for item in settings["currencies"]] == list(CURRENCY_CODES)
     assert settings["defaultOrderCurrency"] == "AED" and settings["homeCallingCode"] == "+91"
     assert put(desk).status_code == 503
-    assert desk.client.post("/api/settings/currencies", json={"code": "JPY", "name": "Yen"}).status_code == 503
+    assert desk.client.post("/api/settings/currencies", json={"code": "BGN", "name": "Lev"}).status_code == 503
     assert desk.client.get("/api/settings/public").json() == {}
     boot = desk.client.get("/api/bootstrap")
     assert boot.status_code == 200 and boot.json()["settings"]["editable"] is False and boot.json()["orders"]
@@ -452,6 +504,6 @@ def test_saving_settings_announces_the_settings_topic_to_every_open_screen(desk)
         listener.execute(f"LISTEN {change_feed.CHANNEL}")
         list(listener.notifies(timeout=0.3))
         assert put(desk).status_code == 200
-        add_currency(desk, "JPY")
+        add_currency(desk, "BGN")
         seen = [json.loads(note.payload) for note in listener.notifies(timeout=0.8)]
     assert seen and all(message["t"] == ["settings"] for message in seen)

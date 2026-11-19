@@ -118,19 +118,33 @@ class Passport(StageInput):
 
 
 class Advance(StageInput):
+    # `advanceStatus` is the explicit answer for the client's tracker sheet: Collected, or Pending (the candidate has not paid
+    # yet; `amount` is then the advance expected). `collected` is the older yes/no answer the invoice and the reports read: it
+    # is kept in step with the status when one is given. Records without a status keep reading as before (see services/advance_text).
     collected: YesNo | None = None
+    advanceStatus: Literal["collected", "pending"] | None = None
     amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
     amountCurrency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    # The total service charge, optional, in the advance's currency. Never less than the advance.
+    serviceChargeTotal: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
     date: Date | None = None
     mode: Literal["cash", "bank", "upi", "cheque"] | None = None
     receiptNo: str | None = Field(default=None, max_length=100)
     receipt: FileRef | None = None
 
-    @field_validator("amount", mode="before")
+    @field_validator("amount", "serviceChargeTotal", mode="before")
     @classmethod
     def amount_is_not_boolean(cls, value):
         if isinstance(value, bool):
             raise ValueError("Enter a monetary amount.")
+        return value
+
+    @field_validator("serviceChargeTotal")
+    @classmethod
+    def total_covers_the_advance(cls, value, info):
+        amount = info.data.get("amount")
+        if value is not None and amount is not None and amount > value:
+            raise PydanticCustomError("total_below_advance", "The total service charge cannot be less than the advance.")
         return value
 
     @field_validator("amountCurrency")
@@ -145,6 +159,9 @@ class Advance(StageInput):
     def default_currency(self, info):
         if self.amountCurrency is None:
             self.amountCurrency = (info.context or {}).get("default_currency") or FALLBACK_ADVANCE_CURRENCY
+        # The explicit status decides the older yes/no answer, so the two can never disagree.
+        if self.advanceStatus is not None:
+            self.collected = "yes" if self.advanceStatus == "collected" else "no"
         return self
 
 
@@ -177,8 +194,9 @@ FILE_FIELDS = {5: ("file",), 7: ("copy",), 8: ("receipt",), 9: ("file",), 10: ("
 def validate_payload(stage: int, data: dict[str, Any], options: StageOptions | None = None) -> dict[str, Any]:
     """Normalize supplied optional details without inventing an outcome or date."""
     normalized = SCHEMAS[stage - 1].model_validate(data, context=_context(options)).model_dump(mode="json", by_alias=True, exclude_none=True)
-    if "amount" in normalized:
-        normalized["amount"] = float(normalized["amount"])
+    for key in ("amount", "serviceChargeTotal"):
+        if key in normalized:
+            normalized[key] = float(normalized[key])
     return normalized
 
 
@@ -313,6 +331,9 @@ def _stage7(d: dict) -> Evaluation:
 
 
 def _stage8(d: dict) -> Evaluation:
+    # Nothing here is required beyond the feedback: a Pending advance is a legitimate thing to record and move on with.
+    if d.get("advanceStatus") == "pending":
+        return _ok("Advance pending")
     return _ok("Collected") if d.get("collected") == "yes" else _ok("Completed manually")
 
 

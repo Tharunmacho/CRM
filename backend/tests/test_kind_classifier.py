@@ -621,3 +621,92 @@ def test_a_review_of_a_cv_in_a_mail_thread_is_not_a_google_review_but_a_real_one
 def test_a_garbled_job_offer_that_is_accepted_by_signing_it_is_a_signed_offer():
     guess = classify_kind(GARBLED_OFFER)
     assert guess.kind == "signed_offer" and guess.confidence >= 0.7
+
+
+# ---------------------------------------------------------------------------- glued text and employer praise letters
+# (invented people and companies; the wording is what a second OCR engine produced on real scans: words run together)
+
+GLUED_EXPERIENCE = "TOWHOMITMAYCONCERNTHISISTOCERTIFYTHATMRSAMPLEWORKEDASAFITTER"
+GLUED_MIDDLE_LINES = """SAMPLEMARINESERVICES(PTE)LTD
+Date:11Feb2010
+THISISTOCERTIFYTHATMRTESTERSAMPLEWORKEDASAFITTERINOURYARD
+FROM12JAN2015TO30JUN2019WEWISHHIMALLTHESUCCESS
+Signed
+Operations Manager"""
+GLUED_RESUME = """CURRICULUMVITAE
+TESTERSAMPLE
+CAREEROBJECTIVE:TOSECUREACHALLENGINGPOSITIONINANORGANIZATION
+WORKEXPERIENCE
+WORKEDASAFITTERINSAMPLECOMPANYFROM2015TO2019
+DESIGNATION:FITTER
+EDUCATIONALQUALIFICATION
+PERSONALDETAILS
+DATEOFBIRTH
+LANGUAGESKNOWN:ENGLISH,TAMIL
+DECLARATION:IHEREBYDECLARETHATTHEABOVEISTRUE"""
+
+
+def test_a_glued_experience_letter_line_is_an_experience_certificate():
+    guess = classify_kind(GLUED_EXPERIENCE)
+    assert guess.kind == "experience_certificate"
+
+
+def test_glued_lines_in_a_mostly_spaced_page_are_read_in_squashed_form():
+    text = ("Sample Marine Services Pte Ltd\nDate: 11 Feb 2010\nTOWHOMITMAYCONCERN\nThis is to confirm that Mr Tester Sample was\n"
+            "serving us as a fitter. HISJOBISREGARDEDEFFICIENTANDRECOMMENDEDTOOTHERS")
+    assert classify_kind(text).kind == "experience_certificate"
+    assert classify_kind(GLUED_MIDDLE_LINES).kind == "experience_certificate"
+
+
+def test_a_glued_resume_is_not_an_experience_certificate():
+    assert classify_kind(GLUED_RESUME).kind is None
+
+
+def test_squashing_is_not_used_on_normal_spaced_text():
+    from app.integrations.ocr import kind_classifier as module
+
+    spaced = "Sample Marine Services Pte Ltd\nThis is to certify that Mr Tester Sample worked as a fitter in our yard.\nHis conduct was good.\n"
+    assert module._glued_form(spaced) == ""
+    assert classify_kind(spaced).kind == "experience_certificate"
+    # a spaced page that mentions a phrase only in glued-looking fragments of different words does not match across the gaps
+    other = "a b to whom it may concern x y z " * 3 + "Boarding passenger flight list " * 5
+    assert module._glued_form(other) == ""
+
+
+def test_short_phrases_do_not_match_inside_unrelated_glued_words():
+    from app.integrations.ocr import kind_classifier as module
+
+    # "designation" is long enough to squash; "joined as" / "pulse" (shorter than nine letters) must not be looked for inside glue
+    assert module._squash_phrase("pulse") is None
+    assert module._squash_phrase("joined as") is None
+    assert module._squash_phrase("designation") == "designation"
+    glued = "XXPULSEJOINEDASYYQUALITYASSURANCEPLANMANAGEMENTREVIEWSCHEDULEFORTHEPROJECTTEAMMEETING"
+    assert classify_kind(glued).kind is None
+
+
+@pytest.mark.parametrize("text", [
+    "TESTIMONY\nSAMPLE OFFSHORE PTE LTD\nTESTER SAMPLE\nSAFETY OFFICER\nHas successfully completed the upgrading work in January 2012\n"
+    "for adhering to the safety procedures",
+    "CERTIFICATE OF APPRECIATION\nPresented to MR TESTER SAMPLE\nfor his excellent performance and contribution as a safety attendant\nduring the 2006 turnaround\nDepartment Manager",
+    "To whom it may concern\nI wish to take this opportunity in thanking Mr Tester Sample who was our safety officer during our vessel work.\n"
+    "He has been an asset to the work and I wish him all the success in his future employment.\nSigned, Master",
+    "This is to certify that Tester Sample was part of the structural, piping and electrical projects team for the Sample Vela rig.\n"
+    "The work scope was completed to the satisfaction of the onboard management with all safety objectives reached.\nRig OIM",
+])
+def test_employer_appreciation_testimony_and_recommendation_letters_are_experience(text):
+    assert classify_kind(text).kind == "experience_certificate"
+
+
+def test_praise_words_do_not_make_an_education_or_medical_page_an_experience_letter():
+    education = ("To whom it may concern\nThis is to certify that Tester Sample passed the Higher Secondary examination, Register No 123456,\n"
+                 "Board of Higher Secondary Education, with distinction. We wish him all the success in his future.\nTotal marks 980")
+    assert classify_kind(education).kind != "experience_certificate"
+    medical = ("To whom it may concern\nMedical Examination Report. This is to certify that Tester Sample is medically fit for the job.\n"
+               "Blood pressure 120/80 Haemoglobin 14 Chest x ray normal. Recommended for employment.\nDr Sample MBBS")
+    assert classify_kind(medical).kind != "experience_certificate"
+
+
+def test_praise_wording_on_a_project_award_is_not_enough():
+    # an award for a project (no person's own work, no letter wording) stays unclassified
+    award = "CERTIFICATE OF APPRECIATION\nPRESENTED TO TESTER SAMPLE\nAWARDED ON 18TH OF JUNE 2020\nFor outstanding contribution to the safe execution of the SAMPLE PROJECT\nProject Manager"
+    assert classify_kind(award).kind is None

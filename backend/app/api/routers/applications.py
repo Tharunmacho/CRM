@@ -478,7 +478,9 @@ def complete_stage(application_id: str, body: CompleteIn,
             application_id=app.id, stage=app.current_stage, attempt=attempt,
             data=data, outcome=result.outcome, completed_by=user.id, completed_at=at,
             owner_id=candidate.owner_id or app.owner_id,
-            amount=data.get("amount") if app.current_stage == 8 else None,
+            # The amount column feeds the Advance collections report: only money that was collected goes there. A pending
+            # advance keeps its expected amount in the record's data only.
+            amount=data.get("amount") if app.current_stage == 8 and data.get("advanceStatus") != "pending" else None,
             amount_currency=data.get("amountCurrency") if app.current_stage == 8 else None,
         ))
         # The candidate ticks off the recruiter's Daily work list from this stage record itself ("done today"); nothing else to write.

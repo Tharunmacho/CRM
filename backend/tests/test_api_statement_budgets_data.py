@@ -22,7 +22,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
 from app.api.routers import (application_form, applications, candidate_exports, candidate_import, candidates, document_bundles,
-                             document_diagnostics, document_jobs, files, lead_bulk, leads, travelled)
+                             document_diagnostics, document_jobs, files, lead_bulk, leads, reports, travelled)
 from app.core.deps import current_user
 from app.db import models as m
 from app.db.session import get_db
@@ -119,7 +119,7 @@ def world(schema_database, tmp_path, monkeypatch):
     with Session(engine, expire_on_commit=False) as db:
         app = FastAPI()
         for module in (leads, lead_bulk, candidates, candidate_import, applications, travelled, files, document_bundles, document_jobs,
-                       application_form, candidate_exports, document_diagnostics):
+                       application_form, candidate_exports, document_diagnostics, reports):
             app.include_router(module.router)
         who = {"id": "admin"}
         app.dependency_overrides[get_db] = lambda: db
@@ -223,6 +223,8 @@ def cases(ids):
         ("application draft", "GET", f"/api/applications/{ids.application}/draft", {}, 5),
         ("travelled list", "GET", "/api/travelled", {}, 4),
         ("travelled export csv", "GET", "/api/travelled/export?format=csv", {}, 4),
+        ("client tracker", "GET", "/api/reports/client-tracker", {}, 6),
+        ("client tracker xlsx", "GET", "/api/reports/client-tracker?format=xlsx&country=UAE", {}, 6),
         ("files list (candidate)", "GET", f"/api/files?entity_type=candidate&entity_id={ids.candidate}", {}, 4),
         ("files download", "GET", "/api/files/resume1", {}, 3),
         ("document-bundle sources", "GET", f"/api/document-bundles/candidates/{ids.uuid_candidate}/sources", {}, 4),
@@ -330,7 +332,7 @@ ROUND_LATENCY_MS = 100
 ROUND_BUDGETS: dict[str, int] = {
     "leads list 25": 2, "leads summary": 2, "leads facets": 2, "leads columns": 2, "lead detail": 2,
     "candidates list 20": 2, "candidate matching": 3, "candidate detail": 2, "application form load": 4, "document diagnostics": 2,
-    "candidate inspection.xlsx": 5, "travelled list": 2, "travelled export csv": 2, "files list (candidate)": 2,
+    "candidate inspection.xlsx": 5, "travelled list": 2, "travelled export csv": 2, "client tracker": 2, "client tracker xlsx": 2, "files list (candidate)": 2,
     "document-bundle sources": 2, "candidate-import status": 2,
 }
 
@@ -369,6 +371,19 @@ def test_the_travelled_list_is_kept_and_a_new_placement_drops_it(world, kept):
     world.db.commit()
     changed, _ = measure(world, "travelled (after a change)", "admin", "GET", "/api/travelled")
     assert len(changed.json()["rows"]) == len(first.json()["rows"]) + 1
+
+
+def test_the_client_tracker_is_kept_per_role_and_a_stage_change_drops_it(world, kept):
+    first, cold = measure(world, "tracker (cold)", "admin", "GET", "/api/reports/client-tracker")
+    again, warm = measure(world, "tracker (kept)", "admin", "GET", "/api/reports/client-tracker")
+    assert first.json() == again.json() and len(first.json()["rows"]) > 20
+    assert len(warm) < len(cold) and len(warm) <= 1, warm  # only the harness' own user lookup
+    mine, _ = measure(world, "tracker (recruiter)", "a", "GET", "/api/reports/client-tracker")
+    assert 0 < len(mine.json()["rows"]) < len(first.json()["rows"])
+    world.db.execute(text("UPDATE crm_applications SET current_stage = 7 WHERE id = 'ap25'"))
+    world.db.commit()
+    changed, _ = measure(world, "tracker (after a change)", "admin", "GET", "/api/reports/client-tracker")
+    assert changed.json() != first.json()
 
 
 def test_the_lead_cards_and_filters_are_kept_per_viewer_and_follow_changes(world, kept):

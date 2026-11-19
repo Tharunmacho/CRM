@@ -552,7 +552,7 @@ def selected_document_attachments(attachments: list, application_id: str | None)
 def _applications(rows: list) -> list[dict]:
     return [{"id": a.id, "orderId": o.id, "orderRef": o.ref, "clientName": c.name, "position": d.title,
              "country": o.country or c.country, "status": a.status.value, "currentStage": a.current_stage,
-             "createdAt": _iso(a.created_at), "selected": False}
+             "createdAt": _iso(a.created_at), "commencementDate": _iso(a.commencement_date), "selected": False}
             for a, o, c, d, _client in rows]
 
 
@@ -687,7 +687,8 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
         "application": ({"id": application.id, "orderId": application.order_id, "orderRef": order.ref,
                          "status": application.status.value,
                          "closureReason": application.closure_reason.value if application.closure_reason else None,
-                         "currentStage": application.current_stage, "createdAt": _iso(application.created_at)}
+                         "currentStage": application.current_stage, "createdAt": _iso(application.created_at),
+                         "commencementDate": _iso(application.commencement_date)}
                         if application is not None else None),
         "applications": listing,
         "photo": slots["photo"]["current"],
@@ -886,8 +887,38 @@ def _validate(candidate, values: dict[str, Any], db: Session | None = None) -> N
         raise HTTPException(422, "The candidate's phone number cannot be removed. Replace it instead.")
 
 
-def save_form(db: Session, user: User, candidate_id: str, body: dict) -> dict[str, Any]:
-    """Apply a partial manual save under the candidate row lock. Returns the changed form keys (caller rebuilds the form)."""
+COMMENCEMENT_FIRST = date(2000, 1, 1)
+COMMENCEMENT_DAYS_AHEAD = 1830   # about five years, like the follow-up date
+
+
+def _commencement_placement(db: Session, candidate_id: str, application_id: str | None, order_id: str | None, value: date | None) -> Application:
+    """The placement whose date of commencement is being set (the one the form shows: by application, by order, else the newest
+    active one, else the newest), locked for the update. The date is checked first: 2000-01-01 to about five years ahead."""
+    today = datetime.now(_tz()).date()
+    if value is not None and not COMMENCEMENT_FIRST <= value <= today + timedelta(days=COMMENCEMENT_DAYS_AHEAD):
+        raise HTTPException(422, "Choose a date of commencement between 1 January 2000 and five years from today.")
+    query = select(Application).where(Application.candidate_id == candidate_id).with_for_update().execution_options(populate_existing=True)
+    if application_id:
+        query = query.where(Application.id == application_id)
+    elif order_id:
+        query = query.where(Application.order_id == order_id)
+    rows = list(db.scalars(query))
+    if not rows:
+        if application_id:
+            raise HTTPException(404, "This candidate has no such application.")
+        if order_id:
+            raise HTTPException(404, "This candidate is not on that order.")
+        raise HTTPException(422, "Map the candidate to a job before setting the date of commencement.")
+    rows.sort(key=lambda a: (a.status == ApplicationStatus.active, a.created_at, a.id), reverse=True)
+    return rows[0]
+
+
+def save_form(db: Session, user: User, candidate_id: str, body: dict, *, application_id: str | None = None,
+              order_id: str | None = None) -> dict[str, Any]:
+    """Apply a partial manual save under the candidate row lock. Returns the changed form keys (caller rebuilds the form).
+
+    `application.commencementDate` is the one placement-level field: it is saved on the placement `application_id` / `order_id`
+    selects (as everywhere in the form), by the same people who may edit the rest of the form."""
     from app.api.routers.candidates import lock_assignment_cursor
     lock_assignment_cursor(db)
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id)
@@ -908,6 +939,9 @@ def save_form(db: Session, user: User, candidate_id: str, body: dict) -> dict[st
     if changes.get("service_charges_status") == "":
         changes["service_charges_status"] = "not_discussed"
     _validate(candidate, changes, db)
+    placement = None
+    if "commencementDate" in (body.get("application") or {}):
+        placement = _commencement_placement(db, candidate_id, application_id, order_id, body["application"]["commencementDate"])
     identity = {c: changes[c] for c in ("phone", "email", "passport_no") if c in changes and changes[c] and changes[c] != getattr(candidate, c)}
     if identity and identity_matches(db, identity, exclude_id=candidate.id):
         raise HTTPException(409, "The corrected phone, email or passport already belongs to another candidate.")
@@ -939,9 +973,14 @@ def save_form(db: Session, user: User, candidate_id: str, body: dict) -> dict[st
         candidate.field_sources = sources
     if "screening.nextFollowUpDate" in changed:
         sync_follow_up_todo(db, candidate)
+    meta = {"changed_fields": changed}
+    if placement is not None and placement.commencement_date != body["application"]["commencementDate"]:
+        placement.commencement_date = body["application"]["commencementDate"]
+        changed.append("application.commencementDate")
+        meta["application_id"] = placement.id
     if changed:
         db.add(AuditEntry(actor_id=user.id, action="Updated application form", target=candidate.name, entity_type="candidate",
-                          entity_id=candidate.id, meta={"changed_fields": changed}))
+                          entity_id=candidate.id, meta=meta))
     db.commit()
     return {"changed": changed}
 

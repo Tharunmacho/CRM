@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from app.core.config import get_settings
 
 # Cell styles (cellXfs indexes in styles.xml below).
-DEFAULT, HEADER, DATE, DATETIME, TEXT, WRAP, BOLD = 0, 1, 2, 3, 4, 5, 6
+DEFAULT, HEADER, DATE, DATETIME, TEXT, WRAP, BOLD, GRID = 0, 1, 2, 3, 4, 5, 6, 7
 
 NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 STYLES = (
@@ -26,10 +26,12 @@ STYLES = (
     '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
     '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
     '<fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F2"/><bgColor indexed="64"/></patternFill></fill></fills>'
-    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
-    '<border><left/><right/><top/><bottom style="thin"><color rgb="FF8EA3BF"/></bottom><diagonal/></border></borders>'
+    '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>'
+    '<border><left/><right/><top/><bottom style="thin"><color rgb="FF8EA3BF"/></bottom><diagonal/></border>'
+    '<border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right>'
+    '<top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>'
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-    '<cellXfs count="7">'
+    '<cellXfs count="8">'
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
     '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
     '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="left"/></xf>'
@@ -37,6 +39,7 @@ STYLES = (
     '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'
     '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'
     '</cellXfs></styleSheet>'
 )
 
@@ -92,16 +95,18 @@ def cell_xml(ref: str, value, style: int | None = None) -> str:
     return f'<c r="{ref}" s="{style if style else TEXT}" t="inlineStr"><is><t xml:space="preserve">{escape(text)}</t></is></c>'
 
 
-def sheet_xml(rows: list[list], widths: list[float] | None, header: bool, freeze: bool, filtered: bool, bold_first: bool) -> str:
+def sheet_xml(rows: list[list], widths: list[float] | None, header: bool, freeze: bool, filtered: bool, bold_first: bool,
+              grid: bool = False) -> str:
+    """`grid`: every body cell gets a thin border and wrapped, top-aligned text, and rows are left to Excel to size (nothing is cut off)."""
     width = max((len(r) for r in rows), default=1)
     out = []
     for r, row in enumerate(rows, 1):
         cells = []
         for c, value in enumerate(row):
-            style = HEADER if header and r == 1 else (BOLD if bold_first and c == 0 else None)
+            style = HEADER if header and r == 1 else (GRID if grid else BOLD if bold_first and c == 0 else None)
             cells.append(cell_xml(f"{column_name(c)}{r}", value, style))
         height = ' ht="30" customHeight="1"' if header and r == 1 else ""
-        if not height:
+        if not height and not grid:
             lines = max((len(value.splitlines()) for value in row if isinstance(value, str)), default=1)
             if lines > 1:
                 height = f' ht="{min(409, 18 * lines + 8)}" customHeight="1"'
@@ -126,7 +131,7 @@ def safe_sheet_name(name: str, taken: set[str]) -> str:
 
 
 def build_workbook(sheets: list[dict]) -> bytes:
-    """`sheets`: dicts with `name`, `rows` (first row is the header when `header`), optional `widths`, `header`, `freeze`, `filter`, `bold_first`."""
+    """`sheets`: dicts with `name`, `rows` (first row is the header when `header`), optional `widths`, `header`, `freeze`, `filter`, `bold_first`, `grid`."""
     out = BytesIO()
     taken: set[str] = set()
     names = [safe_sheet_name(s["name"], taken) for s in sheets]
@@ -147,7 +152,7 @@ def build_workbook(sheets: list[dict]) -> bytes:
         archive.writestr("xl/styles.xml", STYLES)
         for i, sheet in enumerate(sheets, 1):
             archive.writestr(f"xl/worksheets/sheet{i}.xml", sheet_xml(sheet["rows"], sheet.get("widths"), sheet.get("header", True), sheet.get("freeze", True),
-                                                                    sheet.get("filter", True), sheet.get("bold_first", False)))
+                                                                    sheet.get("filter", True), sheet.get("bold_first", False), sheet.get("grid", False)))
     return out.getvalue()
 
 

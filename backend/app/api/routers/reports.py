@@ -14,7 +14,7 @@ from app.services.encoded_response import Encoded
 from app.services.response_cache import cached, scope_of
 from app.services.reporting import Filters, dashboard_data, read_dashboard_data, read_reporting_data, report_data
 from app.services.report_exports import REPORTS, pdf, xlsx
-from app.services import lead_metrics, staff_weekly, staff_weekly_export
+from app.services import client_tracker, lead_metrics, staff_weekly, staff_weekly_export
 from app.services.parallel_reads import parallel_reads
 
 # Report and dashboard numbers are derived from nearly every business table; the change feed adds the "reports" topic to
@@ -74,6 +74,22 @@ def staff_weekly_detail(staff_id: str, from_date: date | None = None, to_date: d
     if not data["staff"]:
         raise HTTPException(404, "Recruiter not found.")
     return data
+
+
+# The client tracker: every placement in progress (and the travelled ones) grouped by client, in the sheet the clients ask for.
+# Without `format` it answers the rows as JSON for the Reports screen's preview; with xlsx or csv it is the download. Admin and manager
+# see every placement, a recruiter the ones they own; the fee and receipts behind the Advance column are the admin's alone.
+@router.get("/client-tracker")
+def client_tracker_report(format: Literal["xlsx", "csv"] | None = None, wanted: client_tracker.Filters = Depends(client_tracker.query_filters),
+                          user: User = Depends(current_user), db: Session = Depends(get_db)):
+    body = client_tracker.build(client_tracker.read_rows(db, user), wanted)
+    if format is None:
+        return body
+    payload = client_tracker.xlsx_bytes(body["rows"]) if format == "xlsx" else client_tracker.csv_bytes(body["rows"])
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if format == "xlsx" else "text/csv; charset=utf-8"
+    today = datetime.now(ZoneInfo(get_settings().agency_timezone)).date()
+    return Response(payload, media_type=mime, headers={
+        "Content-Disposition": f'attachment; filename="client-tracker-{today}.{format}"', "Cache-Control": "private, no-store"})
 
 
 @router.get("")

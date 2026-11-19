@@ -79,7 +79,13 @@ class ExperienceIn(_Section):
     history: list[HistoryIn] | None = Field(default=None, max_length=30)
 
 
+class ApplicationIn(_Section):
+    """The placement-level fields (saved on the placement `applicationId` / `orderId` selects)."""
+    commencementDate: date | None = None   # DOC: the day the candidate starts the job at the client; null clears it
+
+
 class FormIn(_Section):
+    application: ApplicationIn | None = None
     personal: PersonalIn | None = None
     passport: PassportIn | None = None
     education: list[EducationIn] | None = Field(default=None, max_length=20)
@@ -90,7 +96,7 @@ class FormIn(_Section):
 def _body(model: FormIn) -> dict[str, Any]:
     """Only what the client sent: {section: {key: value}} and the education list."""
     out: dict[str, Any] = {}
-    for section in ("personal", "passport", "experience", "screening"):
+    for section in ("personal", "passport", "experience", "screening", "application"):
         part = getattr(model, section)
         if part is not None:
             data = part.model_dump(exclude_unset=True)
@@ -146,7 +152,7 @@ def save_form(candidate_id: str, body: FormIn, response: Response, orderId: str 
               applicationId: str | None = Query(default=None, max_length=36),
               db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     _no_store(response)
-    service.save_form(db, user, candidate_id, _body(body))
+    service.save_form(db, user, candidate_id, _body(body), application_id=applicationId, order_id=orderId)
     return service.build_form(db, candidate_id, user, application_id=applicationId, order_id=orderId)
 
 

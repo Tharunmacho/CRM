@@ -66,6 +66,16 @@ def _word(word: str) -> str:
     return "".join(_FUZZ.get(c, c) for c in word) if len(word) >= 5 else word
 
 
+class _Phrases(str):
+    """A pattern built by `ph()`: the regular expression, plus the plain phrases it was built from (for the squashed form)."""
+    phrases: tuple[str, ...] = ()
+
+    def __add__(self, other: str) -> "_Phrases":  # ph(...) + r"|extra" keeps the phrases
+        out = _Phrases(str.__add__(self, other))
+        out.phrases = self.phrases
+        return out
+
+
 def ph(*phrases: str) -> str:
     """Alternation of plain phrases: words may be glued ("VisaNumber"), spaced, hyphenated or slashed, and OCR-noisy."""
     out = []
@@ -73,11 +83,56 @@ def ph(*phrases: str) -> str:
         words = phrase.split()
         body = _SEP.join(_word(w) for w in words)
         out.append((r"\b" if len(words[0]) <= 4 else "") + body)
-    return "(?:" + "|".join(out) + ")"
+    result = _Phrases("(?:" + "|".join(out) + ")")
+    result.phrases = tuple(phrases)
+    return result
 
 
-def _sig(name: str, weight: int, pattern: str, flags: int = 0) -> tuple[str, int, "re.Pattern[str]"]:
-    return name, weight, re.compile(pattern, re.I | flags)
+# ---------------------------------------------------------------------------------------------- glued text
+# A second OCR engine sometimes reads a line with no spaces between the words ("TOWHOMITMAYCONCERN", "hascompleted"). The phrase
+# signals then never match. For a glued line (or a page that is mostly glued) the same phrases are also looked for in a squashed
+# form of the text: lower case, letters only, no spaces. A squashed phrase must be long enough (MIN_SQUASHED letters) that it does
+# not turn up inside unrelated glued words. Normal spaced text is never squashed, so nothing changes there.
+MIN_SQUASHED = 9
+GLUED_LINE_WORD = 14      # a line of at least this many letters whose words average this many letters or more is glued
+GLUED_PAGE_WORD = 9.0     # a page (60 letters or more) whose words (letters per space) average more than this is mostly glued
+
+# compiled signal pattern -> the same phrases squashed (None when the signal has no phrase long enough)
+_SQUASHED: dict["re.Pattern[str]", "re.Pattern[str] | None"] = {}
+
+
+def _squash_phrase(phrase: str) -> str | None:
+    letters = re.sub(r"[^a-z]", "", phrase.lower())
+    return letters if len(letters) >= MIN_SQUASHED else None
+
+
+def _squashed_pattern(pattern: str, extra: str = "") -> "re.Pattern[str] | None":
+    squashed = sorted({sq for sq in map(_squash_phrase, getattr(pattern, "phrases", ())) if sq})
+    parts = [re.escape(sq) for sq in squashed] + ([extra] if extra else [])
+    return re.compile("|".join(parts)) if parts else None
+
+
+def _sig(name: str, weight: int, pattern: str, flags: int = 0, squashed: str = "") -> tuple[str, int, "re.Pattern[str]"]:
+    """A signal. A `ph()` pattern is also matched in squashed form automatically; `squashed` adds a hand-written regular expression
+    for the squashed form (lower-case letters only) of a signal that is not a plain phrase list."""
+    compiled = re.compile(pattern, re.I | flags)
+    _SQUASHED[compiled] = _squashed_pattern(pattern, squashed)
+    return name, weight, compiled
+
+
+def _glued_form(text: str) -> str:
+    """The squashed text (lower-case letters only) of the glued part of `text`, or "" when there is none (the usual case)."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    letters = sum(len(re.findall(r"[A-Za-z]", line)) for line in lines)
+    spaces = sum(len(re.findall(r"\s", line)) for line in lines)
+    if letters >= 60 and letters / (spaces + 1) > GLUED_PAGE_WORD:
+        return "".join(re.sub(r"[^a-z]", "", line.lower()) for line in lines)
+    glued = []
+    for line in lines:
+        n = len(re.findall(r"[A-Za-z]", line))
+        if n >= GLUED_LINE_WORD and n / (len(re.findall(r"\s", line)) + 1) >= GLUED_LINE_WORD:
+            glued.append(re.sub(r"[^a-z]", "", line.lower()))
+    return "\n".join(glued)
 
 
 # ---------------------------------------------------------------------------------------------- the signals
@@ -268,13 +323,18 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
                                        "certificate of employment", "employment verification", "employment letter",
                                        "work experience certificate")),
         _sig("to whom", 2, ph("to whom it may concern", "to whomsoever it may concern", "to whom so ever it may concern", "to whom soever it may concern")),
-        _sig("certify employment", 3, r"\b(?:certify|confirm\w*)\W+that\W+[\s\S]{0,250}\b(?:worked|working|employed|serving|served|associated|joined|employee|continue[sd]?|continuing)\b"),
-        _sig("has worked", 2, r"\b(?:has|have|had)\W+(?:been\W+)?(?:worked|working|served|serving)\b"),
-        _sig("under me", 2, r"\b(?:work(?:ed|ing)|serv(?:ed|ing))\W+under\W+(?:me|my|the\W+undersigned)\b"),
+        _sig("certify employment", 3, r"\b(?:certify|confirm\w*)\W+that\W+[\s\S]{0,250}\b(?:worked|working|employed|serving|served|associated|joined|employee|continue[sd]?|continuing)\b",
+             squashed=r"(?:certify|confirm[a-z]{0,4})that.{0,150}(?:worked|working|employedas|employedwith|employedin|served|serving|associatedwith|joinedas|joinedthe|joinedon)"),
+        _sig("has worked", 2, r"\b(?:has|have|had)\W+(?:been\W+)?(?:worked|working|served|serving)\b",
+             squashed=r"(?:has|have|had)(?:been)?(?:worked|working|served|serving)"),
+        _sig("under me", 2, r"\b(?:work(?:ed|ing)|serv(?:ed|ing))\W+under\W+(?:me|my|the\W+undersigned)\b",
+             squashed=r"(?:worked|working|served|serving)under(?:me|my|theundersigned)"),
         _sig("designation", 1, ph("designation", "designated as")),
         _sig("joined", 1, ph("date of joining", "joined on", "joined the company", "joined us", "joined as")),
-        _sig("was employed", 2, r"\b(?:was|is|has\W+been|had\W+been)\W+(?:employed|working|associated|engaged)\W+(?:with|in|at|by|as)\b"),
-        _sig("worked with us", 2, r"\bworked\W+(?:with|for|in|as|at)\W+(?:us|our|the\W+company|m/s)\b|\bworked\W+as\b"),
+        _sig("was employed", 2, r"\b(?:was|is|has\W+been|had\W+been)\W+(?:employed|working|associated|engaged)\W+(?:with|in|at|by|as)\b",
+             squashed=r"(?:was|is|hasbeen|hadbeen)(?:employed|working|associated|engaged)(?:with|in|at|by|as)"),
+        _sig("worked with us", 2, r"\bworked\W+(?:with|for|in|as|at)\W+(?:us|our|the\W+company|m/s)\b|\bworked\W+as\b",
+             squashed=r"worked(?:with|for|in|as|at)(?:us|our|thecompany|a|an|the)"),
         _sig("capacity", 2, ph("in the capacity of", "in the capacity as", "in the position of", "in the role of")),
         _sig("conduct", 1, r"\b(?:his|her)\W+(?:conduct|character|performance|work)\W+(?:was|is|has|during)\b|\bwish\W+(?:him|her)\W+(?:all|success|the\W+best|good\W+luck)|\bgood\W+luck\W+(?:in|for)\W+(?:the\W+)?(?:his|her)?\W*future"),
         _sig("leaving", 2, ph("date of leaving", "last working day", "relieved from", "resigned", "relieved of his", "relieved of her")),
@@ -297,6 +357,20 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
         # A letter of recommendation or appreciation from an employer.
         _sig("recommendation", 3, ph("letter of recommendation", "recommendation letter", "reference letter", "letter of reference")),
         _sig("appreciation", 2, ph("letter of appreciation", "appreciation letter", "certificate of appreciation", "appreciation certificate")),
+        # The wording of an employer's appreciation / testimonial / recommendation letter. Each cue is weak on its own: they add up,
+        # and a page that already reads like another kind (an education, medical, offer, visa or insurance page) does not take them
+        # (`_PRAISE`, `_scores`).
+        _sig("testimony title", 3, r"^\W*(?:a\W+)?(?:testimon(?:y|ial)|testimony\W+letter)\W*$", re.M),
+        _sig("praise testimony", 2, ph("testimonial", "testimony", "testify that", "bear testimony")),
+        _sig("praise appreciation", 1, r"\bappreciat(?:e|ed|es|ing)\b|\bin\W+appreciation\b"),
+        _sig("praise recommend", 1, r"\bi\W+(?:\w+\W+)?recommend\b|\brecommend(?:ed|s)?\W+(?:him|her|to\W+others|mr|ms|mrs)\b"),
+        # Praise of a person's own work ("his excellent performance"), not of a project ("outstanding contribution to the project").
+        _sig("praise performance", 1, r"\b(?:his|her)\W+(?:(?:excellent|outstanding|good|satisfactory|exemplary|commendable|valuable)\W+)?(?:performance|work|service|contribution|job)\b|\b(?:excellent|outstanding|exemplary|commendable)\W+performance\b"),
+        _sig("praise dedication", 1, r"\b(?:dedicat(?:ed|ion)|sincer(?:e|ity)|hard\W?working|punctual|honest(?:y)?|diligen(?:t|ce)|asset\W+to)\b"),
+        _sig("praise wishes", 1, r"wish\W+(?:him|her)\W+(?:all\W+)?(?:the\W+)?(?:success|best|good\W+luck)|\bgood\W+luck\b|\bfuture\W+(?:endeavou?rs?|employment|career|assignments?)\b|\bbright\W+future\b"),
+        _sig("praise thanks", 1, r"\bthank(?:ing)?\W+(?:you|the\W+person|him|her|mr|ms|mrs)\b|\bto\W+the\W+satisfaction\b|\bsatisfaction\W+of\b"),
+        _sig("praise team", 2, r"\b(?:was|is|were)\W+(?:a\W+)?part\W+of\W+the\W+(?:\w+\W+){0,8}?(?:team|crew|project|projects|shutdown|turnaround|turn\W+around)\b"),
+        _sig("certify that", 1, ph("this is to certify that", "hereby certify that", "certify that")),
     ),
     "google_review": (
         _sig("google review", 3, ph("google review", "google reviews", "google maps", "local guide", "write a review", "review on google",
@@ -342,20 +416,52 @@ _SAFETY_VETOED = {"proficiency title", "training programme", "awarded", "institu
 _VERIFICATION_REPORT = re.compile(r"\bverification\W+(?:summary|results?|report)\b|\bverified\W+correct\b|\bbackground\W+(?:check|verification)\b", re.I)
 
 
+# The weak employer-letter cues of experience_certificate: dropped when the page already reads like another kind.
+_PRAISE_VETO_SCORE = 3
+_PRAISE = {"praise testimony", "praise appreciation", "praise recommend", "praise performance", "praise dedication", "praise wishes",
+           "praise thanks", "praise team", "certify that"}
+
+
+# What a (glued) resume says; two of them and the glued text is a resume, so its wording about work and designations is not
+# an experience letter's. Squashed matching is then not used at all (the page keeps what the ordinary patterns make of it).
+_GLUED_RESUME = re.compile(r"curricul[ua]mvitae|careerobjective|personaldetails|personalprofile|dateofbirth|languagesknown|maritalstatus|"
+                           r"educationalqualification|professionalsummary|professionalexperience|technicalskills|keyskills|"
+                           r"workexperiencedetails|declaration:?ihereby")
+
+
+def _glued_resume(glued: str) -> bool:
+    return len(set(_GLUED_RESUME.findall(re.sub(r"[^a-z:]", "", glued)))) >= 2
+
+
+def _glued_hit(pattern: "re.Pattern[str]", glued: str) -> bool:
+    squashed = _SQUASHED.get(pattern) if glued else None
+    return bool(squashed and squashed.search(glued))
+
+
 def _scores(text: str) -> dict[str, tuple[int, list[str], bool]]:
     """kind -> (score, names of the signals that matched, whether one of them is strong)."""
     out: dict[str, tuple[int, list[str], bool]] = {}
     safety = bool(_SAFETY_TOPIC.search(text))
     report = bool(_VERIFICATION_REPORT.search(text))
+    glued = _glued_form(text)
+    if glued and _glued_resume(glued):
+        glued = ""
     for kind, signals in _SIGNALS.items():
         if report and kind in {"education_certificate", "experience_certificate"}:
             out[kind] = (0, [], False)
             continue
-        hits = [(name, weight) for name, weight, pattern in signals if pattern.search(text)
+        hits = [(name, weight) for name, weight, pattern in signals if (pattern.search(text) or _glued_hit(pattern, glued))
                 and not (safety and kind == "education_certificate" and name in _SAFETY_VETOED)]
         if kind == "google_review" and not re.search(r"\bgoogle\b|★|⭐|\bstars?\b", text, re.I):
             hits = []
         out[kind] = (sum(w for _, w in hits), [n for n, _ in hits], any(w >= STRONG for _, w in hits))
+    # A page that is already another kind (education, medical, offer ...) is not made an experience letter by praise words.
+    others = max((value[0] for kind, value in out.items() if kind != "experience_certificate"), default=0)
+    if others >= _PRAISE_VETO_SCORE and out.get("experience_certificate", (0,))[0]:
+        _, names, _ = out["experience_certificate"]
+        weights = {name: weight for name, weight, _ in _SIGNALS["experience_certificate"]}
+        kept = [n for n in names if n not in _PRAISE]
+        out["experience_certificate"] = (sum(weights[n] for n in kept), kept, any(weights[n] >= STRONG for n in kept))
     return out
 
 

@@ -455,7 +455,7 @@ def test_empty_snapshot_returns_arrays_with_one_query(schema_database):
     assert_select_budget(statements, 1)
     agency, currencies, categories = snapshot.pop("agency"), snapshot.pop("currencies"), snapshot.pop("categories")
     assert snapshot == {**{key: [] for key in SNAPSHOT_COLLECTIONS}, "ingestionRevision": EMPTY_REVISION}
-    assert agency["name"] and len(currencies) == 11 and len(categories) > 10
+    assert agency["name"] and len(currencies) == 150 and len(categories) > 10
 
 
 def test_snapshot_query_count_stays_constant_and_committed_changes_are_visible(desk_engine):

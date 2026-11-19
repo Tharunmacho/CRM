@@ -101,7 +101,7 @@ def read_reporting_data(db, filters: Filters | None = None, zone=None):
         columns = [getattr(model, field) for field in names.split()]
         if filters is not None and name == "stages":
             columns = [func.json_build_object("result", model.data["result"], "amount", model.data["amount"],
-                "currency", model.data["currency"]).label("data") if field.key == "data" else field for field in columns]
+                "currency", model.data["currency"], "advanceStatus", model.data["advanceStatus"]).label("data") if field.key == "data" else field for field in columns]
         query = select(*columns)
         if filters is not None:
             if name == "events":
@@ -485,6 +485,8 @@ def report_data(data, user, filters: Filters, zone=None, now=None):
         record = records.get(8)
         if not record or not inside(record["completed_at"]) or not staff_matches(record.get("owner_id") or app_owner(app)):
             continue
+        if (record.get("data") or {}).get("advanceStatus") == "pending":
+            continue  # an advance still to be collected is not a collection (its amount is only the one expected)
         amount = record.get("amount")
         if amount is None:
             amount = (record.get("data") or {}).get("amount")

@@ -1,0 +1,123 @@
+"""The Tasks page as an Excel sheet: the table the recruiter sees, with every detail, one row per candidate.
+
+    S.No | DOC | Recruiter | Job | Client | Country | Candidate | Care ID | Agency | Advance | Stage | Today | Remark
+
+The rows are the screen's own: the daily-work rows and the follow-up rows of `/api/daily-work` and `/api/follow-up` (same scoping), merged
+and ordered exactly like `taskRows` in frontend/src/features/daily-work/daily-work-model.ts (candidates nobody touched today first, then the
+ones with a stage waiting, then the furthest along; a candidate in both lists appears once, from the daily list).
+
+* DOC: the placement's date of commencement as DD-MMM-YYYY text (blank when none).
+* Agency: the candidate's referral agency, as the client tracker's Ref column (`agency_display_expression`).
+* Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-8 record); blank when none.
+* Stage: "Stage 9 - Visa arrival + Google review", or "Initial call" before a stage starts.
+* Today: "Called 10:45" / "Stage moved 10:45" (agency clock) when that happened today, else blank. Writing a remark is not listed here.
+* Remark: the newest remark on the row.
+Text is written as inline strings, which Excel never evaluates, so a value such as `=cmd|...` stays text.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime
+
+from sqlalchemy import select
+
+from app.db.models import ApplicationStage, Candidate, User
+from app.domain.stages import TOTAL_STAGES, stage_by_no
+from app.services import agency_settings, daily_work, lead_xlsx
+from app.services.advance_text import advance_cell
+from app.services.agency_display import agency_display_expression
+
+COLUMNS = ("S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark")
+SHEET_NAME = "Tasks"
+WIDTHS = [7, 14, 18, 24, 24, 16, 30, 12, 18, 22, 36, 20, 50]
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def doc_text(value: str | date | None) -> str:
+    """'2026-12-05' -> '05-Dec-2026'; blank for no date."""
+    if not value:
+        return ""
+    day = value if isinstance(value, date) else date.fromisoformat(str(value))
+    return f"{day.day:02d}-{_MONTHS[day.month - 1]}-{day.year}"
+
+
+def _day(moment) -> str:
+    return daily_work.agency_today(moment).isoformat() if isinstance(moment, datetime) else ""
+
+
+def _clock(moment) -> str:
+    return moment.astimezone(daily_work.agency_zone()).strftime("%H:%M") if isinstance(moment, datetime) else ""
+
+
+def merge_rows(daily: list[dict], follow: list[dict], today: str) -> list[dict]:
+    """`taskRows` of the screen: one dict per candidate (the daily row, else the follow-up row) with `moved_at`, in the screen's order."""
+    merged: dict[str, dict] = {}
+    moved_today: dict[str, datetime] = {}
+    for item in daily:
+        merged[item["candidateId"]] = item
+    for item in follow:
+        if item["candidateId"] not in merged:
+            merged[item["candidateId"]] = {**item, "kind": "stage", "waiting": False, "status": "open", "completedAt": None}
+        if item.get("stageMovedAt") and _day(item["stageMovedAt"]) == today:
+            moved_today[item["candidateId"]] = item["stageMovedAt"]
+    rows = []
+    for item in merged.values():
+        called = item["status"] == "done" and item["kind"] == "call"
+        moved = (item["status"] == "done" and item["kind"] == "stage") or item["candidateId"] in moved_today
+        remarked = bool(item.get("remark")) and _day(item["remark"]["at"]) == today
+        rows.append({**item, "called": called, "moved": moved, "moved_at": moved_today.get(item["candidateId"]),
+                     "touched": 1 if called or moved or remarked else 0})
+    # list.sort is stable, like the screen's: the merge order breaks ties.
+    rows.sort(key=lambda r: (r["touched"], -int(bool(r["waiting"])), -(r["stage"] or 0)))
+    return rows
+
+
+def today_text(row: dict) -> str:
+    parts = []
+    if row["called"]:
+        parts.append(" ".join(p for p in ("Called", _clock(row.get("completedAt"))) if p))
+    if row["moved"]:
+        parts.append(" ".join(p for p in ("Stage moved", _clock(row.get("completedAt") or row.get("moved_at"))) if p))
+    return ", ".join(parts)
+
+
+def stage_text(stage: int | None) -> str:
+    if not stage or not 1 <= stage <= TOTAL_STAGES:
+        return "Initial call"
+    return f"Stage {stage} - {stage_by_no(stage).title}"
+
+
+def read_extras(db, rows: list[dict]) -> tuple[dict, dict, dict, str]:
+    """(agency by candidate id, stage-8 facts by application id, recruiter name by id, default advance currency): four statements, one round."""
+    candidate_ids = [r["candidateId"] for r in rows]
+    application_ids = [r["applicationId"] for r in rows if r.get("applicationId")]
+    owner_ids = sorted({r["ownerId"] for r in rows if r.get("ownerId")})
+    agencies, facts, owners, currency = daily_work.read_together(
+        db,
+        lambda s: dict(s.execute(select(Candidate.id, agency_display_expression()).where(Candidate.id.in_(candidate_ids))).all()) if candidate_ids else {},
+        lambda s: daily_work.stage_facts(s.execute(daily_work.stage_facts_query(ApplicationStage.application_id.in_(application_ids))).all()) if application_ids else {},
+        lambda s: dict(s.execute(select(User.id, User.name).where(User.id.in_(owner_ids))).all()) if owner_ids else {},
+        lambda s: agency_settings.default_advance_currency(s))
+    return agencies, facts, owners, currency
+
+
+def table(db, daily: list[dict], follow: list[dict], today: str) -> list[list]:
+    """The header and one list per task row."""
+    rows = merge_rows(daily, follow, today)
+    agencies, facts, owners, currency = read_extras(db, rows)
+
+    def cell(value):
+        return "".join(ch for ch in value if ord(ch) >= 32 or ch in "\t\n\r") if isinstance(value, str) else value
+
+    out = [list(COLUMNS)]
+    for number, row in enumerate(rows, 1):
+        remark = (row.get("remark") or {}).get("body") or ""
+        out.append([cell(v) for v in (
+            number, doc_text(row.get("commencementDate")), owners.get(row.get("ownerId")) or "", row.get("position") or "",
+            row.get("client") or "", row.get("country") or "", row.get("candidate") or "", row.get("candidateCareId") or "",
+            agencies.get(row["candidateId"]) or "", advance_cell(facts.get(row.get("applicationId")), currency) or "",
+            stage_text(row.get("stage")), today_text(row), remark.strip())])
+    return out
+
+
+def xlsx_bytes(rows: list[list]) -> bytes:
+    return lead_xlsx.build_workbook([{"name": SHEET_NAME, "rows": rows, "widths": WIDTHS, "header": True, "freeze": True, "grid": True}])
