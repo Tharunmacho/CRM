@@ -11,7 +11,8 @@ async function loadSource(path) {
 
 const upload = await loadSource('../src/features/candidates/entry-upload.ts')
 const { fileRow, fileRows, foundChips, readProgress, queueText, pagesText, sizeText, findingsNames, documentPresence, severalPeopleFound, jobFindings, isDocumentJob,
-  trackNextInLine, readingStatus, elapsedText, SLOW_READ_MS, NEXT_IN_LINE_MS, NO_READER_INFO_MS, READER_DOWN, STILL_WAITING, safeHint } = upload
+  trackNextInLine, readingStatus, elapsedText, SLOW_READ_MS, NEXT_IN_LINE_MS, NO_READER_INFO_MS, READER_DOWN, STILL_WAITING, safeHint,
+  sortingLine, sortingOf, foundLines, unplacedPages, isSorting } = upload
 
 // Synthetic jobs only: no real names, numbers or documents.
 let counter = 0
@@ -408,4 +409,45 @@ test('the Add candidate strip shows the reading steps under the existing sentenc
   const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
   assert.match(page, /Reading documents… You can leave this page; we keep going\./)
   assert.match(page, /readingStatus\(intake\.jobs\)/)
+})
+
+// ------------------------------------------------------------------ page-by-page sorting (result.sorting)
+const pagesOf = (count, over = {}) => Array.from({ length: count }, (_, index) => ({ page: index + 1, state: 'read', ...(over[index + 1] ?? {}) }))
+const sorting = (over = {}) => ({ pageCount: 27, pagesRead: 4, pagesSorted: 3, step: 'sorting', seconds: 40, startedAt: '2026-01-01T00:00:00Z', passes: 1, pages: pagesOf(27), ...over })
+
+test('a file being sorted says which page of how many, in plain words', () => {
+  assert.equal(sortingLine(job({ status: 'processing', result: { sorting: sorting({ reading: [5, 6] }) } })), 'Page 5 of 27 · sorting')
+  assert.equal(sortingLine(job({ status: 'processing', result: { sorting: sorting() } })), 'Page 5 of 27 · sorting')          // no unit named: the next page to read
+  assert.equal(sortingLine(job({ status: 'retry', result: { sorting: sorting({ step: 'waiting', pagesRead: 12 }) } })), 'Page 13 of 27 · waiting for its next turn')
+  const again = sorting({ reading: [9], pages: pagesOf(27, { 8: { state: 'retry', reason: 'time ran out - retrying' } }) })
+  assert.equal(sortingLine(job({ status: 'processing', result: { sorting: again } })), 'Page 9 of 27 · sorting · page 8: time ran out - retrying')
+  assert.equal(sortingLine(job({ status: 'processing', result: {} })), '')                                                      // an older server: nothing is invented
+  assert.equal(sortingLine(job({ status: 'completed', result: { sorting: sorting({ step: 'done' }) } })), '')
+  assert.equal(sortingOf(job({ result: { sorting: { pageCount: 0, pages: [] } } })), null)
+})
+
+test('a file between two passes of the reader is reading, not waiting in line, and the strip shows the page', () => {
+  const between = job({ status: 'retry', aheadOfYou: 3, result: { sorting: sorting({ step: 'waiting', pagesRead: 8 }) } })
+  assert.equal(isSorting(between), true)
+  const row = fileRow(between)
+  assert.deepEqual([row.state, row.label, row.sortLine], ['reading', 'Reading', 'Page 9 of 27 · waiting for its next turn'])
+  const strip = readingStatus([between], Date.parse('2026-01-01T00:01:20Z'))
+  assert.match(strip.text, /^Page 9 of 27 · waiting for its next turn… 1 min 20 s\./)
+  assert.equal(strip.steps.find((step) => step.key === 'sorting').state, 'active')
+  const live = readingStatus([job({ status: 'processing', startedAt: '2026-01-01T00:00:50Z', result: { sorting: sorting({ reading: [5] }) } })], Date.parse('2026-01-01T00:00:45Z'))
+  assert.match(live.text, /^Page 5 of 27 · sorting… 45 s\./)
+})
+
+test('a sorted file shows one line per kind found and the pages that could not be placed, each with its reason', () => {
+  const done = sorting({
+    step: 'done', pagesRead: 27,
+    pages: pagesOf(9, { 1: { kind: 'resume' }, 2: { kind: 'resume' }, 3: { kind: 'passport' }, 4: { kind: 'passport' }, 5: { kind: 'medical' }, 7: { state: 'unread', reason: 'too dark', code: 'dark' }, 8: { reason: 'no text found' } }),
+    unplaced: [{ page: 8, reason: 'no text found', code: 'no_text' }, { page: 7, reason: 'too dark', code: 'dark' }],
+  })
+  const finished = job({ status: 'completed', result: { scans: { resume: scan([1, 2]) }, sorting: done } })
+  assert.deepEqual(foundLines(finished), ['Resume · pages 1, 2', 'Passport · pages 3, 4', 'Medical · page 5'])
+  assert.deepEqual(unplacedPages(finished), [{ page: 7, reason: 'too dark' }, { page: 8, reason: 'no text found' }])
+  const row = fileRow(finished)
+  assert.deepEqual([row.sortLine, row.foundLines.length, row.unplaced.length], ['', 3, 2])
+  assert.deepEqual(unplacedPages(job({ status: 'processing', result: { sorting: sorting() } })), [])                 // only once the sorting is over
 })

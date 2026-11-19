@@ -53,7 +53,7 @@ from veriis.models import AadhaarResponse, PassportResponse, ResumeResponse
 
 from app.integrations.ocr import client as ocr_client, reader_failures
 from app.integrations.ocr.field_coverage import field_report, row_report
-from app.integrations.ocr.classification import identity_hint, passport_plan
+from app.integrations.ocr.classification import SUSPECT_REASON, PageClassification, identity_hint, passport_plan, suspected_identity_pages
 from app.integrations.ocr.inspection import READING_FILE, InspectionError, inspect_document, restore_inspection
 from app.integrations.ocr.inspection import _real_words as _real_word_count
 from app.integrations.ocr.mapping import aadhaar_fields, passport_fields, resume_fields
@@ -1802,38 +1802,61 @@ def _passport_reasons(state: dict, inspected, sent: set[int]) -> dict[int, str]:
     return reasons
 
 
+def _suspected_pages(inspected) -> dict[str, list[int]]:
+    """The pages the local check could not classify but that carry cues of a passport or an Aadhaar page (see
+    ``classification.suspected_identity_pages``): {kind: [page numbers]}, at most a few per kind, none when a confidently read page
+    of the kind already covers it, none that are confidently some other document. Never raises: an aid, not a reason to fail."""
+    try:
+        pages = inspected.pages
+        texts = [(page.text or "") if page.status == "read" else "" for page in pages]
+        results = [
+            PageClassification(page.document_type, float(getattr(page, "confidence", 0.0) or 0.0), getattr(page, "reason", "") or "",
+                               tuple(getattr(page, "also", None) or ()), bool(getattr(page, "inherited", False)))
+            if page.status == "read" else PageClassification("unknown", 0.0, "")
+            for page in pages]
+        found: dict[str, list[int]] = {}
+        for suspicion in suspected_identity_pages(texts, results):
+            found.setdefault(suspicion.kind, []).append(pages[suspicion.page - 1].page_number)
+        return found
+    except Exception:
+        return {}
+
+
 def _probe_pages(inspected) -> dict[str, list[int]]:
     """Pages the local check could not read or identify that may still be a passport or an Aadhaar card.
 
     Veris is the authority on what a page is and answers with nothing for a page that is not one, so these are sent
-    as candidates: to a kind that has no page yet, all of them; to a kind that has pages, the unresolved pages
-    sitting right beside them (the rest of a passport or card that is read badly). Only a file with at least one
-    identified page is probed, so a file of unrelated pages costs nothing."""
-    if not inspected.has_classified_pages:
+    as candidates. Two kinds of page qualify:
+
+    * a page that was left unread (the local reader failed on it): to a kind that has no page yet, all of them; to a kind that
+      has pages, the unread pages sitting right beside them (the rest of a passport or card that is read badly);
+    * a page that was read but not classified and carries cues of a passport or an Aadhaar page (``_suspected_pages``): the
+      passport's machine-readable zone line, "Republic of India", the printed captions, a 12-digit number with the card's
+      captions, the address page beside such a page. A bounded few per kind, never a page that is confidently something else.
+
+    A read page that merely mentions a date of birth or the word "government" is not sent. Only a file with at least one
+    identified or suspected page is probed, so a file of unrelated pages costs nothing."""
+    suspected = _suspected_pages(inspected)
+    classified = inspected.has_classified_pages
+    if not classified and not suspected:
         return {}
-    # A page left unread because of the page limit or the time limit was never looked at and is not sent; a page that
-    # was read but is plainly something else (a cover letter) is not either.
-    unresolved = sorted(
-        page.page_number for page in inspected.pages
-        if (page.status == "unread" and page.method != "not_processed")
-        or (page.status == "read" and page.document_type == "unknown" and identity_hint(page.text))
-    )
-    if not unresolved:
-        return {}
-    runs, current = [], [unresolved[0]]
-    for page in unresolved[1:]:
-        if page == current[-1] + 1:
-            current.append(page)
+    # A page left unread because of the page limit or the time limit was never looked at and is not sent.
+    unresolved = sorted(page.page_number for page in inspected.pages if page.status == "unread" and page.method != "not_processed")
+    runs: list[list[int]] = []
+    for page in unresolved:
+        if runs and page == runs[-1][-1] + 1:
+            runs[-1].append(page)
         else:
-            runs.append(current)
-            current = [page]
-    runs.append(current)
+            runs.append([page])
     out: dict[str, list[int]] = {}
     for kind, known in (("passport", inspected.passport_pages), ("aadhaar", inspected.aadhaar_pages)):
-        if not known:
+        if not classified:
+            pages = []  # nothing identified: only the suspected pages are sent, never the unread ones
+        elif not known:
             pages = list(unresolved)
         else:
             pages = [p for run in runs if (run[0] - 1 in known or run[-1] + 1 in known) for p in run]
+        pages = sorted({*pages, *suspected.get(kind, [])})
         if pages:
             out[kind] = pages[:_PROBE_LIMIT]
     return out
@@ -1925,12 +1948,53 @@ def _found(kind: str, payload: dict) -> bool:
     return any(identity.get(name) for name in ("name", "aadhaar_number", "masked_aadhaar_number", "date_of_birth", "address", "vid"))
 
 
-def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict, warnings: list[str], review: list[str] | None = None) -> list[str]:
+def _confirmed(kind: str, payload: dict) -> bool:
+    """Whether a Veris result confirms a SUSPECTED page: a passport with its number (read from the machine-readable zone or
+    the printed page), an Aadhaar card with its number. A name or a date alone does not."""
+    if kind == "passport":
+        mrz = payload.get("mrz") if isinstance(payload.get("mrz"), dict) else {}
+        details = payload.get("passport_details") if isinstance(payload.get("passport_details"), dict) else {}
+        return bool(mrz.get("passport_number") or details.get("passport_number"))
+    identity = payload.get("aadhaar") if isinstance(payload.get("aadhaar"), dict) else {}
+    return any(identity.get(name) for name in ("aadhaar_number", "masked_aadhaar_number", "vid"))
+
+
+def _settle_suspected(inspected, kind: str, pages: list[int], extractions: dict, classified: dict, warnings: list[str],
+                      review: list[str] | None) -> bool:
+    """What became of the pages that only LOOKED like a passport / Aadhaar page. Confirmed by the reader (its result for the
+    kind holds the number): they are the kind's pages, filed in its field. Otherwise they stay unidentified, with the reason
+    "Looked like a passport but could not be read.", and go to Other documents; a result for a kind with no confidently read page
+    is then not applied (nothing is filled from a reading that did not confirm what it was shown). Returns whether they were promoted."""
+    extraction = extractions.get(kind)
+    if extraction is not None and _confirmed(kind, extraction["raw"]):
+        for number in pages:
+            page = inspected.pages[number - 1]
+            page.status, page.document_type, page.inherited, page.confidence = "read", kind, True, 0.5
+            page.reason = f"Confirmed as a {kind} by the document reader."
+        extraction["selected_pages"] = sorted({*extraction.get("selected_pages", []), *pages})
+        warnings.append(f"Pages {', '.join(map(str, pages))} looked like a {kind} and were confirmed by the document reader, not by the local "
+                        "check. Compare the details with the original.")
+        return True
+    reason = SUSPECT_REASON.format(kind=kind)
+    for number in pages:
+        inspected.pages[number - 1].reason = reason
+    if extraction is not None and not classified.get(kind):
+        del extractions[kind]
+    warnings.append(f"{'Page' if len(pages) == 1 else 'Pages'} {', '.join(map(str, pages))} looked like a {kind} but could not be read; "
+                    f"{'it was' if len(pages) == 1 else 'they were'} filed under Other documents. Check "
+                    f"{'it' if len(pages) == 1 else 'them'} in the stored original.")
+    return False
+
+
+def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict, warnings: list[str], review: list[str] | None = None,
+                   suspected: dict | None = None) -> list[str]:
     """Decide what the candidate pages turned out to be. Returns the kinds whose candidate pages were promoted.
 
     A kind with no identified page and nothing found is dropped (the reader saw no passport / card there). A kind with
     nothing identified before and something found takes the candidate pages as its own. Where the kind already had pages,
-    its candidates stay candidates that were read along with them."""
+    its candidates stay candidates that were read along with them. ``suspected`` ({kind: pages}) names the candidates that
+    were read but only looked like the kind (``_suspected_pages``): they need the reader to confirm them with the number
+    (see ``_settle_suspected``), which a name alone does not."""
     # A weak page can be probed in both identity modes. Conflicting positive answers
     # do not establish two documents: keep the paid raw results, but no typed file/fields.
     claims: dict[int, list[str]] = {}
@@ -1964,6 +2028,14 @@ def _settle_probes(inspected, probes: dict, classified: dict, extractions: dict,
             changed.add(kind)
     promoted = list(changed)
     for kind, pages in probes.items():
+        mine = [number for number in pages if number in set((suspected or {}).get(kind, []))
+                and inspected.pages[number - 1].document_type == "unknown" and kind not in changed]
+        if mine:
+            if _settle_suspected(inspected, kind, mine, extractions, classified, warnings, review) and kind not in promoted:
+                promoted.append(kind)
+            pages = [number for number in pages if number not in mine]
+            if not pages:
+                continue
         extraction = extractions.get(kind)
         if extraction is None or classified.get(kind):
             if extraction is not None and pages:
@@ -2045,7 +2117,7 @@ def _extract_attachment(
         # Checkpoints merge JSON keys in the database, so reset explicit values
         # instead of removing keys (otherwise old plans could reappear on retry).
         state.update(inspection_signature="", person_detection_version=0, passport_plan={}, passport_skipped=[],
-                     local_patterns={}, local_filled=False, page_rotations={}, payload_drops={}, probe_plan={},
+                     local_patterns={}, local_filled=False, page_rotations={}, payload_drops={}, probe_plan={}, suspected_pages={},
                      partial_extractions={}, extractions={}, coverage={}, warnings=[], output=None, documents={})
     options = {
         "tesseract_cmd": settings.tesseract_cmd, "languages": settings.ocr_languages,
@@ -2076,8 +2148,14 @@ def _extract_attachment(
         state["documents"] = {}
     try:
         if inspected is None:
-            inspected = _inspect_and_send_early(
-                data, options, state=state, save=save, settings=settings, source_hash=source_hash, early=partial)
+            # A long scan inside a reading job is sorted page by page, every finished page saved in the job (services/page_sort.py): a
+            # file that needs more than one pass continues where it stopped (SortContinues hands the job back without an attempt).
+            # Short files, and anything read outside a job, are inspected whole as before.
+            from app.services import page_sort
+            inspected = page_sort.inspect_resumable(data, settings, state=state)
+            if inspected is None:
+                inspected = _inspect_and_send_early(
+                    data, options, state=state, save=save, settings=settings, source_hash=source_hash, early=partial)
             evidence = _identity_evidence(inspected.pages)
             state["person_detection_version"] = 1
             state["inspection_version"] = INSPECTION_VERSION
@@ -2124,7 +2202,15 @@ def _extract_attachment(
             expected = _expected_probe_pages(inspected, expected_kind)
         else:
             expected = {kind: list(pages) for kind, pages in (state.get("probe_plan") or {}).items() if kind == expected_kind and pages}
-    if not inspected.complete and not (partial and (inspected.has_classified_pages or expected)):
+    # No page identified and no slot chosen, but some page looks like a passport or an Aadhaar page that the local check could not
+    # read: those pages are sent to the reader as that kind (see _probe_pages); a restored inspection keeps the saved plan.
+    suspects_only: dict[str, list[int]] = {}
+    if partial and not expected and not inspected.has_classified_pages:
+        if fresh_inspection or "probe_plan" not in state:
+            suspects_only = _probe_pages(inspected)
+        else:
+            suspects_only = {kind: list(pages) for kind, pages in (state.get("probe_plan") or {}).items() if pages}
+    if not inspected.complete and not (partial and (inspected.has_classified_pages or expected or suspects_only)):
         warnings.append("Some pages are unread or unclassified. Review the document before extraction.")
         return _finish(state, save, report, {}, "needs_review", warnings)
 
@@ -2140,8 +2226,13 @@ def _extract_attachment(
     elif fresh_inspection or "probe_plan" not in state:
         probes = _probe_pages(inspected)
         state["probe_plan"] = probes  # a restored inspection holds no text, so the plan is kept to stay the same on every visit
+        # Which of those pages only LOOK like a passport / Aadhaar page: the reader must confirm them with the number (see _settle_probes).
+        looked_like = _suspected_pages(inspected)
+        state["suspected_pages"] = {kind: [n for n in pages if n in probes.get(kind, [])] for kind, pages in looked_like.items()
+                                    if any(n in probes.get(kind, []) for n in pages)}
     else:
         probes = {kind: list(pages) for kind, pages in state["probe_plan"].items()}
+    suspected = {} if expected else {kind: list(pages) for kind, pages in (state.get("suspected_pages") or {}).items() if pages}
     passport_pages, narrowed = _plan_passport(state, inspected, fresh_inspection)
     if passport_pages:
         classified["passport"] = passport_pages
@@ -2185,7 +2276,7 @@ def _extract_attachment(
         check = _cross_check(kind, (state.get("local_patterns") or {}).get(kind) or {}, extraction["raw"])
         if check:
             extraction["coverage"]["crossCheck"] = check
-    promoted = _settle_probes(inspected, probes, classified, extractions, warnings, review)
+    promoted = _settle_probes(inspected, probes, classified, extractions, warnings, review, suspected)
     if expected:
         # First in the list: the form shows the first note, so it says what happened to this scan.
         if expected_kind in promoted:
@@ -2194,8 +2285,9 @@ def _extract_attachment(
             note = _expected_unread_note(expected_kind)
             warnings.insert(0, note)
             review.append(note)  # also the reason shown on the upload row (coverage "failed")
-    if promoted:
-        # Pages the document reader confirmed are now identified pages of the file.
+    if promoted or any(suspected.values()):
+        # Pages the document reader confirmed are now identified pages of the file; suspected pages it did not confirm carry
+        # their reason ("Looked like a passport but could not be read.").
         report = inspected.to_dict()
         state["inspection"] = {**report, "unsent_page_text": held} if held else report
         for kind in promoted:

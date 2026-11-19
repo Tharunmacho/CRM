@@ -1331,3 +1331,30 @@ def test_the_files_of_an_unrenamed_mixed_folder_name_nobody():
         assert len(names) == 14
         assert bulk.split_people(names) is None, names
         assert all(bulk._name_in(name) is None for name in names), names
+
+
+from app.api.routers import candidate_import as _candidate_import
+REAL_START_READING = _candidate_import._start_reading        # taken at import, before the autouse fixture switches it off
+
+
+def test_a_long_scan_that_the_request_cannot_finish_is_stored_whole_and_handed_to_the_worker_not_cut_by_a_partial_reading(env, monkeypatch):
+    """The Import screen sorts for a bounded time only. A scan it did not reach the end of is never cut from a partial reading (the pages it
+    never reached used to land in Other documents): it is stored whole and queued for the reading worker's page-by-page sort."""
+    from app.db.models import DocumentExtractionJob
+    monkeypatch.setattr(_candidate_import, "_start_reading", REAL_START_READING)
+    cut = bulk.SplitResult([bulk.Piece(["other"], PDF + b" long", [])], False, "cut", cut_short=True)
+    seen = {}
+
+    def fake(data, content_type, kinds, original_name="", *, document_timeout=None):
+        seen["timeout"] = document_timeout
+        return cut
+    with patch.object(bulk, "split_by_content", fake), patch.object(bulk, "classify_content", lambda data: []):
+        result = _send_files(env, "Rashid Khan", {"scan0001.pdf": (PDF + b" long", "application/pdf")})
+    assert seen["timeout"] and seen["timeout"] <= 90                                                    # the request's own budget, not 120 s or more
+    assert any("sorted page by page in the background" in issue["message"] for issue in result["issues"])
+    assert "sortLater" not in result
+    with env.sessions() as db:
+        rows = list(db.scalars(select(Attachment).where(Attachment.entity_type == "candidate", Attachment.entity_id == result["candidateId"])))
+        jobs = list(db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.kind == "resort", DocumentExtractionJob.group_id == result["candidateId"])))
+    assert [row.slot for row in rows] == ["other"] and rows[0].content_hash == __import__("hashlib").sha256(PDF + b" long").hexdigest()      # whole, byte for byte
+    assert [job.status for job in jobs] == ["pending"]                                                  # the worker sorts it, with live status

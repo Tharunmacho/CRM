@@ -28,6 +28,7 @@ from PIL import Image, ImageOps, ImageStat
 from app.core.cpus import available_cpus, default_page_workers
 
 from . import page_enhance as enhance
+from . import script_pass
 from . import second_opinion
 from . import read_merge as merge
 from . import validators
@@ -273,6 +274,9 @@ def _find_libreoffice() -> str | None:
 
 
 _LANGUAGE_CACHE: dict[tuple[str, str], str] = {}
+# Set while the optional script packs are looked up: a missing one is reported by ``_installed_script_packs``, once, not as the
+# "Tamil text will be read poorly" warning of the base languages.
+_QUIET_MISSING: contextvars.ContextVar[bool] = contextvars.ContextVar("ocr_quiet_missing", default=False)
 # Where the languages of a (command, languages) pair were found: a folder passed as --tessdata-dir, or None for the
 # Tesseract install's own folder. Filled by _usable_languages; _tesseract only looks it up (it never probes).
 _TESSDATA_CHOICE: dict[tuple[str, str], str | None] = {}
@@ -352,7 +356,7 @@ def _usable_languages(command: str, languages: str) -> str:
         available = (own if folder else system)
         chosen = "+".join(kept) if kept else ("eng" if "eng" in available else wanted)
         missing = [lang for lang in wanted_list if lang not in kept]
-        if missing:
+        if missing and not _QUIET_MISSING.get():
             _warn_missing(missing)
     _LANGUAGE_CACHE[key] = chosen
     _TESSDATA_CHOICE[(command, chosen)] = folder
@@ -370,6 +374,44 @@ def _default_aadhaar_languages() -> str:
         except Exception:
             value = "eng+tam"
     return (value or "").strip()
+
+
+_SCRIPT_WARNED: set[tuple[str, str]] = set()
+
+
+def _script_languages_setting() -> str:
+    """The packs a badly read page may be re-read with (``OCR_SCRIPT_LANGUAGES``; blank: the pass is off)."""
+    value = os.environ.get("OCR_SCRIPT_LANGUAGES")
+    if value is None:
+        try:
+            from app.core.config import get_settings
+
+            value = get_settings().ocr_script_languages
+        except Exception:
+            value = script_pass.DEFAULT_PACKS
+    return (value or "").strip()
+
+
+def _installed_script_packs(command: str, configured: str) -> tuple[tuple[str, ...], str]:
+    """(the configured script packs that are installed, the language string that reads all of them and English at once).
+
+    ``_usable_languages`` drops what is missing (one warning) and remembers which folder holds the rest, so the probe string
+    and the later ``<pack>+eng`` reads both find their files."""
+    wanted = script_pass.enabled_packs(configured)
+    if not wanted:
+        return (), ""
+    token = _QUIET_MISSING.set(True)
+    try:
+        probe = _usable_languages(command, "+".join(["eng", *wanted]))
+    finally:
+        _QUIET_MISSING.reset(token)
+    have = set(probe.split("+"))
+    installed = tuple(pack for pack in wanted if pack in have)
+    if len(installed) < len(wanted) and (command, configured) not in _SCRIPT_WARNED:
+        _SCRIPT_WARNED.add((command, configured))
+        log.info("OCR script pack(s) %s not installed: pages in those scripts keep their English read (%s).",
+                 ", ".join(pack for pack in wanted if pack not in have), _INSTALL_HINT)
+    return (installed, probe) if installed else ((), "")
 
 
 def _usable_native(text: str) -> bool:
@@ -736,7 +778,7 @@ def _ocr_image(image: Image.Image, **kwargs) -> OCRRead:
 def _ocr_page(image: Image.Image, *, command: str | None, languages: str, deadline: float,
               render=None, dpi: int = OCR_BASE_DPI, render_color=None, hard_deadline: float | None = None,
               need_more=None, fast: bool = False, release=None, owned: list | None = None,
-              memo: dict | None = None) -> OCRRead:
+              memo: dict | None = None, script_packs: tuple[str, ...] = (), script_probe: str = "") -> OCRRead:
     """Read one page image, escalating only as far as the page needs.
 
     ``memo`` (optional) is the page's own notebook across calls: the quick look stores its first read and what it found out
@@ -864,9 +906,11 @@ def _ocr_page(image: Image.Image, *, command: str | None, languages: str, deadli
         render = None if plain_render is None else (lambda resolution: _upright(plain_render(resolution), turn, release))
         render_color = None if plain_color is None else (lambda resolution: _upright(plain_color(resolution), turn, release))
     mrz_pending = first is not None and _mrz_pending(first.text)
+    script_used = ""
+    script_read: OCRRead | None = None
 
     def base_notes(extra: dict) -> dict:
-        return {**extra, **({"rotation": turn} if turn else {})}
+        return {**extra, **({"rotation": turn} if turn else {}), **({"script": script_used} if script_used else {})}
 
     if fast and first is not None:
         # The quick first look of a two-pass inspection: one Tesseract call (and the turn, when the page lay sideways),
@@ -874,6 +918,46 @@ def _ocr_page(image: Image.Image, *, command: str | None, languages: str, deadli
         first.setting, first.variants, first.raw_confidence = tried[0], list(tried), first.confidence
         first.notes = base_notes({"engine": "tesseract", "stopped": "fast"})
         return first
+    # Script. A page that English reads as noise (an Arabic card, a Tamil certificate) and that the English read could not
+    # classify is looked at in the script it is written in. Pages that read well, or that already classified, never get here.
+    if script_packs and first is not None and not timed_out and script_pass.poor_read(first):
+        try:
+            try:
+                settled_in_english = (need_more is not None and len(first.text.strip()) >= 40 and not need_more(first.text)
+                                      and classify_page(first.text).document_type != "unknown")
+            except Exception:
+                settled_in_english = False
+            if not settled_in_english:
+                pack = ""
+                sheet = script_pass.stack_lines(image, script_pass.garbled_lines(first, image.size))
+                if sheet is not None:
+                    try:
+                        remaining = deadline - time.monotonic()
+                        if remaining > 0.5:
+                            probe = _tesseract(sheet, command, script_probe, min(remaining, 10.0), psm=6, dpi=dpi)
+                            tried.append("script probe")
+                            counts, latin = script_pass.count_scripts(probe.items)
+                            pack = script_pass.choose(counts, latin, list(script_packs))
+                    finally:
+                        sheet.close()
+                pack_languages = _usable_languages(command, f"{pack}+eng") if pack else ""
+                remaining = deadline - time.monotonic()
+                if pack_languages and pack in pack_languages.split("+") and remaining > 0.5:
+                    again = _tesseract(image, command, pack_languages, remaining, psm=3, dpi=dpi)
+                    tried.append(f"script {pack} psm3 {dpi}dpi")
+                    if script_pass.adopt(again, first):
+                        languages, script_used, script_read = pack_languages, pack, again
+                        best, best_name = OCRRead("", 0, "No readable text was found; the page is not confirmed blank."), ""
+                        candidates.clear()
+                        first = record(f"script {pack} psm3 {dpi}dpi", again)
+                        if first.confidence >= script_pass.STOP_CONFIDENCE and first.words >= script_pass.STOP_MIN_WORDS and not mrz_pending and not identity_hint(first.text):
+                            # Read in its own script with confidence: the other settings (sparse, binarised) would only add stray
+                            # glyphs in that script and cost seconds. An identity page keeps its targeted passes.
+                            first.setting, first.variants, first.raw_confidence = tried[-1], list(tried), first.confidence
+                            first.notes = base_notes({"engine": "tesseract", "stopped": "script"})
+                            return first
+        except Exception:   # an improvement only; never a reason to lose the English read
+            log.debug("script pass failed", exc_info=True)
     small = bool(first and first.words >= 10 and 0 < first.text_height < _SMALL_TEXT_PX)
     covered = True
     if first and first.lines and first.text.strip():
@@ -910,7 +994,7 @@ def _ocr_page(image: Image.Image, *, command: str | None, languages: str, deadli
 
     ladder_start = time.monotonic()
     extra_lines: list[merge.Line] = []
-    notes: dict = {}
+    notes: dict = {"script": script_used} if script_used else {}
     engines_tried: list[str] = ["tesseract"]
     photo_like = False
 
@@ -1191,6 +1275,10 @@ def _ocr_page(image: Image.Image, *, command: str | None, languages: str, deadli
     use_merged = bool(lines) and len(text.strip()) >= min(40, len(best.text.strip()))
     if need_more is not None and classify_page(best.text).document_type != "unknown" and classify_page(text).document_type == "unknown":
         use_merged = False
+    if script_read is not None and good < 1.15 * script_read.good_words:
+        # The page was read in its own script. Later reads of other kinds (sparse, binarised) only add stray glyphs in that script
+        # (and inflate the word count with them), so only a merged text clearly better than the script read replaces it.
+        use_merged, best, best_name = False, script_read, f"script {script_used} psm3 {dpi}dpi"
     if use_merged:
         result = OCRRead(text, confidence, words=words, good_words=good, text_height=best.text_height, lines=lines)
     else:
@@ -1371,8 +1459,11 @@ class _PageReader:
     inside the worker that reads it, so at most ``2 * workers`` are alive at once.
     """
 
-    def __init__(self, document, *, command, languages, page_timeout, deadline, image_source, need_more=None):
+    def __init__(self, document, *, command, languages, page_timeout, deadline, image_source, need_more=None,
+                 script_packs: tuple[str, ...] = (), script_probe: str = ""):
         self.need_more = need_more
+        self.script_packs = script_packs
+        self.script_probe = script_probe
         self.fast = False
         self.document = document
         self.command = command
@@ -1543,7 +1634,8 @@ class _PageReader:
                 read = _ocr_image(image, command=self.command, languages=self.languages, deadline=window,
                                   render=render, dpi=dpi, render_color=render_color, hard_deadline=self.deadline,
                                   need_more=(lambda text: self.need_more(text, index)) if self.need_more else None,
-                                  fast=self.fast, release=release, memo=self.memos.setdefault(index, {}))
+                                  fast=self.fast, release=release, memo=self.memos.setdefault(index, {}),
+                                  script_packs=self.script_packs, script_probe=self.script_probe)
                 if not read.retryable or time.monotonic() >= self.deadline:
                     break
                 if attempt == 1:
@@ -1614,7 +1706,7 @@ def inspect_document(
     data: bytes, *, tesseract_cmd: str | None = None, languages: str = "eng",
     max_pages: int = 300, page_timeout: float = 20, document_timeout: float = 600,
     page_workers: int | None = None, need_more=needs_more_reading, two_pass: bool = True,
-    on_first_pass=None, aadhaar_languages: str | None = None,
+    on_first_pass=None, aadhaar_languages: str | None = None, script_languages: str | None = None,
 ) -> Inspection:
     """Inspect all pages without network, database, filename or nationality rules.
 
@@ -1638,7 +1730,9 @@ def inspect_document(
 
     ``languages`` reads every page. Pages recognised as Aadhaar (bilingual cards: English plus the state language, which
     an English-only model turns into nonsense Latin letters) are read once more with ``aadhaar_languages`` (default:
-    ``OCR_AADHAAR_LANGUAGES``, ``eng+tam``) and the better read kept; other pages are never touched by the extra packs.
+    ``OCR_AADHAAR_LANGUAGES``, ``eng+tam``) and the better read kept. A page that English reads badly and cannot classify is
+    read with the pack of its script (``script_languages``, default ``OCR_SCRIPT_LANGUAGES``: ara, tam, tel, hin, mal) when a
+    probe of its garbled lines names one (``script_pass``); pages that read well are never touched by the extra packs.
     """
     if type(max_pages) is not int or max_pages < 1:
         raise InspectionError("The inspection page limit must be a positive integer.")
@@ -1651,8 +1745,12 @@ def inspect_document(
     normalized, source_format = _normalize(data, deadline)
     command = find_tesseract(tesseract_cmd)
     extra_languages = ""
+    script_packs: tuple[str, ...] = ()
+    script_probe = ""
     if command:
         languages = _usable_languages(command, languages)
+        script_packs, script_probe = _installed_script_packs(
+            command, _script_languages_setting() if script_languages is None else script_languages.strip())
         wanted_extra = _default_aadhaar_languages() if aadhaar_languages is None else aadhaar_languages.strip()
         if wanted_extra:
             extra_languages = _usable_languages(command, wanted_extra)
@@ -1672,7 +1770,8 @@ def inspect_document(
         workers = max(1, min(page_workers or _default_workers(), 32, count))
         deadline = min(deadline, time.monotonic() + _scaled_budget(min(count, max_pages), workers, page_timeout))
         reader = _PageReader(source, command=command, languages=languages, page_timeout=page_timeout,
-                             deadline=deadline, image_source=source_format in _IMAGE_FORMATS, need_more=need_more)
+                             deadline=deadline, image_source=source_format in _IMAGE_FORMATS, need_more=need_more,
+                             script_packs=script_packs, script_probe=script_probe)
         limit = min(count, max_pages)
 
         def read_all(indexes: list[int]) -> list[InspectedPage]:

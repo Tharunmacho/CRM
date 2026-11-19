@@ -194,6 +194,29 @@ def aadhaar_back_lines(n: int = 1) -> list[str]:
     ]
 
 
+def damaged_passport_lines(n: int = 1) -> list[str]:
+    """The photo page of a passport scanned badly: the captions are glued and the country is run together (so the local check
+    cannot classify it), yet its cues are still there. All values invented."""
+    return [
+        "REPUBLICOFINDIA",
+        "Nationality INDIAN",
+        f"Surnarne SAMPLE{n}",
+        "Dateof Birth 01/01/1990",
+        "Placeoflssue EXAMPLEPUR",
+        "Dateoflssue 02/02/2020",
+        "SAMPLE<<TESTER<<<<<<<<<<<",
+    ]
+
+
+def damaged_passport_back_lines(n: int = 1) -> list[str]:
+    """The address page of that passport: no passport words at all, only an address."""
+    return [
+        f"Parent Sample{n}   Spouse Sample{n}",
+        "12, EXAMPLE ROAD, EXAMPLEPUR, EXAMPLE DISTRICT",
+        "PIN:530001, ANDHRA PRADESH, INDIA",
+    ]
+
+
 _UNRELATED = ["Minutes of the neighbourhood garden committee", "Agenda: bench repairs, watering rota, summer picnic",
               "Attendees: nine members; apologies from two", "Next meeting is on the first Monday of the month"] * 3
 
@@ -201,6 +224,8 @@ _PAGE_LINES = {
     "passport": lambda n: passport_lines(n),
     "aadhaar": lambda n: aadhaar_lines(n),
     "aadhaar_back": lambda n: aadhaar_back_lines(n),
+    "passport_damaged": lambda n: damaged_passport_lines(n),
+    "passport_back_damaged": lambda n: damaged_passport_back_lines(n),
     "unrelated": lambda n: list(_UNRELATED),
     "certificate": lambda n: ["CERTIFICATE OF COMPLETION", "This is to certify that Tester Sample has completed the training.",
                               f"Certificate number {n:06d}. Authorised signatory."],

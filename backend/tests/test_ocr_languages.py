@@ -21,6 +21,7 @@ def clean_language_state(monkeypatch):
     monkeypatch.setattr(subject, "_TESSDATA_CHOICE", {})
     monkeypatch.setenv("OCR_TESSDATA_DIR", "")  # blank: the folder is off unless a test names one
     monkeypatch.delenv("OCR_AADHAAR_LANGUAGES", raising=False)
+    monkeypatch.setenv("OCR_SCRIPT_LANGUAGES", "")  # the script pass has its own tests (test_ocr_script_pass.py)
 
 
 def own_folder(root: Path, languages=("eng", "osd", "tam"), tsv=True) -> Path:

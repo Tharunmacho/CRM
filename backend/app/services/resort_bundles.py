@@ -39,6 +39,7 @@ from sqlalchemy.orm import undefer
 from app.core.config import get_settings
 from app.db.models import Attachment, AuditEntry, Candidate, DocumentExtractionJob
 from app.services import document_splitting as splitting
+from app.services import page_sort
 from app.services.document_storage import read_bytes
 
 log = logging.getLogger(__name__)
@@ -48,8 +49,8 @@ IDENTITY_SLOTS = ("resume", "passport", "aadhaar")
 RESORT_SLOTS = (*IDENTITY_SLOTS, "other", "source_bundle")       # where a combined file can be sitting
 SOURCE_SLOT = "source_bundle"
 RESORT_MAX_KB = 25 * 1024            # the upload cap: a bigger stored file is never opened
-RESORT_MAX_PAGES = 40                # the page sorter's own cap (`bulk.SPLIT_MAX_PAGES`): more pages cannot be sorted in full
-RESORT_DOCUMENT_TIMEOUT = 240.0      # seconds of page reading one attempt may take (an upload's own sort gets 120)
+RESORT_MAX_PAGES = 120               # pages a stored file may have to be sorted at all (the setting SORT_MAX_PAGES can lower it)
+RESORT_DOCUMENT_TIMEOUT = 240.0      # seconds a text-layer file's whole-file read may take; a scan is sorted page by page (services/page_sort.py)
 RESORT_MAX_ATTEMPTS = 3              # cut-short or failed attempts before the file is given up on
 RESORT_RETRY_SECONDS = 600           # a cut-short attempt is tried again after this
 RESORT_FILES_PER_CANDIDATE = 8       # jobs one call queues for one candidate (the rest wait for the next call)
@@ -265,7 +266,7 @@ def _lost(job, claimed_by) -> bool:
 def _finish(job, outcome: str, result: dict | None = None) -> None:
     """Mark a locked job done (a file that needs no more sorting, or one that was sorted)."""
     stamp = now()
-    job.state = {**dict(job.state or {}), RESORT_KIND: {"outcome": outcome, "at": stamp.isoformat()}}
+    job.state = {**page_sort.strip(dict(job.state or {})), RESORT_KIND: {"outcome": outcome, "at": stamp.isoformat()}}
     job.result = {"outcome": outcome, "reason": OUTCOMES.get(outcome, ""), **(result or {})}
     job.status, job.last_error = "completed", None
     job.updated_at = job.finished_at = stamp
@@ -294,6 +295,7 @@ def _postpone(sessions, identifier: str, claimed_by, why: str) -> None:
         if job.attempts >= RESORT_MAX_ATTEMPTS:
             job.status = "dismissed"      # given up: nothing was changed; a person can still read and file the pages by hand
             job.finished_at = stamp
+            job.state = page_sort.strip(dict(job.state))     # the saved page texts are not kept for a file given up on
         else:
             job.status, job.next_attempt_at = "retry", stamp + timedelta(seconds=RESORT_RETRY_SECONDS)
         job.updated_at = stamp
@@ -301,6 +303,19 @@ def _postpone(sessions, identifier: str, claimed_by, why: str) -> None:
         attempt = job.attempts
         db.commit()
     log.warning("Re-sort %s did not finish (%s); attempt %s of %s.", identifier, why, attempt, RESORT_MAX_ATTEMPTS)
+
+
+def _continue(sessions, identifier: str, claimed_by) -> None:
+    """The pass is over but the file's pages are not all read: back to the queue at once, no attempt counted. The next pass (this worker
+    or another) continues from the pages already saved (`page_sort`)."""
+    with sessions() as db:
+        job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
+        if _lost(job, claimed_by):
+            return
+        stamp = now()
+        job.status, job.next_attempt_at, job.last_error, job.updated_at = "retry", stamp + timedelta(seconds=1), None, stamp
+        job.claimed_by = job.lease_until = None
+        db.commit()
 
 
 def _pages_text(pages) -> str:
@@ -390,13 +405,15 @@ def process_resort(identifier: str, *, sessions, settings, claimed_by=None) -> N
     """Run one re-sort job (called by `manual_extraction.process_job`, from the reading worker). Never raises for a file's own trouble."""
     from app.services.manual_extraction import READY, _hand_back, now as claim_time
     with sessions() as db:
-        job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.draft)).where(DocumentExtractionJob.id == identifier).with_for_update())
+        job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.draft), undefer(DocumentExtractionJob.state))
+                        .where(DocumentExtractionJob.id == identifier).with_for_update())
         if job is None or job.kind != RESORT_KIND or job.status not in READY or (claimed_by is not None and job.claimed_by != claimed_by):
             return
         if claimed_by is None:
             job.status = "processing"
             job.updated_at = job.started_at = claim_time()
         meta = dict((job.draft or {}).get(RESORT_KIND) or {})
+        saved_state = dict(job.state or {})
         key, digest = job.object_key, job.content_hash
         db.commit()
     candidate_id, attachment_id = meta.get("candidateId"), meta.get("attachmentId")
@@ -424,16 +441,23 @@ def process_resort(identifier: str, *, sessions, settings, claimed_by=None) -> N
         pages = splitting._page_count(data)
         if not pages:
             return _complete(sessions, identifier, claimed_by, "unreadable")
-        if pages > RESORT_MAX_PAGES:
+        if pages > min(RESORT_MAX_PAGES, int(getattr(settings, "sort_max_pages", RESORT_MAX_PAGES) or RESORT_MAX_PAGES)):
             return _complete(sessions, identifier, claimed_by, "too_long")
         if not splitting.worth_analysing(found.slot if found.slot in IDENTITY_SLOTS else None, found.name, "application/pdf", data):
             return _complete(sessions, identifier, claimed_by, "not_a_bundle")
-        plan, complete = splitting.sort_pages(found.name, data, document_timeout=RESORT_DOCUMENT_TIMEOUT)
+        # A scan is sorted page by page: every finished page is saved in this job, so a long file continues over several passes (the job
+        # goes back to the queue between them) and a crash loses at most one unit. A file with a text layer is sorted whole, in seconds.
+        plan, complete = page_sort.sort_plan(found.name, data, settings, state=saved_state, store=page_sort.JobPageStore(sessions, identifier, claimed_by, settings),
+                                             document_timeout=RESORT_DOCUMENT_TIMEOUT)
         if not complete:
             return _postpone(sessions, identifier, claimed_by, "The pages could not all be read in time.")
         if plan is None:
             return _complete(sessions, identifier, claimed_by, "one_document")
         _apply(sessions, settings, identifier, claimed_by, candidate_id, attachment_id, digest, plan)
+    except page_sort.SortContinues:
+        _continue(sessions, identifier, claimed_by)
+    except page_sort.JobLost:
+        return
     except Exception as exc:
         log.warning("Re-sort %s failed (%s).", identifier, type(exc).__name__, exc_info=True)
         _postpone(sessions, identifier, claimed_by, f"The file could not be sorted ({type(exc).__name__}).")

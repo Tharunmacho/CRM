@@ -1,4 +1,4 @@
-import type { IntakeJob } from './use-document-intake'
+import type { IntakeJob, Sorting } from './use-document-intake'
 
 /**
  * The model behind the single "Upload documents" zone on Add candidate. Any file may hold a resume, a passport and
@@ -131,6 +131,51 @@ export function jobFindings(job: IntakeJob): Finding[] {
   return found
 }
 
+/** The page sorting the server reported for a file (`result.sorting`), or null for an older server / a file not sorted yet. */
+export function sortingOf(job: Pick<IntakeJob, 'result'>): Sorting | null {
+  const value = (job.result as { sorting?: unknown } | undefined)?.sorting as Partial<Sorting> | undefined
+  if (!value || typeof value !== 'object' || typeof value.pageCount !== 'number' || value.pageCount < 1 || !Array.isArray(value.pages)) return null
+  return { ...value, pageCount: value.pageCount, pagesRead: Number(value.pagesRead) || 0, pagesSorted: Number(value.pagesSorted) || 0, step: String(value.step ?? ''), pages: value.pages } as Sorting
+}
+const SORT_OPEN = new Set(['sorting', 'waiting'])
+/** The file is being sorted right now (also while it waits for its next turn between two passes of the reader). */
+export const isSorting = (job: Pick<IntakeJob, 'status' | 'result'>): boolean => {
+  const sorting = sortingOf(job)
+  return !!sorting && SORT_OPEN.has(sorting.step) && ACTIVE.has(job.status)
+}
+/**
+ * "Page 5 of 27 · sorting": the page being read now (else the next one to read), honest about a wait ("waiting for its next turn") and about
+ * a page read again after a time-out. Empty when the server has said nothing about the pages.
+ */
+export function sortingLine(job: Pick<IntakeJob, 'status' | 'result'>): string {
+  const sorting = sortingOf(job)
+  if (!sorting || !SORT_OPEN.has(sorting.step)) return ''
+  const reading = (sorting.reading ?? []).filter((page) => Number.isFinite(page))
+  const current = reading.length ? Math.min(...reading) : Math.min(sorting.pageCount, sorting.pagesRead + 1)
+  const again = sorting.pages.filter((page) => page.state === 'retry').map((page) => `page ${page.page}: ${page.reason ?? 'time ran out - retrying'}`)
+  const head = `Page ${current} of ${sorting.pageCount} · ${sorting.step === 'waiting' ? 'waiting for its next turn' : 'sorting'}`
+  return again.length ? `${head} · ${again.slice(0, 2).join(', ')}` : head
+}
+/** One line per kind found once the file is sorted: "Resume · pages 1–2". Kinds in the order of their first page. */
+export function foundLines(job: Pick<IntakeJob, 'result'>): string[] {
+  const sorting = sortingOf(job)
+  if (!sorting || sorting.step !== 'done') return []
+  const groups = new Map<string, number[]>()
+  for (const page of sorting.pages) if (page.kind && page.kind !== 'other') groups.set(page.kind, [...(groups.get(page.kind) ?? []), page.page])
+  return [...groups].map(([kind, pages]) => `${chipLabel(kind)} · ${pagesText(pages)}`)
+}
+export interface UnplacedPage { page: number; reason: string }
+/** The pages of a sorted file that could not be placed, each with a plain reason: the person picks the right field for each one. */
+export function unplacedPages(job: Pick<IntakeJob, 'result'>): UnplacedPage[] {
+  const sorting = sortingOf(job)
+  if (!sorting || sorting.step !== 'done') return []
+  return (sorting.unplaced ?? []).filter((item) => Number.isInteger(item.page) && typeof item.reason === 'string')
+    .map((item) => ({ page: item.page, reason: item.reason })).sort((a, b) => a.page - b.page)
+}
+/** The fields a page can be placed in with one click (the first few are shown as buttons, the rest in a list). */
+export const PLACE_CHOICES: readonly string[] = ['resume', 'passport', 'aadhaar', 'education_certificate', 'experience_certificate', 'medical', 'signed_offer', 'visa', 'pcc', 'air_ticket']
+export const PLACE_BUTTONS = 6
+
 export interface FileRow {
   id: string
   name: string
@@ -153,6 +198,12 @@ export interface FileRow {
   /** Offer "Check again" (ask the server for the reader state now). */
   canCheckAgain: boolean
   findings: Finding[]
+  /** "Page 5 of 27 · sorting" while the pages are being sorted (empty otherwise). */
+  sortLine: string
+  /** One line per kind found once sorted ("Resume · pages 1–2"). */
+  foundLines: string[]
+  /** Pages that could not be placed, each with a plain reason and a choice of field. */
+  unplaced: UnplacedPage[]
 }
 
 /** "245 KB" or "1.2 MB". */
@@ -198,7 +249,10 @@ function queuedRow(job: IntakeJob, base: Omit<FileRow, 'state' | 'label' | 'tone
 
 export function fileRow(job: IntakeJob, clock?: QueueClock): FileRow {
   const findings = jobFindings(job)
-  const base = { id: job.id, name: job.filename, sizeKb: job.sizeKb, url: job.originalUrl, findings, note: '', hint: '', canRetry: false, retryLabel: '', canEnterManually: false, stalled: null, canCheckAgain: false }
+  const base = { id: job.id, name: job.filename, sizeKb: job.sizeKb, url: job.originalUrl, findings, note: '', hint: '', canRetry: false, retryLabel: '', canEnterManually: false, stalled: null, canCheckAgain: false,
+    sortLine: sortingLine(job), foundLines: foundLines(job), unplaced: unplacedPages(job) }
+  // A file being sorted between two passes of the reader is not "waiting in line": it is being read, and says which page.
+  if (isSorting(job) && job.status !== 'processing') return { ...base, state: 'reading', label: 'Reading', tone: 'busy' }
   switch (job.status) {
     case 'processing': return { ...base, state: 'reading', label: 'Reading', tone: 'busy' }
     case 'pending': case 'retry': case 'uploaded': return queuedRow(job, base, clock)
@@ -312,11 +366,11 @@ export const SLOW_READ_MS = 90_000
 export function readingStatus(jobs: IntakeJob[], now: number = Date.now()): ReadingStatus {
   const docs = jobs.filter(isDocumentJob)
   if (!docs.length) return { steps: [], text: '' }
-  const waiting = docs.filter((job) => job.status === 'uploaded' || job.status === 'pending' || job.status === 'retry')
-  const running = docs.filter((job) => job.status === 'processing')
+  const waiting = docs.filter((job) => (job.status === 'uploaded' || job.status === 'pending' || job.status === 'retry') && !isSorting(job))
+  const running = docs.filter((job) => job.status === 'processing' || isSorting(job))
   const open = waiting.length + running.length
   const names = foundChips(docs).filter((chip) => chip.state !== 'idle').map((chip) => chip.label.replace(/ needs a look$/, ''))
-  const startedAt = running.map((job) => Date.parse(job.startedAt ?? '')).filter(Number.isFinite)
+  const startedAt = running.map((job) => Date.parse(sortingOf(job)?.startedAt ?? job.startedAt ?? '')).filter(Number.isFinite)
   const elapsed = startedAt.length ? now - Math.min(...startedAt) : 0
   const sorting = running.length > 0 && names.length === 0
   const steps: ReadingStep[] = [
@@ -331,7 +385,8 @@ export function readingStatus(jobs: IntakeJob[], now: number = Date.now()): Read
     return { steps, text: down ? `Saved. ${READER_DOWN}` : 'Saved. Waiting for the reader to pick it up…' }
   }
   const slow = elapsed > SLOW_READ_MS ? ' A long scan takes a few minutes; it is still working.' : ''
-  if (sorting) return { steps, text: `Sorting the pages by what is on them… ${elapsedText(elapsed)}.${slow}` }
+  const live = running.map((job) => sortingLine(job)).find(Boolean)
+  if (sorting) return { steps, text: live ? `${live}… ${elapsedText(elapsed)}.${slow}` : `Sorting the pages by what is on them… ${elapsedText(elapsed)}.${slow}` }
   return { steps, text: `Found ${names.join(', ')}. Reading ${names.length === 1 ? 'it' : 'them'} now… ${elapsedText(elapsed)}.${slow}` }
 }
 

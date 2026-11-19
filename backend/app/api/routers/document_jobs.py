@@ -302,3 +302,22 @@ def attach(job_id: str, body: AttachIn, db: Session = Depends(get_db), user: Use
     except Exception:
         db.rollback()
         raise HTTPException(503, "We could not attach the saved files. They are safe. Try again for this candidate.") from None
+
+
+class PageKindIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: str = Field(min_length=1, max_length=40)
+
+
+@router.post("/{job_id}/pages/{page}/kind")
+def correct_page_kind(job_id: str, page: int, body: PageKindIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """A person says which document field one page of an uploaded scan belongs in (a page the sorting could not place). The uploader, a
+    manager or an admin only; the page must be in the job's stored file; repeating it changes nothing. See services/page_correction.py."""
+    from app.services.page_correction import correct_page
+    try: return correct_page(db, user, job_id, page, body.kind, get_settings())
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(503, "We could not place this page. Nothing was changed. Try again.") from None

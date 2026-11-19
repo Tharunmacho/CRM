@@ -23,9 +23,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Local page inspection and Word-to-PDF conversion before specialist OCR.
+# Local page inspection and Word-to-PDF conversion before specialist OCR. The Arabic, Tamil, Telugu, Hindi and Malayalam
+# packs read the IDs and certificates written in those scripts (only pages that read badly in English use them).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd tesseract-ocr-tam libreoffice-writer \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd tesseract-ocr-ara tesseract-ocr-tam tesseract-ocr-tel tesseract-ocr-hin tesseract-ocr-mal libreoffice-writer \
     && rm -rf /var/lib/apt/lists/*
 
 # psycopg[binary] ships its own libpq, so no build toolchain is needed here.

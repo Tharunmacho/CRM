@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     # makes that one re-read 2x-8x slower. A pack that is not installed is dropped with one warning, so a machine
     # without it still reads English. Blank: no second read.
     ocr_aadhaar_languages: str = "eng+tam"
+    # Pages that read badly in English (low confidence, few recognised words) and are still unclassified are looked at once
+    # more: a few of their garbled lines are read with all of these packs, and when most of the confident characters belong to
+    # one script the whole page is read again with that pack plus English and kept if clearly better (see
+    # app/integrations/ocr/script_pass.py). Pages that read fine never pay for it. Codes separated by spaces; blank turns the
+    # pass off; a pack that is not installed is dropped with one warning. Install them with scripts/install_ocr_languages.py.
+    ocr_script_languages: str = "ara tam tel hin mal"
     # A folder holding the traineddata files (eng, osd and the extra languages together: Tesseract reads one folder only).
     # It lets the languages be installed without admin rights; see scripts/install_ocr_languages.py. Used when it has
     # more of the wanted languages than the system install. Blank: the system install only.
@@ -100,6 +106,28 @@ class Settings(BaseSettings):
     ocr_document_timeout_seconds: float = Field(default=600.0, ge=10, le=1800)
     # Pages read at the same time by the local OCR (one Tesseract process per page).
     ocr_page_workers: int = Field(default_factory=default_page_workers, ge=1, le=32)
+    # Page sorting of a long scan (services/page_sort.py). A file's pages are read in units of SORT_UNIT_PAGES pages and every
+    # finished unit is saved in the job at once, so a long file continues across worker passes instead of being cut off by one
+    # time window, and a crash loses at most the unit being read. Several files are sorted side by side (the worker's
+    # EXTRACTION_CONCURRENCY threads, and more worker containers/replicas: they share only the database).
+    # Units read at the same time inside ONE file's pass (default: OCR_PAGE_WORKERS). Each unit is one OCR run of its pages.
+    sort_page_workers: int = Field(default_factory=default_page_workers, ge=1, le=16)
+    sort_unit_pages: int = Field(default=4, ge=1, le=16)
+    # After this long one pass hands the file back to the queue (no attempt is counted) so another file, or another worker, can
+    # take its turn; the file continues from the pages already saved.
+    sort_slice_seconds: float = Field(default=120.0, ge=10, le=1800)
+    # Seconds of page reading one file may take in all its passes together (a file that needs more has its last pages marked
+    # "ran out of time", never silently dropped) and how many times one page is read again after a time-out or a crash.
+    sort_total_seconds: float = Field(default=900.0, ge=30, le=7200)
+    sort_page_attempts: int = Field(default=3, ge=1, le=6)
+    # Files with at least this many pages that need OCR use the resumable page-by-page sorting in the reading job; shorter ones are
+    # read in one go (and their first settled pages are sent to Veris early). 2 = every combined file.
+    sort_resumable_min_pages: int = Field(default=10, ge=2, le=200)
+    # The most pages a stored/uploaded combined file may have to be sorted at all (the Import screen's own in-request sort keeps 40).
+    sort_max_pages: int = Field(default=120, ge=2, le=300)
+    # The Import screen sorts a file in its own request for at most this long; a file that needs more is stored whole and handed to the
+    # reading worker (which sorts it page by page, with live progress) instead of being cut off.
+    import_sort_seconds: float = Field(default=75.0, ge=10, le=600)
     # How long a worker keeps checking an accepted Veris job before it hands the slot back
     # and revisits the job later (a hand-back costs a release, a retry delay and a re-claim, each a database round
     # trip). 60 s lets a job of 20-45 s finish within the same visit. Zero keeps the single-poll behaviour.

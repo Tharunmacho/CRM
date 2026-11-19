@@ -25,6 +25,7 @@ from app.integrations.ocr import reader_failures
 from app.integrations.ocr.inspection import restore_inspection
 from app.integrations.ocr.mapping import OcrFields
 from app.services.document_extraction import extract_attachment, ExtractionFailure, ExtractionPending, provider_codes, request_extraction_retry
+from app.services import page_sort
 from app.services.document_storage import put_bytes, read_bytes
 from app.services.reading_notes import plain_notes
 from app.services.worker_heartbeat import waiting_reason
@@ -184,13 +185,16 @@ def _with_form_fields(kind, extraction):
     return fields
 
 
-def _scan_results(output, kinds=None):
+def _scan_results(output, kinds=None, sorting=None):
     """What the person sees of a reading. The raw warnings stay in the job's state (diag_extraction reads them);
     here they are plain, and a warning about one kind appears on that kind's card only.
 
     ``kinds`` (additive) says which pages are which document for EVERY kind the content classifier found, the ones that are only
     filed (education and experience certificates, medical, signed offer, visa ...) as well as resume, passport and Aadhaar:
-    ``{"education_certificate": [4, 5], ...}``, keyed by the candidate document field the pages are filed in."""
+    ``{"education_certificate": [4, 5], ...}``, keyed by the candidate document field the pages are filed in.
+
+    ``sorting`` (additive) is what the page sorting did, page by page (services/page_sort.py): pages read and sorted, seconds, each
+    page's field, and the pages that could not be placed with a plain reason each."""
     report = output.get("inspection", {})
     raw_warnings = output.get("warnings", [])
     shown_report = {**report, "warnings": plain_notes(report.get("warnings") or [])} if "warnings" in report else report
@@ -209,7 +213,7 @@ def _scan_results(output, kinds=None):
             "extraction_status": "complete" if extraction else "no_resume" if kind == "resume" and not selected and output["status"] != "needs_review" else "needs_review",
         }
     return {"scans": scans, "warnings": plain_notes(raw_warnings), "inspection": shown_report, "coverage": output.get("coverage"),
-            **({"kinds": kinds} if kinds else {})}
+            **({"kinds": kinds} if kinds else {}), **({"sorting": sorting} if sorting else {})}
 
 
 def _page_kinds(data, output, state, fresh):
@@ -224,6 +228,24 @@ def _page_kinds(data, output, state, fresh):
         return document_splitting.kinds_found(data, readings=fresh, report=output.get("inspection"), saved_kinds=state.get("page_kinds"))
     except Exception:
         log.warning("The kinds of the pages of a document could not be worked out; the reading result is unchanged.", exc_info=True)
+        return None
+
+
+def _sorting_summary(state: dict, output: dict, kinds, fresh: dict, data: bytes, settings) -> dict | None:
+    """What the page sorting did, page by page, for the screen (`result["sorting"]`): from the resumable sorting's own record, or else
+    from the whole-file reading made in this run. Kept in the job's state (without page text) for the correction endpoint. Never raises."""
+    try:
+        summary = page_sort.summary_of(state)
+        if summary is None:
+            reading = fresh.get(hashlib.sha256(data).hexdigest()) if fresh else None
+            summary = page_sort.summary_from_inspection(reading, settings, seconds=float((output.get("inspection", {}).get("completeness") or {}).get("seconds") or 0.0)) if reading else None
+        if summary is None:
+            return None
+        final = page_sort.final_summary(summary, output.get("inspection"), kinds)
+        state[page_sort.META_KEY] = {**(state.get(page_sort.META_KEY) if isinstance(state.get(page_sort.META_KEY), dict) else {}), "summary": final}
+        return final
+    except Exception:
+        log.warning("The page summary of a reading could not be made; the reading result is unchanged.", exc_info=True)
         return None
 
 
@@ -475,8 +497,11 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 return
             found_early["kinds"] = True
             kinds = document_splitting.kinds_found(data, readings=fresh, report=value["inspection"], saved_kinds=value.get("page_kinds"))
+            early_sort = page_sort.summary_of(value)
+            if early_sort:
+                early_sort = page_sort.final_summary(early_sort, value["inspection"], kinds)
             partial = json.dumps(_scan_results({"inspection": value["inspection"], "status": "needs_review", "warnings": [], "extractions": {}},
-                                               kinds), default=_plain)
+                                               kinds, early_sort), default=_plain)
 
             def show():
                 with sessions() as early_db:
@@ -530,7 +555,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             from app.services import intake_documents
             # The local reading of the file is kept in memory for this run (page text, never saved), so the kinds of its pages
             # below are known without reading the pages again.
-            with intake_documents.reading_scope() as fresh:
+            with page_sort.use_store(page_sort.JobPageStore(sessions, identifier, claimed_by, settings)), intake_documents.reading_scope() as fresh:
                 output = extract_attachment(data, state=state, save=save_and_fill, settings=handoff_settings(settings), designations=titles or [],
                                             final_attempt=attempts + 1 >= MAX_ATTEMPTS, expected_kind=expected_kind)
             state["output"] = deepcopy(output)
@@ -538,6 +563,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         output = checked_person_output(data, output, state, settings)
         state["output"] = deepcopy(output)
         kinds = _page_kinds(data, output, state, fresh)
+        sorting = _sorting_summary(state, output, kinds, fresh, data, settings)
         # The derived output is saved together with the stored documents below (one statement, not one per step): the paid
         # reader results themselves were already saved by the reading as they arrived, so a crash in between loses only the
         # cheap mapping, never a reader job.
@@ -601,8 +627,8 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             if _lost(job, claimed_by):
                 return
             end_run(run, time.monotonic() - run_began, "read")
-            job.state = json.loads(json.dumps(state, default=_plain))
-            job.result = json.loads(json.dumps(_scan_results(output, kinds), default=_plain))
+            job.state = json.loads(json.dumps(page_sort.strip(state), default=_plain))     # the saved page texts end with the sorting
+            job.result = json.loads(json.dumps(_scan_results(output, kinds, sorting), default=_plain))
             job.status = "completed" if output["status"] == "complete" else "needs_review"
             # A kind the reader could not read is named for the person (the upload row shows this line).
             from app.services.reading_notes import review_reasons
@@ -625,18 +651,20 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                     log.warning("Filling the application form from job %s failed; its saved result will be retried.", identifier, exc_info=True)
                     raise ExtractionFailure("The document was read, but its details could not be saved. The saved result will be tried again.") from None
             db.commit()
-    except JobFinished:
+    except (JobFinished, page_sort.JobLost):
         return
     except ExtractionPending as exc:
+        sorting_turn = isinstance(exc, page_sort.SortContinues)
         with sessions() as db:
             job = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id == identifier).with_for_update())
             if not _lost(job, claimed_by):
                 job.status, job.next_attempt_at = "retry", now() + timedelta(seconds=getattr(exc, "retry_seconds", 2))
-                end_run(run, time.monotonic() - run_began, "waiting for the reader")
+                end_run(run, time.monotonic() - run_began, "sorting pages: next turn" if sorting_turn else "waiting for the reader")
                 # The run's timings join the saved state inside this very UPDATE (a jsonb merge: nothing is read first).
                 # (a Python dict, bound once as jsonb: a string would be stored as a jsonb string and turn the state into an array)
                 job.state = DocumentExtractionJob.state.op("||")(cast(json.loads(json.dumps({"timings": state.get("timings")}, default=_plain)), JSONB))
-                job.last_error = str(exc) if hasattr(exc, "retry_seconds") else "The document is still being read. Its progress is saved."
+                job.last_error = (None if sorting_turn else str(exc) if hasattr(exc, "retry_seconds")
+                                  else "The document is still being read. Its progress is saved.")
                 if getattr(exc, "reason", None):   # a busy or slow reader is named on the document line, with a Details disclosure
                     job.draft = {**dict(job.draft or {}), "readerFailure": reader_failure_view(
                         exc.reason, attempt=job.attempts, retry_in=getattr(exc, "retry_seconds", None))}

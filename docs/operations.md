@@ -121,6 +121,32 @@ After success, set `STORAGE_BACKEND=s3`, restart all services, audit again and p
 
 The November 2026 deployment verified private S3 access from the workstation and hosted CRM, conditional writes, concurrent immutable uploads, authenticated document responses, and restoration of object versions. Credentials, source inventories, checksums and deployment evidence remain in ignored, access-restricted operational artifacts.
 
+## Sorting long combined scans (page sorting) and how to scale it
+
+A recruiter uploads ONE combined PDF per candidate (up to about 40 pages, phone scans). The reading worker sorts its pages by their content with the local OCR; only the resume, passport and Aadhaar pages then go to the paid reader (Veris), every other page is only filed in its own field.
+
+How a file is sorted (`backend/app/services/page_sort.py`): a file with `SORT_RESUMABLE_MIN_PAGES` pages or more that needs OCR is read in units of `SORT_UNIT_PAGES` pages. Every finished unit is saved in the job at once (one fenced statement that also renews the lease and publishes the live progress), so a crash or a restart loses at most the unit being read. A pass (one claim of the file by a worker) reads units, `SORT_PAGE_WORKERS` at a time, for at most `SORT_SLICE_SECONDS`; if the file is not finished it goes back to the queue without counting an attempt and the next free worker slot takes the next turn, continuing from the saved pages. Another file is therefore never held up by a long one. A page that ran out of time or crashed is read again (`SORT_PAGE_ATTEMPTS` times, with more time each time). A file may use `SORT_TOTAL_SECONDS` (default 15 minutes) of reading in all its passes; pages not reached by then are marked "ran out of time" and the file goes to needs-review (never silently dropped), and the background re-sort of stored files tries it again later with a fresh budget. Files up to the page cap `SORT_MAX_PAGES` are sorted. The Import screen sorts a file in its own request for `IMPORT_SORT_SECONDS` only; a longer one is stored whole and handed to this worker path.
+
+What the recruiter sees (Add candidate, polling `/api/ocr/jobs/groups/<id>`): `result.sorting` with "Page 5 of 27 - sorting", the pages already read and sorted, and, once done, one line per kind found and, for a page that could not be placed, a plain reason ("too dark", "no text found", "time ran out - retrying") with a choice of the right field (`POST /api/ocr/jobs/<id>/pages/<n>/kind`; the choice and a hash of the page text are written to the audit trail as "Corrected the field of a page").
+
+Settings (Dokploy service environment; defaults in `backend/app/core/config.py`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `EXTRACTION_CONCURRENCY` | 8 | files (jobs) one worker process reads side by side; each running file uses up to `SORT_PAGE_WORKERS` OCR processes |
+| `EXTRACTION_WORKERS` | 1 | worker processes started by the supervisor in one container (workers x threads is capped by `EXTRACTION_MAX_PARALLEL`, 16) |
+| `SORT_PAGE_WORKERS` | `OCR_PAGE_WORKERS` | units read at the same time inside one file's pass |
+| `SORT_UNIT_PAGES` | 4 | pages per saved unit (smaller = more saves, finer progress) |
+| `SORT_SLICE_SECONDS` | 120 | one pass hands the file back after this long |
+| `SORT_TOTAL_SECONDS` | 900 | reading time one file may use in all its passes |
+| `SORT_PAGE_ATTEMPTS` | 3 | times a page that timed out or crashed is read |
+| `SORT_RESUMABLE_MIN_PAGES` | 10 | shorter files are read in one go (2 = every combined file is sorted page by page) |
+| `SORT_MAX_PAGES` | 120 | pages a file may have to be sorted at all |
+| `IMPORT_SORT_SECONDS` | 75 | the Import screen's own in-request sorting budget |
+| `OCR_PAGE_WORKERS`, `OCR_MAX_TESSERACT_PROCESSES` | see above | OCR processes per worker process (keep `EXTRACTION_CONCURRENCY x SORT_PAGE_WORKERS` within the CPU cores) |
+
+To scale up when many recruiters upload at once: first raise CPU for the worker, then `EXTRACTION_CONCURRENCY`; to add capacity run more reader containers (Dokploy: raise the replicas of the reading-worker service, or start a second service from the same image with the same `DATABASE_URL`). Workers share nothing but the database: each claims whole files with `FOR UPDATE SKIP LOCKED` and a lease, and each turn of a long file can be taken by a different worker, so any number of replicas can run. Keep `EXTRACTION_MAX_PARALLEL` per container and the CPU cores of the host in step; a replica that dies releases its file when its lease (`EXTRACTION_LEASE_SECONDS`, 180) runs out and the next worker continues from the saved pages. Local file storage must be shared between replicas, or use S3 storage (see below): a replica that cannot see a file hands it back untouched.
+
 ## Backup and restore verification
 
 Back up PostgreSQL, document bytes/object versions, local volume marker where applicable, and the encrypted-token key as a coordinated recovery set. A database backup without its referenced files is incomplete. Restore into an isolated database/storage namespace, keep provider workers disabled, run the document audit, check user login/roles and representative old/new candidate/application documents, then rehearse manual job and task recovery. Enable external delivery only after connecting the restored environment intentionally.

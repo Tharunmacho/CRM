@@ -466,6 +466,14 @@ async def identify(request: Request, spec: str = Form(...), files: list[UploadFi
     return {"folder": parsed.folder, **answer}
 
 
+def _sort_later(entry: dict) -> "bulk.SplitResult":
+    """The file stored whole, under the kinds its name or first pages give (else Other documents), with a note that the worker sorts it."""
+    kinds = list(entry["kinds"]) or bulk.classify_content(entry["data"]) or ["other"]
+    return bulk.SplitResult([bulk.Piece(kinds, entry["data"], [])], False,
+                            f"{entry['short']} is long: it was stored whole and is being sorted page by page in the background. "
+                            "Its documents appear in their own fields as the pages are sorted.", cut_short=True)
+
+
 @router.post("/candidate")
 def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[]),
                db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
@@ -507,7 +515,13 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
     # file whose name says nothing is read for what it is.
     def read_scan(entry: dict) -> None:
         if bulk.wants_split(entry["kinds"], entry["content_type"]):
-            entry["split"] = bulk.split_by_content(entry["data"], entry["content_type"], entry["kinds"], entry["name"])
+            # The request may sort a file for `import_sort_seconds` only. A file that needs more is NOT cut by a partial reading (that
+            # sent the pages it never reached to Other documents): it is stored whole and the reading worker sorts it page by page,
+            # with every finished page saved (services/page_sort.py), then files its documents in their own fields.
+            entry["split"] = bulk.split_by_content(entry["data"], entry["content_type"], entry["kinds"], entry["name"],
+                                                   document_timeout=float(getattr(get_settings(), "import_sort_seconds", 75.0) or 75.0))
+            if entry["split"].cut_short:
+                entry["split"] = _sort_later(entry)
             if not entry["split"].split:
                 entry["kinds"] = entry["split"].pieces[0].kinds
         elif not entry["kinds"]:
@@ -602,7 +616,10 @@ def import_one(spec: str = Form(...), files: list[UploadFile] = File(default=[])
             return result
         db.commit()
         committed_at = time.perf_counter()
+        if any(entry.get("split") is not None and entry["split"].cut_short for entry in candidates):
+            result["sortLater"] = True
         _start_reading(db, user, result)
+        result.pop("sortLater", None)
         logger.info("Import %s: %d files, receiving and sorting %.1fs (of which reading unnamed files %.1fs), saving %.1fs, commit %.1fs",
                     parsed.folder, len(uploads), saving_at - started, sorted_at - started, saved_at - saving_at, committed_at - saved_at)
         # Numbers only (no names): what the screen could show when an import is slow. ``checkSeconds`` is everything before the
@@ -643,9 +660,28 @@ def _start_reading(db: Session, user: User, result: dict) -> None:
     """A candidate that was just imported has its resume, passport and Aadhaar (and education) pages queued for the reader at once,
     so the name and the details fill in without anyone pressing "Read documents". The documents are already saved: a failure here
     never undoes the import, and the "Read documents" button still queues whatever is left."""
+    sort_later = bool(result.pop("sortLater", False))      # set by the import when a long scan was stored whole (never sent to the screen)
     candidate_id = result.get("candidateId")
     if result.get("status") != "imported" or not candidate_id:
         return
+    try:       # a long scan stored whole in Other documents is sorted by the reading worker (one in Resume / Passport / Aadhaar by its reading)
+        if not sort_later:
+            raise LookupError          # nothing was stored for later sorting: no extra statements for an ordinary import
+        from app.db.models import Candidate
+        from app.services import resort_bundles
+        stored = db.get(Candidate, candidate_id)
+        if stored is not None:
+            with db.begin_nested():
+                resort_bundles.enqueue(db, user, [stored])
+            db.commit()
+    except LookupError:
+        pass
+    except Exception:
+        logger.warning("The stored files of an imported candidate could not be queued for sorting.", exc_info=True)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
     try:
         queued = read_again(ReadAgainIn(candidateIds=[candidate_id]), db, user)
         result["readingQueued"] = int(queued.get("queued", 0))

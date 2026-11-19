@@ -771,3 +771,194 @@ def passport_plan(pages: Sequence[tuple[int, str, bool, float]]) -> PassportPlan
         pages=sorted(row["page"] for row in kept), ranked=by_strength(kept) + by_strength(dropped),
         duplicates=sorted(({"page": row["page"], "of": best[row["id"]]["page"]} for row in dropped), key=lambda d: d["page"]),
     )
+
+
+# ---- Suspected identity pages ----------------------------------------------------
+# A passport or Aadhaar page that the local reader could not read well enough to classify ("unknown") but that still carries cues
+# of one: the paid reader (Veris) is the authority on whether it is, so such a page is SENT to it as a candidate of that kind
+# (document_extraction._probe_pages), filed with the kind if the reader confirms it with a passport number / card number, and
+# filed under Other documents otherwise. The cost stays bounded: a few pages per file, never a page that is confidently some
+# other document, and never a second data page once a confidently read one exists.
+SUSPECT_PASSPORT_LIMIT = 4
+SUSPECT_AADHAAR_LIMIT = 2
+SUSPECT_REASON = "Looked like a {kind} but could not be read."
+
+
+@dataclass(frozen=True)
+class Suspicion:
+    page: int          # 1-based page number
+    kind: str          # "passport" or "aadhaar"
+    score: int
+    cues: tuple[str, ...]
+
+
+def _squash(text: str) -> str:
+    """Lower case, with everything but letters, digits and the '<' filler removed: a caption that OCR split, glued or spaced
+    ("Dateof Birth", "REPUBLICOFINDIA", "REP UBL IC OF - INDIA") reads the same."""
+    return re.sub(r"[^a-z0-9<]", "", (text or "").translate(_MRZ_FILLER).lower())
+
+
+_SQ_REPUBLIC = re.compile(r"republ?i?cofind[il1]a|publicofindia|republicofind")
+_SQ_PASSPORT = re.compile(r"p[a@]s{1,2}p[o0][rnl]t|pasaport|passprt")
+_SQ_CAPTIONS = {
+    "place of issue": re.compile(r"place?o[fl][il1]ss?ue?|plcefissue"),
+    "date of issue": re.compile(r"dateo[fl][il1]ss?ue?"),
+    "date of expiry": re.compile(r"dateofexp[il1]r"),
+    "place of birth": re.compile(r"place?ofb[il1]rth|placeofbith"),
+    "date of birth": re.compile(r"dateofb[il1]r?th|dateofbith"),
+    "nationality": re.compile(r"nationa[il1]?[il1]?t?y"),
+    "surname": re.compile(r"surname|sumame|surnarne"),
+    "given names": re.compile(r"given\w{0,2}names?"),
+}
+_PASSPORT_ONLY_CAPTIONS = ("place of issue", "date of issue", "date of expiry")
+_MRZ_PASSPORT_LINE = re.compile(r"(?<![A-Z0-9])P[<(\[]\s{0,2}[I1l]ND|(?<![A-Z0-9])P<\s{0,2}[A-Z]{3}[A-Z<]")
+_MRZ_OTHER_LINE = re.compile(r"(?<![A-Z0-9])ID[A-Z]{3}\d|(?<![A-Z0-9])[VI]<[A-Z]{3}")
+_FILLER_RUN = re.compile(r"<{3,}")
+_SQ_AADHAAR_AUTHORITY = re.compile(r"uniqueidentif|identificationauthority|uidai|aadhaar|aadhar|adhaar|merapehchan|merepehchan")
+_SQ_GOVERNMENT = re.compile(r"governmentofindia|bharatsarkar|govtofindia")
+_AADHAAR_CAPTION = re.compile(r"\b(?:male|female|dob|yob|year\s+of\s+birth)\b|\b[sdwc]\s*/\s*o\b|\bvid\b", re.I)
+
+# What an address page (the back of a passport) carries.
+_ADDRESS_RELATION = re.compile(r"\b[sdwc]\s*/\s*o\b|\b(?:father|mother|spouse|husband|wife|guardian)\b", re.I)
+_ADDRESS_PIN = re.compile(r"\bpin(?:\s*code)?\W{0,4}[1-9]\d{5}\b|\bpin\b", re.I)
+_ADDRESS_OLD = re.compile(r"\bold\s+passport\b|\bfile\s+no\b|\bemigration\s+check\b|\blegal\s+guardian\b", re.I)
+_INDIAN_STATES = re.compile(
+    r"\b(?:andhra\s+pradesh|arunachal|assam|bihar|chhattisgarh|goa|gujarat|haryana|himachal|jharkhand|karnataka|kerala|"
+    r"madhya\s+pradesh|maharashtra|manipur|meghalaya|mizoram|nagaland|odisha|orissa|punjab|rajasthan|sikkim|tamil\s*nadu|telangana|"
+    r"tripura|uttar\s+pradesh|uttarakhand|west\s+bengal|jammu|kashmir|delhi|puducherry|pondicherry|chandigarh)\b", re.I)
+
+
+# A CV's personal-details lines ("Date of birth", "Age") are never on the address page of a passport.
+_RESUME_DETAILS = re.compile(r"\bdate\s+of\s+birth\b|\bd\.?o\.?b\b|\bage\s*[:\-]|\bmarital\s+status\b|\bwork\s*[:\-]", re.I)
+
+
+def _address_cues(text: str) -> tuple[str, ...]:
+    found = []
+    if _ADDRESS_RELATION.search(text):
+        found.append("relation")
+    if _ADDRESS_PIN.search(text):
+        found.append("pin")
+    if _INDIAN_STATES.search(text):
+        found.append("state")
+    if _ADDRESS_OLD.search(text):
+        found.append("old passport")
+    return tuple(found)
+
+
+def _passport_cues(text: str) -> tuple[int, tuple[str, ...], bool]:
+    """(score, cues, strong) of a page that may be a passport data page: the zone, the country, the word, the printed captions,
+    each counted once. ``strong`` means a cue that belongs to a passport and to almost nothing else."""
+    upper = text.upper().translate(_MRZ_FILLER)
+    squashed = _squash(text)
+    cues: list[str] = []
+    score = 0
+    strong = False
+    if _MRZ_PASSPORT_LINE.search(upper) and "<<" in upper:
+        cues.append("P<IND zone")
+        score += 3
+        strong = True
+    if _FILLER_RUN.search(upper) and not _MRZ_OTHER_LINE.search(upper):
+        cues.append("zone filler")
+        score += 1
+    if _SQ_REPUBLIC.search(squashed):
+        cues.append("republic of india")
+        score += 1
+        strong = True
+    if _SQ_PASSPORT.search(squashed):
+        cues.append("passport")
+        score += 1
+    captions = [name for name, pattern in _SQ_CAPTIONS.items() if pattern.search(squashed)]
+    cues += captions
+    score += min(len(captions), 3)
+    if sum(name in captions for name in _PASSPORT_ONLY_CAPTIONS) >= 2 or ("zone filler" in cues and "passport" in cues):
+        strong = True
+    return score, tuple(cues), strong
+
+
+def _aadhaar_cues(text: str) -> tuple[int, tuple[str, ...]]:
+    squashed = _squash(text)
+    cues: list[str] = []
+    score = 0
+    if _aadhaar_number(text):
+        cues.append("12-digit number")
+        score += 2
+    if _SQ_AADHAAR_AUTHORITY.search(squashed):
+        cues.append("Aadhaar / identification authority")
+        score += 2
+    if _SQ_GOVERNMENT.search(squashed):
+        cues.append("Government of India")
+        score += 1
+    fields = sum(bool(p.search(text)) for p in _AADHAAR_FIELDS) + bool(_AADHAAR_CAPTION.search(text))
+    if fields:
+        cues.append(f"{min(fields, 3)} card caption(s)")
+        score += min(fields, 3)
+    return score, tuple(cues)
+
+
+def _confident_data_page(text: str, result: PageClassification) -> bool:
+    """A passport page read well enough to hold the details (a valid zone, or two printed captions), by its own content."""
+    if "passport" not in (result.document_type, *result.also) or result.inherited:
+        return False
+    captions = sum(bool(pattern.search(_squash(text))) for pattern in _SQ_CAPTIONS.values())
+    return _mrz(text) or bool(_evidence(text)["passport"]) or captions >= 2
+
+
+def _may_be_suspected(text: str, result: PageClassification) -> bool:
+    """A page nobody has a kind for, with no resume structure and no wording of a certificate, an ID card, a visa or any other
+    document the content classifier is confident about."""
+    if result.document_type != "unknown" or sum(c.isalnum() for c in text) < 25:
+        return False
+    seed, continuation, _, _ = _signals(text)
+    if seed or continuation or _structure_strength(text) >= 3:
+        return False
+    if _supporting_marker(text) or _is_visa(text) or education_certificate(text) or _VACCINATION.search(text):
+        return False
+    return not kind_known(text)
+
+
+def suspected_identity_pages(texts: Sequence[str], results: Sequence[PageClassification] | None = None, *,
+                             passport_limit: int = SUSPECT_PASSPORT_LIMIT,
+                             aadhaar_limit: int = SUSPECT_AADHAAR_LIMIT) -> list[Suspicion]:
+    """The pages the local reader could not classify but that look like a passport or an Aadhaar page, strongest first within a
+    kind, at most ``passport_limit`` / ``aadhaar_limit`` of each, in page order. ``texts`` are the page texts in page order ('' for
+    a page that was not read); ``results`` the page classifications (``classify_pages``), worked out when not given.
+
+    * a data page: the first line of the machine-readable zone ("P<IND"), the words "Republic of India" or "Passport" and printed
+      captions (place and date of issue, nationality ...), however damaged ("REPUBLICOFINDIA", "Dateof Birth"); or a 12-digit
+      number with the Aadhaar authority or card captions. Never when a confidently read page of the kind already exists.
+    * an address page: right beside a suspected passport data page, and two of: a relation (S/O, Father, Spouse ...), a PIN code,
+      a state of India, "Old passport" / "File no" wording (one of them the PIN or the old-passport wording).
+    * never a page with resume structure, certificate / ID-card / visa wording or any kind the content classifier is sure of."""
+    texts = [text or "" for text in texts]
+    results = list(results) if results is not None else classify_pages(texts)
+    covered = {
+        "passport": any(_confident_data_page(text, result) for text, result in zip(texts, results)),
+        "aadhaar": any(result.document_type == "aadhaar" and not result.inherited for result in results),
+    }
+    found: dict[int, Suspicion] = {}
+    for index, (text, result) in enumerate(zip(texts, results)):
+        if not _may_be_suspected(text, result):
+            continue
+        if not covered["passport"]:
+            score, cues, strong = _passport_cues(text)
+            if strong and score >= 4:
+                found[index] = Suspicion(index + 1, "passport", score, cues)
+                continue
+        if not covered["aadhaar"] and not _PASSPORT_NOISE.search(text) and "<<" not in text:
+            score, cues = _aadhaar_cues(text)
+            if score >= 4 and ("12-digit number" in cues or "Aadhaar / identification authority" in cues):
+                found[index] = Suspicion(index + 1, "aadhaar", score, cues)
+
+    # The address page beside a suspected passport data page (a passport page read well enough needs no help: nothing is added).
+    data_pages = {index for index, suspicion in found.items() if suspicion.kind == "passport"}
+    for index, (text, result) in enumerate(zip(texts, results)):
+        if index in found or not ({index - 1, index + 1} & data_pages) or not _may_be_suspected(text, result):
+            continue
+        cues = _address_cues(text)
+        if len(cues) >= 2 and len(text.strip()) <= 1200 and ("pin" in cues or "old passport" in cues) and not _RESUME_DETAILS.search(text):
+            found[index] = Suspicion(index + 1, "passport", len(cues), ("address page", *cues))
+    out: list[Suspicion] = []
+    for kind, limit in (("passport", passport_limit), ("aadhaar", aadhaar_limit)):
+        ranked = sorted((s for s in found.values() if s.kind == kind), key=lambda s: (-s.score, s.page))
+        out += ranked[:max(0, limit)]
+    return sorted(out, key=lambda s: s.page)

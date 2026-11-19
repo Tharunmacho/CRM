@@ -4,19 +4,25 @@ Indian ID cards are bilingual (English plus the state language) and the English-
 nonsense Latin letters. This script builds ONE folder, ``backend/data/tessdata`` by default (git-ignored), that holds
 
 * ``eng`` and ``osd`` (copied from the local Tesseract install, which is only read, or downloaded when there is none),
-* the extra languages (``tam`` by default), downloaded from the official tesseract-ocr/tessdata_fast repository,
+* the extra languages (``ara tam tel hin mal`` by default: the scripts of the IDs and certificates the CRM reads), downloaded
+  from the official tesseract-ocr/tessdata_fast repository,
 * ``configs/tsv`` (and the other config files), which Tesseract needs to print its word table.
 
 Tesseract reads a single folder per run and does not merge two, which is why everything is copied side by side. The OCR
 code (``app/integrations/ocr/inspection.py``) uses this folder automatically when it holds more of the wanted languages
 than the system install, and falls back to English with one warning when a pack is missing.
 
-    python backend/scripts/install_ocr_languages.py                 # eng, osd, tam
-    python backend/scripts/install_ocr_languages.py --langs tam hin # also Hindi
+    python backend/scripts/install_ocr_languages.py                 # eng, osd, ara, tam, tel, hin, mal
+    python backend/scripts/install_ocr_languages.py --langs tam kan # a different set (eng and osd always come along)
     python backend/scripts/install_ocr_languages.py --best          # the larger, slower, more accurate models
 
 Safe to run again: a file that is already there and looks complete is never overwritten (use --force to replace it). On a
-server that installs Tesseract with apt, ``apt-get install tesseract-ocr-tam`` does the same job and this script is not needed.
+server that installs Tesseract with apt, ``apt-get install tesseract-ocr-ara tesseract-ocr-tam tesseract-ocr-tel tesseract-ocr-hin
+tesseract-ocr-mal`` does the same job and this script is not needed (the Dockerfile already installs them).
+
+The CRM reads every page in English first and only pages that read badly are looked at once more with the pack of the script
+they turn out to be written in (``OCR_SCRIPT_LANGUAGES``, see app/integrations/ocr/script_pass.py), so installing a pack costs
+nothing on pages that read fine.
 """
 from __future__ import annotations
 
@@ -34,6 +40,7 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 DEFAULT_DEST = BACKEND / "data" / "tessdata"
+DEFAULT_LANGS = ["ara", "tam", "tel", "hin", "mal"]
 SOURCES = {
     "fast": "https://github.com/tesseract-ocr/tessdata_fast/raw/main/{lang}.traineddata",
     "best": "https://github.com/tesseract-ocr/tessdata_best/raw/main/{lang}.traineddata",
@@ -117,7 +124,8 @@ def download(language: str, dest: Path, quality: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--langs", nargs="+", default=["tam"], help="extra languages to install (default: tam)")
+    parser.add_argument("--langs", nargs="+", default=DEFAULT_LANGS,
+                        help=f"extra languages to install (default: {' '.join(DEFAULT_LANGS)})")
     parser.add_argument("--dest", type=Path, default=DEFAULT_DEST, help=f"target folder (default: {DEFAULT_DEST})")
     parser.add_argument("--tesseract", help="path to tesseract (default: PATH, then the usual Windows location)")
     parser.add_argument("--best", action="store_true", help="download the larger tessdata_best models instead of tessdata_fast")
@@ -127,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     languages = [lang.lower() for lang in args.langs]
     bad = [lang for lang in languages if not LANGUAGE.fullmatch(lang)]
     if bad:
-        parser.error(f"not a language code: {', '.join(bad)} (use codes such as tam, hin, mal, kan, tel)")
+        parser.error(f"not a language code: {', '.join(bad)} (use codes such as ara, tam, tel, hin, mal, kan)")
     quality = "best" if args.best else "fast"
     dest: Path = args.dest
     dest.mkdir(parents=True, exist_ok=True)

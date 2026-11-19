@@ -14,6 +14,13 @@ export const isMultiFileKind = (kind: IntakeKind) => MULTI_FILE_KINDS.includes(k
 /** Is a reading worker alive? Sent with every job by newer servers (older ones omit it, which the screen must tolerate). */
 export type ReaderState = { alive: boolean; workers: number; busy: number; lastSeenSeconds: number | null; outdated: boolean }
 export type WaitingReason = 'reader_not_running' | 'queue' | null
+/** One page in the sorting of a file (additive: older servers send no `sorting` at all). */
+export type SortingPage = { page: number; state: string; kind?: string; reason?: string; code?: string; turned?: number; corrected?: boolean; seconds?: number | null }
+/** What the page sorting is doing or did, page by page, from the server (`result.sorting`). */
+export type Sorting = {
+  pageCount: number; pagesRead: number; pagesSorted: number; step: 'sorting' | 'waiting' | 'assembling' | 'done' | string
+  seconds?: number; startedAt?: string | null; passes?: number; reading?: number[]; pages: SortingPage[]; unplaced?: { page: number; reason: string; code?: string }[]
+}
 export type IntakeJob = {
   id: string; groupId: string; kind: IntakeKind; filename: string; sizeKb: number; status: string;
   lastError: string | null; candidateId: string | null; attachmentId: string | null;
@@ -26,7 +33,7 @@ export type IntakeJob = {
   queuedAt?: string | null; startedAt?: string | null; finishedAt?: string | null; queuePosition?: number | null; aheadOfYou?: number | null;
   /** Why a waiting file is waiting: no reader is running (after about a minute) or others come first. Older servers omit it. */
   waitingReason?: WaitingReason; reader?: ReaderState | null;
-  result?: { scans?: DocumentScans; inspection?: OcrInspection; warnings?: string[]; /** What was read and what was not (additive: older servers omit it). */ coverage?: unknown; /** The pages of every other kind found in the file, by candidate document field (additive: older servers omit it). */ kinds?: Record<string, number[]> }; draft?: IntakeDraft
+  result?: { scans?: DocumentScans; inspection?: OcrInspection; warnings?: string[]; /** What was read and what was not (additive: older servers omit it). */ coverage?: unknown; /** The pages of every other kind found in the file, by candidate document field (additive: older servers omit it). */ kinds?: Record<string, number[]>; /** How the pages were read and sorted, page by page (additive). */ sorting?: Sorting }; draft?: IntakeDraft
 }
 const active = new Set(['pending', 'processing', 'retry'])
 const SCAN_KINDS: readonly string[] = ['resume', 'passport', 'aadhaar']
@@ -223,7 +230,13 @@ export function useDocumentIntake(ownerId: string) {
     update([])
     setDraftError('')
   }
+  /** A person says which field a page the sorting could not place belongs in; the server files it (or keeps it for the save) and answers with the job. */
+  const placePage = async (jobId: string, page: number, kind: string) => {
+    const saved = await api.post<IntakeJob>('/ocr/jobs/' + jobId + '/pages/' + page + '/kind', { kind })
+    replaceJob(saved)
+    return saved
+  }
   /** The jobs as they are right now (the state may still be one render behind inside an async handler). */
   const latest = () => current.current
-  return { jobs, latest, uploading, draftError, upload, remove, read, retry, refresh, hasUnqueued, attach, saveDraft, queueDraft, flushDraft, reset }
+  return { jobs, latest, uploading, draftError, upload, remove, read, retry, placePage, refresh, hasUnqueued, attach, saveDraft, queueDraft, flushDraft, reset }
 }

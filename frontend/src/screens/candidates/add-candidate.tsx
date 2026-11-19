@@ -216,6 +216,16 @@ export default function AddCandidatePage() {
     catch (error) { setAddProblems([error instanceof Error ? error.message : 'We could not queue this file again. Please try again.']) }
   }
 
+  // One page the sorting could not place: the person's choice is filed by the server; a resume / passport / Aadhaar page is read again.
+  const placePage = async (id: string, page: number, kind: string) => {
+    if (saving) return
+    try {
+      const saved = await intake.placePage(id, page, kind)
+      setAddProblems([])
+      if (saved.status === 'pending' || saved.status === 'processing' || saved.status === 'retry') void readDocuments({ retryFailed: false, jobIds: [id] })
+    } catch (error) { setAddProblems([error instanceof Error ? error.message : 'We could not place this page. Please try again.']) }
+  }
+
   const queueClock = useQueueClock(intake.jobs)
   // "Check again" on a file that is not moving: ask the server for the reader state right now.
   const checkReader = async () => { await intake.refresh().then(applyJobs, () => {}) }
@@ -538,7 +548,7 @@ export default function AddCandidatePage() {
               <FormSection id="candidate-documents" icon={FolderOpen} title="Upload documents" subtitle="Drop all of this candidate's files together, in any order. Every page is sorted into its own field and the details fill in by themselves, then you check them and save.">
                 <div className="ac-docs">
                   <EntryUploadZone rows={documentRows} chips={chips} reports={readReports} progress={readProgress(documentRows)} disabled={disabledAll} max={MAX_DOCUMENT_FILES} problems={addProblems}
-                    onAdd={(files) => void addDocuments(files)} onRemove={removeDocument} onRetry={retryFile}
+                    onAdd={(files) => void addDocuments(files)} onRemove={removeDocument} onRetry={retryFile} onPlacePage={placePage}
                     onCheckAgain={checkReader} onManual={() => jump('candidate-personal')} />
                   {showFoot && (
                     <div className="ac-doc-foot">

@@ -152,53 +152,47 @@ def test_each_kind_is_visible_as_soon_as_it_has_been_read(combined):
     assert "partial_extractions" not in combined.saved[-1]
 
 
-def test_unresolved_pages_beside_a_passport_are_sent_to_the_passport_mode_as_candidates(combined, monkeypatch):
-    """A badly read page next to a passport might be its address page: Veris decides, the page is accounted for."""
+def test_an_unclassified_page_that_only_mentions_an_identity_word_is_not_sent_to_the_reader(combined, monkeypatch):
+    """A page beside a passport that merely says "date of birth" or "government" carries no cue of a passport page (the machine
+    zone, the country, the printed captions, an address with a PIN): it is accounted for, not paid for."""
     from app.integrations.ocr import classification
 
     data = composite_pdf(["resume", "passport", "unrelated", "aadhaar"], form="native")
-    # The page beside the passport mentions the passport office, which is a hint (not a classification).
     monkeypatch.setattr(classification, "_IDENTITY_HINT", classification.re.compile(r"garden committee", classification.re.I))
 
     output = combined.extract(data)
 
-    assert combined.plan()["passport"] == [2, 3] and combined.plan()["aadhaar"] == [3, 4]
-    assert output["coverage"]["pages"]["probed"] == {"passport": [3], "aadhaar": [3]}
-    assert output["extractions"]["passport"]["selected_pages"] == [2]  # the identified page; the candidate is read along
-    assert output["extractions"]["passport"]["source"]["selected_pages"] == [2, 3]
-    assert {p["page"] for p in output["coverage"]["pages"]["not_sent"]} == set()
+    assert combined.plan() == {"resume": [1], "passport": [2], "aadhaar": [4]}
+    assert output["coverage"]["pages"]["probed"] == {}
+    assert output["extractions"]["passport"]["selected_pages"] == [2]
+    assert [p["page"] for p in output["coverage"]["pages"]["not_sent"]] == [3]  # named in the coverage, with its warning
 
 
-def test_a_kind_without_pages_is_probed_with_the_unresolved_pages_and_dropped_when_nothing_is_found(combined, monkeypatch):
-    from app.integrations.ocr import classification
-
-    monkeypatch.setattr(classification, "_IDENTITY_HINT", classification.re.compile(r"garden committee", classification.re.I))
-    data = composite_pdf(["resume", "certificate", "unrelated"], form="native")
+def test_a_kind_without_pages_is_probed_with_the_suspected_page_and_dropped_when_nothing_is_found(combined):
+    data = composite_pdf(["resume", "certificate", "passport_damaged"], form="native")
     combined.veris.build = lambda mode, number, texts: {"mrz": {}, "fields": []} if mode == "passport" else {"aadhaar": {}}
 
     output = combined.extract(data)
 
-    assert combined.plan() == {"resume": [1], "passport": [3], "aadhaar": [3]}
+    assert combined.plan() == {"resume": [1], "passport": [3]}  # the suspected page goes to the passport mode only
     assert set(output["extractions"]) == {"resume"}
-    assert any("checked as a possible passport and none was found" in w for w in output["warnings"])
+    assert any("looked like a passport but could not be read" in w for w in output["warnings"])
+    assert output["inspection"]["passport_pages"] == [] and output["inspection"]["pages"][2]["reason"] == "Looked like a passport but could not be read."
 
 
-def test_a_kind_without_pages_takes_the_candidates_when_veris_finds_one(combined, monkeypatch):
-    from app.integrations.ocr import classification
-
-    monkeypatch.setattr(classification, "_IDENTITY_HINT", classification.re.compile(r"garden committee", classification.re.I))
+def test_a_kind_without_pages_takes_the_suspected_page_when_veris_confirms_it(combined):
     combined.veris.build = lambda mode, number, texts: (
         {"mrz": {"passport_number": "Z1234567", "surname": "SAMPLE", "given_names": "TESTER", "all_check_digits_valid": True}}
         if mode == "passport" else {"aadhaar": {}})
 
-    output = combined.extract(composite_pdf(["resume", "certificate", "unrelated"], form="native"))
+    output = combined.extract(composite_pdf(["resume", "certificate", "passport_damaged"], form="native"))
 
     assert set(output["extractions"]) == {"resume", "passport"}
     assert output["extractions"]["passport"]["selected_pages"] == [3]
     # The page is now an identified page of the file, so the saved inspection and the extraction agree.
     assert output["inspection"]["passport_pages"] == [3] and output["inspection"]["unknown_pages"] == []
     assert combined.saved[-1]["inspection"]["passport_pages"] == [3]
-    assert any("identified as a passport by the document reader" in w for w in output["warnings"])
+    assert any("looked like a passport and were confirmed by the document reader" in w for w in output["warnings"])
 
 
 def test_a_file_of_unrelated_pages_costs_nothing(combined):
