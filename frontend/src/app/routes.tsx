@@ -8,7 +8,7 @@ import { staffReportRedirect } from '@/features/reports/report-tabs'
 
 import LoginPage from '@/screens/auth/login'
 import NotFoundPage from '@/screens/not-found/not-found'
-import { roleLabel } from '@/shared/model/role-labels'
+import { isAdminLevel, roleLabel } from '@/shared/model/role-labels'
 
 const loaders = {
   'inbox/inbox': () => import('@/screens/inbox/inbox'),
@@ -144,8 +144,8 @@ function Require({ capability, children }: { capability: Capability; children: J
 
 function RequireStaffSupervisor({ children }: { children: JSX.Element }) {
   const { me } = useStore()
-  if (me.role === 'admin' || me.role === 'manager') return children
-  return <EmptyState title="Only admins and managers can see the recruiter directory" description="They can check who is available and how busy each person is." />
+  if (isAdminLevel(me.role)) return children
+  return <EmptyState title="Only an admin or MD can see the recruiter directory" description="They can check who is available and how busy each person is." />
 }
 
 export default function AppRoutes() {

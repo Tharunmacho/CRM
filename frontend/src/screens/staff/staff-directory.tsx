@@ -6,6 +6,7 @@ import { SummaryCards } from '@/shared/ui/workspace'
 import { DirectoryCards, DirectoryFeedback, DirectoryFilters, DirectoryTable, DirectoryUpdated, SectionHead, ViewToggle, useDirectoryView } from '@/features/staff-directory/components'
 import { useStaffDirectory } from '@/features/staff-directory/use-staff-directory'
 import '@/features/staff-directory/staff-directory.css'
+import '@/styles/table-theme.css'
 
 export default function StaffDirectoryPage() {
   const { result, lastResult, loading, refreshing, error, params, updateParam, refresh } = useStaffDirectory()
@@ -34,13 +35,12 @@ export default function StaffDirectoryPage() {
         { label: 'Open tasks', value: total('openTasks'), detail: 'Work they have now', icon: ClipboardList },
         { label: 'Overdue tasks', value: total('overdueTasks'), detail: 'Open tasks past their deadline', icon: Clock3, tone: 'red' },
       ]} />
-      <Panel flush className="staff-card-panel">
-        <SectionHead title="Team overview" meta="Open an employee, or tap a number to see that work." action={<><DirectoryUpdated generatedAt={view.generatedAt} timezone={view.timezone} /><ViewToggle view={directoryView} onChange={setDirectoryView} /></>} />
+      <Panel flush className="staff-card-panel tb-blue">
+        <SectionHead title="Team overview" action={<><DirectoryUpdated generatedAt={view.generatedAt} timezone={view.timezone} /><ViewToggle view={directoryView} onChange={setDirectoryView} /></>} />
         <DirectoryFilters employees={all} search={search} employee={employee} availability={availability} onChange={filter} />
         {!rows.length
           ? <EmptyState title={all.length ? 'No employees match these filters' : 'No employees yet'} description={all.length ? 'Try another name, employee or setting.' : 'Employees will show here once they have been added.'} action={all.length ? <Button onClick={() => filter('clear', '')}>Clear filters</Button> : undefined} />
           : directoryView === 'cards' ? <DirectoryCards employees={rows} query={params.toString()} /> : <DirectoryTable employees={rows} query={params.toString()} />}
-        <footer className="staff-note"><p><strong>New candidates</strong> shows who is in line for the next new candidate. It does not show whether someone is online or checked in.</p><p>The counts show the work each person has right now. Open an employee to see finished work for a chosen period.</p></footer>
       </Panel>
     </>}
   </div>

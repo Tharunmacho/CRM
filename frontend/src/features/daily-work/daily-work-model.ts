@@ -48,6 +48,8 @@ export interface DailyItem {
   /** Stage 9 Google review: obtained, pending (stage 9 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
   referral: { source: string; label: string; detail: string | null }
+  /** The candidate's agency as the client tracker words it (the server's agency_display_expression); null when none. An older server sends nothing. */
+  agency?: string | null
   remark: { body: string; at: string; by: string; count: number } | null
   /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form (an older server sends nothing). */
   commencementDate?: string | null
@@ -105,6 +107,8 @@ export interface FollowUpItem {
   candidate: string
   candidateRef: string
   candidateCareId: string | null
+  /** The candidate's agency as the client tracker words it; null when none. An older server sends nothing. */
+  agency?: string | null
   orderRef: string | null
   /** Advance the candidate paid (stage 8) on this placement; null when none is recorded. Never an invoice figure. */
   advanceAmount: number | null
@@ -319,6 +323,14 @@ export function positionCell(item: Pick<DailyItem, 'position' | 'positionSource'
   return { text: item.position, source: 'order', hint: "The order's job" }
 }
 
+/**
+ * The AGENCY column: the row's `agency`, the server's agency text (the client tracker's Ref: the referrer or the agency a candidate who
+ * arrived by email and later got one is entered under; null/'' when there is none, so the screen shows a dash). Only an older server that
+ * sends no `agency` at all falls back to what the row carries: the referrer's name, else how the CV arrived.
+ */
+export const agencyLabel = (item: Pick<DailyItem, 'referral'> & { agency?: string | null }): string =>
+  (item.agency === undefined ? referralLabel(item.referral) : item.agency ?? '').trim()
+
 /** A client exists only through an order, so an unmatched candidate has none; say that instead of a bare dash. */
 export function clientCell(item: Pick<DailyItem, 'client' | 'kind'>): { text: string; hint: string } {
   if (item.client) return { text: item.client, hint: '' }
@@ -346,21 +358,25 @@ export interface TaskRow extends DailyItem { today: TodayWork }
 export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean }
 
 /**
- * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), Recruiter (supervisors only), JOB,
- * then CLIENT / COUNTRY, CANDIDATE NAME, STAGE, TODAY, REMARKS and the untitled actions cell. Widths are the column plan in px: they add
- * up to 1104px for a supervisor (the Open or Complete button and the row menu need 142px with their padding) (the panel is 1111px wide at a 1440px window with the sidebar open) so nothing scrolls sideways there.
+ * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name only), JOB,
+ * CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS and the untitled actions cell. Every header is one short word
+ * so it never wraps. Widths are the column plan in px: they add up to 1108px for a supervisor and the panel is 1111px
+ * wide at a 1440px window with the sidebar open, so nothing scrolls sideways there. Every column is left-aligned (header and cells
+ * share one left edge) except S NO (centred) and the actions (right-aligned: the 84px Open / Complete / View button, the 36px row menu
+ * and the right padding).
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 40 },
-  { key: 'doc', title: 'DOC', width: 84 },
-  { key: 'staff', title: 'Recruiter', width: 88, supervisor: true, left: true },
-  { key: 'position', title: 'JOB', width: 100, left: true },
-  { key: 'client', title: 'CLIENT / COUNTRY', width: 112, left: true },
-  { key: 'candidate', title: 'CANDIDATE NAME', width: 132, left: true },
-  { key: 'stage', title: 'STAGE', width: 122 },
-  { key: 'today', title: 'TODAY', width: 112, left: true },
-  { key: 'remarks', title: 'REMARKS', width: 172, left: true },
-  { key: 'actions', title: 'Actions', width: 142, quiet: true },
+  { key: 'no', title: 'S NO', width: 38 },
+  { key: 'doc', title: 'DOC', width: 94, left: true },
+  { key: 'client', title: 'CLIENT', width: 96, left: true },
+  { key: 'position', title: 'JOB', width: 94, left: true },
+  { key: 'candidate', title: 'CANDIDATE', width: 98, left: true },
+  { key: 'staff', title: 'Recruiter', width: 94, supervisor: true, left: true },
+  { key: 'agency', title: 'AGENCY', width: 80, left: true },
+  { key: 'stage', title: 'STAGE', width: 132, left: true },
+  { key: 'today', title: 'TODAY', width: 102, left: true },
+  { key: 'remarks', title: 'REMARKS', width: 150, left: true },
+  { key: 'actions', title: 'Actions', width: 130, quiet: true },
 ]
 
 /** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own). */

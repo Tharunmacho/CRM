@@ -16,6 +16,7 @@ import { useAttendance } from '../attendance-context'
 import { dayLabel } from '../format'
 import { durationLabel, type AttendanceResponse, type AttendanceSession, type StaffAttendance } from '../model'
 import '../attendance-presence.css'
+import { isAdminLevel, roleLabel } from '@/shared/model/role-labels'
 
 function timeLabel(value: string | null, timezone: string) {
   return value ? new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' }).format(new Date(value)) : '—'
@@ -77,7 +78,7 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
   const hasTrackedStaff = rows.some((row) => row.presence.tracked)
 
   const columns: Column<StaffAttendance>[] = [
-    { key: 'name', header: 'Employee', width: '22%', render: (row) => <RecordIdentity name={row.name + (row.userId === store.me.id ? ' (you)' : '')} detail={(row.role === 'manager' ? 'Manager' : row.role === 'admin' ? 'Admin' : 'Recruiter') + (!row.active ? ' · Inactive account' : '')} /> },
+    { key: 'name', header: 'Employee', width: '22%', render: (row) => <RecordIdentity name={row.name + (row.userId === store.me.id ? ' (you)' : '')} detail={roleLabel(row.role) + (!row.active ? ' · Inactive account' : '')} /> },
     { key: 'state', header: 'Now', width: '17%', render: (row) => <div className="presence-state-stack"><Badge variant="dot" tone={row.attendance.status === 'checked_in' ? 'green' : 'neutral'}>{row.attendance.status === 'checked_in' ? 'Checked in' : 'Checked out'}</Badge>{row.presence.tracked ? <PresenceBadge status={row.presence.status} /> : <span className="att-muted">CRM use not tracked</span>}</div> },
     { key: 'checked', header: 'Checked in', width: '12%', render: (row) => <div className="att-two"><strong>{durationLabel(row.attendance.totalSeconds)}</strong><small>{row.attendance.sessions.length} {row.attendance.sessions.length === 1 ? 'check-in' : 'check-ins'}</small></div> },
     { key: 'online', header: 'Online in CRM', width: '11%', render: (row) => <span className="tnum">{row.presence.tracked ? durationLabel(row.presence.activeSeconds) : 'Not tracked'}</span> },
@@ -95,7 +96,7 @@ export function PresenceView({ initialStaffId, initialDate, onUpdated }: { initi
         <Button disabled={loading} icon={<RefreshCw size={16} className={loading ? 'animate-spin' : ''} />} onClick={() => setRetry((value) => value + 1)}>Refresh records</Button>
       </div>
     </div>
-    <div className="presence-explanation"><Info size={18} aria-hidden="true" /><p><strong>Check-in time and CRM use are different things.</strong> Check-in and check-out show attendance. Online and Idle show whether the CRM was open on screen. Away or offline means the CRM tab was hidden, the browser was closed or the internet dropped. It does not mean the person was not working. CRM use is tracked for Recruiters, not Managers.</p></div>
+    <div className="presence-explanation"><Info size={18} aria-hidden="true" /><p><strong>Check-in time and CRM use are different things.</strong> Check-in and check-out show attendance. Online and Idle show whether the CRM was open on screen. Away or offline means the CRM tab was hidden, the browser was closed or the internet dropped. It does not mean the person was not working. CRM use is tracked for Recruiters, not MDs.</p></div>
     {error && <Callout tone="error" role="alert">{error.replace(/[.!?]*$/, '.')} Press Refresh records to try again.{result && ' What you see may be out of date.'}</Callout>}
     {loading ? <p role="status" className="att-loading">Loading attendance records…</p> : result && <>
       <SummaryCards items={[
@@ -132,7 +133,7 @@ function SessionDetail({ row, timezone, onUpdated }: { row: StaffAttendance; tim
       <CardHead title={row.name + ': check-in and check-out'} meta="Times recorded. Only time on the chosen date is counted." />
       {!row.attendance.sessions.length ? <p className="presence-empty">No check-ins on this date.</p> : <ol className="presence-list">{row.attendance.sessions.map((session) => <li key={session.id}>
         <div><p className="presence-when">{timeLabel(session.checkedInAt, timezone)} to {session.checkedOutAt ? timeLabel(session.checkedOutAt, timezone) : 'still checked in'}</p><p className="att-help">{session.checkedOutAt ? 'Check-in and check-out recorded' : 'Check out to end this session'}</p>{session.correctionReason && <p className="presence-correction">Fixed by {user(session.correctedBy ?? '')?.name || 'Admin'}: {session.correctionReason}</p>}</div>
-        <div className="presence-row-end"><strong className="tnum">{durationLabel(session.durationSeconds)}</strong>{me.role === 'admin' && <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditing(session)}>Fix</Button>}</div>
+        <div className="presence-row-end"><strong className="tnum">{durationLabel(session.durationSeconds)}</strong>{isAdminLevel(me.role) && <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={() => setEditing(session)}>Fix</Button>}</div>
       </li>)}</ol>}
     </Panel>
     <Panel flush className="att-card">

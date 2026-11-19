@@ -1,3 +1,4 @@
+import { isAdminLevel } from '@/shared/model/role-labels'
 /** Data Bank pools and the wording around candidates that are still waiting for a recruiter. */
 
 export type DataBankPool = 'all' | 'unmapped' | 'not_interested' | 'unassigned' | 'needs_review'
@@ -89,8 +90,8 @@ export interface UnassignResult {
   refused: { id: string; name: string; reason: string }[]
 }
 
-/** Only the admin takes a candidate back from a recruiter, and only one who has a recruiter. */
-export const canUnassignCandidate = (role: string | undefined, ownerId: string | null | undefined): boolean => role === 'admin' && Boolean(ownerId?.trim())
+/** Only an admin or MD takes a candidate back from a recruiter, and only one who has a recruiter. */
+export const canUnassignCandidate = (role: string | undefined, ownerId: string | null | undefined): boolean => isAdminLevel(role) && Boolean(ownerId?.trim())
 
 /** The confirmation before making candidates "Not assigned": who they leave and what follows. */
 export function unassignCopy(count: number, name?: string, ownerName?: string): { title: string; lines: string[]; confirmLabel: string } {

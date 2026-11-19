@@ -206,8 +206,8 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 }
 
 /* ---------- Certificates: several files in one document slot, one row each ---------- */
-.cp-cert { padding: 10px 0; border-bottom: 1px solid var(--border-faint); }
-.cp-cert:last-child { border-bottom: 0; }
+.cp-cert { padding: 10px 0; border-bottom: var(--table-line-width) solid var(--table-line); }
+.cp-cert:last-child { border-bottom: var(--table-line-width) solid var(--table-line); }
 .cp-cert-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .cp-cert-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; color: var(--text-main); }
 .cp-cert-count { padding: 1px 8px; border-radius: 999px; background: var(--tint-2); color: var(--text-muted); font-size: 11.5px; font-weight: 500; }
@@ -267,3 +267,10 @@ a.cp-contact:hover { border-color: var(--border-hover); background: var(--tint-2
 .cp-review-note > strong { display: block; color: var(--warning-ink); }
 .cp-review-note ul { margin: 6px 0 0; padding-left: 18px; list-style: disc; }
 .cp-review-note p { margin-top: 6px; color: var(--text-muted); }
+
+/* ---- Lists that read as a table (Experience, Education, Documents): the same lines as every table (tokens in theme.css) ----
+   a 2px var(--table-line-strong) frame around the list, a var(--table-line) line under every row (the last too), the radius kept. */
+:root:root .cp-stack { gap: 0; overflow: hidden; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+:root:root .cp-stack > .cp-item { padding: 12px 14px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); border-radius: 0; background: var(--bg-card); }
+:root:root .cp-docs { overflow: hidden; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+:root:root .cp-docs > * { padding-inline: 14px; border-bottom: var(--table-line-width) solid var(--table-line); }

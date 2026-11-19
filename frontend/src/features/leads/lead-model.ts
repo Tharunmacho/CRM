@@ -1,3 +1,4 @@
+import { isAdminLevel } from '@/shared/model/role-labels'
 /**
  * Pure rules behind the Lead sheet: the status colours, the list query, follow-up wording, who may work a lead,
  * the upload preview (mapping table and counts) and the file checks. No React and no imports of app code except the
@@ -97,7 +98,7 @@ export const DATE_FIELDS: { value: DateField; label: string }[] = [{ value: 'upl
 
 export type LeadCard = 'total' | 'new_today' | 'not_contacted' | 'interested' | 'resume_received' | 'converted' | 'follow_ups'
 
-export const EMPTY_FILTERS: LeadFilters = { q: '', status: '', campaign: '', position: '', country: '', platform: '', assigned: '', from: '', to: '', batchId: '', dateField: 'uploaded', recent: '' }
+export const EMPTY_FILTERS: LeadFilters = { q: '', status: '', campaign: '', position: '', country: '', platform: '', assigned: '', from: '', to: '', batchId: '', dateField: 'created', recent: '' }
 
 export interface LeadSummary {
   scope?: string
@@ -223,11 +224,11 @@ export const normalizeSearch = (query: string): string => searchTerms(query).joi
 /** A short line under the search box that reacts to what was typed. */
 export interface FooterHintInput {
   supervisor: boolean
-  /** Only an admin hands out leads; a manager sees and works just the leads assigned to them. Unset = same as `supervisor`. */
+  /** Only an admin or MD hands out leads. Unset = same as `supervisor`. */
   canAssign?: boolean
   /** The daily-work lock's reason when the sheet is read-only for this person. */
   lockReason?: string | null
-  /** Leads assigned to the viewer (staff) / waiting for a recruiter (managers). */
+  /** Leads assigned to the viewer (staff) / waiting for a recruiter (admin and MD). */
   assignedToMe?: number
   unassigned?: number
   /** Leads the current list matches, and every lead the viewer may see. */
@@ -252,13 +253,6 @@ export function footerHint(input: FooterHintInput): string {
   }
   if (input.lockReason) parts.push(`${input.lockReason} The sheet is read-only until then.`)
   return parts.join(' ')
-}
-
-export function searchHint(query: string): string {
-  const terms = searchTerms(query)
-  if (terms.length === 0) return 'Search any detail as you type. Use commas to combine terms, for example ravi, chef.'
-  if (terms.length === 1) return `Matching leads that contain "${terms[0]}". Add a comma and another word to narrow it.`
-  return `Matching leads that contain all of: ${terms.map((term) => `"${term}"`).join(', ')}.`
 }
 
 /** The agency's own time zone: every "day" the lead filters mention is a calendar day here, whatever the browser's zone is. */
@@ -293,6 +287,26 @@ export function activePreset(filters: Pick<LeadFilters, 'from' | 'to'>, now: Dat
 export const NEW_CARD_LABEL = 'Uploaded today'
 export const NEW_CARD_DETAIL = 'Since midnight'
 
+/** A date the server accepts: `YYYY-MM-DD` and a real calendar day. A half-typed date input (a 5-digit year, "0000-00-00") is not sent, so it never turns the list into an error. */
+export function validDay(value: string | undefined | null): value is string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '')
+  if (!match) return false
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  if (year < 1900 || month < 1 || month > 12 || day < 1) return false
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+/** The Status select's choices. A card can set several statuses at once (Interested = interested + resume received): that value gets its own
+ *  option, so the select shows what is filtered instead of "Any status" while the list is narrowed. */
+export function statusChoices(current: string): [string, string][] {
+  const choices: [string, string][] = LEAD_STATUSES.map((status) => [status.value, status.label])
+  if (current && !choices.some(([value]) => value === current)) {
+    const labels = current.split(',').map((part) => part.trim()).filter(Boolean).map((part) => leadStatus(part).label)
+    choices.push([current, labels.join(' or ')])
+  }
+  return choices
+}
+
 /** Query string for GET /leads (and the export): only the filters that are set, so equal views give equal strings. */
 export function buildLeadQuery(filters: LeadFilters, sort: { key: string; dir: 'asc' | 'desc' }): string {
   const params = new URLSearchParams()
@@ -304,9 +318,11 @@ export function buildLeadQuery(filters: LeadFilters, sort: { key: string; dir: '
   if (filters.country) params.set('country', filters.country)
   if (filters.platform) params.set('platform', filters.platform)
   if (filters.assigned) params.set('owner', filters.assigned)
-  if (filters.from) params.set('created_from', filters.from)
-  if (filters.to) params.set('created_to', filters.to)
-  if (filters.from || filters.to) params.set('date_field', filters.dateField === 'created' ? 'created' : 'uploaded')
+  const from = validDay(filters.from) ? filters.from : ''
+  const to = validDay(filters.to) ? filters.to : ''
+  if (from) params.set('created_from', from)
+  if (to) params.set('created_to', to)
+  if (from || to) params.set('date_field', filters.dateField === 'created' ? 'created' : 'uploaded')
   if (filters.recent === 'today') params.set('uploaded_today', 'true')
   if (filters.batchId) params.set('batch_id', filters.batchId)
   if (filters.followUp) params.set('follow_up', filters.followUp)
@@ -330,6 +346,25 @@ export function activeLeadFilterCount(filters: LeadFilters): number {
   const { q, dateField, ...rest } = filters  // the date choice alone filters nothing
   void q; void dateField
   return Object.values(rest).filter((value) => value !== '' && value !== undefined).length
+}
+
+const dayLabel = (value: string) => { const [year, month, day] = value.split('-').map(Number); return `${two(day)} ${MONTHS[month - 1]} ${year}` }
+
+/** The filters that are on but have no select of their own, as removable chips: the upload, "Uploaded today", "Follow-ups due" and the date range
+ *  (named after the date it filters on). Nothing that narrows the list may be invisible, or an empty list cannot be explained. */
+export function filterChips(filters: LeadFilters): { key: string; label: string; clear: Partial<LeadFilters> }[] {
+  const chips: { key: string; label: string; clear: Partial<LeadFilters> }[] = []
+  if (filters.batchId) chips.push({ key: 'batch', label: 'From one upload', clear: { batchId: '' } })
+  if (filters.recent === 'today') chips.push({ key: 'recent', label: `${NEW_CARD_LABEL}: ${NEW_CARD_DETAIL.toLowerCase()}`, clear: { recent: '' } })
+  if (filters.followUp === 'due') chips.push({ key: 'followUp', label: 'Follow-ups due', clear: { followUp: '' } })
+  const from = validDay(filters.from) ? filters.from : ''
+  const to = validDay(filters.to) ? filters.to : ''
+  if (from || to) {
+    const field = filters.dateField === 'created' ? 'Created' : 'Uploaded'
+    const range = from && to ? (from === to ? `on ${dayLabel(from)}` : `${dayLabel(from)} to ${dayLabel(to)}`) : from ? `from ${dayLabel(from)}` : `up to ${dayLabel(to)}`
+    chips.push({ key: 'dates', label: `${field} ${range}`, clear: { from: '', to: '' } })
+  }
+  return chips
 }
 
 /** What each KPI card sets on the filters. */
@@ -534,13 +569,12 @@ export const cleanPhone = (phone?: string | null): string => (phone ?? '').repla
 /* ------------------------------------------------------------ permissions */
 
 export interface LeadActor { id: string; role: string }
-const SUPERVISORS = ['admin', 'manager']
-export const isSupervisor = (me?: LeadActor | null) => !!me && SUPERVISORS.includes(me.role)
+export const isSupervisor = (me?: LeadActor | null) => !!me && isAdminLevel(me.role)
 
-/** Admin works any lead; managers and staff only the leads assigned to them. */
+/** Admin and MD work any lead; staff only the leads assigned to them. */
 export function canWorkLead(me: LeadActor | null | undefined, lead: Pick<Lead, 'ownerId'> | null | undefined): boolean {
   if (!me || !lead) return false
-  if (me.role === 'admin') return true
+  if (isAdminLevel(me.role)) return true
   return Boolean(lead.ownerId) && lead.ownerId === me.id
 }
 

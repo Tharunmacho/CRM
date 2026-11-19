@@ -15,7 +15,7 @@ function ImportRows({ preview }: { preview: AgencyImportPreview }) {
   const columns: Column<AgencyImportRow>[] = [
     { key: 'row', header: 'Row', width: '6%', render: row => row.rowNumber },
     { key: 'agency', header: 'Agency / contact', width: '25%', align: 'left', render: row => <div className="ai-cell">
-      <strong>{row.values.agencyName || '—'}</strong>
+      <strong>{row.values.agencyName || '—'}{row.values.activeAgency === true && <span className="ai-active">Active</span>}</strong>
       {row.values.name && row.values.name !== row.values.agencyName && <span>{row.values.name}</span>}
       {row.values.phone && <span>{row.values.phone}</span>}{row.values.email && <span>{row.values.email}</span>}
     </div> },

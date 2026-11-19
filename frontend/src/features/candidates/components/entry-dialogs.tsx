@@ -10,7 +10,7 @@ import { EntryAvatar } from './entry-avatar'
 /**
  * The duplicate decision: the candidate already on file next to what was just typed, and three clear ways out:
  * Cancel (keep typing), Open the existing candidate, or Combine into it. Combining is work on that candidate: only its
- * recruiter, a manager or an admin may do it. Anyone else is told who the candidate is assigned to and can only open it.
+ * recruiter, an MD or an admin may do it. Anyone else is told who the candidate is assigned to and can only open it.
  */
 export function DuplicateDialog({ duplicate, form, saving, error, onCancel, onOpen, onMerge }: {
   duplicate: { candidate: DuplicateMatch; matchedOn: string[] } | null
@@ -32,7 +32,7 @@ export function DuplicateDialog({ duplicate, form, saving, error, onCancel, onOp
         duplicate
           ? canMerge
             ? `The ${duplicate.matchedOn.join(' and ')} already ${duplicate.matchedOn.length > 1 ? 'belong' : 'belongs'} to a candidate in the Data Bank. You can combine this entry with that candidate, or cancel.`
-            : `The ${duplicate.matchedOn.join(' and ')} already ${duplicate.matchedOn.length > 1 ? 'belong' : 'belongs'} to a candidate who is assigned to ${owner ?? 'another recruiter'}. Only they, a manager or an admin can add to that candidate. You can open it to look, or cancel.`
+            : `The ${duplicate.matchedOn.join(' and ')} already ${duplicate.matchedOn.length > 1 ? 'belong' : 'belongs'} to a candidate who is assigned to ${owner ?? 'another recruiter'}. Only they, an MD or an admin can add to that candidate. You can open it to look, or cancel.`
           : undefined
       }
       footer={
@@ -77,7 +77,7 @@ export function DuplicateDialog({ duplicate, form, saving, error, onCancel, onOp
       {duplicate && !canMerge && (
         <p className="ac-dup-note">
           <AlertTriangle size={14} aria-hidden />
-          <span>Nothing was saved and none of your documents were added. Ask {owner ? `${owner} or an admin` : 'a manager or an admin'} to add them.</span>
+          <span>Nothing was saved and none of your documents were added. Ask {owner ? `${owner} or an admin` : 'an MD or an admin'} to add them.</span>
         </p>
       )}
       {duplicate && canMerge && (

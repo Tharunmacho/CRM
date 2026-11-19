@@ -4,6 +4,7 @@ import { DataTable, type Column } from '@/shared/ui/table'
 import { EmptyState, StatusPill } from '@/shared/ui/display'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { useStore } from '@/shared/state/crm-store'
+import '@/styles/table-theme.css'
 import type { ReportResult } from './report-api'
 import { ChartCard, Donut, MiniStats, StepArea, type Series, type Slice } from './report-charts'
 import { Lollipops, MailboxShare, MonthBars, OrderLadders, ReasonBars, Segmented, StepFunnel, type RankRow, type ReasonRow } from './report-formats'
@@ -17,11 +18,11 @@ type Stack = 768 | 1024 | 1280
 const num = (value: number) => value.toLocaleString()
 const plural = (count: number, one: string, many = `${one}s`) => `${num(count)} ${count === 1 ? one : many}`
 
-function RTable<T>({ rows, columns, rowKey, onRowClick, title, caption, pageSize = 12, stackBelow = 1024, className = '' }: {
+function RTable<T>({ rows, columns, rowKey, onRowClick, title, pageSize = 12, stackBelow = 1024, className = '' }: {
   rows: T[]; columns: (c: Builders<T>) => Column<T>[]; rowKey: (row: T) => string; onRowClick?: (row: T) => void; title: string; caption?: string; pageSize?: number; stackBelow?: Stack; className?: string
 }) {
-  return <section className={`rv-card rv-table ${className}`} aria-label={title}>
-    <header><h3>{title}</h3>{caption && <p>{caption}</p>}</header>
+  return <section className={`rv-card rv-table tb-blue ${className}`} aria-label={title}>
+    <header><h3>{title}</h3></header>
     <DataTable compact stackBelow={stackBelow} rows={rows} columns={columns(builders<T>())} rowKey={rowKey} pageSize={pageSize} onRowClick={onRowClick}
       empty={<EmptyState title="Nothing to show for this period" description="Choose a longer date range or clear a filter." icon={<BarChart3 size={26} strokeWidth={1.4} />} />} />
   </section>
@@ -34,7 +35,7 @@ interface Builders<T> {
 function builders<T>(): Builders<T> {
   return {
     col: (key, header, width, value, extra = {}) => ({ key, header, width, sortable: true, value, render: row => { const v = value(row); return v == null || v === '' ? '—' : typeof v === 'number' ? <span className="tnum">{v.toLocaleString()}</span> : <span className="rv-cell" title={v}>{v}</span> }, ...extra }),
-    num: (key, header, width, value, render) => ({ key, header, width, sortable: true, align: 'center', value, render: render ?? (row => { const v = value(row); return v == null ? '—' : <span className="tnum">{v.toLocaleString()}</span> }) }),
+    num: (key, header, width, value, render) => ({ key, header, width, sortable: true, align: 'right', value, render: render ?? (row => { const v = value(row); return v == null ? '—' : <span className="tnum">{v.toLocaleString()}</span> }) }),
   }
 }
 
@@ -105,7 +106,7 @@ export function StaffReport({ data }: { data: Data }) {
         insight={top && top[metric] > 0 ? (leaders.length === 1 ? <><b>{top.name}</b> leads with {num(top[metric])} {active.long}.</> : <><b>{plural(leaders.length, 'person', 'people')}</b> tie at {num(top[metric])} {active.long}.</>) : `No ${active.long} in this period.`}>
         <Lollipops rows={board} colour={active.colour} label={`Recruiters ranked by ${active.long}`} />
       </ChartCard>
-    <RTable rows={data.staff} rowKey={r => r.id} title="Recruiter detail" caption="One row per person. Admins and managers see the whole team. Recruiters see only themselves."
+    <RTable rows={data.staff} rowKey={r => r.id} title="Recruiter detail" caption="One row per person. Admins and MDs see the whole team. Recruiters see only themselves."
       columns={c => [
         c.col('name', 'Recruiter', '25%', r => r.name, { render: r => <RecordIdentity name={r.name} /> }), c.num('assigned', 'Assigned', '12%', r => r.assigned), c.num('done', 'Tasks done', '12%', r => r.completedTasks),
         c.num('hours', 'Avg hours / stage', '14%', r => r.averageStageHours, r => <span className="tnum">{fmtHours(r.averageStageHours)}</span>),

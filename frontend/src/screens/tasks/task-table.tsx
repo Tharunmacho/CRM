@@ -3,17 +3,17 @@ import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
 import { Button } from '@/shared/ui/primitives'
 import { RecordIdentity } from '@/shared/ui/workspace'
-import { countryCell, nothingYet, rowAction, taskColumnsFor, todayChips, type TaskRow } from '@/features/daily-work/daily-work-model'
+import { agencyLabel, countryCell, nothingYet, rowAction, taskColumnsFor, todayChips, type TaskRow } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
 import {
-  ClientCountryCell, DocCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
+  AgencyCell, ClientCell, DocCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
 } from './daily-table'
 
 /**
  * One list for every recruiter's candidates, with what happened to each of them today. The columns and their widths are
- * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, Recruiter, JOB, CLIENT / COUNTRY, CANDIDATE NAME, STAGE, TODAY, REMARKS, actions):
- * the widths add up to 1104px for a supervisor, and the panel is 1111px wide at a 1440px window with the sidebar open and a scrollbar,
- * so nothing scrolls sideways there.
+ * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, actions): the widths add
+ * up to 1108px for a supervisor, and the panel is 1111px wide at a 1440px window with the sidebar open and a scrollbar, so nothing scrolls
+ * sideways there. The look (one 60px row, 44px header, one padding for header and cells) is src/styles/tasks-table.css.
  */
 export interface TaskTableProps {
   rows: TaskRow[]
@@ -45,18 +45,19 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
             const chips = todayChips(row, zone)
             const work = canWork(row)
             return (
-              <tr key={row.candidateId} className={cn('dw-row', index % 2 === 1 && 'is-alt')}>
+              <tr key={row.candidateId} className="dw-row">
                 <td className="is-num tnum" data-label="S NO">{index + 1}</td>
                 <td data-label="DOC" className={cn(!row.commencementDate && !(work && row.applicationId) && 'is-empty')}><DocCell item={row} canAdd={work} onAdd={() => onAddDoc(row)} /></td>
-                {supervisor && <td data-label="Recruiter" className="is-left">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
+                <td data-label="CLIENT" className={cn('is-left', !row.client && 'is-empty')}><ClientCell item={row} /></td>
                 <td data-label="JOB" className={cn('is-left', !row.position && 'is-empty')}><PositionCellView item={row} /></td>
-                <td data-label="CLIENT / COUNTRY" className={cn('is-left', !row.client && noCountry && 'is-empty')}><ClientCountryCell item={row} /></td>
                 <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={row.candidate} /></td>
+                {supervisor && <td data-label="Recruiter" className="is-left">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
+                <td data-label="AGENCY" className={cn('is-left', !agencyLabel(row) && 'is-empty')}><AgencyCell item={row} /></td>
                 <td data-label="STAGE"><StageCell item={row} /></td>
                 <td data-label="TODAY" className="is-left">
                   <span className="tw-today">
-                    {chips.map((chip) => <span key={chip.key} className="tw-chip">{chip.text}</span>)}
-                    {nothingYet(row.today) && <span className="tw-chip is-none">Nothing yet</span>}
+                    {chips.map((chip) => <span key={chip.key} className="tw-chip" title={chip.text}>{chip.key === 'moved' ? chip.text.replace(/^Stage moved/, 'Moved') : chip.text}</span>)}
+                    {nothingYet(row.today) && <span className="tw-chip is-none" title="Nothing was done for this candidate today">Nothing yet</span>}
                     {remarked && chips.length === 0 && <span className="dw-none" title="A remark was written today">—</span>}
                   </span>
                 </td>

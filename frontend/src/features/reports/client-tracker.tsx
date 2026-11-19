@@ -11,6 +11,7 @@ import {
   type TrackerFilters, type TrackerResult,
 } from './client-tracker-model'
 import '@/styles/client-tracker.css'
+import '@/styles/touch-targets.css'
 
 /**
  * Client tracker: every placement still in progress and the ones that travelled, grouped by client, in the sheet the clients ask for
@@ -54,15 +55,17 @@ export function ClientTrackerReport() {
         <label>Stage<Select aria-label="Stage" value={filters.stage} onChange={event => choose({ stage: event.target.value })}><option value="">All stages</option>{options.stages.map(item => <option key={item.no} value={String(item.no)}>{item.label}</option>)}</Select></label>
         <label className="ct-check"><input type="checkbox" aria-label="Include travelled" checked={filters.includeTravelled} disabled={!!filters.stage} onChange={event => choose({ includeTravelled: event.target.checked })} /><span>Include travelled</span></label>
       </div>
-      <div className="ct-actions">
-        <Button size="sm" icon={<RotateCcw size={13} />} disabled={!inUse} onClick={clearFilters}>Reset{inUse ? ` (${inUse})` : ''}</Button>
-        <Button size="sm" icon={<RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />} disabled={refreshing} onClick={refresh}>{refreshing ? 'Refreshing' : 'Refresh'}</Button>
-        <Button size="sm" disabled={!data || exporting} icon={exporting ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} onClick={() => void exportFile()}>{exporting ? 'Preparing Excel…' : 'Export Excel'}</Button>
+      <div className="ct-bar">
+        <p className={exporting ? 'ct-note is-busy' : exported && !exportError ? 'ct-note is-done' : 'ct-note'} role="status">
+          {exporting ? 'Preparing your Excel file…' : exported && !exportError ? <><Check size={14} aria-hidden="true" />Client tracker downloaded as Excel.</>
+            : 'The file is this sheet with the same filters.'}
+        </p>
+        <div className="ct-actions">
+          <Button size="sm" icon={<RotateCcw size={13} />} disabled={!inUse} onClick={clearFilters}>Reset{inUse ? ` (${inUse})` : ''}</Button>
+          <Button size="sm" icon={<RefreshCw size={14} className={refreshing ? 'animate-spin' : undefined} />} disabled={refreshing} onClick={refresh}>{refreshing ? 'Refreshing' : 'Refresh'}</Button>
+          <Button size="sm" disabled={!data || exporting} icon={exporting ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />} onClick={() => void exportFile()}>{exporting ? 'Preparing Excel…' : 'Export Excel'}</Button>
+        </div>
       </div>
-      <p className={exporting ? 'ct-note is-busy' : exported && !exportError ? 'ct-note is-done' : 'ct-note'} role="status">
-        {exporting ? 'Preparing your Excel file…' : exported && !exportError ? <><Check size={14} aria-hidden="true" />Client tracker downloaded as Excel.</>
-          : 'The file is this sheet with the same filters.'}
-      </p>
     </section>
 
     {(error || exportError) && <div role="alert" className="rv-alert ct-alert"><span><AlertCircle size={15} aria-hidden="true" />{error || exportError}{error && data && ' Showing the last loaded sheet.'}</span>{error ? <button type="button" onClick={refresh}>Try again</button> : <button type="button" disabled={exporting} onClick={() => void exportFile()}>Try again</button>}</div>}
@@ -74,9 +77,10 @@ export function ClientTrackerReport() {
           description={inUse ? 'Remove a filter to see more.' : 'Candidates matched to an order, and those who travelled, appear here.'}
           action={inUse ? <Button size="sm" onClick={clearFilters}>Clear filters</Button> : undefined} />
         : <div className="ct-scroll" role="region" aria-label="Client tracker table, scrolls sideways on small screens" tabIndex={0}><table>
+          <colgroup>{TRACKER_COLUMNS.map(column => <col key={column.key} className={`ct-col-${column.key}`} />)}</colgroup>
           <thead><tr>{TRACKER_COLUMNS.map(column => <th key={column.key} className={column.numeric ? 'is-num' : undefined}>{column.label}</th>)}</tr></thead>
           <tbody>{data.rows.map((row, index) => <tr key={row.applicationId} className={index > 0 && data.rows[index - 1].client !== row.client ? 'is-first-of-client' : undefined}>
-            {TRACKER_COLUMNS.map(column => <td key={column.key} data-label={column.label} className={column.numeric ? 'is-num tnum' : column.key === 'remarks' ? 'is-remarks' : undefined}>{cellText(row, column.key)}</td>)}
+            {TRACKER_COLUMNS.map(column => <td key={column.key} data-label={column.label} className={column.numeric ? 'is-num tnum' : column.key === 'remarks' ? 'is-remarks' : undefined}><span className="ct-cell" title={cellText(row, column.key) || undefined}>{cellText(row, column.key)}</span></td>)}
           </tr>)}</tbody>
         </table></div>}
       <footer><span>{trackerSummary(data)}</span></footer>

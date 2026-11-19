@@ -200,3 +200,53 @@ test('the tab stylesheet is loaded last by the screen and sizes the cards by the
   assert.match(css, /\.af-pane\[hidden\]/, 'the hidden attribute still hides a flex or grid panel')
   assert.doesNotMatch(css, /overflow-x: ?(scroll|auto)[^}]*\.af-scroll/, 'the page itself never scrolls sideways')
 })
+
+/* ------------------------------------------------------------------ The design rules, read from the stylesheet */
+
+test('every spacing value in the tab stylesheet is on the 4 / 8 / 12 / 16 / 20 / 24 / 32 scale', async () => {
+  const css = (await src('styles/application-form-tabs.css')).replace(/\/\*[\s\S]*?\*\//g, '')
+  const allowed = new Set([0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64])
+  const bad = []
+  for (const match of css.matchAll(/(?:^|[;{\s])((?:padding|margin|gap|row-gap|column-gap)(?:-(?:top|right|bottom|left|block|inline))?)\s*:\s*([^;}]+)/g)) {
+    for (const px of match[2].matchAll(/(-?\d+(?:\.\d+)?)px/g)) if (!allowed.has(Math.abs(Number(px[1])))) bad.push(`${match[1]}: ${match[2].trim()}`)
+  }
+  assert.deepEqual(bad, [])
+})
+
+test('the design rules hold: 48px tab bar, 40px controls with an 8px radius, 28px section icon, 24px chips, 20px count pills, 36px buttons', async () => {
+  const css = await src('styles/application-form-tabs.css')
+  assert.match(css, /\.af \.af-tablist \{[^}]*height: 48px/)
+  assert.match(css, /\.af \.af-tab \{[^}]*height: 48px/)
+  assert.match(css, /\.af-tab\[aria-selected='true'\]::after \{ background: var\(--primary\)/, 'the underline is the primary colour')
+  assert.match(css, /\.af-tab-count \{[^}]*min-width: 20px; height: 20px/)
+  assert.match(css, /\.af-main :is\(\.ui-input:not\(textarea\), \.custom-select-trigger, \.date-picker-trigger\) \{[^}]*height: 40px/)
+  assert.match(css, /border: 1px solid var\(--border-control\); border-radius: 8px/)
+  assert.match(css, /\.aff-tile \{ width: 28px; height: 28px/)
+  assert.match(css, /\.aff \.aff-grid \{ gap: 16px 12px; \}/, '16px between rows, 12px between columns')
+  assert.match(css, /\.aff-lab, \.af \.aff \.ac-lab \{ height: 20px/, 'every label row is the same height, so controls share a top edge')
+  assert.match(css, /\.ui-button\.min-h-10 \{ min-height: 36px/)
+  assert.match(css, /\.af-docgroup \.af-docrow \{[^}]*min-height: 88px/)
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-fA-F]{3,8}\b/, 'tokens only, no colour of its own')
+})
+
+test('the context strip reads client, job, recruiter, stage and DOC as equal cells, and the tab bar fades at the edges it can scroll past', async () => {
+  const strip = await src('features/application-form/components/context-strip.tsx')
+  assert.match(strip, /data-ctx="doc"/)
+  assert.match(strip, /commencement\?: string/)
+  const bar = await src('features/application-form/components/form-tabs.tsx')
+  assert.match(bar, /data-fade-start=\{edges\.start\}/)
+  assert.match(bar, /data-fade-end=\{edges\.end\}/)
+  const css = await src('styles/application-form-tabs.css')
+  assert.match(css, /scroll-snap-type: x proximity/)
+  assert.match(css, /\.af-tablist-wrap\[data-fade-start='true'\]::before/)
+})
+
+test('on a phone the document groups fold (the first one with something to collect is open) and every target is 44px', async () => {
+  const docs = await src('features/application-form/components/documents-section.tsx')
+  assert.match(docs, /PHONE_QUERY = '\(max-width: 760px\)'/)
+  assert.match(docs, /aria-expanded=\{isOpen\(group\.key\)\}/)
+  assert.match(docs, /hidden=\{!isOpen\(group\.key\)\}/)
+  const css = await src('styles/application-form-tabs.css')
+  const phone = css.slice(css.indexOf('@media (max-width: 760px)'))
+  for (const rule of [/\.af-docbtn \{ height: 44px/, /\.af-bar-back \{[^}]*height: 44px/, /\.af-missing button \{ height: 44px/, /\.af-context-change \{ width: 100%; height: 44px/, /font-size: 16px/]) assert.match(phone, rule)
+})

@@ -8,6 +8,7 @@ import { primaryId } from '@/features/candidates/candidate-ids'
 import { applicationFormHref } from '../form-model'
 import { SHOW_MERGE_UI, findMergeTargets, mergeButtonLabel, mergeDialogView, mergeDoneText, mergeOffer, type MergePhase, type MergePlan } from '../duplicate-merge'
 import { mergeCandidate, previewMerge } from '../merge-api'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /** The duplicate-merge dialog: asks the server what would move (a dry run), says it, and only then merges. Admin only (the server checks too). */
 function MergeDialog({ sourceId, sourceLabel, target, onClose }: { sourceId: string; sourceLabel: string; target: { id: string; label: string }; onClose: () => void }) {
@@ -85,7 +86,7 @@ export function DuplicateMergeAction({ duplicate }: { duplicate: { candidateId: 
   const store = useStore()
   const { id = '' } = useParams()
   const [open, setOpen] = useState(false)
-  const offer = SHOW_MERGE_UI ? mergeOffer(duplicate, { isAdmin: store.me.role === 'admin', candidateId: id }) : null
+  const offer = SHOW_MERGE_UI ? mergeOffer(duplicate, { isAdmin: isAdminLevel(store.me.role), candidateId: id }) : null
   if (!offer) return null
   if (offer.kind === 'ask_admin') return <small className="af-merge-ask">{offer.text}</small>
   const here = store.candidates.find((candidate) => candidate.id === id)
@@ -107,7 +108,7 @@ export function MergeIntoPicker({ sourceId, sourceLabel }: { sourceId: string; s
   const [query, setQuery] = useState('')
   const [target, setTarget] = useState<{ id: string; label: string } | null>(null)
   const results = useMemo(() => findMergeTargets(store.candidates, query, sourceId), [store.candidates, query, sourceId])
-  if (!SHOW_MERGE_UI || store.me.role !== 'admin') return null
+  if (!SHOW_MERGE_UI || !isAdminLevel(store.me.role)) return null
   const closeAll = () => { setOpen(false); setTarget(null); setQuery('') }
   return (
     <>

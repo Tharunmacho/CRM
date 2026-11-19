@@ -1,6 +1,7 @@
+import { isAdminLevel } from '@/shared/model/role-labels'
 /**
  * The daily-work gate of the Lead sheet: staff must finish today's daily tasks (Tasks > Daily work) before they work
- * leads. Admin and manager are exempt. The server decides (GET /api/leads/summary carries `dailyWorkGate`, and the work
+ * leads. Admin and MD are exempt. The server decides (GET /api/leads/summary carries `dailyWorkGate`, and the work
  * endpoints answer 403 `daily_work_pending`); these pure helpers turn that into the banner text, the progress, the
  * disabled-action reason and the small store the sidebar lock reads. No React, so tests load this file directly.
  */
@@ -24,9 +25,9 @@ export function gateFromDailySummary(summary: { total: number; open: number; pos
 
 export type GateState = 'exempt' | 'locked' | 'open' | 'unknown'
 
-/** Admin and manager never see the gate. A staff member is locked until the server says otherwise. */
+/** Admin and MD never see the gate. A staff member is locked until the server says otherwise. */
 export function gateState(role: string | undefined, gate: LeadGate | null | undefined): GateState {
-  if (role === 'admin' || role === 'manager') return 'exempt'
+  if (isAdminLevel(role)) return 'exempt'
   if (!gate) return 'unknown'
   return gate.locked ? 'locked' : 'open'
 }

@@ -5,13 +5,14 @@ import { useStore } from '@/shared/state/crm-store'
 import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { useReportData } from '@/features/reports/report-api'
 import type { LeadSummaryResponse } from '@/features/leads/lead-api'
-import { DashboardTrackerCard } from '@/features/reports/dashboard-tracker-card'
 import { DashboardGraphs } from '@/features/dashboard/components/source-graph'
 import { candidatesAfterPrescreening, inView } from '@/features/dashboard/summary'
 import { inboxCard, type InboxCardData } from '@/features/dashboard/inbox-card'
 import { useTravelled } from '@/features/travelled/travelled-api'
 import { EMPTY_FILTERS } from '@/features/travelled/travelled-model'
 import '@/styles/dashboard-simple.css'
+import '@/styles/touch-targets.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 type Tone = 'blue' | 'green' | 'amber' | 'violet' | 'teal' | 'slate' | 'red'
 interface Card { key: string; label: string; value: number | null; note: string; detail?: string; icon: typeof Users; tone: Tone; to: string; danger?: boolean }
@@ -24,14 +25,14 @@ const noun = (value: number | null, one: string, many: string) => value === 1 ? 
 export default function DashboardPage() {
   const store = useStore()
   const navigate = useNavigate()
-  const isTeam = store.me.role === 'admin' || store.me.role === 'manager'
+  const isTeam = isAdminLevel(store.me.role)
   // Candidates ingested from email (with how many need review and how many accounts feed them). A server that does not send the
   // intake numbers yet keeps the old card: the total number of messages across the connected accounts.
   const mail = useReportData<InboxCardData>('/inbox?limit=1', store.me.id, '', ['mail'])
   const inbox = inboxCard(mail.data)
   const leads = useReportData<LeadSummaryResponse>(`/leads/summary?scope=${isTeam ? 'all' : 'mine'}`, store.me.id, '', ['leads'])
 
-  // Admin and manager see the whole team; staff see their own candidates and tasks.
+  // Admin and MD see the whole team; staff see their own candidates and tasks.
   const candidates = useMemo(() => inView(store.candidates, { id: store.me.id, isTeam }), [store.candidates, isTeam, store.me.id])
   // A candidate counts once they have been put through to prescreening or any later stage of an order.
   const afterPrescreening = useMemo(() => candidatesAfterPrescreening(candidates.map(candidate => candidate.id), store.applications), [candidates, store.applications])
@@ -69,8 +70,6 @@ export default function DashboardPage() {
       <span className={`ds-note${card.danger ? ' is-danger' : ''}`}>{card.note}</span>
       {card.detail && <span className="ds-note ds-note2">{card.detail}</span>}
     </button>)}</div>
-    {/* Reports is open to every role, so the card is too; the server narrows the rows to what the viewer may see. */}
-    <DashboardTrackerCard />
     <DashboardGraphs candidates={candidates} anchor={leads.data ? String(leads.data.total) : ''} onOpen={() => navigate('/data-bank')} />
   </div>
 }

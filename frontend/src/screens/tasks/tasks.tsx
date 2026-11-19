@@ -24,6 +24,7 @@ import { useBucketCounts, useOpenBucket } from './tasks-tabs'
 import { bucketTabs } from '@/features/daily-work/daily-work-model'
 import { Flag, OwnerTag, StageTrack } from './task-identity'
 import '@/styles/tasks-page.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 type TabKey = TaskView
 type SortKey = 'due' | 'newest' | 'candidate' | 'owner'
@@ -183,7 +184,7 @@ function TaskList() {
   ]
   const notUpdated = buckets.open.filter((t) => !store.updatedToday(t.id)).length
   const canReassign = store.can('reassign')
-  const canReset = store.me.role === 'admin'
+  const canReset = isAdminLevel(store.me.role)
 
   // How many closed tasks were finished inside their 48 hours (real completion times only).
   const closed = scope.filter((t) => t.completedAt)
@@ -209,7 +210,7 @@ function TaskList() {
     { key: 'open', label: 'Open tasks', value: buckets.open.length, detail: 'Waiting for the next step', icon: ClipboardList, tone: 'blue' as const },
     { key: 'due', label: 'Due today', value: buckets.due.length, detail: 'Time runs out today', icon: CalendarClock, tone: 'amber' as const },
     { key: 'overdue', label: 'Overdue', value: buckets.overdue.length, detail: 'Past 48 hours', icon: TimerOff, tone: 'red' as const },
-    ...(isSupervisor ? [{ key: 'escalated', label: 'Escalated', value: buckets.escalated.length, detail: 'Reported to admin and managers', icon: ShieldAlert, tone: 'red' as const }] : []),
+    ...(isSupervisor ? [{ key: 'escalated', label: 'Escalated', value: buckets.escalated.length, detail: 'Reported to admin and MD', icon: ShieldAlert, tone: 'red' as const }] : []),
     { key: 'missing', label: 'Not updated today', value: notUpdated, detail: 'No remark added yet', icon: MessageSquareOff, tone: 'amber' as const },
     { key: 'completed', label: 'Completed', value: buckets.completed.length, detail: completedFrom || completedTo ? 'In the selected period' : 'Stage finished', icon: CheckCheck, tone: 'green' as const },
   ]
@@ -244,7 +245,7 @@ function TaskList() {
 
       <SummaryCards items={tiles.map(({ key, label, value, detail, icon, tone }) => ({ label, value, detail, icon, tone, active: tab === key, onSelect: () => changeTab(key) }))} />
 
-      <div className={cn('tk-strips', store.me.role === 'admin' && 'has-two')}>
+      <div className={cn('tk-strips', isAdminLevel(store.me.role) && 'has-two')}>
         <div className="tk-meter">
           <span className="tk-meter-icon"><CheckCheck size={18} aria-hidden="true" /></span>
           <div className="tk-meter-body">
@@ -257,7 +258,7 @@ function TaskList() {
             </span>
           </div>
         </div>
-        {store.me.role === 'admin' && <AutomationSettings />}
+        {isAdminLevel(store.me.role) && <AutomationSettings />}
       </div>
 
       <div className="tk-notices">
@@ -429,7 +430,7 @@ function viewInfo(tab: TabKey, historyDay: string | null) {
     open: { title: 'Open tasks', description: 'All tasks waiting for the next step. Closest deadline first.' },
     due: { title: 'Due today', description: 'Tasks whose 48 hours run out today.' },
     overdue: { title: 'Overdue', description: 'Tasks past their 48-hour limit. Give them to someone else or finish the stage.' },
-    escalated: { title: 'Escalated', description: 'Overdue tasks that were reported to the admin and managers.' },
+    escalated: { title: 'Escalated', description: 'Overdue tasks that were reported to the admin and MD.' },
     initial: { title: 'Initial calls', description: 'First calls waiting for a result before a stage starts.' },
     missing: { title: 'Not updated today', description: 'Open tasks that still need today\'s remark.' },
     completed: { title: 'Completed', description: 'Tasks closed by finishing their stage. Newest first.' },
@@ -455,7 +456,7 @@ function emptyBody(tab: TabKey) {
     open: 'Tasks show here as candidates are assigned and move to new stages.',
     due: 'Every open task still has time left.',
     overdue: 'Everything is on time. Keep adding daily remarks.',
-    escalated: 'No task has been reported to the admin and managers.',
+    escalated: 'No task has been reported to the admin or MD.',
     initial: 'Initial call tasks show here when a candidate is assigned. They close when the call result is saved.',
     missing: 'All open tasks here have a remark today.',
     completed: 'A task closes when its stage is completed.',

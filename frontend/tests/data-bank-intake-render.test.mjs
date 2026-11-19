@@ -81,7 +81,7 @@ const renderRow = (me, change = {}) => renderToStaticMarkup(React.createElement(
   React.createElement(RowActions, { candidate: { ...candidate, ...change }, store: { ...store, me }, ...handlers })))
 const order = html => [...html.matchAll(/aria-label="([^"]+)"/g)].map(match => match[1])
 
-test('row buttons: form, then Request (staff, not theirs), then delete (admin), then the menu', () => {
+test('row buttons: form, then Request (staff, not theirs), then delete (admin or MD), then the menu', () => {
   const staff = renderRow({ id: 'me', role: 'staff' }, { ownerId: 'someone-else' })
   assert.deepEqual(order(staff), ['Open application form for Candidate', 'Request Candidate from the admin', 'More actions for Candidate'])
   assert.match(staff, /title="Application form"/)
@@ -91,7 +91,7 @@ test('row buttons: form, then Request (staff, not theirs), then delete (admin), 
   assert.deepEqual(own, ['Open application form for Candidate', 'More actions for Candidate'])
   const admin = order(renderRow({ id: 'admin', role: 'admin' }))
   assert.deepEqual(admin, ['Open application form for Candidate', 'Delete Candidate', 'More actions for Candidate'])
-  assert.deepEqual(order(renderRow({ id: 'boss', role: 'manager' })), ['Open application form for Candidate', 'More actions for Candidate'])
+  assert.deepEqual(order(renderRow({ id: 'boss', role: 'manager' })), ['Open application form for Candidate', 'Delete Candidate', 'More actions for Candidate'])
 })
 
 test('cards keep their own labelled button row with Request next to Application form', () => {

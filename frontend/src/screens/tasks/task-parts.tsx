@@ -109,7 +109,7 @@ export function RemarkPanel({ task, onReassign, onReset }: { task: Task; onReass
             </div>
           </>
         ) : (
-          <p className="tk-remarks-note">{open ? 'Only the person this task is assigned to, or a manager or admin, can add remarks.' : 'This task is closed, so no more remarks are needed.'}</p>
+          <p className="tk-remarks-note">{open ? 'Only the person this task is assigned to, or an MD or admin, can add remarks.' : 'This task is closed, so no more remarks are needed.'}</p>
         )}
       </div>
       <div className="tk-remarks-history">

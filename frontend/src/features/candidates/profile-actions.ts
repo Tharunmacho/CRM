@@ -1,3 +1,4 @@
+import { isAdminLevel } from '@/shared/model/role-labels'
 /** Wording for profile actions that are unavailable until the candidate has a working recruiter. */
 
 /** Why "Match to an order" cannot be used right now, or null when it can. */
@@ -13,8 +14,8 @@ export function linkedConversationId(response: { conversation?: { id?: unknown }
   return typeof id === 'string' ? id : ''
 }
 
-/** Only an admin sees "Delete candidate"; the server refuses everyone else too. */
-export const canDeleteCandidate = (role: string | undefined): boolean => role === 'admin'
+/** Only an admin or MD sees "Delete candidate"; the server refuses everyone else too. */
+export const canDeleteCandidate = (role: string | undefined): boolean => isAdminLevel(role)
 
 export type DeleteBlocker = {
   /** The plain sentence to show. */

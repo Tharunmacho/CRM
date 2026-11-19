@@ -123,7 +123,7 @@ export function NotesPanel({ feedback, actions, viewer, canWork }: { feedback: F
       <SectionHeader icon={<MessageSquareText />} id="af-notes-title" title="Recruiter notes" chip={clock ? <StageClockChip clock={clock} /> : undefined} />
       {canWrite
         ? <NoteComposer actions={actions} />
-        : <p className="af-notes-readonly">You can read the notes on this candidate. Only the owner, an administrator or a manager can write them.</p>}
+        : <p className="af-notes-readonly">You can read the notes on this candidate. Only the owner, an admin or an MD can write them.</p>}
       {feedback.items.length === 0 ? (
         <p className="af-notes-empty">No notes yet. When this candidate takes longer than expected, write the reason here.</p>
       ) : (

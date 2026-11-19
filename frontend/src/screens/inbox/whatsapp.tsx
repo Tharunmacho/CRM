@@ -19,6 +19,7 @@ import { CandidateChip, FileIcon } from '@/features/inbox/mail-parts'
 import { IntakeAcknowledgements } from '@/features/intake/intake-acknowledgements'
 import { DocumentBundleReview } from '@/features/candidates/components/document-bundle-review'
 import { idLine } from '@/features/candidates/candidate-ids'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 type Message = { documentBundle?: {id: string; status: string; candidateIds: string[]} | null; id: string; phoneNumberId: string; senderNumber: string; senderName?: string; type: string; body?: string; fileName?: string; hasFile: boolean; receivedAt: string; status: string; attempts: number; lastError?: string; candidateId?: string }
 type Inbox = { configured: boolean; configuredPhoneNumberId?: string; enabled: boolean; missingSettings: string[]; webhookPath: string; total: number; page: number; pageSize: number; messages: Message[]; channels: { id: string; displayNumber?: string; enabled: boolean; autoIngest: boolean; lastReceivedAt?: string; workerSeenAt?: string; lastError?: string }[] }
@@ -35,7 +36,7 @@ export default function WhatsAppPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const linkedConversation = conversationFromSearch(location.search)
-  const admin = store.me.role === 'admin'
+  const admin = isAdminLevel(store.me.role)
   const [view, setView] = useState<WaTab>('chat')
   const [bundleSource, setBundleSource] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<{ key: string; data: Inbox } | null>(null)

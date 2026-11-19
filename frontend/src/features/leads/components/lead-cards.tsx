@@ -50,14 +50,14 @@ function LeadCard({ lead, context, onOpen, selectable, selected, onSelect, fresh
       <dl className="db-mini-meta">
         <div><dt>Job</dt><dd><PositionText value={lead.positionApplied} /></dd></div>
         <div><dt>Education</dt><dd><EducationCell lead={lead} /></dd></div>
-        <div><dt>India experience</dt><dd><ExperienceCell lead={lead} kind="india" /></dd></div>
-        <div><dt>Abroad experience</dt><dd><ExperienceCell lead={lead} kind="abroad" /></dd></div>
-        <div><dt>Total experience</dt><dd><ExperienceCell lead={lead} kind="total" /></dd></div>
+        <div><dt title="India experience">India exp.</dt><dd><ExperienceCell lead={lead} kind="india" /></dd></div>
+        <div><dt title="Abroad experience">Abroad exp.</dt><dd><ExperienceCell lead={lead} kind="abroad" /></dd></div>
+        <div><dt title="Total experience">Total exp.</dt><dd><ExperienceCell lead={lead} kind="total" /></dd></div>
         <div><dt>Location</dt><dd><LocationCell lead={lead} /></dd></div>
         <div><dt>Campaign</dt><dd><CampaignCell lead={lead} /></dd></div>
         <div><dt>Assigned to</dt><dd>{owner ? <strong className="ld-owner-name" title={owner}>{owner}</strong> : <strong className="ld-owner-name is-empty" title="Waiting for a recruiter">Unassigned</strong>}</dd></div>
-        <div><dt>Follow-up</dt><dd className={cn(follow === 'overdue' && 'ld-late-text')}>{follow === 'none' || follow === 'closed' ? '–' : followUpLabel(lead.nextFollowUpAt)}</dd></div>
-        <div><dt>Country</dt><dd>{lead.countryInterest || '–'}</dd></div>
+        {follow !== 'none' && follow !== 'closed' && <div><dt>Follow-up</dt><dd className={cn(follow === 'overdue' && 'ld-late-text')}>{followUpLabel(lead.nextFollowUpAt)}</dd></div>}
+        {lead.countryInterest?.trim() && <div><dt>Country</dt><dd>{lead.countryInterest}</dd></div>}
       </dl>
       <div className="db-mini-foot" onClick={(event) => event.stopPropagation()}>
         <div className="db-acts">

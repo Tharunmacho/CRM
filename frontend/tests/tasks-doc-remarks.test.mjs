@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 const moduleUrl = (source) => {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
+  return `data:text/javascript;base64,${Buffer.from(withRoleLabels(outputText)).toString('base64')}`
 }
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8')
 /** A source file without its comments, so a rule about rendered words is not tripped by a comment that explains what was removed. */
@@ -25,21 +26,25 @@ const list = SEEDS.map((text, index) => ({ id: `t${index + 1}`, text, active: tr
 
 /* ------------------------------------------------------------------ columns */
 
-test('the Tasks columns: S NO, DOC, Recruiter (supervisors), JOB, then client, candidate, stage, today, remarks, actions', () => {
+test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (supervisors), AGENCY, STAGE, TODAY, REMARKS, actions', () => {
   assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.title),
-    ['S NO', 'DOC', 'Recruiter', 'JOB', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
+    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
   assert.deepEqual(daily.taskColumnsFor(false).map((c) => c.title),
-    ['S NO', 'DOC', 'JOB', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
-  assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.key), ['no', 'doc', 'staff', 'position', 'client', 'candidate', 'stage', 'today', 'remarks', 'actions'])
+    ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
+  assert.deepEqual(daily.taskColumnsFor(true).map((c) => c.key), ['no', 'doc', 'client', 'position', 'candidate', 'staff', 'agency', 'stage', 'today', 'remarks', 'actions'])
   assert.equal(daily.taskColumnsFor(true).at(-1).quiet, true, 'the actions header has no visible title')
+  for (const c of daily.taskColumnsFor(true)) assert.doesNotMatch(c.title, /\//, 'one short word per header, never "CLIENT / COUNTRY"')
 })
 
 test('the supervisor column plan fits the 1111px panel at a 1440px window', () => {
   const sum = (list) => list.reduce((total, c) => total + c.width, 0)
   assert.ok(sum(daily.taskColumnsFor(true)) <= 1111, `${sum(daily.taskColumnsFor(true))}px`)
-  assert.ok(daily.taskColumnsFor(true).find((c) => c.key === 'actions').width >= 142, 'the Open / Complete button and the menu are not clipped')
-  assert.ok(daily.taskColumnsFor(true).find((c) => c.key === 'remarks').width >= 160, 'the dropdown keeps room for a remark')
-  assert.ok(daily.taskColumnsFor(true).find((c) => c.key === 'doc').width >= 80, '"19 Nov 2026" fits')
+  const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
+  assert.ok(width('actions') >= 130, 'the 76px Open / Complete button, the 36px menu, the gap and the right padding are not clipped')
+  assert.ok(width('remarks') >= 140, 'the dropdown keeps room for a remark')
+  assert.ok(width('doc') >= 90, '"19 Nov 2026" fits at 10px + 6px padding')
+  assert.ok(width('stage') >= 120, 'the stage chip keeps room for "1 · Prescreening"')
+  assert.equal(width('no') <= 44, true, 'S NO is narrow')
 })
 
 test('the Tasks table renders the model columns and no longer has a "Remark added" chip', async () => {
@@ -49,7 +54,7 @@ test('the Tasks table renders the model columns and no longer has a "Remark adde
   assert.match(table, /Nothing yet/)
   assert.match(table, /todayChips\(/)
   const order = [...table.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1])
-  assert.deepEqual(order, ['S NO', 'DOC', 'Recruiter', 'JOB', 'CLIENT / COUNTRY', 'CANDIDATE NAME', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
+  assert.deepEqual(order, ['S NO', 'DOC', 'CLIENT', 'JOB', 'CANDIDATE NAME', 'Recruiter', 'AGENCY', 'STAGE', 'TODAY', 'REMARKS', 'Actions'])
   assert.doesNotMatch(await read('../src/styles/daily-work-board.css'), /\.tw-chip\.is-remark/)
 })
 
@@ -127,12 +132,12 @@ test('the dropdown shows the current remark as its value, "Select remark" when t
   const none = select.remarkSelectView(null, list)
   assert.equal(none.value, '')
   assert.equal(none.options[0].label, 'Select remark')
-  assert.deepEqual(none.options.slice(1).map((o) => o.label), SEEDS)
+  assert.deepEqual(none.options.slice(1).map((o) => o.label), [...SEEDS, 'Others'])
   const current = select.remarkSelectView('PCC Pending', list)
   assert.equal(current.value, 't6')
   assert.equal(current.custom, false)
   assert.equal(current.options.some((o) => o.label === 'Select remark'), false, 'the prompt goes once a remark is chosen')
-  assert.deepEqual(current.options.map((o) => o.label), SEEDS)
+  assert.deepEqual(current.options.map((o) => o.label), [...SEEDS, 'Others'])
 })
 
 test('a template remark is recognised whatever its capitals and spacing', () => {
@@ -140,12 +145,11 @@ test('a template remark is recognised whatever its capitals and spacing', () => 
   assert.equal(select.remarkSelectView('visa in progress', list).custom, false)
 })
 
-test('a free-text remark that is not a template stays selected, listed first and marked custom', () => {
+test('a free-text remark that is not a template stays selected as the value and listed first (it is never labelled custom on screen)', () => {
   const view = select.remarkSelectView('Called, will join next week', list)
   assert.equal(view.value, select.CUSTOM_VALUE)
-  assert.equal(view.custom, true)
   assert.deepEqual(view.options[0], { value: select.CUSTOM_VALUE, label: 'Called, will join next week' })
-  assert.equal(view.options.length, SEEDS.length + 1)
+  assert.equal(view.options.length, SEEDS.length + 2, 'the remark, the templates and Others')
   // Choosing the custom entry again, or the prompt, saves nothing.
   assert.equal(select.textForChoice(select.CUSTOM_VALUE, list), null)
   assert.equal(select.textForChoice('', list), null)
@@ -157,23 +161,44 @@ test('while the templates are still loading nothing is called custom, and with n
   assert.equal(select.remarkSelectView('PCC Pending', [], false).value, select.CUSTOM_VALUE)
 })
 
-test('choosing a template saves its text; the status line says Saving, Saved, the error, or Custom remark', () => {
+test('choosing a template saves its text; the status says Saving, Saved or the error and NEVER "Custom remark"', () => {
   assert.equal(select.textForChoice('t4', list), 'Offer Accepted')
   assert.equal(select.textForChoice('nope', list), null)
-  assert.deepEqual(select.remarkStatus('saving', false), { text: 'Saving…', tone: 'busy' })
-  assert.deepEqual(select.remarkStatus('saved', true), { text: 'Saved', tone: 'ok' })
-  assert.deepEqual(select.remarkStatus('error', false, 'Offline'), { text: 'Offline', tone: 'error' })
-  assert.equal(select.remarkStatus('error', false).text, 'The remark could not be saved.')
-  assert.deepEqual(select.remarkStatus('idle', true), { text: 'Custom remark', tone: 'custom' })
-  assert.deepEqual(select.remarkStatus('idle', false, '', 'Last update 3 days ago'), { text: 'Last update 3 days ago', tone: 'lead' })
-  assert.deepEqual(select.remarkStatus('idle', false), { text: '', tone: 'none' })
+  assert.deepEqual(select.remarkStatus('saving'), { text: 'Saving…', tone: 'busy' })
+  assert.deepEqual(select.remarkStatus('saved'), { text: 'Saved', tone: 'ok' })
+  assert.deepEqual(select.remarkStatus('error', 'Offline'), { text: 'Offline', tone: 'error' })
+  assert.equal(select.remarkStatus('error').text, 'The remark could not be saved.')
+  assert.deepEqual(select.remarkStatus('idle', '', 'Last update 3 days ago'), { text: 'Last update 3 days ago', tone: 'lead' })
+  assert.deepEqual(select.remarkStatus('idle'), { text: '', tone: 'none' })
+  for (const state of ['idle', 'saving', 'saved', 'error']) assert.doesNotMatch(select.remarkStatus(state).text, /custom/i)
 })
 
-test('only an admin is offered "+ Add a template", as the last row', () => {
+test('"Others": the last template-like entry, before "+ Add a template"; the typed text is trimmed and an empty box cancels', () => {
+  assert.equal(select.OTHERS_LABEL, 'Others')
+  assert.equal(select.OTHERS_MAX, 500)
+  for (const [remark, canAdd] of [[null, false], ['PCC Pending', false], ['Typed long ago', false], [null, true], ['Typed long ago', true]]) {
+    const options = select.remarkSelectView(remark, list, true, canAdd).options
+    const labels = options.map((o) => o.label)
+    assert.equal(labels.includes('Others'), true, String(remark))
+    assert.equal(labels.at(-1), canAdd ? '+ Add a template' : 'Others')
+    assert.equal(labels.indexOf('Others'), labels.length - (canAdd ? 2 : 1), 'Others sits right before the admin add row')
+  }
+  assert.equal(select.isOthersChoice(select.OTHERS_VALUE), true)
+  assert.equal(select.isOthersChoice('t1'), false)
+  assert.equal(select.textForChoice(select.OTHERS_VALUE, list), null, 'choosing Others saves nothing; the typed text does')
+  assert.equal(select.othersText('   '), null)
+  assert.equal(select.othersText(''), null)
+  assert.equal(select.othersText('  Will  join   next week '), 'Will join next week')
+  assert.equal(select.othersText('x'.repeat(600)).length, 500)
+})
+
+test('only an admin or MD is offered "+ Add a template", as the last row', () => {
   assert.equal(select.canAddTemplate('admin'), true)
-  for (const role of ['manager', 'recruiter', 'telemarketer', '', null, undefined]) assert.equal(select.canAddTemplate(role), false, String(role))
+  assert.equal(select.canAddTemplate('manager'), true)
+  for (const role of ['staff', 'recruiter', 'telemarketer', '', null, undefined]) assert.equal(select.canAddTemplate(role), false, String(role))
   const admin = select.remarkSelectView('PCC Pending', list, true, true)
   assert.deepEqual(admin.options.at(-1), { value: select.ADD_VALUE, label: '+ Add a template' })
+  assert.deepEqual(admin.options.at(-2), { value: select.OTHERS_VALUE, label: 'Others' })
   assert.equal(select.isAddChoice(select.ADD_VALUE), true)
   assert.equal(select.textForChoice(select.ADD_VALUE, list), null, 'the add row is never saved as a remark')
   const recruiter = select.remarkSelectView('PCC Pending', list, true, false)
@@ -182,6 +207,7 @@ test('only an admin is offered "+ Add a template", as the last row', () => {
   assert.equal(select.remarkSelectView(null, list, true, true).options.at(-1).value, select.ADD_VALUE)
   assert.equal(select.remarkSelectView('Typed long ago', list, true, true).options.at(-1).value, select.ADD_VALUE)
   assert.equal(select.remarkSelectView(null, [], true, true).options.at(-1).value, select.ADD_VALUE, 'an empty list can still be started')
+  assert.equal(select.remarkSelectView(null, [], true, false).options.at(-1).value, select.OTHERS_VALUE, 'a recruiter can always type through Others')
 })
 
 test('the add row: empty, too long and duplicate are calm sentences; a server duplicate is selected, not an error', () => {
@@ -199,20 +225,27 @@ test('the add row: empty, too long and duplicate are calm sentences; a server du
   assert.equal(templates.createdText(null, 'typed'), 'typed')
 })
 
-test('the Remarks cell has no text box except the admin add row, saves through the old remark call, and is labelled for the candidate', async () => {
+test('the Remarks cell types only through Others (and the admin add row), saves through the old remark call, and is labelled for the candidate', async () => {
   const table = await code('../src/screens/tasks/daily-table.tsx')
   const cell = table.slice(table.indexOf('export function RemarkCell'), table.indexOf('export function DocCell'))
   assert.doesNotMatch(cell, /Textarea|<textarea|Add remark|remark-save|placeholder="Add remark"/)
   assert.match(cell, /aria-label=\{`Remark for \$\{item\.candidate\}`\}/)
   assert.match(cell, /await onSave\(text\)/)
   assert.match(cell, /aria-live="polite"/)
-  // the one input is the admin's add-template box
+  // the one input serves Others (everyone) and the admin's add-template row
   assert.equal((cell.match(/<input/g) ?? []).length, 1)
-  assert.match(cell, /adding \? \(/)
+  assert.match(cell, /typing \? \(/)
   assert.match(cell, /canAddTemplate\(useStore\(\)\.me\.role\)/)
   assert.match(cell, /event\.key === 'Escape'/)
   assert.match(cell, /createRemarkTemplate\(check\.text\)/)
-  assert.match(cell, /maxLength=\{TEMPLATE_MAX\}/)
+  assert.match(cell, /maxLength=\{mode === 'others' \? OTHERS_MAX : TEMPLATE_MAX\}/)
+  assert.match(cell, /isOthersChoice\(value\)/)
+  assert.match(cell, /othersText\(typed\)/)
+  assert.match(cell, /type="submit"[^>]*aria-label=\{mode === 'others' \? 'Save the remark'/, 'the small check button saves')
+  assert.match(cell, /autoFocus/)
+  assert.match(cell, /save\(text, TYPED_VALUE\)/, 'the saved text is shown as the select value while it saves')
+  assert.doesNotMatch(cell, /Custom remark|is-custom|tone: 'custom'/, 'a saved remark is never labelled custom')
+  assert.doesNotMatch(cell, /disabled=\{state === 'saving' \|\| \(empty/, 'Others means the select is never empty or disabled for lack of templates')
   // the page keeps the call the old box made
   const screen = await code('../src/screens/tasks/daily-work.tsx')
   assert.match(screen, /store\.addRemark\(row\.taskId, text\)/)
@@ -270,7 +303,7 @@ test('moving a template up or down renumbers the list and sends only what change
 test('the admin card is for admins only, under Agency settings, with add, rename, switch and move', async () => {
   const card = await code('../src/screens/users/remark-templates-card.tsx')
   assert.match(card, /if \(!isAdmin\) return null/)
-  assert.match(card, /store\.me\.role === 'admin'/)
+  assert.match(card, /isAdminLevel\(store\.me\.role\)/)
   for (const word of ['Remark templates', 'Add', 'Rename', 'is offered', 'Move ', 'templateProblem', 'moveTemplate']) assert.ok(card.includes(word), word)
   assert.match(await code('../src/screens/users/agency-settings.tsx'), /<RemarkTemplatesCard editable=\{editable\} \/>/)
   const api = await code('../src/features/remark-templates/remark-templates-api.ts')
@@ -335,4 +368,82 @@ test('the Overview strip shows the field next to Stage, with the same date picke
   assert.match(screen, /<StageControl [^>]*\/><CommencementField ctx=\{ctx\.fill\} canWork=\{canWork\} \/>/)
   // the passport dates use the very same component
   assert.match(await code('../src/features/application-form/fill/fill-controls.tsx'), /import \{ DatePicker \} from '@\/shared\/ui\/date-picker'/)
+})
+
+/* ------------------------------------------------------------------ CLIENT, AGENCY and the professional pass */
+
+test('the CLIENT cell is the client name only: no country, no flag, nothing under it', async () => {
+  const table = await code('../src/screens/tasks/daily-table.tsx')
+  const cell = table.slice(table.indexOf('export function ClientCell'), table.indexOf('export function AgencyCell'))
+  assert.match(cell, /dw-cell-strong dw-clamp/)
+  assert.doesNotMatch(cell, /country|Country|flag|<img/)
+  assert.doesNotMatch(table, /CountryChip|ClientCountryCell|flagSrc|dw-ctry/)
+  const tasks = await code('../src/screens/tasks/task-table.tsx')
+  assert.doesNotMatch(tasks, /CLIENT \/ COUNTRY|<img|flagSrc|\bFlag\b/)
+  for (const css of ['daily-work.css', 'tasks-table.css']) assert.doesNotMatch(await read(`../src/styles/${css}`), /\.dw-ctry|\.dw-cc\b/)
+  // the recruiter cards carry no flags either
+  assert.doesNotMatch(await code('../src/screens/tasks/daily-staff-board.tsx'), /flag|<img/i)
+})
+
+test('the AGENCY column shows the server agency first; only an older server falls back to the referrer or how the CV arrived, else a dash', () => {
+  const row = (source, label, detail = null, extra = {}) => ({ referral: { source, label, detail }, ...extra })
+  // the server's agency (the tracker's Ref) wins, also for a candidate who arrived by email and later got an agency
+  assert.equal(daily.agencyLabel(row('email', 'Email', null, { agency: ' Lotus Overseas ' })), 'Lotus Overseas')
+  assert.equal(daily.agencyLabel(row('referral', 'Referral', 'Old detail', { agency: 'Sigma Agency' })), 'Sigma Agency')
+  // the server says there is none: a dash, not "Email" / "WhatsApp"
+  assert.equal(daily.agencyLabel(row('whatsapp', 'WhatsApp', null, { agency: null })), '')
+  assert.equal(daily.agencyLabel(row('referral', 'Referral', 'Sunrise', { agency: '' })), '')
+  // an older server sends no agency at all: the old referral / source logic
+  assert.equal(daily.agencyLabel(row('referral', 'Referral', ' Sunrise Overseas ')), 'Sunrise Overseas')
+  assert.equal(daily.agencyLabel(row('referral', 'Referral')), 'Referral')
+  assert.equal(daily.agencyLabel(row('whatsapp', 'WhatsApp')), 'WhatsApp')
+  assert.equal(daily.agencyLabel(row('', '')), '')
+})
+
+test('the professional pass: one 60px row, a 44px one-line header, one padding for header and cells, a line under every row', async () => {
+  const css = await read('../src/styles/tasks-table.css')
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`)
+    assert.ok(at >= 0, `${selector} rule exists`)
+    return css.slice(at, css.indexOf('}', at))
+  }
+  const P = '.dw .tw-table.dw-table.dw-main'
+  assert.match(rule(`${P} tbody td`), /height: 60px/)
+  assert.match(rule(`${P} tbody td`), /vertical-align: middle/)
+  assert.match(rule(`${P} tbody td`), /border-bottom: var\(--table-line-width\) solid var\(--table-line\)/)
+  assert.match(rule(`${P} tbody td`), /border-right: var\(--table-line-width\) solid var\(--table-line\)/, 'a column line between every pair of columns')
+  assert.doesNotMatch(css, /tr:last-child > td \{ border-bottom: 0/, 'the last row has its line too')
+  assert.match(rule(`${P} thead th`), /height: 44px/)
+  assert.match(rule(`${P} thead th`), /font-size: 11\.5px; font-weight: 600; letter-spacing: \.05em/)
+  assert.match(rule(`${P} thead th`), /white-space: nowrap/)
+  assert.match(rule(`${P} thead th`), /padding: 0 var\(--tw-pad-r\) 0 var\(--tw-pad-l\)/)
+  assert.match(rule(`${P} tbody td`), /padding: 0 var\(--tw-pad-r\) 0 var\(--tw-pad-l\)/, 'the same padding as the header')
+  // controls
+  assert.match(css, /\.dw \.tw-table \.dw-remark \.custom-select-trigger \{ height: 36px !important; min-height: 36px !important/)
+  assert.match(css, /\.dw-act \{[^}]*width: 76px[^}]*height: 36px/)
+  assert.match(css, /\.dw-more-btn \{ width: 36px; height: 36px/)
+  assert.match(css, /\.dw-doc-add \{[^}]*height: 32px[^}]*text-decoration: none/)
+  assert.match(css, /\.tw-chip \{[^}]*height: 26px/)
+  assert.match(css, /\.dw-stage-chip \{[^}]*height: 26px/)
+  // the status never adds a line: a badge on the control, quiet states only for screen readers
+  assert.match(css, /\.dw-remark-status \{ position: absolute/)
+  assert.match(css, /\.dw-remark-status:is\(\.is-lead, \.is-none\) \{[^}]*clip: rect/)
+  assert.doesNotMatch(css, /is-custom/)
+  // the wide metrics only apply to the table; a candidate is a card below 761px with 44px targets and 16px inputs
+  assert.match(css, /@container dw \(min-width: 761px\)/)
+  const cards = css.slice(css.indexOf('@container dw (max-width: 760px)'))
+  assert.match(cards, /\.dw-more-btn \{ width: 44px; height: 44px/)
+  assert.match(cards, /\.dw-remark \.custom-select-trigger \{ height: 44px !important[^}]*font-size: 16px/)
+  assert.match(cards, /\.dw-remark-add input \{[^}]*height: 44px[^}]*font-size: 16px/)
+  // tokens only
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /#[0-9a-fA-F]{3,8}\b|rgb\(/)
+  // no zebra on the Tasks table
+  assert.doesNotMatch(await code('../src/screens/tasks/task-table.tsx'), /is-alt/)
+})
+
+test('the TaskTable renders the Agency cell and moves the Recruiter cell after the candidate', async () => {
+  const table = await code('../src/screens/tasks/task-table.tsx')
+  assert.ok(table.indexOf('<AgencyCell') > table.indexOf('<OwnerTag'), 'Agency follows Recruiter')
+  assert.ok(table.indexOf('<OwnerTag') > table.indexOf('<RecordIdentity'), 'Recruiter follows the candidate')
+  assert.ok(table.indexOf('<ClientCell') < table.indexOf('<PositionCellView') && table.indexOf('<DocCell') < table.indexOf('<ClientCell'), 'DOC, CLIENT, JOB')
 })

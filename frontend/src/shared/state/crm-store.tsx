@@ -38,6 +38,7 @@ import type {
   TodoItem,
   User,
 } from '@/shared/model/types'
+import { ADMIN_LEVEL_ROLES } from '@/shared/model/role-labels'
 
 /**
  * The store is now backed by the API. Every collection comes from one bootstrap call,
@@ -100,25 +101,25 @@ export type Capability =
   | 'view_invoices'
 
 /** Straight from the client specification's capability table. */
-const MATRIX: Record<Capability, Role[]> = {
-  connect_sources: ['admin'],
+const MATRIX: Record<Capability, readonly Role[]> = {
+  connect_sources: ADMIN_LEVEL_ROLES,
   manage_records: ['admin', 'manager', 'staff'],
   // Deleting cascades down client → company → order, so staff do not get it.
-  delete_records: ['admin', 'manager'],
+  delete_records: ADMIN_LEVEL_ROLES,
   map_candidates: ['admin', 'manager', 'staff'],
-  work_any_candidate: ['admin', 'manager'],
-  // Only the admin assigns, reassigns and unassigns candidates; managers work the candidates assigned to them.
-  reassign: ['admin'],
-  reopen_stage: ['admin'],
-  todo_list: ['admin', 'manager'],
-  user_management: ['admin'],
-  export: ['admin'],
-  all_reports: ['admin', 'manager'],
+  work_any_candidate: ADMIN_LEVEL_ROLES,
+  // Only an admin or MD assigns, reassigns and unassigns candidates; staff work the candidates assigned to them.
+  reassign: ADMIN_LEVEL_ROLES,
+  reopen_stage: ADMIN_LEVEL_ROLES,
+  todo_list: ADMIN_LEVEL_ROLES,
+  user_management: ADMIN_LEVEL_ROLES,
+  export: ADMIN_LEVEL_ROLES,
+  all_reports: ADMIN_LEVEL_ROLES,
   // The weekly per-person performance report (hours, tasks, candidate progress) is the admin's.
-  staff_report: ['admin'],
-  // The agreed service fee, CGST/SGST, invoices, receipts and the Fee collections report are the admin's alone: recruiters and managers
+  staff_report: ADMIN_LEVEL_ROLES,
+  // The agreed service fee, CGST/SGST, invoices, receipts and the Fee collections report are for admin and MD only: recruiters
   // never see them (the server answers 403 and leaves them out of every payload; this only keeps the screens in step).
-  view_invoices: ['admin'],
+  view_invoices: ADMIN_LEVEL_ROLES,
 }
 
 type Toast = { id: number; message: string; tone: 'ok' | 'warn' } | null
@@ -588,6 +589,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     return {
       ...data,
+      // Deleted accounts stay in the lookup index (history still shows their name) but never in a list or picker.
+      users: data.users.filter((person) => !person.deleted),
       me: me as User,
       ready,
       authenticated: me !== null,
@@ -626,7 +629,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       openTasks,
       myOpenTasks: openTasks.filter((t) => t.ownerId === me?.id),
-      // Staff see their own work; admin and managers see the whole desk.
+      // Staff see their own work; admin and MD see the whole desk.
       visibleTasks: me?.role === 'staff' ? data.tasks.filter((t) => t.ownerId === me.id) : data.tasks,
       activeApplicationFor: (candidateId) =>
         index.activeApplications.get(candidateId),

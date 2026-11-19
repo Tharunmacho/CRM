@@ -278,3 +278,9 @@ html body .rail .rail-dock-btn:hover { background: var(--nav-hover-bg); border-c
 }
 /* Nothing sticky may hide what the keyboard or a scroll jump lands on: leave room for the top bar. */
 html { scroll-padding-top: 76px; }
+
+/* Touch screens: the top bar's buttons are 44 px tap targets. */
+@media (max-width: 820px) {
+  .topbar-menu, .topbar-icon-btn { width: 44px; height: 44px; }
+  .topbar-profile-trigger { min-height: 44px; min-width: 44px; }
+}

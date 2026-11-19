@@ -9,6 +9,7 @@ import { RecordIdentity } from '@/shared/ui/workspace'
 import { attendanceLabels, minutesLabel, readableStatus, type AttendanceCode, type AttendancePolicy, type AttendanceRequest, type EmployeeMonth } from '../policy-model'
 import { daysInMonth, dayLabel, firstWeekdayIndex, hueClass, monthTitle, weekdayLabel } from '../format'
 import { CardHead, DayStatus, StatusLegend } from './attendance-status'
+import { roleLabel } from '@/shared/model/role-labels'
 
 export function AttendancePolicyStrip({ policy }: { policy: AttendancePolicy }) {
   const hours = (minutes: number) => minutes % 60 === 0 ? `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}` : minutesLabel(minutes)
@@ -30,7 +31,7 @@ export function AttendanceOverview({ rows, requests, own, month, onRecord, onReq
 }) {
   const title = monthTitle(month)
   const columns: Column<EmployeeMonth>[] = [
-    { key: 'name', header: 'Employee', width: '20%', render: (row) => <RecordIdentity name={row.name} detail={readableStatus(row.role) + (row.active ? '' : ' · Inactive')} /> },
+    { key: 'name', header: 'Employee', width: '20%', render: (row) => <RecordIdentity name={row.name} detail={roleLabel(row.role) + (row.active ? '' : ' · Inactive')} /> },
     { key: 'rate', header: 'Attendance', width: '14%', render: (row) => {
       const percentage = row.summary.attendancePercentage ?? null
       return percentage === null

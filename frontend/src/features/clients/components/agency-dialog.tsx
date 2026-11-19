@@ -10,6 +10,7 @@ import { AgencyFocusSection, PartyFieldsSection, StaffDetailsSection } from '@/f
 import { agencyApi } from '@/features/clients/agency-api'
 import { buildAgencyPayload, emptyParty, fieldErrorsFromApi, focusOf, staffRowsOf, validateAgency, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
 import '@/styles/clients-simple.css'
+import '@/styles/touch-targets.css'
 
 /** Add or edit a reference agency: the same details and staff details as a client, without allocated CRM staff. */
 export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceAgency; onClose: () => void; onSaved: () => void }) {
@@ -20,6 +21,8 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
     : emptyParty())
   const [rows, setRows] = useState<StaffRow[]>(() => staffRowsOf(agency?.staffContacts))
   const [focus, setFocus] = useState<AgencyFocus>(() => focusOf(agency))
+  // The Active mark is switched in the agencies list, not here; saving keeps whatever it is.
+  const active = agency?.activeAgency === true
   const [errors, setErrors] = useState<FieldErrors>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -33,7 +36,7 @@ export function AgencyDialog({ agency, onClose, onSaved }: { agency?: ReferenceA
     if (Object.keys(problems).length) { setError('Please fix the highlighted fields.'); return }
     setSaving(true); setError('')
     try {
-      const payload = buildAgencyPayload(values, rows, focus)
+      const payload = buildAgencyPayload(values, rows, focus, active)
       if (agency) await agencyApi.update(agency.id, payload)
       else await agencyApi.create(payload)
       store.notify('Agency saved')

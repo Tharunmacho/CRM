@@ -3,6 +3,7 @@ import type { ReferenceAgency } from '../../shared/model/types'
 export const AGENCY_IMPORT_FIELDS = [
   ['name', 'Contact person'], ['agencyName', 'Agency name'], ['phone', 'Contact number'],
   ['place', 'Place / City'], ['address', 'Address'], ['state', 'State'], ['email', 'Email'], ['notes', 'Notes'],
+  ['activeAgency', 'Active agency (Yes / No)'],
 ] as const
 export type AgencyImportField = typeof AGENCY_IMPORT_FIELDS[number][0]
 export type AgencyImportMapping = Partial<Record<AgencyImportField, number>>
@@ -12,7 +13,8 @@ export interface AgencyImportRow {
   rowNumber: number
   status: AgencyImportStatus
   message: string
-  values: Record<AgencyImportField, string | null>
+  /** `activeAgency` is a true/false the server read from the Yes/No cell; the other values are the cleaned cell text. */
+  values: Record<AgencyImportField, string | boolean | null>
   agencyId?: string
 }
 export interface AgencyImportPreview extends AgencyImportOptions {

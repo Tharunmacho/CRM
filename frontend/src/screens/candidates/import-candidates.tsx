@@ -23,6 +23,7 @@ import { CandidateCard, type CardActions, type OpenData } from '@/features/candi
 import { BatchProgress } from '@/features/candidate-import/components/result-track'
 import { ActionBar } from '@/features/candidate-import/components/action-bar'
 import '@/styles/import-candidates.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 type Progress = RowProgress<ImportResult>
 
@@ -33,8 +34,8 @@ const NO_CHOICES: Record<string, string> = {}
 
 export default function ImportCandidatesPage() {
   const { me, users, orders, orderLabel, refresh, notify, candidates } = useStore()
-  /** Only the admin chooses the recruiter; a staff member or manager imports for themselves (the server enforces it). */
-  const importsForSelf = me.role !== 'admin'
+  /** Only an admin or MD chooses the recruiter; a staff member imports for themselves (the server enforces it). */
+  const importsForSelf = !isAdminLevel(me.role)
 
   const [picked, setPicked] = useState<PickedFolders | null>(null)
   const [rootName, setRootName] = useState('')

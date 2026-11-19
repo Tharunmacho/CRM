@@ -15,6 +15,7 @@ import { TaskTable } from './task-table'
 import { WorkBoard } from './daily-staff-board'
 import '@/styles/daily-work.css'
 import '@/styles/daily-work-board.css'
+import '@/styles/tasks-table.css'
 
 /**
  * Every recruiter's candidates on one page: the ones they hold (to call, and moving through the stages) and what happened to each

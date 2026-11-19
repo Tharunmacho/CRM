@@ -11,11 +11,11 @@
 .as-form { display: grid; gap: 16px; min-width: 0; }
 .as-fields { display: grid; gap: 20px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .as-fields:disabled { opacity: .75; }
-.as-body { padding: 18px 20px 20px; min-width: 0; }
-.as-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; align-items: start; }
+.as-body { padding: 20px; min-width: 0; }
+.as-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; align-items: start; }
 .as-grid > * { min-width: 0; }
 .as-fields :is(textarea, .ui-input) { width: 100%; }
-.as-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 12px 20px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.as-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 12px 20px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); }
 .as-stamp { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--text-muted); }
 .as-unsaved { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border: 1px solid var(--warning-edge); border-radius: 999px; background: var(--warning-fill); font-size: 12.5px; font-weight: 500; color: var(--warning-ink); }
 .as-savebar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
@@ -23,17 +23,17 @@
 /* ---------- Fixed rules ---------- */
 .as-facts { display: grid; gap: 0; margin: 0; }
 .as-facts > div { display: grid; align-content: start; gap: 6px; min-width: 0; }
-.as-facts > div + div { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-faint); }
+.as-facts > div + div { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-faint); }
 .as-facts dt { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; line-height: 20px; color: var(--text-muted); }
 .as-facts dd { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; letter-spacing: -.02em; color: var(--text-main); overflow-wrap: anywhere; }
 .as-facts dd.as-note { font-size: 13px; font-weight: 400; line-height: 1.55; letter-spacing: 0; color: var(--text-muted); }
 
 /* ---------- Currencies ---------- */
-.as-inline { margin: 0 20px 14px; }
+.as-inline { margin: 0 20px 16px; }
 .as-code { font-size: 14px; font-weight: 600; letter-spacing: .02em; color: var(--text-main); }
 .as-name { font-size: 13.5px; color: var(--text-main); overflow-wrap: anywhere; }
 .as-symbol { font-weight: 600; color: var(--text-main); }
-.as-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.as-tags { display: flex; flex-wrap: wrap; gap: 8px; }
 .as-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .as-switch > span { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
 .as-delete:hover:not(:disabled) { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
@@ -47,7 +47,7 @@
 .as-cat-name { font-size: 14px; font-weight: 500; color: var(--text-main); overflow-wrap: anywhere; }
 .as-cat.is-off .as-cat-name { color: var(--text-muted); }
 .as-cat .as-switch { min-width: 112px; }
-.as-categories .as-notice { margin: 0 20px 14px; }
+.as-categories .as-notice { margin: 0 20px 16px; }
 .uv-edit:disabled:hover { border-color: var(--border-control); color: var(--text-main); }
 
 
@@ -66,7 +66,10 @@
   .as-inline { margin: 0 16px 12px; }
   .as-currencies .uv-head-actions > .ui-button { width: 100%; min-height: 44px; justify-content: center; }
   .as-fields textarea { min-height: 168px; }
-  .as-switch { min-height: 40px; }
+  .as-switch { min-height: 44px; }
+  .as .uv-edit { min-height: 44px; }
+  .as-opt-tabs button { min-height: 44px; font-size: 14px; }
+  .as-currencies .ui-table-scroll.is-sticky { max-height: none !important; overflow-y: visible; }
   .as .ui-switch { position: relative; }
   .as .ui-switch::after { content: ''; position: absolute; inset: -9px -6px; }
   .as-currencies .uv-actions { width: 100%; }
@@ -86,7 +89,7 @@
 }
 
 /* ---------- Form options: list tabs, colour dot, hint under the name ---------- */
-.as-opt-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 14px; }
+.as-opt-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 16px; }
 .as-opt-tabs button { min-height: 32px; padding: 0 12px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-1); color: var(--text-muted); font-size: 12.5px; font-weight: 500; transition: border-color .14s, background-color .14s, color .14s; }
 .as-opt-tabs button:hover { border-color: var(--border-hover); background: var(--bg-card); }
 .as-opt-tabs button.is-on { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); color: var(--primary); font-weight: 600; }
@@ -106,18 +109,40 @@
 }
 
 /* ---------- Remark templates ---------- */
-.as-rt-add { display: flex; align-items: flex-start; gap: 12px; padding: 0 20px 6px; }
+.as-rt-add { display: flex; align-items: flex-start; gap: 12px; padding: 0 20px 8px; }
 .as-rt-add-field { flex: 1 1 auto; min-width: 0; }
-.as-rt-problem { margin: 6px 0 0; font-size: 12.5px; color: var(--error-ink); }
+.as-rt-problem { margin: 8px 0 0; font-size: 12.5px; color: var(--error-ink); }
 .as-rt-note { min-height: 20px; margin: 0; padding: 0 20px 8px; font-size: 12.5px; color: var(--text-muted); }
 .as-rt-row { grid-template-columns: minmax(0, 1fr) auto auto; }
-.as-rt-actions { gap: 4px; align-items: center; }
+.as-rt-actions { gap: 8px; align-items: center; }
 .as-rt-edit { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .as-rt-edit-field { flex: 1 1 auto; min-width: 0; }
 .as-rt-edit-actions { display: inline-flex; gap: 4px; }
 @media (max-width: 767px) {
-  .as-rt-add { padding: 0 16px 6px; }
+  .as-rt-add { flex-wrap: wrap; padding: 0 16px 8px; }
+  .as-rt-add .ui-button { width: 100%; }
   .as-rt-note { padding: 0 16px 8px; }
   .as-rt-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .as-rt-actions .ui-icon-button { width: 44px; height: 44px; }
+}
+
+/* ---------- The currencies list: the same table rules as every list (44 px header with single-line uppercase 11.5px/600 labels, 56 px rows centred,
+   14 px side padding so a header starts on the same left edge as its cells, a line under every row, everything left), scrolling inside its card
+   with the header kept in view, so 150 currencies do not make the page 3000 px long. */
+@media (min-width: 768px) {
+  :root:root .as-currencies .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  :root:root .as-currencies .ui-data-table.is-grid thead th button { font: inherit; letter-spacing: inherit; text-transform: inherit; }
+  :root:root .as-currencies .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .as-currencies .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .as-currencies .ui-data-table.is-grid :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+  :root:root .as-currencies .ui-data-table.is-grid :is(th, td).ui-actions-cell { text-align: left; }
+}
+.as-currencies .uv-actions { justify-content: flex-start; }
+
+/* Tablets and phones: switches, icon buttons and the Edit / Delete / Rename buttons are at least 44 px tall (a switch keeps its look and gains an invisible 44 px hit area). */
+@media (max-width: 1023px), (pointer: coarse) {
+  .as .uv-edit, .as-switch { min-height: 44px; }
+  .as .ui-switch { position: relative; }
+  .as .ui-switch::after { content: ''; position: absolute; inset: -10px -6px; }
+  .as .ui-icon-button { min-width: 44px; min-height: 44px; }
 }

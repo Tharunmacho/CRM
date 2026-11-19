@@ -34,7 +34,7 @@ function BoardHead({ title, hint, selected, onSelect, children, solo }: {
 }
 
 /**
- * Admin and manager: one card per recruiter, the ones who need attention first (Idle, then Behind, then On track, then no
+ * Admin and MD: one card per recruiter, the ones who need attention first (Idle, then Behind, then On track, then no
  * candidates; the status rule is `recruiterStatus` in daily-work-model). A card filters the candidate list below to that
  * recruiter (the ?staff= parameter); pressing it again, or "All recruiters", clears the filter. `idleOnly` narrows the cards to
  * recruiters with nothing done yet (the "Nothing done yet" tile sets it).
@@ -126,7 +126,7 @@ const WORK_ICON: Record<WorkStatus, LucideIcon> = { idle: CircleAlert, working: 
 const WORK_CLASS: Record<WorkStatus, string> = { idle: 'idle', working: 'behind', done: 'on-track', none: 'none' }
 
 /**
- * Admin and manager: one card per recruiter with what they hold and what they did today: candidates assigned, called, stages
+ * Admin and MD: one card per recruiter with what they hold and what they did today: candidates assigned, called, stages
  * moved and remarks written. Recruiters with nothing done yet come first. A card filters the list below to that recruiter.
  */
 export function WorkBoard({ people, work, selected, onSelect, idleOnly, onClearIdle, solo }: {

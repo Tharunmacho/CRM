@@ -37,6 +37,9 @@ export function useLeadData({ query, page, pageSize, scope: summaryScope, enable
   const scopeRef = useRef({ query, page, pageSize, summaryScope })
   scopeRef.current = { query, page, pageSize, summaryScope }
   const firstLoad = useRef(true)
+  /** Which list request is the newest. A slower, older answer (a live-event reload that started before the filter changed, the safety poll)
+   *  must never replace the answer to the filters on screen, nor switch the "loading" light off while the newer request is still out. */
+  const latest = useRef(0)
 
   const loadSummary = useCallback(async (signal?: AbortSignal) => {
     try { const data = await leadApi.summary(scopeRef.current.summaryScope, signal); if (!signal?.aborted) setSummary(data) } catch { /* the figures keep their last value */ }
@@ -47,16 +50,17 @@ export function useLeadData({ query, page, pageSize, scope: summaryScope, enable
   const loadList = useCallback(async (signal?: AbortSignal) => {
     const current = scopeRef.current
     const key = `${current.query}|${current.page}|${current.pageSize}`
+    const ticket = ++latest.current
     try {
       const data = await leadApi.list(current.query, current.page, current.pageSize, signal)
-      if (signal?.aborted) return
+      if (signal?.aborted || ticket !== latest.current) return
       setSnapshot({ data, scope: key })
       setError('')
     } catch (e) {
-      if (signal?.aborted) return
+      if (signal?.aborted || ticket !== latest.current) return
       setError(e instanceof Error ? e.message : 'We could not load the leads. Please try again.')
     } finally {
-      if (!signal?.aborted) setLoading(false)
+      if (!signal?.aborted && ticket === latest.current) setLoading(false)
     }
   }, [])
 

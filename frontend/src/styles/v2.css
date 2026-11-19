@@ -221,7 +221,7 @@ html[data-theme='dark'] .v2-avatar { --av: hsl(var(--av-h, 222) 78% 70%); }
 .v2-sk-row:last-child { border-bottom: 0; }
 .v2-sk-row-id { display: grid; flex: 1 1 auto; gap: 6px; min-width: 0; }
 .v2-sk-table { overflow: hidden; border-radius: inherit; }
-.v2-sk-table .v2-sk-thead { display: flex; gap: 40px; overflow: hidden; padding: 14px 20px; border-bottom: 2px solid var(--border-main); }
+.v2-sk-table .v2-sk-thead { display: flex; gap: 40px; overflow: hidden; padding: 14px 20px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); }
 .v2-sk-route { display: flex; justify-content: space-between; width: 100%; max-width: 440px; }
 .v2-sk-route i { width: 16px; height: 16px; border: 2px solid var(--tint-3); border-radius: 50%; box-sizing: border-box; }
 .v2-sk-route.is-sm i { width: 10px; height: 10px; }

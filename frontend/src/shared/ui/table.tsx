@@ -23,8 +23,8 @@ export interface Column<T> {
   /** A row-actions column: fixed to its content, right-aligned, never wrapped or clipped. */
   actions?: boolean
   /**
-   * Header and cell alignment. Short values read best centred (the default), so every column is centred except the
-   * first one, which carries the record's identity and starts on the left. Set 'left' on long text columns.
+   * Header and cell alignment. Left by default, so a header and its cells share one left edge; set 'center' on a short
+   * code or flag column and 'right' on figures (the header follows).
    */
   align?: 'left' | 'right' | 'center'
   /**
@@ -196,8 +196,8 @@ export function DataTable<T>({
   const headPad = grid ? '' : compact ? 'px-3 py-2.5' : dense ? 'px-4 py-2' : 'px-4 py-3'
   const fixedLayout = columns.some((col) => col.width)
   const rule = !grid && gridLines ? 'border-r border-rule-soft last:border-r-0' : ''
-  const alignOf = (col: Column<T>, index: number): 'left' | 'center' | 'right' =>
-    col.actions ? 'center' : col.align ?? (index === 0 ? 'left' : 'center')
+  const alignOf = (col: Column<T>, _index?: number): 'left' | 'center' | 'right' =>
+    col.actions ? 'center' : col.align ?? 'left'
   const pinOf = (col: Column<T>, index: number): 'start' | 'end' | undefined => {
     if (!grid || col.pin === 'none') return undefined
     if (col.pin) return col.pin
@@ -278,6 +278,7 @@ export function DataTable<T>({
                       <button
                         type="button"
                         disabled={!col.sortable}
+                        title={col.header}
                         onClick={() => {
                           if (!col.sortable) return
                           const next = { key: col.key, dir: sort?.key === col.key && sort.dir === 'asc' ? 'desc' as const : 'asc' as const }
@@ -442,16 +443,12 @@ export function DataTable<T>({
       </div>
 
       {!loading && !sorted.length && (
-        empty ?? <EmptyState
-          title="Nothing matches your filters"
-          description="Remove a filter to see more results."
-        />
+        empty ?? <EmptyState title="Nothing matches your filters" />
       )}
 
       {!loading && sorted.length > 0 && (
         <div className="ui-table-pagination flex items-center justify-between border-t border-rule-soft px-4 py-3 text-[13px] text-ink-500">
           <span className="tnum" aria-live="polite">
-            <span className="pagination-label">Showing </span>
             {safePage * pageSize + 1}–{Math.min(total, (safePage + 1) * pageSize)} of{' '}
             {total}
           </span>
@@ -489,6 +486,8 @@ export interface RowMenuItem {
   tone?: 'default' | 'danger'
   /** Keeps the item visible but unusable, with the reason as its tooltip. */
   disabledReason?: string
+  /** Draws a divider line above this item (a destructive item at the end of the menu). */
+  separated?: boolean
 }
 
 /**
@@ -497,7 +496,7 @@ export interface RowMenuItem {
  */
 export function RowMenu({ label = 'Row actions', items }: { label?: string; items: RowMenuItem[] }) {
   const [open, setOpen] = useState(false)
-  const [at, setAt] = useState({ top: 0, left: 0 })
+  const [at, setAt] = useState({ top: 0, right: 8 })
   const trigger = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!open) return
@@ -529,21 +528,21 @@ export function RowMenu({ label = 'Row actions', items }: { label?: string; item
         onClick={(event) => {
           event.stopPropagation()
           const box = event.currentTarget.getBoundingClientRect()
-          const height = items.length * 38 + 12
-          setAt({ top: box.bottom + height + 8 > window.innerHeight ? Math.max(8, box.top - height - 4) : box.bottom + 4, left: Math.max(8, box.right - 184) })
+          const height = items.length * 40 + items.filter((item) => item.separated).length * 9 + 12
+          setAt({ top: box.bottom + height + 8 > window.innerHeight ? Math.max(8, box.top - height - 4) : box.bottom + 4, right: Math.max(8, window.innerWidth - box.right) })
           setOpen((value) => !value)
         }}
       >
         <MoreHorizontal size={16} />
       </button>
       {open && createPortal(
-        <div className="ui-row-menu" role="menu" style={{ top: at.top, left: at.left }}>
-          {items.map(({ label: text, icon: Icon, onSelect, tone, disabledReason }) => (
+        <div className="ui-row-menu" role="menu" style={{ top: at.top, right: at.right }}>
+          {items.map(({ label: text, icon: Icon, onSelect, tone, disabledReason, separated }) => (
             <button
               key={text}
               type="button"
               role="menuitem"
-              className={cn('ui-row-menu-item', tone === 'danger' && 'is-danger')}
+              className={cn('ui-row-menu-item', tone === 'danger' && 'is-danger', separated && 'is-separated')}
               disabled={Boolean(disabledReason)}
               title={disabledReason}
               onClick={(event) => { event.stopPropagation(); setOpen(false); onSelect() }}

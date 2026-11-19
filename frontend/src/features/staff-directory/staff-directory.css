@@ -146,7 +146,7 @@ a.staff-perf-stat:hover { background: var(--tint-1); }
 }
 .staff-directory-workspace .ui-data-table .ui-badge { white-space: normal; max-width: 100%; line-height: 1.3; }
 @media (max-width: 1279px) {
-  .staff-directory-workspace .ui-table-stack-1280 tbody td[data-label='Employee'] { justify-content: flex-start; padding-bottom: 10px; border-bottom: 1px solid var(--border-faint); margin-bottom: 4px; }
+  .staff-directory-workspace .ui-table-stack-1280 tbody td[data-label='Employee'] { justify-content: flex-start; padding-bottom: 10px; border-bottom: var(--table-line-width) solid var(--table-line); margin-bottom: 4px; }
   .staff-directory-workspace .ui-table-stack-1280 tbody td[data-label='Employee']::before { display: none; }
 }
 

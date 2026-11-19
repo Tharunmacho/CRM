@@ -16,7 +16,7 @@
   --dc-walk_in: var(--chart-3, var(--dr-amber));
   --dc-other: var(--dr-slate);
 }
-.dashsimple { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; width: 100%; max-width: 1500px; margin: 0 auto; padding: 4px 0 28px; color: var(--text-main); font-size: 14px; }
+.dashsimple { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; width: 100%; max-width: 1500px; margin: 0 auto; padding: 4px 0 28px; color: var(--text-main); font-size: 14px; }
 .dashsimple > * { min-width: 0; }
 .dashsimple button { font-family: inherit; }
 .dashsimple button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
@@ -28,11 +28,11 @@
 .ds-error button { margin-left: auto; border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font-size: 12px; cursor: pointer; }
 
 /* ---------- Number cards: seven in one row on a desktop screen, never an orphan row ---------- */
-.ds-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 14px; }
-.ds-card { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 16px 16px 15px; border: 1px solid color-mix(in srgb, var(--tone) 16%, var(--border-main)); border-radius: 16px; background: linear-gradient(165deg, color-mix(in srgb, var(--tone) 9%, var(--bg-card)) 0%, var(--bg-card) 62%); color: var(--text-main); text-align: left; cursor: pointer; transition: border-color .16s, box-shadow .2s, transform .2s; }
+.ds-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.ds-card { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 20px; border: 1px solid color-mix(in srgb, var(--tone) 16%, var(--border-main)); border-radius: 16px; background: linear-gradient(165deg, color-mix(in srgb, var(--tone) 9%, var(--bg-card)) 0%, var(--bg-card) 62%); color: var(--text-main); text-align: left; cursor: pointer; transition: border-color .16s, box-shadow .2s, transform .2s; }
 .ds-card:hover { border-color: color-mix(in srgb, var(--tone) 55%, var(--border-main)); box-shadow: 0 10px 26px color-mix(in srgb, var(--tone) 16%, transparent); transform: translateY(-2px); }
 .ds-card:active { transform: translateY(0); }
-.ds-top { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 14px; }
+.ds-top { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 16px; }
 .ds-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: color-mix(in srgb, var(--tone) 16%, var(--bg-card)); color: var(--tone); }
 .ds-go { color: var(--text-light); opacity: .5; transition: opacity .16s, transform .2s, color .16s; }
 .ds-card:hover .ds-go, .ds-card:focus-visible .ds-go { opacity: 1; color: var(--tone); transform: translate(2px, -2px); }
@@ -47,16 +47,16 @@
 /* ---------- The round graphs ---------- */
 .sg-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .sg-section > * { min-width: 0; }   /* the 7 days / 30 days / ... switch scrolls inside its own box instead of widening the page at 390px */
-.sg-bar-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.sg-bar-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; }
 .sg-bar-top h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
 .sg-seg { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 6%, transparent); }
 .sg-seg button { height: 34px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .16s, color .16s, box-shadow .16s; }
 .sg-seg button:hover:not(.is-active) { background: var(--tint-1); color: var(--text-main); }
 .sg-seg button.is-active { background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 78%, #7c5cd6)); color: var(--on-primary); box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 34%, transparent); }
-.sg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
+.sg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 
 .sg-blue { --tone: var(--ds-blue); } .sg-violet { --tone: var(--ds-violet); }
-.sg-card { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 22px 22px 20px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--tone) 14%, var(--border-main)); border-radius: 20px; background: radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--tone) 8%, var(--bg-card)) 0%, var(--bg-card) 70%); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); transition: box-shadow .2s, border-color .2s; }
+.sg-card { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 20px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--tone) 14%, var(--border-main)); border-radius: 16px; background: radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--tone) 8%, var(--bg-card)) 0%, var(--bg-card) 70%); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); transition: box-shadow .2s, border-color .2s; }
 .sg-card:hover { border-color: color-mix(in srgb, var(--tone) 38%, var(--border-main)); box-shadow: 0 14px 34px color-mix(in srgb, var(--tone) 13%, transparent); }
 .sg-head { display: flex; align-items: center; gap: 12px; }
 .sg-chip { display: grid; flex: none; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: color-mix(in srgb, var(--tone) 15%, var(--bg-card)); color: var(--tone); }
@@ -98,17 +98,29 @@
 .sg-open:hover svg { transform: translateX(3px); }
 .sg-open:active { transform: scale(.99); }
 
-@media (max-width: 1180px) { .ds-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .sg-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 760px) {
   .ds-head h1 { font-size: 24px; }
-  .ds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .ds-card { padding: 14px; }
+  .ds-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .ds-card { padding: 16px; }
   .ds-grid > .ds-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .ds-top { margin-bottom: 10px; }
+  .ds-top { margin-bottom: 12px; }
   .ds-value { font-size: 28px; }
-  .sg-card { padding: 18px 16px; }
+  .sg-card { padding: 16px; }
   .sg-bar-top .sg-seg { width: 100%; overflow-x: auto; }
   .sg-seg button { flex: 1 0 auto; padding: 0 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .ds-card, .ds-go, .sg-arc, .sg-bar s, .sg-open, .sg-row, .sg-seg button { transition: none; animation: none; } .ds-card:hover { transform: none; } }
+/* Phones and tablets: body text reads at 14 px and every card, tab and button is at least 44 px. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .ds-label, .ds-note, .sg-head p, .sg-insight, .sg-name { font-size: 14px; }
+  .sg-seg button { height: 44px; }
+  .sg-row { min-height: 44px; }
+  .sg-open { height: 44px; }
+  .ds-error button { min-height: 44px; padding: 0 16px; font-size: 14px; }
+}
+@media (max-width: 760px) {
+  .sg-seg { gap: 2px; scrollbar-width: none; }
+  .sg-seg::-webkit-scrollbar { display: none; }
+  .sg-seg button { padding: 0 10px; }
+}

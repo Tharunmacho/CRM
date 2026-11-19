@@ -716,3 +716,21 @@
   --nav-alert: #ff7b7b;
   --nav-shadow: none;
 }
+
+/* ---- Table lines (the ONE source of truth for every table border on the site) ----
+   --table-line         inside lines: under every row, between columns (body and header), pager rule        (1px)
+   --table-line-strong  the outer frame around a table and the header's bottom edge                          (frame 2px)
+   --table-header-line  the column divider inside the primary-blue header band
+   They are mixed from the text colour into the card background, so every palette follows and both themes stay visible. */
+:root {
+  --table-line-width: 1px;
+  --table-frame-width: 2px;
+  --table-line: color-mix(in srgb, var(--text-main) 32%, var(--bg-card));
+  --table-line-strong: color-mix(in srgb, var(--text-main) 45%, var(--bg-card));
+  --table-header-line: color-mix(in srgb, var(--on-primary) 40%, var(--primary));
+}
+[data-theme="dark"] {
+  --table-line: color-mix(in srgb, var(--text-main) 26%, var(--bg-card));
+  --table-line-strong: color-mix(in srgb, var(--text-main) 40%, var(--bg-card));
+  --table-header-line: color-mix(in srgb, var(--on-primary) 40%, var(--primary));
+}

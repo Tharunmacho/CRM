@@ -145,8 +145,9 @@ export function validateAgency(fields: PartyFields, rows: StaffRow[]): FieldErro
 }
 
 /** Body for POST /reference-agencies and PUT /reference-agencies/:id. */
-export function buildAgencyPayload(fields: PartyFields, rows: StaffRow[], focus: AgencyFocus = emptyFocus()) {
+export function buildAgencyPayload(fields: PartyFields, rows: StaffRow[], focus: AgencyFocus = emptyFocus(), activeAgency = false) {
   return {
+    activeAgency: activeAgency === true,
     name: trim(fields.name),
     agencyName: agencyDisplayName(fields),
     phone: optional(fields.phone),
@@ -162,12 +163,19 @@ export function buildAgencyPayload(fields: PartyFields, rows: StaffRow[], focus:
   }
 }
 
+/** The saved agency as the PUT body with only the Active mark changed (the server replaces the whole record on a PUT, so everything else is sent as saved). */
+export function agencyPayloadFor(agency: { name: string; agencyName: string; phone?: string | null; email?: string | null; address?: string | null; place?: string | null; state?: string | null; notes?: string | null; staffContacts?: StaffContact[] | null; specialisations?: string[] | null; preferredCountries?: string[] | null }, activeAgency: boolean) {
+  const fields: PartyFields = { name: agency.name, agencyName: agency.agencyName, phone: agency.phone ?? '', email: agency.email ?? '', address: agency.address ?? '', place: agency.place ?? '', state: agency.state ?? '', notes: agency.notes ?? '' }
+  return buildAgencyPayload(fields, staffRowsOf(agency.staffContacts), focusOf(agency), activeAgency)
+}
+
 /** The names the form uses for the server's field names (`agency_name`, `contactEmail` ...). */
 const FIELD_ALIASES: Record<string, string> = {
   agency_name: 'agencyName', agencyname: 'agencyName', contactemail: 'email', contact_email: 'email', contactperson: 'name', contact_person: 'name',
   staff_contacts: 'staff', staffcontacts: 'staff', preferred_countries: 'preferredCountries', preferredcountries: 'preferredCountries',
+  active_agency: 'activeAgency', activeagency: 'activeAgency',
 }
-const FORM_FIELDS = new Set(['name', 'agencyName', 'phone', 'email', 'address', 'place', 'state', 'notes', 'staff', 'staffIds', 'specialisations', 'preferredCountries'])
+const FORM_FIELDS = new Set(['name', 'agencyName', 'phone', 'email', 'address', 'place', 'state', 'notes', 'staff', 'staffIds', 'specialisations', 'preferredCountries', 'activeAgency'])
 
 /**
  * Turns a 422 body (`[{loc: ['body', 'staffContacts', 0, 'email'], msg}]`) into field errors, so each message shows under

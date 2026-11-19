@@ -5,7 +5,7 @@ import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
 import { advanceLabel, countryCell, staleLabel, type FollowUpItem } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
-import { AmountCell, CandidateIds, ClientCountryCell, columnLayout, OrderRefCell, PositionCellView, RemarkCell, ReviewCell, RowMenu, ScrollEdges, StageCell, TASK_COLUMNS } from './daily-table'
+import { AmountCell, CandidateIds, ClientCell, columnLayout, OrderRefCell, PositionCellView, RemarkCell, ReviewCell, RowMenu, ScrollEdges, StageCell, TASK_COLUMNS } from './daily-table'
 
 export interface FollowUpTableProps {
   items: FollowUpItem[]
@@ -35,7 +35,7 @@ export function FollowUpTable({ items, now, supervisor, staffName, canWork, onOp
             return (
               <tr key={item.id} className={cn('dw-row', index % 2 === 1 && 'is-alt')}>
                 <td className="is-num tnum" data-label="S NO">{index + 1}</td>
-                <td data-label="CLIENT / COUNTRY" className={cn('is-left', !item.client && noCountry && 'is-empty')}><ClientCountryCell item={{ ...item, kind: 'stage' }} /></td>
+                <td data-label="CLIENT" className={cn('is-left', !item.client && 'is-empty')}><ClientCell item={{ ...item, kind: 'stage' }} /></td>
                 <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
                 {supervisor && <td data-label="Recruiter" className="is-left">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
                 <td data-label="JOB" className={cn('is-left', !item.position && 'is-empty')}><PositionCellView item={item} /></td>

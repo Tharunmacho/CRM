@@ -26,7 +26,7 @@ const hasMoreFilters = (filters: Record<string, string>, skills: string[], skill
   HIDDEN_KEYS.some((key) => (filters[key] ?? '').trim()) || skills.length > 0 || skillStatus !== 'all' || pool !== 'all'
 
 interface Props {
-  /** The signed-in person: staff get Everyone / My candidates, admin and manager also get the Staff filter. */
+  /** The signed-in person: staff get Everyone / My candidates, admin and MD also get the Staff filter. */
   me: { id: string; role: string }
   filters: Record<string, string>
   onFilter: (key: string, value: string) => void
@@ -52,7 +52,7 @@ interface Props {
 }
 
 /**
- * One row of equal selects: Everyone / My candidates, Source, Status, Travel and (admin, manager) Staff. "More filters" holds the rest: the pool
+ * One row of equal selects: Everyone / My candidates, Source, Status, Travel and (admin, MD) Staff. "More filters" holds the rest: the pool
  * list, stage, passport, name, phone, job title, experience, mapped order, date added and skills. Every PRD column stays filterable.
  */
 export function DataBankFilters(props: Props) {

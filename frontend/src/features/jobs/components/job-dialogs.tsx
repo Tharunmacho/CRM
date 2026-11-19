@@ -22,6 +22,7 @@ import {
 } from '@/features/jobs/job-form'
 import '@/styles/jobs.css'
 import '@/styles/jobs-simple.css'
+import '@/styles/touch-targets.css'
 
 /** Removing a candidate from a job closes their application there; the candidate is not deleted. */
 export function UnmapCandidateDialog({ name, saving, error, onClose, onConfirm }: { name: string; saving: boolean; error: string; onClose: () => void; onConfirm: () => void }) {

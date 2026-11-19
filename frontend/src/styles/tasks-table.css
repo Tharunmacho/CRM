@@ -1,0 +1,120 @@
+/*
+ * Tasks list (the .tw-table inside the Tasks panel): the professional pass. Tokens only, no new colours.
+ * Columns: S NO, DOC, CLIENT (name only), JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, actions.
+ * The measurable rules, all asserted by tests/tasks-doc-remarks.test.mjs and checked in the browser:
+ *   - ONE row height, 60px: nothing in a cell is taller (long text clamps to 1-2 lines with a title tooltip), every cell is vertically centred.
+ *   - lines: the table is framed (var(--table-frame-width) var(--table-line-strong), daily-work.css), the header's bottom edge is the same strong line, a
+ *     var(--table-line) line sits under EVERY row (the last too) and between every pair of columns, the header's dividers are var(--table-header-line).
+ *   - header 44px, one line, uppercase 11.5px / 600 / .05em; a header cell and its cells share ONE left edge (10px padding, 6px on the right).
+ *   - alignment by type: text left, S NO centred (tabular numerals), chips left with one height (26px) and one radius, the stage dashes
+ *     exactly as wide as the stage chip, DOC with tabular numerals.
+ *   - controls: the Remarks select, the Complete / Open / View button and the row menu are 36px tall; the DOC "Add date" button has a 32px hit area.
+ *   - the remark's status (Saving / Saved / error) is a small badge on the control's edge and the "custom remark" note is a tooltip, so a row
+ *     never grows and no space is reserved for them.
+ * Everything that sets the table's metrics lives inside the container query: below 760px a candidate is a card (daily-work.css).
+ * The long selector prefix is deliberate: it out-ranks the shared .dw-table rules, which the Follow-up and Reports tables still use.
+ */
+@container dw (min-width: 761px) {
+  .dw .tw-table.dw-table.dw-main { --tw-pad-l: 10px; --tw-pad-r: 6px; font-size: 13px; line-height: 1.35; }
+
+  /* ---- header: 44px, one line, one left edge with the cells ---- */
+  .dw .tw-table.dw-table.dw-main thead th { height: 44px; padding: 0 var(--tw-pad-r) 0 var(--tw-pad-l); overflow: hidden; border-left: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); font-size: 11.5px; font-weight: 600; letter-spacing: .05em; line-height: 1; text-align: left; text-overflow: ellipsis; text-transform: uppercase; text-wrap: nowrap; white-space: nowrap; overflow-wrap: normal; }
+  .dw .tw-table.dw-table.dw-main thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+
+  /* ---- body: one row height, vertically centred, one padding, a visible var(--table-line) line under EVERY row (the last one too) and between every pair of columns ---- */
+  .dw .tw-table.dw-table.dw-main tbody td { height: 60px; padding: 0 var(--tw-pad-r) 0 var(--tw-pad-l); border-left: 0; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
+  .dw .tw-table.dw-table.dw-main tbody td:last-child { border-right: 0; }
+  .dw .tw-table.dw-table.dw-main .dw-row:hover { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
+  .dw .tw-table.dw-table.dw-main .dw-row:hover > td.is-actions { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
+
+  /* S NO: narrow, centred, tabular numerals (header and cells share the centre) */
+  .dw .tw-table.dw-table.dw-main :is(th, td):first-child { padding-inline: 0; text-align: center; }
+  .dw .tw-table.dw-table.dw-main td.is-num { font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+  /* text columns: at most two lines (the client name one), the full text in the tooltip */
+  .dw .tw-table .dw-cell-strong { font-weight: 500; line-height: 1.35; }
+  .dw .tw-table .dw-clamp { -webkit-line-clamp: 2; }
+  .dw .tw-table .record-name { font-size: 12.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+  .dw .tw-table .tk-owner-name { font-weight: 500; }
+  .dw .tw-table .dw-none { text-align: left; }
+
+  /* DOC: the date as calm tabular text; the empty state is a quiet primary text-button with a calendar icon, 32px tall, no underline */
+  .dw .tw-table .dw-doc { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.35; color: var(--text-main); }
+  .dw .tw-table .dw-doc-add { gap: 4px; height: 32px; min-height: 32px; margin-left: -6px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 600; line-height: 1; color: var(--primary); text-decoration: none; transition: background-color .12s; }
+  .dw .tw-table .dw-doc-add > svg { flex: none; width: 13px; height: 13px; }
+  .dw .tw-table .dw-doc-add:hover { background: color-mix(in srgb, var(--primary) 9%, var(--bg-card)); text-decoration: none; }
+  .dw .tw-table .dw-doc-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+  /* CLIENT and AGENCY: the name only (two lines at most), nothing under it */
+  .dw .tw-table td[data-label='CLIENT'] .dw-clamp { font-weight: 600; }
+
+  /* STAGE: a chip as wide as the cell (the same in every row) and the progress dashes exactly as wide, left-aligned */
+  .dw .tw-table .dw-stage { align-items: stretch; gap: 6px; width: 100%; max-width: none; margin: 0; }
+  .dw .tw-table .dw-stage-chip { box-sizing: border-box; justify-content: flex-start; width: 100%; height: 26px; min-height: 26px; padding: 0 8px; border-radius: 999px; font-size: 11px; line-height: 1; text-align: left; }
+  .dw .tw-table .dw-stage-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dw .tw-table .dw-stage-bar i { height: 4px; }
+
+  /* TODAY: chips stacked and left-aligned, 26px tall, a pill like the stage chip */
+  .dw .tw-table td[data-label='TODAY'] .tw-today { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 4px; }
+  .dw .tw-table .tw-chip { display: block; box-sizing: border-box; width: fit-content; max-width: 100%; height: 26px; min-height: 26px; padding: 0 8px; overflow: hidden; border-radius: 999px; font-size: 11px; line-height: 24px; text-overflow: ellipsis; text-wrap: nowrap; white-space: nowrap; }
+
+  /* the shared skin gives every select a 40px minimum with a very specific selector (:root:root ... input.ui-input:not(...), skin.css), so this
+   * one needs !important to be 36px like the other controls of the row */
+  .dw .tw-table .dw-remark .custom-select-trigger { height: 36px !important; min-height: 36px !important; padding: 0 8px; font-size: 12px; }
+  .dw .tw-table .dw-remark-add input { min-height: 36px; }
+  .dw .tw-table .dw-stage-text b { font-weight: 700; }
+
+  /* REMARKS: a 36px select with 12px gutters; the status never adds a line */
+  .dw .tw-table.dw-table.dw-main td[data-label='REMARKS'] { padding-right: 10px; }
+  .dw .tw-table .dw-remark { position: relative; gap: 0; }
+  .dw .tw-table .dw-remark-last { font-size: 12.5px; line-height: 1.35; }
+  /* "Others": the inline box is the select's twin (36px, same width) with a small check button inside its right edge */
+  .dw .tw-table .dw-remark-add { position: relative; }
+  .dw .tw-table .dw-remark-add input { padding-right: 38px; font-size: 12px; }
+  .dw .tw-table .dw-remark-ok { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; background: var(--primary); color: var(--on-primary); cursor: pointer; }
+  .dw .tw-table .dw-remark-ok:disabled { opacity: .35; cursor: not-allowed; }
+  .dw .tw-table .dw-remark-ok:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .dw .tw-table .dw-remark-status { position: absolute; top: -8px; right: 10px; z-index: 1; display: block; box-sizing: border-box; min-height: 0; max-width: calc(100% - 20px); height: 16px; padding: 0 7px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 10.5px; font-style: normal; font-weight: 600; line-height: 14px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+  .dw .tw-table .dw-remark-status:empty { display: none; }
+  .dw .tw-table .dw-remark-status.is-busy { border-color: color-mix(in srgb, var(--primary) 35%, var(--bg-card)); color: var(--primary-deep); }
+  .dw .tw-table .dw-remark-status.is-ok { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+  .dw .tw-table .dw-remark-status.is-error { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+  /* the quiet states stay in the live region for screen readers and in the cell's tooltip; they take no room on screen */
+  .dw .tw-table .dw-remark-status:is(.is-lead, .is-none) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; border: 0; clip: rect(0 0 0 0); white-space: nowrap; }
+  [data-theme='dark'] .dw .tw-table .dw-remark-status.is-busy { color: var(--primary); }
+
+  /* ACTIONS: the 36px button and the 36px menu, right-aligned with the cell's right padding; the cell keeps the sticky background */
+  .dw .tw-table.dw-table.dw-main :is(th, td).is-actions { padding: 0 12px 0 0; text-align: right; }
+  .dw .tw-table .dw-actions { gap: 6px; }
+  .dw .tw-table .dw-actions .dw-act { box-sizing: border-box; width: 76px; min-width: 76px; height: 36px; min-height: 36px; border-radius: 8px; font-size: 13px; }
+  .dw .tw-table .dw-more-btn { width: 36px; height: 36px; border-radius: 8px; }
+  .dw .tw-table .dw-more-btn:focus-visible, .dw .tw-table .dw-actions .dw-act:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+}
+
+/* ---- cards (the panel is under 761px wide: phones and 768px tablets): 14px text, 16px inputs (no iOS zoom), 44px targets ---- */
+@container dw (max-width: 760px) {
+  .dw .tw-table .dw-row { font-size: 14px; }
+  .dw .tw-table .dw-row > td[data-label]::before { font-size: 13px; }
+  .dw .tw-table .dw-row .record-name { font-size: 15px; }
+  .dw .tw-table .dw-doc, .dw .tw-table .dw-cell-strong, .dw .tw-table .dw-remark-last { font-size: 14px; }
+  .dw .tw-table .dw-doc-add { height: 44px; min-height: 44px; margin-left: 0; padding: 0 12px 0 0; font-size: 14px; }
+  .dw .tw-table .dw-actions { gap: 8px; }
+  .dw .tw-table .dw-actions .dw-act { box-sizing: border-box; width: auto; min-width: 112px; height: 44px; min-height: 44px; padding: 0 20px; font-size: 14px; }
+  .dw .tw-table .dw-more-btn { width: 44px; height: 44px; }
+  .dw .tw-table .dw-remark .custom-select-trigger { height: 44px !important; min-height: 44px !important; padding: 0 12px; font-size: 16px; line-height: 22px; }
+  .dw .tw-table .dw-remark-add input { height: 44px; min-height: 44px; padding: 0 48px 0 12px; font-size: 16px; line-height: 22px; }
+  .dw .tw-table .dw-remark-ok { top: 4px; right: 4px; width: 36px; height: 36px; }
+  .dw .tw-table .dw-remark { position: relative; }
+  .dw .tw-table .dw-remark-status { position: absolute; top: -9px; right: 12px; z-index: 1; display: block; box-sizing: border-box; height: 18px; max-width: calc(100% - 24px); padding: 0 8px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 12px; font-style: normal; font-weight: 600; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+  .dw .tw-table .dw-remark-status:empty { display: none; }
+  .dw .tw-table .dw-remark-status.is-busy { color: var(--primary-deep); }
+  .dw .tw-table .dw-remark-status.is-ok { border-color: var(--success-edge); background: var(--success-fill); color: var(--success-ink); }
+  .dw .tw-table .dw-remark-status.is-error { border-color: var(--error-edge); background: var(--error-fill); color: var(--error-ink); }
+  .dw .tw-table .dw-remark-status:is(.is-lead, .is-none) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; border: 0; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+
+/* ---- every size: the same chip look in the table and on the phone cards, and the focus rings ---- */
+.dw .tw-chip, .dwb-chip { border-radius: 999px; }
+.dw .dw-remark-ok { border: 0; }
+.dw .dw-more-btn:focus-visible, .dw .dw-doc-add:focus-visible, .dw .dw-actions .dw-act:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .dw .tw-table .dw-doc-add { transition: none; } }

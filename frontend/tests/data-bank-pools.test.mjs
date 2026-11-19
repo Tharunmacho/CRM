@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 async function load(path) {
   const source = await readFile(new URL(path, import.meta.url), 'utf8')
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+  return import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`)
 }
 
 const pools = await load('../src/features/candidates/data-bank-pools.ts')
@@ -67,11 +68,12 @@ test('only a string conversation id produces the WhatsApp button', () => {
   assert.equal(actions.linkedConversationId({ conversation: { id: 7 } }), '')
 })
 
-test('only the admin can make a candidate who has a recruiter unassigned', () => {
+test('only an admin or MD can make a candidate who has a recruiter unassigned', () => {
   assert.equal(pools.canUnassignCandidate('admin', 'u1'), true)
   assert.equal(pools.canUnassignCandidate('admin', null), false, 'nobody to take them back from')
   assert.equal(pools.canUnassignCandidate('admin', '  '), false)
-  assert.equal(pools.canUnassignCandidate('manager', 'u1'), false)
+  assert.equal(pools.canUnassignCandidate('manager', 'u1'), true)
+  assert.equal(pools.canUnassignCandidate('manager', null), false)
   assert.equal(pools.canUnassignCandidate('staff', 'u1'), false)
   assert.equal(pools.canUnassignCandidate(undefined, 'u1'), false)
 })

@@ -1,7 +1,8 @@
+import { isAdminLevel } from '@/shared/model/role-labels'
 /** Rules and wording for deleting a job (the server still calls it an order). Plain data in and out, so it is easy to test. */
 
-/** Only an admin sees a delete button for a job; the server refuses everyone else too. */
-export const canDeleteOrder = (role: string | undefined): boolean => role === 'admin'
+/** Only an admin or MD sees a delete button for a job; the server refuses everyone else too. */
+export const canDeleteOrder = (role: string | undefined): boolean => isAdminLevel(role)
 
 export type OrderDeleteBlocker = {
   /** The plain sentence to show. */

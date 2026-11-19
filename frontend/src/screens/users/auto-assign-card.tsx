@@ -8,6 +8,7 @@ import { autoAssignToggle } from '@/features/candidates/assignment-labels'
 import { Panel } from '@/shared/ui/display'
 import { Switch } from '@/shared/ui/primitives'
 import { PanelHead, failureText } from './user-ui'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /**
  * Users > Agency settings > Assignment (admins change it): whether new candidates are given to a free recruiter automatically.
@@ -19,7 +20,7 @@ export function AutoAssignCard() {
   const settings = store.settings
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const toggle = autoAssignToggle(settings, store.me.role === 'admin')
+  const toggle = autoAssignToggle(settings, isAdminLevel(store.me.role))
 
   const change = async (on: boolean) => {
     if (busy || toggle.disabled) return

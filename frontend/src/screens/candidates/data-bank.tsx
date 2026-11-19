@@ -29,13 +29,15 @@ import { fitColumns } from '@/features/candidates/components/column-fit'
 import { ColumnMenu, useColumnChoices } from '@/features/candidates/components/column-menu'
 import { Pager, ViewToggle, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
 import { normalizeSearch } from '@/features/candidates/data-bank-search'
-import { ALL_CANDIDATES_LABEL, MY_NEW_LABEL, SHOW_ALL_LABEL, countLine, myNewEmptyCopy, myNewNote, startsOnMyNew } from '@/features/candidates/data-bank-scope'
+import { ALL_CANDIDATES_LABEL, MY_NEW_LABEL, SHOW_ALL_LABEL, countLine, myNewEmptyCopy, startsOnMyNew } from '@/features/candidates/data-bank-scope'
 import {
   activeFilterCount, assignWaitingLabel, assignWaitingMessage, canAssignWaiting, canUnassignCandidate, emptyPoolCopy, parseTravel, poolCountsPath,
   type AssignWaitingResult, type DataBankPool, type PoolCounts, type TravelFilter,
 } from '@/features/candidates/data-bank-pools'
 import '@/styles/data-bank-v2.css'
 import '@/styles/data-bank-top.css'
+import '@/styles/candidate-tables.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 const SORT_OPTIONS: [string, string][] = [
   ['new_first:desc', 'New candidates first'],
@@ -296,7 +298,7 @@ export default function DataBankPage() {
                 Reassign {selected.length}
               </Button>
             )}
-            {store.me.role === 'admin' && selectedOwned.length > 0 && (
+            {isAdminLevel(store.me.role) && selectedOwned.length > 0 && (
               <Button variant="secondary" disabled={loading || !!loadError} icon={<UserMinus className="h-4 w-4" />} onClick={() => { setMutationError(''); setUnassigning(selectedOwned) }}>
                 Make {selectedOwned.length} unassigned
               </Button>
@@ -326,13 +328,12 @@ export default function DataBankPage() {
               <button type="button" className={cn('db-seg-btn', mineNew && 'is-on')} aria-pressed={mineNew} onClick={showMyNew}>{MY_NEW_LABEL}</button>
               <button type="button" className={cn('db-seg-btn', !mineNew && 'is-on')} aria-pressed={!mineNew} onClick={showAll}>{ALL_CANDIDATES_LABEL}</button>
             </div>
-            {mineNew && <p className="dbt-scope-note">{myNewNote()}</p>}
           </div>
         )}
         <div className="dbt-toolbar">
           <label className="db-search">
             <Search size={15} aria-hidden="true" />
-            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, phone, email…" title="Finds candidate details as you type. Separate words with commas to match all of them, for example: ravi, care agency" aria-label="Search candidates by name, phone, email, agency, recruiter, skills or resume content. Separate words with commas to match all of them." />
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search candidates, phone, email… (commas combine words)" aria-label="Search candidates by name, phone, email, agency, recruiter, skills or resume content. Separate words with commas to match all of them." />
           </label>
           <span className="dbt-sort">
             <Select aria-label="Sort candidates by" value={`${sort.key}:${sort.dir}`} onChange={event => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
@@ -379,7 +380,6 @@ export default function DataBankPage() {
           )}
         </div>
 
-        {!showCards && fit.hidden > 0 && <p className="ld-fitnote" role="status">{fit.hidden} {fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Open a row (the arrow at its start) to see every field, or choose Columns.</p>}
         <div ref={boxRef} className={cn('db-box', fit.compact && 'is-compact', busy && loaded && 'is-busy')} aria-busy={busy || undefined}>
           {rows.length === 0 ? emptyState : showCards ? (
             <DataBankCards rows={rows} store={store} onOpen={openCandidate} onReassign={reassignOne} onEdit={setEditing} onOpenStage={setOpenStage} />
@@ -404,7 +404,6 @@ export default function DataBankPage() {
           )}
         </div>
         {rows.length > 0 && <Pager page={result?.page ?? page} pageSize={pageSize} total={total} noun="candidates" onPage={setPage} onPageSize={setPageSize} />}
-        <p className="db-hint">Candidates from every source. Open a candidate to see their details; view job allocations from Clients or Jobs.</p>
       </Panel>
 
       {reassigning && <ReassignCandidatesDialog candidateIds={reassigning} onClose={() => setReassigning(null)} onSaved={() => { setSelected([]); reloadPage() }} />}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 async function source(path) {
   return readFile(new URL(path, import.meta.url), 'utf8')
@@ -9,15 +10,16 @@ async function source(path) {
 
 async function load(path) {
   const js = ts.transpileModule(await source(path), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+  return import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`)
 }
 
 const { canDeleteOrder, orderDeleteBlocker, orderDeletePath, serverAsksToConfirm } = await load('../src/features/jobs/order-delete.ts')
 const { removeOrder } = await load('../src/shared/state/order-removal.ts')
 
-test('only an admin is offered Delete job', () => {
+test('only an admin or MD is offered Delete job', () => {
   assert.equal(canDeleteOrder('admin'), true)
-  for (const role of ['manager', 'staff', '', undefined]) assert.equal(canDeleteOrder(role), false)
+  assert.equal(canDeleteOrder('manager'), true)
+  for (const role of ['staff', '', undefined]) assert.equal(canDeleteOrder(role), false)
 })
 
 test('a job with no candidates has no blocker', () => {

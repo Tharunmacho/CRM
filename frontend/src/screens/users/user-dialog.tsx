@@ -10,6 +10,7 @@ import { canReceiveManualAssignment, manualAssignmentLabel } from '@/features/st
 import { availabilityWords } from '@/features/staff-directory/model'
 import { autoAssignValue } from '@/features/candidates/assignment-labels'
 import { FormSection, PasswordOnce, PasswordPair, RolePill, UserAvatar, failureText, generatePassword, roleBlurbs } from './user-ui'
+import { ROLE_ORDER, roleLabel } from '@/shared/model/role-labels'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -92,8 +93,8 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
             <Field label="Phone"><Input type="tel" maxLength={40} value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+971 50 000 0000" /></Field>
           </FormSection>
           <FormSection icon={<ShieldCheck size={18} />} title="Access" hint="The role decides what this person can see and do">
-            <Field label="Role" hint={own ? 'Your own Admin role cannot be removed.' : roleBlurbs[form.role]} className="sm:col-span-2">
-              <Select value={form.role} disabled={busy || own} onChange={(e) => set('role', e.target.value as Role)}><option value="staff">Recruiter</option><option value="manager">Manager</option><option value="admin">Admin</option></Select>
+            <Field label="Role" hint={own ? 'Your own role cannot be changed.' : roleBlurbs[form.role]} className="sm:col-span-2">
+              <Select value={form.role} disabled={busy || own} onChange={(e) => set('role', e.target.value as Role)}>{ROLE_ORDER.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</Select>
             </Field>
             {!user && <>
               <PasswordPair className="sm:col-span-2" label="Initial password" disabled={busy} password={form.password} confirmation={form.confirmation} generated={generated}
@@ -107,7 +108,7 @@ export function UserDialog({ user, deactivate, onClose, onSaved }: {
             {isStaff ? <div className="uv-toggle">
               <Switch label="Can be given new candidates automatically" description={autoOn ? 'Include this person when new candidates are shared out.' : 'Automatic assignment is off. This only matters if an admin switches it on.'} checked={form.receivesAutoAssign} disabled={busy || !form.active} onChange={(value) => set('receivesAutoAssign', value)} />
               <Switch label="On leave" description="Stops new candidates being given, but keeps the work they have. Approved leave in Attendance also stops them." checked={form.onLeave} disabled={busy || !form.active} onChange={(value) => set('onLeave', value)} />
-            </div> : <p className="uv-note">Only Recruiters can be given new candidates automatically. {form.role === 'admin' ? 'Admins' : 'Managers'} never are, so these options do not apply.</p>}
+            </div> : <p className="uv-note">Only Recruiters can be given new candidates automatically. {roleLabel(form.role)}s never are, so these options do not apply.</p>}
             {isStaff && currentAvailability && <p className="uv-note">Right now: <strong>{availabilityWords(currentAvailability.status, currentAvailability.label)}</strong>. Your changes start when you save.</p>}
           </FormSection>
         </>}

@@ -8,6 +8,7 @@ import { Button, Field, Input, Select, Switch } from '@/shared/ui/primitives'
 import { normalizeFormOptions, optionLabelError, reorder, slugValue, toneStyle, TONE_CHOICES, type CategoryMetas, type FormOption, type FormOptions } from '@/features/form-options/form-options-model'
 import { refreshFormOptions } from '@/features/form-options/use-form-options'
 import { PanelHead, failureText } from './user-ui'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /** Categories whose choices carry a colour (the interest cards and the service-charges badge). */
 const COLOURED = new Set(['interest_level', 'service_charges_status'])
@@ -18,7 +19,7 @@ const COLOURED = new Set(['interest_level', 'service_charges_status'])
  */
 export function FormOptionsCard({ editable }: { editable: boolean }) {
   const store = useStore()
-  const isAdmin = store.me.role === 'admin'
+  const isAdmin = isAdminLevel(store.me.role)
   const [data, setData] = useState<{ options: FormOptions; meta: CategoryMetas; order: string[] } | null>(null)
   const [category, setCategory] = useState('interest_level')
   const [error, setError] = useState('')

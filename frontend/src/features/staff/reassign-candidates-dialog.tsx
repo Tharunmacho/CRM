@@ -4,6 +4,7 @@ import { Button, Field, Select, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { canReceiveManualAssignment, manualAssignmentLabel } from './availability-model'
 import { useStaffAvailability } from './use-staff-availability'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /** Hands candidates to a recruiter. Candidates nobody owns yet are simply assigned (no reason needed); owned ones are reassigned with a reason. */
 export function ReassignCandidatesDialog({ candidateIds, onClose, onSaved }: {
@@ -33,7 +34,7 @@ export function ReassignCandidatesDialog({ candidateIds, onClose, onSaved }: {
     name: staff.name,
     reason: canReceiveManualAssignment(staff) ? 'Already responsible' : staff.availability.label,
   }))
-  const isAdmin = store.me?.role === 'admin'
+  const isAdmin = isAdminLevel(store.me?.role)
   const reasonMissing = !firstAssignment && !reason.trim()
   const restartMissing = isAdmin && restart && restartReason.trim().length < 3
   const blocked = busy || availability.loading || !!availability.error || !validOwner || reasonMissing || !ids.length || restartMissing

@@ -1,7 +1,7 @@
 import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react'
 import { Check, Copy, Eye, EyeOff, ShieldCheck, Sparkles, X } from 'lucide-react'
 import type { Role } from '@/shared/model/types'
-import { ROLE_LABELS } from '@/shared/model/role-labels'
+import { ROLE_LABELS, isAdminLevel } from '@/shared/model/role-labels'
 import { cn } from '@/shared/lib/cn'
 import { Badge } from '@/shared/ui/display'
 import { Button, Field, Input } from '@/shared/ui/primitives'
@@ -10,7 +10,7 @@ import { FormSection as SharedFormSection } from '@/shared/ui/form-section'
 export const roleLabels: Record<Role, string> = ROLE_LABELS
 export const roleBlurbs: Record<Role, string> = {
   admin: 'Controls all settings and all accounts.',
-  manager: 'Looks after recruiters, moves work between people and is told about very late tasks.',
+  manager: 'Everything an Admin can do: all settings and all accounts, plus looking after recruiters and very late tasks.',
   staff: 'Recruiter. Gets new candidates and does the tasks.',
 }
 
@@ -29,9 +29,9 @@ export function UserAvatar({ name, size = 'md', muted }: { name: string; size?: 
   return <span className={cn('record-avatar uv-avatar', `avatar-hue-${hue}`, size === 'lg' && 'is-lg', size === 'sm' && 'is-sm', muted && 'is-muted')} aria-hidden="true">{initialsOf(name)}</span>
 }
 
-/** Admin carries the primary colour, Manager a violet tint, Staff a quiet neutral; all are soft pills with a dot. */
+/** Admin and MD carry the primary colour, Staff a quiet neutral; all are soft pills with a dot. */
 export function RolePill({ role }: { role: Role }) {
-  return <Badge variant="dot" tone={role === 'admin' ? 'navy' : 'neutral'} className={cn('uv-role', `is-${role}`)}>{roleLabels[role]}</Badge>
+  return <Badge variant="dot" tone={isAdminLevel(role) ? 'navy' : 'neutral'} className={cn('uv-role', `is-${role}`)}>{roleLabels[role]}</Badge>
 }
 
 /** Sectioned-form block used by the dialogs: a soft icon circle, a title and a one-line hint. */

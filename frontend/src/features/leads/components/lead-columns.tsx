@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, UserCheck, Globe, Link2, BellRing, Info } from 'lucide-react'
+import { Check, CheckCircle2, Copy, FileUp, Instagram, Facebook, UserCheck, Globe, Link2, BellRing } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '@/shared/lib/cn'
 import { Dialog } from '@/shared/ui/overlay'
@@ -8,7 +8,7 @@ import { primaryId } from '@/features/candidates/candidate-ids'
 import { WhatsAppTemplateButton } from './wa-template'
 import { Avatar, RowMenu } from '@/features/candidates/components/db-parts'
 import {
-  cleanPhone, createdParts, dobLabel, experienceAnswer, experienceQuestionSummary, extraAnswer, followUpLabel, followUpState, isClosed, leadAge, leadDate, leadStatus, uploadedLabel, uploadedParts,
+  cleanPhone, createdParts, dobLabel, experienceAnswer, extraAnswer, followUpLabel, followUpState, isClosed, leadAge, leadDate, leadStatus, uploadedLabel, uploadedParts,
   platformKind, PLATFORM_LABEL, type ExtraColumn, type Lead,
 } from '../lead-model'
 import { leadMenuItems, workBlock, type LeadColumnContext } from './lead-actions'
@@ -21,7 +21,7 @@ export function CreatedCell({ lead }: { lead: Lead }) {
   const parts = createdParts(date?.value)
   if (!date || !parts) return <Dash />
   const uploaded = uploadedLabel(lead.createdAt)
-  return <span className="db-2l" title={`${date.label} ${new Date(date.value).toLocaleString()}${uploaded && date.label === 'Created' ? `\nUploaded ${uploaded}` : ''}`}><strong className="db-num">{parts.day}</strong><small>{parts.year}{date.label === 'Imported' && ' · Imported'}</small></span>
+  return <span className="db-2l" title={`${date.label} ${new Date(date.value).toLocaleString()}${uploaded && date.label === 'Created' ? `\nUploaded ${uploaded}` : ''}`}><strong className="db-num">{parts.day}</strong><small>{parts.year}</small></span>
 }
 
 /** When the lead was imported into the CRM (agency time): the day over the clock time. */
@@ -36,10 +36,12 @@ export function NameCell({ lead }: { lead: Lead }) {
   const age = leadAge(lead.dob)
   const phone = cleanPhone(lead.phone)
   return (
-    <span className="db-2l is-name ld-identity" title={`${lead.name}${dob ? ` · born ${dob}` : ''}${lead.gender ? ` · ${lead.gender}` : ''}`}>
-      <strong className="ld-identity-name">{lead.name || 'Unnamed'}</strong>
-      <small>{age === null ? 'Age —' : `Age ${age}`}</small>
-      {phone ? <span className="ld-identity-phone"><span className="ident db-num">{phone}</span>{whatsappHref(phone) && <LeadWhatsApp lead={lead} />}<CopyButton value={phone} label={`Copy ${phone}`} /></span> : <small className="db-muted">Phone —</small>}
+    <span className="db-2l is-name ld-identity" title={`${lead.name}${age === null ? '' : ` · age ${age}`}${dob ? ` · born ${dob}` : ''}${lead.gender ? ` · ${lead.gender}` : ''}`}>
+      <span className="ld-identity-top">
+        <strong className="ld-identity-name">{lead.name || 'Unnamed'}</strong>
+        {age !== null && <span className="ld-identity-age" aria-label={`Age ${age}`}>{age} yrs</span>}
+      </span>
+      {phone ? <span className="ld-identity-phone"><span className="ident db-num">{phone}</span>{whatsappHref(phone) && <LeadWhatsApp lead={lead} />}<CopyButton value={phone} label={`Copy ${phone}`} /></span> : <span className="db-muted" aria-label="No phone">–</span>}
     </span>
   )
 }
@@ -85,11 +87,9 @@ export function ExperienceCell({ lead, kind = 'total' }: { lead: Lead; kind?: 'r
   if (!value) return <Dash />
   const label = { restaurant: 'Restaurant experience', india: 'India experience', abroad: 'Abroad experience', total: 'Total experience' }[kind]
   const showQuestion = Boolean(question && /^(yes|no)$/i.test(value))
+  // The question is the tooltip (and the dialog a tap opens); the cell itself shows only the answer.
   const title = `${question || label}: ${value}`
-  const content = <>
-    <strong className="db-num ld-experience-value">{value}{showQuestion && <Info size={12} aria-hidden="true" />}</strong>
-    {showQuestion && <small>{experienceQuestionSummary(question)}</small>}
-  </>
+  const content = <strong className="db-num ld-experience-value">{value}</strong>
   return (
     <span className={`ld-experience-cell is-${kind}`} onClick={showQuestion ? event => event.stopPropagation() : undefined}>
       {showQuestion
@@ -164,7 +164,7 @@ export function OwnerCell({ lead, userById }: { lead: Lead; userById: LeadColumn
     : <span className="db-owner is-empty" title="Waiting for a recruiter"><UserCheck size={14} aria-hidden="true" /><span>Unassigned</span></span>
 }
 
-/** "Assigned to": the recruiter's full name (wrapping at spaces), the lead status under it, and the next follow-up as a third line only when one is set. */
+/** "Assigned to": the recruiter's name, then the lead status with the next follow-up (when one is set) on the same line. */
 export function StatusOwnerCell({ lead, userById, onViewRemarks }: { lead: Lead; userById: LeadColumnContext['userById']; onViewRemarks?: (lead: Lead) => void }) {
   const state = followUpState(lead.nextFollowUpAt, lead.status)
   const due = state !== 'none' && state !== 'closed'
@@ -174,12 +174,14 @@ export function StatusOwnerCell({ lead, userById, onViewRemarks }: { lead: Lead;
       {name
         ? <strong className="ld-owner-name" title={name}>{name}</strong>
         : <strong className="ld-owner-name is-empty" title="Waiting for a recruiter">Unassigned</strong>}
-      <ContactStateText lead={lead} />
-      {due && (
-        <small className={cn('ld-follow', state === 'overdue' && 'is-late', state === 'today' && 'is-today')} title={`Follow up ${new Date(lead.nextFollowUpAt as string).toLocaleString()}`}>
-          <BellRing size={11} aria-hidden="true" /> {followUpLabel(lead.nextFollowUpAt)}
-        </small>
-      )}
+      <span className="ld-statline">
+        <ContactStateText lead={lead} />
+        {due && (
+          <small className={cn('ld-follow', state === 'overdue' && 'is-late', state === 'today' && 'is-today')} title={`Follow up ${new Date(lead.nextFollowUpAt as string).toLocaleString()}`}>
+            <BellRing size={11} aria-hidden="true" /> {followUpLabel(lead.nextFollowUpAt)}
+          </small>
+        )}
+      </span>
     </>
   )
   // Only an assigned lead has a history to show; "Unassigned" and every other cell keep the row's click (opens the drawer).

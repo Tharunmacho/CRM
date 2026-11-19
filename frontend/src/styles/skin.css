@@ -199,11 +199,11 @@
 /* ============================================================ 7. Tables */
 :root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table, .candidate-table) thead tr { background: none; border-bottom-width: 0; }
 :root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table, .candidate-table) thead th {
-  background: transparent; border-bottom: 0; box-shadow: inset 0 -2px 0 var(--border-main);
+  background: transparent; border-bottom: var(--table-frame-width) solid var(--table-line-strong); box-shadow: none;
   font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted);
 }
-:root:root .ui-table-scroll.is-sticky thead th { background: var(--bg-card); box-shadow: inset 0 -2px 0 var(--border-main); }
-:root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table) tbody tr { border-color: var(--border-faint); }
+:root:root .ui-table-scroll.is-sticky thead th { background: var(--bg-card); box-shadow: none; }
+:root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table) tbody tr { border-color: var(--table-line); }
 @media (hover: hover) and (min-width: 1280px) {
   :root:root :is(.ui-data-table, .db-tbl, .tk-table, .cd-cands, .dr-table) tbody tr:hover > td:first-child {
     box-shadow: inset 3px 0 0 var(--accent-2);

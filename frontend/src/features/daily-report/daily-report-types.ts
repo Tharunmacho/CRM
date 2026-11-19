@@ -99,7 +99,7 @@ export interface StageBreakdown { totals: StageTotal[]; perStaff: { id: string; 
 export interface DailyReport {
   period: DailyPeriod
   generatedAt: string
-  /** 'team' for admin and manager (all staff, the staff filter); 'self' for a recruiter (their own figures only). */
+  /** 'team' for admin and MD (all staff, the staff filter); 'self' for a recruiter (their own figures only). */
   scope: 'team' | 'self'
   metrics: DailyMetric[]
   extra: { interviewsOnline: number; leadsAssigned: number; leadsContactedPct: number | null }

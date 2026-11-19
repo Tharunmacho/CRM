@@ -108,7 +108,7 @@ a.uv-phone:focus-visible { outline: 2px solid var(--primary); outline-offset: 2p
   .uv .ui-table-stack-1280 tbody td::before { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text-muted); }
   .uv .ui-table-stack-1280 tbody td[data-label='Team member'] { grid-column: 1 / -1; }
   .uv .ui-table-stack-1280 tbody td[data-label='Team member']::before, .uv .ui-table-stack-1280 tbody td[data-label='Actions']::before { display: none; }
-  .uv .ui-table-stack-1280 tbody td[data-label='Actions'] { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 10px; border-top: 1px solid var(--border-faint); }
+  .uv .ui-table-stack-1280 tbody td[data-label='Actions'] { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 10px; border-top: var(--table-line-width) solid var(--table-line); }
   .uv .ui-table-stack-1280 .uv-email { white-space: normal; overflow-wrap: anywhere; }
   .uv-toolbar, .uv-toolbar.has-clear { grid-template-columns: minmax(0, 1fr) 180px 190px; }
   .uv-toolbar.has-clear > .ui-button { grid-column: 1 / -1; justify-self: start; }
@@ -256,3 +256,27 @@ a.uv-phone:focus-visible { outline: 2px solid var(--primary); outline-offset: 2p
 
 /* Page-level tabs (Team / Agency settings) sit under the page header. */
 .uv-page-tabs { margin-top: 14px; }
+
+/* ---------- delete a team member ---------- */
+.uv-delete { min-width: 0; }
+.uv-delete-summary { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--warning-edge); border-radius: 8px; background: var(--warning-fill); font-size: 14px; line-height: 1.5; color: var(--text-main); }
+.uv-delete-summary svg { flex: none; margin-top: 3px; }
+.uv-delete-summary strong { font-weight: 600; }
+.uv-delete select { max-width: 100%; }
+@media (max-width: 640px) { .uv-delete .ui-select, .uv-delete select { font-size: 16px; min-height: 44px; } }
+
+/* ---------- phones and tablets: 44 px tap targets, and 16 px field text on phones, on User Management and its dialogs ---------- */
+@media (max-width: 820px) {
+  .uv :is([class*='ui-button'], .uv-edit, .ui-row-menu-trigger, .ui-page-button, .custom-select-trigger, select, input:not([type='checkbox']):not([type='radio']), [role='tab']) { min-height: 44px !important; }
+  .uv :is(.ui-row-menu-trigger, .ui-page-button) { min-width: 44px !important; }
+  .uv .ui-switch { position: relative; }
+  .uv .ui-switch::after { content: ''; position: absolute; inset: -10px -6px; }
+  .uv a { display: inline-flex; align-items: center; min-height: 44px !important; }
+  [role='dialog']:has(.uv-delete, #user-form, #security-form, .uv-target) :is(.dialog-foot [class*='ui-button'], .ui-dialog-close, .custom-select-trigger, select, input:not([type='checkbox']):not([type='radio'])) { min-height: 44px !important; }
+}
+@media (max-width: 640px) {
+  .uv :is(.custom-select-trigger, select, input, .ui-input) { font-size: 16px; }
+  [role='dialog']:has(.uv-delete, #user-form, #security-form, .uv-target) :is(.custom-select-trigger, select, input, .ui-input) { font-size: 16px; }
+  [role='dialog']:has(.uv-delete) .dialog-foot { flex-direction: column-reverse; align-items: stretch; }
+  [role='dialog']:has(.uv-delete) .dialog-foot [class*='ui-button'] { width: 100%; }
+}

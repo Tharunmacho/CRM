@@ -1,0 +1,26 @@
+/*
+ * Touch screens and phones (under 1024 px, or any coarse pointer): every control on these screens is at least 44 px high, buttons
+ * read at 14 px and fields at 16 px (so iOS does not zoom on focus). The global skin sets 40 px with :root:root, so these rules carry the
+ * same prefix. One list of screen roots keeps the rule in one place: Client tracker, Travelled, Clients, Jobs, Dashboard, the stage
+ * modal, the New job dialog and the admin cards.
+ */
+@media (max-width: 1023px), (pointer: coarse) {
+  :root:root :is(.ct, .tv, .clients-simple, .jobs-simple, .dashsimple, .sm-form, .jv-form, .as) :is(.ui-button, .ui-radio-chip, .custom-select-trigger, .date-picker-trigger, input.ui-input:not([type='checkbox']):not([type='radio']):not([type='file']), select) { min-height: 44px; }
+  :root:root :is(.ct, .tv, .clients-simple, .jobs-simple, .dashsimple, .sm-form, .jv-form, .as) .ui-button { font-size: 14px; }
+  :root:root :is(.ct, .tv, .clients-simple, .jobs-simple, .dashsimple, .sm-form, .jv-form, .as) :is(input:not([type='checkbox']):not([type='radio']), select, textarea) { font-size: 16px; }
+}
+
+/* The footer of a dialog holds its two buttons: full width and 44 px on a phone, primary above secondary (the dialog already stacks them). */
+@media (max-width: 1023px), (pointer: coarse) {
+  :root:root [role='dialog']:has(:is(.jobs-simple, .jv-form, .sm-form, .client-form)) :is(footer, [class*='footer']) .ui-button { min-height: 44px; }
+}
+
+/* The dialog's close button is a 44 px target too. */
+@media (max-width: 1023px), (pointer: coarse) {
+  :root:root [role='dialog']:has(:is(.jobs-simple, .jv-form, .sm-form, .client-form)) .ui-icon-button { min-width: 44px; min-height: 44px; }
+}
+
+/* The pager under every list. */
+@media (max-width: 1023px), (pointer: coarse) {
+  :root:root :is(.ct, .tv, .clients-simple, .jobs-simple, .dashsimple, .as) .ui-page-button { width: 44px; height: 44px; }
+}

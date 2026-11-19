@@ -1,3 +1,4 @@
+import { isAdminLevel } from '@/shared/model/role-labels'
 export type ChatConversation = {
   id: string; phoneNumberId: string; peerNumber: string; displayName: string | null;
   lastInboundAt: string | null; lastMessageAt: string | null; lastPreview: string | null;
@@ -30,7 +31,7 @@ export function templatePreview(template: ChatTemplate | undefined, parameters: 
 }
 
 /** Only a supervisor may link a candidate while opening a conversation (the server answers 403 otherwise). */
-export const canLinkCandidate = (role: string): boolean => role === 'admin' || role === 'manager'
+export const canLinkCandidate = (role: string): boolean => isAdminLevel(role)
 
 export function openConversationBody(input: { phoneNumberId: string; peerNumber: string; candidateId: string; role: string }) {
   const { phoneNumberId, peerNumber, candidateId, role } = input

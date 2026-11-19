@@ -36,7 +36,7 @@ const modeStorage = () => { try { return window.localStorage } catch { return nu
 /** Links that point at a mailbox, folder or message (candidate source links, OAuth returns) always open the mail view. */
 const initialMode = (): InboxMode => { const q = new URLSearchParams(window.location.search); return ['message', 'account', 'folder', 'mail_connected', 'mail_error'].some((key) => q.has(key)) ? 'mail' : readMode(modeStorage()) }
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'We could not load the mailbox. Check your internet and try again.'
-/** The plain-English state of a mailbox for the manager dialog. */
+/** The plain-English state of a mailbox for the mailbox manager dialog. */
 const accountState = (account: InboxAccount): { tone: 'neutral' | 'green' | 'amber' | 'stamp'; text: string } => {
   if (account.connectionStatus === 'disconnected') return { tone: 'neutral', text: 'Disconnected' }
   if (!account.configured) return { tone: 'amber', text: 'Setup needed' }

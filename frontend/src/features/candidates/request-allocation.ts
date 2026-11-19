@@ -8,7 +8,7 @@ export interface RequestCandidate { id: string; ownerId: string | null }
 
 export interface AllocationRequestResult { requested: boolean; alreadyRequested: boolean; notified: number }
 
-/** Only staff ask; the admin assigns directly (a manager works their own candidates). A candidate already assigned to the person is never requested. */
+/** Only staff ask; an admin or MD assigns directly. A candidate already assigned to the person is never requested. */
 export function canRequestAllocation(me: RequestActor | null | undefined, candidate: RequestCandidate | null | undefined): boolean {
   if (!me || !candidate || me.role !== 'staff') return false
   return candidate.ownerId !== me.id

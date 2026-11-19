@@ -9,6 +9,7 @@
 import type { Client, Company, Designation, Order, User } from '@/shared/model/types'
 import { cleanAgencyName, sourceLabel } from './form-model'
 import type { AssignmentClientOption, AssignmentData } from './types'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 export interface AssignmentSources {
   clients: readonly Client[]
@@ -27,12 +28,12 @@ export interface AssignmentSources {
   activeOrderId?: string
 }
 
-const isManager = (role: string) => role === 'admin' || role === 'manager'
+const isManager = (role: string) => isAdminLevel(role)
 
-/** Who may change what, by the rules of the contract: job, source and agency by an admin, a manager or the person working the candidate; the recruiter by the admin only. */
+/** Who may change what, by the rules of the contract: job, source and agency by an admin, an MD or the person working the candidate; the recruiter by an admin or MD only. */
 export function fallbackCan(me: { role: string }, canEdit: boolean): AssignmentData['can'] {
   const mayEdit = isManager(me.role) || canEdit
-  return { job: mayEdit, source: mayEdit, agency: mayEdit, recruiter: me.role === 'admin' }
+  return { job: mayEdit, source: mayEdit, agency: mayEdit, recruiter: isAdminLevel(me.role) }
 }
 
 /** Every client with its jobs (title, reference, openings, status), built from the workspace. Inactive clients only when they are the current one. */

@@ -8,6 +8,7 @@ import { AvailabilityBadge, DirectoryFeedback, DirectoryUpdated, EmployeeIdentit
 import { candidateLink, completionLabel, periodLabel, reportLink, taskLink } from '@/features/staff-directory/model'
 import { useStaffDirectory } from '@/features/staff-directory/use-staff-directory'
 import '@/features/staff-directory/staff-directory.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 export default function StaffDetailPage() {
   const { id } = useParams()
@@ -16,7 +17,7 @@ export default function StaffDetailPage() {
   const view = result ?? lastResult
   const employee = view?.staff.find(person => person.id === id)
   const back = `/staff-directory${params.size ? '?' + params.toString() : ''}`
-  const canSeeAttendance = employee && employee.role !== 'admin' && (me.role === 'admin' || employee.role === 'staff' || employee.id === me.id)
+  const canSeeAttendance = employee && employee.role !== 'admin' && (isAdminLevel(me.role) || employee.role === 'staff' || employee.id === me.id)
   const attendance = `/attendance?${new URLSearchParams({ staff: id ?? '', month: period.to.slice(0, 7), view: 'employee' })}`
   const queues = employee ? [
     { to: taskLink(employee.id, 'overdue'), title: 'Overdue tasks', hint: 'Past their deadline and still open', value: employee.overdueTasks, tone: 'overdue' },

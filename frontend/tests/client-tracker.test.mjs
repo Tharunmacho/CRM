@@ -72,9 +72,13 @@ test('the Reports screen has a Client tracker entry with an Export Excel button 
   assert.match(api, /downloadClientTracker/)
 })
 
-test('the sheet keeps Advance and Stage on one line; the address follows the stage filter', async () => {
+test('the sheet cuts long cells with an ellipsis and a title; the address follows the stage filter', async () => {
   const css = await readFile(new URL('../src/styles/client-tracker.css', import.meta.url), 'utf8')
-  assert.match(css, /td:is\(:nth-child\(3\), :nth-child\(5\), :nth-child\(6\), :nth-child\(7\), :nth-child\(8\)\) \{ white-space: nowrap; \}/)
+  assert.match(css, /td:nth-child\(3\) \.ct-cell \{ -webkit-line-clamp: 1; \}/)
+  // Table rules: 44 px header kept in view, 56 px rows centred, 14 px side padding on header and cells, numbers right with tabular numerals.
+  assert.match(css, /\.ct-table th \{[^}]*position: sticky;[^}]*height: 44px;[^}]*padding: 0 14px;[^}]*font-size: 11\.5px;[^}]*text-transform: uppercase;[^}]*white-space: nowrap;/)
+  assert.match(css, /\.ct-table td \{[^}]*height: 56px;[^}]*padding: 8px 14px;[^}]*vertical-align: middle;/)
+  assert.match(css, /\.ct-table td\.is-num \{ font-variant-numeric: tabular-nums; \}/)
   const view = await readFile(new URL('../src/features/reports/client-tracker.tsx', import.meta.url), 'utf8')
   assert.match(view, /next\.delete\('stage'\)/)   // Reset / another stage must not leave a stale ?stage= in the address
 })

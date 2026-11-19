@@ -1,17 +1,19 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowRight, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCall, UserRound } from 'lucide-react'
+import { ArrowRight, CalendarPlus, Check, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCall, UserRound } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
-import { countryCode, flagSrc } from '@/shared/lib/country-flag'
+import { countryCode } from '@/shared/lib/country-flag'
 import { Button, Select } from '@/shared/ui/primitives'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import {
-  advanceLabel, clientCell, clockTime, countryCell, countryShort, docLabel, positionCell, rowAction,
+  advanceLabel, agencyLabel, clientCell, clockTime, countryCell, docLabel, positionCell, rowAction,
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
-import { canAddTemplate, isAddChoice, remarkSelectView, remarkStatus, textForChoice, type RemarkSaveState } from '@/features/daily-work/remark-select-model'
+import {
+  OTHERS_MAX, TYPED_VALUE, canAddTemplate, isAddChoice, isOthersChoice, othersText, remarkSelectView, remarkStatus, textForChoice, type RemarkSaveState,
+} from '@/features/daily-work/remark-select-model'
 import { createRemarkTemplate, useRemarkTemplates } from '@/features/remark-templates/remark-templates-api'
 import { TEMPLATE_MAX, createdText, newTemplateCheck } from '@/features/remark-templates/remark-templates-model'
 import { useStore } from '@/shared/state/crm-store'
@@ -126,7 +128,7 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
   return (
     <tr className={cn('dw-row', done && 'is-done', serial % 2 === 0 && 'is-alt')}>
       <td className="is-num tnum" data-label="S NO">{serial}</td>
-      <td data-label="CLIENT / COUNTRY" className={cn('is-left', !item.client && noCountry && 'is-empty')}><ClientCountryCell item={item} /></td>
+      <td data-label="CLIENT" className={cn('is-left', !item.client && 'is-empty')}><ClientCell item={item} /></td>
       <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={item.candidate} detail={<CandidateIds item={item} />} /></td>
       {showStaff && <td data-label="Recruiter" className="is-left">{staffName ? <OwnerTag name={staffName} /> : <span className="dw-none">—</span>}</td>}
       <td data-label="JOB" className={cn('is-left', !item.position && 'is-empty')}><PositionCellView item={item} /></td>
@@ -160,19 +162,20 @@ export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId'
 }
 
 /**
- * CLIENT / COUNTRY in one cell: the client's name (up to two lines) and the country chip (flag and short name) under it.
- * A row with only one of them shows just that one; with neither it is a single muted dash. What is missing is added from the row menu.
+ * CLIENT: the client's name only (up to two lines, the full name and the contact in the tooltip). Nothing sits under it: no country, no flag.
+ * Without one it is a single muted dash that says why. What is missing is added from the row menu.
  */
-export function ClientCountryCell({ item }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact' | 'country' | 'countrySource' | 'locationHint'> }) {
+export function ClientCell({ item }: { item: Pick<DailyItem, 'client' | 'kind' | 'clientContact'> }) {
   const cell = clientCell(item)
-  const country = countryCell(item, countryCode)
-  if (!cell.text && country.names.length === 0) return <span className="dw-none" title={cell.hint}>—</span>
-  return (
-    <div className="dw-cc">
-      {cell.text && <span className="dw-cell-strong dw-clamp" title={item.clientContact ? `${cell.text}. Contact: ${item.clientContact}` : cell.text}>{cell.text}</span>}
-      <CountryChip country={country} />
-    </div>
-  )
+  if (!cell.text) return <span className="dw-none" title={cell.hint}>—</span>
+  return <span className="dw-cell-strong dw-clamp" title={item.clientContact ? `${cell.text}. Contact: ${item.clientContact}` : cell.text}>{cell.text}</span>
+}
+
+/** AGENCY: the candidate's referral agency (the referrer's name when someone referred them, otherwise how the CV arrived); a muted dash when none. Two lines at most. */
+export function AgencyCell({ item }: { item: Pick<DailyItem, 'referral' | 'agency'> }) {
+  const label = agencyLabel(item)
+  if (!label) return <span className="dw-none" title="No agency recorded">—</span>
+  return <span className="dw-cell-strong dw-clamp" title={label}>{label}</span>
 }
 
 /** REF: the order's reference (ORD-...) for the job; a muted dash until the candidate is matched to an order. */
@@ -194,20 +197,6 @@ export function ReviewCell({ item }: { item: Pick<DailyItem, 'googleReview'> }) 
   return <span className="dw-none">—</span>
 }
 
-/** A small neutral chip: the flag (when the app has one) and the short country name. A dashed edge marks a country that is not from an order (the tooltip says where it comes from). */
-export function CountryChip({ country }: { country: ReturnType<typeof countryCell> }) {
-  const [first, ...more] = country.names
-  if (!first) return null
-  const code = countryCode(first)
-  return (
-    <span className={cn('dw-ctry', country.source !== 'order' && 'is-soft')} title={`${country.names.join(', ')}. ${country.hint}`}>
-      {code && <img src={flagSrc(code)} alt="" width={16} height={11} loading="lazy" onError={(e) => { e.currentTarget.style.display = 'none' }} />}
-      <span>{countryShort(first)}</span>
-      {more.length > 0 && <small className="dw-more">+{more.length}</small>}
-    </span>
-  )
-}
-
 /** JOB: up to two lines, the full title in the tooltip; a muted dash when none is known. */
 export function PositionCellView({ item }: { item: Pick<DailyItem, 'position' | 'positionSource'> }) {
   const cell = positionCell(item)
@@ -222,8 +211,8 @@ export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
   return (
     <div className="dw-stage" title={stage ? `Stage ${no} of ${TOTAL_STAGES}: ${stage.title}` : 'Initial call, before a stage starts'}>
       {stage
-        ? <span className="dw-stage-chip">Stage {no} · {stage.title}</span>
-        : <span className="dw-stage-chip is-call"><PhoneCall size={12} aria-hidden="true" />Initial call</span>}
+        ? <span className="dw-stage-chip"><span className="dw-stage-text"><b>{no}</b> · {stage.title}</span></span>
+        : <span className="dw-stage-chip is-call"><PhoneCall size={12} aria-hidden="true" /><span className="dw-stage-text">Initial call</span></span>}
       <span className="dw-stage-bar" aria-hidden="true">
         {STAGES.map((s) => <i key={s.no} className={cn(no !== null && s.no < no && 'is-done', s.no === no && 'is-now')} />)}
       </span>
@@ -232,22 +221,25 @@ export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
 }
 
 /**
- * REMARKS: a compact dropdown, never a text box. It shows the candidate's current remark as its value ("Select remark" while there is
- * none) and offers the active remark templates; choosing one saves it at once through `onSave` (the same call the old "Add remark" box
- * made) and a small line under it says Saving, Saved or what went wrong. A remark someone typed before the templates existed that is
- * not a template stays shown and valid, marked "Custom remark". The line under the dropdown is always there (an empty one keeps its
- * height), so nothing moves when it changes. Read-only people see the remark as plain text, or a dash. `lead` is a muted line such as
- * "Last update 3 days ago" shown in the status line while nothing else needs saying.
+ * REMARKS: a compact dropdown. It shows the candidate's current remark as its value ("Select remark" while there is none) and offers the
+ * active remark templates, then "Others"; choosing a template saves it at once through `onSave`. "Others" turns the cell into a one-line
+ * box of the same height (autofocus, Enter or the check button saves through the same call, Esc or an empty box cancels), and the saved
+ * text then shows as the dropdown's value: that is the only way to type. Admins also get "+ Add a template" under it, which opens the same
+ * kind of box and adds the text as a template. A remark that is not a template is simply shown as the value (it is never labelled custom).
+ * The status (Saving, Saved or what went wrong) is a badge on the control's edge in the Tasks table (src/styles/tasks-table.css) and a line
+ * only in Follow-up, and it is always in a polite live region, so a row never changes height when it says something. Read-only people see
+ * the remark as plain text, or a dash. `lead` is a muted line such as "Last update 3 days ago" shown while nothing else needs saying.
  */
 export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyItem, 'remark' | 'candidate'>; canWork: boolean; onSave: (text: string) => Promise<void>; lead?: string }) {
   const templates = useRemarkTemplates()
   const canAdd = canAddTemplate(useStore().me.role)
-  const [adding, setAdding] = useState(false)
+  const [mode, setMode] = useState<'select' | 'others' | 'template'>('select')
   const [typed, setTyped] = useState('')
   const box = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<RemarkSaveState>('idle')
   const [error, setError] = useState('')
   const [pending, setPending] = useState<string | null>(null)
+  const [pendingText, setPendingText] = useState('')
   const timer = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(timer.current), [])
   const last = item.remark
@@ -263,56 +255,73 @@ export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyIt
     )
   }
 
-  /** Save `text` as this candidate's remark: the one path both a chosen template and a newly added one take. */
-  const save = async (text: string, value: string | null) => {
+  /** Save `text` as this candidate's remark: the one path a chosen template, a typed remark and a newly added template all take. Says whether it worked. */
+  const save = async (text: string, value: string | null): Promise<boolean> => {
     window.clearTimeout(timer.current)
-    setPending(value); setState('saving'); setError('')
+    setPending(value); setPendingText(text); setState('saving'); setError('')
     try {
       await onSave(text)
       setState('saved')
       timer.current = window.setTimeout(() => setState('idle'), 2500)
+      return true
     } catch (failure) {
       setState('error'); setError(failure instanceof Error ? failure.message : 'The remark could not be saved.')
+      return false
     } finally { setPending(null) }
   }
   const choose = async (value: string) => {
     if (state === 'saving') return
-    if (isAddChoice(value)) { if (canAdd) { setTyped(''); setError(''); setState('idle'); setAdding(true) } return }
+    if (isOthersChoice(value)) { setTyped(''); setError(''); setState('idle'); setMode('others'); return }
+    if (isAddChoice(value)) { if (canAdd) { setTyped(''); setError(''); setState('idle'); setMode('template') } return }
     const text = textForChoice(value, templates.items)
     if (text) await save(text, value)
   }
-  const stopAdding = () => {
-    setAdding(false); setTyped(''); setError(''); setState('idle')
+  const stopTyping = () => {
+    setMode('select'); setTyped(''); setError(''); setState('idle')
     window.setTimeout(() => box.current?.querySelector<HTMLElement>('.custom-select-trigger')?.focus(), 0)
   }
-  /** Admin only: add the typed text as a template (the server answers with the new or the already existing one), then select it for this candidate. */
-  const addTemplate = async (event: FormEvent) => {
+  /** Enter or the check button: the typed remark is saved as it is; admins' "+ Add a template" adds the typed text as a template (the server answers with the new or the already existing one) and selects it. An empty box cancels. */
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!canAdd || state === 'saving') return
+    if (state === 'saving') return
+    if (mode === 'others') {
+      const text = othersText(typed)
+      if (!text) { stopTyping(); return }
+      setMode('select')
+      if (!(await save(text, TYPED_VALUE))) setMode('others')
+      else setTyped('')
+      return
+    }
+    if (!canAdd) return
     const check = newTemplateCheck(typed, templates.items)
     if (!check.ok) { setState('error'); setError(check.message); return }
     setState('saving'); setError('')
     let text: string
     try { text = createdText(await createRemarkTemplate(check.text), check.text) }
     catch (failure) { setState('error'); setError(failure instanceof Error ? failure.message : 'The template could not be added.'); return }
-    setAdding(false); setTyped('')
+    setMode('select'); setTyped('')
     await save(text, null)
   }
-  const status = remarkStatus(state, view.custom, error, lead)
-  const empty = templates.items.length === 0
+  const status = remarkStatus(state, error, lead)
+  const typing = mode !== 'select'
+  const options = pending === TYPED_VALUE ? [...view.options, { value: TYPED_VALUE, label: pendingText }] : view.options
   return (
     <div className="dw-remark" ref={box} title={tip || undefined}>
-      {adding ? (
-        <form className="dw-remark-add" onSubmit={(event) => void addTemplate(event)}>
-          <input type="text" autoFocus autoComplete="off" maxLength={TEMPLATE_MAX} value={typed} disabled={state === 'saving'}
-            placeholder="New template, then Enter" aria-label={`New remark template for ${item.candidate}`} aria-invalid={state === 'error' ? true : undefined}
+      {typing ? (
+        <form className="dw-remark-add" onSubmit={(event) => void submit(event)}>
+          <input type="text" autoFocus autoComplete="off" maxLength={mode === 'others' ? OTHERS_MAX : TEMPLATE_MAX} value={typed} disabled={state === 'saving'}
+            placeholder={mode === 'others' ? 'Type a remark, then Enter' : 'New template, then Enter'}
+            aria-label={mode === 'others' ? `Remark for ${item.candidate}` : `New remark template for ${item.candidate}`} aria-invalid={state === 'error' ? true : undefined}
             onChange={(event) => { setTyped(event.target.value); if (state === 'error') { setState('idle'); setError('') } }}
-            onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); stopAdding() } }}
-            onBlur={() => { if (!typed.trim() && state !== 'saving') stopAdding() }} />
+            onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); stopTyping() } }}
+            onBlur={(event) => { if (!typed.trim() && state !== 'saving' && !event.relatedTarget) stopTyping() }} />
+          <button type="submit" className="dw-remark-ok" aria-label={mode === 'others' ? 'Save the remark' : 'Add the template'} title="Save (Enter)" disabled={state === 'saving' || !typed.trim()}>
+            <Check size={15} aria-hidden="true" />
+          </button>
         </form>
       ) : <Select compact searchable={false} className="dw-remark-select" aria-label={`Remark for ${item.candidate}`}
-        value={pending ?? view.value} disabled={state === 'saving' || (empty && !last && !canAdd)} onChange={(event) => void choose(event.target.value)}>
-        {view.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        value={pending ?? view.value} disabled={state === 'saving'} onChange={(event) => void choose(event.target.value)}>
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </Select>}
       <small className={cn('dw-remark-status', `is-${status.tone}`)} title={status.tone === 'error' ? status.text : undefined} role="status" aria-live="polite">{status.text}</small>
     </div>
@@ -324,7 +333,7 @@ export function DocCell({ item, canAdd, onAdd }: { item: Pick<DailyItem, 'commen
   const label = docLabel(item.commencementDate)
   if (label) return <time className="dw-doc tnum" dateTime={item.commencementDate ?? undefined} title="Date of commencement">{label}</time>
   if (!canAdd || !item.applicationId) return <span className="dw-none" title={item.applicationId ? 'No date of commencement yet' : 'Choose a job first, then add the date of commencement'}>—</span>
-  return <button type="button" className="dw-doc-add" onClick={onAdd} aria-label={`Add the date of commencement for ${item.candidate}`}>Add date</button>
+  return <button type="button" className="dw-doc-add" onClick={onAdd} aria-label={`Add the date of commencement for ${item.candidate}`}><CalendarPlus size={14} aria-hidden="true" />Add date</button>
 }
 
 export interface MenuEntry { label: string; icon: typeof ArrowRight | typeof ExternalLink; onSelect: () => void }

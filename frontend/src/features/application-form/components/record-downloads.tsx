@@ -17,7 +17,7 @@ export function RecordDownloads({ candidateId, applicationId, recordName, dirty,
   return <div className="af-record-downloads">
     <div>
       <strong>Candidate records</strong>
-      <p>{!canDownload ? 'Full record downloads are available to the assigned recruiter and managers.' : dirty ? 'Save your changes before downloading records.' : 'Excel includes saved details and the document checklist. The ZIP includes files and the Excel record.'}</p>
+      <p>{!canDownload ? 'Full record downloads are available to the assigned recruiter, MDs and admins.' : dirty ? 'Save your changes before downloading records.' : 'Excel includes saved details and the document checklist. The ZIP includes files and the Excel record.'}</p>
     </div>
     <div className="af-record-buttons">
       <Button disabled={dirty || busy !== null || !canDownload} icon={busy === 'xlsx' ? <Loader2 className="animate-spin" /> : <FileSpreadsheet />} onClick={() => void download('xlsx')}>Export Excel</Button>

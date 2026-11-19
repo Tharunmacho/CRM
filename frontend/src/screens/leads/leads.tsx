@@ -35,9 +35,9 @@ import { AssignLeadsDialog, UnassignLeadDialog } from '@/features/leads/componen
 import { useLeadBulk } from '@/features/leads/use-lead-bulk'
 import { downloadLeadExport, gateFromRefusal, leadApi, uploadLeadResume, type UploadDeletionResult } from '@/features/leads/lead-api'
 import { useLeadData } from '@/features/leads/use-leads'
-import { GATE_REASON, gateBlocks, gateState, publishGate, type LeadGate } from '@/features/leads/lead-gate'
+import { gateState, publishGate, type LeadGate } from '@/features/leads/lead-gate'
 import {
-  EMPTY_FILTERS, LEAD_SORTS, NEW_CARD_DETAIL, NEW_CARD_LABEL, footerHint, activeCard, activeLeadFilterCount, buildLeadQuery, cardFilters, columnsQuery, isSupervisor, searchHint, summaryScope,
+  EMPTY_FILTERS, LEAD_SORTS, NEW_CARD_DETAIL, NEW_CARD_LABEL, activeCard, activeLeadFilterCount, buildLeadQuery, cardFilters, columnsQuery, isSupervisor, summaryScope,
   type DateField, type ExtraColumn, type Lead, type LeadCard, type LeadFilters,
 } from '@/features/leads/lead-model'
 import { PAGE_SIZES, defaultPageSize, readPageSize, savePageSize } from '@/features/candidates/pager-model'
@@ -45,6 +45,8 @@ import '@/styles/data-bank-v2.css'
 import '@/styles/data-bank-positions.css'
 import '@/styles/leads.css'
 import '@/styles/lead-extras.css'
+import '@/styles/leads-table.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 type Tab = 'leads' | 'campaigns' | 'uploads'
 const FRESH_MS = 8_000
@@ -63,8 +65,8 @@ export default function LeadsPage() {
   const [params, setParams] = useSearchParams()
   const me = store.me
   const supervisor = isSupervisor(me)
-  /** Only an admin hands out leads (managers and staff see just the leads assigned to them). */
-  const canAssign = me.role === 'admin'
+  /** Only an admin or MD hands out leads (staff see just the leads assigned to them). */
+  const canAssign = isAdminLevel(me.role)
 
   const [filters, setFilters] = useState<LeadFilters>(() => ({ ...EMPTY_FILTERS, dateField: readDateField(), batchId: params.get('batch') ?? '' }))
   const [sort, setSort] = useState({ key: 'created', dir: 'desc' as 'asc' | 'desc' })
@@ -114,7 +116,6 @@ export default function LeadsPage() {
   useEffect(() => { setForcedGate(null) }, [summary])
   const gate = forcedGate ?? summary?.dailyWorkGate ?? null
   const gateMode = gateState(me.role, gate)
-  const blockedAll = gateBlocks(gateMode)
   useEffect(() => { if (me.role === 'staff' && gate) publishGate(me.id, gate) }, [me.role, me.id, gate])
   const onGateRefusal = useCallback((refused: LeadGate) => { setForcedGate(refused); data.reloadSummary() }, [data])
 
@@ -147,7 +148,7 @@ export default function LeadsPage() {
     return () => controller.abort()
   }, [leadParam]) // eslint-disable-line react-hooks/exhaustive-deps
   const bulk = useLeadBulk({
-    query, sort, pageSize, rows: data.page?.items ?? [], total: data.page?.total ?? 0, users: store.users, supervisor, isAdmin: me.role === 'admin',
+    query, sort, pageSize, rows: data.page?.items ?? [], total: data.page?.total ?? 0, users: store.users, supervisor, isAdmin: isAdminLevel(me.role),
     refresh: () => data.refresh({ facets: true }), flash, onGateRefusal, onDeleted: (lead) => setOpen((current) => (current?.id === lead.id ? null : current)),
   })
 
@@ -201,9 +202,10 @@ export default function LeadsPage() {
   const allColumns = useMemo(() => leadColumns(context, extras), [me.id, me.role, gateMode, supervisor, canAssign, store.users, extras]) // eslint-disable-line react-hooks/exhaustive-deps
   const fit = useMemo(() => fitColumns(allColumns, boxWidth, choices), [allColumns, boxWidth, choices])
   const shownKeys = fit.keys
-  const columns = useMemo(() => allColumns.filter((column) => shownKeys.includes(column.key)), [allColumns, shownKeys])
+  // Every heading is its own tooltip: a heading squeezed on a narrow table is cut with an ellipsis, and the hover still reads it whole.
+  const columns = useMemo(() => allColumns.filter((column) => shownKeys.includes(column.key)).map((column) => (column.header ? { ...column, headerTitle: column.headerTitle ?? column.header } : column)), [allColumns, shownKeys])
   const menuColumns = useMemo(() => allColumns.filter((column) => column.key !== 'actions').map((column) => ({
-    key: column.key, header: column.header, group: column.group, hint: column.key.startsWith('x:') ? String(extras.find((item) => `x:${item.key}` === column.key)?.count ?? '') : undefined,
+    key: column.key, header: column.headerTitle ?? column.header, group: column.group, hint: column.key.startsWith('x:') ? String(extras.find((item) => `x:${item.key}` === column.key)?.count ?? '') : undefined,
   })), [allColumns, extras])
   const toggleExpand = (id: string) => setExpanded((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]))
 
@@ -272,9 +274,9 @@ export default function LeadsPage() {
         </div>
 
         {tab === 'campaigns' ? (
-          <CampaignsTab refreshKey={historyKey} onPickCampaign={viewCampaign} canAdmin={me.role === 'admin'} onManageUploads={() => setTab('uploads')} />
+          <CampaignsTab refreshKey={historyKey} onPickCampaign={viewCampaign} canAdmin={isAdminLevel(me.role)} onManageUploads={() => setTab('uploads')} />
         ) : tab === 'uploads' && canAssign ? (
-          <ImportHistory supervisor={canAssign} canAdmin={me.role === 'admin'} refreshKey={historyKey} onViewBatch={viewBatch} onUpload={() => setUploading(true)} onDeleted={uploadDeleted} />
+          <ImportHistory supervisor={canAssign} canAdmin={isAdminLevel(me.role)} refreshKey={historyKey} onViewBatch={viewBatch} onUpload={() => setUploading(true)} onDeleted={uploadDeleted} />
         ) : (
           <>
             <div className="db-panel-head">
@@ -285,7 +287,7 @@ export default function LeadsPage() {
               <div className="db-panel-tools">
                 <label className="db-search">
                   <Search size={15} aria-hidden="true" />
-                  <input type="search" value={filters.q} onChange={(event) => patchFilters({ q: event.target.value })} placeholder="Search name, phone, job, campaign…" aria-label="Search leads. Separate words with commas to match all of them." />
+                  <input type="search" value={filters.q} onChange={(event) => patchFilters({ q: event.target.value })} placeholder="Search name, phone, job… (use commas to combine)" aria-label="Search leads. Separate words with commas to match all of them." />
                 </label>
                 <Select className="db-sort" aria-label="Sort leads by" value={`${sort.key}:${sort.dir}`} onChange={(event) => { const [key, dir] = event.target.value.split(':'); setSort({ key, dir: dir as 'asc' | 'desc' }) }}>
                   {LEAD_SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -293,17 +295,15 @@ export default function LeadsPage() {
                 <button type="button" className="db-refresh" title="Refresh the list" aria-label="Refresh the list" onClick={refreshAll}><RefreshCw size={15} /></button>
                 {!showCards && <>
                   <button type="button" className="db-refresh" title={allOpen ? 'Collapse every row' : 'Expand every row to see all fields'} aria-label={allOpen ? 'Collapse all rows' : 'Expand all rows'} onClick={() => setExpanded(allOpen ? [] : rows.map((row) => row.id))}>{allOpen ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}</button>
+                  {fit.hidden > 0 && <span className="ld-hidden-pill" title={`${fit.hidden} ${fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Choose Columns to show ${fit.hidden === 1 ? 'it' : 'them'}, or open a row to see every field.`}>+{fit.hidden} hidden</span>}
                   <ColumnMenu columns={menuColumns} groups={FIELD_GROUPS} hidden={fit.hidden} shown={shownKeys} choices={choices} onChange={setChoices} />
                 </>}
                 {!forceCards && <ViewToggle view={view} onChange={changeView} />}
               </div>
             </div>
-            <p className="dbp-tip ld-tip">{searchHint(filters.q)}</p>
-
             <LeadFiltersBar filters={filters} facets={data.facets} users={store.users} meId={me.id} canAssign={canAssign} onChange={patchFilters}
               moreOpen={moreOpen} onMoreToggle={() => setMoreOpen((value) => !value)} canClear={hasFilters} onClear={clearFilters} />
 
-            {fit.hidden > 0 && !showCards && <p className="ld-fitnote" role="status">{fit.hidden} {fit.hidden === 1 ? 'column is' : 'columns are'} hidden to fit the screen. Open a row (the arrow at its start) to see every field, or choose Columns.</p>}
             {bulk.bar}
             <div ref={boxRef} className={cn('db-box', fit.compact && 'is-compact', busy && rows.length > 0 && 'is-busy')} aria-busy={busy || undefined}>
               <SafeBoundary what="the lead table" resetKey={data.page} onRetry={refreshAll}>
@@ -320,10 +320,6 @@ export default function LeadsPage() {
               </SafeBoundary>
             </div>
             {rows.length > 0 && <Pager page={data.page?.page ?? page} pageSize={pageSize} total={total} noun="leads" sizes={PAGE_SIZES} allowAll filtered={hasFilters} onPage={setPage} onPageSize={setPageSize} />}
-            <p className="db-hint ld-hint">{footerHint({
-              supervisor, canAssign, lockReason: blockedAll ? GATE_REASON : null, matching: total, total: summary?.total ?? total, filtersOn: hasFilters,
-              assignedToMe: canAssign ? undefined : summary?.total, unassigned: canAssign ? summary?.unassigned : undefined,
-            })}{hasFilters && <> <button type="button" className="ld-linkbtn" onClick={clearFilters}>Clear filters</button></>}</p>
           </>
         )}
       </Panel>
@@ -336,9 +332,9 @@ export default function LeadsPage() {
         lead={openLive} me={{ id: me.id, role: me.role }} users={store.users} gate={gateMode} version={data.page} canAssign={canAssign}
         workRefusal={openLive ? workBlock({ me: { id: me.id, role: me.role }, gate: 'open', userById: store.user }, openLive) : null}
         onClose={() => setOpen(null)} onChanged={() => data.refresh()}
-        onLogCall={setCalling} onConvert={setConverting} onAssign={(lead) => setAssigning([lead.id])} onUnassign={me.role === 'admin' ? setUnassigning : undefined}
+        onLogCall={setCalling} onConvert={setConverting} onAssign={(lead) => setAssigning([lead.id])} onUnassign={isAdminLevel(me.role) ? setUnassigning : undefined}
         onUploadResume={uploadResume} onGateRefusal={onGateRefusal}
-        canDelete={me.role === 'admin'} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo}
+        canDelete={isAdminLevel(me.role)} onDelete={bulk.openDelete} onUnconvert={setUnconverting} onStatusChange={bulk.offerUndo}
         onEdit={setEditing} onChangeStatus={bulk.openStatus} onNotInterested={(lead) => { void bulk.quickStatus(lead, 'not_interested') }}
         onViewLog={setLogFor}
       />
@@ -353,7 +349,7 @@ export default function LeadsPage() {
       <LeadEditDialog lead={editing} onClose={() => setEditing(null)} blockedReason={editing ? workBlock(context, editing) : null} onGateRefusal={onGateRefusal}
         onSaved={(saved) => { setEditing(null); setOpen((current) => (current?.id === saved.id ? saved : current)); flash(`Changes to ${saved.name || 'the lead'} saved.`); data.refresh({ facets: true }) }} />
       <ConvertDialog lead={converting} onClose={() => setConverting(null)} blockedReason={converting ? workBlock(context, converting) : null} onGateRefusal={onGateRefusal} onChanged={() => data.refresh()} />
-      {me.role === 'admin' && <UnconvertDialog lead={unconverting} onClose={() => setUnconverting(null)} onSaved={(result) => {
+      {isAdminLevel(me.role) && <UnconvertDialog lead={unconverting} onClose={() => setUnconverting(null)} onSaved={(result) => {
         setUnconverting(null); setOpen((current) => current?.id === result.lead.id ? result.lead : current)
         bulk.clear(); data.refresh(); flash(`${result.lead.name} moved back to Lead.`)
         void store.refresh({ keepCurrent: true }).catch(() => store.notify('Moved back to Lead. Reload the workspace to see the latest candidate list.', 'warn'))
@@ -361,7 +357,7 @@ export default function LeadsPage() {
       <AssignLeadsDialog ids={assigning} users={store.users} onClose={() => setAssigning(null)}
         fromName={assignFrom ? ownerNameOf(assignFrom, store.user) || null : null}
         onSaved={(assigned, skipped, owners) => { setAssigning(null); bulk.clear(); flash(`${assigned} ${assigned === 1 ? 'lead' : 'leads'} assigned${skipped ? `, ${skipped} skipped` : ''}.${owners && owners.length > 1 ? ` ${ownersLine(owners)}.` : ''}`); data.refresh({ facets: true }) }} />
-      {me.role === 'admin' && <UnassignLeadDialog lead={unassigning} ownerName={unassigning ? ownerNameOf(unassigning, store.user) : ''} onClose={() => setUnassigning(null)}
+      {isAdminLevel(me.role) && <UnassignLeadDialog lead={unassigning} ownerName={unassigning ? ownerNameOf(unassigning, store.user) : ''} onClose={() => setUnassigning(null)}
         onSaved={(unassigned, skipped) => {
           const name = unassigning?.name || 'The lead'
           setUnassigning(null); bulk.clear(); data.refresh({ facets: true })

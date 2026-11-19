@@ -20,7 +20,7 @@ export type LiveStatus = 'off' | 'connecting' | 'up' | 'down'
 export interface LiveChange {
   /** Topics that changed; `*` after a resynchronisation. */
   topics: string[]
-  /** Opaque ids per topic (admin/manager only, and only when few). */
+  /** Opaque ids per topic (admin/MD only, and only when few). */
   ids: Record<string, string[]>
   /** Server clock (epoch ms) when the change was committed, if known. */
   at: number | null
@@ -60,7 +60,7 @@ export interface LiveEvents {
 }
 
 /**
- * True when a change cannot concern one record of `topic`: the server named which records changed (admin/manager
+ * True when a change cannot concern one record of `topic`: the server named which records changed (admin/MD
  * only, and only when few) and `id` is not among them. Anything uncertain (a resync, other topics too, no ids sent)
  * is treated as relevant, so this can only save a refetch, never skip a needed one.
  */

@@ -16,6 +16,7 @@ import './styles/depth.css'
 import './styles/skin.css'
 import './styles/forms.css'
 import './styles/fit.css'
+import './styles/table-default.css'
 
 initTheme()
 installTruncationTitles()

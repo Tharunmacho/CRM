@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
-import { roleLabel } from '@/shared/model/role-labels'
+import { roleWord } from '@/shared/model/role-labels'
 import { Select } from '@/shared/ui/primitives'
 import { SuggestInput } from '@/shared/ui/suggest-input'
 import { SOURCE_OPTIONS, cleanAgencyName, jobOptionText, jobUnavailableReason } from '../form-model'
@@ -192,7 +192,7 @@ export function AssignmentBar({
             {assignment.recruiter && !options.recruiters.some((item) => item.id === assignment.recruiter?.id) && (
               <option value={assignment.recruiter.id} disabled>{assignment.recruiter.name}</option>
             )}
-            {options.recruiters.map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` (${roleLabel(item.role).toLowerCase()})` : ''}</option>)}
+            {options.recruiters.map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` (${roleWord(item.role)})` : ''}</option>)}
           </Select>
         ) : (
           <p className="af-assign-value" id="af-assign-recruiter">{assignment.recruiter?.name || NOT_ASSIGNED_TEXT}</p>

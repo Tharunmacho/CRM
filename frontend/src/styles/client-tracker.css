@@ -1,36 +1,48 @@
-/* Client tracker (Reports): the filters card, then the sheet's table, aligned like the other report tables. */
+/* Client tracker (Reports): the filters card, then the sheet's table, aligned like the other report tables.
+   Table rules: 44 px header with single-line uppercase 11.5px/600 labels, rows at least 56 px with every cell centred, 14 px side padding on
+   header and cells alike (so a header starts on the same left edge as its cells), numbers right with tabular numerals, long text cut with
+   an ellipsis and the full text in the cell's title, the header kept in view while the rows scroll. */
 .ct { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; max-width: 100%; }
 .ct > * { min-width: 0; }
-.ct-controls { padding: 18px; display: grid; gap: 12px; }
+.ct-controls { padding: 20px; display: grid; gap: 16px; }
 .ct-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
-.ct-grid > label { display: grid; gap: 6px; font-size: 12px; color: var(--text-muted); min-width: 0; }
-.ct-grid > label.ct-check { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--text-main); white-space: nowrap; }
+.ct-grid > label { display: grid; gap: 4px; font-size: 12.5px; font-weight: 600; line-height: 16px; color: var(--text-muted); min-width: 0; }
+.ct-grid > label.ct-check { display: flex; align-items: center; gap: 8px; min-height: 40px; font-weight: 500; color: var(--text-main); white-space: nowrap; }
 .ct-check input { width: 16px; height: 16px; }
-.ct-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.ct-note { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.ct-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.ct-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-left: auto; }
+.ct-actions .ui-button { height: 36px; }
+.ct-note { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
 .ct-note.is-done { color: var(--success-ink); }
 .ct-alert { margin: 0; }
-.ct-loading { margin: 0; font-size: 12px; color: var(--text-muted); }
+.ct-loading { margin: 0; font-size: 12.5px; color: var(--text-muted); }
 .ct-table.is-stale { opacity: 0.6; }
-.ct-scroll { position: relative; min-width: 0; max-width: 100%; overflow-x: auto; }
+.ct-scroll { position: relative; min-width: 0; max-width: 100%; max-height: 72vh; overflow: auto; }
 .ct-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-.ct-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.ct-table th { text-align: left; color: var(--text-muted); font-size: 11px; font-weight: 600; background: var(--tint-1); white-space: nowrap; }
-.ct-table th, .ct-table td { padding: 12px 12px; border-bottom: 1px solid var(--border-faint); vertical-align: top; }
-.ct-table th.is-num, .ct-table td.is-num { text-align: right; width: 1%; }
-/* Short facts stay on one line (a name or a client may wrap; "Staff Nurse", "Agency 1", "10k collected/50k" and a stage should not); Remarks takes the spare width. */
-.ct-table td:is(:nth-child(3), :nth-child(5), :nth-child(6), :nth-child(7), :nth-child(8)) { white-space: nowrap; }
-.ct-table td:nth-child(2) { min-width: 120px; }
-.ct-table td:nth-child(4) { min-width: 130px; }
-.ct-table td.is-remarks { min-width: 180px; }
-.ct-table tr.is-first-of-client td { border-top: 2px solid var(--border-main); }
-.ct-table footer { padding: 14px 18px; color: var(--text-muted); font-size: 12px; }
-@media (max-width: 900px) { .ct-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ct-actions { justify-content: flex-start; } }
+.ct-table table { width: 100%; min-width: 1060px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+.ct-col-sNo { width: 56px; } .ct-col-client { width: 13%; } .ct-col-country { width: 8%; } .ct-col-name { width: 13%; } .ct-col-position { width: 12%; }
+.ct-col-referral { width: 9%; } .ct-col-advance { width: 10%; } .ct-col-stage { width: 11%; }
+.ct-table th { position: sticky; top: 0; z-index: 2; height: 44px; padding: 0 14px; border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--tint-1); color: var(--text-muted); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: left; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ct-table td { height: 56px; padding: 8px 14px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: middle; text-align: left; line-height: 1.4; }
+.ct-table tbody tr:hover td { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
+.ct-table th.is-num, .ct-table td.is-num { text-align: right; }
+.ct-table td.is-num { font-variant-numeric: tabular-nums; }
+/* A cell shows its text on up to two lines (Country on one, Remarks on three), then an ellipsis; the title carries the rest. */
+.ct-cell { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.ct-table td:nth-child(3) .ct-cell { -webkit-line-clamp: 1; }
+.ct-table td.is-remarks .ct-cell { -webkit-line-clamp: 3; }
+.ct-table tr.is-first-of-client td { border-top: var(--table-frame-width) solid var(--table-line-strong); }
+.ct-table footer { padding: 12px 20px; border-top: var(--table-line-width) solid var(--table-line); color: var(--text-muted); font-size: 12.5px; }
+@media (max-width: 900px) { .ct-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) {
-  .ct-controls { padding: 14px; }
+  .ct-controls { padding: 16px; }
   .ct-grid { grid-template-columns: minmax(0, 1fr); }
   .ct-controls :is(.ui-input:not(textarea), .custom-select-trigger) { min-height: 44px; }
+  .ct-actions { width: 100%; justify-content: flex-start; }
   .ct-scroll { overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
-  .ct-table table { white-space: nowrap; }
-  .ct-table td.is-remarks, .ct-table td:is(:nth-child(2), :nth-child(4)) { white-space: normal; }
 }
+
+/* the outer frame of the tracker: the scroll box around the table (so it stays whole when the table scrolls sideways), radius kept */
+:root:root .ct-table .ct-scroll { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+:root:root .ct-table .ct-scroll thead th { border-top-width: 0; }
+:root:root .rv-card.ct-table { border-color: transparent; }

@@ -54,7 +54,7 @@ export interface DashboardLeads {
   open: number
   convertedTotal: number
   conversionPercent: number | null
-  /** Admin and manager only; always the global count of open leads nobody owns. */
+  /** Admin and MD only; always the global count of open leads nobody owns. */
   unassigned: number | null
 }
 export interface DashboardLeadItem {

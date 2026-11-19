@@ -1,0 +1,53 @@
+/*
+ * Table theme for the shared DataTable (opt in with class "tb-blue" on a wrapper around the table): the same look as the Tasks table.
+ * Header band var(--primary) with var(--on-primary) text (dark mode follows the tokens), 700 weight, uppercase 11.5px, .05em letter-spacing,
+ * 44px high, one line (ellipsis, the full label is the button's title); rows 56px with every cell vertically centred, 14px side padding so a
+ * header and its cells share one left edge, a visible var(--table-line) line under every row (the last too) and between every pair of columns,
+ * a var(--table-line-strong) edge under the header, the lighter var(--table-header-line) divider between header cells, hover tint, sticky header when
+ * the table is. The 2px outer frame is the DataTable box's own (data-table.css); the stacked cards have no frame and no column lines.
+ * Text is left, a column declared align:'right' (numbers) is right with tabular figures. Below the table's stackBelow width the shared
+ * stacked-card rules (data-table.css) apply, so only the header (hidden there) is themed unconditionally and the row metrics are gated.
+ */
+:root:root .tb-blue .ui-data-table.ui-data-table thead tr { border: 0; background: none; }
+:root:root .tb-blue .ui-data-table.ui-data-table thead th {
+  height: 44px; padding: 0 14px; overflow: hidden; vertical-align: middle; text-align: left; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap;
+  border-color: var(--primary); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--primary); color: var(--on-primary); box-shadow: none;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; line-height: 1.2;
+}
+:root:root .tb-blue .ui-data-table.ui-data-table thead th + th { border-left: 0; border-right-color: transparent; }
+:root:root .tb-blue .ui-data-table.ui-data-table thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+:root:root .tb-blue .ui-data-table.ui-data-table thead th:last-child { border-right: 0; }
+:root:root .tb-blue .ui-data-table.ui-data-table thead th.ui-c-right { text-align: right; }
+:root:root .tb-blue .ui-data-table.ui-data-table thead :is(button, svg) { color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+:root:root .tb-blue .ui-data-table.ui-data-table thead th.is-sortable button:hover { color: inherit; opacity: .85; }
+.tb-blue .ui-data-table .ui-th-inner { max-width: 100%; }
+.tb-blue .ui-data-table .ui-th-inner > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* row metrics: only while the table is a table (not the stacked cards) */
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td.ui-c-center > :where(div, p, ul, .record-identity) { margin-inline: 0; }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) :is(th, td).ui-actions-cell { text-align: left; }
+@media (min-width: 768px) {
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+}
+@media (min-width: 1024px) {
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+}
+@media (min-width: 1280px) {
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+}
+:root:root .tb-blue .ui-data-table.ui-data-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
+/* the last column's right edge is the frame, so it carries no column line of its own */
+:root:root .tb-blue .ui-data-table.ui-data-table tbody td:last-child { border-right: 0; }

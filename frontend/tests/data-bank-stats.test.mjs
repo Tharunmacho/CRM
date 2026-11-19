@@ -3,15 +3,16 @@ import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import React from 'react'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 
 // data-bank-stats.ts imports data-bank-pools.ts: transpile that one to a temp module the import can reach.
 const poolsSource = await readFile(new URL('../src/features/candidates/data-bank-pools.ts', import.meta.url), 'utf8')
 const poolsJs = ts.transpileModule(poolsSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-const poolsUrl = `data:text/javascript;base64,${Buffer.from(poolsJs).toString('base64')}`
+const poolsUrl = `data:text/javascript;base64,${Buffer.from(withRoleLabels(poolsJs)).toString('base64')}`
 const statsSource = await readFile(new URL('../src/features/candidates/data-bank-stats.ts', import.meta.url), 'utf8')
 const statsJs = ts.transpileModule(statsSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText.replace("'./data-bank-pools'", `'${poolsUrl}'`)
-const stats = await import(`data:text/javascript;base64,${Buffer.from(statsJs).toString('base64')}`)
+const stats = await import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(statsJs)).toString('base64')}`)
 const pools = await import(poolsUrl)
 
 // Exercise the real filter component without loading its CSS or unrelated column dialogs.

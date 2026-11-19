@@ -43,19 +43,19 @@
 .dw-table :is(th, td).is-left:not(.is-actions) { padding-inline: 8px 6px; }
 .dw-table :is(th, td).is-left[data-label='REMARKS']:not(.is-actions) { padding-inline: 5px; }
 /* headers: one alignment with their cells, uppercase, two lines allowed (CLIENT / COUNTRY, GOOGLE REVIEW) in a header tall enough for them */
-.dw-table thead th { height: 48px; padding-top: 0; padding-bottom: 0; border-top: 1px solid var(--border-main); border-bottom: 1px solid var(--border-main); background: var(--tint-1); font-size: 11px; font-weight: 600; letter-spacing: .04em; line-height: 1.3; text-transform: uppercase; text-wrap: balance; color: var(--text-muted); overflow-wrap: normal; }
-.dw-table thead th + th { border-left: 1px solid var(--border-main); }
+.dw-table thead th { height: 44px; padding-top: 0; padding-bottom: 0; border-top: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--tint-1); font-size: 11px; font-weight: 600; letter-spacing: .04em; line-height: 1.3; text-transform: uppercase; text-wrap: balance; color: var(--text-muted); overflow-wrap: normal; }
+.dw-table thead th + th { border-left: var(--table-line-width) solid var(--table-line); }
 /* Tasks screen only (the Reports tables sit under .dwr and keep their own look): the header row is the primary blue, the same fill as the
  * Complete button (var(--primary) with var(--on-primary) on it: white in the light themes, near-black on the lighter dark-theme blue, so
  * the contrast holds in both). No gap lines: the cell dividers are a faint tint of the text colour. The actions header stays opaque
  * because that column is sticky. */
-.dw:not(.dwr) .dw-table thead th { border-color: var(--primary); background: var(--primary); font-weight: 700; color: var(--on-primary); }
-.dw:not(.dwr) .dw-table thead th + th { border-left-color: color-mix(in srgb, var(--on-primary) 26%, var(--primary)); }
+.dw:not(.dwr) .dw-table thead th { border-top-color: var(--primary); background: var(--primary); font-weight: 700; color: var(--on-primary); }
+.dw:not(.dwr) .dw-table thead th + th { border-left-color: var(--table-header-line); }
 .dw:not(.dwr) .dw-main thead th.is-actions { background: var(--primary); }
 .dw:not(.dwr) .dw-table thead :is(button, svg) { color: inherit; }
-.dw-table td { border-bottom: 1px solid var(--border-faint); }
-.dw-table td + td { border-left: 1px solid var(--border-faint); }
-.dw-main td { height: 72px; }
+.dw-table td { border-bottom: var(--table-line-width) solid var(--table-line); }
+.dw-table td + td { border-left: var(--table-line-width) solid var(--table-line); }
+.dw-main td { height: 56px; }
 /* the actions column is a fixed-purpose cell, right-aligned: it stays in view (sticky right) when the table has to scroll sideways */
 .dw-main :is(th, td).is-actions { position: sticky; right: 0; z-index: 2; padding-inline: 6px 10px; background: var(--bg-card); }
 .dw-main thead th.is-actions { z-index: 3; background: var(--tint-1); }
@@ -64,7 +64,19 @@
 .dw-scroll.has-right .dw-main :is(th, td).is-actions { box-shadow: -10px 0 10px -10px rgba(15, 23, 42, .28); }
 .dw-scroll:has(.dw-main).has-right::after { opacity: 0; }
 .dw-table .is-num { color: var(--text-muted); font-weight: 500; }
-.dw-table tbody > tr:last-child > td { border-bottom: 0; }
+.dw-table tbody > tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+/* the outer frame of every .dw table (Tasks, Follow-up, the Reports people tables): a strong border around header and rows, the radius kept.
+   It sits on the scroll wrapper (.tk-table-wrap), so it stays whole when the table scrolls sideways; a table without a wrapper carries it itself.
+   Only where it is a table (the panel is over 760px wide); below that each row is a card with its own single var(--table-line) border. */
+@container dw (min-width: 761px) {
+  .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+  .dw .tk-table-wrap .dw-table thead th { border-top-width: 0; }
+  .dw .dw-table:where(:not(.tk-table-wrap .dw-table)) { box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); overflow: hidden; }
+}
+/* one frame, never two: from 1100px wide (a panel over 760px) the panel gives up its own border around the framed table; as a card list
+   (a phone) the panel's own single 1px border is the card border, the same var(--table-line) */
+.dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border: var(--table-line-width) solid var(--table-line); }
+@media (min-width: 1100px) { .dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border-color: transparent; } }
 .dw-row.is-alt, .dw-staff-row.is-alt { background: color-mix(in srgb, var(--tint-2) 50%, var(--bg-card)); }
 .dw-row:hover, .dw-staff-row:hover { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
 .dw-row.is-done { color: var(--text-muted); }
@@ -74,9 +86,12 @@
 .dw-row.is-done .record-name { color: color-mix(in srgb, var(--text-main) 70%, var(--text-muted)); text-decoration: none; }
 
 /* group rows: a slim band (title and count only) across the table, shown only when both groups exist */
-.dw-group th { height: 34px; padding: 0 16px; border-top: 1px solid var(--border-main); border-bottom: 1px solid var(--border-main); background: var(--tint-2); text-align: left; font-weight: 500; white-space: nowrap; }
+.dw-group th { height: 34px; padding: 0 16px; border-top: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); background: var(--tint-2); text-align: left; font-weight: 500; white-space: nowrap; }
 .dw-group-title { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-main); }
-.dw-group-title b { padding: 0 8px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); font-size: 11.5px; font-weight: 500; line-height: 18px; color: var(--text-muted); }
+.dw-group-title b { padding: 0 8px; border: var(--table-line-width) solid var(--table-line); border-radius: 999px; background: var(--bg-card); font-size: 11.5px; font-weight: 500; line-height: 18px; color: var(--text-muted); }
+/* group header rows (Active today / No activity): a tinted full-width band with the same row line, never thicker than the frame */
+:root:root:root .dw-group > th { box-sizing: border-box; height: 40px; padding: 0 14px; border: 0; border-bottom: var(--table-line-width) solid var(--table-line); background: color-mix(in srgb, var(--primary) 8%, var(--bg-card)); color: var(--text-main); text-align: left; }
+:root:root:root .dw-group.is-done > th { background: color-mix(in srgb, var(--success-ink) 10%, var(--bg-card)); }
 .dw-group.is-done th { background: color-mix(in srgb, var(--success-fill) 80%, var(--bg-card)); border-color: var(--success-edge); }
 .dw-group.is-done .dw-group-title { color: var(--success-ink); }
 
@@ -86,14 +101,6 @@
 .dw-none { display: block; color: var(--text-light); }
 .dw-table td:not(.is-left) > .dw-none { text-align: center; }
 .dw-row.is-done .dw-cell-strong { color: inherit; }
-
-/* client / country: the client name (two lines at most) and the country chip under it, left-aligned, the whole block centred in the row */
-.dw-cc { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
-.dw-ctry { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 22px; padding: 0 8px 0 6px; border: 1px solid var(--border-main); border-radius: 6px; background: var(--tint-2); font-size: 12px; font-weight: 600; line-height: 1; color: var(--text-main); }
-.dw-ctry > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dw-ctry > img { flex: none; width: 16px; height: 11px; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px var(--border-main); }
-.dw-ctry.is-soft { border-style: dashed; background: var(--bg-card); }
-.dw-more { flex: none; font-size: 11px; font-weight: 600; color: var(--text-muted); }
 
 /* REF: a compact monospace chip, never wrapping (truncated with a tooltip only if an order reference is unusually long) */
 .dw-ref { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; padding: 3px 7px; border-radius: 6px; background: var(--tint-2); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; line-height: 1.3; color: var(--text-muted); }
@@ -160,7 +167,6 @@
 .dw-remark-status.is-busy { color: var(--primary-deep); }
 .dw-remark-status.is-ok { color: var(--success-ink); }
 .dw-remark-status.is-error { color: var(--error-ink); }
-.dw-remark-status.is-custom { color: var(--text-muted); font-style: italic; }
 .dw-remark-status.is-lead { color: var(--text-muted); }
 [data-theme='dark'] .dw-remark-status.is-busy { color: var(--primary); }
 
@@ -180,7 +186,7 @@
   .dw-table thead, .dw-table colgroup { display: none; }
   .dw-group, .dw-group th { display: block; }
   .dw-group th { height: auto; padding: 8px 16px; white-space: normal; }
-  .dw-row, .dw-staff-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--border-faint); }
+  .dw-row, .dw-staff-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; border-bottom: var(--table-line-width) solid var(--table-line); }
   .dw-table .dw-row > td, .dw-table .dw-staff-row > td { display: block; height: auto; padding: 0; border: 0; text-align: left; min-width: 0; }
   .dw-row > td[data-label]::before, .dw-staff-row > td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
   .dw-row > td[data-label='S NO'], .dw-row > td.is-empty { display: none; }

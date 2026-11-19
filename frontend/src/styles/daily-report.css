@@ -48,11 +48,11 @@
 
 /* The people table, on the Tasks table's .dw-table: names left, every figure right-aligned under its right-aligned heading */
 .dwr-table :is(th, td) { padding-block: 0; }
-.dwr-table thead th { height: 48px; }
+.dwr-table thead th { height: 44px; }
 .dwr-table thead th.is-left { padding-left: 20px; }
 .dwr-table thead th.is-num { text-align: right; padding-right: 20px; }
 .dwr-table thead th.is-tail, .dwr-table td.is-tail { text-align: left; padding-left: 16px; }
-.dwr-table .dw-staff-row > * { height: 60px; }
+.dwr-table .dw-staff-row > * { height: 56px; }
 .dwr-table.is-dense .dw-staff-row > * { height: 56px; }
 .dwr-table.is-dense thead th.is-num { padding-right: 12px; }
 .dwr-table.is-dense td.is-num { padding-right: 12px; font-size: 15px; }
@@ -108,8 +108,8 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 .dr-drill-scroll { overflow-x: auto; transition: opacity .14s; }
 .dr-drill-scroll.is-stale { opacity: .5; }
 .dr-drill-table { width: 100%; min-width: 640px; border-collapse: collapse; }
-.dr-drill-table th { position: sticky; top: 0; padding: 8px 10px; background: var(--bg-card); border-bottom: 1px solid var(--border-main); text-align: left; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
-.dr-drill-table td { padding: 10px; border-bottom: 1px solid var(--border-faint); vertical-align: top; overflow-wrap: anywhere; }
+.dr-drill-table th { position: sticky; top: 0; padding: 8px 10px; background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.dr-drill-table td { padding: 10px; border-bottom: var(--table-line-width) solid var(--table-line); vertical-align: top; overflow-wrap: anywhere; }
 .dr-when { white-space: nowrap; }
 .dr-when b { display: block; font-weight: 600; font-variant-numeric: tabular-nums; }
 .dr-when small, .dr-ci { font-size: 11.5px; color: var(--text-light); }
@@ -190,6 +190,6 @@ button.dwr-who:hover { color: var(--primary); text-decoration: underline; text-u
 .dwr .dwr-table td.is-num > .dw-none, .dwr .dwr-table td.is-num > .dwr-plain, .dwr .dwr-table td.is-num > .dwr-link { display: block; margin-left: auto; text-align: right; }
 .dwr .dwr-table .dwr-link { margin-right: -6px; }
 .dwr .dwr-table .dw-staff-row > * { vertical-align: middle; }
-.dwr .dwr-table tfoot .dwr-total > * { height: 56px; background: var(--tint-2); border-top: 1px solid var(--text-light); font-weight: 700; color: var(--text-main); }
+.dwr .dwr-table tfoot .dwr-total > * { height: 56px; background: var(--tint-2); border-top: 0; font-weight: 700; color: var(--text-main); }
 .dwr .dwr-table tfoot .dwr-total .dwr-link { font-weight: 700; }
 @media (min-width: 1100px) { .dwr .dwb-stats.has-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); } }

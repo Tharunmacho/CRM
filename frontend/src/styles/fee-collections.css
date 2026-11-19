@@ -13,7 +13,7 @@
 .fee-collection-scroll { position: relative; min-width: 0; max-width: 100%; overflow-x: auto; }
 .fee-collection-table table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
 .fee-collection-table th { text-align: left; color: var(--text-muted); font-size: 11px; font-weight: 600; background: var(--tint-1); }
-.fee-collection-table th, .fee-collection-table td { padding: 14px; border-bottom: 1px solid var(--border-faint); }
+.fee-collection-table th, .fee-collection-table td { padding: 14px; border-bottom: var(--table-line-width) solid var(--table-line); }
 .fee-collection-table td small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 10px; }
 .fee-collection-table td b { font-weight: 600; }
 .fee-pending { color: var(--text-muted); }
@@ -42,3 +42,8 @@
 @media (max-width: 380px) {
   .fee-collection-totals { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* the outer frame: the scroll box around the table (whole when the table scrolls sideways), radius kept; the card around it gives up its own border */
+:root:root .fee-collection-scroll { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+:root:root .fee-collection-scroll thead th { border-top-width: 0; }
+:root:root .rv-card.fee-collection-table:has(> .fee-collection-scroll) { border-color: transparent; }

@@ -1,9 +1,10 @@
 /**
  * The words around choosing a recruiter. A candidate is never given to anyone automatically: the admin picks a
- * recruiter (or leaves the candidate unassigned), and a staff member or manager who adds a candidate by hand owns it. Plain text in,
+ * recruiter (or leaves the candidate unassigned), and a staff member who adds a candidate by hand owns it. Plain text in,
  * plain text out, so the labels are tested without a browser.
  */
 import type { AgencySettings } from '@/shared/model/types'
+import { roleLabel } from '@/shared/model/role-labels'
 
 /** What an empty recruiter reads as, everywhere a candidate's recruiter is shown. Muted, never a name. */
 export const NOT_ASSIGNED = 'Not assigned'
@@ -22,13 +23,13 @@ const firstName = (name?: string | null): string => name?.trim().split(/\s+/)[0]
 export interface RecruiterChoice { id: string; name: string; role: string; active?: boolean; onLeave?: boolean }
 
 /**
- * The people the admin can hand a new candidate to: active staff and managers, A to Z. Someone on leave is still
+ * The people the admin can hand a new candidate to: active staff and MDs, A to Z. Someone on leave is still
  * listed (a deliberate manual hand-over is allowed), marked in the label.
  */
 export function recruiterChoices(users: readonly RecruiterChoice[]): { id: string; label: string }[] {
   return users
     .filter((user) => user.active !== false && (user.role === 'staff' || user.role === 'manager'))
-    .map((user) => ({ id: user.id, label: `${user.name}${user.role === 'manager' ? ' (manager)' : ''}${user.onLeave ? ' · on leave' : ''}`, name: user.name }))
+    .map((user) => ({ id: user.id, label: `${user.name}${user.role === 'manager' ? ` (${roleLabel(user.role)})` : ''}${user.onLeave ? ' · on leave' : ''}`, name: user.name }))
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(({ id, label }) => ({ id, label }))
 }
@@ -46,7 +47,7 @@ export function savebarStatus(picksRecruiter: boolean, recruiterName?: string | 
   return name ? `${name} will own this candidate.` : 'No recruiter is chosen. An admin can assign one later.'
 }
 
-/** The hint under the Recruiter field (admin only; staff and managers do not see the field). */
+/** The hint under the Recruiter field (admin and MD only; staff do not see the field). */
 export const RECRUITER_FIELD_HINT = 'Optional. Leave on Not assigned to choose later.'
 
 /** The hint under the follow-up date: it only reaches a to-do list once somebody owns the candidate. */

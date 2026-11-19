@@ -6,6 +6,7 @@
  * The other pools (No order yet, Not interested, Deployed...) stay available as filters, not as cards.
  */
 import { NOT_ASSIGNED_LABEL, togglePool, type DataBankPool, type PoolCounts } from './data-bank-pools'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 export type StatKey = 'resumes' | 'unassigned' | 'needs_review'
 export type StatTone = 'blue' | 'amber' | 'violet'
@@ -21,8 +22,8 @@ export interface StatCard {
   active: boolean
 }
 
-/** Admin and manager see the whole bank and its pools; only the admin hands candidates to recruiters. Staff only see their own work. */
-export const isSupervisor = (role: string | null | undefined): boolean => role === 'admin' || role === 'manager'
+/** Admin and MD see the whole bank and its pools and hand candidates to recruiters. Staff only see their own work. */
+export const isSupervisor = (role: string | null | undefined): boolean => isAdminLevel(role)
 
 export function statCards(counts: Pick<PoolCounts, 'all' | 'unassigned' | 'needs_review'>, pool: DataBankPool, role: string | null | undefined): StatCard[] {
   const cards: StatCard[] = [

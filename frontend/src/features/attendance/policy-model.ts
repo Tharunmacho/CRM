@@ -18,4 +18,4 @@ export interface AttendanceSettings { employees: AttendanceEmployee[]; coverColl
 export interface AttendanceAdjustment { id: string; userId: string; name: string; date: string; kind: string; reason: string; status?: AttendanceCode | null; minutes?: number | null; action?: string | null; occurredAt?: string | null; actorName: string; createdAt: string }
 export function minutesLabel(minutes: number) { const value = Math.max(0, Math.round(minutes || 0)); return `${Math.floor(value / 60)}h ${String(value % 60).padStart(2, '0')}m` }
 export function readableStatus(status: string) { return status.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase()) }
-export function approvalLabel(stage: string) { return stage === 'admin' ? 'Administrator' : stage === 'manager' ? 'Manager' : readableStatus(stage) }
+export function approvalLabel(stage: string) { return stage === 'admin' ? 'Administrator' : stage === 'manager' ? 'MD' : readableStatus(stage) }

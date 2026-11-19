@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 /**
  * The owner's rule: a document line in the Documents list never shows a yellow / amber alert. Only blocking states get a box
@@ -10,7 +11,7 @@ import ts from 'typescript'
  */
 function moduleUrl(source) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
+  return `data:text/javascript;base64,${Buffer.from(withRoleLabels(outputText)).toString('base64')}`
 }
 const src = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const slotsUrl = moduleUrl(await src('shared/model/document-slots.ts'))

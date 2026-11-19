@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertTriangle, CalendarDays, Download, KeyRound, LogOut, Pencil, Plus, RefreshCw, RotateCw, ScrollText, UserCheck, UserCog, UserX, Users } from 'lucide-react'
+import { AlertTriangle, CalendarDays, Download, KeyRound, LogOut, Pencil, Plus, RefreshCw, RotateCw, ScrollText, Trash2, UserCheck, UserCog, UserX, Users } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { useStore } from '@/shared/state/crm-store'
 import type { Role, User } from '@/shared/model/types'
@@ -20,8 +20,12 @@ import { AgencySettingsTab } from './agency-settings'
 import { AuditHistory } from './audit-sheet'
 import { SecurityDialog } from './security-dialog'
 import { UserDialog } from './user-dialog'
+import { DeleteUserDialog } from './delete-user-dialog'
+import { canDeleteUser } from '@/features/staff/delete-user-model'
 import { PanelHead, RolePill, UserAvatar, downloadRows, failureText, roleLabels } from './user-ui'
 import '@/styles/users-v2.css'
+import '@/styles/table-theme.css'
+import { ROLE_ORDER, roleLabel } from '@/shared/model/role-labels'
 
 const PAGE_SIZE = 10
 type SortKey = 'name' | 'role' | 'work'
@@ -55,6 +59,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
   const [editing, setEditing] = useState<{ user: User | null; deactivate?: boolean } | null>(null)
   const [security, setSecurity] = useState<{ user: User; kind: 'password' | 'logout' } | null>(null)
   const [auditFor, setAuditFor] = useState<User | null>(null)
+  const [deleting, setDeleting] = useState<User | null>(null)
   const [query, setQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -191,6 +196,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
           { label: 'Reset password', icon: KeyRound, onSelect: () => setSecurity({ user: u, kind: 'password' }) },
           { label: 'Sign out everywhere', icon: LogOut, onSelect: () => setSecurity({ user: u, kind: 'logout' }) },
           ...(u.active && u.id !== store.me.id ? [{ label: 'Deactivate account', icon: UserX, tone: 'danger' as const, onSelect: () => setEditing({ user: u, deactivate: true }) }] : []),
+          ...(canDeleteUser(store.me, u) ? [{ label: 'Delete user', icon: Trash2, tone: 'danger' as const, separated: true, onSelect: () => setDeleting(u) }] : []),
         ]} />
       </div>,
     },
@@ -209,7 +215,7 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
     <Panel flush className="uv-panel uv-rotation">
       <PanelHead id="uv-rotation-title" title="Candidate assignment"
-        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active recruiters who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or a manager assigns a recruiter. An admin can switch it on in Agency settings.'}
+        description={autoOn ? 'Automatic assignment is on. New candidates are shared out one after another among active recruiters who can be given new candidates and are not on leave. Approved leave and the On leave switch both pause this.' : 'Automatic assignment is off. New candidates wait until an admin or an MD assigns a recruiter. An admin can switch it on in Agency settings.'}
         actions={autoOn ? <><span className="uv-chip-label"><RotateCw size={13} aria-hidden="true" />One by one</span><Button size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={availability.loading} onClick={availability.refresh}>Refresh</Button></> : <Button size="sm" onClick={() => setParams({ tab: 'agency' }, { replace: true })}>Agency settings</Button>} />
       {autoOn && <div className="uv-rotation-body" role="group" aria-labelledby="uv-rotation-title">
         {availability.loading ? <p role="status" className="uv-note">Checking who is free…</p>
@@ -231,13 +237,13 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
 
     {error && <p role="alert" className="uv-error uv-banner">{error}</p>}
 
-    <Panel flush className="uv-panel uv-directory">
+    <Panel flush className="uv-panel uv-directory tb-blue">
       <PanelHead id="uv-directory-title" title="Team directory" description={filtered ? `${rows.length} of ${store.users.length} accounts` : `${store.users.length} accounts`}
         actions={rows.length > 0 ? <Button size="sm" icon={<Download className="h-3.5 w-3.5" />} onClick={exportCsv} title="Download the people shown here as a spreadsheet (CSV)">Export CSV</Button> : undefined} />
       <Tabs tabs={STATUS_TABS} active={statusFilter} onChange={(key) => setStatusFilter(key as StatusFilter)} />
       <div className={cn('uv-toolbar', filtered && 'has-clear')}>
         <SearchInput value={query} onChange={setQuery} placeholder="Search name, email or phone" />
-        <Select aria-label="Filter by role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as 'all' | Role)}><option value="all">All roles</option><option value="admin">Admin</option><option value="manager">Manager</option><option value="staff">Recruiter</option></Select>
+        <Select aria-label="Filter by role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as 'all' | Role)}><option value="all">All roles</option>{ROLE_ORDER.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</Select>
         <div className="uv-sort-narrow"><Select aria-label="Sort team members" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}><option value="name">Sort: Name</option><option value="role">Sort: Role</option><option value="work">Sort: Open work</option></Select></div>
         {filtered && <Button variant="ghost" onClick={clearFilters}>Clear filters</Button>}
       </div>
@@ -251,5 +257,8 @@ function TeamPage({ tabs }: { tabs: ReactNode }) {
       onClose={() => setEditing(null)} onSaved={refreshSaved} />}
     {security && <SecurityDialog key={security.user.id + security.kind} {...security} onClose={() => setSecurity(null)} />}
     {auditFor && <AuditHistory key={auditFor.id} user={auditFor} onClose={() => setAuditFor(null)} />}
+    {deleting && <DeleteUserDialog key={deleting.id} user={deleting} onClose={() => setDeleting(null)}
+      onDeleted={async (message) => { setDeleting(null); await refreshSaved(message) }}
+      onDeactivateInstead={() => { const person = deleting; setDeleting(null); setEditing({ user: person, deactivate: true }) }} />}
   </div>
 }

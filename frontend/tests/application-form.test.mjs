@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 function moduleUrl(source) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
+  return `data:text/javascript;base64,${Buffer.from(withRoleLabels(outputText)).toString('base64')}`
 }
 const read = (path) => readFile(new URL(`../src/features/application-form/${path}`, import.meta.url), 'utf8')
 
@@ -458,14 +459,14 @@ test('the merge UI is switched off: no header button, no Merge into button, no A
   assert.equal(merge.SHOW_MERGE_UI, false)
   const src = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
   const screen = await src('screens/candidates/application-form.tsx')
-  assert.match(screen, /SHOW_MERGE_UI && form && me\.role === 'admin' && <MergeIntoPicker/)   // the only mount of the header button
+  assert.match(screen, /SHOW_MERGE_UI && form && isAdminLevel\(me\.role\) && <MergeIntoPicker/)   // the only mount of the header button
   const line = await src('features/application-form/components/extraction-line.tsx')
   assert.match(line, /SHOW_MERGE_UI && wrongDocument && slot\.extraction\?\.duplicateOf && <DuplicateMergeAction/)
   assert.doesNotMatch(await src('features/application-form/components/documents-section.tsx'), /DuplicateMergeAction|MergeIntoPicker|candidate-merge/)
   // Even if mounted by mistake, the components render nothing while the flag is false.
   const merged = await src('features/application-form/components/candidate-merge.tsx')
   assert.match(merged, /SHOW_MERGE_UI \? mergeOffer\(/)
-  assert.match(merged, /!SHOW_MERGE_UI \|\| store\.me\.role !== 'admin'/)
+  assert.match(merged, /!SHOW_MERGE_UI \|\| !isAdminLevel\(store\.me\.role\)/)
   // The note keeps its words and the Open / Read again buttons; there is no merge action among them.
   const note = model.describeExtraction('passport', { uploaded: true, extraction: { identityMismatch: true, duplicateOf: DUPLICATE, identityReasons: [] } })
   assert.match(note.text, /^Already in the CRM as CI-139 · Rashid Khan/)

@@ -15,6 +15,7 @@ import {
 import { GATE_REASON, gateBlocks, type GateState, type LeadGate } from '../lead-gate'
 import { CopyButton } from './lead-columns'
 import { openWhatsApp } from './wa-template'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 interface Props {
   /** The row that was clicked; shown at once while the full detail loads. */
@@ -170,7 +171,7 @@ export function LeadDrawer({ lead: row, me, users, gate, version, workRefusal, c
           {onNotInterested && <Button size="sm" variant="secondary" icon={<UserRoundX className="h-4 w-4" />} disabled={Boolean(blocked) || converted} title={blocked ?? (converted ? CONVERTED_REASON : undefined)} onClick={() => onNotInterested(shown)}>Not interested</Button>}
           {canAssign && <Button size="sm" variant="secondary" icon={<UserCheck className="h-4 w-4" />} disabled={converted} title={converted ? CONVERTED_REASON : shown.ownerId ? 'Hand this lead to another recruiter' : undefined} onClick={() => onAssign(shown)}>{shown.ownerId ? 'Reassign' : 'Assign'}</Button>}
           {canAssign && onUnassign && shown.ownerId && <Button size="sm" variant="secondary" icon={<UserMinus className="h-4 w-4" />} disabled={converted} title={converted ? CONVERTED_REASON : 'Take this lead back from its recruiter so nobody owns it'} onClick={() => onUnassign(shown)}>Make unassigned</Button>}
-          {me.role === 'admin' && shown.candidateId && onUnconvert && <Button size="sm" variant="secondary" icon={<Undo2 className="h-4 w-4" />} onClick={() => onUnconvert(shown)}>Move back to Lead</Button>}
+          {isAdminLevel(me.role) && shown.candidateId && onUnconvert && <Button size="sm" variant="secondary" icon={<Undo2 className="h-4 w-4" />} onClick={() => onUnconvert(shown)}>Move back to Lead</Button>}
           {canDelete && onDelete && <Button size="sm" variant="dangerGhost" icon={<Trash2 className="h-4 w-4" />} disabled={Boolean(shown.candidateId)} title={shown.candidateId ? 'This lead was converted to a candidate, so it cannot be deleted.' : undefined} onClick={() => onDelete(shown)}>Delete lead</Button>}
         </div>
 

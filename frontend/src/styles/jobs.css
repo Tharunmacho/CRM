@@ -48,10 +48,10 @@
 
 /* ---------- Table cells ---------- */
 .jv .ui-data-table thead tr { background: none; }
-.workspace-page .jv .ui-data-table th { padding: 12px 10px; border-bottom: 1px solid var(--border-main); background: none; font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+.workspace-page .jv .ui-data-table th { padding: 12px 10px; border-bottom: var(--table-line-width) solid var(--table-line); background: none; font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
 .workspace-page .jv .ui-data-table td { padding: 12px 10px; border-color: var(--border-faint); font-size: 13px; line-height: 1.45; vertical-align: middle; overflow: hidden; }
 .workspace-page .jv .ui-data-table tbody tr:hover { background: var(--tint-1); }
-.workspace-page .jv .ui-data-table tbody tr:last-child td { border-bottom: 0; }
+.workspace-page .jv .ui-data-table tbody tr:last-child td { border-bottom: var(--table-line-width) solid var(--table-line); }
 .jv-late, .jv-late .jv-cell-sub { color: var(--error-ink); }
 .jv-late p:first-child { font-weight: 500; }
 /* Circular avatars: a soft hue per name (set as --h by the component), tinted from the card colour. */

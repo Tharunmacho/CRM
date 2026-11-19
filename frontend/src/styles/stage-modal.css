@@ -144,13 +144,14 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
 .sm-check ul { display: flex; flex-wrap: wrap; gap: 4px 24px; padding-left: 18px; list-style: disc; }
 
 /* The form: a 12-column grid. Short fields sit side by side, long ones take the row. */
-.sm-form { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px 16px; padding: 24px; }
+.sm-form { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; padding: 24px; }
 .sm-form > * { min-width: 0; }
 .sm-form > .sm-c4 { grid-column: span 4; }
 .sm-form > .sm-c8 { grid-column: span 8; }
 .sm-form > .sm-c12 { grid-column: 1 / -1; }
-.sm-form .ui-field > span:first-child { margin-bottom: 8px; }
-.sm-form :is(.ui-input, select, .custom-select-trigger, .date-picker-trigger) { min-height: 40px; }
+.sm-form .ui-field > span:first-child { margin-bottom: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); }
+/* Every box of the form is one height (the date box was 2 px taller than the rest) and every field is a 12 / 16 px grid cell: label above (12.5px/600), control below. */
+:root:root .sm-form :is(.ui-input:not(textarea), select, .custom-select-trigger, .date-picker-trigger) { box-sizing: border-box; height: 40px; min-height: 40px; }
 .sm-form .ui-radio-chip { min-width: 72px; }
 .sm-feedback { margin: 24px; padding: 20px; border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border-main)); border-radius: 12px; background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 .sm-feedback textarea { min-height: 112px; resize: vertical; background: var(--bg-card); }
@@ -277,7 +278,8 @@ details[open] > .sm-summary .sm-chev { transform: rotate(180deg); }
   .sm-extra { padding: 14px 16px; }
   .sm :is(input, select, textarea, .ui-input, .custom-select-trigger, .date-picker-trigger) { font-size: 16px; }
   .sm .ui-button, .sm-record-toggle, .sm summary { min-height: 44px; }
-  .sm-form :is(.ui-input, select, .custom-select-trigger, .date-picker-trigger), .sm-form .ui-radio-chip { min-height: 44px; }
+  :root:root .sm-form :is(.ui-input:not(textarea), select, .custom-select-trigger, .date-picker-trigger) { height: 44px; min-height: 44px; }
+  .sm-form .ui-radio-chip { min-height: 44px; }
 }
 @media (max-width: 360px) {
   .sm-facts { grid-template-columns: minmax(0, 1fr); }

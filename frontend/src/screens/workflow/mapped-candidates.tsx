@@ -16,6 +16,7 @@ import { OwnerText, SOURCE_LABEL, SourceDot, SourceIcon, StageChip, shortDate } 
 import { CountryFlag, KpiCards, Pager, StatusDot, ViewToggle, Who, readView, saveView, type DbView } from '@/features/candidates/components/db-parts'
 import { DbTable, GRID_TABLE_MIN_WIDTH, useElementWidth, type DbColumn } from '@/features/candidates/components/db-table'
 import '@/styles/data-bank-v2.css'
+import '@/styles/candidate-tables.css'
 
 type TabKey = 'active' | 'deployed' | 'closed'
 

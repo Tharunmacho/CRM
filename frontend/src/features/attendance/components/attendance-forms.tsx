@@ -5,6 +5,7 @@ import { useStore } from '@/shared/state/crm-store'
 import { Dialog } from '@/shared/ui/overlay'
 import { DatePicker } from '@/shared/ui/date-picker'
 import { attendanceLabels, requestLabels, approvalLabel, minutesLabel, type AttendanceRequest, type AttendanceSettings, type RequestKind } from '../policy-model'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 interface FormProps { onClose: () => void; onSaved: () => void }
 function SaveDialog({ title, description, onClose, onSaved, children, save, label = 'Save' }: FormProps & { title: string; description?: string; children: ReactNode; save: () => Promise<unknown>; label?: string }) {
@@ -49,7 +50,7 @@ export function DecisionDialog({ request, action, settings, onClose, onSaved }: 
   const [reason, setReason] = useState('')
   const [cover, setCover] = useState('')
   const [extraOccasion, setExtraOccasion] = useState(false)
-  const canAllowExtraOccasion = me.role === 'admin' && action === 'approve' && ['late', 'early_exit'].includes(request.kind)
+  const canAllowExtraOccasion = isAdminLevel(me.role) && action === 'approve' && ['late', 'early_exit'].includes(request.kind)
   const coverAction = action.includes('cover')
   const title = ({ approve: 'Approve request', reject: 'Reject request', accept_cover: 'Accept leave cover', decline_cover: 'Decline leave cover', nominate: 'Choose another cover colleague' })[action]
   return <SaveDialog title={title} description={`${request.name} · ${request.date} · ${requestLabels[request.kind]}`} onClose={onClose} onSaved={onSaved} label={title} save={() => action === 'nominate' ? api.post(`/attendance/requests/${request.id}/cover`, { coverUserId: cover }) : coverAction ? api.post(`/attendance/requests/${request.id}/cover-response`, { accepted: action === 'accept_cover', note: reason.trim() }) : api.post(`/attendance/requests/${request.id}/decision`, { approved: action === 'approve', reason: reason.trim(), emergencyOverride: canAllowExtraOccasion && extraOccasion })}>

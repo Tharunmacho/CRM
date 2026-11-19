@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 async function load(relative) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
+  return import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(outputText)).toString('base64')}`)
 }
 
 const labels = await load('../src/features/candidates/assignment-labels.ts')
@@ -19,7 +20,7 @@ test('an empty recruiter reads Not assigned and is flagged as muted', () => {
   assert.equal(labels.isUnassigned('Asha Nair'), false)
 })
 
-test('the recruiter dropdown lists active staff and managers only, A to Z, never an admin', () => {
+test('the recruiter dropdown lists active staff and MDs only, A to Z, never an admin', () => {
   const choices = labels.recruiterChoices([
     { id: 'a', name: 'Zed Staff', role: 'staff', active: true },
     { id: 'b', name: 'Amy Manager', role: 'manager', active: true },
@@ -28,7 +29,7 @@ test('the recruiter dropdown lists active staff and managers only, A to Z, never
     { id: 'e', name: 'Lee Staff', role: 'staff', active: true, onLeave: true },
   ])
   assert.deepEqual(choices.map((c) => c.id), ['b', 'e', 'a'])
-  assert.equal(choices[0].label, 'Amy Manager (manager)')
+  assert.equal(choices[0].label, 'Amy Manager (MD)')
   assert.equal(choices[1].label, 'Lee Staff · on leave')
   assert.equal(labels.NOT_ASSIGNED_YET, 'Not assigned yet')
 })

@@ -61,6 +61,7 @@ import { canWorkCandidate, workRefusal } from '@/features/candidates/candidate-a
 import { shortRef } from '@/features/candidates/components/data-bank-columns'
 import '@/styles/candidate-v2.css'
 import '@/styles/stage-modal.css'
+import '@/styles/touch-targets.css'
 import { careIdOf, idLine, primaryId } from '@/features/candidates/candidate-ids'
 
 /**

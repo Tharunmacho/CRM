@@ -18,6 +18,17 @@
   :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 12rem; min-width: 12rem; }   /* edit + delete + Open need about 155px plus padding: a narrower cell clipped the Open button */
 }
 
+/* The jobs table: 44 px header with single-line uppercase 11.5px/600 labels, rows of at least 56 px with every cell centred, 14 px side padding on header
+   and cells alike (a header starts on the same left edge as its cells), a line under every row, and the Actions header and buttons on one left edge. */
+@media (min-width: 1280px) {
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; line-height: 1.2; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid thead th button { font: inherit; letter-spacing: inherit; text-transform: inherit; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { text-align: left; }
+  .jobs-simple .js-jobs-table .cs-row-actions { justify-content: flex-start; }
+}
 /* A job just saved: a soft tint that fades, always next to the job itself. */
 .jobs-simple tr.js-new > td { animation: js-new-fade 6s ease-out; }
 .jobs-simple .cs-card.js-new { animation: js-new-card 6s ease-out; }
@@ -62,7 +73,7 @@
 .jobs-simple .js-filter { flex: none; }
 .jobs-simple .js-picker.is-popover { position: relative; }
 .jobs-simple .js-picker.is-popover .js-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: min(340px, 86vw); box-shadow: 0 10px 28px color-mix(in srgb, var(--text-main) 16%, transparent); }
-.jobs-simple .js-picker.is-compact .js-trigger { width: 200px; height: 48px; min-height: 48px; border-radius: 12px; color: var(--text-main); }
+.jobs-simple .js-picker.is-compact .js-trigger { width: 200px; height: 40px; min-height: 40px; border-radius: 10px; color: var(--text-main); }
 .jobs-simple .js-picker.is-compact .js-trigger-empty { color: var(--text-main); }
 
 /* ---------- Typed dropdowns (job title, country): one bordered row of flag, text and chevron, the list opens under it ---------- */
@@ -109,10 +120,14 @@
   .jobs-simple .js-control.is-tags .js-control-input { height: 32px; }
 }
 @media (max-width: 760px) {
-  .jobs-simple .js-picker.is-compact .js-trigger { min-height: 48px; }
+  .jobs-simple .js-picker.is-compact .js-trigger { height: 44px; min-height: 44px; }
   .jobs-simple .js-picker.is-popover .js-panel { width: 100%; max-width: 100%; }
   .jobs-simple .js-panel ul[role='listbox'] { max-height: min(232px, 40dvh); }
   .jobs-simple .js-combo-list { max-height: min(208px, 40dvh); }
   .jobs-simple .js-facts > div { grid-template-columns: 72px minmax(0, 1fr); }
   .jobs-simple .js-openings { max-width: none; }
 }
+
+/* Below the width where the table turns into cards, the page scrolls as a whole (no second scroll box inside it). */
+@media (max-width: 1279px) { .jobs-simple .js-jobs-table .ui-table-scroll.is-sticky { max-height: none !important; overflow-y: visible; } }
+@media (max-width: 1023px), (pointer: coarse) { .jobs-simple .js-picker.is-compact .js-trigger { height: 44px; min-height: 44px; } }

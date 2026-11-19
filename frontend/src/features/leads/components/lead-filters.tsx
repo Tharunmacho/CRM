@@ -2,7 +2,7 @@ import { ChevronDown, X } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Select } from '@/shared/ui/primitives'
-import { DATE_FIELDS, DATE_PRESETS, LEAD_STATUSES, NEW_CARD_DETAIL, PLATFORM_LABEL, activePreset, platformKind, presetRange, todayKey, type LeadFacets, type LeadFilters } from '../lead-model'
+import { DATE_FIELDS, DATE_PRESETS, PLATFORM_LABEL, activePreset, filterChips, platformKind, presetRange, statusChoices, todayKey, type LeadFacets, type LeadFilters } from '../lead-model'
 
 interface Props {
   filters: LeadFilters
@@ -14,7 +14,7 @@ interface Props {
   onMoreToggle: () => void
   canClear: boolean
   onClear: () => void
-  /** Only an admin sees every lead, so only an admin gets the "Unassigned" and per-recruiter choices; managers and staff see only their own leads. */
+  /** Only an admin or MD sees every lead, so only they get the "Unassigned" and per-recruiter choices; staff see only their own leads. */
   canAssign: boolean
 }
 
@@ -36,7 +36,10 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
     </span>
   )
   const plain = (list: string[] | undefined, current: string): [string, string][] => withCurrent(list, current).map((item) => [item, item])
-  const dateActive = Boolean(filters.from || filters.to || filters.recent)
+  /** A person filtered on who the list above does not offer (an admin, or users still loading) stays visible instead of the select reading "All leads". */
+  const ownerOutside = Boolean(filters.assigned) && !['me', 'none'].includes(filters.assigned) && !users.some((user) => user.id === filters.assigned && user.role !== 'admin' && user.id !== meId)
+  const chips = filterChips(filters)
+  const dateActive = chips.some((chip) => chip.key === 'dates' || chip.key === 'recent')
   const dateLabel = DATE_FIELDS.find((field) => field.value === filters.dateField)?.label ?? 'Uploaded'
   const preset = activePreset(filters)
   return (
@@ -46,7 +49,7 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
         {choice('campaign', 'Filter by campaign', 'Any campaign', plain(facets?.campaigns, filters.campaign))}
         {choice('position', 'Filter by job', 'Any job', plain(facets?.positions, filters.position))}
         {choice('country', 'Filter by country', 'Any country', plain(facets?.countries, filters.country))}
-        {choice('status', 'Filter by status', 'Any status', LEAD_STATUSES.map((status) => [status.value, status.label]))}
+        {choice('status', 'Filter by status', 'Any status', statusChoices(filters.status))}
         {choice('platform', 'Filter by platform', 'Any platform', withCurrent(facets?.platforms, filters.platform).map((item) => [item, `${PLATFORM_LABEL[platformKind(item)]}${platformKind(item) === 'other' ? ` (${item})` : ''}`]))}
         <span className="db-sel">
           <Select aria-label="Filter by who the lead is assigned to" value={filters.assigned} onChange={(event) => onChange({ assigned: event.target.value })}>
@@ -54,6 +57,7 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
             <option value="me">Assigned to me</option>
             {canAssign && <option value="none">Unassigned</option>}
             {canAssign && users.filter((user) => user.role !== 'admin' && user.id !== meId).map((user) => <option key={user.id} value={user.id}>{user.name}{!user.active ? ' (inactive)' : ''}</option>)}
+            {canAssign && ownerOutside && <option value={filters.assigned}>{users.find((user) => user.id === filters.assigned)?.name ?? 'Selected person'}</option>}
           </Select>
         </span>
         <span className="db-more-cell">
@@ -65,10 +69,9 @@ export function LeadFiltersBar({ filters, facets, users, meId, onChange, moreOpe
           </button>
         </span>
       </div>
-      {(filters.batchId || filters.recent) && (
+      {chips.length > 0 && (
         <div className="db-chips" aria-label="Filters in use">
-          {filters.batchId && <button type="button" className="db-chip" aria-label="Show every upload again" onClick={() => onChange({ batchId: '' })}>From one upload<X size={12} aria-hidden="true" /></button>}
-          {filters.recent && <button type="button" className="db-chip" aria-label="Stop showing only the leads uploaded today" onClick={() => onChange({ recent: '' })}>{NEW_CARD_DETAIL}<X size={12} aria-hidden="true" /></button>}
+          {chips.map((chip) => <button key={chip.key} type="button" className="db-chip" aria-label={`Remove filter: ${chip.label}`} onClick={() => onChange(chip.clear)}>{chip.label}<X size={12} aria-hidden="true" /></button>)}
         </div>
       )}
       <div id="ld-more-filters" className="db-more" hidden={!moreOpen}>

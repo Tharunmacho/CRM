@@ -31,7 +31,7 @@ export function AssignLeadsDialog({ ids, users, fromName, onClose, onSaved }: {
       description={again ? `Now with ${fromName}. It leaves their list and goes to the person you choose. Converted leads are never moved.` : 'The recruiter can then call them and attach the updated resume. Converted leads are never moved.'}
       footer={<><Button variant="secondary" disabled={busy} onClick={onClose}>Cancel</Button><Button variant="primary" icon={<UserCheck className="h-4 w-4" />} disabled={busy} onClick={() => void save()}>{busy ? (again ? 'Reassigning…' : 'Assigning…') : (again ? 'Reassign' : 'Assign')}</Button></>}>
       <div className="ld-form">
-        {/* The server only hands leads to active recruiters who are not on leave (not managers); the picker shows them disabled. */}
+        {/* The server only hands leads to active recruiters who are not on leave (not MDs); the picker shows them disabled. */}
         <RecruiterPicker users={users} selected={chosen} onChange={setChosen} total={ids.length} disabled={busy} label={again ? 'Reassign to' : 'Assign to'} />
         {error && <p role="alert" className="ld-alert"><span>{error}</span></p>}
       </div>

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 const cache = new Map()
 async function load(path) {
@@ -13,7 +14,7 @@ async function load(path) {
     source = source.replaceAll(`from '${spec}'`, `from '${loaded.__url}'`)
   }
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  const dataUrl = `data:text/javascript;base64,${Buffer.from(js).toString('base64')}`
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`
   const loaded = { ...(await import(dataUrl)), __url: dataUrl }
   cache.set(path, loaded)
   return loaded

@@ -15,6 +15,8 @@ import { CurrencyCard } from './currency-card'
 import { RemarkTemplatesCard } from './remark-templates-card'
 import { PanelHead } from './user-ui'
 import '@/styles/agency-settings.css'
+import '@/styles/touch-targets.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 type Errors = Partial<Record<keyof AgencyForm, string>>
 
@@ -22,7 +24,7 @@ type Errors = Partial<Record<keyof AgencyForm, string>>
 export function AgencySettingsTab() {
   const store = useStore()
   const settings = store.settings
-  const editable = settings.editable && store.me.role === 'admin'
+  const editable = settings.editable && isAdminLevel(store.me.role)
   const saved = useMemo(() => formFromSettings(settings), [settings])
   const [form, setForm] = useState<AgencyForm>(saved)
   const [errors, setErrors] = useState<Errors>({})

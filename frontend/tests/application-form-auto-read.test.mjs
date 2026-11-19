@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 function moduleUrl(source) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
+  return `data:text/javascript;base64,${Buffer.from(withRoleLabels(outputText)).toString('base64')}`
 }
 const formSource = (path) => readFile(new URL(`../src/features/application-form/${path}`, import.meta.url), 'utf8')
 

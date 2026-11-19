@@ -1,53 +1,77 @@
 /*
- * Shared DataTable (shared/ui/table.tsx), the reference grid look as the default for every list in the CRM:
- * white card; a header band of centred, medium-weight, muted titles on a very light grey; thin vertical hairlines
- * between columns; 72px rows (56px when compact) with everything vertically centred; zebra stripes; centred cells
- * (the first column, which names the record, starts on the left); a horizontal scroll area whose pinned first and
- * actions columns show a soft shadow when content has scrolled under them; stacked cards below the table's
- * stackBelow width. Tokens only (theme.css), so every palette and dark mode follow. `plain` opts a table out.
- * Rules carry :root:root so they beat the older table skin in depth.css and skin.css and screen overrides.
+ * Shared DataTable (shared/ui/table.tsx), the default look for every list in the CRM, the same as the Tasks table: a header band in the
+ * primary blue (var(--primary) with var(--on-primary) text, 700 weight, uppercase 11.5px, .05em, one line, 44px); 56px rows with everything
+ * vertically centred, 14px side padding (a header and its cells share one left edge) and a 1px line under EVERY row, the last one too;
+ * zebra stripes and a hover tint; a horizontal scroll area whose pinned first and actions columns show a soft shadow when content has
+ * scrolled under them; stacked cards below the table's stackBelow width (no band, no row lines, label/value pairs). Tokens only
+ * (theme.css), so every palette and dark mode follow. `plain` opts a table out (styles/table-default.css gives it the same look).
+ * Lines (tokens in theme.css, one source of truth): an OUTER FRAME of var(--table-frame-width) var(--table-line-strong) around the whole table
+ * (the .ui-data-table box: header, rows and pager; radius kept, overflow clips the corners), var(--table-line-width) var(--table-line) under every row
+ * (the last one too) and between every pair of columns, a lighter divider between header cells, and a var(--table-frame-width) strong edge under the
+ * header. Stacked cards (below stackBelow) have no frame and no column lines: each card keeps one var(--table-line) border.
+ * Rules carry :root:root so they beat the older table skin in depth.css and skin.css; a screen can still re-theme with a longer selector.
  */
 .ui-data-table.is-grid { background: var(--bg-card); }
+/* the outer frame: one strong border around header, rows and pager; the radius is kept, overflow clips the corners */
+:root:root .ui-data-table:is(.is-grid, .is-plain) { box-sizing: border-box; overflow: hidden; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
 .ui-data-table.is-grid .ui-table-scroll { position: relative; overscroll-behavior-x: contain; }
 :root:root .ui-data-table.is-grid table { width: 100%; min-width: var(--tbl-min, 0); border-collapse: separate; border-spacing: 0; color: var(--text-main); }
 @media (max-width: 1279px) { :root:root .ui-data-table.is-grid table { min-width: var(--tbl-min-md, var(--tbl-min, 0)); } }
 @media (max-width: 1023px) { :root:root .ui-data-table.is-grid table { min-width: var(--tbl-min-sm, var(--tbl-min, 0)); } }
 
-/* ---------- header band ---------- */
-:root:root .ui-data-table.is-grid thead tr { border: 0; background: none; }
+/* ---------- header: the primary blue band (the Tasks table look) ----------
+ * var(--primary) with var(--on-primary) on it (white in the light themes, near-black on the lighter dark-theme blue), 700 weight,
+ * uppercase 11.5px with .05em tracking, one line, 44px high. Sort buttons, the sort arrow, the filter button and the select-all checkbox
+ * inherit that colour; keyboard focus is an on-primary outline so it shows on the blue. */
+:root:root .ui-data-table.is-grid thead tr { border: 0; background: var(--primary); }
 :root:root .ui-data-table.is-grid thead th {
-  position: relative; height: 52px; padding: 8px 12px; vertical-align: middle;
-  font-size: 13px; font-weight: 500; line-height: 1.3; white-space: normal; overflow-wrap: break-word; color: var(--text-muted);
-  background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card));
-  border-bottom: 1px solid var(--border-main); border-right: 1px solid var(--border-main); box-shadow: none;
+  position: relative; box-sizing: border-box; height: 44px; padding: 0 14px; vertical-align: middle;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; line-height: 1; text-transform: uppercase; white-space: nowrap; overflow-wrap: normal; color: var(--on-primary);
+  background: var(--primary); border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); box-shadow: none;
 }
-:root:root .ui-data-table.is-grid.is-compact thead th { height: 46px; padding: 6px 10px; font-size: 12.5px; }
-:root:root .ui-data-table.is-grid thead th:last-child { border-right: 0; }
+:root:root .ui-data-table.is-grid thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+:root:root .ui-data-table.is-grid.is-compact thead th { height: 44px; padding: 0 14px; font-size: 11.5px; }
 :root:root .ui-table-scroll.is-sticky thead th { position: sticky; top: 0; z-index: 3; box-shadow: none; }
-.ui-data-table.is-grid .ui-th-inner { max-width: 100%; }
-.ui-data-table.is-grid th button { text-align: inherit; line-height: 1.3; }
-.ui-data-table.is-grid th.is-sortable button:hover, .ui-data-table.is-grid th.is-sorted button { color: var(--text-main); }
-.ui-data-table.is-grid .ui-sort-hint { flex: none; opacity: .4; transition: opacity .14s; }
-.ui-data-table.is-grid th.is-sortable:hover .ui-sort-hint { opacity: .85; }
+:root:root .ui-data-table.is-grid .ui-table-scroll.is-sticky thead th { background: var(--primary); }
+.ui-data-table.is-grid .ui-th-inner { max-width: 100%; min-width: 0; vertical-align: middle; }
+:root:root .ui-data-table.is-grid th button { min-width: 0; max-width: 100%; overflow: hidden; text-align: inherit; text-overflow: ellipsis; white-space: nowrap; font: inherit; letter-spacing: inherit; text-transform: inherit; line-height: inherit; color: inherit; }
+:root:root .ui-data-table.is-grid th.is-sortable button:hover, :root:root .ui-data-table.is-grid th.is-sorted button { color: inherit; }
+:root:root .ui-data-table.is-grid th.is-sortable button:hover { text-decoration: underline; text-underline-offset: 3px; }
+:root:root .ui-data-table.is-grid thead :is(svg, .ui-th-filter) { flex: none; color: inherit; }
+:root:root .ui-data-table.is-grid .ui-th-filter { border-radius: 4px; }
+:root:root .ui-data-table.is-grid .ui-th-filter:hover { background: color-mix(in srgb, var(--on-primary) 18%, transparent); color: inherit; }
+:root:root .ui-data-table.is-grid .ui-th-filter.bg-navy-600 { background: var(--on-primary); color: var(--primary); }
+.ui-data-table.is-grid .ui-sort-hint { flex: none; opacity: .6; transition: opacity .14s; }
+.ui-data-table.is-grid th.is-sortable:hover .ui-sort-hint { opacity: 1; }
 .ui-data-table.is-grid th button:disabled { cursor: default; }
+:root:root .ui-data-table.is-grid thead :is(button, a, input, [tabindex]):focus-visible { outline: 2px solid var(--on-primary); outline-offset: 1px; border-radius: 4px; }
+/* the select-all box: a light box with a primary tick on the blue band */
+:root:root .ui-data-table.is-grid thead .custom-checkbox { border-color: color-mix(in srgb, var(--on-primary) 70%, var(--primary)); background-color: color-mix(in srgb, var(--on-primary) 14%, var(--primary)); }
+:root:root .ui-data-table.is-grid thead .custom-checkbox:hover:not(:disabled) { border-color: var(--on-primary); }
+:root:root .ui-data-table.is-grid thead .custom-checkbox:is(:checked, :indeterminate) { border-color: var(--on-primary); background-color: var(--on-primary); }
+:root:root .ui-data-table.is-grid thead .custom-checkbox:is(:checked, :indeterminate)::after { background-color: var(--primary); }
 
-/* ---------- body ---------- */
+/* ---------- body: 56px rows, centred, a 1px line under EVERY row (the last one too), a hover tint ---------- */
 :root:root .ui-data-table.is-grid tbody tr { background: var(--bg-card); border: 0; }
-:root:root .ui-data-table.is-grid.is-zebra tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
+:root:root .ui-data-table.is-grid.is-zebra tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3%, var(--bg-card)); }
 :root:root .ui-data-table.is-grid tbody td {
-  height: 72px; padding: 10px 12px; vertical-align: middle; font-size: 13.5px; line-height: 1.45; color: var(--text-main);
-  border-bottom: 1px solid var(--border-faint); border-right: 1px solid var(--border-main);
+  box-sizing: border-box; height: 56px; padding: 8px 14px; vertical-align: middle; font-size: 13.5px; line-height: 1.4; color: var(--text-main);
+  border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line);
 }
-:root:root .ui-data-table.is-grid.is-compact tbody td, :root:root .ui-data-table.is-grid.is-dense tbody td { height: 56px; padding: 7px 10px; font-size: 13px; }
 :root:root .ui-data-table.is-grid tbody td:last-child { border-right: 0; }
-:root:root .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: 0; }
-:root:root .ui-data-table.is-grid :is(th, td):first-child { padding-left: 20px; }
-:root:root .ui-data-table.is-grid :is(th, td):last-child { padding-right: 20px; }
-:root:root .ui-data-table.is-grid tbody tr.cursor-pointer:hover { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
+:root:root .ui-data-table.is-grid.is-compact tbody td, :root:root .ui-data-table.is-grid.is-dense tbody td { height: 56px; padding: 8px 14px; font-size: 13px; }
+:root:root .ui-data-table.is-grid :is(th, td):first-child { padding-left: 14px; }
+:root:root .ui-data-table.is-grid :is(th, td):last-child { padding-right: 14px; }
+:root:root .ui-data-table.is-grid:is(.is-zebra, :not(.is-zebra)) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
 :root:root .ui-data-table.is-grid tbody tr:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .ui-data-table.is-grid td .text-micro { color: var(--text-muted); }
+/* chips 24-26px, row buttons and the row menu 36px (40-44px in the stacked cards below) */
+:root:root .ui-data-table.is-grid td :is(.ui-badge-dot, .ui-badge-chip) { box-sizing: border-box; min-height: 24px; max-height: 26px; padding-top: 0; padding-bottom: 0; line-height: 22px; }
+:root:root .ui-data-table.is-grid td .ui-button { height: 36px; min-height: 36px; }
+:root:root .ui-data-table.is-grid td .ui-row-menu-trigger { width: 36px; height: 36px; }
+@media (pointer: coarse) { :root:root .ui-data-table.is-grid td .ui-row-menu-trigger { width: 44px; height: 44px; } }
 
-/* alignment: the column's `align` (first column left, the rest centred by default) */
+/* alignment: the column's `align` (left unless the column says otherwise): a header and its cells share one edge */
 .ui-data-table.is-grid .ui-c-left { text-align: left; }
 .ui-data-table.is-grid .ui-c-center { text-align: center; }
 .ui-data-table.is-grid .ui-c-right { text-align: right; }
@@ -58,7 +82,7 @@
 :root:root .ui-data-table.is-grid .ui-actions-cell { width: 1%; min-width: 88px; white-space: nowrap; text-align: center; }
 :root:root .ui-data-table.is-grid table.is-fixed th.ui-actions-cell { width: auto; }
 :root:root .ui-data-table.is-grid :is(th, td).ui-actions-cell { padding-left: 12px; padding-right: 12px; }
-:root:root .ui-data-table.is-grid :is(th, td).ui-actions-cell:last-child { padding-right: 16px; }
+:root:root .ui-data-table.is-grid :is(th, td).ui-actions-cell:last-child { padding-right: 14px; }
 .ui-data-table.is-grid .ui-actions-cell > * { vertical-align: middle; }
 .ui-data-table.is-grid td.ui-actions-cell > .ui-button + .ui-button, .ui-data-table.is-grid td.ui-actions-cell > .ui-row-menu-trigger { margin-left: 6px; }
 
@@ -81,7 +105,7 @@
 .ui-data-table.is-loading tbody tr { pointer-events: none; }
 
 /* ---------- pagination footer ---------- */
-:root:root .ui-data-table.is-grid .ui-table-pagination { min-height: 56px; padding: 10px 20px; border-top: 1px solid var(--border-main); background: var(--bg-card); font-size: 13px; color: var(--text-muted); }
+:root:root .ui-data-table.is-grid .ui-table-pagination { min-height: 56px; padding: 10px 14px; border-top: var(--table-line-width) solid var(--table-line); background: var(--bg-card); font-size: 13px; color: var(--text-muted); }
 :root:root .ui-data-table.is-grid .ui-page-button { width: 34px; height: 34px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); transition: background-color .14s, border-color .14s, color .14s; }
 :root:root .ui-data-table.is-grid .ui-page-button:hover:not(:disabled) { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
 :root:root .ui-data-table.is-grid .ui-page-button:disabled { opacity: .4; }
@@ -90,19 +114,23 @@
 .ui-row-menu-trigger { display: inline-grid; flex: none; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-muted); cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
 .ui-row-menu-trigger:hover, .ui-row-menu-trigger[aria-expanded='true'] { border-color: var(--border-hover); background: var(--tint-1); color: var(--text-main); }
 .ui-row-menu-trigger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.ui-row-menu { position: fixed; z-index: 70; width: 184px; padding: 6px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); box-shadow: 0 10px 30px rgba(0, 0, 0, .14); }
-.ui-row-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; color: var(--text-main); text-align: left; cursor: pointer; }
+.ui-row-menu { position: fixed; z-index: 70; width: max-content; min-width: 200px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 6px; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); box-shadow: 0 10px 30px rgba(0, 0, 0, .14); }
+.ui-row-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 12px; border: 0; border-radius: 6px; white-space: nowrap; background: transparent; font-size: 13px; color: var(--text-main); text-align: left; cursor: pointer; }
 .ui-row-menu-item svg { flex: none; color: var(--text-muted); }
 .ui-row-menu-item:hover:not(:disabled), .ui-row-menu-item:focus-visible { background: var(--tint-2); outline: none; }
 .ui-row-menu-item:disabled { opacity: .5; cursor: default; }
+.ui-row-menu-item.is-separated { position: relative; margin-top: 9px; }
+.ui-row-menu-item.is-separated::before { content: ''; position: absolute; top: -5px; left: 0; right: 0; height: 1px; background: var(--table-line); }
 .ui-row-menu-item.is-danger, .ui-row-menu-item.is-danger svg { color: var(--error-ink); }
 @media (pointer: coarse) { .ui-row-menu-trigger { width: 44px; height: 44px; } .ui-row-menu-item { height: 44px; } }
+@media (max-width: 480px) { .ui-row-menu-item { height: 44px; font-size: 14px; } }
 
 /* ---------- stacked cards below a table's stackBelow width ---------- */
 
 @media (max-width: 767px) {
+  :root:root .ui-data-table.ui-table-stack-768:is(.is-grid, .is-plain) { overflow: visible; border: 0; border-radius: 0; }
   :root:root .ui-data-table.is-grid.ui-table-stack-768 table { min-width: 0; border-spacing: 0; }
-  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody tr { height: auto; background: var(--bg-card); border-bottom: 1px solid var(--border-faint); }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody tr { height: auto; background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .ui-data-table.is-grid.is-zebra.ui-table-stack-768 tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 2.5%, var(--bg-card)); }
   :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td { height: auto; padding: 0; border: 0; text-align: left; background: transparent; }
   :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td:is(.ui-c-center, .ui-c-right, .ui-c-left) { text-align: left; }
@@ -111,11 +139,14 @@
   :root:root .ui-data-table.is-grid.ui-table-stack-768 :is(th, td)::after { content: none; }
   :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td > :is(div, p, ul, .record-identity) { margin-inline: 0; width: auto; }
   :root:root .ui-data-table.is-grid.ui-table-stack-768 .ui-skel-row td:not(:first-child) { display: none; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 tbody td .ui-button { height: 40px; min-height: 40px; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-768 .ui-table-pagination { border-top: var(--table-line-width) solid var(--table-line); }
 }
 
 @media (max-width: 1023px) {
+  :root:root .ui-data-table.ui-table-stack-1024:is(.is-grid, .is-plain) { overflow: visible; border: 0; border-radius: 0; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1024 table { min-width: 0; border-spacing: 0; }
-  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody tr { height: auto; background: var(--bg-card); border-bottom: 1px solid var(--border-faint); }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody tr { height: auto; background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .ui-data-table.is-grid.is-zebra.ui-table-stack-1024 tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 2.5%, var(--bg-card)); }
   :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td { height: auto; padding: 0; border: 0; text-align: left; background: transparent; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td:is(.ui-c-center, .ui-c-right, .ui-c-left) { text-align: left; }
@@ -124,11 +155,14 @@
   :root:root .ui-data-table.is-grid.ui-table-stack-1024 :is(th, td)::after { content: none; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td > :is(div, p, ul, .record-identity) { margin-inline: 0; width: auto; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1024 .ui-skel-row td:not(:first-child) { display: none; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 tbody td .ui-button { height: 40px; min-height: 40px; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1024 .ui-table-pagination { border-top: var(--table-line-width) solid var(--table-line); }
 }
 
 @media (max-width: 1279px) {
+  :root:root .ui-data-table.ui-table-stack-1280:is(.is-grid, .is-plain) { overflow: visible; border: 0; border-radius: 0; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1280 table { min-width: 0; border-spacing: 0; }
-  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody tr { height: auto; background: var(--bg-card); border-bottom: 1px solid var(--border-faint); }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody tr { height: auto; background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .ui-data-table.is-grid.is-zebra.ui-table-stack-1280 tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 2.5%, var(--bg-card)); }
   :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td { height: auto; padding: 0; border: 0; text-align: left; background: transparent; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td:is(.ui-c-center, .ui-c-right, .ui-c-left) { text-align: left; }
@@ -137,4 +171,30 @@
   :root:root .ui-data-table.is-grid.ui-table-stack-1280 :is(th, td)::after { content: none; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td > :is(div, p, ul, .record-identity) { margin-inline: 0; width: auto; }
   :root:root .ui-data-table.is-grid.ui-table-stack-1280 .ui-skel-row td:not(:first-child) { display: none; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 tbody td .ui-button { height: 40px; min-height: 40px; }
+  :root:root .ui-data-table.is-grid.ui-table-stack-1280 .ui-table-pagination { border-top: var(--table-line-width) solid var(--table-line); }
 }
+
+/* ---------- one frame, never two: a panel that holds the table edge to edge gives up its own border (the radius and size stay) while the
+   table is a table; as stacked cards (a phone) the panel's own single border is the card border, in the same var(--table-line) ---------- */
+:root:root .ui-panel:not(.p-5):has(> .ui-data-table:is(.is-grid, .is-plain)),
+:root:root .v2-panel:has(> .v2-panel-body.is-flush > .ui-data-table:is(.is-grid, .is-plain)) { border-color: var(--table-line); }
+:root:root .ui-panel:not(.p-5):has(> .ui-data-table:is(.is-grid, .is-plain):not([class*='ui-table-stack-'])),
+:root:root .v2-panel:has(> .v2-panel-body.is-flush > .ui-data-table:is(.is-grid, .is-plain):not([class*='ui-table-stack-'])) { border-color: transparent; }
+@media (min-width: 768px) {
+  :root:root .ui-panel:not(.p-5):has(> .ui-data-table:is(.is-grid, .is-plain).ui-table-stack-768),
+  :root:root .v2-panel:has(> .v2-panel-body.is-flush > .ui-data-table:is(.is-grid, .is-plain).ui-table-stack-768) { border-color: transparent; }
+}
+@media (min-width: 1024px) {
+  :root:root .ui-panel:not(.p-5):has(> .ui-data-table:is(.is-grid, .is-plain).ui-table-stack-1024),
+  :root:root .v2-panel:has(> .v2-panel-body.is-flush > .ui-data-table:is(.is-grid, .is-plain).ui-table-stack-1024) { border-color: transparent; }
+}
+@media (min-width: 1280px) {
+  :root:root .ui-panel:not(.p-5):has(> .ui-data-table:is(.is-grid, .is-plain).ui-table-stack-1280),
+  :root:root .v2-panel:has(> .v2-panel-body.is-flush > .ui-data-table:is(.is-grid, .is-plain).ui-table-stack-1280) { border-color: transparent; }
+}
+/* the report cards that hold a table edge to edge (reports-v2.css .rv-card.rv-table) */
+@media (min-width: 1280px) { :root:root .rv-card.rv-table:has(> .ui-data-table.ui-table-stack-1280) { border-color: transparent; } }
+@media (min-width: 1024px) { :root:root .rv-card.rv-table:has(> .ui-data-table.ui-table-stack-1024) { border-color: transparent; } }
+@media (min-width: 768px) { :root:root .rv-card.rv-table:has(> .ui-data-table.ui-table-stack-768) { border-color: transparent; } }
+:root:root .rv-card.rv-table:has(> .ui-data-table:is(.is-grid, .is-plain):not([class*='ui-table-stack-'])) { border-color: transparent; }

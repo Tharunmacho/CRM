@@ -1,0 +1,40 @@
+/*
+ * Candidate tables (Data Bank grid, Matched candidates list): the owner's table theme, the same as the Tasks table.
+ *   header  blue band (var(--primary), text var(--on-primary)), 700 weight, uppercase 11.5px, .05em tracking, one line, 44px high
+ *   rows    at least 60px, everything vertically centred, 14px side padding (a heading and its cells share one left edge),
+ *           a visible var(--table-line) line under every row (the last too) and between every pair of columns, a soft hover tint
+ *   frame   the scroll box around the table (.db-scroll) carries the 2px var(--table-line-strong) frame (data-bank-v2.css); the header's bottom edge is the same strong line
+ *           and the divider between header cells is var(--table-header-line)
+ *   header controls (sort buttons, carets, the select-all box) inherit the header colour so they read white on the blue.
+ * Applies to EVERY grid DbTable (Data Bank, Matched candidates, the lead upload preview dialog, ...) except the ones inside the Lead sheet (.ld), which keep their own sheet (leads-table.css) - so no grid renders the old grey 48-52px header. Imported last by data-bank.tsx and mapped-candidates.tsx; :root:root:root beats the older grey grid rules (db-fit.css, data-bank-table.css).
+ * Tokens only, so dark mode follows. Below 900px the Data Bank shows cards (no table), so none of this applies there.
+ */
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th {
+  box-sizing: border-box; height: 44px; padding: 0 14px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; text-align: left; white-space: nowrap;
+  border: 0; border-bottom: var(--table-frame-width) solid var(--table-line-strong); border-radius: 0; background: var(--primary); color: var(--on-primary);
+  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; line-height: 16px; text-transform: uppercase;
+}
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th.is-right { text-align: right; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead th :is(button, a, svg, span, label) { color: inherit; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-sort { display: inline-flex; align-items: center; justify-content: flex-start; gap: 4px; max-width: 100%; min-width: 0; min-height: 0; padding: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; color: inherit; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-sort:is(:hover, .is-on) { color: inherit; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-caret { position: static; flex: none; margin: 0; color: inherit; opacity: .7; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .db-th-sort.is-on .db-th-caret { color: inherit; opacity: 1; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead :is(button, a, input, [tabindex]):focus-visible { outline: 2px solid var(--on-primary); outline-offset: 1px; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .custom-checkbox { border-color: color-mix(in srgb, var(--on-primary) 70%, var(--primary)); background-color: color-mix(in srgb, var(--on-primary) 14%, var(--primary)); }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .custom-checkbox:is(:checked, :indeterminate) { border-color: var(--on-primary); background-color: var(--on-primary); }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) thead .custom-checkbox:is(:checked, :indeterminate)::after { background-color: var(--primary); }
+
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td {
+  box-sizing: border-box; height: 60px; min-height: 60px; padding: 8px 14px; vertical-align: middle; text-align: left;
+  border: 0; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line);
+}
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td:last-child { border-right: 0; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td.is-right { text-align: right; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow):last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) :is(th, td).is-right { padding-left: 14px; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) :is(th, td).is-select { padding-left: 14px; padding-right: 14px; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) :is(th.db-th-check, td.db-td-check) { padding: 0 !important; text-align: center; }
+:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow):hover > td { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }

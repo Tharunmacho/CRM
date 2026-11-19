@@ -34,19 +34,19 @@ test('saved owner absent from eligible recruiters remains visible as a disabled 
   const html = render({ id: 'admin', name: 'Administrator' })
   assert.equal(triggerText(html), 'Administrator')
   assert.match(html, /<option value="admin" disabled="" selected="">Administrator<\/option>/)
-  assert.match(html, /<option value="manager">Manager \(manager\)<\/option>/)
+  assert.match(html, /<option value="manager">Manager \(MD\)<\/option>/)
 })
 
 test('eligible saved recruiter keeps its normal option without a duplicate disabled fallback', () => {
   const html = render({ id: 'manager', name: 'Manager' })
-  assert.equal(triggerText(html), 'Manager (manager)')
+  assert.equal(triggerText(html), 'Manager (MD)')
   assert.equal((html.match(/<option value="manager"/g) ?? []).length, 1)
-  assert.match(html, /<option value="manager" selected="">Manager \(manager\)<\/option>/)
+  assert.match(html, /<option value="manager" selected="">Manager \(MD\)<\/option>/)
 })
 
 test('unassigned candidate remains explicitly unassigned while valid choices stay available', () => {
   const html = render(null)
   assert.equal(triggerText(html), 'Not assigned')
   assert.match(html, /<option value="" selected="">Not assigned<\/option>/)
-  assert.match(html, /<option value="manager">Manager \(manager\)<\/option>/)
+  assert.match(html, /<option value="manager">Manager \(MD\)<\/option>/)
 })

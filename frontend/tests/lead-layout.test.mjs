@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 const cache = new Map()
 async function load(path) {
@@ -13,7 +14,7 @@ async function load(path) {
     source = source.replaceAll(`from '${spec}'`, `from '${loaded.__url}'`)
   }
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  const dataUrl = `data:text/javascript;base64,${Buffer.from(js).toString('base64')}`
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`
   const loaded = { ...(await import(dataUrl)), __url: dataUrl }
   cache.set(path, loaded)
   return loaded
@@ -42,8 +43,11 @@ test('lead table restores Actions, Created and Uploaded before the requested ide
   assert.deepEqual(visible.slice(0, 3).map(column => column.key), ['actions', 'created', 'uploaded'])
   assert.deepEqual(visible.slice(0, 4).map(column => column.sticky), ['start', 'start', 'start', 'start'])
   assert.deepEqual(visible.slice(3, 10).map(column => column.key), requested)
-  assert.deepEqual(visible.slice(3, 10).map(column => column.header), ['Name / Age / Contact', 'Job applied', 'Education', 'India experience', 'Abroad experience', 'Total experience', 'Location'])
+  assert.deepEqual(visible.slice(3, 10).map(column => column.header), ['Name / Age / Contact', 'Job applied', 'Education', 'India exp.', 'Abroad exp.', 'Total exp.', 'Location'])
   assert.deepEqual(visible.slice(10).map(column => column.key), ['campaign', 'status', 'resume'])
+  // the shortened headings keep the full name as the header tooltip, so the Columns menu and hover still say what they mean
+  assert.deepEqual(visible.slice(6, 9).map(column => column.headerTitle), ['India experience', 'Abroad experience', 'Total experience'])
+  assert.ok(visible.filter(column => !['experienceIndia', 'experienceAbroad', 'experience'].includes(column.key)).every(column => column.headerTitle === undefined))
   assert.equal(new Set(columns.map(column => column.key)).size, columns.length)
 })
 

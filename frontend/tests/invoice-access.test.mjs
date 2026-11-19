@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 /**
  * Invoices, the agreed service fee, CGST/SGST and receipts are the admin's alone (capability `view_invoices`).
@@ -9,7 +10,7 @@ import ts from 'typescript'
  */
 function moduleUrl(source) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
+  return `data:text/javascript;base64,${Buffer.from(withRoleLabels(outputText)).toString('base64')}`
 }
 const read = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
@@ -22,10 +23,10 @@ const stages = await import(moduleUrl((await read('features/application-form/pro
 const profile = await import(moduleUrl((await read('features/candidates/profile-documents-model.ts')).replace("'@/shared/model/document-slots'", `'${slotsUrl}'`)))
 const tabs = await import(moduleUrl(await read('features/reports/report-tabs.ts')))
 
-test('only the admin holds the view_invoices capability', async () => {
+test('only admin-level roles (admin and MD) hold the view_invoices capability', async () => {
   const store = await read('shared/state/crm-store.tsx')
   assert.match(store, /\| 'view_invoices'/)
-  assert.match(store, /view_invoices: \['admin'\],/)
+  assert.match(store, /view_invoices: ADMIN_LEVEL_ROLES,/)
 })
 
 test('the application form renders the Invoice card (fee, CGST/SGST, payments, PDF) only behind view_invoices', async () => {

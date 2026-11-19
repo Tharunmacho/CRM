@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 async function load(path) {
   const source = await readFile(new URL(path, import.meta.url), 'utf8')
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+  return import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`)
 }
 
 const { canWorkCandidate, workRefusal, choosesRecruiter } = await load('../src/features/candidates/candidate-access.ts')
@@ -44,18 +45,19 @@ test('an unknown role that is not the owner gets nothing', () => {
 test('the refusal names the owner and matches the server wording', async () => {
   assert.equal(workRefusal(asha, owned, 'Asha'), null)
   assert.equal(workRefusal(admin, owned, 'Asha'), null)
-  assert.equal(workRefusal(ravi, owned, 'Asha'), 'This candidate is assigned to Asha. Only they, a manager or an admin can work on it.')
-  assert.equal(workRefusal(ravi, owned), 'This candidate is assigned to another recruiter. Only they, a manager or an admin can work on it.')
-  assert.equal(workRefusal(ravi, { ownerId: null }), 'This candidate has no recruiter yet. Only a manager or an admin can work on it.')
+  assert.equal(workRefusal(ravi, owned, 'Asha'), 'This candidate is assigned to Asha. Only they, an MD or an admin can work on it.')
+  assert.equal(workRefusal(ravi, owned), 'This candidate is assigned to another recruiter. Only they, an MD or an admin can work on it.')
+  assert.equal(workRefusal(ravi, { ownerId: null }), 'This candidate has no recruiter yet. Only an MD or an admin can work on it.')
   // The server is the source of truth; the sentences must not drift apart.
   const server = await readFile(new URL('../../backend/app/core/deps.py', import.meta.url), 'utf8')
-  assert.ok(server.includes('This candidate is assigned to {name or \'another recruiter\'}. Only they, a manager or an admin can work on it.'))
-  assert.ok(server.includes('This candidate has no recruiter yet. Only a manager or an admin can work on it.'))
+  assert.ok(server.includes('This candidate is assigned to {name or \'another recruiter\'}. Only they, an MD or an admin can work on it.'))
+  assert.ok(server.includes('This candidate has no recruiter yet. Only an MD or an admin can work on it.'))
 })
 
-test('only the admin chooses the recruiter when adding a candidate; a manager keeps their own add', () => {
+test('an admin or MD chooses the recruiter when adding a candidate; a recruiter keeps their own add', () => {
   assert.equal(choosesRecruiter('admin'), true)
-  assert.equal(choosesRecruiter('manager'), false)
+  assert.equal(choosesRecruiter('manager'), true)
+  assert.equal(choosesRecruiter('md'), true)
   assert.equal(choosesRecruiter('staff'), false)
   assert.equal(choosesRecruiter(undefined), false)
 })
@@ -84,5 +86,5 @@ test('staff own what they add; admin and manager choose a recruiter by hand or l
 test('the duplicate dialog hides Combine when the candidate belongs to another recruiter', async () => {
   const dialog = await readFile(new URL('../src/features/candidates/components/entry-dialogs.tsx', import.meta.url), 'utf8')
   assert.match(dialog, /canMerge && <Button variant="primary"/)
-  assert.match(dialog, /Only they, a manager or an admin can add to that candidate/)
+  assert.match(dialog, /Only they, an MD or an admin can add to that candidate/)
 })

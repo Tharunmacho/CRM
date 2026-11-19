@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 function moduleUrl(source) {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
+  return `data:text/javascript;base64,${Buffer.from(withRoleLabels(outputText)).toString('base64')}`
 }
 const slotsUrl = moduleUrl(await readFile(new URL('../src/shared/model/document-slots.ts', import.meta.url), 'utf8'))
 const modelSource = await readFile(new URL('../src/features/application-form/form-model.ts', import.meta.url), 'utf8')
@@ -212,8 +213,10 @@ test('a note can be deleted by an administrator at any time, by its author only 
   const note = (minutes, authorId = 'u1') => ({ authorId, createdAt: new Date(now.getTime() - minutes * 60_000).toISOString() })
   assert.equal(model.canDeleteFeedback(note(5), { id: 'u1', role: 'staff' }, now), true)
   assert.equal(model.canDeleteFeedback(note(16), { id: 'u1', role: 'staff' }, now), false)
-  assert.equal(model.canDeleteFeedback(note(5, 'u2'), { id: 'u1', role: 'manager' }, now), false)
+  assert.equal(model.canDeleteFeedback(note(5, 'u2'), { id: 'u1', role: 'staff' }, now), false)
   assert.equal(model.canDeleteFeedback(note(600, 'u2'), { id: 'a1', role: 'admin' }, now), true)
+  // An MD holds every privilege an admin holds, so an MD may delete any note too.
+  assert.equal(model.canDeleteFeedback(note(600, 'u2'), { id: 'm1', role: 'manager' }, now), true)
   assert.deepEqual(model.FEEDBACK_KINDS.map((item) => item.label), ['Update', 'Delay', 'Issue', 'Client feedback', 'Candidate feedback'])
   assert.equal(model.FEEDBACK_REASONS.length, 6)
   assert.equal(model.FEEDBACK_MAX_LENGTH, 2000)
@@ -301,12 +304,12 @@ test('an older server sends no assignment: the block is built from the workspace
   assert.equal(model.jobUnavailableReason(noor.jobs[1]), 'Filled')
 })
 
-test('without a way to work the candidate nothing is editable; managers edit the rest but only the admin picks the recruiter', () => {
+test('without a way to work the candidate nothing is editable; an MD is admin-level: edits everything including the recruiter', () => {
   const form = model.normalizeForm(base())
   const staff = fallback.completeAssignment(form.assignment, { ...workspace(), canEdit: false })
   assert.deepEqual(staff.can, { job: false, source: false, agency: false, recruiter: false })
   const manager = fallback.completeAssignment(form.assignment, { ...workspace(), canEdit: false, me: { id: 'u2', role: 'manager' } })
-  assert.deepEqual(manager.can, { job: true, source: true, agency: true, recruiter: false })
+  assert.deepEqual(manager.can, { job: true, source: true, agency: true, recruiter: true })
   const admin = fallback.completeAssignment(form.assignment, { ...workspace(), canEdit: false, me: { id: 'u1', role: 'admin' } })
   assert.equal(admin.can.recruiter, true)
   assert.deepEqual(manager.options.recruiters.map((item) => item.name), ['Meena', 'Ravi'])

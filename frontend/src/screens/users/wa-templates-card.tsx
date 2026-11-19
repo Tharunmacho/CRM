@@ -7,6 +7,7 @@ import { leadExtrasApi, loadWaTemplates } from '@/features/leads/lead-extras-api
 import { WA_BODY_MAX, WA_PLACEHOLDERS, WA_TITLE_MAX, bodyRoom, fillTemplate, unknownPlaceholders, type WaTemplate } from '@/features/leads/wa-template-model'
 import { PanelHead, failureText } from './user-ui'
 import '@/styles/lead-extras.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /**
  * Users > Agency settings > Lead sheet WhatsApp templates (admins only): the three messages the green WhatsApp button offers on the
@@ -14,7 +15,7 @@ import '@/styles/lead-extras.css'
  */
 export function WaTemplatesCard({ editable }: { editable: boolean }) {
   const store = useStore()
-  const isAdmin = store.me.role === 'admin'
+  const isAdmin = isAdminLevel(store.me.role)
   const [saved, setSaved] = useState<WaTemplate[] | null>(null)
   const [draft, setDraft] = useState<Record<string, { title: string; body: string }>>({})
   const [error, setError] = useState('')

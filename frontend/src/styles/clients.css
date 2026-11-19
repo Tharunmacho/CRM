@@ -183,10 +183,10 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 .cd-progress > .cl-progress > small { font-size: 12.5px; }
 .cd-no-candidates { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border-faint); font-size: 14px; color: var(--text-muted); }
 
-.cd-cands { width: 100%; table-layout: fixed; border-collapse: collapse; border-top: 1px solid var(--border-faint); }
-.cd-cands th { padding: 9px 8px; font-size: 12.5px; font-weight: 500; line-height: 1.4; text-align: left; color: var(--text-muted); border-bottom: 1px solid var(--border-faint); }
-.cd-cands td { padding: 10px 8px; font-size: 13px; vertical-align: middle; color: var(--text-main); border-bottom: 1px solid var(--border-faint); }
-.cd-cands tbody tr:last-child td { border-bottom: 0; }
+.cd-cands { width: 100%; table-layout: fixed; border-collapse: collapse; border-top: var(--table-line-width) solid var(--table-line); }
+.cd-cands th { padding: 9px 8px; font-size: 12.5px; font-weight: 500; line-height: 1.4; text-align: left; color: var(--text-muted); border-bottom: var(--table-line-width) solid var(--table-line); }
+.cd-cands td { padding: 10px 8px; font-size: 13px; vertical-align: middle; color: var(--text-main); border-bottom: var(--table-line-width) solid var(--table-line); }
+.cd-cands tbody tr:last-child td { border-bottom: var(--table-line-width) solid var(--table-line); }
 .cd-cands :is(th, td):first-child { padding-left: 20px; }
 .cd-cands :is(th, td):last-child { padding-right: 20px; text-align: right; }
 .cd-cands tbody tr { cursor: pointer; transition: background-color .12s; }
@@ -246,8 +246,9 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 }
 @media (max-width: 900px) {
   .cd-cands, .cd-cands tbody { display: block; }
+  :root:root:root .cd-cands { overflow: visible; border: 0; border-radius: 0; }
   .cd-cands thead { display: none; }
-  .cd-cands tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid var(--border-faint); }
+  .cd-cands tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px 16px; border-bottom: var(--table-line-width) solid var(--table-line); }
   .cd-cands tbody tr:last-child { border-bottom: 0; }
   .cd-cands td { display: block; min-width: 0; padding: 0 !important; border: 0; text-align: left !important; }
   .cd-cands td.c-name, .cd-cands td.c-stage { grid-column: 1 / -1; }
@@ -370,15 +371,15 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 
 /* The candidates of an order read as the shared grid table: banded header, hairline dividers, zebra rows, centred cells. */
 @media (min-width: 901px) {
-  :root:root .cd-cands { border-collapse: separate; border-spacing: 0; border-top: 1px solid var(--border-main); }
-  :root:root .cd-cands thead th { height: 46px; padding: 6px 10px; text-align: center; font-size: 12.5px; font-weight: 500; color: var(--text-muted); background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); border-bottom: 1px solid var(--border-main); border-right: 1px solid var(--border-main); box-shadow: none; }
+  :root:root .cd-cands { border-collapse: separate; border-spacing: 0; border-top: var(--table-line-width) solid var(--table-line); }
+  :root:root .cd-cands thead th { height: 46px; padding: 6px 10px; text-align: center; font-size: 12.5px; font-weight: 500; color: var(--text-muted); background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line); box-shadow: none; }
   :root:root .cd-cands tbody tr { background: var(--bg-card); }
   :root:root .cd-cands tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
   :root:root .cd-cands tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
-  :root:root .cd-cands tbody td { height: 64px; padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--border-faint); border-right: 1px solid var(--border-main); }
+  :root:root .cd-cands tbody td { height: 64px; padding: 8px 10px; text-align: center; border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line); }
   :root:root .cd-cands :is(th, td):last-child { padding-right: 12px; padding-left: 12px; text-align: center; border-right: 0; }
   :root:root .cd-cands :is(th, td):first-child { padding-left: 20px; text-align: left; }
-  :root:root .cd-cands tbody tr:last-child td { border-bottom: 0; }
+  :root:root .cd-cands tbody tr:last-child td { border-bottom: var(--table-line-width) solid var(--table-line); }
   .cd-cands td.c-stage { text-align: center; }
   .cd-cands td.c-stage > * { margin-inline: auto; }
   .cd-cands .cd-profile-actions { justify-content: center; }

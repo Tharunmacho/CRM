@@ -263,7 +263,7 @@ test('the Tasks table header row is the primary blue of the Complete button, sco
   assert.match(head, /font-weight: 700/)
   assert.doesNotMatch(head, /#[0-9a-f]{3,8}\b|rgb\(/i) // no hard-coded blue
   assert.match(rule('.dw:not(.dwr) .dw-main thead th.is-actions'), /background: var\(--primary\)/) // the sticky actions header stays opaque blue
-  assert.match(rule('.dw:not(.dwr) .dw-table thead th + th'), /border-left-color: color-mix\(in srgb, var\(--on-primary\)/) // a faint divider, no gap lines
+  assert.match(rule('.dw:not(.dwr) .dw-table thead th + th'), /border-left-color: var\(--table-header-line\)/) // the lighter header divider (theme.css), no gap lines
   // the button it matches
   assert.match(await read('../src/screens/tasks/task-table.tsx'), /variant=\{called \|\| moved \? 'secondary' : 'primary'\}/)
   // the 48-hour list header is blue too
@@ -273,8 +273,16 @@ test('the Tasks table header row is the primary blue of the Complete button, sco
 
 test('the admin Tasks list fits the panel at a 1440px window (no sideways scroll, nothing under the sticky actions column)', async () => {
   const widths = m.taskColumnsFor(true).map((c) => c.width)
-  assert.equal(widths.length, 10) // S NO, DOC, recruiter, job, client, candidate, stage, today, remarks, actions
+  assert.equal(widths.length, 11) // S NO, DOC, client, job, candidate, recruiter, agency, stage, today, remarks, actions
   assert.ok(widths.reduce((a, b) => a + b, 0) <= 1111, `the plan is ${widths.reduce((a, b) => a + b, 0)}px, the panel 1111px`)
+})
+
+test('a follow-up row keeps the server agency when it is shown as a daily row', () => {
+  const item = { id: 'f1', applicationId: 'f1', candidateId: 'c1', ownerId: 'u1', stage: 4, agency: 'Lotus Overseas', remark: null }
+  const row = m.followUpAsDaily(item)
+  assert.equal(row.agency, 'Lotus Overseas')
+  assert.equal(m.agencyLabel(row), 'Lotus Overseas')
+  assert.equal(m.agencyLabel({ ...row, agency: null }), '', 'the server said there is no agency: a dash, not the empty referral label')
 })
 
 test('a placement moved on from stage 2 to 11 today counts as stage moved today (Follow-up rows carry when a stage was last finished)', () => {

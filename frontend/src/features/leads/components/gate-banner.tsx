@@ -11,7 +11,7 @@ const readDismissed = (day: string) => { try { return sessionStorage.getItem(UNL
 /**
  * Staff who still have daily tasks to finish see this at the top of the Lead sheet: what is left, how far along they are,
  * the next deadline, and one button to the tasks. When the last task is done it turns into a small green note (dismissible).
- * Admin and manager never see it.
+ * Admin and MD never see it.
  */
 export function GateBanner({ state, gate }: { state: GateState; gate: LeadGate | null }) {
   const day = new Date().toDateString()

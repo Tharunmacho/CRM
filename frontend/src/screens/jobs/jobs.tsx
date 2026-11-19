@@ -22,6 +22,7 @@ import { useOrderStats } from '@/features/jobs/use-order-stats'
 import { useWorkspaceReady } from '@/features/master-data/use-workspace-ready'
 import '@/styles/clients-simple.css'
 import '@/styles/jobs-simple.css'
+import '@/styles/touch-targets.css'
 
 type Layout = 'cards' | 'table'
 
@@ -132,7 +133,7 @@ function JobTable({ rows, query, loading, newId, onOpen, onEdit, onDelete }: { r
       </span>,
     },
   ]
-  return <Panel flush className="js-jobs-table"><DataTable compact stackBelow={1280} loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.order.id} rowClassName={(row) => row.order.id === newId ? 'js-new' : undefined} onRowClick={(row) => onOpen(row.order)} /></Panel>
+  return <Panel flush className="js-jobs-table"><DataTable compact sticky maxHeight="72vh" stackBelow={1280} loading={loading} resetPageKey={query} rows={rows} columns={columns} rowKey={(row) => row.order.id} rowClassName={(row) => row.order.id === newId ? 'js-new' : undefined} onRowClick={(row) => onOpen(row.order)} /></Panel>
 }
 
 function Skeleton({ layout }: { layout: Layout }) {

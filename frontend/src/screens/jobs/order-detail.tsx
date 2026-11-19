@@ -13,6 +13,7 @@ import { EmptyState, PageHeader, Panel, PanelHeader } from '@/shared/ui/display'
 import { Button, SearchInput } from '@/shared/ui/primitives'
 import { SummaryCards } from '@/shared/ui/workspace'
 import { DataTable, type Column } from '@/shared/ui/table'
+import '@/styles/table-theme.css'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { DeleteJobDialog } from '@/features/jobs/components/delete-job-dialog'
 import { canDeleteOrder } from '@/features/jobs/order-delete'
@@ -313,7 +314,7 @@ export default function OrderDetailPage() {
         </Panel>
       </div>
 
-      <Panel flush className="jv-matched">
+      <Panel flush className="jv-matched tb-blue">
         <PanelHeader
           title="Matched candidates"
           meta={`${apps.length} ${apps.length === 1 ? 'candidate' : 'candidates'} on this job, with their stage and recruiter`}

@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 async function load(path) {
   const source = await readFile(new URL(path, import.meta.url), 'utf8')
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+  return import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`)
 }
 
 const m = await load('../src/features/leads/lead-model.ts')
@@ -40,13 +41,11 @@ test('call outcome moves the status exactly as the server table says', () => {
   assert.deepEqual(m.CALL_OUTCOMES.map((o) => o.value), ['answered', 'interested', 'no_answer', 'wrong_number', 'not_interested'])
 })
 
-test('search: commas combine terms, case and spacing do not matter, the hint follows the typing', () => {
+test('search: commas combine terms, case and spacing do not matter, the placeholder is the only hint', () => {
   assert.deepEqual(m.searchTerms('  Ravi ,  chef  ,RAVI,, '), ['Ravi', 'chef'])
   assert.equal(m.normalizeSearch('ravi, chef,'), 'ravi,chef')
   assert.equal(m.normalizeSearch('ravi,'), m.normalizeSearch('ravi'))
-  assert.match(m.searchHint(''), /commas/)
-  assert.match(m.searchHint("ravi"), /"ravi"/)
-  assert.match(m.searchHint('ravi, chef'), /all of: "ravi", "chef"/)
+  assert.equal(m.searchHint, undefined, 'the help sentence under the search is gone: the placeholder is the only hint')
 })
 
 const base = m.EMPTY_FILTERS
@@ -185,12 +184,12 @@ const admin = { id: 'a', role: 'admin' }
 const manager = { id: 'm', role: 'manager' }
 const staff = { id: 's1', role: 'staff' }
 
-test('permissions: managers and staff only work their own leads, admin works any, converted leads cannot convert again', () => {
+test('permissions: staff only work their own leads, admin and MD work any, converted leads cannot convert again', () => {
   assert.equal(m.canWorkLead(admin, { ownerId: null }), true)
-  assert.equal(m.canWorkLead(manager, { ownerId: 's2' }), false)
+  assert.equal(m.canWorkLead(manager, { ownerId: 's2' }), true)
   assert.equal(m.canWorkLead(manager, { ownerId: 'm' }), true)
-  assert.equal(m.canWorkLead(manager, { ownerId: null }), false)
-  assert.match(m.leadRefusal(manager, { ownerId: 's2' }, 'Asha'), /assigned to Asha/)
+  assert.equal(m.canWorkLead(manager, { ownerId: null }), true)
+  assert.equal(m.leadRefusal(manager, { ownerId: 's2' }, 'Asha'), null)
   assert.equal(m.canWorkLead(staff, { ownerId: 's1' }), true)
   assert.equal(m.canWorkLead(staff, { ownerId: 's2' }), false)
   assert.equal(m.canWorkLead(staff, { ownerId: null }), false)
@@ -201,6 +200,7 @@ test('permissions: managers and staff only work their own leads, admin works any
   assert.equal(m.convertRefusal(staff, { ownerId: 's1', candidateId: null }), null)
   assert.match(m.convertRefusal(staff, { ownerId: 's1', candidateId: 'c1' }), /already a candidate/)
   assert.equal(m.isSupervisor(admin), true)
+  assert.equal(m.isSupervisor(manager), true)
   assert.equal(m.isSupervisor(staff), false)
 })
 
@@ -296,14 +296,14 @@ test('dates: presets are agency (IST) calendar days, whatever the browser zone i
   assert.equal(m.activePreset({ from: '', to: '' }, lateUtc), '')
 })
 
-test('dates: Uploaded is the default, Created is chosen explicitly, and both are sent only with a date', () => {
-  assert.equal(m.EMPTY_FILTERS.dateField, 'uploaded')
+test('dates: Created (the first column of the table) is the default, Uploaded is chosen explicitly, and both are sent only with a date', () => {
+  assert.equal(m.EMPTY_FILTERS.dateField, 'created')
   assert.deepEqual(m.DATE_FIELDS.map((f) => f.label), ['Uploaded', 'Created'])
   const q = (patch) => new URLSearchParams(m.buildLeadQuery({ ...base, ...patch }, sort))
   assert.equal(q({}).has('date_field'), false, 'no dates, no date_field')
-  assert.equal(q({ dateField: 'created' }).has('date_field'), false)
-  assert.equal(q({ from: '2026-11-06', to: '2026-11-06' }).get('date_field'), 'uploaded')
-  assert.equal(q({ from: '2026-11-06', dateField: 'created' }).get('date_field'), 'created')
+  assert.equal(q({ dateField: 'uploaded' }).has('date_field'), false)
+  assert.equal(q({ from: '2026-11-06', to: '2026-11-06' }).get('date_field'), 'created')
+  assert.equal(q({ from: '2026-11-06', dateField: 'uploaded' }).get('date_field'), 'uploaded')
   assert.equal(q({ to: '2026-11-06', dateField: 'created' }).get('created_to'), '2026-11-06')
   assert.equal(m.activeLeadFilterCount({ ...base, dateField: 'created' }), 0, 'choosing the date alone filters nothing')
   assert.equal(m.activeLeadFilterCount({ ...base, dateField: 'created', from: '2026-11-06' }), 1)

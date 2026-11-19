@@ -20,6 +20,7 @@ import { minutesLabel, type AttendanceAdjustment, type AttendanceRequest, type A
 import { clockTime, shiftMonth } from '../format'
 import '../attendance-workspace.css'
 import '../attendance-overview.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 type Tab = 'overview' | 'employee' | 'requests' | 'weekly' | 'schedule' | 'history' | 'presence'
 type Decision = { request: AttendanceRequest; action: DecisionAction }
@@ -135,7 +136,7 @@ export function AttendanceWorkspace({ presence, recordRevision = 0 }: { presence
     catch (cause) { setError(cause instanceof Error ? cause.message : 'We could not change your weekly off. Try again.') }
     finally { setWeeklyBusy(false) }
   }
-  const people = bundle?.settings.employees ?? store.users.filter((user) => user.role !== 'admin' && (store.me.role === 'admin' || user.role === 'staff' || user.id === store.me.id))
+  const people = bundle?.settings.employees ?? store.users.filter((user) => user.role !== 'admin' && (isAdminLevel(store.me.role) || user.role === 'staff' || user.id === store.me.id))
   const changeMonth = (value: string) => { if (/^\d{4}-\d{2}$/.test(value) && value >= '2000-01' && value <= '2100-12') { setMonth(value); setNotice('') } }
 
   return <div className="attendance-workspace">

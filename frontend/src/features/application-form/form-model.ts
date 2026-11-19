@@ -37,6 +37,7 @@ import type {
   TrackingStatus,
   TrackingSummary,
 } from './types'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /* ------------------------------------------------------------------ Field list */
 
@@ -1439,7 +1440,7 @@ export function stageClockTone(clock: Pick<StageClock, 'hours' | 'limitHours' | 
 /** An administrator may delete any note; the author only within 15 minutes of writing it. */
 export function canDeleteFeedback(item: Pick<FeedbackItem, 'authorId' | 'createdAt'> & { canDelete?: boolean | null }, viewer: { id: string; role: string }, now: Date = new Date()): boolean {
   if (typeof item.canDelete === 'boolean') return item.canDelete // the server knows its own clock
-  if (viewer.role === 'admin') return true
+  if (isAdminLevel(viewer.role)) return true
   if (!viewer.id || item.authorId !== viewer.id) return false
   const written = new Date(item.createdAt).getTime()
   return Number.isFinite(written) && now.getTime() - written <= FEEDBACK_DELETE_MINUTES * 60_000

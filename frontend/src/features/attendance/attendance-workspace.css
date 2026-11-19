@@ -79,7 +79,7 @@
 .att-note { padding: 14px 20px; border-top: 1px solid var(--border-faint); font-size: 12.5px; line-height: 1.6; color: var(--text-muted); }
 .att-section > .att-head { padding: 0 0 12px; border: 0; }
 .att-card .ui-data-table { border-top: 0; }
-.att-card > .ui-data-table .ui-table-pagination { border-top-color: var(--border-faint); }
+.att-card > .ui-data-table .ui-table-pagination { border-top-color: var(--table-line); }
 
 /* ---------- Policy strip ---------- */
 .att-policy { display: flex; flex-wrap: wrap; gap: 8px 10px; }
@@ -196,7 +196,7 @@
   .att-filter-row .ui-tabs-pill .ui-tab { flex: 1 1 auto; padding: 0 10px; }
 }
 @media (max-width: 1279px) {
-  .attendance-workspace .ui-table-stack-1280 tbody td:is([data-label='Employee'], [data-label='Date']):first-child { justify-content: flex-start; padding-bottom: 10px; border-bottom: 1px solid var(--border-faint); margin-bottom: 4px; }
+  .attendance-workspace .ui-table-stack-1280 tbody td:is([data-label='Employee'], [data-label='Date']):first-child { justify-content: flex-start; padding-bottom: 10px; border-bottom: var(--table-line-width) solid var(--table-line); margin-bottom: 4px; }
   .attendance-workspace .ui-table-stack-1280 tbody td:is([data-label='Employee'], [data-label='Date']):first-child::before { display: none; }
 }
 

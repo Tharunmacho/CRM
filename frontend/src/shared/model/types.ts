@@ -52,6 +52,8 @@ export interface User {
   active: boolean
   receivesAutoAssign: boolean
   onLeave: boolean
+  /** A removed account kept only so history shows the name; it is never listed or offered in a picker. */
+  deleted?: boolean
 }
 
 export type CandidateStatus =
@@ -199,6 +201,8 @@ export interface ReferenceAgency {
   specialisations?: string[]
   /** Countries or regions the agency prefers. */
   preferredCountries?: string[]
+  /** Very active at present (migration 0047). Active agencies are listed first. Absent on a server that predates it. */
+  activeAgency?: boolean
   createdAt?: string
 }
 

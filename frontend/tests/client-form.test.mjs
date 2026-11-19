@@ -67,7 +67,7 @@ test('the agency body trims values, leaves blanks out and carries the cleaned st
   const body = buildAgencyPayload({ ...party, phone: '', state: ' ' }, [{ name: 'Ravi', designation: '', phone: '', email: '' }, emptyStaffRow()])
   assert.deepEqual(body, {
     name: 'Khalid Rahman', agencyName: 'Gulf Build', phone: undefined, email: 'khalid@example.com', address: '12 Marina Road', place: '', state: undefined, notes: '',
-    staffContacts: [{ name: 'Ravi' }], specialisations: [], preferredCountries: [],
+    staffContacts: [{ name: 'Ravi' }], specialisations: [], preferredCountries: [], activeAgency: false,
   })
 })
 

@@ -110,7 +110,7 @@ export function InvoiceCard({ candidateId, applicationId, canWork, canConfigure,
   const amounts = edited ? preview : savedAmounts ?? preview
   const issued = state?.status === 'issued'
   const status = state ? STATUS_TEXT[state.status] : 'Loading'
-  const message = !canWork ? 'Invoice details are available to the assigned recruiter and managers.'
+  const message = !canWork ? 'Invoice details are available to the assigned recruiter, MDs and admins.'
     : !state ? 'Loading invoice details…'
     : state.status === 'pending_assignment' ? 'Choose the candidate’s client and job before saving a service fee.'
     : issued ? 'The PDF is saved with this candidate’s documents and included in file downloads.'

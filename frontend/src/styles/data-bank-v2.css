@@ -142,12 +142,12 @@
 /* ---------- List view: one grid for header and body, every column visible, no horizontal scroll ---------- */
 .db-box { container-type: inline-size; min-width: 0; }
 .db-tbl { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12.5px; color: var(--text-main); }
-.db-tbl th { height: 44px; padding: 0 8px; vertical-align: middle; text-align: left; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text-muted); border-bottom: 1px solid var(--border-main); background: var(--bg-card); }
-.db-tbl td { height: 64px; padding: 6px 8px; vertical-align: middle; text-align: left; border-bottom: 1px solid var(--border-faint); overflow: hidden; }
+.db-tbl th { height: 44px; padding: 0 8px; vertical-align: middle; text-align: left; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text-muted); border-bottom: var(--table-frame-width) solid var(--table-line-strong); background: var(--bg-card); }
+.db-tbl td { height: 64px; padding: 6px 8px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); overflow: hidden; }
 .db-tbl :is(th, td):first-child { padding-left: 16px; }
 .db-tbl :is(th, td):last-child { padding-right: 16px; }
 .db-tbl :is(th, td).is-right { text-align: right; }
-.db-tbl tbody tr:last-child > td { border-bottom: 0; }
+.db-tbl tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 .db-tbl tbody tr.is-clickable { cursor: pointer; }
 .db-tbl tbody tr:hover > td { background: var(--tint-1); }
 .db-tbl tbody tr.is-selected > td { background: color-mix(in srgb, var(--primary) 7%, var(--bg-card)); }
@@ -371,21 +371,25 @@
    content scrolled under it). Rules carry :root:root so they beat the shared table skin in skin.css.
    ====================================================================================================== */
 .db-scroll { position: relative; max-height: max(480px, calc(100vh - 150px)); overflow: auto; overscroll-behavior-x: contain; background: var(--bg-card); }
+/* the outer frame of every grid table (Data Bank, Matched, Lead sheet, uploads): var(--table-frame-width) var(--table-line-strong), radius kept.
+   The panel around it gives up its own border (one frame, never two). */
+:root:root .db-scroll:has(> .db-tbl.is-grid) { box-sizing: border-box; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+:root:root .db .db-panel:has(> .db-box .db-scroll > .db-tbl.is-grid), :root:root .db-panel:has(> .db-box .db-scroll > .db-tbl.is-grid) { border-color: transparent; }
 :root:root .db-tbl.is-grid { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; color: var(--text-main); }
 :root:root .db-tbl.is-grid thead th {
   position: sticky; top: 0; z-index: 3; height: 52px; padding: 8px 10px; vertical-align: middle; text-align: center;
   font-size: 13px; font-weight: 500; line-height: 1.25; white-space: normal; color: var(--text-muted);
   background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card));
-  border-bottom: 1px solid var(--border-main); border-right: 1px solid var(--border-main); box-shadow: none;
+  border-bottom: var(--table-frame-width) solid var(--table-line-strong); border-right: var(--table-line-width) solid var(--table-header-line); box-shadow: none;
 }
 :root:root .db-tbl.is-grid thead th:last-child { border-right: 0; }
 :root:root .db-tbl.is-grid tbody td {
   position: relative; height: 80px; padding: 10px; vertical-align: middle; text-align: center; overflow: visible;
-  background: var(--bg-card); border-bottom: 1px solid var(--border-faint); border-right: 1px solid var(--border-main);
+  background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line);
 }
 :root:root .db-tbl.is-grid tbody td:last-child { border-right: 0; }
 :root:root .db-tbl.is-grid tbody tr:nth-child(even) > td { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
-:root:root .db-tbl.is-grid tbody tr:last-child > td { border-bottom: 0; }
+:root:root .db-tbl.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 :root:root .db-tbl.is-grid tbody tr.is-clickable:hover > td { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
 :root:root .db-tbl.is-grid tbody tr.is-selected > td { background: color-mix(in srgb, var(--primary) 10%, var(--bg-card)); }
 :root:root .db-tbl.is-grid :is(th, td).is-pin-start, :root:root .db-tbl.is-grid :is(th, td).is-pin-end { position: sticky; }

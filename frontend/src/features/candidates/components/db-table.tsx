@@ -3,10 +3,13 @@ import { ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown } from 'lucide-rea
 import { cn } from '@/shared/lib/cn'
 import { Checkbox } from '@/shared/ui/primitives'
 import '@/styles/db-fit.css'
+import '@/styles/candidate-tables.css'
 
 export interface DbColumn<T> {
   key: string
   header: string
+  /** The full heading when `header` is a shortened one: shown as the header cell's tooltip. */
+  headerTitle?: string
   /** Server/client sort key; the header becomes a sort button when set. */
   sortKey?: string
   /** Design width in px. Classic tables turn the widths into shares so they always add up to 100%; the grid table uses them as minimum widths. */
@@ -240,7 +243,7 @@ export function DbTable<T>({ rows, columns, rowKey, onRowClick, sort, onSort, se
               ? <button type="button" className={cn('db-th-sort', active && 'is-on')} onClick={() => onSort?.(column.sortKey!)}><span className="db-th-label">{column.header}</span>{fit ? <ChevronsUpDown className="db-th-caret is-idle" size={12} aria-hidden="true" /> : active ? (sort!.dir === 'asc' ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />) : null}</button>
               : column.header || <span className="sr-only">Actions</span>
             return (
-              <th key={column.key} className={cn(cellClass(column), (selectAll || (flush && expandable && index === 0)) && 'is-select')} style={cellStyle(column)}
+              <th key={column.key} className={cn(cellClass(column), (selectAll || (flush && expandable && index === 0)) && 'is-select')} style={cellStyle(column)} title={column.headerTitle}
                 aria-sort={column.sortKey ? (active ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}>
                 {selectAll && !flush
                   ? selectAllBox

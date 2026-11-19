@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Globe, Plus, Search, Tags, Trash2, UserRound, Users } from 'lucide-react'
 import type { User } from '@/shared/model/types'
 import { Field, Input, Textarea } from '@/shared/ui/primitives'
@@ -6,6 +6,7 @@ import { Avatar } from '@/features/clients/components/parts'
 import { agencyDisplayName, emptyStaffRow, MAX_STAFF_ROWS, PREFERRED_COUNTRIES, SPECIALISATIONS, toggleSpecialisation, togglePreferredCountry, type AgencyFocus, type FieldErrors, type PartyFields, type StaffRow } from '@/features/clients/client-form'
 import { foldText } from '@/features/clients/client-search'
 import '@/styles/clients-simple.css'
+import { roleLabel } from '@/shared/model/role-labels'
 
 /** A titled soft card of a dialog: an icon chip, the title, and the fields below. */
 export function Section({ icon, title, count, children }: { icon: ReactNode; title: string; count?: string; children: ReactNode }) {
@@ -106,12 +107,11 @@ export function StaffDetailsSection({ rows, onChange, errors }: { rows: StaffRow
   </Section>
 }
 
-/** CRM users who can be given a client: active recruiters and managers (admins are not allocated to clients). */
+/** CRM users who can be given a client: active recruiters and MDs (admins are not allocated to clients). */
 export function allocatableUsers(users: User[]): User[] {
   return users.filter((user) => user.active && (user.role === 'staff' || user.role === 'manager')).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-const ROLE_LABEL: Record<string, string> = { staff: 'Recruiter', manager: 'Manager', admin: 'Admin' }
 
 /**
  * The CRM recruiters who can look after a client, shown as a plain checklist: no dropdown to open and nothing to scroll to.
@@ -138,7 +138,7 @@ export function RecruiterPicker({ users, value, onChange, error, disabled }: { u
         return <li key={user.id}>
           <label className={on ? 'cs-rec is-on' : 'cs-rec'}>
             <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(user.id)} />
-            <Avatar name={user.name} size="sm" /><span className="cs-opt-name">{user.name}</span><span className="cs-opt-role">{ROLE_LABEL[user.role]}</span>
+            <Avatar name={user.name} size="sm" /><span className="cs-opt-name">{user.name}</span><span className="cs-opt-role">{roleLabel(user.role)}</span>
           </label>
         </li>
       })}

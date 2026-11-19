@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import {
   Briefcase, CheckCircle2, Clock, Download, Eye, FileSignature, FileText, Files, GraduationCap, IdCard, Image as ImageIcon, Landmark,
-  Loader2, Paperclip, Plane, ShieldCheck, Stamp, Star, Stethoscope, Upload, type LucideIcon,
+  ChevronDown, Loader2, Paperclip, Plane, ShieldCheck, Stamp, Star, Stethoscope, Upload, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { dateTimeLabel } from '@/shared/lib/format'
@@ -13,6 +13,7 @@ import { DocumentUploadQueue, useDocumentUploadQueue } from '@/shared/ui/documen
 import { Button, Field, Textarea } from '@/shared/ui/primitives'
 import { Dialog } from '@/shared/ui/overlay'
 import { documentLabel, documentSlot } from '@/shared/model/document-slots'
+import { useMediaQuery } from '../use-media-query'
 import { extractionLineKey, routeLineNotes, sizeLabel, slotReadState } from '../form-model'
 import { loadDocumentReport, type IdentityCheck } from '../form-api'
 import { documentRowStates, documentRowsProgress, documentsCountText, groupDocumentRows, groupProgressText, type DocumentRowIcon, type DocumentRowState } from '../document-rows'
@@ -30,6 +31,9 @@ const ICONS: Record<string, LucideIcon> = {
   signed_offer: FileSignature, medical: Stethoscope, pcc: ShieldCheck, visa: Stamp, google_review: Star, visa_stamping: Stamp,
   emigration: Landmark, air_ticket: Plane, other: Paperclip,
 }
+
+/** Below this width the page is a phone layout (the same breakpoint as the stylesheet). */
+const PHONE_QUERY = '(max-width: 760px)'
 
 const STATE_ICONS: Record<DocumentRowIcon, LucideIcon | null> = { check: CheckCircle2, clock: Clock, dot: null }
 
@@ -143,8 +147,9 @@ function DocumentRow({ slot, state, canUpload, busy, onUpload, onManualStatus, o
         <SlotReadingNote slot={slot} enabled={canUpload && Boolean(onExtract)} error={readError ?? ''} onRead={onExtract} />
       </div>
       {!hasFile && <div className="af-docrow-actions">
-        {uploadButton}
+        {/* The secondary action comes first, so the one primary action (Upload) is the last, at the card's bottom right. */}
         {canUpload && onManualStatus && slot.manualStatusSupported && !hasFile && <button type="button" className="af-docbtn af-doc-manual-action" disabled={working || manualBusy} onClick={() => { setManualNote(''); setManualError(''); setManualOpen(true) }}>{marked ? 'Mark as pending' : 'Mark as uploaded'}</button>}
+        {uploadButton}
       </div>}
       {mayUpload && (
         <input
@@ -192,6 +197,12 @@ export function DocumentsSection({
   // What the document reader read and what it could not place (only when the server sent it; live with the form's refresh).
   const reads = formReports(rows.map(({ slot }) => slot))
   const lineNotes = routeLineNotes(form.documents)
+  // On a phone the four groups fold: the first one that still has something to collect is open, the rest are one line each, so the section is two screens at most.
+  const phone = useMediaQuery(PHONE_QUERY)
+  const [toggled, setToggled] = useState<Record<string, boolean>>({})
+  const groups = groupDocumentRows(rows)
+  const firstOpen = (groups.find((group) => group.rows.some((row) => row.state.key === 'pending')) ?? groups[0])?.key
+  const isOpen = (key: string) => !phone || (toggled[key] ?? key === firstOpen)
   return (
     <section className="af-sec af-docs-card" id="af-documents" aria-labelledby="af-documents-title">
       <SectionHeader
@@ -210,10 +221,16 @@ export function DocumentsSection({
       />
       {/* Four small groups, each a grid of compact cards: a name, a status chip and one action, so the whole list is seen at a glance. */}
       <div className="af-docgroups">
-        {groupDocumentRows(rows).map((group) => (
-          <section key={group.key} className="af-docgroup" aria-labelledby={`af-docgroup-${group.key}`}>
-            <h3 id={`af-docgroup-${group.key}`}>{group.label}{groupProgressText(group.rows) && <small className="tnum">{groupProgressText(group.rows)}</small>}</h3>
-            <ul className="af-doclist">
+        {groups.map((group) => (
+          <section key={group.key} className={cn('af-docgroup', phone && 'is-foldable', phone && !isOpen(group.key) && 'is-folded')} aria-labelledby={`af-docgroup-${group.key}`}>
+            <h3 id={`af-docgroup-${group.key}`}>
+              {phone
+                ? <button type="button" className="af-docgroup-toggle" aria-expanded={isOpen(group.key)} aria-controls={`af-doclist-${group.key}`} onClick={() => setToggled((now) => ({ ...now, [group.key]: !isOpen(group.key) }))}>
+                  <span>{group.label}</span><small className="tnum">{groupProgressText(group.rows) || `${group.rows.length} ${group.rows.length === 1 ? 'document' : 'documents'}`}</small><ChevronDown aria-hidden="true" />
+                </button>
+                : <>{group.label}{groupProgressText(group.rows) && <small className="tnum">{groupProgressText(group.rows)}</small>}</>}
+            </h3>
+            <ul className="af-doclist" id={`af-doclist-${group.key}`} hidden={!isOpen(group.key)}>
               {group.rows.map(({ slot, state }) => (
                 <DocumentRow
                   key={slot.slot}

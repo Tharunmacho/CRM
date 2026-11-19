@@ -14,6 +14,7 @@ import {
   type TravelledFilterKey, type TravelledFilters, type TravelledResult, type TravelledRow,
 } from '@/features/travelled/travelled-model'
 import '@/styles/travelled.css'
+import '@/styles/touch-targets.css'
 import { TravellerIdChip } from '@/features/candidates/components/candidate-id-chip'
 
 const SHOWN = 6

@@ -6,6 +6,7 @@ import { Button, IconButton, Input, Switch } from '@/shared/ui/primitives'
 import { createRemarkTemplate, listAllRemarkTemplates, updateRemarkTemplate } from '@/features/remark-templates/remark-templates-api'
 import { TEMPLATE_MAX, applyOrder, moveTemplate, sortTemplates, templateProblem, type RemarkTemplate } from '@/features/remark-templates/remark-templates-model'
 import { PanelHead, failureText } from './user-ui'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /**
  * Users > Agency settings > Remark templates (admins only): the ready-made remarks the Tasks list offers in its Remarks dropdown. Add one,
@@ -13,7 +14,7 @@ import { PanelHead, failureText } from './user-ui'
  */
 export function RemarkTemplatesCard({ editable }: { editable: boolean }) {
   const store = useStore()
-  const isAdmin = store.me.role === 'admin'
+  const isAdmin = isAdminLevel(store.me.role)
   const [items, setItems] = useState<RemarkTemplate[] | null>(null)
   const [text, setText] = useState('')
   const [problem, setProblem] = useState('')

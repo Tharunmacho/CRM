@@ -24,22 +24,22 @@
 .clients-simple .cs-agency-name-preview strong { color: var(--text-main); }
 
 /* ---------- Switch, search and view toggle in one white panel ---------- */
-.clients-simple .cs-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; padding: 12px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); }
-.clients-simple .cs-seg { display: inline-flex; flex: none; gap: 3px; padding: 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-1); }
-.clients-simple .cs-seg button { height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, color .14s; }
+.clients-simple .cs-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); }
+.clients-simple .cs-seg { display: inline-flex; flex: none; gap: 4px; padding: 3px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--tint-1); }
+.clients-simple .cs-seg button { height: 32px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color .14s, color .14s; }
 .clients-simple .cs-seg button:hover:not(.is-active) { color: var(--text-main); }
 .clients-simple .cs-seg button.is-active { background: var(--primary); color: var(--on-primary); box-shadow: 0 1px 3px color-mix(in srgb, var(--primary) 30%, transparent); }
 .clients-simple .cs-search { position: relative; display: flex; flex: 1 1 280px; align-items: center; min-width: 0; }
 .clients-simple .cs-search > svg { position: absolute; left: 15px; color: var(--text-light); pointer-events: none; }
-.clients-simple .cs-search input { width: 100%; height: 48px; padding: 0 42px 0 44px; border: 1px solid var(--border-control); border-radius: 12px; background: var(--bg-card); color: var(--text-main); font-size: 14.5px; transition: border-color .14s, box-shadow .14s; -webkit-appearance: none; appearance: none; }
+.clients-simple .cs-search input { width: 100%; height: 40px; padding: 0 42px 0 44px; border: 1px solid var(--border-control); border-radius: 12px; background: var(--bg-card); color: var(--text-main); font-size: 14.5px; transition: border-color .14s, box-shadow .14s; -webkit-appearance: none; appearance: none; }
 .clients-simple .cs-search input::placeholder { color: var(--text-light); opacity: 1; }
 .clients-simple .cs-search input::-webkit-search-cancel-button { display: none; }
 .clients-simple .cs-search input:hover { border-color: var(--border-hover); }
 .clients-simple .cs-search input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); outline: none; }
 .clients-simple .cs-search-clear { position: absolute; right: 10px; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .clients-simple .cs-search-clear:hover { background: var(--tint-2); color: var(--text-main); }
-.clients-simple .cs-layout { display: inline-flex; flex: none; gap: 2px; padding: 4px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); }
-.clients-simple .cs-layout button { display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color .14s, color .14s; }
+.clients-simple .cs-layout { display: inline-flex; flex: none; gap: 2px; padding: 3px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--tint-1); }
+.clients-simple .cs-layout button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color .14s, color .14s; }
 .clients-simple .cs-layout button:hover:not(.is-active) { color: var(--text-main); }
 .clients-simple .cs-layout button.is-active { background: var(--bg-card); color: var(--primary); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 12%, transparent); }
 .clients-simple .cs-resultbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px; font-size: 13.5px; color: var(--text-muted); }
@@ -68,12 +68,6 @@
 .clients-simple .cl-open.is-danger:hover { border-color: var(--error-ink); color: var(--error-ink); }
 .clients-simple .cl-open { cursor: pointer; }
 
-/* Agency-only width budget: keep Edit/Delete visible without changing other directories. */
-@media (min-width: 768px) {
-  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 8.5rem; min-width: 8.5rem; }
-}
-.cs-agency-table .record-name { white-space: normal; overflow-wrap: anywhere; }
-.clients-simple .cs-agency-table .cs-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 
 /* Highlighted search match: a soft tint that reads in both themes, always paired with the text itself. */
 .clients-simple .cs-mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, #e6a817 28%, transparent); color: inherit; }
@@ -184,17 +178,18 @@
 
 /* ---------- Touch screens and phones (mobile pass): 40px targets, 16px fields so the page does not zoom on focus ---------- */
 @media (max-width: 1023px), (pointer: coarse) {
-  .clients-simple .cs-search input { font-size: 16px; }
-  .clients-simple .cs-search-clear { width: 40px; height: 40px; right: 4px; }
-  .clients-simple .cs-seg button { height: 40px; }
-  .clients-simple .cs-layout button { width: 40px; height: 40px; }
-  .clients-simple .cs-textbtn { display: inline-flex; align-items: center; min-height: 40px; padding: 4px 8px; }
-  .clients-simple .cs-icon-act { width: 40px; height: 40px; }
+  .clients-simple .cs-search input { height: 44px; font-size: 16px; }
+  .clients-simple .cs-search-clear { width: 44px; height: 44px; right: 0; }
+  .clients-simple .cs-seg button { height: 44px; }
+  .clients-simple .cs-layout button { width: 44px; height: 44px; }
+  .clients-simple .cs-textbtn { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 8px; }
+  .clients-simple .cs-icon-act { width: 44px; height: 44px; }
+  .clients-simple .cl-open { height: 44px; }
   .clients-simple .cs-row-actions { gap: 8px; }
-  .clients-simple .cs-pill { height: 40px; }
+  .clients-simple .cs-pill { height: 44px; }
   .clients-simple .cs-add { height: 44px; }
   .clients-simple .cs-round-btn { width: 40px; height: 40px; }
-  .clients-simple .cs-wide { height: 40px; }
+  .clients-simple .cs-wide { height: 44px; }
   .clients-simple .cs-picker-search input { height: 44px; font-size: 16px; }
   .clients-simple .cs-rec { min-height: 48px; }
   .clients-simple .cs-rec input { width: 22px; height: 22px; }
@@ -212,4 +207,77 @@
 }
 @media (max-width: 760px) {
   .clients-simple.cs-page { overflow-x: clip; padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
+}
+
+/* ---------- Agencies: filter bar, Active switch and the table ---------- */
+/* Filter bar: one row of 40 px controls with the label above (12.5px/600 muted), 12 px gaps, Clear on the right; the sector note is a line under the row. */
+.clients-simple .cs-filterbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 12px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 5%, transparent); }
+.clients-simple .cs-filter { display: grid; flex: 1 1 200px; gap: 4px; min-width: 0; max-width: 280px; }
+.clients-simple .cs-filter label { font-size: 12.5px; font-weight: 600; line-height: 16px; color: var(--text-muted); }
+.clients-simple .cs-filter select { width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 10px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 14px; cursor: pointer; transition: border-color .14s, box-shadow .14s; }
+.clients-simple .cs-filter select:hover { border-color: var(--border-hover); }
+.clients-simple .cs-filter select:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); outline: none; }
+.clients-simple .cs-filter-note { flex: 1 0 100%; margin: 0; font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.clients-simple .cs-filter-clear { display: inline-flex; align-items: center; height: 40px; margin-left: auto; padding: 0 12px; }
+
+/* The Active switch: a 32 px pill, green when on, neutral when off. Tokens only, so dark mode follows. */
+.clients-simple .cs-active-cell { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+.clients-simple .cs-switch { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 999px; background: var(--tint-1); color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
+.clients-simple .cs-switch > i { flex: none; width: 8px; height: 8px; border-radius: 999px; background: currentColor; opacity: .5; }
+.clients-simple .cs-switch.is-on { border-color: color-mix(in srgb, var(--success-ink) 40%, var(--border-main)); background: var(--success-fill); color: var(--success-ink); }
+.clients-simple .cs-switch.is-on > i { opacity: 1; }
+.clients-simple .cs-switch:hover:not(:disabled, .is-static) { border-color: var(--border-hover); background: var(--tint-2); }
+.clients-simple .cs-switch.is-on:hover:not(:disabled, .is-static) { border-color: var(--success-ink); background: color-mix(in srgb, var(--success-ink) 14%, var(--success-fill)); }
+.clients-simple .cs-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.clients-simple .cs-switch:disabled { cursor: progress; opacity: .75; }
+.clients-simple .cs-switch.is-static { cursor: default; }
+.clients-simple .cs-switch-spin { flex: none; animation: cs-spin .9s linear infinite; }
+@keyframes cs-spin { to { transform: rotate(360deg); } }
+.clients-simple .cs-active-error { max-width: 100%; font-size: 11.5px; line-height: 1.35; color: var(--error-ink); overflow-wrap: anywhere; }
+
+/* The agencies table: the Tasks table's blue header band (44 px, one line, uppercase 11.5px/700), 56 px rows with everything centred, 14 px
+   side padding on every cell so a header starts on the same left edge as its cells, and a visible var(--table-line) line under every row, the last one too, and between every pair of columns (the frame is the DataTable box's, data-table.css). */
+@media (min-width: 1024px) {
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid thead th { height: 44px; padding: 0 14px; background: var(--primary); color: var(--on-primary); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-align: left; text-transform: uppercase; white-space: nowrap; }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid thead th:last-child { border-right: 0; }
+  .clients-simple .cs-agency-table .ui-data-table.is-grid thead th .ui-th-inner { display: inline-flex; max-width: 100%; }
+  .clients-simple .cs-agency-table .ui-data-table.is-grid thead th button { color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
+  :root:root .clients-simple .cs-agency-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 9.5rem; min-width: 9.5rem; text-align: left; }
+}
+.clients-simple .cs-agency-table .cs-row-actions { justify-content: flex-start; }
+.clients-simple .cs-agency-table .record-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.clients-simple .cs-agency-table .cs-tags { gap: 4px; }
+.clients-simple .cs-agency-table .cs-tag { display: inline-flex; align-items: center; max-width: 100%; min-height: 24px; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  .clients-simple .cs-filter { flex-basis: 100%; max-width: none; }
+  .clients-simple .cs-filter-clear { margin-left: 0; }
+}
+@media (max-width: 1023px), (pointer: coarse) {
+  .clients-simple .cs-filter select { height: 44px; font-size: 16px; }
+  .clients-simple .cs-filter-clear { height: 44px; }
+  .clients-simple .cs-switch { height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .clients-simple .cs-switch, .clients-simple .cs-switch-spin { transition: none; animation: none; } }
+@media (max-width: 1023px) { .clients-simple .cs-agency-table .ui-table-scroll.is-sticky { max-height: none !important; overflow-y: visible; } }
+
+/* Tablets and phones: every button of the page header, the empty states and the dialogs is at least 44 px high. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .clients-simple :is(.cs-btn-primary, .cs-btn-green, .cs-btn-import, .cs-pillbtn) { height: 44px; min-height: 44px; }
+  .clients-simple .cs-search input { min-height: 44px; }
+  .clients-simple .cs-textbtn { min-height: 44px; }
+}
+@media (max-width: 1023px), (pointer: coarse) {
+  .clients-simple :is(.cl-cell, .cs-facts) a { display: inline-flex; align-items: center; min-height: 44px; }
+  .clients-simple .cl-cell .cl-line, .clients-simple .cl-cell .cl-copy, .clients-simple .cl-copy { min-height: 44px; }
+  .clients-simple .cl-cell .cl-copy, .clients-simple .cl-copy { width: 44px; height: 44px; margin: 0; }
+}
+@media (max-width: 760px) {
+  .clients-simple .cs-actions { width: 100%; }
+  .clients-simple .cs-actions > * { flex: 1 1 auto; white-space: nowrap; }
+  .clients-simple .cs-search { flex: 1 1 100%; order: 2; }
+  .clients-simple .cs-layout { order: 3; margin-left: auto; }
 }

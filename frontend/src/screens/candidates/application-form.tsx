@@ -11,7 +11,7 @@ import { StageModal } from '@/features/workflow/components/stage-modal'
 import { useApplicationForm, type AssignmentCompleter } from '@/features/application-form/use-application-form'
 import { completeAssignment } from '@/features/application-form/assignment-fallback'
 import { useReferenceAgencies } from '@/features/clients/agency-api'
-import { applicationFormHref, visibleWarnings } from '@/features/application-form/form-model'
+import { COMMENCEMENT_PATH, applicationFormHref, visibleWarnings } from '@/features/application-form/form-model'
 import { documentSlot } from '@/shared/model/document-slots'
 import { documentRowStates, documentRowsProgress } from '@/features/application-form/document-rows'
 import { candidateSubtitle, candidateTitle, completeText, visibleMissing } from '@/features/application-form/paper-model'
@@ -41,6 +41,7 @@ import '@/styles/application-form-v2.css'
 import '@/styles/candidate-records.css'
 import '@/styles/application-stages.css'
 import '@/styles/application-form-tabs.css'
+import { isAdminLevel } from '@/shared/model/role-labels'
 
 /** Stands in for the notes of a server that has none yet: the panel still opens its composer for people who can work the candidate. */
 const EMPTY_FEEDBACK: FeedbackData = { supported: false, items: [], canWrite: false, stageClock: null }
@@ -102,7 +103,9 @@ export default function ApplicationFormPage() {
   const name = title.text
   // ONE ID in the header: the Data Bank ID, then the client and job. The CRM reference only stands in for a row with no Data Bank ID; no Traveller ID here.
   const ids = { ref: form?.candidate.ref || candidate?.ref, careId: form?.candidate.careId || candidate?.careId }
-  const subtitle = [careIdOf(ids), candidateSubtitle(careIdOf(ids) ? '' : ids.ref, form?.assignment)].filter(Boolean).join(' · ')
+  const idText = careIdOf(ids)
+  const subline = candidateSubtitle(careIdOf(ids) ? '' : ids.ref, form?.assignment)
+  const subtitle = [idText, subline].filter(Boolean).join(' · ')
 
   // The overlay covers the shell: lock its scroll and give the print stylesheet a hook to hide it.
   useEffect(() => {
@@ -272,8 +275,9 @@ export default function ApplicationFormPage() {
         <div className="af-bar-title">
           <span className="af-bar-nameline">
             <span className={cn('af-bar-name', title.muted && 'is-muted')} title={name}>{name}</span>
+            {idText && <span className="af-bar-id tnum" title="Data Bank ID">{idText}</span>}
           </span>
-          {subtitle && <small title={subtitle}>{subtitle}</small>}
+          {subline && <small title={subline}>{subline}</small>}
         </div>
         {form && <span className="af-pct tnum" title="How much of the official form and its documents is filled in">{completeText(completeness.percent)}</span>}
         <span className={cn('af-live', liveStatus === 'up' && 'is-up')} title={liveStatus === 'up' ? 'Changes by your colleagues appear here as they happen' : 'Live updates are reconnecting. This page still refreshes every few seconds'}>
@@ -287,7 +291,7 @@ export default function ApplicationFormPage() {
               <Button variant="primary" disabled={saving} onClick={() => void state.save()} icon={saving ? <Loader2 className="animate-spin" /> : <Save />}>{saving ? 'Saving…' : 'Save changes'}</Button>
             </>
           )}
-          {SHOW_MERGE_UI && form && me.role === 'admin' && <MergeIntoPicker sourceId={id} sourceLabel={primaryId(ids) || name} />}
+          {SHOW_MERGE_UI && form && isAdminLevel(me.role) && <MergeIntoPicker sourceId={id} sourceLabel={primaryId(ids) || name} />}
           <Button ref={previewButton} onClick={() => setPreviewOpen(true)} icon={<Eye />} disabled={!form} aria-haspopup="dialog">Preview form</Button>
           {/* The paper form is always rendered, so this prints it from anywhere. */}
           <Button onClick={() => window.print()} icon={<Printer />} disabled={!form}>Print or save as PDF</Button>
@@ -307,13 +311,13 @@ export default function ApplicationFormPage() {
               {state.reading && <p className="af-banner is-reading" role="status"><Loader2 className="animate-spin" aria-hidden="true" /><span>Reading documents… The details fill in by themselves as each file is read.</span></p>}
               {shownWarnings.length > 0 && <ul className="af-banner is-warn" role="status">{shownWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
               {feedback && <StageClockBar feedback={feedback} actions={feedbackActions} canWrite={feedback.canWrite} />}
-              <ContextStrip form={form} onOpen={() => selectTab('overview')} />
+              <ContextStrip form={form} commencement={draft?.extras[COMMENCEMENT_PATH]} onOpen={() => selectTab('overview')} />
               <FormTabs tabs={tabs} active={activeTab} alsoShown={alsoShown} badges={badges} onSelect={(next) => selectTab(next)} />
               {/* Every panel stays mounted (hidden when another section is chosen), so typing, uploads and readings carry on while a recruiter moves between sections. */}
               <div className="af-pane" id="af-pane-overview" role="tabpanel" aria-labelledby="af-tab-overview" hidden={!here('overview')}>
                 <div className="af-card af-assign-card" id="af-assignment">
                   <SectionHeader compact icon={<Building2 />} id="af-assignment-title" title="Client and recruitment details" />
-                  <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={me.role === 'admin' || me.role === 'manager'} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
+                  <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={isAdminLevel(me.role)} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
                     stageControl={<><StageControl form={form} canOpen={Boolean(application) && !stageBusy} onOpen={selectStage} /><CommencementField ctx={ctx.fill} canWork={canWork} /></>} />
                   <div className="af-stage-workbench">
                   <RecruitmentStages form={form} canOpen={Boolean(application) && !stageBusy} selectedStage={selectedStage} onOpen={selectStage} />
@@ -341,7 +345,7 @@ export default function ApplicationFormPage() {
               </div>
               {canSeeInvoice && (
                 <div className="af-pane af-card af-work" id="af-pane-invoice" role="tabpanel" aria-labelledby="af-tab-invoice" hidden={!here('invoice')}>
-                  <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />
+                  <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={isAdminLevel(store.me.role)} onChanged={() => void state.reload(true)} />
                 </div>
               )}
               {canSeeNotes && (

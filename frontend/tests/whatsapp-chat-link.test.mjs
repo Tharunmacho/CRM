@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 const source = await readFile(new URL('../src/features/whatsapp/chat-types.ts', import.meta.url), 'utf8')
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-const chat = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+const chat = await import(`data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`)
 
 test('only supervisors may attach a candidate when opening a conversation', () => {
   assert.equal(chat.canLinkCandidate('admin'), true)

@@ -45,7 +45,7 @@ import { AttendanceProvider } from '@/features/attendance/attendance-context'
 import { CommandSearch } from './command-search'
 import { GATE_REASON, gateBlocks, gateState, readGate, subscribeGate } from '@/features/leads/lead-gate'
 import { useDailyWork } from '@/features/daily-work/use-daily-work'
-import { ROLE_TITLES } from '@/shared/model/role-labels'
+import { isAdminLevel, roleLabel } from '@/shared/model/role-labels'
 import '@/styles/shell.css'
 import '@/styles/surface.css'
 
@@ -190,7 +190,7 @@ export function AppShell() {
     [store.visibleTasks],
   )
   // A recruiter's Tasks badge is today's candidates still to work (the same list as Tasks > Today's candidates, no deadline
-  // wording); admin and manager keep the count of overdue 48-hour tasks, since their list is everybody's.
+  // wording); admin and MD keep the count of overdue 48-hour tasks, since their list is everybody's.
   const isRecruiter = store.me.role === 'staff'
   const todays = useDailyWork({ enabled: isRecruiter, debounceMs: 4000 })
   const tasksBadge = isRecruiter ? todays.data?.summary.toWork ?? 0 : overdue
@@ -244,7 +244,7 @@ export function AppShell() {
     return () => { cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener('resize', measureBar) }
   }, [measureBar])
 
-  const allowed = (item: NavItem) => (!item.capability || can(item.capability)) && (!item.supervisorsOnly || store.me.role === 'admin' || store.me.role === 'manager')
+  const allowed = (item: NavItem) => (!item.capability || can(item.capability)) && (!item.supervisorsOnly || isAdminLevel(store.me.role))
   const items = NAV.filter((item) => !item.extension && allowed(item))
   const searchable = NAV.filter(allowed).map((item) => ({ label: item.label, to: item.to, icon: item.icon }))
   // The icon rail "peeks": hovering it (after a short intent delay) or tabbing into it opens the full panel over the page
@@ -417,8 +417,6 @@ function RailFoot({ dock, pinLabel, onToggle, showTip, hideTip }: { dock: boolea
   )
 }
 
-const ROLE_LABEL: Record<string, string> = ROLE_TITLES
-
 function ProfileMenu() {
   const { me, signOut } = useStore()
   return (
@@ -428,7 +426,7 @@ function ProfileMenu() {
       trigger={({ open, toggle }) => (
         <button type="button" className="topbar-profile-trigger" onClick={toggle} aria-label={`Account menu for ${me.name}`} aria-expanded={open}>
           <span className="topbar-profile-avatar" aria-hidden="true">{initials(me.name)}</span>
-          <span className="topbar-profile-copy"><strong>{me.name}</strong><small>{ROLE_LABEL[me.role] ?? me.role}</small></span>
+          <span className="topbar-profile-copy"><strong>{me.name}</strong><small>{roleLabel(me.role, true)}</small></span>
           <ChevronDown size={14} aria-hidden="true" />
         </button>
       )}
@@ -437,7 +435,7 @@ function ProfileMenu() {
         <>
           <div className="border-b border-rule-soft px-3 py-2.5">
             <p className="text-sm font-medium text-ink">{me.name}</p>
-            <p className="truncate text-micro text-ink-400">{me.email} · {ROLE_LABEL[me.role] ?? me.role}</p>
+            <p className="truncate text-micro text-ink-400">{me.email} · {roleLabel(me.role, true)}</p>
           </div>
           <MenuItem onClick={() => { close(); void signOut() }} tone="danger"><span className="inline-flex items-center gap-2"><LogOut size={14} />Sign out</span></MenuItem>
         </>
@@ -451,7 +449,7 @@ function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: R
   const navigate = useNavigate()
   const unread = notifications.filter((n) => !n.read).length
   const firstName = me.name.trim().split(/\s+/)[0] || me.name
-  const roleLabel = ROLE_LABEL[me.role] ?? me.role
+  const roleText = roleLabel(me.role, true)
 
   return (
     <header className="topbar">
@@ -463,7 +461,7 @@ function Topbar({ onMenu, menuRef, menuAlert }: { onMenu: () => void; menuRef: R
           <h2 className="topbar-welcome" title={`Welcome back, ${me.name}`}>
             <span className="welcome-long">Welcome back</span><span className="welcome-short">Hi</span>, {firstName}
           </h2>
-          {roleLabel.toLowerCase() !== firstName.toLowerCase() && <p className="topbar-role">{roleLabel}</p>}
+          {roleText.toLowerCase() !== firstName.toLowerCase() && <p className="topbar-role">{roleText}</p>}
         </div>
       </div>
       <div className="topbar-actions">

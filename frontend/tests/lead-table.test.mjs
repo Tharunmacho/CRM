@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import ts from 'typescript'
+import { withRoleLabels } from './fixtures/role-labels-url.mjs'
 
 const cache = new Map()
 /** Transpile a TS module; relative imports are loaded the same way and inlined as data: URLs. */
@@ -16,7 +17,7 @@ async function load(path) {
     source = source.replaceAll(`from '${spec}'`, `from '${loaded.__url}'`)
   }
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
-  const dataUrl = `data:text/javascript;base64,${Buffer.from(js).toString('base64')}`
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(withRoleLabels(js)).toString('base64')}`
   const module = { ...(await import(dataUrl)), __url: dataUrl }
   cache.set(path, module)
   return module
@@ -168,7 +169,7 @@ test('consistency: the table headings come from the one config and nothing else'
   const body = columns.slice(start)
   const headers = [...body.matchAll(/header: ([^,]+),/g)].map((match) => match[1].trim())
   assert.ok(headers.length >= 10)
-  for (const header of headers) assert.ok(header.startsWith('h.') || header.startsWith('field.') || header.startsWith('column.') || header === "'Education / Marital status'", `heading ${header} is not from the config`)
+  for (const header of headers) assert.ok(header.startsWith('h.') || header.startsWith('LEAD_SHORT_HEADINGS.') || header.startsWith('field.') || header.startsWith('column.') || header === "'Education / Marital status'", `heading ${header} is not from the config`)
   for (const key of Object.keys(model.LEAD_HEADINGS)) assert.ok(body.includes(`h.${key}`) || key === 'country' || key === 'followup' || key === 'actions', `LEAD_HEADINGS.${key} is used`)
   // every table heading is a non-empty, single-spaced label without a trailing colon
   for (const label of Object.values(model.LEAD_HEADINGS)) assert.match(label, /^\S.*\S$|^\S$/)

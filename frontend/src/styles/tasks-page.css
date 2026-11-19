@@ -60,12 +60,12 @@
 .tk-table :is(th, td) { padding: 12px 6px; text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
 .tk-table :is(th, td):first-child { padding-left: 20px; }
 .tk-table :is(th, td):last-child { padding-right: 20px; }
-.tk-table th { padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-main); font-size: 12.5px; font-weight: 500; line-height: 1.35; color: var(--text-muted); }
+.tk-table th { padding-top: 10px; padding-bottom: 10px; border-bottom: var(--table-line-width) solid var(--table-line); font-size: 12.5px; font-weight: 500; line-height: 1.35; color: var(--text-muted); }
 .tk-table th.is-actions { text-align: right; }
 /* the header row is the primary blue like the Complete button (primary / on-primary tokens: contrast holds in the light and dark themes);
  * :root:root beats the transparent table-header skin in skin.css */
 :root:root .tk .tk-table thead th { background: var(--primary); box-shadow: none; font-weight: 700; color: var(--on-primary); }
-.tk-table td { border-bottom: 1px solid var(--border-faint); }
+.tk-table td { border-bottom: var(--table-line-width) solid var(--table-line); }
 .tk-row { position: relative; cursor: pointer; transition: background-color .12s; }
 .tk-row:hover { background: var(--tint-1); }
 .tk-row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
@@ -76,7 +76,7 @@
 .tk-row.is-expanded > td { border-bottom-color: transparent; }
 .tk-expand-row > td { padding: 0 20px 16px; background: var(--tint-1); cursor: default; }
 .tk-expand-row > td:first-child { padding-left: 20px; }
-.tk-table tbody > tr:last-child > td { border-bottom: 0; }
+.tk-table tbody > tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 
 .tk .tk-table .record-identity { min-width: 0; gap: 10px; align-items: center; }
 .tk .tk-table .record-identity > div { min-width: 0; }
@@ -181,9 +181,10 @@
 /* ---------- Narrow panels: every task becomes a labelled card ---------- */
 @container tk (max-width: 1010px) {
   .tk-table, .tk-table tbody { display: block; }
+  :root:root:root .tk-table { overflow: visible; border: 0; border-radius: 0; }
   .tk-table colgroup { display: none; }
   .tk-table thead { display: none; }
-  .tk-row { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px 16px; padding: 16px 20px; border-bottom: 1px solid var(--border-faint); }
+  .tk-row { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px 16px; padding: 16px 20px; border-bottom: var(--table-line-width) solid var(--table-line); }
   .tk-row.is-expanded { border-bottom-color: transparent; }
   .tk-table .tk-row > td, .tk-table .tk-row > td:first-child, .tk-table .tk-row > td:last-child { display: block; min-width: 0; padding: 0; border: 0; text-align: left; }
   .tk-row.is-over > td:first-child, .tk-row.is-esc > td:first-child, .tk-row.is-soon > td:first-child { box-shadow: none; }
