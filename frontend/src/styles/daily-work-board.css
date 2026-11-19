@@ -5,13 +5,13 @@
  */
 
 /* ---------- Summary strip ---------- */
-.dwb-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
+.dwb-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0 0 16px; padding: 0; list-style: none; }
 .dwb-stats > li { display: flex; min-width: 0; }
 @media (min-width: 1100px) { .dwb-stats.has-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .dwb-stats.has-3 { grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 720px) { .dwb-stats.has-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
-.dwb-stat { display: flex; flex: 1 1 auto; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); font: inherit; text-align: left; color: inherit; }
+.dwb-stat { display: flex; flex: 1 1 auto; align-items: flex-start; gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); font: inherit; text-align: left; color: inherit; }
 .dwb-stat.is-action { cursor: pointer; transition: border-color .14s, background-color .14s; }
 .dwb-stat.is-action:hover { border-color: var(--border-hover); background: var(--tint-1); }
 .dwb-stat.is-active { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
@@ -39,11 +39,11 @@
 .dwb-head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dwb-head .tk-chip { min-height: 34px; padding: 0 14px; }
 .dwb-chip-x { gap: 6px; }
-.dwb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin: 0; padding: 0 20px 20px; list-style: none; }
+.dwb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin: 0; padding: 0 20px 20px; list-style: none; }
 .dwb-cards > li { display: flex; min-width: 0; }
 .dwb-none { padding: 4px 20px 24px; font-size: 14px; color: var(--text-muted); }
 
-.dwb-card { position: relative; display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; width: 100%; min-width: 0; min-height: 112px; padding: 14px 16px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 10px; background: var(--bg-card); font: inherit; text-align: left; color: var(--text-main); cursor: pointer; transition: border-color .14s, background-color .14s; }
+.dwb-card { position: relative; display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; width: 100%; min-width: 0; min-height: 112px; padding: 14px 16px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); font: inherit; text-align: left; color: var(--text-main); cursor: pointer; transition: border-color .14s, background-color .14s; }
 .dwb-card:hover { border-color: var(--border-hover); background: var(--tint-1); }
 .dwb-card.is-active { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
 /* a thin edge says "look here" for the two statuses that need the admin; the chip says it in words */
@@ -93,7 +93,7 @@
 .dw-doc-add:hover { background: var(--tint-2); }
 .dw-doc-add:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 /* narrow panels: each candidate is a labelled card; the name leads it whatever the column order is */
-@container dw (max-width: 760px) {
+@container dw (max-width: 1079px) {
   .tw-table .dw-row > td[data-label='CANDIDATE NAME'] { order: -1; }
   .tw-table .dw-row > td[data-label='DOC'] .dw-doc-add { padding-left: 0; }
 }

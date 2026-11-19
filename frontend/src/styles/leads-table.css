@@ -48,7 +48,7 @@
 
 /* ---------- Body: one height, one padding, a line under every row ---------- */
 :root:root .ld .db-tbl.is-grid.is-fit tbody td {
-  box-sizing: border-box; height: 64px; padding: 8px 3px 8px 14px; overflow: hidden; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line);
+  box-sizing: border-box; height: 64px; padding: 8px 3px 8px 14px; overflow: hidden; border-right: 0; border-bottom: var(--table-line-width) solid var(--table-line);
   font-size: 13px; line-height: 18px; text-align: left; vertical-align: middle;
 }
 :root:root .ld .db-tbl.is-grid.is-fit tbody td.is-center { padding-inline: 0; text-align: center; }

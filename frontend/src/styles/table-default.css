@@ -52,13 +52,11 @@
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody th:where(:not([data-label])) {
   box-sizing: border-box; height: 56px; padding-top: 8px; padding-bottom: 8px; padding-inline: 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line);
 }
-:root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody :is(td, th):where(:not([data-label])):not(:last-child) { border-right: var(--table-line-width) solid var(--table-line); }
 @media (min-width: 1280px) {
   :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody td[data-label],
   :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody th[data-label] {
     box-sizing: border-box; height: 56px; padding-top: 8px; padding-bottom: 8px; padding-inline: 14px; vertical-align: middle; border-bottom: var(--table-line-width) solid var(--table-line);
   }
-  :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody :is(td, th)[data-label]:not(:last-child) { border-right: var(--table-line-width) solid var(--table-line); }
 }
 :root:root :is(.workspace, .workspace-dialog, .workspace-sheet) table:where(:not(.ui-data-table.is-grid table)) tbody tr:hover > :is(td, th):where(:not([data-label])) { background-color: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
 @media (min-width: 1280px) {

@@ -372,11 +372,11 @@ tr:hover .cl-open { border-color: var(--primary); color: var(--primary); }
 /* The candidates of an order read as the shared grid table: banded header, hairline dividers, zebra rows, centred cells. */
 @media (min-width: 901px) {
   :root:root .cd-cands { border-collapse: separate; border-spacing: 0; border-top: var(--table-line-width) solid var(--table-line); }
-  :root:root .cd-cands thead th { height: 46px; padding: 6px 10px; text-align: center; font-size: 12.5px; font-weight: 500; color: var(--text-muted); background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line); box-shadow: none; }
+  :root:root .cd-cands thead th { height: 46px; padding: 6px 10px; text-align: center; font-size: 12.5px; font-weight: 500; color: var(--text-muted); background: color-mix(in srgb, var(--tint-2) 60%, var(--bg-card)); border-bottom: var(--table-line-width) solid var(--table-line); border-right: 0; box-shadow: none; }
   :root:root .cd-cands tbody tr { background: var(--bg-card); }
   :root:root .cd-cands tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
   :root:root .cd-cands tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }
-  :root:root .cd-cands tbody td { height: 64px; padding: 8px 10px; text-align: center; border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line); }
+  :root:root .cd-cands tbody td { height: 64px; padding: 8px 10px; text-align: center; border-bottom: var(--table-line-width) solid var(--table-line); border-right: 0; }
   :root:root .cd-cands :is(th, td):last-child { padding-right: 12px; padding-left: 12px; text-align: center; border-right: 0; }
   :root:root .cd-cands :is(th, td):first-child { padding-left: 20px; text-align: left; }
   :root:root .cd-cands tbody tr:last-child td { border-bottom: var(--table-line-width) solid var(--table-line); }

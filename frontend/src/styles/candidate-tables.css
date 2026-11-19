@@ -29,9 +29,8 @@
 
 :root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td {
   box-sizing: border-box; height: 60px; min-height: 60px; padding: 8px 14px; vertical-align: middle; text-align: left;
-  border: 0; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line);
+  border: 0; border-bottom: var(--table-line-width) solid var(--table-line);
 }
-:root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td:last-child { border-right: 0; }
 :root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow) > td.is-right { text-align: right; }
 :root:root:root .db-tbl.is-grid:not(.ld .db-tbl) tbody tr:not(.db-xrow):last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 :root:root:root .db-tbl.is-grid:not(.ld .db-tbl) :is(th, td).is-right { padding-left: 14px; }

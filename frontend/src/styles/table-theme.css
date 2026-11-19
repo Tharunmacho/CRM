@@ -24,30 +24,28 @@
 .tb-blue .ui-data-table .ui-th-inner > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* row metrics: only while the table is a table (not the stacked cards) */
-:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+:root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) tbody td.ui-c-center > :where(div, p, ul, .record-identity) { margin-inline: 0; }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
 :root:root .tb-blue .ui-data-table.ui-data-table:not([class*='ui-table-stack-']) :is(th, td).ui-actions-cell { text-align: left; }
 @media (min-width: 768px) {
-  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-768 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
   :root:root .tb-blue .ui-data-table.ui-table-stack-768 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
 }
 @media (min-width: 1024px) {
-  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1024 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1024 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
 }
 @media (min-width: 1280px) {
-  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line); }
+  :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td { height: 56px; padding: 8px 14px; vertical-align: middle; text-align: left; border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1280 tbody td.ui-c-right { text-align: right; font-variant-numeric: tabular-nums; }
   :root:root .tb-blue .ui-data-table.ui-table-stack-1280 :is(th, td):is(:first-child, :last-child, .ui-actions-cell) { padding-left: 14px; padding-right: 14px; }
 }
 :root:root .tb-blue .ui-data-table.ui-data-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
-/* the last column's right edge is the frame, so it carries no column line of its own */
-:root:root .tb-blue .ui-data-table.ui-data-table tbody td:last-child { border-right: 0; }

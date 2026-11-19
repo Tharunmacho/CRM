@@ -56,9 +56,8 @@
 :root:root .ui-data-table.is-grid.is-zebra tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3%, var(--bg-card)); }
 :root:root .ui-data-table.is-grid tbody td {
   box-sizing: border-box; height: 56px; padding: 8px 14px; vertical-align: middle; font-size: 13.5px; line-height: 1.4; color: var(--text-main);
-  border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line);
+  border-bottom: var(--table-line-width) solid var(--table-line);
 }
-:root:root .ui-data-table.is-grid tbody td:last-child { border-right: 0; }
 :root:root .ui-data-table.is-grid.is-compact tbody td, :root:root .ui-data-table.is-grid.is-dense tbody td { height: 56px; padding: 8px 14px; font-size: 13px; }
 :root:root .ui-data-table.is-grid :is(th, td):first-child { padding-left: 14px; }
 :root:root .ui-data-table.is-grid :is(th, td):last-child { padding-right: 14px; }

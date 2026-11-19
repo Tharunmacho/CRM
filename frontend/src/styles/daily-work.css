@@ -15,7 +15,7 @@
 .dw-alerts p.is-warn { border-color: var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); }
 
 /* ---------- Panels ---------- */
-.dw-panel { container: dw / inline-size; min-width: 0; margin-bottom: 16px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 12px; background: var(--bg-card); }
+.dw-panel { container: dw / inline-size; min-width: 0; margin-bottom: 16px; overflow: hidden; border: 1px solid var(--border-main); border-radius: 16px; background: var(--bg-card); }
 .dw-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 18px 20px 14px; }
 .dw-panel-head h2 { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; line-height: 1.35; color: var(--text-main); }
 .dw-panel-head p { margin-top: 2px; font-size: 13px; color: var(--text-muted); }
@@ -54,7 +54,6 @@
 .dw:not(.dwr) .dw-main thead th.is-actions { background: var(--primary); }
 .dw:not(.dwr) .dw-table thead :is(button, svg) { color: inherit; }
 .dw-table td { border-bottom: var(--table-line-width) solid var(--table-line); }
-.dw-table td + td { border-left: var(--table-line-width) solid var(--table-line); }
 .dw-main td { height: 56px; }
 /* the actions column is a fixed-purpose cell, right-aligned: it stays in view (sticky right) when the table has to scroll sideways */
 .dw-main :is(th, td).is-actions { position: sticky; right: 0; z-index: 2; padding-inline: 6px 10px; background: var(--bg-card); }
@@ -68,15 +67,24 @@
 /* the outer frame of every .dw table (Tasks, Follow-up, the Reports people tables): a strong border around header and rows, the radius kept.
    It sits on the scroll wrapper (.tk-table-wrap), so it stays whole when the table scrolls sideways; a table without a wrapper carries it itself.
    Only where it is a table (the panel is over 760px wide); below that each row is a card with its own single var(--table-line) border. */
-@container dw (min-width: 761px) {
-  .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); }
+@container dw (min-width: 1080px) {
+  .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 16px; }
   .dw .tk-table-wrap .dw-table thead th { border-top-width: 0; }
-  .dw .dw-table:where(:not(.tk-table-wrap .dw-table)) { box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: var(--radius-xl, 10px); overflow: hidden; }
+  .dw .dw-table:where(:not(.tk-table-wrap .dw-table)) { box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 16px; overflow: hidden; }
 }
 /* one frame, never two: from 1100px wide (a panel over 760px) the panel gives up its own border around the framed table; as a card list
    (a phone) the panel's own single 1px border is the card border, the same var(--table-line) */
 .dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border: var(--table-line-width) solid var(--table-line); }
-@media (min-width: 1100px) { .dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border-color: transparent; } }
+/* ONE set of edges: from 1360px (the table is a table, the cards are in rows) the panels that hold the recruiter cards, My day or a table frame
+   have no chrome of their own (no border, no fill, no padding around the content), so the heading row, the cards and the table frame all start
+   and end on the page's content edges, 16px apart (margin-bottom of .dw-panel), with the same 16px radius. Narrower, a panel is the card. */
+@media (min-width: 1360px) {
+  .dw-panel:is(.dwb-board, .dwr-myday, :has(> .dw-scroll, > .tk-table-wrap)) { overflow: visible; border-width: 0; border-radius: 0; background: transparent; }
+  .dw-panel:is(.dwb-board, .dwr-myday, :has(> .dw-scroll, > .tk-table-wrap)) > .dw-panel-head { padding: 0 0 14px; }
+  .dw-panel :is(.dwb-cards, .dwb-none) { padding-inline: 0; }
+  .dwr-myday { padding-bottom: 0; }
+  .dwr-myday .dwr-note, .dwr-myday-foot, .dwr-myday .dwr-error { margin-inline: 0; }
+}
 .dw-row.is-alt, .dw-staff-row.is-alt { background: color-mix(in srgb, var(--tint-2) 50%, var(--bg-card)); }
 .dw-row:hover, .dw-staff-row:hover { background: color-mix(in srgb, var(--primary) 5%, var(--bg-card)); }
 .dw-row.is-done { color: var(--text-muted); }
@@ -179,7 +187,7 @@
 .dw-staff-name { display: block; font-weight: 600; }
 
 /* ---------- Narrow panels: each candidate becomes a labelled card ---------- */
-@container dw (max-width: 760px) {
+@container dw (max-width: 1079px) {
   .dw .tk-table-wrap { overflow-x: visible; }
   .dw-table { min-width: 0 !important; }
   .dw-table, .dw-table tbody { display: block; }
@@ -188,6 +196,8 @@
   .dw-group th { height: auto; padding: 8px 16px; white-space: normal; }
   .dw-row, .dw-staff-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; border-bottom: var(--table-line-width) solid var(--table-line); }
   .dw-table .dw-row > td, .dw-table .dw-staff-row > td { display: block; height: auto; padding: 0; border: 0; text-align: left; min-width: 0; }
+  /* a card is never a table row: the table skins (table-default.css gives cells with a label a 56px height, 14px padding and a line from 1280px) must not reach it */
+  :root:root .dw .dw-table :is(.dw-row, .dw-staff-row) > td[data-label] { height: auto; padding: 0; border: 0; }
   .dw-row > td[data-label]::before, .dw-staff-row > td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
   .dw-row > td[data-label='S NO'], .dw-row > td.is-empty { display: none; }
   .dw-table .dw-row > td.is-actions { position: static; background: none; box-shadow: none; padding: 0; }
@@ -203,6 +213,14 @@
   .dw-row.is-done > td:first-child, .dw-staff-row.is-active > td:first-child { box-shadow: none; }
   .dw-row.is-done { box-shadow: inset 3px 0 0 var(--success-ink); }
   .dw-panel-head { padding-left: 16px; padding-right: 16px; }
+}
+/* tablets and a 1280-1440px window with the sidebar open (a panel of 640-1079px): the cards sit in a grid, each one a framed card, instead of one long list */
+@container dw (min-width: 640px) and (max-width: 1079px) {
+  .dw-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; padding: 16px; }
+  .dw-group { grid-column: 1 / -1; }
+  .dw-table tbody > .dw-row, .dw-table tbody > .dw-staff-row { align-content: start; border: var(--table-line-width) solid var(--table-line); border-radius: 16px; }
+  /* from 1360px the panel has no chrome (see above): the card grid then starts on the same edges as the heading, with no inset */
+  @media (min-width: 1360px) { .dw-table tbody { padding: 0; } }
 }
 @media (prefers-reduced-motion: reduce) { .dw-scroll::before, .dw-scroll::after { transition: none; } }
 

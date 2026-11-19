@@ -360,23 +360,24 @@ export interface TaskColumn { key: string; title: string; width: number; left?: 
 /**
  * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), CLIENT (the name only), JOB,
  * CANDIDATE, Recruiter (supervisors only), AGENCY, STAGE, TODAY, REMARKS and the untitled actions cell. Every header is one short word
- * so it never wraps. Widths are the column plan in px: they add up to 1108px for a supervisor and the panel is 1111px
- * wide at a 1440px window with the sidebar open, so nothing scrolls sideways there. Every column is left-aligned (header and cells
+ * so it never wraps. Widths are the column plan in px: they add up to 1108px for a supervisor (1004px without the Recruiter column);
+ * the table never scrolls sideways: its columns are those widths as percentages of the panel (columnLayout), so it fills the panel at any
+ * width from 1080px (below that the Tasks list is a stack of cards). Every column is left-aligned (header and cells
  * share one left edge) except S NO (centred) and the actions (right-aligned: the 84px Open / Complete / View button, the 36px row menu
  * and the right padding).
  */
 export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
-  { key: 'no', title: 'S NO', width: 38 },
-  { key: 'doc', title: 'DOC', width: 94, left: true },
-  { key: 'client', title: 'CLIENT', width: 96, left: true },
-  { key: 'position', title: 'JOB', width: 94, left: true },
-  { key: 'candidate', title: 'CANDIDATE', width: 98, left: true },
-  { key: 'staff', title: 'Recruiter', width: 94, supervisor: true, left: true },
-  { key: 'agency', title: 'AGENCY', width: 80, left: true },
-  { key: 'stage', title: 'STAGE', width: 132, left: true },
-  { key: 'today', title: 'TODAY', width: 102, left: true },
-  { key: 'remarks', title: 'REMARKS', width: 150, left: true },
-  { key: 'actions', title: 'Actions', width: 130, quiet: true },
+  { key: 'no', title: 'S NO', width: 34 },
+  { key: 'doc', title: 'DOC', width: 84, left: true },
+  { key: 'client', title: 'CLIENT', width: 104, left: true },
+  { key: 'position', title: 'JOB', width: 96, left: true },
+  { key: 'candidate', title: 'CANDIDATE', width: 128, left: true },
+  { key: 'staff', title: 'Recruiter', width: 104, supervisor: true, left: true },
+  { key: 'agency', title: 'AGENCY', width: 76, left: true },
+  { key: 'stage', title: 'STAGE', width: 126, left: true },
+  { key: 'today', title: 'TODAY', width: 100, left: true },
+  { key: 'remarks', title: 'REMARKS', width: 140, left: true },
+  { key: 'actions', title: 'Actions', width: 116, quiet: true },
 ]
 
 /** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own). */

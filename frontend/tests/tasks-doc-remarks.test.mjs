@@ -38,12 +38,14 @@ test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (superviso
 
 test('the supervisor column plan fits the 1111px panel at a 1440px window', () => {
   const sum = (list) => list.reduce((total, c) => total + c.width, 0)
-  assert.ok(sum(daily.taskColumnsFor(true)) <= 1111, `${sum(daily.taskColumnsFor(true))}px`)
+  assert.ok(sum(daily.taskColumnsFor(true)) <= 1108, `${sum(daily.taskColumnsFor(true))}px`)
+  assert.ok(sum(daily.taskColumnsFor(false)) <= 1008, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
   const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
-  assert.ok(width('actions') >= 130, 'the 76px Open / Complete button, the 36px menu, the gap and the right padding are not clipped')
+  assert.ok(width('actions') >= 116, 'the 72px Open / Complete button, the 36px menu, the gap and the right padding are not clipped')
   assert.ok(width('remarks') >= 140, 'the dropdown keeps room for a remark')
-  assert.ok(width('doc') >= 90, '"19 Nov 2026" fits at 10px + 6px padding')
+  assert.ok(width('doc') >= 84, '"19 Nov" / "2026" or the "Add date" button fit at 10px padding')
   assert.ok(width('stage') >= 120, 'the stage chip keeps room for "1 · Prescreening"')
+  assert.ok(width('today') >= 100, 'the TODAY chip keeps room for "Moved 10:45" on one line')
   assert.equal(width('no') <= 44, true, 'S NO is narrow')
 })
 
@@ -407,31 +409,34 @@ test('the professional pass: one 60px row, a 44px one-line header, one padding f
     assert.ok(at >= 0, `${selector} rule exists`)
     return css.slice(at, css.indexOf('}', at))
   }
-  const P = '.dw .tw-table.dw-table.dw-main'
-  assert.match(rule(`${P} tbody td`), /height: 60px/)
+  const P = ':root .dw .tw-table.dw-table.dw-main'
+  assert.match(rule(`${P} tbody td`), /height: 60px/, 'at least 60px; a row grows when a name or client wraps')
   assert.match(rule(`${P} tbody td`), /vertical-align: middle/)
-  assert.match(rule(`${P} tbody td`), /border-bottom: var\(--table-line-width\) solid var\(--table-line\)/)
-  assert.match(rule(`${P} tbody td`), /border-right: var\(--table-line-width\) solid var\(--table-line\)/, 'a column line between every pair of columns')
+  assert.match(rule(`${P} tbody td`), /border: 0; border-bottom: var\(--table-line-width\) solid var\(--table-line\)/, 'a line under every row and nothing else')
+  assert.doesNotMatch(css, /tbody td[^{]*\{[^}]*border-(right|left): var\(--table-line/, 'NO vertical column line in the body')
+  assert.doesNotMatch(css, /td \+ td|td:not\(:last-child\)/, 'no column-line rule on body cells')
   assert.doesNotMatch(css, /tr:last-child > td \{ border-bottom: 0/, 'the last row has its line too')
   assert.match(rule(`${P} thead th`), /height: 44px/)
-  assert.match(rule(`${P} thead th`), /font-size: 11\.5px; font-weight: 600; letter-spacing: \.05em/)
+  assert.match(rule(`${P} thead th`), /font-size: 11\.5px; font-weight: 600; letter-spacing: \.04em/)
   assert.match(rule(`${P} thead th`), /white-space: nowrap/)
-  assert.match(rule(`${P} thead th`), /padding: 0 var\(--tw-pad-r\) 0 var\(--tw-pad-l\)/)
-  assert.match(rule(`${P} tbody td`), /padding: 0 var\(--tw-pad-r\) 0 var\(--tw-pad-l\)/, 'the same padding as the header')
+  assert.match(rule(`${P} thead th`), /padding: 0 8px 0 var\(--tw-pad-l\)/)
+  assert.match(rule(`${P} thead th`), /border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/, 'the header edge is the strong line')
+  assert.match(rule(`${P} tbody td`), /padding: 8px var\(--tw-pad-r\) 8px var\(--tw-pad-l\)/, 'the same left edge as the header')
+  assert.match(css, /\.tw-table\.dw-table\.dw-main \{[^}]*width: 100%; min-width: 0; border-collapse: separate/, 'the table fills its panel and never scrolls sideways')
   // controls
   assert.match(css, /\.dw \.tw-table \.dw-remark \.custom-select-trigger \{ height: 36px !important; min-height: 36px !important/)
-  assert.match(css, /\.dw-act \{[^}]*width: 76px[^}]*height: 36px/)
+  assert.match(css, /\.dw-act \{[^}]*width: 72px[^}]*height: 36px/)
   assert.match(css, /\.dw-more-btn \{ width: 36px; height: 36px/)
   assert.match(css, /\.dw-doc-add \{[^}]*height: 32px[^}]*text-decoration: none/)
-  assert.match(css, /\.tw-chip \{[^}]*height: 26px/)
-  assert.match(css, /\.dw-stage-chip \{[^}]*height: 26px/)
+  assert.match(css, /\.tw-chip \{[^}]*height: 28px[^}]*white-space: nowrap/, 'the TODAY chip is one 28px line with its whole text')
+  assert.match(css, /\.dw-stage-chip \{[^}]*min-height: 28px/)
   // the status never adds a line: a badge on the control, quiet states only for screen readers
   assert.match(css, /\.dw-remark-status \{ position: absolute/)
   assert.match(css, /\.dw-remark-status:is\(\.is-lead, \.is-none\) \{[^}]*clip: rect/)
   assert.doesNotMatch(css, /is-custom/)
-  // the wide metrics only apply to the table; a candidate is a card below 761px with 44px targets and 16px inputs
-  assert.match(css, /@container dw \(min-width: 761px\)/)
-  const cards = css.slice(css.indexOf('@container dw (max-width: 760px)'))
+  // the metrics only apply to the table (a panel of 1080px or more); under that a candidate is a card with 44px targets and 16px inputs
+  assert.match(css, /@container dw \(min-width: 1080px\)/)
+  const cards = css.slice(css.indexOf('@container dw (max-width: 1079px)'))
   assert.match(cards, /\.dw-more-btn \{ width: 44px; height: 44px/)
   assert.match(cards, /\.dw-remark \.custom-select-trigger \{ height: 44px !important[^}]*font-size: 16px/)
   assert.match(cards, /\.dw-remark-add input \{[^}]*height: 44px[^}]*font-size: 16px/)

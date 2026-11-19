@@ -22,10 +22,11 @@ test('the shared DataTable header is the primary blue: 44px, 700, uppercase 11.5
   assert.match(css, /thead \.custom-checkbox:is\(:checked, :indeterminate\) \{[^}]*var\(--on-primary\)/)
 })
 
-test('the shared DataTable rows: 56px, 14px padding, a 1px line under every row including the last, hover tint, a column line between every pair of columns', async () => {
+test('the shared DataTable rows: 56px, 14px padding, a 1px line under every row including the last, hover tint, no column line in the body', async () => {
   const css = await read('styles/data-table.css')
   const cell = rule(css, ':root:root .ui-data-table.is-grid tbody td {')
-  for (const part of ['height: 56px', 'padding: 8px 14px', 'vertical-align: middle', 'border-bottom: var(--table-line-width) solid var(--table-line)', 'border-right: var(--table-line-width) solid var(--table-line)']) assert.ok(cell.includes(part), part)
+  for (const part of ['height: 56px', 'padding: 8px 14px', 'vertical-align: middle', 'border-bottom: var(--table-line-width) solid var(--table-line)']) assert.ok(cell.includes(part), part)
+  assert.doesNotMatch(cell, /border-(right|left)/, 'no vertical line between body cells')
   assert.doesNotMatch(css, /tbody tr:last-child > td \{ border-bottom: 0/)
   assert.match(css, /tbody tr:hover \{ background: color-mix\(in srgb, var\(--primary\) 5%/)
   assert.match(css, /td \.ui-button \{ height: 36px; min-height: 36px; \}/)

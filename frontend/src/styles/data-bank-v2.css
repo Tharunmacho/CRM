@@ -385,9 +385,8 @@
 :root:root .db-tbl.is-grid thead th:last-child { border-right: 0; }
 :root:root .db-tbl.is-grid tbody td {
   position: relative; height: 80px; padding: 10px; vertical-align: middle; text-align: center; overflow: visible;
-  background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); border-right: var(--table-line-width) solid var(--table-line);
+  background: var(--bg-card); border-bottom: var(--table-line-width) solid var(--table-line); border-right: 0;
 }
-:root:root .db-tbl.is-grid tbody td:last-child { border-right: 0; }
 :root:root .db-tbl.is-grid tbody tr:nth-child(even) > td { background: color-mix(in srgb, var(--text-main) 3.5%, var(--bg-card)); }
 :root:root .db-tbl.is-grid tbody tr:last-child > td { border-bottom: var(--table-line-width) solid var(--table-line); }
 :root:root .db-tbl.is-grid tbody tr.is-clickable:hover > td { background: color-mix(in srgb, var(--primary) 6%, var(--bg-card)); }

@@ -60,7 +60,7 @@ strong.dbt-main { font-weight: 600; }
 :root:root .db-tbl.is-grid.is-fit.is-bank thead th.is-right { text-align: right; }
 :root:root .db-tbl.is-grid.is-fit.is-bank tbody tr:not(.db-xrow) > td {
   height: 64px; padding: 8px 16px; overflow: hidden; text-align: left; vertical-align: middle;
-  background: var(--bg-card); border-right: var(--table-line-width) solid var(--table-line); border-bottom: var(--table-line-width) solid var(--table-line);
+  background: var(--bg-card); border-right: 0; border-bottom: var(--table-line-width) solid var(--table-line);
 }
 :root:root .db-tbl.is-grid.is-fit.is-bank tbody tr:not(.db-xrow) > td.is-right { text-align: right; }
 :root:root .db-tbl.is-grid.is-fit.is-bank tbody tr.is-clickable:not(.db-xrow):hover > td { background: var(--tint-1); }

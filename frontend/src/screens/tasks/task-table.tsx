@@ -12,8 +12,9 @@ import {
 /**
  * One list for every recruiter's candidates, with what happened to each of them today. The columns and their widths are
  * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, actions): the widths add
- * up to 1108px for a supervisor, and the panel is 1111px wide at a 1440px window with the sidebar open and a scrollbar, so nothing scrolls
- * sideways there. The look (one 60px row, 44px header, one padding for header and cells) is src/styles/tasks-table.css.
+ * up to 1108px for a supervisor (1004px for a recruiter) and are used as percentages, so the table always fills its panel (1111px at a 1440px
+ * window with the sidebar open) and never scrolls sideways; under 1080px of panel width the list is a stack of cards instead. Text wraps to two
+ * lines (the full text is the tooltip) instead of being cut with an ellipsis. The look is src/styles/tasks-table.css.
  */
 export interface TaskTableProps {
   rows: TaskRow[]
@@ -33,7 +34,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
   const layout = columnLayout(columns)
   return (
     <ScrollEdges label="Candidates, scroll sideways for more columns">
-      <table className="dw-table dw-main tw-table" aria-label="Candidates" style={{ minWidth: layout.minWidth }}>
+      <table className="dw-table dw-main tw-table" aria-label="Candidates">
         <colgroup>{columns.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn(c.left && 'is-left', c.key === 'actions' && 'is-actions')}>{c.quiet ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>
