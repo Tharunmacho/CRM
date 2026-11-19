@@ -373,9 +373,8 @@ def test_end_to_end_a_candidate_declined_at_stage_5_leaves_the_tasks_list_and_ca
         # Even with the new "parked" rule switched off, the status alone takes them off the list and the counts.
         assert ids(listing(desk, "asha")) == ["c1"] and listing(desk, "asha")["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}
         assert asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
-    # With the current rules the decline (recorded today) is the recruiter's finished work: a ticked done-today row, never Follow-up.
-    assert [(i["candidateId"], i["status"], i["declined"]) for i in listing(desk, "asha")["items"]] == [("c1", "open", False), ("c0", "done", True)]
-    assert asha_count(desk) == {"total": 2, "toWork": 1, "doneToday": 1}
+    # With the current rules the decline (recorded today) takes them off the list at once, with no done-today row and no count, never Follow-up.
+    assert ids(listing(desk, "asha")) == ["c1"] and asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
     desk.clock["now"] = WEDNESDAY + timedelta(days=1)
     # From tomorrow: not today's work, not Follow-up, not in the admin counts, for the recruiter or a supervisor.
     assert ids(listing(desk, "asha")) == ["c1"] and listing(desk, "asha")["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}

@@ -810,13 +810,12 @@ def test_a_candidate_who_declined_is_parked_in_the_data_bank_until_mapped_again(
     with desk.sessions() as db:
         closed = db.execute(text("SELECT status, closure_reason FROM crm_applications WHERE id = :a"), {"a": apps["c0"]}).one()
     assert (closed.status, closed.closure_reason) == ("closed", reason)
-    # Today the decline is the recruiter's finished work: a ticked "Done today" row (the candidate is already in the Data Bank).
+    # The decline takes the candidate off the Tasks page AT ONCE (the Data Bank has them): no row, no count, not even today.
     today = listing(desk, "asha")
-    assert [(i["candidateId"], i["status"], i["declined"]) for i in today["items"]] == [("c1", "open", False), ("c0", "done", True)]
-    assert today["summary"] == {"total": 2, "toWork": 1, "doneToday": 1} and asha_count(desk) == {"total": 2, "toWork": 1, "doneToday": 1}
+    assert ids(today) == ["c1"] and today["summary"] == {"total": 1, "toWork": 1, "doneToday": 0} and asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
     assert follow(desk, "asha")["items"] == [] and follow(desk, "manager")["items"] == []
-    desk.clock["now"] = WEDNESDAY + timedelta(days=1)   # tomorrow it is not today's work, not Follow-up and not on the admin counts
-    # Not today's work and not Follow-up; the admin Tasks counts do not carry them either, and the other candidate stays.
+    assert listing(desk, "manager")["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}
+    desk.clock["now"] = WEDNESDAY + timedelta(days=1)   # tomorrow nothing changes: still not today's work, not Follow-up, not on the admin counts
     assert ids(listing(desk, "asha")) == ["c1"] and listing(desk, "asha")["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}
     assert follow(desk, "asha")["items"] == [] and follow(desk, "manager")["items"] == []
     assert asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
@@ -851,13 +850,11 @@ def test_a_candidate_who_was_rejected_stays_on_the_list_to_be_worked(desk, stage
     assert bank_row(desk, "c0")["status"] == "new"
 
 
-def test_a_candidate_who_declined_at_prescreening_is_done_today_then_gone_and_comes_back_when_mapped(desk):
-    # (Used to vanish at once with no credit; the owner's rule now is that the decline is the recruiter's finished work today.)
+def test_a_candidate_who_declined_at_prescreening_leaves_the_list_at_once_and_comes_back_when_mapped(desk):
     apps = mapped_candidates(desk, 2)
     order2 = second_order(desk)
     advance(desk, apps["c0"], {"stop": "declined"})
-    assert [(i["candidateId"], i["status"], i["declined"]) for i in listing(desk, "asha")["items"]] == [("c1", "open", False), ("c0", "done", True)]
-    assert asha_count(desk) == {"total": 2, "toWork": 1, "doneToday": 1}
+    assert ids(listing(desk, "asha")) == ["c1"] and asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
     assert bank_row(desk, "c0")["status"] == "not_interested" and not on_a_job(desk, "c0")
     desk.clock["now"] = WEDNESDAY
     assert ids(listing(desk, "asha")) == ["c1"] and asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
@@ -906,9 +903,9 @@ def test_only_the_last_placement_counts_an_older_decline_does_not_park_a_candida
     to_stage(desk, apps["c0"], 3)
     desk.clock["now"] = WEDNESDAY
     advance(desk, apps["c0"], {"stop": "declined"})  # the older placement: the candidate declined
-    assert sorted(ids(listing(desk, "asha"))) == ["c0", "c1"] and listing(desk, "asha")["summary"]["doneToday"] == 1  # done today, parked from tomorrow
+    assert ids(listing(desk, "asha")) == ["c1"] and listing(desk, "asha")["summary"]["doneToday"] == 0  # parked at once, today too
     desk.clock["now"] = WEDNESDAY + timedelta(days=1)
-    assert ids(listing(desk, "asha")) == ["c1"]  # parked for now
+    assert ids(listing(desk, "asha")) == ["c1"]  # still parked
     desk.clock["now"] = WEDNESDAY
     as_user(desk, "asha")
     second = desk.client.post("/api/applications", json={"candidate_id": "c0", "order_id": order2})
@@ -1027,10 +1024,9 @@ def test_not_interested_at_the_initial_call_takes_a_prescreening_candidate_off_t
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(
             AuditEntry.entity_id == apps["c0"], AuditEntry.action == "Candidate not interested at the initial call: taken off the order")) == 1
     assert open_tasks(desk, "c0") == 0
-    # The answered call is the recruiter's finished work today (ticked, counted), the candidate is already back in the Data Bank and never in
-    # Follow-up. (This used to vanish at once: the no made them Not interested, which is not workable.)
-    assert [(i["candidateId"], i["status"], i["declined"]) for i in listing(desk, "asha")["items"]] == [("c1", "open", False), ("c0", "done", True)]
-    assert asha_count(desk) == {"total": 2, "toWork": 1, "doneToday": 1}
+    # The candidate is back in the Data Bank and leaves the Tasks page at once: no row, no count, never in Follow-up.
+    assert ids(listing(desk, "asha")) == ["c1"]
+    assert asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
     assert follow(desk, "asha")["items"] == []
     assert bank_row(desk, "c0")["status"] == "not_interested" and not on_a_job(desk, "c0")
     # Interested again (recorded as yes) and mapped to another job: back at prescreening on the next day.
@@ -1076,7 +1072,7 @@ def test_not_interested_at_the_call_changes_nothing_on_the_order_past_prescreeni
     assert ids(follow(desk, "asha")) == ["c0"]  # still moving through the later stages
 
 
-# ------------------------------------------------------------------ a decline is finished work today (the candidate is back in the Data Bank)
+# ------------------------------------------------------------------ a decline leaves the Tasks page at once (the Data Bank has the candidate)
 
 THURSDAY = WEDNESDAY + timedelta(days=1)
 
@@ -1090,13 +1086,12 @@ def row_of(body, candidate_id):
     return next((item for item in body["items"] if item["candidateId"] == candidate_id), None)
 
 
-@pytest.mark.parametrize("stage, answer, label", [
-    pytest.param(1, {"stop": "declined"}, "Candidate declined", id="declined-at-stage-1"),
-    pytest.param(3, {"stop": "declined"}, "Candidate declined", id="declined-at-stage-3"),
-    pytest.param(5, {"result": "declined"}, "Offer declined", id="offer-declined-at-stage-5"),
+@pytest.mark.parametrize("stage, answer", [
+    pytest.param(1, {"stop": "declined"}, id="declined-at-stage-1"),
+    pytest.param(3, {"stop": "declined"}, id="declined-at-stage-3"),
+    pytest.param(5, {"result": "declined"}, id="offer-declined-at-stage-5"),
 ])
-def test_a_decline_is_done_work_today_for_the_owner_then_the_candidate_is_only_in_the_data_bank(desk, stage, answer, label):
-    from app.domain.stages import stage_by_no
+def test_a_decline_takes_the_candidate_off_the_tasks_page_and_every_count_at_once(desk, stage, answer):
     apps = mapped_candidates(desk, 2)
     mapped_candidates(desk, 1, owner="ravi", start=50)             # another recruiter's candidate: nothing changes for them
     as_user(desk, "asha")
@@ -1108,95 +1103,95 @@ def test_a_decline_is_done_work_today_for_the_owner_then_the_candidate_is_only_i
     advance(desk, apps["c0"], answer)
 
     today = listing(desk, "asha")
-    assert [(i["candidateId"], i["status"]) for i in today["items"]] == [("c1", "open"), ("c0", "done")]     # to work first, then done today
-    row, other = row_of(today, "c0"), row_of(today, "c1")
-    assert (row["declined"], row["movedToDataBank"], row["declinedReason"]) == (True, True, label)
-    assert (row["stage"], row["stageTitle"], row["ownerId"], row["applicationId"]) == (stage, stage_by_no(stage).title, "asha", None)
-    assert at(row["completedAt"]) == WEDNESDAY + timedelta(hours=2)                                         # ticked with the time the decline was recorded
-    assert (row["client"], row["orderRef"]) == ("Gulf Builders", "ORD-1")                                      # the job they turned down is still shown
-    assert (other["declined"], other["movedToDataBank"], other["declinedReason"]) == (False, False, None)
-    # The decline is credited to the owner: to work only loses the candidate who was still at prescreening, done today gains one.
-    assert today["summary"] == {"total": 2, "toWork": before["toWork"] - (1 if stage == 1 else 0) , "doneToday": 1}
+    # No row at all (not even a ticked "Done today" one): the list and every count lose the candidate the moment they decline.
+    assert ids(today) == ["c1"] and row_of(today, "c0") is None
     assert before["doneToday"] == 0 and before["toWork"] == (2 if stage == 1 else 1)
-    assert asha_count(desk) == today["summary"] and listing(desk, "manager")["summary"]["doneToday"] == 1
+    assert today["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}
+    assert asha_count(desk) == today["summary"] and listing(desk, "manager")["summary"] == {"total": 2, "toWork": 2, "doneToday": 0}
     assert listing(desk, "ravi")["items"] == ravi_before["items"] and ids(listing(desk, "ravi")) == ["c50"]
     assert next(s for s in listing(desk, "manager")["staff"] if s["userId"] == "ravi")["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}
-    assert ids(listing(desk, "admin", "/api/daily-work?staff=asha")) == ["c1", "c0"]
-    # Back in the Data Bank (Not interested), on no job, never in Follow-up.
+    assert ids(listing(desk, "admin", "/api/daily-work?staff=asha")) == ["c1"]
+    # The Data Bank has them: Not interested, on no job, never in Follow-up.
     assert bank_row(desk, "c0")["status"] == "not_interested" and not on_a_job(desk, "c0") and open_tasks(desk, "c0") == 0
     assert follow(desk, "asha")["items"] == [] and follow(desk, "manager")["items"] == []
 
-    desk.clock["now"] = THURSDAY                                    # tomorrow the candidate is gone from Tasks and the counts
+    desk.clock["now"] = THURSDAY                                    # tomorrow nothing changes
     assert ids(listing(desk, "asha")) == ["c1"] and listing(desk, "asha")["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}
     assert asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
     assert bank_row(desk, "c0")["status"] == "not_interested" and follow(desk, "asha")["items"] == []
 
 
-def test_an_initial_call_not_interested_that_takes_a_candidate_off_a_stage_one_placement_is_done_today(desk):
+def test_prescreening_finished_today_and_a_decline_later_the_same_day_leaves_no_done_row(desk):
+    """Stage 1 was finished today (a ticked row), then the candidate declined at stage 2: the Data Bank has them, so no row remains."""
+    apps = mapped_candidates(desk, 2)
+    finish(desk, apps["c0"])
+    assert row_of(listing(desk, "asha"), "c0")["status"] == "done"
+    advance(desk, apps["c0"], {"stop": "declined"})
+    today = listing(desk, "asha")
+    assert ids(today) == ["c1"] and today["summary"] == {"total": 1, "toWork": 1, "doneToday": 0} and asha_count(desk) == today["summary"]
+
+
+def test_an_initial_call_not_interested_that_takes_a_candidate_off_a_stage_one_placement_leaves_the_list_at_once(desk):
     apps = mapped_candidates(desk, 3)
     owned_candidates(desk, 1)                                       # u100: owned, never matched
     desk.clock["now"] = TUESDAY + timedelta(hours=3)
     assert record_call(desk, "c0", interested="no").json()["leftOrder"] is True
     today = listing(desk, "asha")
-    row = row_of(today, "c0")
-    assert [i["candidateId"] for i in today["items"]][-1] == "c0" and row["status"] == "done" and at(row["completedAt"]) == TUESDAY + timedelta(hours=3)
-    assert (row["declined"], row["movedToDataBank"], row["declinedReason"], row["stage"], row["stageTitle"]) == (True, True, "Not interested", 1, "Prescreening")
-    assert row["applicationId"] is None and row["closedApplicationId"] == apps["c0"] and row["ownerId"] == "asha"
-    assert today["summary"] == {"total": 4, "toWork": 3, "doneToday": 1} and asha_count(desk) == today["summary"]
+    assert row_of(today, "c0") is None and sorted(ids(today)) == ["c1", "c2", "u100"]
+    assert today["summary"] == {"total": 3, "toWork": 3, "doneToday": 0} and asha_count(desk) == today["summary"]
     assert follow(desk, "asha")["items"] == []
     assert bank_row(desk, "c0")["status"] == "not_interested"
-    # A "no" from a candidate with no placement to leave keeps its old behaviour: it is not this credit and they are not listed.
+    # A "no" from a candidate with no placement to leave behaves the same way: they are not listed.
     assert record_call(desk, "u100", interested="no").status_code == 200
     assert row_of(listing(desk, "asha"), "u100") is None and bank_row(desk, "u100")["status"] == "not_interested"
-    assert listing(desk, "asha")["summary"] == {"total": 3, "toWork": 2, "doneToday": 1}      # u100 (now Not interested) left the list, as before
+    assert listing(desk, "asha")["summary"] == {"total": 2, "toWork": 2, "doneToday": 0}
     with desk.sessions() as db:    # the test clock is frozen but updated_at is the real clock: pin the closing time, as the parked tests do
         db.execute(text("UPDATE crm_applications SET updated_at = :at WHERE id = :a"), {"at": TUESDAY + timedelta(hours=3), "a": apps["c0"]})
         db.commit()
     desk.clock["now"] = TUESDAY + timedelta(hours=4)
-    # A "yes" later the same day puts them back to the ordinary rules: interested again, the call is answered today, no longer a decline.
+    # A "yes" later the same day brings them back to the ordinary rules: interested again, the call is answered today (a ticked row).
     assert record_call(desk, "c0", interested="yes").status_code == 200
     again = row_of(listing(desk, "asha"), "c0")
-    assert again["status"] == "done" and again["declined"] is False and again["movedToDataBank"] is False
+    assert again["status"] == "done"
     desk.clock["now"] = THURSDAY
     assert row_of(listing(desk, "asha"), "u100") is None
 
 
-def test_a_decline_is_credited_to_the_owner_only_even_when_a_manager_records_it(desk):
+def test_a_decline_recorded_by_a_manager_leaves_the_owners_list_and_counts_too(desk):
     mapped_candidates(desk, 1)
     other = mapped_candidates(desk, 1, owner="ravi", start=50)
     as_user(desk, "manager")
     advance(desk, other["c50"], {"stop": "declined"})              # the manager records ravi's candidate's no
     assert ids(listing(desk, "asha")) == ["c0"] and asha_count(desk) == {"total": 1, "toWork": 1, "doneToday": 0}
-    ravi = listing(desk, "ravi")
-    assert [(i["candidateId"], i["status"], i["declined"], i["ownerId"]) for i in ravi["items"]] == [("c50", "done", True, "ravi")]
-    assert ravi["summary"] == {"total": 1, "toWork": 0, "doneToday": 1}
+    assert listing(desk, "ravi")["items"] == [] and listing(desk, "ravi")["summary"] == {"total": 0, "toWork": 0, "doneToday": 0}
     admin = listing(desk, "admin")
-    assert admin["summary"] == {"total": 2, "toWork": 1, "doneToday": 1}
-    assert {s["userId"]: s["summary"] for s in admin["staff"]}["ravi"] == {"total": 1, "toWork": 0, "doneToday": 1}
+    assert admin["summary"] == {"total": 1, "toWork": 1, "doneToday": 0}
+    assert {s["userId"]: s["summary"] for s in admin["staff"]}["ravi"] == {"total": 0, "toWork": 0, "doneToday": 0}
     assert {s["userId"]: s["summary"] for s in admin["staff"]}["asha"] == {"total": 1, "toWork": 1, "doneToday": 0}
-    # Moved to someone else afterwards: the credit belongs to whoever did the work, so the new owner is not credited either.
+    assert bank_row(desk, "c50")["status"] == "not_interested"
+    # Moved to someone else afterwards: still parked in the Data Bank, so the new owner does not get them either.
     with desk.sessions() as db:
         db.execute(text("UPDATE crm_candidates SET owner_id = 'asha' WHERE id = 'c50'"))
         db.commit()
     assert ids(listing(desk, "asha")) == ["c0"] and ids(listing(desk, "ravi")) == []
 
 
-def test_a_rejection_is_not_the_candidates_own_no_and_gets_no_declined_row(desk):
+def test_a_rejection_is_not_the_candidates_own_no_and_stays_on_the_list(desk):
     apps = mapped_candidates(desk, 2)
     to_stage(desk, apps["c0"], 4)
     desk.clock["now"] = WEDNESDAY
     advance(desk, apps["c0"], {"result": "rejected"})
     today = listing(desk, "asha")
-    assert sorted(ids(today)) == ["c0", "c1"] and not any(i["declined"] or i["movedToDataBank"] for i in today["items"])
+    assert sorted(ids(today)) == ["c0", "c1"]
     assert today["summary"] == {"total": 2, "toWork": 2, "doneToday": 0}
-    # And a prescreening that failed today keeps its ticked row, which is not a decline either.
+    # And a prescreening that failed today keeps its ticked row.
     desk.clock["now"] = THURSDAY
     advance(desk, apps["c1"], {"result": "failed"})
     body = listing(desk, "asha")
-    assert row_of(body, "c1")["status"] == "done" and row_of(body, "c1")["declined"] is False and body["summary"]["doneToday"] == 1
+    assert row_of(body, "c1")["status"] == "done" and body["summary"]["doneToday"] == 1
 
 
-def test_declines_are_ordered_with_the_other_done_work_most_recent_first(desk):
+def test_done_work_is_ordered_most_recent_first_and_a_decline_is_not_part_of_it(desk):
     apps = mapped_candidates(desk, 4)
     desk.clock["now"] = TUESDAY + timedelta(hours=1)
     advance(desk, apps["c0"], {"stop": "declined"})
@@ -1205,12 +1200,11 @@ def test_declines_are_ordered_with_the_other_done_work_most_recent_first(desk):
     desk.clock["now"] = TUESDAY + timedelta(hours=3)
     assert record_call(desk, "c2", interested="no").status_code == 200
     body = listing(desk, "asha")
-    assert [(i["candidateId"], i["status"]) for i in body["items"]] == [("c3", "open"), ("c2", "done"), ("c1", "done"), ("c0", "done")]
-    assert [i["declined"] for i in body["items"]] == [False, True, False, True]
-    assert body["summary"] == {"total": 4, "toWork": 1, "doneToday": 3}
+    assert [(i["candidateId"], i["status"]) for i in body["items"]] == [("c3", "open"), ("c1", "done")]
+    assert body["summary"] == {"total": 2, "toWork": 1, "doneToday": 1}
 
 
-def test_a_needs_review_candidate_who_declines_keeps_that_status_and_is_still_done_today(desk):
+def test_a_needs_review_candidate_who_declines_keeps_that_status_and_leaves_the_list_at_once(desk):
     apps = mapped_candidates(desk, 1)
     with desk.sessions() as db:
         candidate = db.get(Candidate, "c0")
@@ -1219,8 +1213,7 @@ def test_a_needs_review_candidate_who_declines_keeps_that_status_and_is_still_do
         db.commit()
     advance(desk, apps["c0"], {"stop": "declined"})
     today = listing(desk, "asha")
-    assert [(i["candidateId"], i["status"], i["declined"]) for i in today["items"]] == [("c0", "done", True)]
-    assert today["summary"] == {"total": 1, "toWork": 0, "doneToday": 1}
+    assert today["items"] == [] and today["summary"] == {"total": 0, "toWork": 0, "doneToday": 0}
     assert bank_row(desk, "c0")["status"] == "needs_review" and follow(desk, "asha")["items"] == []
     desk.clock["now"] = WEDNESDAY
     assert ids(listing(desk, "asha")) == [] and asha_count(desk) == {"total": 0, "toWork": 0, "doneToday": 0}
@@ -1230,8 +1223,8 @@ def test_a_decline_then_a_new_mapping_the_same_day_is_ordinary_work_again(desk):
     apps = mapped_candidates(desk, 1)
     order2 = second_order(desk)
     advance(desk, apps["c0"], {"stop": "declined"})
-    assert row_of(listing(desk, "asha"), "c0")["declined"] is True
+    assert row_of(listing(desk, "asha"), "c0") is None
     as_user(desk, "asha")
     assert desk.client.post("/api/applications", json={"candidate_id": "c0", "order_id": order2}).status_code == 201
     row = row_of(listing(desk, "asha"), "c0")
-    assert row["declined"] is False and row["stage"] == 1 and row["applicationId"] is not None
+    assert row["stage"] == 1 and row["applicationId"] is not None

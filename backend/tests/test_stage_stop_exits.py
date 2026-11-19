@@ -125,14 +125,13 @@ def test_a_decline_keeps_the_needs_review_status_and_a_parked_candidate_stays_of
         candidate = db.get(Candidate, "candidate")
         assert candidate.status == status and candidate.needs_review is needs_review         # the flag itself is never touched
         assert CandidateStatus.needs_review in daily_work.WORKABLE                           # the status alone would NOT hide them
-        # TODAY the candidate's own no is the recruiter's finished work (ticked, declined); a rejection is not a decline row; a stage 2
+        # The candidate's own no takes them off the list at once (no ticked row either); a rejection stays on it; a stage 2
         # closure that is not their no stays off the list (parked by status), exactly as before.
         today = {row["candidateId"]: row for row in daily_work.load_rows(db, ["staff"], now=datetime.now(timezone.utc) + timedelta(minutes=1), tz="Asia/Kolkata")}
         if reason in CANDIDATE_SAID_NO:
-            assert today["candidate"]["declined"] is True and today["candidate"]["movedToDataBank"] is True and today["candidate"]["status"] == "done"
-            assert today["candidate"]["stage"] == stage
+            assert "candidate" not in today
         elif on_the_tasks_list:
-            assert today["candidate"]["declined"] is False
+            assert "candidate" in today          # stays on the list (ticked: prescreening was finished today)
         else:
             assert "candidate" not in today
         listed = [row["candidateId"] for row in daily_work.load_rows(db, ["staff"], now=tomorrow, tz="Asia/Kolkata")]

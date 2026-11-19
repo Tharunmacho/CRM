@@ -4,12 +4,11 @@ import { ArrowRight, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCal
 import { cn } from '@/shared/lib/cn'
 import { countryCode, flagSrc } from '@/shared/lib/country-flag'
 import { Button, Textarea } from '@/shared/ui/primitives'
-import { Badge } from '@/shared/ui/display'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import {
-  advanceLabel, clientCell, clockTime, countryCell, countryShort, declinedInfo, positionCell, remarkBox, rowAction, rowTarget,
+  advanceLabel, clientCell, clockTime, countryCell, countryShort, positionCell, remarkBox, rowAction,
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
@@ -120,8 +119,6 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
   const done = item.status === 'done'
   const action = rowAction(item)
   const noCountry = countryCell(item, countryCode).names.length === 0
-  // A declined row has no stage left to work: its button opens the candidate profile.
-  const open = rowTarget(item) === 'profile' ? onProfile : onOpen
   return (
     <tr className={cn('dw-row', done && 'is-done', serial % 2 === 0 && 'is-alt')}>
       <td className="is-num tnum" data-label="S NO">{serial}</td>
@@ -137,7 +134,7 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
       <td data-label="Actions" className="is-actions">
         {done && <span className="dw-done-tag"><CheckCircle2 size={13} aria-hidden="true" />Done{item.completedAt ? ` ${clockTime(item.completedAt, zone)}` : ''}</span>}
         <div className="dw-actions">
-          <Button size="sm" variant={done ? 'secondary' : 'primary'} className="dw-act" onClick={open} aria-label={`${action === 'Complete' ? 'Complete the stage for' : action} ${item.candidate}`}>
+          <Button size="sm" variant={done ? 'secondary' : 'primary'} className="dw-act" onClick={onOpen} aria-label={`${action === 'Complete' ? 'Complete the stage for' : action} ${item.candidate}`}>
             {action}
           </Button>
           <RowMenu candidate={item.candidate} items={[
@@ -152,16 +149,10 @@ function ItemRow({ item, serial, zone, showStaff, staffName, canWork, onOpen, on
 }
 
 /** The ONE ID of the candidate: the Data Bank ID. The CRM reference (CND-...) shows only for an old row that has no Data Bank ID. */
-export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId' | 'candidateRef'> & Partial<Pick<DailyItem, 'declined' | 'declinedReason' | 'movedToDataBank'>> }) {
+export function CandidateIds({ item }: { item: Pick<DailyItem, 'candidateCareId' | 'candidateRef'> }) {
   const id = primaryId({ careId: item.candidateCareId, ref: item.candidateRef })
-  const declined = declinedInfo(item)
-  if (!id && !declined) return null
-  return (
-    <>
-      {id && <b className="cid-main" title={id}>{id}</b>}
-      {declined && <span className="dw-declined" title={declined.title}><Badge tone="amber" variant="chip">{declined.label}</Badge></span>}
-    </>
-  )
+  if (!id) return null
+  return <b className="cid-main" title={id}>{id}</b>
 }
 
 /**
@@ -221,9 +212,8 @@ export function PositionCellView({ item }: { item: Pick<DailyItem, 'position' | 
 }
 
 /** STAGE: one pill with the stage name (the same width in every row) and a slim progress bar under it. */
-export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> & Partial<Pick<DailyItem, 'declined' | 'declinedReason' | 'movedToDataBank'>> }) {
+export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
   const no = item.stage
-  const moved = declinedInfo(item)?.movedNote
   const stage = no ? STAGES[Math.max(0, Math.min(TOTAL_STAGES, no) - 1)] : null
   return (
     <div className="dw-stage" title={stage ? `Stage ${no} of ${TOTAL_STAGES}: ${stage.title}` : 'Initial call, before a stage starts'}>
@@ -233,7 +223,6 @@ export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> & Partial<P
       <span className="dw-stage-bar" aria-hidden="true">
         {STAGES.map((s) => <i key={s.no} className={cn(no !== null && s.no < no && 'is-done', s.no === no && 'is-now')} />)}
       </span>
-      {moved && <span className="dw-moved">{moved}</span>}
     </div>
   )
 }

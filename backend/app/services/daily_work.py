@@ -23,13 +23,12 @@ Today's order, stable and the same on every read:
 A candidate is *done today* when its recruiter finished prescreening (stage 1) for it today, credited to the owner and not reopened,
 or its initial call got a real outcome today (called, interest answered yes or no). A candidate whose prescreening finished today is
 shown in "Done today" (ticked, counted) until the day ends even though it is already in Follow-up; tomorrow only Follow-up has it.
-A candidate's own NO is also finished work: when a candidate declines (stage exits Declined / Offer declined / Candidate not interested /
+A candidate's own NO is NOT work on this page: when a candidate declines (stage exits Declined / Offer declined / Candidate not interested /
 Not travelling at any stage, or "not interested" at the initial call that takes them off a stage-1 placement) the placement closes and the
-candidate goes back to the Data Bank (status not interested, or needs review kept), yet the recruiter who owns them is credited TODAY: the
-candidate stays on today's list in "Done today" (ticked at the time the decline was recorded, `declined: true`, `movedToDataBank: true`, the
-stage they declined at, the reason) until the day ends. Tomorrow they are parked (see `_parked`) and only the Data Bank has them. The
-credit is the owner's only (the closing stage record's owner, or the candidate's owner for a call), and only while the candidate is still
-parked: a later "yes" call or a new mapping takes them back to the ordinary rules. A rejection (not the candidate's own no) gets no such row.
+candidate goes back to the Data Bank (status not interested, or needs review kept). They leave the Tasks page AT ONCE, on the day it
+happened too: no row (not even a ticked "Done today" one), and they are in no count (per-recruiter cards, sidebar badge, Today / Overall
+figures); only the Data Bank has them (see `_parked`). A later "yes" call or a new mapping takes them back to the ordinary rules. A rejection
+(not the candidate's own no) stays on the list as before.
 One row per candidate. Admin and manager read every recruiter's lists (optionally one recruiter) with per-recruiter counts.
 
 Follow-up order: oldest last update first so stale candidates surface. The last update is the latest of the last stage completed,
@@ -55,7 +54,7 @@ from sqlalchemy.orm import Session, aliased
 from app.core.config import get_settings
 from app.services.parallel_reads import _SLOTS
 from app.db.models import (
-    Application, ApplicationStage, ApplicationStatus, AuditEntry, Candidate, CandidateStatus, Client, ClosureReason, Company, DailyGoal, Designation,
+    Application, ApplicationStage, ApplicationStatus, Candidate, CandidateStatus, Client, ClosureReason, Company, DailyGoal, Designation,
     Order, Remark, Source, Task, TaskKind, User,
 )
 from app.domain.stages import TOTAL_STAGES, stage_by_no
@@ -144,8 +143,8 @@ def _waiting_since():
 
 
 def _done_at(start: datetime, end: datetime):
-    """When the owner finished today's work on this candidate in [start, end): prescreening (stage 1) completed, the initial call answered
-    or the candidate's own no recorded (`_declined_at`), else NULL."""
+    """When the owner finished today's work on this candidate in [start, end): prescreening (stage 1) completed, or the initial call answered,
+    else NULL. (A candidate's own no is no work here: `_parked` keeps them off the list.)"""
     stage = (select(func.max(ApplicationStage.completed_at)).select_from(ApplicationStage)
              .join(Application, Application.id == ApplicationStage.application_id)
              .where(Application.candidate_id == Candidate.id, ApplicationStage.stage == 1, ApplicationStage.completed_at >= start, ApplicationStage.completed_at < end,
@@ -153,7 +152,7 @@ def _done_at(start: datetime, end: datetime):
                     func.coalesce(ApplicationStage.owner_id, ApplicationStage.completed_by) == Candidate.owner_id)
              .correlate(Candidate).scalar_subquery())
     call = case((and_(_call_done(), Candidate.call_recorded_at >= start, Candidate.call_recorded_at < end), Candidate.call_recorded_at))
-    return func.greatest(stage, call, _declined_at(start, end))
+    return func.greatest(stage, call)
 
 
 def _in_follow_up():
@@ -196,58 +195,11 @@ def _parked():
     return and_(declined, ~active)
 
 
-CALL_DECLINE_ACTION = "Candidate not interested at the initial call: taken off the order"   # the audit entry `record_call` writes for a stage-1 placement
-DECLINE_LABELS = {"stage_declined": "Candidate declined", "offer_declined": "Offer declined", "not_interested": "Not interested", "not_travelling": "Not travelling"}
-
-
-def _closing_stage(start: datetime, end: datetime) -> list:
-    """Conditions picking, in [start, end), the stage record that closed the candidate's last placement, credited to their owner:
-    a real (never reopened) record of that placement whose owner at the time is the candidate's owner now."""
-    return [ApplicationStage.application_id == _last_application(), ApplicationStage.completed_at >= start, ApplicationStage.completed_at < end,
-            ApplicationStage.reopened_reason.is_(None), func.coalesce(ApplicationStage.owner_id, ApplicationStage.completed_by) == Candidate.owner_id]
-
-
-def _stage_decline_at(start: datetime, end: datetime):
-    """When, in [start, end), a stage record closed the candidate's last placement with the candidate's own no (the candidate is still parked)."""
-    return (select(func.max(ApplicationStage.completed_at)).where(*_closing_stage(start, end), _parked()).correlate(Candidate).scalar_subquery())
-
-
-def _call_decline_at(start: datetime, end: datetime):
-    """When, in [start, end), an initial call "not interested" took the candidate off their stage-1 placement (the audit entry written with the
-    closure carries the time; the candidate is still parked, so a later "yes" call undoes it)."""
-    return (select(func.max(AuditEntry.at)).where(
-        AuditEntry.entity_type == "application", AuditEntry.entity_id == _last_application(), AuditEntry.action == CALL_DECLINE_ACTION,
-        AuditEntry.at >= start, AuditEntry.at < end, Candidate.owner_id.is_not(None), _parked()).correlate(Candidate).scalar_subquery())
-
-
-def _declined_at(start: datetime, end: datetime):
-    """When the owner's candidate declined today (see the module docstring), else NULL. A candidate can only be credited to the recruiter who
-    owns them: the stage record's owner for a stage exit, the candidate's owner for the initial call."""
-    return func.greatest(_stage_decline_at(start, end), _call_decline_at(start, end))
-
-
-def _declined_detail(start: datetime, end: datetime):
-    """(stage they declined at, closed placement id, closure reason), each NULL unless the candidate declined today."""
-    stage_no = (select(ApplicationStage.stage).where(*_closing_stage(start, end), _parked())
-                .order_by(ApplicationStage.completed_at.desc(), ApplicationStage.attempt.desc()).limit(1).correlate(Candidate).scalar_subquery())
-    stage = func.coalesce(stage_no, case((_call_decline_at(start, end).is_not(None), 1)))   # the initial call only ever closes a stage-1 placement
-    last = _last_application()
-    reason = select(Application.closure_reason).where(Application.id == last).correlate(Candidate).scalar_subquery()
-    return stage, case((stage.is_not(None), last)), case((stage.is_not(None), reason))
-
-
-def _listed(done):
-    """On today's list: not past prescreening and not parked after a decline, or finished today (shown ticked until the day ends:
-    whoever recorded the outcome keeps the credit, and the candidate is gone tomorrow)."""
-    return or_(and_(~_in_follow_up(), ~_parked()), done.is_not(None))
-
-
 def _on_list(start: datetime, end: datetime):
-    """The candidate is on today's list. Workable candidates by `_listed`; a candidate who declined today is listed although they are now
-    Not interested (the Data Bank has them), as done work. Nobody else who is not workable is ever listed."""
+    """The candidate is on today's list: workable, not parked after their own decline (not even on the day of the decline: the Data Bank
+    has them at once), and either not past prescreening or finished today (shown ticked until the day ends: the candidate is gone tomorrow)."""
     done = _done_at(start, end)
-    return or_(and_(Candidate.status.in_(WORKABLE), _listed(done)),
-               and_(Candidate.status == CandidateStatus.not_interested, _declined_at(start, end).is_not(None)))
+    return and_(Candidate.status.in_(WORKABLE), ~_parked(), or_(~_in_follow_up(), done.is_not(None)))
 
 
 def owner_counts(db, owner_ids, *, now: datetime | None = None, tz=None) -> dict[str, tuple[int, int]]:
@@ -268,18 +220,15 @@ def summarise(counts: list[tuple[int, int]]) -> dict:
 
 
 def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
-    """The list's rows (candidate, waiting since, done at, declined at stage, closed placement id, closure reason) for these recruiters
-    (ids, or a select of ids), in list order. The last three are NULL unless the candidate declined today (see `_declined_detail`).
+    """The list's rows (candidate, waiting since, done at) for these recruiters (ids, or a select of ids), in list order.
 
     One statement. `load_rows` turns them into the screen's dicts. See the module docstring for the order."""
     now = now or datetime.now(timezone.utc)
     start, end = day_bounds(agency_today(now, tz), tz)
-    dec_stage, dec_app, dec_reason = _declined_detail(start, end)
-    inner = (select(Candidate.id.label("cid"), _waiting_since().label("waiting_since"), _done_at(start, end).label("done_at"),
-                    dec_stage.label("dec_stage"), dec_app.label("dec_app"), dec_reason.label("dec_reason"))
+    inner = (select(Candidate.id.label("cid"), _waiting_since().label("waiting_since"), _done_at(start, end).label("done_at"))
              .where(Candidate.owner_id.in_(owner_ids), _on_list(start, end)).subquery("w"))
     return db.execute(
-        select(Candidate, inner.c.waiting_since, inner.c.done_at, inner.c.dec_stage, inner.c.dec_app, inner.c.dec_reason)
+        select(Candidate, inner.c.waiting_since, inner.c.done_at)
         .join(inner, inner.c.cid == Candidate.id)
         .order_by(inner.c.done_at.is_not(None), inner.c.done_at.desc().nulls_last(), inner.c.waiting_since.is_(None),
                   inner.c.waiting_since.asc().nulls_last(), Candidate.created_at.desc(), Candidate.id)
@@ -456,12 +405,11 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
     if not rows:
         return []
     ids = [row[0].id for row in rows]
-    declined_apps = [row[4] for row in rows if row[4]]   # the placements declined today (closed): their job is shown on the row
-    # Active placements, plus the closed ones that were declined today (one more `or`, not one more statement).
+    # Active placements only: a listed candidate has no declined placement to show (they are parked, see `_parked`).
     app_query = (select(Application, Order, Company, Client, Designation)
                  .join(Order, Order.id == Application.order_id).join(Company, Company.id == Order.company_id)
                  .join(Client, Client.id == Company.client_id).join(Designation, Designation.id == Order.designation_id)
-                 .where(Application.candidate_id.in_(ids), or_(Application.status == ApplicationStatus.active, Application.id.in_(declined_apps)))
+                 .where(Application.candidate_id.in_(ids), Application.status == ApplicationStatus.active)
                  .order_by(Application.created_at.desc(), Application.id))
     # Remarks live on tasks: the open stage task of the placement, else the candidate's open initial-call task.
     task_query = (select(Task.candidate_id, Task.application_id, Task.id, Task.kind).where(
@@ -474,12 +422,8 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
     placed, task_rows, fact_rows = read_together(db, *lookups) if parallel else [look(db) for look in lookups]
     facts = stage_facts(fact_rows)
     apps: dict[str, list] = defaultdict(list)
-    closed: dict[str, tuple] = {}   # candidate id -> the placement they declined today
     for placement in placed:
-        if placement[0].id in declined_apps and placement[0].status != ApplicationStatus.active:
-            closed[placement[0].candidate_id] = placement
-        else:
-            apps[placement[0].candidate_id].append(placement)
+        apps[placement[0].candidate_id].append(placement)
     stage_tasks: dict[str, str] = {}  # application id -> its oldest open stage task
     call_tasks: dict[str, str] = {}   # candidate id -> its newest open initial-call task
     for candidate_id, application_id, task_id, kind in task_rows:
@@ -497,15 +441,10 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
         remark_tasks[cand.id] = (stage_tasks.get(placement[0].id) if placement else None) or call_tasks.get(cand.id)
     remarks = _remarks(db, sorted({t for t in remark_tasks.values() if t}))
     out = []
-    for cand, waiting, finished, declined_stage, _declined_app, declined_reason in rows:
+    for cand, waiting, finished in rows:
         placement = chosen[cand.id]
         app, order, company, client, designation = placement if placement else (None, None, None, None, None)
-        declined = declined_stage is not None
-        shown = closed.get(cand.id) if declined else None     # the placement they declined: its job is shown, but it is not an active one
-        if shown:
-            _, order, company, client, designation = shown
-        stage_no = declined_stage if declined else app.current_stage if app else None
-        reason = getattr(declined_reason, "value", declined_reason)
+        stage_no = app.current_stage if app else None
         remark_task = remark_tasks[cand.id]
         remark = remarks.get(remark_task) if remark_task else None
         out.append({
@@ -514,9 +453,6 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
             "stage": stage_no, "stageTitle": stage_by_no(stage_no).title if stage_no and 1 <= stage_no <= TOTAL_STAGES else None,
             "waiting": waiting is not None,
             "status": "done" if finished is not None else "open", "completedAt": finished,
-            # The candidate's own no, recorded today: done work for the owner, and the candidate is already back in the Data Bank.
-            "declined": declined, "declinedReason": DECLINE_LABELS.get(reason, reason) if declined else None,
-            "movedToDataBank": declined, "closedApplicationId": shown[0].id if shown else None,
             **placement_fields(order, company, client, designation, cand),
             "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id,
             "orderRef": order.ref if order else None, **payment_fields(app, facts),

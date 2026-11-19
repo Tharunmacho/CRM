@@ -247,26 +247,8 @@ test('what a recruiter did today: called, stage moved, remarked; the board count
   assert.equal(m.dayOf('2026-11-18T20:00:00Z', zone), '2026-11-19', 'the agency clock, not UTC')
 })
 
-test('a declined row gets the "Declined" tag with its reason as the tooltip and a calm "Moved to Data Bank" note', () => {
-  assert.deepEqual(m.declinedInfo(item({ declined: true, declinedReason: 'Offer declined', movedToDataBank: true })),
-    { label: 'Declined', reason: 'Offer declined', title: 'Offer declined', movedNote: 'Moved to Data Bank' })
-  // a reason that does not say it already is prefixed; no reason falls back to the bare word; the note needs the flag
-  assert.equal(m.declinedInfo(item({ declined: true, declinedReason: '  Salary too low ' })).title, 'Declined: Salary too low')
-  assert.deepEqual(m.declinedInfo(item({ declined: true })), { label: 'Declined', reason: '', title: 'Declined', movedNote: null })
-  assert.equal(m.declinedInfo(item({ declined: true, movedToDataBank: false })).movedNote, null)
-})
-
-test('rows without the declined fields (an API that does not send them yet) behave exactly as before', () => {
-  assert.equal(m.declinedInfo(item()), null)
-  assert.equal(m.declinedInfo(item({ declined: false, declinedReason: 'Offer declined', movedToDataBank: true })), null)
-  assert.equal(m.rowTarget(item()), 'stage')
-  assert.equal(m.rowTarget(item({ declined: false })), 'stage')
+test('rowAction: View once done today, Complete on a placement, Open otherwise', () => {
   assert.equal(m.rowAction(item({ status: 'done', applicationId: 'a1' })), 'View')
-})
-
-test('a declined row stays in the Done today group and its View opens the candidate profile', () => {
-  const rows = [item({ id: '1' }), item({ id: '2', status: 'done', declined: true, declinedReason: 'Offer declined', movedToDataBank: true })]
-  assert.deepEqual(m.splitItems(rows).done.map((r) => r.id), ['2'])
-  assert.equal(m.rowAction(rows[1]), 'View')
-  assert.equal(m.rowTarget(rows[1]), 'profile')
+  assert.equal(m.rowAction(item({ applicationId: 'a1' })), 'Complete')
+  assert.equal(m.rowAction(item()), 'Open')
 })

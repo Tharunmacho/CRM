@@ -3,7 +3,7 @@ import { cn } from '@/shared/lib/cn'
 import { countryCode } from '@/shared/lib/country-flag'
 import { Button } from '@/shared/ui/primitives'
 import { RecordIdentity } from '@/shared/ui/workspace'
-import { clockTime, countryCell, rowAction, rowTarget, type TaskRow } from '@/features/daily-work/daily-work-model'
+import { clockTime, countryCell, rowAction, type TaskRow } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
 import {
   CandidateIds, ClientCountryCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
@@ -46,7 +46,6 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
             const name = staffName(row.ownerId)
             const action = rowAction(row)
             const noCountry = countryCell(row, countryCode).names.length === 0
-            const open = rowTarget(row) === 'profile' ? () => onProfile(row) : () => onOpen(row)
             const { called, moved, remarked } = row.today
             return (
               <tr key={row.candidateId} className={cn('dw-row', index % 2 === 1 && 'is-alt')}>
@@ -67,7 +66,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                 <td data-label="REMARKS" className={cn('is-left', !row.remark && !canWork(row) && 'is-empty')}><RemarkCell item={row} canWork={canWork(row)} onSave={(text) => onRemark(row, text)} /></td>
                 <td data-label="Actions" className="is-actions">
                   <div className="dw-actions">
-                    <Button size="sm" variant={called || moved ? 'secondary' : 'primary'} className="dw-act" onClick={open}
+                    <Button size="sm" variant={called || moved ? 'secondary' : 'primary'} className="dw-act" onClick={() => onOpen(row)}
                       aria-label={`${action === 'Complete' ? 'Complete the stage for' : action} ${row.candidate}`}>{action}</Button>
                     <RowMenu candidate={row.candidate} items={[
                       ...(row.applicationId ? [{ label: moved ? 'View stage' : 'Open stage', icon: ArrowRight, onSelect: () => onOpen(row) }] : []),
