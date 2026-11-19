@@ -106,7 +106,9 @@ def list_jobs(response: Response, limit: int = Query(50, ge=1, le=100), db: Sess
     jobs = db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.owner_id == user.id,
         DocumentExtractionJob.status.notin_(["attached", "dismissed"]),
         # Files read for a candidate's application form belong to that candidate, not to an unsaved intake.
-        DocumentExtractionJob.candidate_id.is_(None)).order_by(DocumentExtractionJob.updated_at.desc()).limit(limit)).all()
+        DocumentExtractionJob.candidate_id.is_(None),
+        # ... and the background re-sort of a stored file (services/resort_bundles.py) is no upload at all.
+        DocumentExtractionJob.kind != "resort").order_by(DocumentExtractionJob.updated_at.desc()).limit(limit)).all()
     queue, reader = queue_positions(db, jobs), reader_status(db)
     return [job_out(job, queue=queue, reader=reader) for job in jobs]
 

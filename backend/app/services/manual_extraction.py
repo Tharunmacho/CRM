@@ -367,12 +367,19 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
     """Read one document. ``claimed_by`` is the worker that leased it (see services/extraction_queue.py); a lease that
     has moved to another worker makes this run stop writing. Without it (direct calls) the job is taken here."""
     titles = None
+    resort = False     # a stored combined file to sort (services/resort_bundles.py) is no document to read: that module takes the job
     with sessions() as db:
         if claimed_by is None:
             job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.draft))
                             .where(DocumentExtractionJob.id == identifier).with_for_update())
             if job is None or job.status not in READY:
                 return
+            resort = job.kind == "resort"
+            if resort:
+                db.rollback()
+        if resort:
+            pass
+        elif claimed_by is None:
             job.status = "processing"
             job.updated_at = job.started_at = now()
             expected_kind, form_slot = _expected_kind(job.draft), _form_slot(job.draft)
@@ -387,7 +394,7 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
         else:
             # The claim already moved the job to processing: one read gets everything this run needs.
             _autocommit(db)
-            row = db.execute(select(DocumentExtractionJob.status, DocumentExtractionJob.claimed_by, DocumentExtractionJob.state,
+            row = db.execute(select(DocumentExtractionJob.kind, DocumentExtractionJob.status, DocumentExtractionJob.claimed_by, DocumentExtractionJob.state,
                 DocumentExtractionJob.object_key, DocumentExtractionJob.content_hash, DocumentExtractionJob.owner_id,
                 DocumentExtractionJob.group_id, DocumentExtractionJob.candidate_id, DocumentExtractionJob.attempts,
                 DocumentExtractionJob.draft, DocumentExtractionJob.queued_at, DocumentExtractionJob.created_at,
@@ -395,12 +402,16 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
                 .where(DocumentExtractionJob.id == identifier)).one_or_none()
             if row is None or row.status not in READY or row.claimed_by != claimed_by:
                 return
+            resort = row.kind == "resort"
             queued_at = row.queued_at or row.created_at
             state = deepcopy(row.state or {})
             key, digest, owner, group_id, form_candidate = row.object_key, row.content_hash, row.owner_id, row.group_id, row.candidate_id
             attempts = row.attempts
             titles = list(row.titles or [])
             expected_kind, form_slot = _expected_kind(row.draft), _form_slot(row.draft)
+    if resort:
+        from app.services.resort_bundles import process_resort
+        return process_resort(identifier, sessions=sessions, settings=settings, claimed_by=claimed_by)
 
     # Which reader ran this attempt (a job that has no "reader" in its state was handled by older code).
     from app.services.worker_heartbeat import code_version

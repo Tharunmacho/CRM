@@ -24,7 +24,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.deps import current_user
+from app.core.deps import current_user, require_role
 from app.db.models import Role, User
 from app.db.session import get_db
 from app.services import bulk_candidate_import as bulk, duplicate_pages
@@ -844,6 +844,32 @@ MAX_AUTO_FILINGS = 3      # read files whose other documents one call files
 candidate_reading_router = APIRouter(prefix="/api/candidates", tags=["candidate-import"])
 
 
+def _work_pending(db: Session, user: User, candidate, *, read_unread: bool = True) -> dict:
+    """What opening a candidate's form does for the documents already stored (the candidate row is locked and `user` may work it):
+    queue the sorting of stored combined files that older code never sorted (`resort_bundles.enqueue`: queuing only, the page reading
+    runs in the reading worker), queue the unread files for the reader (`queue_unread`, unless `read_unread` is off) and file the other
+    documents of files already read. The caller commits. A failure of any step leaves the others untouched."""
+    from app.services import application_form, resort_bundles
+    try:        # before queue_unread: a file no reading job has seen yet is left to its reading, which sorts it by itself
+        with db.begin_nested():
+            sorting = resort_bundles.enqueue(db, user, [candidate])
+    except Exception:
+        logger.warning("The stored files of a candidate could not be queued for sorting.", exc_info=True)
+        sorting = resort_bundles.Queued()
+    queued = readable = 0
+    more = False
+    if read_unread:
+        queued, readable, more = queue_unread(db, user, [candidate], retry_failed=False, limit=MAX_AUTO_READS)
+    filed = []
+    try:
+        with db.begin_nested():
+            filed = application_form.file_other_documents_of_read_files(db, candidate, limit=MAX_AUTO_FILINGS)
+    except Exception:       # the documents stay where they are (in the file that was read): a later call tries again
+        logger.warning("The other documents of a read file could not be filed.", exc_info=True)
+        filed = []
+    return {"sorting": sorting, "queued": queued, "readable": readable, "more": more, "filed": filed}
+
+
 @candidate_reading_router.post("/{candidate_id}/read-pending")
 def read_pending(candidate_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
     """Read the stored documents of ONE candidate by themselves, for the application form / profile to call when it opens (nobody presses
@@ -854,30 +880,79 @@ def read_pending(candidate_id: str, db: Session = Depends(get_db), user: User = 
       that already has a job in any state, and a FAILED reading is not queued again here (that stays with Read documents);
     * every file that was already read, whose bundle also holds experience / education certificates, a signed offer, a visa, a medical
       report or a police clearance, has those pages filed in their own fields from the reading it saved (nothing is read again), at
-      most `MAX_AUTO_FILINGS` files per call, each only once.
+      most `MAX_AUTO_FILINGS` files per call, each only once;
+    * every stored PDF that may be a combined file nobody ever sorted (one already read by older code, or sitting in Other documents or
+      the source evidence) is queued ONCE for the reading worker's re-sort (`resort_bundles`): its pages are read there, never in this
+      request, and the pieces are filed in their own fields and read. `sorting` is how many files were queued (left out when none).
 
     Safe to call again and from two screens at once: the candidate row is locked, so a file is never queued twice. Only a person who may
     work this candidate (the owner, a manager or an admin, exactly like read-again) changes anything: anyone else gets 200 with
     `allowed: false` and nothing is queued. An unknown candidate is 404."""
     from sqlalchemy import select
     from app.db.models import Candidate
-    from app.services import application_form, document_splitting
+    from app.services import document_splitting
     candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
     if candidate is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
     if not _may_work(candidate, user):
         db.rollback()
         return {"candidateId": candidate_id, "allowed": False, "queued": 0, "readable": 0, "filed": [], "more": False, "changed": False}
-    queued, readable, more = queue_unread(db, user, [candidate], retry_failed=False, limit=MAX_AUTO_READS)
-    filed = []
-    try:
-        with db.begin_nested():
-            filed = application_form.file_other_documents_of_read_files(db, candidate, limit=MAX_AUTO_FILINGS)
-    except Exception:       # the documents stay where they are (in the file that was read): a later call tries again
-        logger.warning("The other documents of a read file could not be filed.", exc_info=True)
-        filed = []
+    work = _work_pending(db, user, candidate)
     db.commit()
-    pieces = [piece.as_dict() for piece in filed if not piece.duplicate]
-    return {"candidateId": candidate_id, "allowed": True, "queued": queued, "readable": readable, "more": more,
-            "filed": pieces, "message": document_splitting.filing_message(filed) if pieces else None,
-            "changed": bool(queued or pieces)}
+    pieces = [piece.as_dict() for piece in work["filed"] if not piece.duplicate]
+    sorting = work["sorting"].jobs
+    return {"candidateId": candidate_id, "allowed": True, "queued": work["queued"], "readable": work["readable"], "more": work["more"],
+            "filed": pieces, "message": document_splitting.filing_message(work["filed"]) if pieces else None,
+            "changed": bool(work["queued"] or pieces or sorting), **({"sorting": sorting} if sorting else {})}
+
+
+# ------------------------------------------------------------------ the one-off sweep of the Data Bank (admin / manager)
+
+class ResortIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    # Only these candidates; left out, the sweep takes the next candidates that still have a stored file nobody sorted.
+    candidateIds: list[str] | None = Field(default=None, max_length=MAX_FOLDERS)
+    # Also queue the files that were never read for the reader (what opening a form does). Off: the sweep only sorts, which costs the
+    # reader nothing.
+    alsoRead: bool = False
+
+
+@candidate_reading_router.post("/resort")
+def resort_stored(body: ResortIn | None = None, db: Session = Depends(get_db),
+                  user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
+    """Sweep the Data Bank once: queue the sorting of stored combined files (see `resort_bundles`) for up to `RESORT_SWEEP_CANDIDATES`
+    (25) candidates per call. Admin and manager only. The pages are read by the reading worker afterwards, never in this request.
+
+    Body (all optional): `candidateIds` (default: the next candidates that still have an unsorted stored file, in a stable order, so
+    calling again walks through the whole Data Bank) and `alsoRead` (default false). Idempotent: a file is queued once, ever, so a second
+    call over the same candidates queues nothing. Answers `{candidates, queued, marked, filed, readQueued, skipped, more}`: candidates
+    handled, sorting jobs queued, files that needed no sorting (marked, nothing queued), pieces filed from earlier readings, files queued
+    for the reader (`alsoRead`), ids that do not exist, and whether another call has more to do."""
+    from sqlalchemy import select
+    from app.db.models import Candidate
+    from app.services import resort_bundles
+    body = body or ResortIn()
+    if body.candidateIds is None:
+        ids, more = resort_bundles.next_candidates(db, resort_bundles.RESORT_SWEEP_CANDIDATES)
+    else:
+        asked = list(dict.fromkeys(body.candidateIds))
+        ids, more = asked[:resort_bundles.RESORT_SWEEP_CANDIDATES], len(asked) > resort_bundles.RESORT_SWEEP_CANDIDATES
+    handled = skipped = filed = read_queued = 0
+    total = resort_bundles.Queued()
+    for candidate_id in ids:
+        candidate = db.scalar(select(Candidate).where(Candidate.id == candidate_id).with_for_update())
+        if candidate is None or not _may_work(candidate, user):
+            db.rollback()
+            skipped += 1
+            continue
+        work = _work_pending(db, user, candidate, read_unread=body.alsoRead)
+        db.commit()           # one short transaction per candidate
+        handled += 1
+        total += work["sorting"]
+        filed += len([piece for piece in work["filed"] if not piece.duplicate])
+        read_queued += work["queued"]
+    if body.candidateIds is None:
+        # candidates still waiting; a call that changed nothing says no (so a file that cannot be marked never makes a caller loop)
+        more = bool(total.jobs or total.marked or filed) and bool(resort_bundles.next_candidates(db, 1)[0])
+    return {"candidates": handled, "queued": total.jobs, "marked": total.marked, "filed": filed, "readQueued": read_queued,
+            "skipped": skipped, "more": more or total.more}

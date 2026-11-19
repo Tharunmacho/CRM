@@ -872,6 +872,11 @@ class SplitResult:
     # What was read on every page that was inspected, by page number of the scan (`duplicate_pages.PageRead`): the text and how
     # sure the reader was. Kept so the pages already filed elsewhere can be recognised without reading the scan again.
     page_reads: dict = field(default_factory=dict)
+    # The reading was cut short: pages the reader ran out of time for (`cut_short`), or the whole scan could not be read (`failed`).
+    # What a split of such a reading says is not final, so a caller that files pieces for good (the background re-sort of stored files,
+    # services/resort_bundles.py) does not act on it and tries again later.
+    cut_short: bool = False
+    failed: bool = False
 
     def reads_for(self, pages: list[int]) -> list | None:
         """The readings of these pages (numbers in the scan that was read), or None when any of them was not read."""
@@ -889,7 +894,8 @@ def _whole(data: bytes, kinds: list[str], note: str | None = None) -> SplitResul
     return SplitResult([Piece(list(kinds), data, [])], False, note)
 
 
-def split_by_content(data: bytes, content_type: str, kinds_from_name: list[str], original_name: str = "") -> SplitResult:
+def split_by_content(data: bytes, content_type: str, kinds_from_name: list[str], original_name: str = "", *,
+                     document_timeout: float | None = None) -> SplitResult:
     """Cut a multi-document scan into the documents it holds, by what is on each page (read locally, no network).
 
     One piece per identity document found (passport, Aadhaar, resume: its pages in original order; a page that is both goes to
@@ -904,7 +910,7 @@ def split_by_content(data: bytes, content_type: str, kinds_from_name: list[str],
     one piece. Content decides before the name: a file named "visa,medical,pcc" is cut into those three by what each page says.
 
     Never raises: a scan that cannot be read in time is returned whole under the kinds today's rules give it (the name's, else
-    what `classify_content` makes of its first pages), with an info note.
+    what `classify_content` makes of its first pages), with an info note. `document_timeout` (seconds) overrides the default time box.
     """
     named = list(dict.fromkeys(kinds_from_name))
     if not wants_split(named, content_type):
@@ -914,12 +920,14 @@ def split_by_content(data: bytes, content_type: str, kinds_from_name: list[str],
         settings = get_settings()
         inspected = inspect_document(
             data, tesseract_cmd=getattr(settings, "tesseract_cmd", None), languages=getattr(settings, "ocr_languages", "eng"),
-            max_pages=SPLIT_MAX_PAGES, page_timeout=SPLIT_PAGE_TIMEOUT, document_timeout=SPLIT_DOCUMENT_TIMEOUT)
+            max_pages=SPLIT_MAX_PAGES, page_timeout=SPLIT_PAGE_TIMEOUT, document_timeout=document_timeout or SPLIT_DOCUMENT_TIMEOUT)
         return _split_inspected(inspected, data, named, original_name)
     except Exception:
         short = (original_name or "The file").rsplit("/", 1)[-1]
-        return _whole(data, named or classify_content(data) or ["other"],
-                      f"{short} could not be split into its documents; it was stored whole.")
+        whole = _whole(data, named or classify_content(data) or ["other"],
+                       f"{short} could not be split into its documents; it was stored whole.")
+        whole.failed = True
+        return whole
 
 
 def _content_kinds(inspected) -> dict:
@@ -937,6 +945,7 @@ def _content_kinds(inspected) -> dict:
 
 def _split_inspected(inspected, data: bytes, named: list[str], original_name: str) -> SplitResult:
     result = _split_pieces(inspected, data, named, original_name)
+    result.cut_short = any(page.status == "unread" and getattr(page, "method", None) == "not_processed" for page in inspected.pages)
     # Pages the reader ran out of time for were filed with the left-over pages (Other); say so, so they get a look.
     unread = [page.page_number for page in inspected.pages if page.status == "unread"]
     if unread:

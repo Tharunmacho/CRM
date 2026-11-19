@@ -714,11 +714,12 @@ def _legible(read: OCRRead) -> bool:
 
 
 def _mrz_pending(text: str) -> bool:
-    """A passport page whose machine-readable zone is not (yet) a valid one: the targeted zone pass still has work to do."""
-    if not text or not (_MRZ_CUE.search(text) or text.count("<") >= 3):
+    """A page that shows the filler of a machine-readable zone ("<" runs, a "P<xxx" start) yet from which no zone could be
+    parsed at all: the targeted zone pass still has work to do. A page that merely says "passport" (a resume line, a visa) or
+    whose zone parsed but fails its check digits is not pending."""
+    if not text or text.count("<") < 3:
         return False
-    state = validators.find_mrz(text)
-    return state is None or not state.valid
+    return validators.find_mrz(text) is None
 
 
 def _ocr_image(image: Image.Image, **kwargs) -> OCRRead:

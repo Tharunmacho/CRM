@@ -154,6 +154,22 @@ def plan_split(slot: str | None, filename: str, data: bytes, content_type: str =
         return None
 
 
+def sort_pages(filename: str, data: bytes, *, document_timeout: float | None = None) -> tuple[SplitPlan | None, bool]:
+    """`plan_split` for a file that is already stored, with the one thing a background re-sort needs to know besides the plan: whether
+    the reading was COMPLETE. Returns (plan or None, complete). `complete` is False when the pages could not all be read in the time
+    given (or the reading failed): the plan, or its absence, is then not final and nothing should be marked as sorted. Never raises.
+    Always a fresh reading of the pages (sideways scans are turned upright by the reader): an old saved reading is never trusted here."""
+    try:
+        if document_timeout:
+            result = bulk.split_by_content(data, "application/pdf", [], filename, document_timeout=document_timeout)
+        else:
+            result = bulk.split_by_content(data, "application/pdf", [], filename)
+        complete = not (getattr(result, "cut_short", False) or getattr(result, "failed", False))
+        return _plan_of(result, None), complete
+    except Exception:
+        return None, False
+
+
 def _read_again(data: bytes, readings, report, saved_kinds):
     """The local reading of `data` without OCR: the one made in this run (`readings`, by SHA-256), else the saved inspection with the
     page kinds saved beside it (`intake_documents.remember_kinds`). None when neither is usable."""
