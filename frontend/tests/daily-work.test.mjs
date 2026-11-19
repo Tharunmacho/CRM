@@ -84,7 +84,8 @@ test('the table has the agreed sheet columns and no Deadline column; the Recruit
   assert.match(screen, /navigate\(applicationFormHref\(row\.candidateId\)\)/)
   assert.match(table, /Open candidate profile/)
   assert.match(table, /Open stage/)
-  assert.match(table, /Add remark/)
+  assert.doesNotMatch(table, /Add remark/, 'no typing in the Remarks cell: it is a dropdown of remark templates')
+  assert.match(table, /Remark for/)
 })
 
 test('the screen has no morning/evening, postponed, quota, goals or hourly checkpoints, and says "recruiters" not "staff"', async () => {
@@ -181,14 +182,8 @@ test('long country names get their short form', () => {
   assert.equal(m.countryShort('Qatar'), 'Qatar')
 })
 
-test('the remark box starts at one line, grows with the text to about four lines and then scrolls inside', () => {
-  assert.deepEqual(m.remarkBox(0), { height: m.REMARK_MIN, scroll: false })
-  assert.deepEqual(m.remarkBox(20), { height: m.REMARK_MIN, scroll: false })
-  assert.deepEqual(m.remarkBox(60.2), { height: 61, scroll: false })
-  assert.deepEqual(m.remarkBox(m.REMARK_MAX), { height: m.REMARK_MAX, scroll: false })
-  assert.deepEqual(m.remarkBox(300), { height: m.REMARK_MAX, scroll: true })
-  assert.deepEqual(m.remarkBox(Number.NaN), { height: m.REMARK_MIN, scroll: false })
-  assert.ok(m.remarkBox(48).height < m.remarkBox(90).height, 'grows with the text and shrinks back when it is deleted')
+test('the free-text remark box is gone from the model (the Remarks cell is a dropdown)', () => {
+  for (const name of ['remarkBox', 'REMARK_MIN', 'REMARK_MAX']) assert.equal(m[name], undefined, name)
 })
 
 test("the Tasks page has one 'Candidates' tab; Follow-up and Travelled are not tabs", () => {
@@ -215,10 +210,12 @@ test('the Tasks page is one list of every recruiter\'s candidates with what happ
   assert.match(daily, /recruiterWork\(/)
   assert.match(daily, /WorkBoard/)
   const table = await code('../src/screens/tasks/task-table.tsx')
-  assert.match(table, /title: 'TODAY'/)
-  assert.match(table, /Called/)
-  assert.match(table, /Stage moved/)
-  assert.match(table, /Remark added/)
+  assert.match(m.TASK_LIST_COLUMNS.map((c) => c.title).join('|'), /TODAY/)
+  assert.match(table, /todayChips\(/)
+  assert.match(table, /Nothing yet/)
+  assert.doesNotMatch(table, /Remark added/, 'a remark is no longer a chip in TODAY')
+  assert.match(await code('../src/features/daily-work/daily-work-model.ts'), /Called/)
+  assert.match(await code('../src/features/daily-work/daily-work-model.ts'), /Stage moved/)
   assert.match(table, /from '\.\/daily-table'/) // the cells are the Tasks cells, not copies
 })
 
@@ -251,4 +248,47 @@ test('rowAction: View once done today, Complete on a placement, Open otherwise',
   assert.equal(m.rowAction(item({ status: 'done', applicationId: 'a1' })), 'View')
   assert.equal(m.rowAction(item({ applicationId: 'a1' })), 'Complete')
   assert.equal(m.rowAction(item()), 'Open')
+})
+
+test('the Tasks table header row is the primary blue of the Complete button, scoped to the Tasks screen (not the Reports tables)', async () => {
+  const css = await read('../src/styles/daily-work.css')
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`)
+    assert.ok(at >= 0, `${selector} rule exists`)
+    return css.slice(at, css.indexOf('}', at))
+  }
+  const head = rule('.dw:not(.dwr) .dw-table thead th') // .dwr is the Reports screen: it keeps its own header
+  assert.match(head, /background: var\(--primary\)/)
+  assert.match(head, /color: var\(--on-primary\)/) // the token the primary button text uses: readable in the light and dark themes
+  assert.match(head, /font-weight: 700/)
+  assert.doesNotMatch(head, /#[0-9a-f]{3,8}\b|rgb\(/i) // no hard-coded blue
+  assert.match(rule('.dw:not(.dwr) .dw-main thead th.is-actions'), /background: var\(--primary\)/) // the sticky actions header stays opaque blue
+  assert.match(rule('.dw:not(.dwr) .dw-table thead th + th'), /border-left-color: color-mix\(in srgb, var\(--on-primary\)/) // a faint divider, no gap lines
+  // the button it matches
+  assert.match(await read('../src/screens/tasks/task-table.tsx'), /variant=\{called \|\| moved \? 'secondary' : 'primary'\}/)
+  // the 48-hour list header is blue too
+  const page = await read('../src/styles/tasks-page.css')
+  assert.match(page, /:root:root \.tk \.tk-table thead th \{ background: var\(--primary\);[^}]*color: var\(--on-primary\)/)
+})
+
+test('the admin Tasks list fits the panel at a 1440px window (no sideways scroll, nothing under the sticky actions column)', async () => {
+  const widths = m.taskColumnsFor(true).map((c) => c.width)
+  assert.equal(widths.length, 10) // S NO, DOC, recruiter, job, client, candidate, stage, today, remarks, actions
+  assert.ok(widths.reduce((a, b) => a + b, 0) <= 1111, `the plan is ${widths.reduce((a, b) => a + b, 0)}px, the panel 1111px`)
+})
+
+test('a placement moved on from stage 2 to 11 today counts as stage moved today (Follow-up rows carry when a stage was last finished)', () => {
+  const zone = 'Asia/Kolkata'
+  const base = { kind: 'stage', status: 'open', waiting: false, completedAt: null, referral: { source: '', label: '', detail: null }, remark: null, stage: 9 }
+  const follow = [
+    { ...base, id: 'f1', applicationId: 'f1', candidateId: 'c1', ownerId: 'u1', stageMovedAt: '2026-11-18T05:00:00Z' },  // moved today (Asia/Kolkata)
+    { ...base, id: 'f2', applicationId: 'f2', candidateId: 'c2', ownerId: 'u1', stageMovedAt: '2026-11-17T05:00:00Z' },  // moved yesterday
+    { ...base, id: 'f3', applicationId: 'f3', candidateId: 'c3', ownerId: 'u1' },                                       // no stage moved at all
+  ]
+  const rows = m.taskRows([], follow, '2026-11-18', zone)
+  assert.deepEqual(Object.fromEntries(rows.map((r) => [r.candidateId, r.today.moved])), { c1: true, c2: false, c3: false })
+  const work = m.recruiterWork(rows).get('u1')
+  assert.equal(work.moved, 1)
+  assert.equal(work.called, 1, 'a stage moved today counts as a call')
+  assert.equal(work.untouched, 2)
 })

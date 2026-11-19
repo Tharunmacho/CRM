@@ -1,0 +1,36 @@
+/* Client tracker (Reports): the filters card, then the sheet's table, aligned like the other report tables. */
+.ct { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; max-width: 100%; }
+.ct > * { min-width: 0; }
+.ct-controls { padding: 18px; display: grid; gap: 12px; }
+.ct-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
+.ct-grid > label { display: grid; gap: 6px; font-size: 12px; color: var(--text-muted); min-width: 0; }
+.ct-grid > label.ct-check { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--text-main); white-space: nowrap; }
+.ct-check input { width: 16px; height: 16px; }
+.ct-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.ct-note { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.ct-note.is-done { color: var(--success-ink); }
+.ct-alert { margin: 0; }
+.ct-loading { margin: 0; font-size: 12px; color: var(--text-muted); }
+.ct-table.is-stale { opacity: 0.6; }
+.ct-scroll { position: relative; min-width: 0; max-width: 100%; overflow-x: auto; }
+.ct-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ct-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ct-table th { text-align: left; color: var(--text-muted); font-size: 11px; font-weight: 600; background: var(--tint-1); white-space: nowrap; }
+.ct-table th, .ct-table td { padding: 12px 12px; border-bottom: 1px solid var(--border-faint); vertical-align: top; }
+.ct-table th.is-num, .ct-table td.is-num { text-align: right; width: 1%; }
+/* Short facts stay on one line (a name or a client may wrap; "Staff Nurse", "Agency 1", "10k collected/50k" and a stage should not); Remarks takes the spare width. */
+.ct-table td:is(:nth-child(3), :nth-child(5), :nth-child(6), :nth-child(7), :nth-child(8)) { white-space: nowrap; }
+.ct-table td:nth-child(2) { min-width: 120px; }
+.ct-table td:nth-child(4) { min-width: 130px; }
+.ct-table td.is-remarks { min-width: 180px; }
+.ct-table tr.is-first-of-client td { border-top: 2px solid var(--border-main); }
+.ct-table footer { padding: 14px 18px; color: var(--text-muted); font-size: 12px; }
+@media (max-width: 900px) { .ct-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ct-actions { justify-content: flex-start; } }
+@media (max-width: 700px) {
+  .ct-controls { padding: 14px; }
+  .ct-grid { grid-template-columns: minmax(0, 1fr); }
+  .ct-controls :is(.ui-input:not(textarea), .custom-select-trigger) { min-height: 44px; }
+  .ct-scroll { overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+  .ct-table table { white-space: nowrap; }
+  .ct-table td.is-remarks, .ct-table td:is(:nth-child(2), :nth-child(4)) { white-space: normal; }
+}

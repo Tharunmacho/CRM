@@ -47,13 +47,14 @@ export const SHOW_LEGACY_REPORTS = false
 export const SHOW_ACCOUNTS_TAB = false
 
 /** The tabs of the Reports page. `legacy` exists only while SHOW_LEGACY_REPORTS is on; `accounts` is the admin's alone. */
-export type PageTab = 'daily' | 'lead' | 'stages' | 'accounts' | 'legacy'
+export type PageTab = 'daily' | 'lead' | 'stages' | 'tracker' | 'accounts' | 'legacy'
 /** The reports inside Accounts. */
 export const ACCOUNT_TABS: readonly ReportKey[] = ['collections', 'advance']
 
 export function pageTabs(accounts: boolean, legacy: boolean = SHOW_LEGACY_REPORTS, showAccounts: boolean = SHOW_ACCOUNTS_TAB): { key: PageTab; label: string }[] {
   return [
     { key: 'daily', label: 'Daily report' }, { key: 'lead', label: 'Lead sheet monitoring' }, { key: 'stages', label: 'Candidate monitoring' },
+    { key: 'tracker', label: 'Client tracker' },
     ...(accounts && showAccounts ? [{ key: 'accounts' as const, label: 'Accounts' }] : []),
     ...(legacy ? [{ key: 'legacy' as const, label: 'Legacy' }] : []),
   ]
@@ -65,7 +66,7 @@ export function pageTabs(accounts: boolean, legacy: boolean = SHOW_LEGACY_REPORT
  */
 export function pageTabFromParams(params: URLSearchParams, accounts: boolean, legacy: boolean = SHOW_LEGACY_REPORTS): PageTab {
   const tab = params.get('tab')
-  if (tab === 'lead' || tab === 'stages') return tab
+  if (tab === 'lead' || tab === 'stages' || tab === 'tracker') return tab
   if (tab === 'accounts' || tab === 'collections' || tab === 'advance') return accounts ? 'accounts' : 'daily'
   if (legacy && (isReportTab(tab) || (tab == null && params.get('staff')))) return 'legacy'
   return 'daily'

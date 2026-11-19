@@ -1,0 +1,250 @@
+/*
+ * Application form, one section at a time. The page used to be one very long column; it is now a sticky tab bar (Overview, Personal,
+ * Passport, Education, Experience, Documents, Invoice, Notes) over ONE visible section, so everything a recruiter needs is a click
+ * away on the same page. This file is loaded after the other application-form files and every rule starts with .af, so it wins
+ * over them whichever order the browser applies. Spacing keeps the page's 4 / 8 / 12 / 16 / 24 / 32 scale; brand blue is the only
+ * accent, amber means "still to add". The screen is print-free: the paper form prints from its own sheet.
+ *
+ *  - Wide screens (1360px and up): Personal beside Passport, Education over Experience, so the first screen holds both.
+ *  - Fields: Personal is the photo and three columns of fields; Passport four across (two when it sits beside Personal); a card
+ *    follows its OWN width (container `affc`), so the same markup is right at 1440, 1024 and 390.
+ *  - Qualifications and employers are table rows on one line (a wide card), mini-cards with a label on every box (a narrow one).
+ *  - Documents are four small groups of compact cards: name, status chip, one action.
+ */
+
+.af .af-pane[hidden], .af .aff .aff-card[hidden] { display: none; }
+
+/* ------------------------------------------------------------ Layout: the rail and the main column */
+@media (min-width: 1191px) {
+  .af .af-layout { max-width: 1680px; grid-template-columns: 264px minmax(0, 1fr); column-gap: 20px; padding: 12px 20px 40px; }
+  .af .af-side { top: 12px; gap: 12px; max-height: calc(100dvh - 64px - 24px); }
+  .af .af-missing-toggle { display: none; }
+}
+.af .af-main { gap: 12px; }
+
+/* The completeness card is smaller: the ring is 64px, the list under it is shorter. */
+.af .af-ring { width: 64px; height: 64px; }
+.af .af-ring-label { font-size: 16px; }
+.af .af-card.af-complete { padding: 14px; gap: 10px; }
+.af .af-complete-main { gap: 12px; }
+.af .af-complete-docs { gap: 6px; padding-top: 10px; }
+.af .af-missing li { min-height: 40px; padding: 6px 0; gap: 8px; }
+.af .af-missing.has-action li { grid-template-columns: 16px minmax(0, 1fr) 84px; }
+.af .af-missing button { height: 28px; }
+.af .af-card.af-missing-card { padding: 12px 14px; }
+.af .af-side-h { margin-bottom: 4px; }
+
+.af .af-missing-toggle {
+  display: none; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 36px; padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--warning-ink) 30%, var(--af-line)); border-radius: 10px; background: var(--warning-fill); color: var(--warning-ink);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.af .af-missing-toggle svg { width: 16px; height: 16px; transition: transform .14s; }
+.af .af-missing-toggle[aria-expanded='true'] svg { transform: rotate(180deg); }
+.af .af-missing-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Narrow: the rail becomes one slim bar above the form; the missing list opens from its button. */
+@media (max-width: 1190px) {
+  .af .af-layout { grid-template-columns: minmax(0, 1fr); max-width: 1100px; padding: 10px 16px 40px; row-gap: 10px; }
+  .af .af-side { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  .af .af-card.af-complete { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 10px 14px; }
+  .af .af-ring { width: 44px; height: 44px; }
+  .af .af-ring-label { font-size: 12px; }
+  .af .af-ring circle { stroke-width: 9; }
+  .af .af-complete-main { flex: 1 1 220px; }
+  .af .af-complete-docs { flex: 1 1 200px; flex-direction: column; border-top: 0; padding-top: 0; }
+  .af .af-missing-toggle { display: inline-flex; flex: 0 0 auto; width: auto; min-width: 150px; }
+  .af .af-missing-card { display: none; }
+  .af .af-missing-card.is-open { display: block; }
+  .af .af-missing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Phone: the bar is one short row (ring, words, a "7 still missing" button); the documents count lives on the Documents tab. */
+@media (max-width: 760px) {
+  .af .af-layout { padding: 8px 12px 40px; }
+  .af .af-missing { grid-template-columns: minmax(0, 1fr); }
+  .af .af-card.af-complete { flex-wrap: nowrap; gap: 10px; padding: 8px 12px; }
+  .af .af-complete-main { flex: 1 1 auto; gap: 10px; }
+  .af .af-complete-title { font-size: 14px; line-height: 18px; }
+  .af .af-card.af-complete:has(.af-missing-toggle) .af-complete-sub { display: none; }
+  .af .af-complete-docs { display: none; }
+  .af .af-missing-toggle { flex: 0 0 auto; width: auto; min-width: 0; height: 36px; }
+}
+
+/* ------------------------------------------------------------ The line that is always there, and the tab bar */
+.af .af-context { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 36px; padding: 0 4px; font-size: 13px; color: var(--text-muted); }
+.af .af-context > svg { flex: none; width: 16px; height: 16px; color: var(--primary); }
+.af .af-context dl { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 2px 20px; min-width: 0; margin: 0; }
+.af .af-context dl > div { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.af .af-context dt { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12px; font-weight: 500; color: var(--text-light); }
+.af .af-context dt svg { width: 12px; height: 12px; }
+.af .af-context dd { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-main); }
+.af .af-context dd small { font-size: 11.5px; font-weight: 500; color: var(--text-muted); }
+.af .af-context-empty { flex: 1 1 auto; min-width: 0; }
+.af .af-context > button { flex: none; height: 28px; padding: 0 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.af .af-context > button:hover { border-color: var(--primary); background: var(--tint-1); }
+.af .af-context > button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Sticky inside the page's own scroll area, so the sections are always one click away and the page never jumps. */
+.af .af-tabs { position: sticky; top: 0; z-index: 6; margin: -4px -4px 0; padding: 4px 4px 8px; background: var(--af-desk); }
+.af .af-tablist { display: flex; gap: 2px; padding: 4px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; background: var(--bg-card); border: 1px solid var(--af-line); border-radius: 12px; box-shadow: var(--af-shadow); }
+.af .af-tablist::-webkit-scrollbar { display: none; }
+.af .af-tab {
+  position: relative; display: inline-flex; flex: none; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text-muted); font: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background-color .14s, color .14s;
+}
+.af .af-tab:hover { background: var(--tint-2); color: var(--text-main); }
+.af .af-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.af .af-tab[aria-selected='true'] { background: color-mix(in srgb, var(--primary) 11%, var(--bg-card)); color: var(--primary-deep); }
+[data-theme='dark'] .af .af-tab[aria-selected='true'] { color: var(--primary); }
+/* A tab whose section is on screen next to the chosen one (a wide screen shows Personal with Passport). */
+.af .af-tab.is-shown:not([aria-selected='true'])::after { content: ''; position: absolute; left: 14px; right: 14px; bottom: 3px; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--primary) 40%, transparent); }
+.af .af-tab-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--warning-edge); background: var(--warning-fill); color: var(--warning-ink); font-size: 11.5px; font-weight: 700; line-height: 1; }
+.af .af-tab-count.is-plain { background: var(--tint-2); border-color: var(--border-main); color: var(--text-muted); }
+.af .af-tab-count.is-over { background: var(--error-fill); border-color: var(--error-edge); color: var(--error-ink); }
+.af .af-scroll { scroll-padding-top: 72px; }
+
+@media (max-width: 760px) {
+  .af .af-context { flex-wrap: wrap; }
+  .af .af-context dl { gap: 2px 14px; }
+  .af .af-tab { height: 40px; padding: 0 12px; }
+}
+
+/* ------------------------------------------------------------ Panels: one white card each */
+.af .af-pane.af-work { padding: 20px 24px; }
+.af .af-pane > .af-sec { padding: 0; border-top: 0; }
+.af .af-pane > .af-invoice { padding: 0; border-top: 0; }
+.af .af-pane .af-record-downloads { margin-top: 20px; padding: 16px 0 0; border-top: 1px solid var(--af-line); }
+.af .af-pane .af-record-downloads p { margin-top: 2px; line-height: 1.5; }
+.af .af-pane .af-sh { margin-bottom: 14px; padding-bottom: 12px; min-height: 36px; }
+.af .af-pane .af-notes .af-sh { margin-bottom: 0; }
+.af .af-assign-card > .af-assign { padding: 16px 24px 20px; gap: 14px 16px; }
+.af .af-assign-card > .af-sh { min-height: 48px; padding: 8px 24px; }
+.af .af-stage-workbench { padding: 16px 0 20px; }
+@media (max-width: 760px) {
+  .af .af-pane.af-work { padding: 16px; }
+  .af .af-assign-card > .af-assign { padding: 14px 16px 16px; }
+  .af .af-assign-card > .af-sh { padding: 8px 16px; }
+}
+
+/* ------------------------------------------------------------ Details: dense, aligned sections */
+.af .aff { max-width: none; }
+.af .aff .aff-stack { gap: 0; }
+.af .aff .aff-card { container: affc / inline-size; padding: 0; border-top: 0; }
+.af .aff .aff-card-head { gap: 10px; min-height: 36px; margin-bottom: 14px; padding-bottom: 10px; }
+.af .aff .aff-tile { width: 28px; height: 28px; border-radius: 8px; }
+.af .aff .aff-tile svg { width: 15px; height: 15px; }
+.af .aff .aff-card-title h2 { font-size: 15px; line-height: 22px; }
+.af .aff .aff-card-body > * + * { margin-top: 16px; }
+.af .aff .aff-grid { gap: 14px 16px; }
+/* A second visible section sits under the first with a hairline between them. */
+.af .aff .aff-stack:not(.is-pair) > .aff-card:not([hidden]) ~ .aff-card:not([hidden]) { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--af-line); }
+
+/* Personal beside Passport: the photo and three columns of fields (languages and the mobile number share the third row) on the left, two across on the right (a fixed 400px, so its fields never get narrower than 160px). */
+.af .aff .aff-stack.is-pair { display: grid; grid-template-columns: minmax(0, 1fr) 400px; align-items: start; }
+.af .aff .aff-stack.is-pair > .aff-card { padding-right: 28px; }
+.af .aff .aff-stack.is-pair > .aff-card ~ .aff-card { padding: 0 0 0 28px; border-left: 1px solid var(--af-line); }
+
+@media (min-width: 768px) {
+  .af .aff :is(.ui-input:not(textarea), .custom-select-trigger, .date-picker-trigger) { height: 40px; min-height: 40px; }
+  .af .aff .ac-tags { min-height: 40px; padding-block: 4px; }
+  .af .aff textarea.ui-input { min-height: 64px; }
+}
+.af .aff .aff-lab, .af .aff .ac-lab { margin-bottom: 6px; }
+
+/* A card follows its own width: the same markup serves Personal beside Passport and a phone. */
+@container affc (min-width: 560px) {
+  .af .aff .aff-grid:has(> .aff-photo) { grid-template-columns: 112px repeat(3, minmax(0, 1fr)); }
+  .af .aff .aff-grid:has(> .aff-photo) > * { grid-column: auto; }
+  .af .aff .aff-grid:has(> .aff-photo) > .aff-photo { grid-column: 1; grid-row: 1 / span 2; align-items: stretch; gap: 8px; }
+  .af .aff .aff-grid:has(> .aff-photo) > [data-field='personal.languagesKnown'] { grid-column: 1 / span 2; }
+  .af .aff .aff-grid:has(> .aff-photo) > [data-field='personal.mobileNumber'] { grid-column: 3 / span 2; }
+  .af .aff .aff-grid:has(> .aff-photo) > [data-field='personal.currentAddress'] { grid-column: 1 / -1; }
+  .af .aff .aff-photo-frame, .af .aff .aff-photo-btn { width: 100%; }
+  .af .aff .aff-photo-btn { height: 32px; font-size: 12.5px; }
+}
+@container affc (max-width: 559px) {
+  .af .aff .aff-grid > *, .af .aff .aff-grid > .aff-photo { grid-column: span var(--span-md, 6); }
+  .af .aff .aff-grid > .aff-photo { grid-column: 1 / -1; grid-row: auto; }
+}
+/* Even a phone keeps short fields two across (the name, languages, mobile number and address take the whole row). */
+@container affc (max-width: 559px) {
+  .af .aff .aff-grid > :is([data-field='personal.candidateName'], [data-field='personal.languagesKnown'], [data-field='personal.mobileNumber'], [data-field='personal.currentAddress']) { grid-column: 1 / -1; }
+}
+@container affc (max-width: 299px) {
+  .af .aff .aff-grid > *, .af .aff .aff-grid > .aff-photo { grid-column: 1 / -1; }
+}
+
+/* The passport card: the upload strip is one tidy line. */
+.af .aff .aff-passport-upload { gap: 8px 10px; }
+.af .aff .aff-passport-upload > .aff-small-btn { margin-left: 0; }
+
+/* ------------------------------------------------------------ Education and experience: table rows */
+.af .aff .aff-rows { gap: 10px; }
+.af .aff .aff-row-list { gap: 10px; }
+.af .aff .aff-row { padding: 12px; }
+.af .aff .aff-row-head { min-height: 28px; margin-bottom: 8px; }
+.af .aff .aff-table-head { display: none; }
+.af .aff .aff-add { height: 38px; }
+.af .aff .aff-rows-empty { padding: 16px; }
+
+.af .aff .aff-rows[data-kind='education'] { --aff-mid: minmax(120px, 1.1fr) 76px minmax(0, 1.5fr) minmax(0, 1.5fr); }
+.af .aff .aff-rows[data-kind='experience'] { --aff-mid: minmax(0, 1.5fr) minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr); }
+.af .aff .aff-rows[data-editable='true'] { --aff-cols: 28px var(--aff-mid) 100px; }
+.af .aff .aff-rows[data-editable='false'] { --aff-cols: 28px var(--aff-mid); }
+
+@container affc (min-width: 700px) {
+  .af .aff .aff-row-list { gap: 0; border: 1px solid var(--af-line); border-radius: 12px; overflow: hidden; }
+  .af .aff .aff-table-head { display: grid; grid-template-columns: var(--aff-cols); column-gap: 12px; padding: 8px 12px; background: var(--tint-1); border-bottom: 1px solid var(--af-line); font-size: 12px; font-weight: 600; line-height: 16px; color: var(--text-muted); }
+  .af .aff .aff-table-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .af .aff .aff-row { display: grid; grid-template-columns: var(--aff-cols); column-gap: 12px; align-items: start; padding: 8px 12px; border: 0; border-top: 1px solid var(--border-faint); border-radius: 0; background: var(--bg-card); }
+  .af .aff .aff-table-head + .aff-row { border-top: 0; }
+  .af .aff .aff-row:hover { background: var(--tint-1); }
+  .af .aff .aff-row-head, .af .aff .aff-row .aff-grid { display: contents; }
+  .af .aff .aff-row .aff-grid > * { grid-column: auto; }
+  .af .aff .aff-row-no { display: grid; place-items: center; width: 24px; height: 24px; margin-top: 8px; border-radius: 50%; background: var(--tint-2); font-size: 12px; font-weight: 700; color: var(--text-muted); }
+  .af .aff .aff-row-noun { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .af .aff .aff-row-ctl { order: 3; justify-self: end; align-self: start; margin-top: 4px; }
+  .af .aff .aff-row .aff-lab { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .af .aff .aff-row .aff-value { min-height: 40px; }
+  .af .aff .aff-row .aff-field { position: relative; }
+  .af .aff .aff-row .aff-note { margin-top: 2px; }
+}
+
+/* ------------------------------------------------------------ Documents: groups of compact cards */
+.af .af-docs-card { padding: 0; }
+.af .af-docgroups { display: flex; flex-direction: column; gap: 18px; }
+.af .af-docgroup h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+.af .af-docgroup h3 small { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-light); }
+.af .af-docgroup .af-doclist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 10px; align-items: start; border: 0; border-radius: 0; overflow: visible; }
+.af .af-docgroup .af-docrow {
+  grid-template-columns: 24px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 6px; align-items: center; align-content: start; min-height: 0;
+  padding: 10px 12px; border: 1px solid var(--af-line); border-radius: 12px;
+}
+.af .af-docgroup .af-docrow:first-child { border-top: 1px solid var(--af-line); }
+.af .af-docgroup .af-docrow.is-pending { border-color: color-mix(in srgb, var(--warning-ink) 22%, var(--af-line)); }
+.af .af-docgroup .af-docrow-icon { width: 24px; height: 24px; }
+.af .af-docgroup .af-docrow-icon svg { width: 14px; height: 14px; }
+.af .af-docgroup .af-docrow-name { font-size: 13.5px; line-height: 18px; white-space: normal; overflow-wrap: anywhere; }
+.af .af-docgroup .af-doc-chip { height: 22px; font-size: 11.5px; }
+.af .af-docgroup .af-docrow-file, .af .af-docgroup .af-docrow.has-files .af-docrow-file { grid-column: 1 / -1; }
+.af .af-docgroup .af-docrow-file:empty { display: none; }
+.af .af-docgroup .af-docrow-actions { grid-column: 1 / -1; justify-content: flex-start; gap: 6px; min-height: 0; }
+.af .af-docgroup .af-docrow-actions > .af-docbtn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.af .af-docgroup .af-docfile { flex-wrap: wrap; gap: 6px; }
+.af .af-docgroup .af-docfile-copy { flex: 1 1 100%; }
+.af .af-docgroup .af-docfile-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 0; }
+.af .af-docgroup .af-docfile-actions > :last-child { width: auto; }
+.af .af-docgroup .af-docfile-actions .af-docbtn { height: 30px; }
+.af .af-docgroup .af-docfile-actions .af-docbtn.is-icon { width: 30px; }
+/* A card with a reading note, a failure box or several files takes the whole row, so those messages keep their room. */
+.af .af-docgroup .af-docrow:is(.is-multi-file.has-files, :has(.af-extract-line, .af-extract, .af-doc-manual, .document-upload-queue)) { grid-column: 1 / -1; }
+@media (max-width: 760px) {
+  .af .af-docgroups { gap: 14px; }
+  .af .af-docgroup .af-doclist { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .af .af-docgroup .af-docrow { padding: 8px 10px; row-gap: 4px; }
+  .af .af-docgroup .af-docrow { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .af .af-docgroup .af-docrow-file, .af .af-docgroup .af-docrow-actions, .af .af-docgroup .af-docrow.has-files .af-docrow-file { grid-column: 1 / -1; }
+  .af .af-docgroup .af-docrow.is-multi-file .af-docrow-actions, .af .af-docgroup .af-docrow.is-multi-file .af-docrow-file { grid-row: auto; }
+  .af .af-docgroup .af-docfile-actions { grid-template-columns: none; }
+}
+.af .af-docs-card > .af-sh { min-height: 36px; }

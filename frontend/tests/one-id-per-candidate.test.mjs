@@ -60,7 +60,7 @@ test('the Travelled row shows only the Traveller ID plus the passport number as 
   const source = await read('../src/screens/travelled/travelled.tsx')
   const row = source.slice(source.indexOf('function TravelTable'))
   assert.match(row, /<TravellerIdChip candidate=\{row\} \/>/)
-  assert.match(row, /Passport \{row\.passportNumber\}/)
+  assert.doesNotMatch(row, /passportNumber|row\.airline|row\.pnr|Passport |PNR |Flight/)   // the table shows no passport or flight
   assert.doesNotMatch(row, /primaryId|careIdOf|row\.careId|row\.ref\b|Care India ID/)
 })
 

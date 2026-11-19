@@ -55,7 +55,7 @@ export function FillRows<T extends { rowId: string }>({ kind, dataField, rows, c
 }) {
   const shown = canWork ? rows : rows.filter((row) => !isBlankRow(row))
   return (
-    <div className="aff-rows" data-field={dataField} data-kind={kind}>
+    <div className="aff-rows" data-field={dataField} data-kind={kind} data-editable={canWork ? 'true' : 'false'}>
       {chip && <div className="aff-rows-bar"><SourceBadge kind={chip} /></div>}
       {shown.length === 0 ? (
         <div className="aff-rows-empty">
@@ -64,13 +64,15 @@ export function FillRows<T extends { rowId: string }>({ kind, dataField, rows, c
         </div>
       ) : (
         <ol className="aff-row-list">
+          {/* The column titles of the table layout (a wide screen); on a narrow one every box carries its own label instead. */}
+          <li className="aff-table-head" aria-hidden="true"><span />{columns.map((column) => <span key={column.key}>{column.label}</span>)}{canWork && <span />}</li>
           {shown.map((row, index) => {
             const at = rows.indexOf(row)
             const noun = copy.noun.toLowerCase()
             return (
               <li className="aff-row" key={row.rowId}>
                 <div className="aff-row-head">
-                  <span className="aff-row-no">{copy.noun} {index + 1}</span>
+                  <span className="aff-row-no"><span className="aff-row-noun">{copy.noun} </span>{index + 1}</span>
                   {canWork && (
                     <div className="aff-row-ctl">
                       <IconButton label={`Move ${noun} ${index + 1} up`} disabled={at === 0} onClick={() => onMove(row.rowId, -1)}><ArrowUp className="h-4 w-4" /></IconButton>

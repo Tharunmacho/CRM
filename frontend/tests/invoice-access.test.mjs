@@ -30,7 +30,10 @@ test('only the admin holds the view_invoices capability', async () => {
 
 test('the application form renders the Invoice card (fee, CGST/SGST, payments, PDF) only behind view_invoices', async () => {
   const form = await read('screens/candidates/application-form.tsx')
-  assert.match(form, /store\.can\('view_invoices'\) && <InvoiceCard /)
+  // The Invoice tab and its panel both hang on the one capability check.
+  assert.match(form, /const canSeeInvoice = store\.can\('view_invoices'\)/)
+  assert.match(form, /availableTabs\(\{ invoice: canSeeInvoice,/)
+  assert.match(form, /\{canSeeInvoice && \(\s*<div[^>]*id="af-pane-invoice"[^>]*>\s*<InvoiceCard /)
   assert.equal([...form.matchAll(/<InvoiceCard/g)].length, 1)
 })
 

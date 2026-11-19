@@ -1,14 +1,14 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, Plane, Repeat2, UserCheck, Users } from 'lucide-react'
+import { ArrowUpRight, Building2, BriefcaseBusiness, Database, ListChecks, Mail, Plane, UserCheck, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { useReportData } from '@/features/reports/report-api'
 import type { LeadSummaryResponse } from '@/features/leads/lead-api'
+import { DashboardTrackerCard } from '@/features/reports/dashboard-tracker-card'
 import { DashboardGraphs } from '@/features/dashboard/components/source-graph'
 import { candidatesAfterPrescreening, inView } from '@/features/dashboard/summary'
 import { inboxCard, type InboxCardData } from '@/features/dashboard/inbox-card'
-import { useFollowUp } from '@/features/daily-work/use-daily-work'
 import { useTravelled } from '@/features/travelled/travelled-api'
 import { EMPTY_FILTERS } from '@/features/travelled/travelled-model'
 import '@/styles/dashboard-simple.css'
@@ -41,10 +41,8 @@ export default function DashboardPage() {
     return { open: rows.length, overdue: rows.filter(task => task.dueAt && Date.parse(task.dueAt) < now).length }
   }, [store.visibleTasks])
   const leadTotal = leads.data ? leads.data.total : null
-  // Follow-up: selected candidates still moving through stages 2 to 11. Travelled: everyone who has been deployed. Same numbers as their screens.
-  const followUp = useFollowUp({ staff: isTeam ? 'all' : undefined, debounceMs: 4000 })
+  // Travelled: everyone who has been deployed. Same number as its screen (Follow-up has no card: it is part of Tasks).
   const travelled = useTravelled(EMPTY_FILTERS, store.me.id)
-  const followUpTotal = followUp.data ? followUp.data.summary.total : null
   const travelledTotal = travelled.data ? travelled.data.total : null
 
   const cards: Card[] = [
@@ -55,7 +53,6 @@ export default function DashboardPage() {
     { key: 'leads', label: 'Lead sheet', value: leadTotal, note: `${noun(leadTotal, 'lead', 'leads')} on the sheet`, icon: Users, tone: 'teal', to: '/leads' },
     { key: 'databank', label: 'Data Bank', value: candidates.length, note: `${noun(candidates.length, 'resume', 'resumes')} stored`, icon: Database, tone: 'slate', to: '/data-bank' },
     { key: 'tasks', label: 'Tasks', value: open, note: overdue > 0 ? `${count(overdue)} overdue` : 'open, none overdue', danger: overdue > 0, icon: ListChecks, tone: 'red', to: '/tasks' },
-    { key: 'followup', label: 'Follow up', value: followUpTotal, note: followUpTotal === null ? 'loading' : 'selected, still moving', icon: Repeat2, tone: 'amber', to: '/tasks?view=follow-up' },
     { key: 'travelled', label: 'Travelled', value: travelledTotal, note: travelledTotal === null ? 'loading' : `${noun(travelledTotal, 'candidate', 'candidates')} deployed`, icon: Plane, tone: 'green', to: '/travelled' },
   ]
 
@@ -72,6 +69,8 @@ export default function DashboardPage() {
       <span className={`ds-note${card.danger ? ' is-danger' : ''}`}>{card.note}</span>
       {card.detail && <span className="ds-note ds-note2">{card.detail}</span>}
     </button>)}</div>
+    {/* Reports is open to every role, so the card is too; the server narrows the rows to what the viewer may see. */}
+    <DashboardTrackerCard />
     <DashboardGraphs candidates={candidates} anchor={leads.data ? String(leads.data.total) : ''} onOpen={() => navigate('/data-bank')} />
   </div>
 }

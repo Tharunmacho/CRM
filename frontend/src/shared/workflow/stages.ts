@@ -463,7 +463,19 @@ export const STAGES: StageDef[] = [
     summary: 'Collect the agreed advance and file the receipt.',
     closer: false,
     fields: [
-      { name: 'collected', required: true, label: 'Advance collected', type: 'radio', options: YES_NO },
+      // The client's tracker sheet reads the advance as 'collected / total' or 'pending / total', so the stage keeps exactly that:
+      // the status, the amount (collected, or expected while pending) and the optional total service charge, in one currency.
+      // The server keeps the older `collected` yes/no in step with the status.
+      {
+        name: 'advanceStatus',
+        required: true,
+        label: 'Advance status',
+        type: 'radio',
+        options: [
+          { value: 'collected', label: 'Collected' },
+          { value: 'pending', label: 'Pending' },
+        ],
+      },
       {
         name: 'amount',
         required: true,
@@ -471,7 +483,15 @@ export const STAGES: StageDef[] = [
         type: 'number',
         width: 'half',
         placeholder: '0',
-        showWhen: { field: 'collected', in: ['yes'] },
+        showWhen: { field: 'advanceStatus', in: ['collected', 'pending'] },
+      },
+      {
+        name: 'serviceChargeTotal',
+        label: 'Total service charge (optional)',
+        type: 'number',
+        width: 'half',
+        placeholder: '0',
+        showWhen: { field: 'advanceStatus', in: ['collected', 'pending'] },
       },
       {
         // The advance is collected from the candidate in India while the salary is
@@ -480,7 +500,7 @@ export const STAGES: StageDef[] = [
         label: 'Currency',
         type: 'select',
         width: 'half',
-        showWhen: { field: 'collected', in: ['yes'] },
+        showWhen: { field: 'advanceStatus', in: ['collected', 'pending'] },
         optionsSource: 'currencies',
       },
       {
@@ -488,14 +508,14 @@ export const STAGES: StageDef[] = [
         label: 'Date',
         type: 'date',
         width: 'half',
-        showWhen: { field: 'collected', in: ['yes'] },
+        showWhen: { field: 'advanceStatus', in: ['collected'] },
       },
       {
         name: 'mode',
         label: 'Payment mode',
         type: 'select',
         width: 'half',
-        showWhen: { field: 'collected', in: ['yes'] },
+        showWhen: { field: 'advanceStatus', in: ['collected'] },
         options: [
           { value: 'cash', label: 'Cash' },
           { value: 'bank', label: 'Bank transfer' },
@@ -509,18 +529,20 @@ export const STAGES: StageDef[] = [
         type: 'text',
         width: 'half',
         ident: true,
-        showWhen: { field: 'collected', in: ['yes'] },
+        showWhen: { field: 'advanceStatus', in: ['collected'] },
       },
       {
         name: 'receipt',
         required: true,
         label: 'Receipt',
         type: 'file',
-        showWhen: { field: 'collected', in: ['yes'] },
+        showWhen: { field: 'advanceStatus', in: ['collected'] },
       },
     ],
     evaluate: (d) => {
-      return manual(d.collected === 'yes' ? 'Collected' : undefined)
+      // Nothing is required beyond the feedback: a Pending advance is recorded and the candidate moves on (mirrors _stage8).
+      if (d.advanceStatus === 'pending') return manual('Advance pending')
+      return manual(d.advanceStatus === 'collected' || d.collected === 'yes' ? 'Collected' : undefined)
     },
   },
   {
@@ -643,6 +665,7 @@ for (const definition of STAGES) {
       if (field.type === 'checkbox' && typeof value !== 'boolean') invalid.push(`${field.label}: choose yes or no`)
       if (field.type === 'number' && (typeof value === 'boolean' || !Number.isFinite(Number(value)) || Number(value) <= 0 || Number(value) >= 10_000_000_000 || Math.abs(Number(value) * 100 - Math.round(Number(value) * 100)) > 0.000001)) invalid.push(`${field.label}: enter a positive amount with at most two decimal places`)
     }
+    if (definition.no === 8 && data.serviceChargeTotal != null && data.serviceChargeTotal !== '' && data.amount != null && data.amount !== '' && Number(data.amount) > Number(data.serviceChargeTotal)) invalid.push('Total service charge cannot be less than the advance')
     if (definition.no === 6 && data.result === 'unfit' && data.reapplying === 'yes' && data.retestDate && data.appliedDate && data.retestDate < data.appliedDate) invalid.push('New medical date must be on or after the previous medical date')
     if (!invalid.length && data.stop != null && data.stop !== '') {
       const exit = stopExits(definition.no).find((item) => item.value === data.stop)

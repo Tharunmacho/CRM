@@ -59,7 +59,10 @@
 
 /* The list */
 .tv-table-wrap { overflow-x: auto; }
-.tv-table { width: 100%; min-width: 960px; border-collapse: collapse; font-size: 13.5px; }
+.tv-table { width: 100%; min-width: 820px; table-layout: fixed; border-collapse: collapse; font-size: 13.5px; }
+.tv-c-date { width: 12%; } .tv-c-who { width: 20%; } .tv-c-client { width: 15%; } .tv-c-country { width: 9%; }
+.tv-c-job { width: 14%; } .tv-c-agency { width: 12%; } .tv-c-docs { width: 10%; } .tv-c-recruiter { width: 8%; }
+.tv-table td { overflow-wrap: anywhere; }
 .tv-table th { padding: 12px 14px; border-bottom: 1px solid var(--border-main); background: var(--tint-2); text-align: left; font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
 .tv-table td { padding: 12px 14px; border-bottom: 1px solid var(--border-main); vertical-align: top; color: var(--text-main); }
 .tv-table tbody tr:last-child td { border-bottom: 0; }
@@ -93,7 +96,8 @@
   .tv-search-row .tv-search { flex-basis: 100%; }
   .tv-chips { padding: 10px 16px 14px; }
   .tv-breakdowns { grid-template-columns: minmax(0, 1fr); }
-  .tv-table { min-width: 0; }
+  .tv-table { min-width: 0; table-layout: auto; }
+  .tv-table colgroup { display: none; }
   .tv-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .tv-table, .tv-table tbody, .tv-table tr, .tv-table td { display: block; }
   .tv-table tr { padding: 10px 14px; border-bottom: 1px solid var(--border-main); }

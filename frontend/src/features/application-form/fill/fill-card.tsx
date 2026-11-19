@@ -9,7 +9,7 @@ import { toAddText } from './fill-fields'
  * this same component for the sections it renders itself (Documents, Recruitment process tracking, the assignment card).
  * `missing` is the number of items the section still needs; `counts` says whether it has required items at all.
  */
-export function FillCardShell({ no, icon: Icon, title, hint, missing, counts, aside, children }: {
+export function FillCardShell({ no, icon: Icon, title, hint, missing, counts, aside, hidden, children }: {
   /** Only for the element id `af-fill-section-<no>` (the paper form's section number); it is not shown. */
   no: number
   /** A lucide icon component (UserRound, IdCard, GraduationCap, BriefcaseBusiness, FolderOpen ...). */
@@ -20,11 +20,13 @@ export function FillCardShell({ no, icon: Icon, title, hint, missing, counts, as
   counts: boolean
   /** Chips and buttons in the header, left of the count (the passport upload, the expiry status). */
   aside?: ReactNode
+  /** Not on screen right now (another section is chosen); it stays mounted so nothing typed is lost. */
+  hidden?: boolean
   children: ReactNode
 }) {
   const toAdd = toAddText(missing)
   return (
-    <section className="aff-card" id={`af-fill-section-${no}`} aria-labelledby={`af-fill-title-${no}`}>
+    <section className="aff-card" id={`af-fill-section-${no}`} aria-labelledby={`af-fill-title-${no}`} hidden={hidden}>
       <header className="aff-card-head">
         <span className="aff-tile" aria-hidden="true"><Icon /></span>
         <div className="aff-card-title">

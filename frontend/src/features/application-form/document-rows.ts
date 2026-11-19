@@ -59,3 +59,40 @@ export function documentRowStates(
       state: documentRowState({ entry: documentSlot(slot.slot) ?? { always: slot.required, fromStage: slot.requiredFromStage }, hasFile: slot.uploaded, canWork }),
     }))
 }
+
+/* ------------------------------------------------------------------ The groups of the Documents grid */
+
+export type DocumentGroupKey = 'identity' | 'process' | 'certificates' | 'other'
+
+/** Which group each document sits in on the page: who the candidate is, the process papers, the certificates, and everything else. */
+const DOCUMENT_GROUPS: { key: DocumentGroupKey; label: string; kinds: string[] }[] = [
+  { key: 'identity', label: 'Identity', kinds: ['resume', 'passport', 'aadhaar', 'photo'] },
+  { key: 'process', label: 'Process', kinds: ['medical', 'signed_offer', 'pcc', 'visa', 'visa_stamping', 'air_ticket', 'undertaking_letter', 'emigration', 'insurance', 'invoice'] },
+  { key: 'certificates', label: 'Certificates', kinds: ['education_certificate', 'experience_certificate', 'google_review'] },
+  { key: 'other', label: 'Other', kinds: [] },
+]
+
+export interface DocumentGroup<T> { key: DocumentGroupKey; label: string; rows: T[] }
+
+/**
+ * Splits the document rows into the four groups, each in the order listed above; a document the groups do not name (the old
+ * application form, a kind a newer server adds) goes to Other, so no document ever disappears. Empty groups are left out.
+ */
+export function groupDocumentRows<T extends { slot: { slot: string } }>(rows: T[]): DocumentGroup<T>[] {
+  const named = new Set(DOCUMENT_GROUPS.flatMap((group) => group.kinds))
+  return DOCUMENT_GROUPS
+    .map((group) => ({
+      key: group.key,
+      label: group.label,
+      rows: group.key === 'other'
+        ? rows.filter((row) => !named.has(row.slot.slot) || group.kinds.includes(row.slot.slot))
+        : group.kinds.map((kind) => rows.find((row) => row.slot.slot === kind)).filter((row): row is T => Boolean(row)),
+    }))
+    .filter((group) => group.rows.length > 0)
+}
+
+/** "2 of 4" for one group: the counted documents that have arrived, over the counted ones; nothing for a group of optional papers only. */
+export function groupProgressText(rows: { state: Pick<DocumentRowState, 'key' | 'counted'> }[]): string {
+  const progress = documentRowsProgress(rows.map((row) => row.state))
+  return progress.total > 0 ? `${progress.uploaded} of ${progress.total}` : ''
+}

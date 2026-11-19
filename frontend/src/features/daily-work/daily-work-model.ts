@@ -49,6 +49,8 @@ export interface DailyItem {
   googleReview: GoogleReview
   referral: { source: string; label: string; detail: string | null }
   remark: { body: string; at: string; by: string; count: number } | null
+  /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form (an older server sends nothing). */
+  commencementDate?: string | null
 }
 
 export interface DailySummary {
@@ -89,6 +91,8 @@ export interface FollowUpItem {
   stage: number
   /** The latest of the last stage completed, the last remark, the last draft and the placement's creation. */
   lastUpdateAt: string
+  /** When a stage of this placement was last finished (a reopened one never counts); null when none was. */
+  stageMovedAt?: string | null
   client: string | null
   clientContact: string | null
   country: string | null
@@ -109,6 +113,8 @@ export interface FollowUpItem {
   /** Stage 9 Google review: obtained, pending (stage 9 or later, not obtained yet) or null (not applicable yet). */
   googleReview: GoogleReview
   remark: { body: string; at: string; by: string; count: number } | null
+  /** Date of commencement (DOC) of the placement, ISO "YYYY-MM-DD"; null until it is filled in the application form. */
+  commencementDate?: string | null
 }
 
 export interface FollowUpResponse {
@@ -319,16 +325,6 @@ export function clientCell(item: Pick<DailyItem, 'client' | 'kind'>): { text: st
   return { text: '', hint: item.kind === 'call' ? 'Not matched to an order yet' : 'No client recorded' }
 }
 
-/** The remark box: one line (36px) when idle, growing with the text to about four lines (100px), then it scrolls inside. */
-export const REMARK_MIN = 36
-export const REMARK_MAX = 100
-
-/** The box height for a given text height (`scrollHeight`) and whether it has to scroll: never below one line, never above four. */
-export function remarkBox(contentHeight: number): { height: number; scroll: boolean } {
-  const wanted = Number.isFinite(contentHeight) ? Math.ceil(contentHeight) : REMARK_MIN
-  return { height: Math.min(REMARK_MAX, Math.max(REMARK_MIN, wanted)), scroll: wanted > REMARK_MAX }
-}
-
 const SHORT_COUNTRIES: Record<string, string> = {
   'united arab emirates': 'UAE', 'saudi arabia': 'KSA', 'kingdom of saudi arabia': 'KSA', 'united kingdom': 'UK', 'united states': 'USA',
   'united states of america': 'USA', 'republic of korea': 'S. Korea', 'south korea': 'S. Korea',
@@ -343,9 +339,73 @@ export function countryShort(name: string): string {
 /* ---------------------------------------------------------------- one list per recruiter: what was done today */
 
 /** What happened to a candidate today: the initial call was answered, a stage was finished, a remark was written. */
-export interface TodayWork { called: boolean; moved: boolean; remarked: boolean }
+export interface TodayWork { called: boolean; moved: boolean; remarked: boolean; /** When the stage was finished today (a Follow-up placement); the daily rows carry `completedAt`. */ movedAt?: string }
 
 export interface TaskRow extends DailyItem { today: TodayWork }
+
+export interface TaskColumn { key: string; title: string; width: number; left?: boolean; supervisor?: boolean; quiet?: boolean }
+
+/**
+ * The columns of the Tasks list, in the order the owner asked for: S NO, DOC (date of commencement), Recruiter (supervisors only), JOB,
+ * then CLIENT / COUNTRY, CANDIDATE NAME, STAGE, TODAY, REMARKS and the untitled actions cell. Widths are the column plan in px: they add
+ * up to 1104px for a supervisor (the Open or Complete button and the row menu need 142px with their padding) (the panel is 1111px wide at a 1440px window with the sidebar open) so nothing scrolls sideways there.
+ */
+export const TASK_LIST_COLUMNS: readonly TaskColumn[] = [
+  { key: 'no', title: 'S NO', width: 40 },
+  { key: 'doc', title: 'DOC', width: 84 },
+  { key: 'staff', title: 'Recruiter', width: 88, supervisor: true, left: true },
+  { key: 'position', title: 'JOB', width: 100, left: true },
+  { key: 'client', title: 'CLIENT / COUNTRY', width: 112, left: true },
+  { key: 'candidate', title: 'CANDIDATE NAME', width: 132, left: true },
+  { key: 'stage', title: 'STAGE', width: 122 },
+  { key: 'today', title: 'TODAY', width: 112, left: true },
+  { key: 'remarks', title: 'REMARKS', width: 172, left: true },
+  { key: 'actions', title: 'Actions', width: 142, quiet: true },
+]
+
+/** The columns one person sees: everyone but supervisors lose the Recruiter column (their list is their own). */
+export const taskColumnsFor = (supervisor: boolean): TaskColumn[] => TASK_LIST_COLUMNS.filter((column) => supervisor || !column.supervisor)
+
+export interface TodayChip { key: 'called' | 'moved'; text: string }
+
+/**
+ * The chips of the TODAY column: "Called 10:30" and "Stage moved 10:45". A remark written today is NOT a chip (the remark itself is in the
+ * REMARKS column and still counts for the cards, see `recruiterWork`). An empty list means nothing to show as a chip: the screen then
+ * says "Nothing yet", or a quiet dash when only a remark was written today (`nothingYet`).
+ */
+export function todayChips(row: { today: TodayWork; completedAt: string | null }, timeZone?: string): TodayChip[] {
+  const chips: TodayChip[] = []
+  if (row.today.called) chips.push({ key: 'called', text: `Called${row.completedAt ? ` ${clockTime(row.completedAt, timeZone)}` : ''}` })
+  const movedAt = row.completedAt || row.today.movedAt
+  if (row.today.moved) chips.push({ key: 'moved', text: `Stage moved${movedAt ? ` ${clockTime(movedAt, timeZone)}` : ''}` })
+  return chips
+}
+
+/** True when nothing at all happened to the candidate today: no call, no stage, no remark. */
+export const nothingYet = (today: TodayWork): boolean => !today.called && !today.moved && !today.remarked
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** The DOC cell: "2026-11-19" as "19 Nov 2026"; '' when there is no valid date (the screen then offers "Add date"). */
+export function docLabel(iso: string | null | undefined): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '')
+  if (!match) return ''
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const real = new Date(Date.UTC(year, month - 1, day))
+  if (real.getUTCFullYear() !== year || real.getUTCMonth() !== month - 1 || real.getUTCDate() !== day) return ''
+  return `${day} ${SHORT_MONTHS[month - 1]} ${year}`
+}
+
+/** The server path of the Excel export for the same list the screen shows: everyone (supervisors) or one recruiter. */
+export function exportPath(staff?: string): string {
+  return `/daily-work/export?format=xlsx&staff=${encodeURIComponent(staff || 'all')}`
+}
+
+/** "tasks-2026-11-19.xlsx", or "tasks-asha-devi-2026-11-19.xlsx" for one recruiter's list. */
+export function exportFileName(day: string, person?: string): string {
+  const slug = (person ?? '').normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 40)
+  return `tasks${slug ? `-${slug}` : ''}-${day}.xlsx`
+}
 
 /** The calendar day ("2026-11-18") of a moment on the agency clock; '' when the moment is not a date. */
 export function dayOf(iso: string | null | undefined, timeZone?: string): string {
@@ -369,13 +429,19 @@ export function followUpAsDaily(item: FollowUpItem): DailyItem {
  */
 export function taskRows(daily: DailyItem[], followUp: FollowUpItem[], today: string, timeZone?: string): TaskRow[] {
   const merged = new Map<string, DailyItem>()
+  const movedToday = new Map<string, string>()
   for (const item of daily) merged.set(item.candidateId, item)
-  for (const item of followUp) if (!merged.has(item.candidateId)) merged.set(item.candidateId, followUpAsDaily(item))
+  for (const item of followUp) {
+    if (!merged.has(item.candidateId)) merged.set(item.candidateId, followUpAsDaily(item))
+    // A placement in Follow-up whose stage was finished today (stage 2 to 11) is "stage moved" today, like a finished prescreening.
+    if (item.stageMovedAt && dayOf(item.stageMovedAt, timeZone) === today) movedToday.set(item.candidateId, item.stageMovedAt)
+  }
   const rows = [...merged.values()].map((item): TaskRow => ({
     ...item,
     today: {
       called: item.status === 'done' && item.kind === 'call',
-      moved: item.status === 'done' && item.kind === 'stage',
+      moved: (item.status === 'done' && item.kind === 'stage') || movedToday.has(item.candidateId),
+      movedAt: movedToday.get(item.candidateId),
       remarked: !!item.remark && dayOf(item.remark.at, timeZone) === today,
     },
   }))

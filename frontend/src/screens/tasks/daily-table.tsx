@@ -1,16 +1,20 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowRight, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCall, Save, UserRound } from 'lucide-react'
+import { ArrowRight, CheckCircle2, ExternalLink, Globe, MoreHorizontal, PhoneCall, UserRound } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { countryCode, flagSrc } from '@/shared/lib/country-flag'
-import { Button, Textarea } from '@/shared/ui/primitives'
+import { Button, Select } from '@/shared/ui/primitives'
 import { RecordIdentity } from '@/shared/ui/workspace'
 import { STAGES, TOTAL_STAGES } from '@/shared/workflow/stages'
 import { primaryId } from '@/features/candidates/candidate-ids'
 import {
-  advanceLabel, clientCell, clockTime, countryCell, countryShort, positionCell, remarkBox, rowAction,
+  advanceLabel, clientCell, clockTime, countryCell, countryShort, docLabel, positionCell, rowAction,
   type DailyItem,
 } from '@/features/daily-work/daily-work-model'
+import { canAddTemplate, isAddChoice, remarkSelectView, remarkStatus, textForChoice, type RemarkSaveState } from '@/features/daily-work/remark-select-model'
+import { createRemarkTemplate, useRemarkTemplates } from '@/features/remark-templates/remark-templates-api'
+import { TEMPLATE_MAX, createdText, newTemplateCheck } from '@/features/remark-templates/remark-templates-model'
+import { useStore } from '@/shared/state/crm-store'
 import { OwnerTag } from './task-identity'
 
 export interface DailyGroup { key: string; title: string; icon: ReactNode; items: DailyItem[]; tone?: 'done' }
@@ -227,54 +231,100 @@ export function StageCell({ item }: { item: Pick<DailyItem, 'stage'> }) {
   )
 }
 
-/** Keeps a textarea exactly as tall as its text (one line up to about four, then it scrolls inside); see remarkBox. */
-function useAutoGrow(value: string) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.style.height = 'auto'
-    // Empty: always the single idle line (a wrapping placeholder must not make the box taller).
-    const box = remarkBox(value ? el.scrollHeight : 0)
-    el.style.height = `${box.height}px`
-    el.style.overflowY = box.scroll ? 'auto' : 'hidden'
-  }, [value])
-  return ref
-}
-
 /**
- * REMARKS: one muted line (the latest remark, or `lead` such as "Last update 3 days ago" in Follow-up) over a same-width field with
- * the save icon in its bottom-right corner. The field grows with the typed text up to about four lines and shrinks back when text
- * is deleted; the line shows the saved remark wrapped (two lines), the full text in its tooltip. Read-only people see just the line, or a dash.
+ * REMARKS: a compact dropdown, never a text box. It shows the candidate's current remark as its value ("Select remark" while there is
+ * none) and offers the active remark templates; choosing one saves it at once through `onSave` (the same call the old "Add remark" box
+ * made) and a small line under it says Saving, Saved or what went wrong. A remark someone typed before the templates existed that is
+ * not a template stays shown and valid, marked "Custom remark". The line under the dropdown is always there (an empty one keeps its
+ * height), so nothing moves when it changes. Read-only people see the remark as plain text, or a dash. `lead` is a muted line such as
+ * "Last update 3 days ago" shown in the status line while nothing else needs saying.
  */
 export function RemarkCell({ item, canWork, onSave, lead }: { item: Pick<DailyItem, 'remark' | 'candidate'>; canWork: boolean; onSave: (text: string) => Promise<void>; lead?: string }) {
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
+  const templates = useRemarkTemplates()
+  const canAdd = canAddTemplate(useStore().me.role)
+  const [adding, setAdding] = useState(false)
+  const [typed, setTyped] = useState('')
+  const box = useRef<HTMLDivElement>(null)
+  const [state, setState] = useState<RemarkSaveState>('idle')
   const [error, setError] = useState('')
-  const box = useAutoGrow(text)
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    const value = text.trim()
-    if (!value || busy) return
-    setBusy(true); setError('')
-    try { await onSave(value); setText('') }
-    catch (e) { setError(e instanceof Error ? e.message : 'The remark could not be saved.') }
-    finally { setBusy(false) }
-  }
+  const [pending, setPending] = useState<string | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
   const last = item.remark
-  const line = lead ? (last ? `${lead} · ${last.body}` : lead) : last?.body
+  const view = remarkSelectView(last?.body, templates.items, templates.loaded, canAdd)
+  const tip = last ? `${last.by} · ${new Date(last.at).toLocaleString()}\n${last.body}` : ''
+
+  if (!canWork) {
+    const line = lead ? (last ? `${lead} · ${last.body}` : lead) : last?.body
+    return (
+      <div className="dw-remark">
+        {line ? <p className={cn('dw-remark-last', lead && 'is-lead')} title={`${lead ? `${lead}\n` : ''}${tip}`.trim()}>{line}</p> : <span className="dw-none">—</span>}
+      </div>
+    )
+  }
+
+  /** Save `text` as this candidate's remark: the one path both a chosen template and a newly added one take. */
+  const save = async (text: string, value: string | null) => {
+    window.clearTimeout(timer.current)
+    setPending(value); setState('saving'); setError('')
+    try {
+      await onSave(text)
+      setState('saved')
+      timer.current = window.setTimeout(() => setState('idle'), 2500)
+    } catch (failure) {
+      setState('error'); setError(failure instanceof Error ? failure.message : 'The remark could not be saved.')
+    } finally { setPending(null) }
+  }
+  const choose = async (value: string) => {
+    if (state === 'saving') return
+    if (isAddChoice(value)) { if (canAdd) { setTyped(''); setError(''); setState('idle'); setAdding(true) } return }
+    const text = textForChoice(value, templates.items)
+    if (text) await save(text, value)
+  }
+  const stopAdding = () => {
+    setAdding(false); setTyped(''); setError(''); setState('idle')
+    window.setTimeout(() => box.current?.querySelector<HTMLElement>('.custom-select-trigger')?.focus(), 0)
+  }
+  /** Admin only: add the typed text as a template (the server answers with the new or the already existing one), then select it for this candidate. */
+  const addTemplate = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!canAdd || state === 'saving') return
+    const check = newTemplateCheck(typed, templates.items)
+    if (!check.ok) { setState('error'); setError(check.message); return }
+    setState('saving'); setError('')
+    let text: string
+    try { text = createdText(await createRemarkTemplate(check.text), check.text) }
+    catch (failure) { setState('error'); setError(failure instanceof Error ? failure.message : 'The template could not be added.'); return }
+    setAdding(false); setTyped('')
+    await save(text, null)
+  }
+  const status = remarkStatus(state, view.custom, error, lead)
+  const empty = templates.items.length === 0
   return (
-    <div className="dw-remark">
-      {line && <p className={cn('dw-remark-last', lead && 'is-lead')} title={`${lead ? `${lead}\n` : ''}${last ? `${last.by} · ${new Date(last.at).toLocaleString()}\n${last.body}` : ''}`.trim()}>{line}</p>}
-      {canWork && <form onSubmit={submit}>
-        <Textarea ref={box} autoGrow={false} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder="Add remark" maxLength={10000} disabled={busy}
-          aria-label={`Remark for ${item.candidate}`} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(e as unknown as FormEvent) } }} />
-        <button type="submit" className="dw-remark-save" disabled={busy || !text.trim()} aria-label="Save remark" title="Save remark"><Save size={14} aria-hidden="true" /></button>
-      </form>}
-      {!line && !canWork && <span className="dw-none">—</span>}
-      {error && <small className="dw-remark-error" role="alert">{error}</small>}
+    <div className="dw-remark" ref={box} title={tip || undefined}>
+      {adding ? (
+        <form className="dw-remark-add" onSubmit={(event) => void addTemplate(event)}>
+          <input type="text" autoFocus autoComplete="off" maxLength={TEMPLATE_MAX} value={typed} disabled={state === 'saving'}
+            placeholder="New template, then Enter" aria-label={`New remark template for ${item.candidate}`} aria-invalid={state === 'error' ? true : undefined}
+            onChange={(event) => { setTyped(event.target.value); if (state === 'error') { setState('idle'); setError('') } }}
+            onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); stopAdding() } }}
+            onBlur={() => { if (!typed.trim() && state !== 'saving') stopAdding() }} />
+        </form>
+      ) : <Select compact searchable={false} className="dw-remark-select" aria-label={`Remark for ${item.candidate}`}
+        value={pending ?? view.value} disabled={state === 'saving' || (empty && !last && !canAdd)} onChange={(event) => void choose(event.target.value)}>
+        {view.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </Select>}
+      <small className={cn('dw-remark-status', `is-${status.tone}`)} title={status.tone === 'error' ? status.text : undefined} role="status" aria-live="polite">{status.text}</small>
     </div>
   )
+}
+
+/** DOC: the date of commencement as "19 Nov 2026". Empty: an "Add date" link that opens the candidate's application form on its Overview tab, where the date is filled in; a dash when there is no placement yet or the person cannot edit. */
+export function DocCell({ item, canAdd, onAdd }: { item: Pick<DailyItem, 'commencementDate' | 'candidate' | 'applicationId'>; canAdd: boolean; onAdd: () => void }) {
+  const label = docLabel(item.commencementDate)
+  if (label) return <time className="dw-doc tnum" dateTime={item.commencementDate ?? undefined} title="Date of commencement">{label}</time>
+  if (!canAdd || !item.applicationId) return <span className="dw-none" title={item.applicationId ? 'No date of commencement yet' : 'Choose a job first, then add the date of commencement'}>—</span>
+  return <button type="button" className="dw-doc-add" onClick={onAdd} aria-label={`Add the date of commencement for ${item.candidate}`}>Add date</button>
 }
 
 export interface MenuEntry { label: string; icon: typeof ArrowRight | typeof ExternalLink; onSelect: () => void }

@@ -1,0 +1,34 @@
+/* Dashboard: the Client tracker card (one full-width card under the number cards). Same tokens and radii as .ds-card. */
+.dt-card { --tone: var(--ds-teal, var(--primary)); display: grid; gap: 16px; min-width: 0; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--tone) 16%, var(--border-main)); border-radius: 16px; background: linear-gradient(165deg, color-mix(in srgb, var(--tone) 8%, var(--bg-card)) 0%, var(--bg-card) 62%); color: var(--text-main); }
+.dt-head { display: flex; align-items: center; gap: 12px; }
+.dt-icon { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: color-mix(in srgb, var(--tone) 16%, var(--bg-card)); color: var(--tone); }
+.dt-head h2 { margin: 0; font-size: 16.5px; font-weight: 600; letter-spacing: -.02em; }
+.dt-head p { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.dt-totals { display: flex; flex-wrap: wrap; gap: 8px 36px; }
+.dt-totals > div { display: flex; align-items: baseline; gap: 8px; }
+.dt-totals b { font-size: 34px; font-weight: 650; line-height: 1.05; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.dt-totals span { font-size: 13.5px; color: var(--text-muted); }
+.dt-sub { margin: 0 0 8px; font-size: 12.5px; font-weight: 500; color: var(--text-muted); }
+.dt-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.dt-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 6px 4px 12px; border: 1px solid color-mix(in srgb, var(--tone) 22%, var(--border-main)); border-radius: 999px; background: var(--bg-card); color: var(--text-main); font-size: 13px; text-decoration: none; transition: border-color .16s, background-color .16s; }
+.dt-chip b { min-width: 28px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--tone) 14%, var(--bg-card)); font-size: 13px; font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; }
+.dt-chip:hover { border-color: color-mix(in srgb, var(--tone) 55%, var(--border-main)); background: color-mix(in srgb, var(--tone) 7%, var(--bg-card)); }
+.dt-chip.is-zero { color: var(--text-muted); }
+.dt-chip.is-zero b { background: var(--tint-1, transparent); color: var(--text-light); font-weight: 500; }
+.dt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dt-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 14px; border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--border-main)); border-radius: 10px; background: color-mix(in srgb, var(--tone) 8%, var(--bg-card)); color: var(--text-main); font: inherit; font-size: 13.5px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color .16s, border-color .16s; }
+.dt-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--tone) 60%, var(--border-main)); background: color-mix(in srgb, var(--tone) 16%, var(--bg-card)); }
+.dt-btn:disabled { opacity: .65; cursor: progress; }
+.dt-chip:focus-visible, .dt-btn:focus-visible, .dt-fail button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.dt-note { margin: 0; font-size: 13px; color: var(--text-muted); }
+.dt-fail { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--error-ink); }
+.dt-fail button { border: 1px solid var(--error-edge); border-radius: 6px; background: var(--bg-card); padding: 4px 10px; color: var(--error-ink); font: inherit; font-size: 12px; cursor: pointer; }
+.dt-inline { font-size: 12.5px; }
+.dt-spin { animation: dt-turn 1s linear infinite; }
+@keyframes dt-turn { to { transform: rotate(360deg); } }
+@media (max-width: 760px) {
+  .dt-card { padding: 14px; gap: 14px; }
+  .dt-totals b { font-size: 28px; }
+  .dt-btn { flex: 1 1 140px; }
+}
+@media (prefers-reduced-motion: reduce) { .dt-chip, .dt-btn { transition: none; } .dt-spin { animation: none; } }

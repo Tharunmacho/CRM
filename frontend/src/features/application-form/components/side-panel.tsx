@@ -1,10 +1,9 @@
-import { useId } from 'react'
-import { CheckCircle2, MessageSquareText, Pencil, Upload } from 'lucide-react'
+import { useId, useState } from 'react'
+import { CheckCircle2, ChevronDown, Pencil, Upload } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
 import { documentLabel } from '@/shared/model/document-slots'
-import { missingBySection } from '../form-model'
 import { documentsCountText } from '../document-rows'
-import { paperSections, ringLabel } from '../paper-model'
+import { ringLabel } from '../paper-model'
 import type { DocumentKind, MissingItem } from '../types'
 
 /** The percentage as one centred label inside the ring ("5%", never a number and a sign on two lines). */
@@ -31,7 +30,8 @@ function Ring({ percent }: { percent: number }) {
   )
 }
 
-/** Completeness and the checklist of what is still missing, with a one-click way to fix each item. */
+
+/** Completeness and the checklist of what is still missing, with a one-click way to fix each item (the section navigator is the tab bar above the form). */
 export function SidePanel({
   percent,
   missing,
@@ -39,8 +39,6 @@ export function SidePanel({
   canEdit,
   onUpload,
   onFill,
-  onJump,
-  notes,
 }: {
   percent: number
   missing: MissingItem[]
@@ -49,11 +47,10 @@ export function SidePanel({
   canEdit: boolean
   onUpload: (kind: DocumentKind) => void
   onFill: (item: MissingItem) => void
-  onJump: (section: number) => void
-  /** The recruiter notes entry of the section list: how many notes there are, and where it leads. */
-  notes?: { count: number; overdue: boolean; onOpen: () => void }
 }) {
-  const grouped = missingBySection(missing)
+  // Beside the form the list is always open; on a narrow screen it is one button ("7 missing") that opens it.
+  const [listOpen, setListOpen] = useState(false)
+  const listId = useId()
   const complete = percent >= 100
   return (
     <aside className="af-side" aria-label="Form completeness">
@@ -71,10 +68,15 @@ export function SidePanel({
             <i style={{ width: `${documents.percent}%` }} />
           </span>
         </div>
+        {missing.length > 0 && (
+          <button type="button" className="af-missing-toggle" aria-expanded={listOpen} aria-controls={listId} onClick={() => setListOpen((open) => !open)}>
+            {missing.length} still missing<ChevronDown aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       {missing.length > 0 && (
-        <div className="af-card">
+        <div className={cn('af-card af-missing-card', listOpen && 'is-open')} id={listId}>
           <h2 className="af-side-h">Still missing</h2>
           <ul className={cn('af-missing', canEdit && 'has-action')}>
             {missing.map((item) => (
@@ -96,33 +98,6 @@ export function SidePanel({
           ? 'Details for this stage are complete. Document collection is tracked separately.'
           : 'All required details and documents are on the form.'}</div>
       )}
-
-      <nav className="af-card af-nav" aria-label="Form sections">
-        <h2 className="af-side-h">Sections</h2>
-        <ol>
-          {paperSections().map(({ no, title }) => {
-            const count = grouped.get(no)?.length ?? 0
-            return (
-              <li key={no}>
-                <button type="button" onClick={() => onJump(no)}>
-                  <span className="af-nav-no">{no}</span>
-                  <span className="af-nav-title">{title}</span>
-                  {count > 0 && <span className="af-nav-count">{count}</span>}
-                </button>
-              </li>
-            )
-          })}
-          {notes && (
-            <li>
-              <button type="button" onClick={notes.onOpen}>
-                <span className="af-nav-no is-icon"><MessageSquareText aria-hidden="true" /></span>
-                <span className="af-nav-title">Recruiter notes</span>
-                {(notes.count > 0 || notes.overdue) && <span className={cn('af-nav-count', notes.overdue ? 'is-over' : 'is-plain')}>{notes.overdue ? '!' : notes.count}</span>}
-              </button>
-            </li>
-          )}
-        </ol>
-      </nav>
     </aside>
   )
 }

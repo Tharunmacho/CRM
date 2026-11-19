@@ -45,7 +45,8 @@
 .ds-violet { --tone: var(--ds-violet); } .ds-teal { --tone: var(--ds-teal); } .ds-slate { --tone: var(--ds-slate); } .ds-red { --tone: var(--ds-red); }
 
 /* ---------- The round graphs ---------- */
-.sg-section { display: grid; gap: 16px; }
+.sg-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.sg-section > * { min-width: 0; }   /* the 7 days / 30 days / ... switch scrolls inside its own box instead of widening the page at 390px */
 .sg-bar-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
 .sg-bar-top h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.025em; }
 .sg-seg { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border-main); border-radius: 999px; background: var(--bg-card); box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 6%, transparent); }

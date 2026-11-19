@@ -39,6 +39,7 @@ import {
   type StageField,
   type UserRef,
 } from '@/shared/workflow/stages'
+import { advanceSummary, withAdvanceStatus } from '@/shared/workflow/advance'
 import type { Application, FileVersion, StageRecord } from '@/shared/model/types'
 import { Dialog } from '@/shared/ui/overlay'
 import { Badge } from '@/shared/ui/display'
@@ -491,6 +492,9 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
   const def = stageByNo(record.stage)
   const by = store.user(record.completedBy)
   const negative = NEGATIVE_OUTCOMES.includes(record.outcome)
+  // An advance saved before it had a status reads as Collected when it holds an amount; the same words the tracker sheet uses.
+  const data = record.stage === 8 ? withAdvanceStatus(record.data) : record.data
+  const advanceLine = record.stage === 8 ? advanceSummary(data, store.settings.defaultAdvanceCurrency) : null
 
   return (
     <section>
@@ -503,16 +507,22 @@ function CompletedStage({ record, files, app }: { record: StageRecord; files: Ap
       </header>
 
       <dl className="sm-record-fields">
+        {advanceLine && (
+          <div className="sm-fact is-wide">
+            <dt>Advance</dt>
+            <dd>{advanceLine}</dd>
+          </div>
+        )}
         {def.fields
-          .filter((f) => fieldVisible(f, record.data) && record.data[f.name] != null)
+          .filter((f) => fieldVisible(f, data) && data[f.name] != null)
           .map((f) => (
             <div key={f.name} className={cn('sm-fact', (f.type === 'file' || f.type === 'textarea') && 'is-wide')}>
               <dt>{f.label}</dt>
               <dd className={cn(f.ident && 'ident', f.type === 'textarea' && 'whitespace-pre-line')}>
-                {f.type === 'file' && (record.data[f.name] as StoredFile).url ? (
-                  <FileDrop value={record.data[f.name] as StoredFile} versions={applicationFileVersions(files, app, record.stage, f.name)} disabled uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
+                {f.type === 'file' && (data[f.name] as StoredFile).url ? (
+                  <FileDrop value={data[f.name] as StoredFile} versions={applicationFileVersions(files, app, record.stage, f.name)} disabled uploaderName={(id) => store.user(id)?.name || 'Former team member'} />
                 ) : (
-                  readValue(f, record.data[f.name], record.data)
+                  readValue(f, data[f.name], data)
                 )}
               </dd>
             </div>
@@ -567,7 +577,7 @@ function readValue(f: StageField, raw: unknown, row: Record<string, unknown> = {
   if (f.type === 'date') return dateLabel(raw as string)
   // The advance is shown in the currency it was collected in, not the order's.
   if (f.type === 'number')
-    return f.name === 'amount'
+    return f.name === 'amount' || f.name === 'serviceChargeTotal'
       ? money(raw as number, (row.amountCurrency as string) || null)
       : String(raw)
   if (f.optionsSource === 'users') return userRefName(raw) || '—'
@@ -620,6 +630,8 @@ function CurrentStage({
     if (app.currentStage === 11 && !prepared.file && profileAirTicket) {
       prepared = { ...prepared, file: { id: profileAirTicket.id, name: profileAirTicket.name, sizeKb: profileAirTicket.sizeKb, url: profileAirTicket.url, version: profileAirTicket.version } }
     }
+    // A stage-8 draft saved before the advance had a status shows it as Collected / Pending in the form.
+    if (app.currentStage === 8) prepared = withAdvanceStatus(prepared)
     return prepared
   }
   const [data, setData] = useState<Record<string, unknown>>(() => withCandidateDocuments(app.draft ?? {}))
@@ -751,7 +763,7 @@ function CurrentStage({
         {(!compact || attempted) && <div className={cn('sm-check', checkState)} aria-live="polite">
           <span className="sm-check-icon" aria-hidden="true">{result.closes ? <AlertTriangle className="h-4 w-4" /> : ready || result.repeats ? <CheckCircle2 className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}</span>
           <div className="min-w-0">
-            <b>{result.canComplete ? 'Ready to save feedback and move' : 'Write feedback before moving this stage'}</b>
+            <b>{result.canComplete ? 'Ready to save feedback and move' : result.missing.includes('Stage feedback') ? 'Write feedback before moving this stage' : 'Fix this before moving this stage'}</b>
             {result.missing.length > 0
               ? <ul>{result.missing.map(item => <li key={item}>{item}</li>)}</ul>
               : <p>{result.repeats ? 'This saves the medical result and sets up the next medical task.' : result.closes ? `This closes the order for this candidate: ${result.closes.label}. Work done so far stays on record.` : def.no < STAGES.length ? `Next: stage ${def.no + 1}, ${stageByNo(def.no + 1).title}. A new task is created when you finish this stage.` : 'This finishes the deployment and adds one to the order’s filled openings.'}</p>}

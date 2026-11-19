@@ -99,7 +99,7 @@ export default function TravelledPage() {
         <label>Agency<Select aria-label="Agency" value={filters.agency} onChange={e => set('agency', e.target.value)}><option value="">All agencies</option>{withChosen(options.agencies, filters.agency).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
         <label>Country<Select aria-label="Country" value={filters.country} onChange={e => set('country', e.target.value)}><option value="">All countries</option>{withChosen(options.countries, filters.country).map(name => <option key={name} value={name}>{name}</option>)}</Select></label>
         <div className="tv-search-row">
-          <label className="tv-search">Search<Input type="search" aria-label="Search candidate, passport, client, job or flight" placeholder="Name, passport, client, job or PNR" value={search} onChange={e => setSearch(e.target.value)} /></label>
+          <label className="tv-search">Search<Input type="search" aria-label="Search candidate, client or job" placeholder="Name, client or job" value={search} onChange={e => setSearch(e.target.value)} /></label>
           <button type="button" className={filters.incomplete ? 'tv-toggle is-on' : 'tv-toggle'} aria-pressed={!!filters.incomplete} onClick={() => apply(toggleIncomplete(filters))}>Missing documents only</button>
         </div>
       </div>
@@ -204,21 +204,20 @@ function TravelTable({ rows, total }: { rows: TravelledRow[]; total: number }) {
   return <section className="tv-card tv-table-card" aria-label="Travelled candidates">
     <div className="tv-table-wrap">
       <table className="tv-table">
-        <thead><tr><th>Travel date</th><th>Candidate</th><th>Client</th><th>Country</th><th>Job</th><th>Agency</th><th>Flight</th><th>Documents</th><th>Recruiter</th></tr></thead>
+        <colgroup><col className="tv-c-date" /><col className="tv-c-who" /><col className="tv-c-client" /><col className="tv-c-country" /><col className="tv-c-job" /><col className="tv-c-agency" /><col className="tv-c-docs" /><col className="tv-c-recruiter" /></colgroup>
+        <thead><tr><th>Travel date</th><th>Candidate</th><th>Client</th><th>Country</th><th>Job</th><th>Agency</th><th>Documents</th><th>Recruiter</th></tr></thead>
         <tbody>
           {rows.map(row => <tr key={row.applicationId}>
             <td data-label="Travel date" className="tnum">{row.travelDate ? formatTravelDay(row.travelDate) : <span className="tv-muted">Not recorded</span>}</td>
             <td data-label="Candidate" className="tv-who">
               <Link to={`/candidates/${row.candidateId}`}>{row.name}</Link>
               <TravellerIdChip candidate={row} />
-              {row.passportNumber && <small className="ident">Passport {row.passportNumber}</small>}
               {row.status && <StatusPill status={row.status} />}
             </td>
             <td data-label="Client">{row.clientId ? <Link to={`/clients/${row.clientId}`}>{row.client}</Link> : row.client || <span className="tv-muted">—</span>}</td>
             <td data-label="Country">{row.country || <span className="tv-muted">—</span>}</td>
             <td data-label="Job">{row.orderId ? <Link to={`/orders/${row.orderId}`}>{row.job || 'Open job'}</Link> : row.job || <span className="tv-muted">—</span>}{row.orderRef && <small className="ident">{row.orderRef}</small>}</td>
             <td data-label="Agency">{row.agency ? row.agency : <span className="tv-muted">—<Link className="tv-hint" to={`/candidates/${row.candidateId}/application`}>add agency</Link></span>}</td>
-            <td data-label="Flight">{row.airline || row.pnr ? <>{row.airline || ''}{row.pnr && <small className="ident">PNR {row.pnr}</small>}</> : <span className="tv-muted">—</span>}</td>
             <td data-label="Documents">{row.documents
               ? row.documents.missing.length ? <details className="tv-doc-details"><summary className="tv-docs is-short">{documentsLabel(row)}<small>{row.documents.missing.length} missing</small></summary><ul>{row.documents.missing.map(label => <li key={label}>{label}</li>)}</ul><Link to={`/candidates/${row.candidateId}/application`}>Review documents</Link></details>
                 : <span className="tv-docs" title={documentsTitle(row)}>{documentsLabel(row)}<small>Complete</small></span>

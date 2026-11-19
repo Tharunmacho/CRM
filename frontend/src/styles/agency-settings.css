@@ -104,3 +104,20 @@
   .as-opt-tabs { padding: 0 16px 12px; }
   .as-options .as-cat.as-opt { grid-template-columns: minmax(0, 1fr) auto; }
 }
+
+/* ---------- Remark templates ---------- */
+.as-rt-add { display: flex; align-items: flex-start; gap: 12px; padding: 0 20px 6px; }
+.as-rt-add-field { flex: 1 1 auto; min-width: 0; }
+.as-rt-problem { margin: 6px 0 0; font-size: 12.5px; color: var(--error-ink); }
+.as-rt-note { min-height: 20px; margin: 0; padding: 0 20px 8px; font-size: 12.5px; color: var(--text-muted); }
+.as-rt-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+.as-rt-actions { gap: 4px; align-items: center; }
+.as-rt-edit { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.as-rt-edit-field { flex: 1 1 auto; min-width: 0; }
+.as-rt-edit-actions { display: inline-flex; gap: 4px; }
+@media (max-width: 767px) {
+  .as-rt-add { padding: 0 16px 6px; }
+  .as-rt-note { padding: 0 16px 8px; }
+  .as-rt-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .as-rt-actions .ui-icon-button { width: 44px; height: 44px; }
+}

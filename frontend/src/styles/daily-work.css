@@ -45,6 +45,14 @@
 /* headers: one alignment with their cells, uppercase, two lines allowed (CLIENT / COUNTRY, GOOGLE REVIEW) in a header tall enough for them */
 .dw-table thead th { height: 48px; padding-top: 0; padding-bottom: 0; border-top: 1px solid var(--border-main); border-bottom: 1px solid var(--border-main); background: var(--tint-1); font-size: 11px; font-weight: 600; letter-spacing: .04em; line-height: 1.3; text-transform: uppercase; text-wrap: balance; color: var(--text-muted); overflow-wrap: normal; }
 .dw-table thead th + th { border-left: 1px solid var(--border-main); }
+/* Tasks screen only (the Reports tables sit under .dwr and keep their own look): the header row is the primary blue, the same fill as the
+ * Complete button (var(--primary) with var(--on-primary) on it: white in the light themes, near-black on the lighter dark-theme blue, so
+ * the contrast holds in both). No gap lines: the cell dividers are a faint tint of the text colour. The actions header stays opaque
+ * because that column is sticky. */
+.dw:not(.dwr) .dw-table thead th { border-color: var(--primary); background: var(--primary); font-weight: 700; color: var(--on-primary); }
+.dw:not(.dwr) .dw-table thead th + th { border-left-color: color-mix(in srgb, var(--on-primary) 26%, var(--primary)); }
+.dw:not(.dwr) .dw-main thead th.is-actions { background: var(--primary); }
+.dw:not(.dwr) .dw-table thead :is(button, svg) { color: inherit; }
 .dw-table td { border-bottom: 1px solid var(--border-faint); }
 .dw-table td + td { border-left: 1px solid var(--border-faint); }
 .dw-main td { height: 72px; }
@@ -133,20 +141,28 @@
 .dw-menu-item:hover { background: var(--tint-2); }
 .dw-menu-item svg { flex: none; color: var(--text-muted); }
 
-/* remarks: one muted line over a same-width field. The field is one line (36px) when idle and grows with the text (the component sets
- * its height, up to about four lines, then it scrolls inside); the save icon sits in its bottom-right corner on reserved padding. */
-.dw-remark { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* remarks: a dropdown over a one-line status (the read-only view is the remark as plain text) */
+.dw-remark { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dw-remark-last { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; line-height: 1.3; color: var(--text-muted); }
 .dw-remark-last.is-lead { display: block; -webkit-line-clamp: unset; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.dw-remark form { position: relative; width: 100%; }
-.dw .dw-remark textarea { display: block; box-sizing: border-box; width: 100%; height: 36px; min-height: 36px; max-height: 100px; padding: 8px 30px 8px 9px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--bg-card); box-shadow: none; font-size: 12.5px; line-height: 18px; resize: none; overflow-y: hidden; overflow-wrap: anywhere; }
-.dw .dw-remark textarea::placeholder { color: var(--text-light); }
-.dw .dw-remark textarea:hover { border-color: var(--border-hover); }
-.dw .dw-remark textarea:focus, .dw .dw-remark textarea:focus-visible { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px var(--primary-glow); }
-.dw-remark-save { position: absolute; right: 5px; bottom: 5px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--primary); cursor: pointer; }
-.dw-remark-save:disabled { color: var(--text-light); cursor: default; }
-.dw-remark-save:not(:disabled):hover { background: var(--tint-2); }
-.dw-remark-error { display: block; margin-top: 2px; font-size: 12px; color: var(--error-ink); }
+/* The dropdown is one line (36px, 44px on phones) with a one-line status under it that always keeps its height, so a row never changes size
+ * when it says Saving / Saved / Custom remark / an error. The current remark is its value, ellipsised with the full text in the cell's tooltip. */
+.dw-remark .custom-select { width: 100%; }
+.dw .dw-remark .custom-select-trigger { box-sizing: border-box; width: 100%; height: 36px; min-height: 36px; padding: 0 8px 0 9px; gap: 6px; border-radius: 8px; font-size: 12.5px; line-height: 18px; }
+.dw .dw-remark .custom-select-trigger[data-placeholder] > span { color: var(--text-light); }
+.dw .dw-remark .custom-select-trigger:disabled { opacity: 1; }
+/* "+ Add a template" (admins): the dropdown turns into a one-line box of the same height, so the row does not move */
+.dw-remark-add { margin: 0; }
+.dw .dw-remark-add input { display: block; box-sizing: border-box; width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--primary); border-radius: 8px; background: var(--bg-card); box-shadow: 0 0 0 3px var(--primary-glow); font: inherit; font-size: 12.5px; line-height: 18px; color: var(--text-main); outline: none; }
+.dw .dw-remark-add input[aria-invalid='true'] { border-color: var(--error-ink); box-shadow: none; }
+.dw .dw-remark-add input::placeholder { color: var(--text-light); }
+.dw-remark-status { display: block; min-height: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 15px; color: var(--text-light); }
+.dw-remark-status.is-busy { color: var(--primary-deep); }
+.dw-remark-status.is-ok { color: var(--success-ink); }
+.dw-remark-status.is-error { color: var(--error-ink); }
+.dw-remark-status.is-custom { color: var(--text-muted); font-style: italic; }
+.dw-remark-status.is-lead { color: var(--text-muted); }
+[data-theme='dark'] .dw-remark-status.is-busy { color: var(--primary); }
 
 /* ---------- Staff board ---------- */
 .dw-staff .dw-staff-row td { height: 56px; }
@@ -191,8 +207,8 @@
   .dw-actions .dw-act { min-height: 44px; }
   .dw-menu { max-width: calc(100vw - 16px); }
   .dw-menu-item { height: 44px; }
-  .dw .dw-remark textarea { height: 44px; min-height: 44px; padding: 11px 44px 11px 12px; font-size: 16px; line-height: 22px; }
-  .dw-remark-save { width: 36px; height: 36px; right: 4px; bottom: 4px; }
+  .dw .dw-remark .custom-select-trigger { height: 44px; min-height: 44px; padding: 0 12px; font-size: 16px; line-height: 22px; }
+  .dw .dw-remark-add input { height: 44px; padding: 0 12px; font-size: 16px; line-height: 22px; }
 }
 @media (max-width: 640px) {
   .dw-panel-head { padding-inline: 16px; }

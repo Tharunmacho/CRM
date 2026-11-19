@@ -15,7 +15,7 @@ import { Dialog } from '@/shared/ui/overlay'
 import { documentLabel, documentSlot } from '@/shared/model/document-slots'
 import { extractionLineKey, routeLineNotes, sizeLabel, slotReadState } from '../form-model'
 import { loadDocumentReport, type IdentityCheck } from '../form-api'
-import { documentRowStates, documentRowsProgress, documentsCountText, type DocumentRowIcon, type DocumentRowState } from '../document-rows'
+import { documentRowStates, documentRowsProgress, documentsCountText, groupDocumentRows, groupProgressText, type DocumentRowIcon, type DocumentRowState } from '../document-rows'
 import type { ApplicationFormData, DocumentKind, DocumentSlot, FormDocument } from '../types'
 import { SectionHeader } from './section-header'
 import { ExtractionLine } from './extraction-line'
@@ -208,23 +208,31 @@ export function DocumentsSection({
           </div>
         )}
       />
-      <ul className="af-doclist">
-        {rows.map(({ slot, state }) => (
-          <DocumentRow
-            key={slot.slot}
-            slot={slot}
-            state={state}
-            canUpload={canUpload}
-            busy={busyKinds.includes(slot.slot)}
-            onUpload={onUpload}
-            onManualStatus={onManualStatus}
-            onExtract={onExtract}
-            readError={readError}
-            onIdentity={onIdentity}
-            lineNotes={lineNotes}
-          />
+      {/* Four small groups, each a grid of compact cards: a name, a status chip and one action, so the whole list is seen at a glance. */}
+      <div className="af-docgroups">
+        {groupDocumentRows(rows).map((group) => (
+          <section key={group.key} className="af-docgroup" aria-labelledby={`af-docgroup-${group.key}`}>
+            <h3 id={`af-docgroup-${group.key}`}>{group.label}{groupProgressText(group.rows) && <small className="tnum">{groupProgressText(group.rows)}</small>}</h3>
+            <ul className="af-doclist">
+              {group.rows.map(({ slot, state }) => (
+                <DocumentRow
+                  key={slot.slot}
+                  slot={slot}
+                  state={state}
+                  canUpload={canUpload}
+                  busy={busyKinds.includes(slot.slot)}
+                  onUpload={onUpload}
+                  onManualStatus={onManualStatus}
+                  onExtract={onExtract}
+                  readError={readError}
+                  onIdentity={onIdentity}
+                  lineNotes={lineNotes}
+                />
+              ))}
+            </ul>
+          </section>
         ))}
-      </ul>
+      </div>
       {reads.map((item) => <ReadReport key={item.id} report={item.report} caption={reads.length > 1 ? item.caption : undefined} />)}
       {form.aadhaarMasked && (
         <p className="af-doc-meta af-aadhaar" data-testid="aadhaar-masked">

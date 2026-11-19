@@ -57,22 +57,23 @@ test('the sidebar has one Reports item and /staff-report only redirects', async 
   assert.doesNotMatch(page, /Weekly staff report|navigate\('\/staff-report'\)/)
 })
 
-test('the page tabs are exactly the three report views; Accounts and the legacy reports are behind constants', () => {
-  const three = ['Daily report', 'Lead sheet monitoring', 'Candidate monitoring']
+test('the page tabs are the three report views and the Client tracker; Accounts and the legacy reports are behind constants', () => {
+  const three = ['Daily report', 'Lead sheet monitoring', 'Candidate monitoring', 'Client tracker']
   assert.deepEqual(t.pageTabs(false).map(x => x.label), three)
   assert.deepEqual(t.pageTabs(true).map(x => x.label), three) // even for the admin: Accounts is not a visible tab
   assert.equal(t.SHOW_ACCOUNTS_TAB, false)
   assert.equal(t.SHOW_LEGACY_REPORTS, false)
   // switched on, they come back
-  assert.deepEqual(t.pageTabs(true, false, true).map(x => x.key), ['daily', 'lead', 'stages', 'accounts'])
-  assert.deepEqual(t.pageTabs(true, true, true).map(x => x.key), ['daily', 'lead', 'stages', 'accounts', 'legacy'])
-  assert.deepEqual(t.pageTabs(false, false, true).map(x => x.key), ['daily', 'lead', 'stages']) // never for a non-admin
+  assert.deepEqual(t.pageTabs(true, false, true).map(x => x.key), ['daily', 'lead', 'stages', 'tracker', 'accounts'])
+  assert.deepEqual(t.pageTabs(true, true, true).map(x => x.key), ['daily', 'lead', 'stages', 'tracker', 'accounts', 'legacy'])
+  assert.deepEqual(t.pageTabs(false, false, true).map(x => x.key), ['daily', 'lead', 'stages', 'tracker']) // never for a non-admin
 })
 
 test('which tab an address opens: no tab is the Daily report; old Fee/Advance collections links still open for the admin; old report keys fall back', () => {
   assert.equal(t.pageTabFromParams(q(''), true, false), 'daily')
   assert.equal(t.pageTabFromParams(q('tab=lead'), false, false), 'lead')
   assert.equal(t.pageTabFromParams(q('tab=stages'), false, false), 'stages')
+  assert.equal(t.pageTabFromParams(q('tab=tracker'), false, false), 'tracker') // every signed-in person; the server limits what a recruiter sees
   for (const tab of ['accounts', 'collections', 'advance']) {
     assert.equal(t.pageTabFromParams(q(`tab=${tab}`), true, false), 'accounts', tab)
     assert.equal(t.pageTabFromParams(q(`tab=${tab}`), false, false), 'daily', tab)
@@ -90,6 +91,7 @@ test('choosing a page tab writes ?tab= and drops dates and person from the addre
   assert.equal(t.paramsForPageTab(q('from=2026-11-02&to=2026-11-08&staff=abc'), 'lead').toString(), 'tab=lead')
   assert.equal(t.paramsForPageTab(q('tab=stages&staff=abc'), 'daily').toString(), '')
   assert.equal(t.paramsForPageTab(q(''), 'accounts').toString(), 'tab=accounts')
+  assert.equal(t.paramsForPageTab(q('from=2026-11-02&staff=abc'), 'tracker').toString(), 'tab=tracker')
   assert.equal(t.paramsForPageTab(q(''), 'legacy').toString(), 'tab=funnel')
 })
 

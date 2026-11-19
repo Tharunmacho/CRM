@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ListChecks, RefreshCw, TriangleAlert, Users } from 'lucide-react'
+import { FileSpreadsheet, ListChecks, Loader2, RefreshCw, TriangleAlert, Users } from 'lucide-react'
 import { useStore } from '@/shared/state/crm-store'
 import { Button, Select } from '@/shared/ui/primitives'
 import { EmptyState, PageHeader } from '@/shared/ui/display'
@@ -8,6 +8,8 @@ import { ReminderBanner } from '@/features/daily-report/reminder-banner'
 import { StageModal } from '@/features/workflow/components/stage-modal'
 import { applicationFormHref } from '@/features/application-form/form-model'
 import { listTitle, recruiterWork, taskRows } from '@/features/daily-work/daily-work-model'
+import { downloadDailyWork } from '@/features/daily-work/daily-work-export'
+import { agencyDay } from '@/shared/lib/task-time'
 import { useDailyWork, useFollowUp } from '@/features/daily-work/use-daily-work'
 import { TaskTable } from './task-table'
 import { WorkBoard } from './daily-staff-board'
@@ -34,6 +36,8 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const [idleOnly, setIdleOnly] = useState(false)
   const [openApp, setOpenApp] = useState<{ id: string; stage?: number } | null>(null)
   const zone = store.agencyTimezone
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
 
   const setStaff = (value: string) => setParams((previous) => {
     const next = new URLSearchParams(previous)
@@ -48,6 +52,15 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
   const boardFollow = filtered ? everyoneFollow.data : follow.data
   const everyoneRows = useMemo(() => taskRows(boardDaily?.items ?? [], boardFollow?.items ?? [], today, zone), [boardDaily, boardFollow, today, zone])
   const work = useMemo(() => recruiterWork(everyoneRows), [everyoneRows])
+
+  // The same list the screen shows, as an Excel file: everyone or the chosen recruiter for a supervisor, the recruiter's own list otherwise.
+  const exportList = async (person: string) => {
+    if (exporting) return
+    setExporting(true); setExportError('')
+    try { await downloadDailyWork(supervisor ? staffFilter : store.me.id, agencyDay(new Date(), zone), person) }
+    catch (failure) { setExportError(failure instanceof Error ? failure.message : 'The Excel file could not be created. Please try again.') }
+    finally { setExporting(false) }
+  }
 
   if (daily.loading && !daily.data) return <div className="tk dw"><PageHeader title="Tasks" />
     <section className="dw-panel dw-state" aria-busy="true"><p role="status">Loading your candidates…</p></section></div>
@@ -77,11 +90,15 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
         actions={<>
           <Button onClick={onOpenAll}><ListChecks size={15} aria-hidden="true" />All 48-hour tasks</Button>
           <Button onClick={() => void refreshAll()}><RefreshCw size={15} aria-hidden="true" />Refresh</Button>
+          <Button onClick={() => void exportList(mine ? store.me.name : person)} disabled={exporting} aria-busy={exporting}>
+            {exporting ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <FileSpreadsheet size={15} aria-hidden="true" />}{exporting ? 'Preparing…' : 'Export Excel'}
+          </Button>
         </>} />
 
       <div className="dw-alerts">
         {(data.truncated || follow.data?.truncated) && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />
           Not every candidate is listed. {supervisor ? 'Pick a recruiter to see all of theirs.' : ''}</p>}
+        {exportError && <p className="is-warn" role="alert"><TriangleAlert size={16} aria-hidden="true" />{exportError}</p>}
         {daily.error && <p className="is-warn" role="status"><TriangleAlert size={16} aria-hidden="true" />The list could not refresh just now ({daily.error}). Showing the last version.</p>}
       </div>
 
@@ -107,6 +124,7 @@ export function DailyWork({ onOpenAll }: { onOpenAll: () => void }) {
           <TaskTable rows={rows} zone={zone} supervisor={supervisor} staffName={(id) => store.user(id)?.name}
             canWork={(row) => !!row.taskId && (store.can('work_any_candidate') || row.ownerId === store.me.id)}
             onOpen={open} onProfile={(row) => navigate(`/candidates/${row.candidateId}`)}
+            onAddDoc={(row) => navigate(`${applicationFormHref(row.candidateId, null, row.applicationId)}#overview`)}
             onRemark={async (row, text) => { if (row.taskId) { await store.addRemark(row.taskId, text); await refreshAll() } }} />
         )}
       </section>

@@ -14,12 +14,17 @@ import { useReferenceAgencies } from '@/features/clients/agency-api'
 import { applicationFormHref, visibleWarnings } from '@/features/application-form/form-model'
 import { documentSlot } from '@/shared/model/document-slots'
 import { documentRowStates, documentRowsProgress } from '@/features/application-form/document-rows'
-import { candidateSubtitle, candidateTitle, completeText, sectionTargetId, visibleMissing } from '@/features/application-form/paper-model'
+import { candidateSubtitle, candidateTitle, completeText, visibleMissing } from '@/features/application-form/paper-model'
+import { DEFAULT_TAB, availableTabs, hashForTab, isDetailTab, missingByTab, tabForMissing, tabForSection, tabFromHash, visibleCards, type FormTab } from '@/features/application-form/form-tabs'
+import { WIDE_DETAILS_QUERY, useMediaQuery } from '@/features/application-form/use-media-query'
+import { FormTabs, type TabBadge } from '@/features/application-form/components/form-tabs'
+import { ContextStrip } from '@/features/application-form/components/context-strip'
 import { RecruitmentStages, StageControl } from '@/features/application-form/components/recruitment-stages'
 import type { DocumentKind, FeedbackData, FormDraft, MissingItem, TrackingRow } from '@/features/application-form/types'
 import { FormErrorCard, FormSkeleton } from '@/features/application-form/components/form-states'
 import { SectionHeader } from '@/features/application-form/components/section-header'
 import { AssignmentBar } from '@/features/application-form/components/assignment-bar'
+import { CommencementField } from '@/features/application-form/components/commencement-field'
 import { DocumentsSection } from '@/features/application-form/components/documents-section'
 import { MergeIntoPicker } from '@/features/application-form/components/candidate-merge'
 import { SHOW_MERGE_UI } from '@/features/application-form/duplicate-merge'
@@ -35,6 +40,7 @@ import { careIdOf, primaryId } from '@/features/candidates/candidate-ids'
 import '@/styles/application-form-v2.css'
 import '@/styles/candidate-records.css'
 import '@/styles/application-stages.css'
+import '@/styles/application-form-tabs.css'
 
 /** Stands in for the notes of a server that has none yet: the panel still opens its composer for people who can work the candidate. */
 const EMPTY_FEEDBACK: FeedbackData = { supported: false, items: [], canWrite: false, stageClock: null }
@@ -74,6 +80,10 @@ export default function ApplicationFormPage() {
   const [busyKinds, setBusyKinds] = useState<DocumentKind[]>([])
   const [previewOpen, setPreviewOpen] = useState(false)
   const fillRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // One section at a time under the sticky tab bar; a link such as #documents opens that section.
+  const [tab, setTab] = useState<FormTab>(() => tabFromHash(window.location.hash) ?? DEFAULT_TAB)
+  const wide = useMediaQuery(WIDE_DETAILS_QUERY)
   const previewButton = useRef<HTMLButtonElement>(null)
   const closePreview = useRef<HTMLButtonElement>(null)
 
@@ -157,28 +167,40 @@ export default function ApplicationFormPage() {
   }, [state, store])
 
   const smooth = () => (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth') as ScrollBehavior
-  /** Scrolls to the first of these elements that is on screen. */
-  const scrollToVisible = useCallback((ids: string[]): boolean => {
-    for (const elementId of ids) {
-      const element = document.getElementById(elementId)
-      if (element && element.getClientRects().length > 0) { element.scrollIntoView({ behavior: smooth(), block: 'start' }); return true }
-    }
-    return false
+
+  /** Shows a section. The panels stay mounted (nothing typed is lost); the page keeps its place and the section starts under the tab bar. */
+  const selectTab = useCallback((next: FormTab, options?: { keepScroll?: boolean }) => {
+    setTab(next)
+    try { window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}${hashForTab(next)}`) } catch { /* The address is only a convenience. */ }
+    const scroller = scrollRef.current
+    const bar = scroller?.querySelector<HTMLElement>('.af-tabs')
+    if (!options?.keepScroll && scroller && bar && scroller.scrollTop > bar.offsetTop) scroller.scrollTop = bar.offsetTop
+  }, [])
+  useEffect(() => {
+    const onHash = () => { const linked = tabFromHash(window.location.hash); if (linked) setTab(linked) }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  const jump = useCallback((section: number) => { scrollToVisible([sectionTargetId(section)]) }, [scrollToVisible])
+  /** Brings an element of the chosen section into view once it is on screen (a section that was hidden has just been shown). */
+  const revealLater = useCallback((find: () => HTMLElement | null | undefined, block: ScrollLogicalPosition = 'center', attempt = 0) => {
+    const element = find()
+    if (!element || element.getClientRects().length === 0) { if (attempt < 6) window.setTimeout(() => revealLater(find, block, attempt + 1), 60); return }
+    element.scrollIntoView({ behavior: smooth(), block })
+  }, [])
 
-  /** "Upload" beside a missing document: bring its row into view and open the file picker straight away (inside the click, so the browser allows it). */
+  const jump = useCallback((section: number) => { selectTab(tabForSection(section)) }, [selectTab])
+
+  /** "Upload" beside a missing document: show Documents and open the file picker straight away (inside the click, so the browser allows it). */
   const uploadNow = useCallback((kind: DocumentKind) => {
     const row = document.querySelector<HTMLElement>(`[data-document="${kind}"]`)
-    if (row) row.scrollIntoView({ behavior: smooth(), block: 'center' })
-    else jump(5)
-    row?.querySelector<HTMLInputElement>('input[type="file"]')?.click()
-  }, [jump])
+    if (!row) { jump(5); return }
+    row.querySelector<HTMLInputElement>('input[type="file"]')?.click()
+    selectTab('documents', { keepScroll: true })
+    revealLater(() => document.querySelector<HTMLElement>(`[data-document="${kind}"]`))
+  }, [jump, selectTab, revealLater])
 
-  const openNotes = useCallback(() => {
-    document.getElementById('af-notes')?.scrollIntoView({ behavior: smooth(), block: 'start' })
-  }, [])
+  const openNotes = useCallback(() => { selectTab('notes') }, [selectTab])
 
   // A new job means a new application: follow it, so the page keeps showing the candidate's current work.
   const changeAssignment = useCallback(async (field: Parameters<typeof state.changeAssignment>[0], change: Parameters<typeof state.changeAssignment>[1]) => {
@@ -202,20 +224,21 @@ export default function ApplicationFormPage() {
   }), [state.feedbackBusy, state.feedbackError, state.sendFeedback, state.removeFeedback])
 
   /**
-   * "Fill in" beside a missing item: scroll to the field and put the cursor in it (the passport details are section 2 of the page).
+   * "Fill in" beside a missing item: show the section that holds the field, then scroll to it and put the cursor in it.
    */
   const focusField = useCallback((item: MissingItem, attempt = 0) => {
-    const cell = fillRef.current?.querySelector<HTMLElement>(`[data-field="${item.key}"]`) ?? document.getElementById(sectionTargetId(item.section))
-    if (!cell) { if (attempt < 6) window.setTimeout(() => focusField(item, attempt + 1), 80); return }
+    const cell = fillRef.current?.querySelector<HTMLElement>(`[data-field="${item.key}"]`)
+    if (!cell || cell.getClientRects().length === 0) { if (attempt < 6) window.setTimeout(() => focusField(item, attempt + 1), 80); return }
     cell.scrollIntoView({ behavior: smooth(), block: 'center' })
     cell.querySelector<HTMLElement>('input, textarea, select, button.custom-select-trigger, button.date-picker-trigger')?.focus({ preventScroll: true })
   }, [])
   const fillIn = useCallback((item: MissingItem) => {
     setPreviewOpen(false)
+    selectTab(tabForMissing(item), { keepScroll: true })
     window.setTimeout(() => focusField(item), 60)
-  }, [focusField])
+  }, [focusField, selectTab])
 
-  const openTracking = useCallback((row: TrackingRow) => { selectStage(row.stage); setPreviewOpen(false) }, [selectStage])
+  const openTracking = useCallback((row: TrackingRow) => { selectStage(row.stage); setPreviewOpen(false); selectTab('overview') }, [selectStage, selectTab])
 
   const completeness = state.completeness ?? form?.completeness ?? { percent: 0, filled: 0, total: 0, missing: [] }
   const feedback = form?.feedback
@@ -223,6 +246,22 @@ export default function ApplicationFormPage() {
   const missing = visibleMissing(completeness.missing)
   const shownWarnings = visibleWarnings(form?.warnings ?? [])
   const documentProgress = form ? documentRowsProgress(documentRowStates(form, canWork).map((row) => row.state)) : { uploaded: 0, total: 0, percent: 0 }
+
+  const canSeeInvoice = store.can('view_invoices')
+  const canSeeNotes = Boolean(feedback?.supported || canWork)
+  const tabs = availableTabs({ invoice: canSeeInvoice, notes: canSeeNotes })
+  const activeTab: FormTab = tabs.includes(tab) ? tab : DEFAULT_TAB
+  const shownCards = visibleCards(activeTab, wide)
+  const alsoShown = isDetailTab(activeTab) ? (['personal', 'passport', 'education', 'experience'] as FormTab[]).filter((item) => item !== activeTab && visibleCards(item, wide).join() === shownCards.join()) : []
+  const badges = useMemo(() => {
+    const out: Partial<Record<FormTab, TabBadge>> = {}
+    for (const [key, count] of Object.entries(missingByTab(missing))) out[key as FormTab] = { count: count ?? 0, kind: 'missing' }
+    const noteCount = feedback?.items.length ?? 0
+    if (feedback?.stageClock?.needsReason) out.notes = { count: noteCount, kind: 'overdue' }
+    else if (noteCount > 0) out.notes = { count: noteCount, kind: 'notes' }
+    return out
+  }, [missing, feedback])
+  const here = (id: FormTab) => activeTab === id
 
   const sheet = form && ctx ? <FormSheet ctx={ctx.paper} missing={missing} canOpenStage={canWork && Boolean(application)} onOpenStage={openTracking} /> : null
 
@@ -255,48 +294,61 @@ export default function ApplicationFormPage() {
         </div>
       </div>
 
-      <div className="af-scroll">
+      <div className="af-scroll" ref={scrollRef}>
         {state.loading && !form && !state.error ? (
           <FormSkeleton />
         ) : state.error && !form ? (
           <FormErrorCard error={state.error} onRetry={() => void state.reload(false)} onBack={close} />
         ) : form && ctx ? (
           <div className="af-layout">
-            <SidePanel percent={completeness.percent} missing={missing} documents={documentProgress} canEdit={canWork} onUpload={uploadNow} onFill={fillIn} onJump={jump} notes={feedback?.supported || canWork ? { count: feedback?.items.length ?? 0, overdue: Boolean(feedback?.stageClock?.needsReason), onOpen: openNotes } : undefined} />
+            <SidePanel percent={completeness.percent} missing={missing} documents={documentProgress} canEdit={canWork} onUpload={uploadNow} onFill={fillIn} />
             <div className="af-main">
               {saveError && <p className="af-banner is-error" role="alert"><span>{saveError}</span></p>}
               {state.reading && <p className="af-banner is-reading" role="status"><Loader2 className="animate-spin" aria-hidden="true" /><span>Reading documents… The details fill in by themselves as each file is read.</span></p>}
               {shownWarnings.length > 0 && <ul className="af-banner is-warn" role="status">{shownWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
               {feedback && <StageClockBar feedback={feedback} actions={feedbackActions} canWrite={feedback.canWrite} />}
-              {/* The assignment is a card of its own at the very top; it scrolls away with the page. */}
-              <div className="af-card af-assign-card" id="af-assignment">
-                <SectionHeader compact icon={<Building2 />} id="af-assignment-title" title="Client and recruitment details" />
-                <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={me.role === 'admin' || me.role === 'manager'} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
-                  stageControl={<StageControl form={form} canOpen={Boolean(application) && !stageBusy} onOpen={selectStage} />} />
-                <div className="af-stage-workbench">
-                <RecruitmentStages form={form} canOpen={Boolean(application) && !stageBusy} selectedStage={selectedStage} onOpen={selectStage} />
-                {application && selectedStage && <div className="af-stage-feedback" id="af-stage-feedback">
-                  <StageModal key={`${application.id}-${selectedStage}`} embedded applicationId={application.id} open focusStage={selectedStage}
-                    onDirtyChange={setStageDirty} onBusyChange={setStageBusy}
-                    onStageChanged={() => { setStageDirty(false); setOpenStage(null); void state.reload(true) }}
-                    onClose={() => { if (leaveStage()) { setOpenStage(null); void state.reload(true) } }} />
-                </div>}
-                {!application && <div className="af-stage-empty" id="af-stage-feedback">
-                  <Building2 aria-hidden="true" />
-                  <div><h3>Choose a job to begin</h3><p>Select a client and job above. Each stage will keep its own feedback and saved history here.</p></div>
-                </div>}
+              <ContextStrip form={form} onOpen={() => selectTab('overview')} />
+              <FormTabs tabs={tabs} active={activeTab} alsoShown={alsoShown} badges={badges} onSelect={(next) => selectTab(next)} />
+              {/* Every panel stays mounted (hidden when another section is chosen), so typing, uploads and readings carry on while a recruiter moves between sections. */}
+              <div className="af-pane" id="af-pane-overview" role="tabpanel" aria-labelledby="af-tab-overview" hidden={!here('overview')}>
+                <div className="af-card af-assign-card" id="af-assignment">
+                  <SectionHeader compact icon={<Building2 />} id="af-assignment-title" title="Client and recruitment details" />
+                  <AssignmentBar assignment={form.assignment} saving={state.assignmentSaving} errors={state.assignmentErrors} onChange={(field, change) => void changeAssignment(field, change)} applications={form.applications} activeApplicationId={form.application?.id ?? ''} canManageJobs={me.role === 'admin' || me.role === 'manager'} onSwitchApplication={(applicationId) => { if (leaveStage()) navigate(applicationFormHref(id, null, applicationId), { replace: true }) }}
+                    stageControl={<><StageControl form={form} canOpen={Boolean(application) && !stageBusy} onOpen={selectStage} /><CommencementField ctx={ctx.fill} canWork={canWork} /></>} />
+                  <div className="af-stage-workbench">
+                  <RecruitmentStages form={form} canOpen={Boolean(application) && !stageBusy} selectedStage={selectedStage} onOpen={selectStage} />
+                  {application && selectedStage && <div className="af-stage-feedback" id="af-stage-feedback">
+                    <StageModal key={`${application.id}-${selectedStage}`} embedded applicationId={application.id} open focusStage={selectedStage}
+                      onDirtyChange={setStageDirty} onBusyChange={setStageBusy}
+                      onStageChanged={() => { setStageDirty(false); setOpenStage(null); void state.reload(true) }}
+                      onClose={() => { if (leaveStage()) { setOpenStage(null); void state.reload(true) } }} />
+                  </div>}
+                  {!application && <div className="af-stage-empty" id="af-stage-feedback">
+                    <Building2 aria-hidden="true" />
+                    <div><h3>Choose a job to begin</h3><p>Select a client and job above. Each stage will keep its own feedback and saved history here.</p></div>
+                  </div>}
+                  </div>
                 </div>
               </div>
-              {/* One white card for the working area: details, documents, process tracking and notes, split by thin dividers. */}
-              <div className="af-card af-work">
+              <div className="af-pane af-card af-work" id="af-pane-details" role="tabpanel" aria-labelledby={`af-tab-${isDetailTab(activeTab) ? activeTab : 'personal'}`} hidden={!isDetailTab(activeTab)}>
                 <div className="af-fill-wrap" ref={fillRef}>
-                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} />
+                  <FillView ctx={ctx.fill} canWork={canWork} upload={upload} busyKinds={busyKinds} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} cards={shownCards} />
                 </div>
-                <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[primaryId(ids), name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
-                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onIdentity={state.checkIdentity} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} />
-                {store.can('view_invoices') && <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />}
-                <NotesPanel feedback={feedback ?? EMPTY_FEEDBACK} actions={feedbackActions} viewer={{ id: store.me.id, role: store.me.role }} canWork={canWork} />
               </div>
+              <div className="af-pane af-card af-work" id="af-pane-documents" role="tabpanel" aria-labelledby="af-tab-documents" hidden={!here('documents')}>
+                <DocumentsSection form={form} canUpload={canWork} onUpload={upload} busyKinds={busyKinds} onManualStatus={state.markDocument} onIdentity={state.checkIdentity} onExtract={form.capabilities?.deferredDocumentReading ? state.extractDocuments : undefined} readError={state.readError} />
+                <RecordDownloads candidateId={id} applicationId={form.application?.id} recordName={[primaryId(ids), name].filter(Boolean).join('-')} dirty={dirty} canDownload={canWork} />
+              </div>
+              {canSeeInvoice && (
+                <div className="af-pane af-card af-work" id="af-pane-invoice" role="tabpanel" aria-labelledby="af-tab-invoice" hidden={!here('invoice')}>
+                  <InvoiceCard candidateId={id} applicationId={form.application?.id} canWork={canWork} canConfigure={store.me.role === 'admin'} onChanged={() => void state.reload(true)} />
+                </div>
+              )}
+              {canSeeNotes && (
+                <div className="af-pane af-card af-work" id="af-pane-notes" role="tabpanel" aria-labelledby="af-tab-notes" hidden={!here('notes')}>
+                  <NotesPanel feedback={feedback ?? EMPTY_FEEDBACK} actions={feedbackActions} viewer={{ id: store.me.id, role: store.me.role }} canWork={canWork} />
+                </div>
+              )}
             </div>
           </div>
         ) : null}

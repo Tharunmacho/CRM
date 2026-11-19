@@ -32,17 +32,21 @@ const ICONS: Record<FillCard['kind'], LucideIcon> = { fields: UserRound, passpor
  * completeness and the "N to add" counts follow every keystroke. Sections 5 to 7 (Documents, Client and recruitment,
  * Recruitment process tracking) are the shell's; the passport document itself is also a row of the Documents list.
  */
-export function FillView({ ctx, canWork, upload, busyKinds, onExtract, readError }: {
+export function FillView({ ctx, canWork, upload, busyKinds, onExtract, readError, cards: shown }: {
   ctx: FormContext
   canWork: boolean
   upload: (kind: DocumentKind, file: File) => Promise<void>
   busyKinds: DocumentKind[]
   onExtract?: (attachmentIds: string[]) => Promise<void>
   readError?: string
+  /** The numbers of the sections on screen (1 Personal, 2 Passport, 3 Education, 4 Experience); all of them when not given. The others stay mounted, hidden. */
+  cards?: number[]
 }): JSX.Element {
   const env = useFillEnv(ctx)
   const { form, draft, setDraft, errors } = ctx
   const cards = useMemo(() => cardsFor(), [])
+  const visible = (no: number) => !shown || shown.includes(no)
+  const together = shown ? (shown.includes(1) && shown.includes(2) ? 'is-pair' : shown.includes(3) && shown.includes(4) ? 'is-career' : '') : ''
   // Worked out from the draft with the form's own rule, so the counts move as the person types and uploads.
   const missing = useMemo(() => completenessOf(draft, form.documents).missing, [draft, form.documents])
 
@@ -100,9 +104,9 @@ export function FillView({ ctx, canWork, upload, busyKinds, onExtract, readError
 
   return (
     <div className="aff" id="af-fill">
-      <div className="aff-stack">
+      <div className={together ? `aff-stack ${together}` : 'aff-stack'}>
         {cards.map((card) => (
-          <FillCardShell key={card.no} no={card.no} icon={ICONS[card.kind]} title={card.title} hint={card.hint} missing={cardMissing(card, missing).length} counts={cardCounts(card)} aside={card.kind === 'passport' ? passportAside : undefined}>
+          <FillCardShell key={card.no} no={card.no} icon={ICONS[card.kind]} title={card.title} hint={card.hint} missing={cardMissing(card, missing).length} counts={cardCounts(card)} aside={card.kind === 'passport' ? passportAside : undefined} hidden={!visible(card.no)}>
             {body(card)}
           </FillCardShell>
         ))}

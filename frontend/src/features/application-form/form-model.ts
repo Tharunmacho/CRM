@@ -147,12 +147,20 @@ export const RECRUITMENT_FIELDS = [
 export const ALL_EDITABLE_FIELDS: FieldDef[] = [...PERSONAL_FIELDS, ...PASSPORT_FIELDS, ...EXPERIENCE_FIELDS]
 
 /**
+ * The date of commencement (DOC) of the selected placement. It rides the ordinary form save as `application.commencementDate` (ISO "YYYY-MM-DD",
+ * or null to clear it), like the screening fields: it lives in `draft.extras`, is read from `application.commencementDate` of the form payload and is
+ * sent as `{ application: { commencementDate } }`. It is optional, never counted in completeness and never listed in "Still missing".
+ */
+export const COMMENCEMENT_PATH = 'application.commencementDate'
+
+/**
  * The screening details the telemarketer's intake form collects, beyond the paper form (contract section 11).
  * Shown only when the server sends `screening` (`extrasSupported`). Lists (`jobPreference`, `skills`) are kept as
  * comma-separated text in the draft and sent as arrays. `interestLevel` is graded; the call result and the call notes
  * stay what the initial call recorded and are shown read only.
  */
 export const EXTRA_FIELDS: FieldDef[] = [
+  field({ path: COMMENCEMENT_PATH, label: 'Date of commencement (DOC)', section: 6, kind: 'date', required: false }),
   field({ path: 'screening.nativePlace', label: 'Native place', section: 1, kind: 'text', required: false }),
   field({ path: 'screening.familyMemberNumber', label: 'Contact number of a family member', section: 1, kind: 'tel', required: false }),
   field({ path: 'screening.jobPreference', label: 'Preferred job titles', section: 8, kind: 'list', required: false }),

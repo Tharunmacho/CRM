@@ -3,7 +3,7 @@ import { Briefcase, CalendarDays, ListChecks, MapPin, Plus } from 'lucide-react'
 import { api, ApiError } from '@/shared/api/client'
 import type { Client, Company, Designation, Order } from '@/shared/model/types'
 import { useStore } from '@/shared/state/crm-store'
-import { currencyChoices, currencyLabel } from '@/shared/lib/agency'
+import { activeCurrencies, currencyChoices, currencyLabel } from '@/shared/lib/agency'
 import { Button, Field, Input, Select, Textarea } from '@/shared/ui/primitives'
 import { COUNTRY_NAMES, countryCode } from '@/shared/lib/country-flag'
 import { DatePicker } from '@/shared/ui/date-picker'
@@ -14,6 +14,7 @@ import { Flag, FormSection } from '@/features/clients/components/parts'
 import { ClientDialog, useCountryOptions } from '@/features/clients/components/client-dialog'
 import { ComboInput, TagInput } from '@/features/jobs/components/search-select'
 import { canonicalCountry, countryOptions } from '@/features/jobs/country-options'
+import { defaultCurrencyFor } from '@/features/jobs/country-currency'
 import { ClientPicker } from '@/features/jobs/components/client-picker'
 import {
   buildClientOptions, buildJobPayload, decideTitle, emptyJobForm, jobErrorsFromApi, planDesignation, requirementsOf, skillSuggestions, titleKey, validateJob,
@@ -78,9 +79,16 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
   const skillChoices = useMemo(() => skillSuggestions(store.designations), [store.designations])
   const decision = decideTitle(form.title, store.designations, created.current)
 
+  // The currency follows the country only as a default: once the person picks a currency by hand, or when an existing job is opened, it stays as it is.
+  const currencyTouched = useRef(!creating)
+  const [followedCountry, setFollowedCountry] = useState('')
+  const offeredCurrencies = useMemo(() => activeCurrencies(store.settings.currencies).map((item) => item.code), [store.settings.currencies])
   const set = (key: keyof JobForm, value: string) => {
-    setForm((previous) => ({ ...previous, [key]: value }))
-    if (errors[key]) setErrors((previous) => { const next = { ...previous }; delete next[key]; return next })
+    if (key === 'currency') { currencyTouched.current = true; setFollowedCountry('') }
+    const follow = key === 'country' && !currencyTouched.current ? defaultCurrencyFor(value, countryCode, offeredCurrencies) : null
+    if (key === 'country' && !currencyTouched.current) setFollowedCountry(follow ? properCountry(value) : '')
+    setForm((previous) => ({ ...previous, [key]: value, ...(follow ? { currency: follow } : {}) }))
+    if (errors[key] || (follow && errors.currency)) setErrors((previous) => { const next = { ...previous }; delete next[key]; if (follow) delete next.currency; return next })
   }
   const close = () => { if (!saving) onClose() }
   const setTitle = (value: string) => {
@@ -192,7 +200,7 @@ export function OrderDialog({ designation, order, companyId, onClose, onSaved }:
           <Field label="Salary (per month)" error={errors.salary}>
             <Input type="number" inputMode="decimal" min={0} max={9999999999.99} step={0.01} value={form.salary} onChange={(e) => set('salary', e.target.value)} placeholder="Optional amount" aria-invalid={!!errors.salary} />
           </Field>
-          <Field label="Currency" required error={errors.currency}>
+          <Field label="Currency" required error={errors.currency} hint={followedCountry && form.currency ? `Set from ${followedCountry}. You can change it.` : undefined}>
             <Select value={form.currency} onChange={(e) => set('currency', e.target.value)} aria-invalid={!!errors.currency}>
               {!form.currency && <option value="">Choose a currency</option>}
               {currencyChoices(store.settings.currencies, order?.currency).map((currency) => <option key={currency.code} value={currency.code}>{currencyLabel(currency)}</option>)}

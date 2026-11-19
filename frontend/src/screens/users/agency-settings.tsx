@@ -12,6 +12,7 @@ import { FormOptionsCard } from './form-options-card'
 import { WaTemplatesCard } from './wa-templates-card'
 import { AutoAssignCard } from './auto-assign-card'
 import { CurrencyCard } from './currency-card'
+import { RemarkTemplatesCard } from './remark-templates-card'
 import { PanelHead } from './user-ui'
 import '@/styles/agency-settings.css'
 
@@ -156,5 +157,7 @@ export function AgencySettingsTab() {
     <FormOptionsCard editable={editable} />
 
     <WaTemplatesCard editable={editable} />
+
+    <RemarkTemplatesCard editable={editable} />
   </div>
 }
