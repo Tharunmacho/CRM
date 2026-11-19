@@ -131,9 +131,13 @@ def _current_files(db, candidate_ids: list[str]) -> dict[tuple[str, str], tuple[
 
 def _filing_history(db, candidate_ids: list[str]) -> tuple[set[str], set[str]]:
     """From the audit trail: (the stored files that are themselves a piece cut from a larger scan, the stored files whose pieces were
-    already filed). Pieces are never cut again, and a scan whose pieces were filed when it was stored has nothing left to sort."""
+    already filed). Pieces of the Resume / Passport / Aadhaar fields are never cut again, and a scan whose pieces were filed when it was
+    stored has nothing left to sort. (A piece in Other documents is different: the old sorter left the pages it could not place there,
+    so `enqueue` sorts it anyway; and a scan kept as received with NO piece cut from it was never sorted at all.)"""
     pieces: set[str] = set()
     sources: set[str] = set()
+    kept: dict[str, str] = {}              # a scan kept as received -> its original name
+    cut_from: set[str] = set()             # original names of the scans some piece was cut from
     for meta in db.scalars(select(AuditEntry.meta).where(
             AuditEntry.entity_type == "candidate", AuditEntry.entity_id.in_(candidate_ids),
             AuditEntry.action.in_(("Uploaded document", "Separated a document from a combined upload", "Added a saved document to a candidate")))):
@@ -141,10 +145,15 @@ def _filing_history(db, candidate_ids: list[str]) -> tuple[set[str], set[str]]:
             continue
         if meta.get("split_pages") or meta.get("source_attachment_id"):
             pieces.add(meta["attachment_id"])
+            if meta.get("original_name"):
+                cut_from.add(meta["original_name"])
         if meta.get("source_attachment_id"):
             sources.add(meta["source_attachment_id"])
-        if meta.get("kept_original") or (meta.get("slot") == SOURCE_SLOT and meta.get("original_only") is False):
+        if meta.get("kept_original"):
+            kept[meta["attachment_id"]] = meta.get("original_name") or ""
+        elif meta.get("slot") == SOURCE_SLOT and meta.get("original_only") is False:
             sources.add(meta["attachment_id"])     # the scan kept as received beside the pieces cut from it
+    sources.update(identifier for identifier, name in kept.items() if name in cut_from)
     return pieces, sources
 
 
@@ -203,9 +212,9 @@ def enqueue(db, user, candidates: list, *, per_candidate: int = RESORT_FILES_PER
             outcome = "superseded"          # an older version of a field: history, never cut
         elif (row.size_kb or 0) > RESORT_MAX_KB:
             outcome = "too_large"
-        elif row.id in pieces:
+        elif row.slot != "other" and row.id in pieces:
             outcome = "already_a_piece"
-        elif row.id in sources:
+        elif row.slot != "other" and row.id in sources:
             outcome = "pieces_already_filed"
         elif row.slot in IDENTITY_SLOTS and (row.entity_id, row.object_key) in filed:
             outcome = "sorted_by_reading"
@@ -312,11 +321,14 @@ def _file_pieces(db, owner, candidate: Candidate, source: Attachment, plan, job,
     if original_slot != "resume":
         # A resume pulled out of a passport / Aadhaar / Other file never replaces a resume the candidate already has: its pages go to
         # Other documents instead (they are still on the record, and the whole file is kept).
-        has_resume = db.scalar(select(func.count()).select_from(Attachment).where(
-            Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == "resume"))
-        if has_resume:
+        held = db.scalars(select(Attachment).where(
+            Attachment.entity_type == "candidate", Attachment.entity_id == candidate.id, Attachment.slot == "resume")
+            .order_by(Attachment.version.desc())).all()
+        if held:
             for piece in plan.pieces:
-                if "resume" in piece.slots:
+                # ... unless the candidate's resume already shows these very pages (cut from the same scan earlier): then nothing is
+                # filed at all, and `store_pieces` says so
+                if "resume" in piece.slots and splitting._already_filed(piece, "resume", held, settings) is None:
                     piece.slots = [slot for slot in dict.fromkeys("other" if slot == "resume" else slot for slot in piece.slots)]
     stored = splitting.store_pieces(db, owner, candidate, plan, source.file_name, settings=settings, written=written,
                                     audit_extra={"document_job_id": job.id, "source_attachment_id": source.id, "resorted": True},

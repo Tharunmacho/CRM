@@ -356,3 +356,98 @@ def test_a_sort_job_never_shows_in_the_upload_screens_job_list(world):
     assert [job.status for job in resorts(world)] == ["pending"]
     listed = world.client.get("/api/ocr/jobs")
     assert listed.status_code == 200 and listed.json() == []
+
+
+# ------------------------------------------------------------------ the shape the old Import screen left (CI-205)
+
+OLD_IMPORT = ["resume_1", "resume_2", "passport_data", "passport_back", "medical", "offer", "evisa"]
+
+
+def old_import(env, *, keep_whole=True):
+    """One 9-page-style PDF cut by the OLD import: a Resume piece (pages 1-2, filled) and ONE Other documents piece holding every other page
+    (3-7) that the old sorter could not place, each with the audit meta the import wrote (`split_pages`), the whole file kept as source evidence."""
+    whole = bundle(OLD_IMPORT)
+    resume = store(env, "resume", "Pages 1-2 of vivek.pdf", bulk.cut_pdf_pages(whole, [1, 2]),
+                   audit={"bulk_import": True, "original_name": "vivek.pdf", "split_pages": [1, 2], "extraction_deferred": True})
+    other = store(env, "other", "Pages 3-7 of vivek.pdf", bulk.cut_pdf_pages(whole, [3, 4, 5, 6, 7]),
+                  audit={"bulk_import": True, "original_name": "vivek.pdf", "split_pages": [3, 4, 5, 6, 7]})
+    source = store(env, "source_bundle", "vivek.pdf", whole, audit={"bulk_import": True, "kept_original": True, "original_name": "vivek.pdf"}) if keep_whole else None
+    return whole, resume, other, source
+
+
+def test_the_other_documents_piece_left_by_the_old_import_is_sorted_and_the_resume_is_untouched(world, monkeypatch):
+    install_reader(monkeypatch)
+    whole, resume, other, source = old_import(world)
+    before = snapshot(world)
+    result = read_pending(world).json()
+    assert result["sorting"] == 1                                            # the mixed Other piece; the resume piece and the whole are skipped
+    run_worker(world)
+    [job] = [item for item in resorts(world) if item.result["outcome"] == "sorted"]
+    assert job.draft["resort"]["attachmentId"] == other.id
+    filed = slots(world)
+    assert [(item.id, item.version) for item in filed["resume"]] == [(resume.id, 1)]          # the resume is untouched
+    assert bytes_of(world, filed["resume"][0]) == bulk.cut_pdf_pages(whole, [1, 2])
+    assert {"passport", "medical", "signed_offer", "visa"} <= set(filed)
+    assert len(page_texts(bytes_of(world, filed["passport"][0]))) == 2
+    assert [item.id for item in filed["source_bundle"] if item.id == other.id] == [other.id]   # the mixed piece is kept as evidence ...
+    assert source.id in [item.id for item in filed["source_bundle"]]                          # ... beside the whole file
+    assert "other" not in filed or all(item.id != other.id for item in filed["other"])        # nothing is left in Other documents that was not placed
+    # the passport piece is queued for reading; the unread resume piece is queued by read-pending itself, as for any stored file
+    assert sorted((item.draft["applicationForm"]["slot"], item.attachment_id == resume.id) for item in readings(world)) == [("passport", False), ("resume", True)]
+    with world.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Attachment).where(Attachment.entity_id == "candidate", Attachment.slot == "resume")) == 1
+
+    snap = snapshot(world)
+    assert snap != before
+    again = read_pending(world).json()
+    assert "sorting" not in again and again["queued"] == 0
+    run_worker(world)
+    assert snapshot(world) == snap                                           # a second call changes nothing
+    world.actor.id, world.actor.role = "admin", Role.admin
+    assert sweep(world, candidateIds=["candidate"]).json()["queued"] == 0
+    world.actor.id, world.actor.role = "staff", Role.staff
+    run_worker(world)
+    assert snapshot(world) == snap
+
+
+def test_a_whole_file_the_old_import_kept_with_no_piece_cut_from_it_is_sorted(world, monkeypatch):
+    install_reader(monkeypatch)
+    whole = bundle(OLD_IMPORT)
+    store(world, "source_bundle", "vivek.pdf", whole, audit={"bulk_import": True, "kept_original": True, "original_name": "vivek.pdf"})
+    assert read_pending(world).json()["sorting"] == 1
+    run_worker(world)
+    assert {"resume", "passport", "medical", "signed_offer", "visa", "source_bundle"} <= set(slots(world))
+    # ... and when it was stored whole in Other documents as well
+    add_candidate(world, "second")
+    store(world, "other", "vivek.pdf", whole, candidate="second")
+    assert read_pending(world, "second").json()["sorting"] == 1
+    run_worker(world)
+    assert {"resume", "passport", "source_bundle"} <= set(slots(world, "second"))
+
+
+def test_a_resume_already_filed_from_the_same_scan_is_not_filed_again_from_the_other_piece(world, monkeypatch):
+    install_reader(monkeypatch)
+    whole = bundle(OLD_IMPORT)
+    store(world, "resume", "Pages 1-2 of vivek.pdf", bulk.cut_pdf_pages(whole, [1, 2]),
+          audit={"bulk_import": True, "original_name": "vivek.pdf", "split_pages": [1, 2]})
+    store(world, "other", "Pages 1-7 of vivek.pdf", bulk.cut_pdf_pages(whole, list(range(1, 8))), audit={"bulk_import": True, "original_name": "vivek.pdf", "split_pages": list(range(1, 8))})
+    assert read_pending(world).json()["sorting"] == 1
+    run_worker(world)
+    filed = slots(world)
+    assert len(filed["resume"]) == 1 and "other" not in filed                # the resume pages are not copied into Other documents
+    assert "passport" in filed
+
+
+def test_what_a_sort_leaves_in_other_documents_is_looked_at_once_and_never_loops(world, monkeypatch):
+    install_reader(monkeypatch)
+    store(world, "source_bundle", "Bundle.pdf", bundle(BUNDLE, "A page nothing recognises."))
+    read_pending(world)
+    run_worker(world)
+    left = slots(world)["other"]
+    assert len(left) == 1
+    first = snapshot(world)
+    for _ in range(3):
+        read_pending(world)
+        run_worker(world)
+    assert snapshot(world) == first
+    assert sorted(job.result["outcome"] for job in resorts(world) if job.draft["resort"]["attachmentId"] == left[0].id) == ["not_a_bundle"]
