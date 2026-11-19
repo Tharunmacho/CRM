@@ -1175,7 +1175,8 @@ def file_other_documents(db: Session, job: DocumentExtractionJob, output: dict, 
     so nothing is lost and the reading of the three kinds is never held back. Returns the pieces stored."""
     if (job.draft or {}).get(OTHERS_FILED) or meta.get("slot") not in IDENTITY_SLOTS or not job.candidate_id:
         return []
-    state = job.state if isinstance(job.state, dict) else {}
+    state = getattr(job, "state", None)
+    state = state if isinstance(state, dict) else {}
     inspection = (output or {}).get("inspection") or {}
     saved = state.get("page_kinds")
     if not inspection or not isinstance(saved, dict):

@@ -11,7 +11,7 @@ async function loadSource(path) {
 
 const upload = await loadSource('../src/features/candidates/entry-upload.ts')
 const { fileRow, fileRows, foundChips, readProgress, queueText, pagesText, sizeText, findingsNames, documentPresence, severalPeopleFound, jobFindings, isDocumentJob,
-  trackNextInLine, NEXT_IN_LINE_MS, NO_READER_INFO_MS, READER_DOWN, STILL_WAITING, safeHint } = upload
+  trackNextInLine, readingStatus, elapsedText, SLOW_READ_MS, NEXT_IN_LINE_MS, NO_READER_INFO_MS, READER_DOWN, STILL_WAITING, safeHint } = upload
 
 // Synthetic jobs only: no real names, numbers or documents.
 let counter = 0
@@ -377,4 +377,35 @@ test('the zone lists a chip only for a kind that was found, under one heading, a
   assert.match(zone, /found\.length > 0 && \(/)
   assert.match(zone, /aria-labelledby="uz-chips-head"/)
   assert.match(zone, /rows\.length === 0 && <p className="uz-hint">/)
+})
+
+test('the reading strip says where the work really is: saved, waiting for the reader, sorting the pages, then reading what was found', () => {
+  const start = Date.parse('2026-01-01T00:00:00Z')
+  assert.deepEqual(readingStatus([]), { steps: [], text: '' })
+  const waiting = readingStatus([job({ status: 'pending', reader: alive })], start)
+  assert.equal(waiting.text, 'Saved. Waiting for the reader to pick it up…')
+  assert.deepEqual(waiting.steps.map((step) => [step.key, step.state]), [['saved', 'done'], ['line', 'active'], ['sorting', 'todo'], ['reading', 'todo']])
+  assert.equal(readingStatus([job({ status: 'pending', reader: dead })], start).text, `Saved. ${READER_DOWN}`)
+  // The worker has the file and has not found any page yet: the pages are being sorted, with the time spent.
+  const sorting = readingStatus([job({ status: 'processing', startedAt: '2026-01-01T00:00:00Z' })], start + 45_000)
+  assert.equal(sorting.text, 'Sorting the pages by what is on them… 45 s.')
+  assert.deepEqual(sorting.steps.map((step) => [step.key, step.state]), [['saved', 'done'], ['line', 'done'], ['sorting', 'active'], ['reading', 'todo']])
+  // A long scan is told honestly, still working.
+  assert.match(readingStatus([job({ status: 'processing', startedAt: '2026-01-01T00:00:00Z' })], start + SLOW_READ_MS + 30_000).text, /2 min\.? .*a few minutes|2 min/)
+  // The pages are sorted (kinds found while the reader works): the chips are named and the step moves on.
+  const found = readingStatus([job({ status: 'processing', startedAt: '2026-01-01T00:00:00Z', result: { scans: { resume: scan([1], { extraction_status: 'needs_review', raw: {} }), passport: scan([2], { extraction_status: 'needs_review', raw: {} }) }, kinds: { experience_certificate: [3, 4] } } })], start + 100_000)
+  assert.match(found.text, /^Found Resume, Passport, Experience certificates\. Reading them now… 1 min 40 s\./)
+  assert.deepEqual(found.steps.map((step) => [step.key, step.state]), [['saved', 'done'], ['line', 'done'], ['sorting', 'done'], ['reading', 'active']])
+  // Everything read: every step done, and what was found is named.
+  const done = readingStatus([job({ status: 'completed', result: { scans: { resume: scan([1]) } } })], start)
+  assert.equal(done.text, 'Found Resume.')
+  assert.ok(done.steps.every((step) => step.state === 'done'))
+  assert.equal(elapsedText(61_000), '1 min 1 s')
+  assert.equal(elapsedText(120_000), '2 min')
+})
+
+test('the Add candidate strip shows the reading steps under the existing sentence and keeps it', async () => {
+  const page = await readFile(new URL('../src/screens/candidates/add-candidate.tsx', import.meta.url), 'utf8')
+  assert.match(page, /Reading documents… You can leave this page; we keep going\./)
+  assert.match(page, /readingStatus\(intake\.jobs\)/)
 })

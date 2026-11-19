@@ -295,6 +295,46 @@ export function documentPresence(jobs: IntakeJob[]): Record<DocKind, boolean> {
   return result
 }
 
+export interface ReadingStep { key: 'saved' | 'line' | 'sorting' | 'reading'; label: string; state: 'done' | 'active' | 'todo' }
+export interface ReadingStatus { steps: ReadingStep[]; text: string }
+/** "45 s", "1 min 20 s". */
+export function elapsedText(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min${seconds % 60 ? ` ${seconds % 60} s` : ''}`
+}
+/** After this long on one file the screen says that a long scan takes a few minutes (it is still working). */
+export const SLOW_READ_MS = 90_000
+/**
+ * Where the reading of the dropped files really is, in plain words, from what the server already tells (no guessing): saved, in line for
+ * the reader, the pages being sorted by what is on them, then each kind found being read. `text` is one honest sentence for the strip
+ * under the drop zone; the steps say which part is done, running or still to come. Pure: `now` (ms) is passed in.
+ */
+export function readingStatus(jobs: IntakeJob[], now: number = Date.now()): ReadingStatus {
+  const docs = jobs.filter(isDocumentJob)
+  if (!docs.length) return { steps: [], text: '' }
+  const waiting = docs.filter((job) => job.status === 'uploaded' || job.status === 'pending' || job.status === 'retry')
+  const running = docs.filter((job) => job.status === 'processing')
+  const open = waiting.length + running.length
+  const names = foundChips(docs).filter((chip) => chip.state !== 'idle').map((chip) => chip.label.replace(/ needs a look$/, ''))
+  const startedAt = running.map((job) => Date.parse(job.startedAt ?? '')).filter(Number.isFinite)
+  const elapsed = startedAt.length ? now - Math.min(...startedAt) : 0
+  const sorting = running.length > 0 && names.length === 0
+  const steps: ReadingStep[] = [
+    { key: 'saved', label: 'Saved', state: 'done' },
+    { key: 'line', label: 'In line for the reader', state: running.length > 0 || waiting.length === 0 ? 'done' : 'active' },
+    { key: 'sorting', label: 'Sorting the pages', state: sorting ? 'active' : names.length > 0 || open === 0 ? 'done' : 'todo' },
+    { key: 'reading', label: 'Reading what was found', state: open === 0 ? 'done' : names.length > 0 ? 'active' : 'todo' },
+  ]
+  if (open === 0) return { steps, text: names.length ? `Found ${names.join(', ')}.` : '' }
+  if (running.length === 0) {
+    const down = waiting.some((job) => job.reader?.alive === false || job.waitingReason === 'reader_not_running')
+    return { steps, text: down ? `Saved. ${READER_DOWN}` : 'Saved. Waiting for the reader to pick it up…' }
+  }
+  const slow = elapsed > SLOW_READ_MS ? ' A long scan takes a few minutes; it is still working.' : ''
+  if (sorting) return { steps, text: `Sorting the pages by what is on them… ${elapsedText(elapsed)}.${slow}` }
+  return { steps, text: `Found ${names.join(', ')}. Reading ${names.length === 1 ? 'it' : 'them'} now… ${elapsedText(elapsed)}.${slow}` }
+}
+
 export interface ReadProgress { total: number; finished: number; working: number; failed: number; percent: number; text: string }
 /** "3 of 10 read" over all files in the zone. */
 export function readProgress(rows: FileRow[]): ReadProgress {

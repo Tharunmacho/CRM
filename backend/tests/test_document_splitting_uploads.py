@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.models import Attachment, AuditEntry, Candidate, DocumentExtractionJob, Role, Source, User
 from app.integrations.ocr import inspection
 from app.services import bulk_candidate_import as bulk, document_splitting as splitting
-from app.services.document_storage import put_bytes
+from app.services.document_storage import put_bytes, read_bytes
 from ocr_synthetic import composite_pdf
 from test_database_naming import _migrate, schema_database  # noqa: F401  (fixtures)
 
@@ -371,6 +371,42 @@ def test_attaching_a_saved_scan_files_its_pages_in_their_own_fields_too(desk):
     with desk.sessions() as db:
         meta = next(e.meta for e in db.scalars(select(AuditEntry).where(AuditEntry.entity_id == "candidate")) if e.meta.get("slot") == "aadhaar")
     assert meta["original_name"] == "intake-scan.pdf" and meta["split_pages"] == [3] and meta["document_job_id"] == job
+
+
+def test_a_scan_that_would_need_ocr_is_never_read_inside_the_attach_request_it_is_stored_whole_and_read_in_the_background(desk):
+    scan = composite_pdf(SCAN)
+    job = _saved_upload(desk, scan)
+    with patch.object(splitting, "costs_ocr", return_value=True),             patch.object(bulk, "split_by_content", side_effect=AssertionError("OCR must not run inside the attach request")):
+        attached = desk.client.post(f"/api/ocr/jobs/{job}/attach", json={"candidateId": "candidate"})
+    assert attached.status_code == 200, attached.text
+    assert "pieces" in attached.json()["split"] and attached.json()["split"]["pieces"] == []
+    stored = rows(desk)
+    assert [row.slot for row in stored] == ["resume"] and read_bytes(desk.settings, stored[0].object_key) == scan   # the whole scan, as received
+    with desk.sessions() as db:
+        queued = list(db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.status == "pending")))
+    assert [(item.candidate_id, item.attachment_id, item.kind) for item in queued] == [("candidate", stored[0].id, "resume")]
+
+
+def test_a_cheap_scan_whose_reading_is_still_running_is_sorted_now_and_also_queued_for_the_reader(desk):
+    job = _saved_upload(desk, composite_pdf(SCAN))
+    with desk.sessions() as db:
+        db.get(DocumentExtractionJob, job).status = "processing"            # the person stopped waiting: no result yet
+        db.commit()
+    attached = desk.client.post(f"/api/ocr/jobs/{job}/attach", json={"candidateId": "candidate"})
+    assert attached.status_code == 200, attached.text
+    assert {row.slot for row in rows(desk)} == {"resume", "passport", "aadhaar", "other"}                   # sorted from the text layer at once
+    with desk.sessions() as db:
+        assert db.get(DocumentExtractionJob, job).status == "attached"
+        assert len(list(db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.status == "pending",
+                                                                       DocumentExtractionJob.candidate_id == "candidate")))) == 1
+
+
+def test_costs_ocr_tells_a_text_layer_from_a_scan():
+    assert splitting.costs_ocr(composite_pdf(SCAN)) is False
+    assert splitting.costs_ocr(b"not a pdf") is True
+    with fitz.open() as blank:
+        blank.new_page()
+        assert splitting.costs_ocr(blank.tobytes()) is True                 # a page with no text layer has to be read as a picture
 
 
 def test_fields_the_reader_already_filled_from_the_saved_scan_are_left_alone(desk):

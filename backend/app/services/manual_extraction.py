@@ -449,8 +449,37 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
             raise JobFinished()
         saved_keys.update(changed)
 
+    found_early = {"kinds": False}
+
+    def keep_page_kinds(value):
+        """The moment the local reading of the pages exists, what each page is (no page text) goes into the saved state, and the pages found
+        are shown on the upload row at once (chips) while the reader is still working. Without this the kinds were saved only when the
+        whole job ended: a run that stopped to wait for the reader and was taken up again restores the inspection WITHOUT any page text
+        and could never work the kinds out again, so the file was neither sorted nor filed. Never raises: the reading goes on."""
+        if found_early["kinds"] or not fresh or not isinstance(value.get("inspection"), dict):
+            return
+        try:
+            from app.services import document_splitting, intake_documents
+            if not intake_documents.remember_kinds(value, digest, fresh):
+                return
+            found_early["kinds"] = True
+            kinds = document_splitting.kinds_found(data, readings=fresh, report=value["inspection"], saved_kinds=value.get("page_kinds"))
+            partial = json.dumps(_scan_results({"inspection": value["inspection"], "status": "needs_review", "warnings": [], "extractions": {}},
+                                               kinds), default=_plain)
+
+            def show():
+                with sessions() as early_db:
+                    _autocommit(early_db)
+                    early_db.execute(text(
+                        "UPDATE document_extraction_jobs SET result = CAST(:result AS JSONB) WHERE id = :id AND status = 'processing' "
+                        "AND (CAST(:fence AS TEXT) IS NULL OR claimed_by = :fence)"), {"result": partial, "id": identifier, "fence": claimed_by})
+            with_db_retry(show)
+        except Exception:
+            log.warning("The pages found in job %s could not be shown early; the reading goes on.", identifier, exc_info=True)
+
     def save_and_fill(value):
         """A checkpoint; and the first time the local reading has verified something, the form is filled from it at once."""
+        keep_page_kinds(value)
         checkpoint(value)
         if form_candidate and value.get("local_patterns") and not value.get("local_filled"):
             try:
@@ -657,8 +686,12 @@ def process_job(identifier, *, sessions, settings, claimed_by=None):
 def _plan_split_of_original(db, user, identifier, candidate_id, settings):
     """Before any lock is taken: does the saved scan hold documents beyond the ones the reader already cut out of it?
 
-    Reading the pages is slow, so it never happens while the candidate (or the assignment cursor) is locked. Any refusal or
-    failure here only means "no analysis": the attach below then raises whatever it always raised, or stores the files as before.
+    Returns (plan, skipped). Reading the pages is slow (OCR), so it never happens while the candidate (or the assignment cursor) is
+    locked, and it never happens in this request when it would run OCR: the attach would then outlast the browser's 30 seconds and
+    the person would be told it failed. A scan that was read has its page kinds saved: the pieces are cut from that reading, no OCR.
+    A scan with a text layer on every page is sorted here (seconds). Any other unread scan is `skipped`: attach stores it whole and
+    queues it for the reading job, which sorts and reads it in the background (`attach_original`).
+    Any refusal or failure here only means "no analysis": the attach below then raises whatever it always raised, or stores the files as before.
     """
     from app.core.deps import ensure_can_work_candidate
     from app.services import document_splitting
@@ -668,29 +701,42 @@ def _plan_split_of_original(db, user, identifier, candidate_id, settings):
         candidate = db.get(Candidate, candidate_id)
         if (job is None or candidate is None or job.candidate_id or job.status == "dismissed" or job.content_type != "application/pdf"
                 or job.kind not in document_splitting.READ_SLOTS):
-            return None
+            return None, False
         ensure_can_work_candidate(candidate, user, db)
         data = read_bytes(settings, job.object_key)
         if hashlib.sha256(data).hexdigest() != job.content_hash:
-            return None
-        # A scan that was read (Extract details) has its page kinds saved: the pieces are cut from that reading, with no second OCR.
+            return None, False
+        if not document_splitting.worth_analysing(None, job.filename, job.content_type, data):
+            return None, False
+        # A scan that was read has its page kinds saved: the pieces are cut from that reading, with no second OCR.
         state = job.state if isinstance(job.state, dict) else {}
         known, plan = document_splitting.plan_split_saved(None, job.filename, data, (state.get("output") or {}).get("inspection"),
                                                           state.get("page_kinds"))
-        return plan if known else document_splitting.plan_split(None, job.filename, data)
+        if known:
+            return plan, False
+        if document_splitting.costs_ocr(data):
+            return None, True
+        return document_splitting.plan_split(None, job.filename, data), False
     except Exception:
-        return None
+        return None, False
     finally:
         for row in (candidate, job):   # the locked reads that follow must see the rows as they are then, not as they were before
             if row is not None:
                 db.expire(row)
 
 
+# What a job carries over to the reading queued when its file is attached unread: the local reading and what the reader already accepted.
+_NOT_CARRIED = ("output", "documents", "document_history", "failure", "reader", "timings")
+_READ_KINDS = ("resume", "passport", "aadhaar")
+SAVED_UNREAD = ("This file was saved whole. It is still being read: the details are filled in by themselves and its documents are "
+                "filed in their own fields afterwards.")
+
+
 def attach_original(db, user, identifier, candidate_id, settings, *, original_only=False):
     from app.api.routers.candidates import lock_assignment_cursor
     from app.services.document_person_split import ensure_single_person_source
     from app.services import document_splitting
-    split_plan = None if original_only else _plan_split_of_original(db, user, identifier, candidate_id, settings)
+    split_plan, analysis_skipped = (None, False) if original_only else _plan_split_of_original(db, user, identifier, candidate_id, settings)
     lock_assignment_cursor(db)
     source_job = owned_job(db, identifier, user.id)
     ensure_single_person_source(db, "manual", source_job.group_id)
@@ -718,7 +764,16 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
                  **({} if original_only else deepcopy((job.state or {}).get("documents", {})))}
     if not original_only and job.kind in {"photo", "education", "experience"}:
         documents[job.kind] = deepcopy(documents["source_bundle"])
+    # A file whose reading had not finished when the candidate was saved (the reader is not running, still busy, or the person stopped
+    # waiting), or whose pages could not be sorted without OCR here, is never left as an unread original: it is stored whole in its field
+    # and queued for the reader, which finds the resume / passport / Aadhaar pages itself; the other pages are filed when it is read.
+    state = job.state if isinstance(job.state, dict) else {}
+    read_later = (not original_only and job.kind in _READ_KINDS and not state.get("output") and not documents.keys() - {"source_bundle"}
+                  and (job.status in READY or analysis_skipped))
+    if read_later:
+        documents = {job.kind: documents["source_bundle"]}
     attached = {}
+    stored: dict[str, Attachment] = {}
     named: set[str] = set()
     for slot, document in documents.items():
         data = original if slot == "source_bundle" else read_bytes(settings, document["object_key"])
@@ -735,6 +790,7 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
             uploaded_by=user.id, uploaded_at=now())
         db.add(row)
         attached[slot] = row.id
+        stored[slot] = row
         db.add(AuditEntry(actor_id=user.id, action="Added a saved document to a candidate", target=row.file_name,
             entity_type="candidate", entity_id=candidate.id, meta={"attachment_id": row.id, "slot": slot,
             "version": row.version, "document_job_id": job.id, "original_only": original_only}))
@@ -753,13 +809,21 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
             from app.services.bulk_candidate_import import discard_written
             discard_written(settings, written)
             filed = []
-    job.attachment_id = attached["source_bundle"]
+    job.attachment_id = attached.get("source_bundle") or attached[job.kind]
     job.candidate_id = candidate.id
     job.status = "attached"
     job.updated_at = now()
     job.state = {**deepcopy(job.state or {}), "attached_documents": attached, "attached_original_only": original_only}
+    if read_later:
+        from app.services.application_form import queue_reading
+        reading = queue_reading(db, user, candidate, stored[job.kind], job.content_type)
+        carried = {key: deepcopy(value) for key, value in state.items() if key not in _NOT_CARRIED}
+        if carried:   # the same file: its local reading and any reader job already accepted are not done twice
+            reading.state = carried
     db.commit()
     answer = job_out(job, detail=True)
+    if read_later:
+        answer["split"] = {"pieces": [], "message": SAVED_UNREAD}
     if filed:
         from app.services import document_splitting
         answer["split"] = document_splitting.report(filed)   # the screen tells the person which documents went to which field

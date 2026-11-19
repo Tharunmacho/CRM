@@ -380,3 +380,94 @@ def test_a_university_marks_statement_is_an_education_certificate():
     text = ("GAMMA UNIVERSITY, DEMO CITY\nMARKS STATEMENT\nB.Com Part III Examination 2022\nRoll No 160582059791\n"
             "Total marks obtained 1450 of 2000 Second Class")
     assert classify_kind(text).kind == "education_certificate"
+
+
+# ---- training certificates and letters from an employer or an institute are experience, not education or "other" ------------------
+# (wording taken from a real combined PDF's OCR, with invented names)
+
+INTERN_TRAINING = ("Grand Palm Hotels Group Intern Training This certificate is awarded to Mr. Rahul Demo Student of Example Institute "
+                   "For successfully completing Intern Training At Grand Palm Chennai Resort From 11th October 2019 to 11th March 2020 "
+                   "with 100 % Attendance Overall Performance Rating: Excellent Performance Asha Demo Assistant Human Resources Manager")
+INSTITUTE_TRAINING_LETTER = ("EXAMPLE INSTITUTE OF HOTEL MANAGEMENT 21/01/2021 TOWHOMSOEVERITMAYCONCERN Dear Sir/Madam, This is to certify "
+                             "that RAHUL DEMO, pursuing 1 year Craft course specializing in KITCHEN and is a Bonafide student of our "
+                             "Institute (2019-2020) We do not have any objection to his undergoing BAKERY Exclusive on the job training "
+                             "for the period 6 months in your prestigious hotel Placement Officer & Training Manager")
+HOTEL_TRAINING_LETTER = ("Sunrise Hotel Demo City 24 June 2022 TO WHOMSOEVER IT MAY CONCERN is to certify that Mr. R. DEMO, Student of "
+                         "Example Institute of Technology, has undergone his On Job Training in our hotel from October 2021 to 31st "
+                         "March 2022, he has shown keen interest to learn the skills involved. We wish him success in his future.")
+
+
+@pytest.mark.parametrize("text", [INTERN_TRAINING, INSTITUTE_TRAINING_LETTER, HOTEL_TRAINING_LETTER])
+def test_a_training_certificate_or_letter_about_training_at_an_employer_is_an_experience_certificate(text):
+    guess = classify_kind(text)
+    assert guess.kind == "experience_certificate" and not guess.inherited
+
+
+@pytest.mark.parametrize("text", [
+    "Certificate of Internship. This is to certify that Mr. Amit Demo completed his internship with Delta Foods from 01/06/2023 to 30/11/2023.",
+    "INDUSTRIAL EXPOSURE TRAINING CERTIFICATE. Mr. Amit Demo has completed Industrial Exposure Training at Delta Residency, "
+    "from 06/09/2022 to 06/03/2023. Training period: 6 months. HR Manager",
+    "LETTER OF RECOMMENDATION. To whom it may concern, Mr. Amit Demo worked in our kitchen as a commis chef and we recommend him. General Manager",
+])
+def test_internship_industrial_exposure_and_recommendation_wording_is_experience(text):
+    assert classify_kind(text).kind == "experience_certificate"
+
+
+def test_an_industrial_training_institute_certificate_is_education_not_experience():
+    text = ("GOVERNMENT OF DEMOSTATE Directorate of Employment and Training. Industrial Training Institute, Demopur. "
+            "NATIONAL TRADE CERTIFICATE. Roll No 00160809106589. Trade: Fitter. Passed the All India Trade Test examination. First Class.")
+    assert classify_kind(text).kind == "education_certificate"
+
+
+def test_a_degree_or_marksheet_stays_education_even_when_it_mentions_training():
+    text = ("EXAMPLE UNIVERSITY. This is to certify that Mr. Amit Demo has been admitted to the degree of Bachelor of Science in Catering. "
+            "Provisional Certificate. Course includes industrial training. Date of issue 12/06/2018. Convocation 2018.")
+    assert classify_kind(text).kind == "education_certificate"
+
+
+def test_a_safety_course_card_or_attendance_certificate_is_not_taken_for_experience():
+    text = ("Venture Demo Safety Training Centre. Certificate of attendance. This is to certify that Mr. Amit Demo has attended the Basic "
+            "H2S awareness course on 16 Nov 2025. Valid for 2 years. Training Manager")
+    assert classify_kind(text).kind is None
+
+
+def test_a_resume_page_with_a_board_of_education_line_is_not_an_education_certificate():
+    resume = ("ABOUT ME I want to work where I can have a good career. WORK EXPERIENCE 11/10/2019 - 11/03/2020 Chennai Kitchen Trainee "
+              "Example Hotel Assisting the chef with preparation. 01/10/2021 - 31/03/2022 On Job Trainee Sample Hotels Serving food items. "
+              "CONTACT demo@example.test (+91) 9000000000 EDUCATION AND TRAINING Intermediate Education (12th Standard) Board of "
+              "Intermediate Education - A.P S.S.C (10th) Board of Secondary Education - A.P")
+    assert classify_kind(resume).kind not in {"education_certificate", "experience_certificate"}
+
+
+# ---- an unreadable page inside a run of certificates takes their kind and is flagged -----------------------------------------------
+
+GIBBERISH = " ".join(["xn", "vs", "Wc", "NS", "fF", "Fems", "SEZ", "OD", "ir", "nN", "Pg", "fai", "Sex", "oniw", "WieA", "Rien"] * 6)
+
+
+def test_an_unreadable_page_between_two_experience_letters_takes_that_kind_and_is_flagged():
+    letter = "Alpha Valve Services\n" + EXPERIENCE
+    guesses = classify_kinds([letter, GIBBERISH, INTERN_TRAINING])
+    assert [g.kind for g in guesses] == ["experience_certificate"] * 3
+    assert not guesses[0].inherited and guesses[1].inherited and not guesses[2].inherited
+    assert guesses[1].confidence <= 0.55 and "check it" in guesses[1].reason
+
+
+def test_an_unreadable_page_after_the_last_certificate_of_a_run_is_taken_with_it_unless_the_next_page_is_another_kind():
+    assert classify_kinds([INTERN_TRAINING, GIBBERISH])[1].kind == "experience_certificate"
+    assert classify_kinds([INTERN_TRAINING, GIBBERISH, "Some unrelated words " * 5])[1].kind == "experience_certificate"
+    assert classify_kinds([INTERN_TRAINING, GIBBERISH, MEDICAL])[1].kind is None
+    assert classify_kinds([SSLC, GIBBERISH])[1].kind == "education_certificate"
+
+
+def test_the_inherited_page_does_not_pass_the_kind_on_and_a_readable_unknown_page_is_never_filled_in():
+    guesses = classify_kinds([INTERN_TRAINING, GIBBERISH, GIBBERISH])
+    assert guesses[1].inherited and guesses[2].kind is None
+    plain = "Result normal remarks none thank you for choosing our centre signature and stamp of the examining doctor. " * 3
+    assert classify_kinds([INTERN_TRAINING, plain])[1].kind is None
+    assert classify_kinds([GIBBERISH, INTERN_TRAINING])[0].kind is None          # nothing before it to continue
+
+
+def test_an_unreadable_page_with_a_passport_zone_or_after_a_non_certificate_is_not_filled_in():
+    zone = GIBBERISH + "\nP<INDDEMO<<RAHUL<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\nZ70001373IND9001015M3001012<<<<<<<<<<<<<<04"
+    assert classify_kinds([INTERN_TRAINING, zone])[1].kind is None
+    assert classify_kinds([MEDICAL, GIBBERISH])[1].kind is None

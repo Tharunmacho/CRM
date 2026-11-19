@@ -16,7 +16,7 @@ import { mergeOcrForm, ocrSavePayload, type DocumentScans } from '@/features/can
 import { normalizedSkills } from '@/features/candidates/candidate-skills'
 import { passportExpiryNotice } from '@/features/candidates/passport-expiry'
 import { IDLE_POLL_MS, scansFromJobs, useDocumentIntake, useQueueClock, type IntakeJob } from '@/features/candidates/use-document-intake'
-import { documentPresence, fileRows, foundChips, isDocumentJob, isWorking, MAX_DOCUMENT_FILES, readProgress, severalPeopleFound } from '@/features/candidates/entry-upload'
+import { documentPresence, fileRows, foundChips, isDocumentJob, isWorking, MAX_DOCUMENT_FILES, readingStatus, readProgress, severalPeopleFound } from '@/features/candidates/entry-upload'
 import { jobReports } from '@/features/candidates/read-report'
 import { EntryUploadZone } from '@/features/candidates/components/entry-upload-zone'
 import { DocumentBundleReview } from '@/features/candidates/components/document-bundle-review'
@@ -225,6 +225,8 @@ export default function AddCandidatePage() {
   const readReports = useMemo(() => jobReports(intake.jobs.filter(isDocumentJob)), [intake.jobs])
   const presence = documentPresence(intake.jobs)
   const failedFiles = documentRows.filter((row) => row.state === 'failed').length
+  // Where the reading really is (sorting the pages, then reading what was found), re-worked with every poll of the server.
+  const readingNote = reading ? readingStatus(intake.jobs).text : ''
   // The strip under the zone: only while something is going on or went wrong; nothing to press otherwise.
   const showFoot = reading || intake.uploading || Boolean(readError) || failedFiles > 0 || (severalPeopleFound(intake.jobs, splitSuggested) && Boolean(intake.jobs[0]?.groupId))
   const stillWorking = intake.jobs.some((job) => isDocumentJob(job) && isWorking(job))
@@ -543,7 +545,7 @@ export default function AddCandidatePage() {
                       <div className="ac-doc-status" aria-live="polite">
                         {(reading || intake.uploading) && <span className="ac-progress" role="progressbar" aria-label={reading ? 'Reading documents' : 'Saving your file'}><i /></span>}
                         {reading
-                          ? <span><LoaderCircle size={14} className="ac-spin" aria-hidden /> Reading documents… You can leave this page; we keep going.</span>
+                          ? <span><LoaderCircle size={14} className="ac-spin" aria-hidden /> Reading documents… You can leave this page; we keep going.{readingNote && <><br /><span className="ac-muted ac-small" role="status">{readingNote}</span></>}</span>
                           : intake.uploading ? <span><LoaderCircle size={14} className="ac-spin" aria-hidden /> Saving your files…</span>
                           : readError ? <span role="alert" className="ac-doc-error"><AlertTriangle size={14} aria-hidden /> {readError}</span>
                           : failedFiles > 0 ? <span role="alert" className="ac-doc-error"><AlertTriangle size={14} aria-hidden /> {failedFiles === 1 ? 'One file could not be read. It is saved. Try again, or type the details yourself.' : `${failedFiles} files could not be read. They are saved. Try again, or type the details yourself.`}</span>

@@ -937,6 +937,13 @@ def _content_kinds(inspected) -> dict:
 
 def _split_inspected(inspected, data: bytes, named: list[str], original_name: str) -> SplitResult:
     result = _split_pieces(inspected, data, named, original_name)
+    # Pages the reader ran out of time for were filed with the left-over pages (Other); say so, so they get a look.
+    unread = [page.page_number for page in inspected.pages if page.status == "unread"]
+    if unread:
+        short = (original_name or "The file").rsplit("/", 1)[-1]
+        result.note = ((result.note + " ") if result.note else "") + (
+            f"{short}: page{'s' if len(unread) != 1 else ''} {_page_list(unread)} could not be read in time and "
+            "went to Other documents; check them.")
     try:
         from app.services.duplicate_pages import PageRead
         result.page_reads = {page.page_number: PageRead(page.text or "", float(page.confidence or 0.0), page.status)

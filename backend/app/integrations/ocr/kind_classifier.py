@@ -266,7 +266,22 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
         _sig("issued at request", 2, ph("issued at his request", "issued at her request", "issued on his request", "issued upon his request")),
         _sig("period", 1, r"\bfrom\W+\d{1,2}\W{0,3}[a-z0-9]{2,9}\W{0,3}\d{2,4}\W+(?:to|till|until)\W+\d{1,2}\W{0,3}[a-z0-9]{2,9}\W{0,3}\d{2,4}"),
         _sig("responsibilities", 1, ph("responsibilities included", "key responsibilities", "duties included", "his duties", "her duties")),
-        _sig("signatory", 1, ph("general manager", "hr manager", "human resource manager", "human resources", "authorised signatory", "authorized signatory")),
+        _sig("signatory", 1, ph("general manager", "hr manager", "human resource manager", "human resources", "authorised signatory", "authorized signatory",
+                                "training manager", "placement officer", "training officer", "personnel manager")),
+        # Training at an employer (hotel, company): an intern / industrial-exposure / on-the-job training certificate or the letter an
+        # institute or the employer writes about it is what the owner files with the experience letters. ("Industrial Training
+        # Institute" is an ITI, an education certificate, so that wording is excluded.)
+        _sig("training title", 3, ph("intern training", "internship certificate", "internship letter", "internship completion",
+                                     "certificate of internship", "industrial exposure", "on the job training", "on job training",
+                                     "in plant training", "inplant training", "internship training")
+            + r"|\bindustrial\W+training\b(?!\W+institute)"),
+        _sig("undergone training", 2, r"\bunder(?:gone|going|went)\W+(?:\w+\W+){0,6}?(?:training|internship)\b"),
+        _sig("training at", 1, r"\b(?:complet\w+|undergo\w*)\W+(?:\w+\W+){0,3}?(?:training|internship)\W+(?:at|in|with)\b"),
+        _sig("training period", 1, ph("training period", "period of training", "training duration", "duration of training")),
+        _sig("performance", 1, ph("overall performance", "performance rating")),
+        # A letter of recommendation or appreciation from an employer.
+        _sig("recommendation", 3, ph("letter of recommendation", "recommendation letter", "reference letter", "letter of reference")),
+        _sig("appreciation", 2, ph("letter of appreciation", "appreciation letter", "certificate of appreciation", "appreciation certificate")),
     ),
     "google_review": (
         _sig("google review", 3, ph("google review", "google reviews", "google maps", "local guide", "write a review", "review on google",
@@ -336,15 +351,20 @@ def _decide(scores: dict[str, tuple[int, list[str], bool]], noisy: bool = False)
     return kind, score, names, ""
 
 
-def _noisy(text: str) -> bool:
-    """A page that does not read like language: a poor scan or text read sideways is mostly one- and two-letter fragments and
-    runs of consonants. Plain text, tables and forms have about half of their tokens as real words of four letters or more."""
-    tokens = re.findall(r"[A-Za-z]+", text)
+def _unreadable(text: str, below: float = NOISY_REAL_WORDS) -> bool:
+    """Whether the share of real words (four letters or more, with a vowel, no run of consonants) is under `below`."""
+    tokens = re.findall(r"[A-Za-z]+", text or "")
     if len(tokens) < 40:
         return False
     real = sum(1 for token in tokens if len(token) >= 4 and re.search(r"[aeiouy]", token, re.I)
                and not re.search(r"[^aeiouy\W\d_]{5,}", token, re.I) and not re.search(r"(.)\1\1", token, re.I))
-    return real / len(tokens) < NOISY_REAL_WORDS
+    return real / len(tokens) < below
+
+
+def _noisy(text: str) -> bool:
+    """A page that does not read like language: a poor scan or text read sideways is mostly one- and two-letter fragments and
+    runs of consonants. Plain text, tables and forms have about half of their tokens as real words of four letters or more."""
+    return _unreadable(text)
 
 
 # ---------------------------------------------------------------------------------------------- identity guard
@@ -381,6 +401,15 @@ def _identity_guard(text: str) -> tuple[str, bool]:
 # ---------------------------------------------------------------------------------------------- the classifier
 
 
+# What only a certificate has: a resume's education section names boards, institutions and awards but never these.
+_CERTIFICATE_PROOF = {"certificate title", "university exam", "sslc", "register", "marks", "passed exam"}
+
+
+def _reads_like_resume(text: str) -> bool:
+    seed, continuation, _, _ = _identity._signals(text)
+    return seed or continuation
+
+
 def classify_kind(text: str) -> KindGuess:
     """The candidate document a page is, or ``kind=None`` when nothing is confidently one of them (see the module docstring)."""
     raw = text or ""
@@ -404,6 +433,9 @@ def classify_kind(text: str) -> KindGuess:
                          "a machine-readable zone or a bare number, not on the document itself.", overrides_identity=True)
     if kind is None:
         return KindGuess(None, 0.0, why)
+    if kind == "education_certificate" and not _CERTIFICATE_PROOF.intersection(names) and _reads_like_resume(raw):
+        # "Board of Intermediate Education - A.P" under a resume's Education heading is a line of the resume, not a certificate.
+        return KindGuess(None, 0.0, "Resume page (its education wording is a section of the resume, not a certificate).")
     return KindGuess(kind, _confidence(score), f"{kind}: " + ", ".join(names) + f" (score {score}).")
 
 
@@ -414,6 +446,12 @@ _PAGE_MARK = re.compile(r"\bpage\W{0,3}(\d{1,2})\W{0,3}(?:of|/)\W{0,3}(\d{1,2})\
 def _page_marker(text: str) -> tuple[int, int] | None:
     found = {(int(n), int(m)) for n, m in _PAGE_MARK.findall(text or "") if 1 <= int(n) <= int(m) and int(m) >= 2}
     return next(iter(found)) if len(found) == 1 else None
+
+
+# The kinds that arrive as a run of similar pages (a bundle of letters or of mark sheets), and the reason `_decide` gives when a page
+# has nothing of its own to judge (as against a close call between two kinds, which is not a page to fill in).
+_RUN_KINDS = {"experience_certificate", "education_certificate"}
+_NO_EVIDENCE = "No document kind has enough evidence"
 
 
 def classify_kinds(texts: Sequence[str]) -> list[KindGuess]:
@@ -430,4 +468,25 @@ def classify_kinds(texts: Sequence[str]) -> list[KindGuess]:
             guesses[index] = replace(
                 previous, confidence=round(min(previous.confidence, 0.6), 2), inherited=True, overrides_identity=False,
                 reason=f"Page {here[0]} of {here[1]} continues page {before[0]}, which is {previous.kind}; no evidence of its own.")
+    # A certificate scanned sideways or badly is gibberish. It carries no wording to judge, but it sits inside a run of certificates
+    # (a bundle of experience letters or of mark sheets): it takes that kind, flagged ``inherited`` so a person checks it. Only a page
+    # that does not read like language qualifies (a readable page of something else is left alone), only from a page that has a kind
+    # of its own, and never when the page after it is a different kind.
+    for index in range(1, len(texts)):
+        previous = guesses[index - 1]
+        if (guesses[index].kind is not None or previous.kind not in _RUN_KINDS or previous.inherited or previous.alongside_identity
+                or not guesses[index].reason.startswith(_NO_EVIDENCE)):
+            continue
+        following = guesses[index + 1] if index + 1 < len(texts) else None
+        if following is not None and following.kind not in (None, previous.kind):
+            continue
+        both_sides = following is not None and following.kind == previous.kind
+        # A garbled passport or ID card page (a zone, a passport caption, an Aadhaar number) is not a certificate.
+        if _identity.identity_hint(texts[index]) or _identity._other_evidence(texts[index]):
+            continue
+        if _unreadable(texts[index], 0.4 if both_sides else NOISY_REAL_WORDS):
+            guesses[index] = replace(
+                previous, confidence=round(min(previous.confidence, 0.55), 2), inherited=True, overrides_identity=False,
+                reason=f"Unreadable page after a {previous.kind} page" + (" and before another" if both_sides else "")
+                       + "; no wording of its own to judge, so it is taken as part of that run (check it).")
     return guesses

@@ -101,6 +101,19 @@ def worth_analysing(slot: str | None, filename: str, content_type: str, data: by
     return True
 
 
+def costs_ocr(data: bytes) -> bool:
+    """Whether sorting the pages of this PDF means running OCR on at least one of them (a scan, a photographed page, a text layer that
+    is damaged): the slow part, minutes on a busy machine. A PDF whose every page carries a real text layer is read in seconds. Used to
+    keep the OCR out of web requests (see `manual_extraction._plan_split_of_original`). True when it cannot be told."""
+    try:
+        import pymupdf as fitz
+        from app.integrations.ocr.inspection import _usable_native
+        with fitz.open(stream=data, filetype="pdf") as document:
+            return any(not _usable_native(page.get_text("text", sort=True).strip()) for page in document)
+    except Exception:
+        return True
+
+
 def _targets(kinds: list[str], claim: str | None, found: set[str]) -> list[str]:
     """The fields for one piece. Pages the reader could not place ("other") stay in the field the person chose when that field
     was not found anywhere else in the scan; otherwise they go to Other documents. Nothing is ever filed in a field that

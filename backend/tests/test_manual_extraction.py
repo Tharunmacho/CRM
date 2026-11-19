@@ -656,3 +656,90 @@ def test_a_combined_file_saved_without_choosing_extract_is_still_filed_in_all_it
                                                             "experience_certificate", "medical", "other"})
         assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 1
     assert intake.submissions == []
+
+
+# ------------------------------------------------------------------ sorting survives a wait for the reader; a file saved unread is still read
+
+def test_the_page_kinds_are_saved_the_moment_the_pages_are_read_so_a_reader_wait_does_not_lose_the_sorting(intake, monkeypatch):
+    job = upload(intake, pdf(CV, PASSPORT))
+    intake.statuses["resume"] = "running"
+    start(intake, job["id"])
+    process(intake, job["id"])
+    with intake.sessions() as db:
+        saved = db.get(DocumentExtractionJob, job["id"])
+        assert saved.status == "retry"                                   # the reader has not answered: this run ended without a result
+        assert saved.state["page_kinds"]["sha256"] == saved.content_hash and saved.state["page_kinds"]["page_count"] == 2   # ...but the sorting was already saved (no page text)
+        early = saved.result["scans"]                                    # and the pages found were shown while the reader was still working
+        assert early["resume"]["inspection"]["selected_pages"] == [1] and early["passport"]["inspection"]["selected_pages"] == [2]
+        assert early["resume"]["extraction_status"] == "needs_review" and early["resume"]["raw"] == {}
+        assert set(saved.result["kinds"]) >= {"resume", "passport"}
+    # The next run restores the inspection with no page text (another process): the sorting must still be known.
+    monkeypatch.setattr(document_extraction, "inspect_document", lambda *a, **k: pytest.fail("Inspection repeated"))
+    intake.statuses["resume"] = "succeeded"
+    process(intake, job["id"])
+    detail = intake.client.get("/api/ocr/jobs/" + job["id"]).json()
+    assert detail["status"] in ("completed", "needs_review")
+    assert set(detail["result"]["kinds"]) >= {"resume", "passport"}       # before: the retry had no reading in memory, so no kinds at all
+
+
+def _attach(env, job, **body):
+    return env.client.post("/api/ocr/jobs/" + job + "/attach", json={"candidateId": "candidate", **body})
+
+
+def test_a_scan_that_needs_ocr_is_not_read_inside_the_attach_request_it_is_stored_whole_and_queued(intake, monkeypatch):
+    from app.services import bulk_candidate_import as bulk, document_splitting
+    data = pdf(CV, PASSPORT)
+    job = upload(intake, data)
+    monkeypatch.setattr(document_splitting, "costs_ocr", lambda _data: True)       # a scanned file: the pages would need OCR
+    monkeypatch.setattr(bulk, "split_by_content", lambda *a, **k: pytest.fail("the pages must not be OCR-read inside the request"))
+    response = _attach(intake, job["id"])
+    assert response.status_code == 200, response.text
+    assert response.json()["split"]["message"] == manual_extraction.SAVED_UNREAD
+    with intake.sessions() as db:
+        rows = list(db.scalars(select(Attachment).where(Attachment.entity_id == "candidate")))
+        assert [(row.slot, row.version) for row in rows] == [("resume", 1)]       # stored whole, in the field the file was dropped as
+        assert read_bytes(intake.settings, rows[0].object_key) == data
+        queued = list(db.scalars(select(DocumentExtractionJob).where(DocumentExtractionJob.candidate_id == "candidate",
+                                                                   DocumentExtractionJob.status == "pending")))
+        assert len(queued) == 1 and queued[0].attachment_id == rows[0].id and queued[0].kind == "resume"
+        assert queued[0].draft["applicationForm"]["slot"] == "resume"            # read like any stored resume: fields fill, other pages are filed
+        assert db.get(DocumentExtractionJob, job["id"]).status == "attached"
+    assert _attach(intake, job["id"]).status_code == 200                           # the same call again adds and queues nothing more
+    with intake.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Attachment)) == 1
+        assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 2
+
+
+def test_a_file_whose_reading_was_not_finished_at_save_time_is_queued_again_and_keeps_its_progress(intake):
+    job = upload(intake, pdf(CV, PASSPORT))
+    intake.statuses["resume"] = "running"
+    start(intake, job["id"])
+    process(intake, job["id"])                                                    # the reader is still working: status retry, no output
+    with intake.sessions() as db:
+        old = db.get(DocumentExtractionJob, job["id"])
+        assert old.status == "retry" and not old.state.get("output")
+        accepted = deepcopy(old.state["provider_jobs"])
+    assert _attach(intake, job["id"]).status_code == 200
+    with intake.sessions() as db:
+        queued = db.scalar(select(DocumentExtractionJob).where(DocumentExtractionJob.id != job["id"]))
+        assert queued.status == "pending" and queued.candidate_id == "candidate"
+        assert queued.state["provider_jobs"] == accepted                           # what the reader already accepted is not paid for twice
+        assert queued.state["page_kinds"] and queued.state["inspection"]            # nor is the local reading done twice
+    intake.statuses["resume"] = "succeeded"
+    process(intake, queued.id)
+    assert sorted(mode for mode, _key in intake.submissions) == ["passport", "resume"]       # one paid request per kind, none repeated
+    with intake.sessions() as db:
+        done = db.get(DocumentExtractionJob, queued.id)
+        assert done.status in ("completed", "needs_review")
+        assert {row.slot for row in db.scalars(select(Attachment).where(Attachment.entity_id == "candidate"))} >= {"resume", "passport"}
+
+
+def test_a_failed_reading_is_not_started_again_behind_the_persons_back_and_a_saved_unread_file_stays_as_before(intake):
+    failed = upload(intake, pdf(CV))
+    with intake.sessions() as db:
+        db.get(DocumentExtractionJob, failed["id"]).status = "failed"
+        db.commit()
+    assert _attach(intake, failed["id"]).status_code == 200
+    with intake.sessions() as db:
+        assert {row.slot for row in db.scalars(select(Attachment))} == {"source_bundle"}          # the person was told, and typed the details
+        assert db.scalar(select(func.count()).select_from(DocumentExtractionJob)) == 1

@@ -614,6 +614,9 @@ _LADDER = (
 _MRZ_CONFIG = ("tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<", "load_system_dawg=0", "load_freq_dawg=0")
 _DIGIT_CONFIG = ("tessedit_char_whitelist=0123456789", "load_system_dawg=0", "load_freq_dawg=0")
 _PASSPORT_HINT = re.compile(r"passport|republic of|\bp<[a-z]{3}|nationality|place of (?:birth|issue)|surname|given name", re.I)
+# What says a page carries a machine-readable zone worth a targeted look (the captions "nationality" or "surname" also sit on ID cards
+# and permits, which have none).
+_MRZ_CUE = re.compile(r"passport|\bp\s*<\s*[a-z]{3}", re.I)
 _AADHAAR_HINT = re.compile(r"aadhaar|aadhar|uidai|unique identification|government of india|\bvid\b|enrol|year of birth|\bdob\b|\bmale\b|\bfemale\b", re.I)
 
 
@@ -641,10 +644,102 @@ def _prepare(kind: str, hi: Image.Image, color=None) -> Image.Image | None:
     return None  # "redflat" is prepared by the caller (it needs the colour render, see ``red_flat``)
 
 
-def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadline: float,
-               render=None, dpi: int = OCR_BASE_DPI, render_color=None, hard_deadline: float | None = None,
-               need_more=None, fast: bool = False, release=None) -> OCRRead:
+_TURNS = {90: getattr(Image, "Transpose", Image).ROTATE_90, 180: getattr(Image, "Transpose", Image).ROTATE_180,
+          270: getattr(Image, "Transpose", Image).ROTATE_270}
+
+
+def _turn(image: Image.Image, angle: int) -> Image.Image:
+    """``image`` turned counter-clockwise by ``angle`` degrees (90, 180, 270): the same sense as ``Image.rotate`` and as the
+    rotations ``payload.rotations_from`` hands to the sending step."""
+    return image.transpose(_TURNS[angle])
+
+
+def _upright(image: Image.Image, angle: int, release=None) -> Image.Image:
+    """A render of the page turned like the page the reads were made on; the render itself is closed (and released)."""
+    try:
+        return _turn(image, angle)
+    finally:
+        image.close()
+        if release is not None:
+            release(image)
+
+
+def _text_direction(read: OCRRead, size: tuple[int, int]) -> tuple[int, int, float]:
+    """(words wider than tall, words taller than wide, share of words read with low confidence) of a read.
+
+    Free evidence of the page's orientation: Tesseract reports the boxes of sideways text in page coordinates, so words of
+    text that runs up or down the sheet are tall, and upside-down or gibberish reads carry mostly low-confidence words."""
+    wide = tall = low = counted = 0
+    for left, top, right, bottom, word, confidence in read.items:
+        if sum(c.isalnum() for c in word) < 3:
+            continue
+        counted += 1
+        low += confidence < 40
+        width, height = (right - left) * size[0], (bottom - top) * size[1]
+        if width >= 1.3 * height:
+            wide += 1
+        elif height >= 1.3 * width:
+            tall += 1
+    return wide, tall, (low / counted if counted else 0.0)
+
+
+def _orientation_plan(read: OCRRead, size: tuple[int, int]) -> tuple[tuple[int, ...], bool]:
+    """(turns worth reading the page at, whether the first read already shows the page upright).
+
+    * Text running up or down the page (most words taller than wide): the page is sideways: try 90 and 270.
+    * Horizontal text read badly (low confidence or few confident words, the mark of upside-down print): try 180.
+    * Horizontal words read with confidence (upside-down print never averages above the mid thirties): upright; no turned
+      read can add anything, so the ladder's turned reads are skipped.
+    A page with too few words, or a mix of both directions (cards photographed facing different ways), is left to the
+    general ladder."""
+    if read.words < 6:
+        return (), False
+    wide, tall, low = _text_direction(read, size)
+    if wide + tall < 6:
+        return (), False
+    if tall >= 5 and tall >= 2 * wide:
+        return (90, 270), False
+    if wide >= 3 * tall and ((read.words >= 20 and read.confidence >= 45 and low < 0.45)
+                             or (wide >= 8 and read.confidence >= 70)):
+        return (), True
+    if wide >= 2 * tall and (read.confidence < 50 or read.good_words < 0.35 * read.words):
+        return (180,), False
+    return (), False
+
+
+def _legible(read: OCRRead) -> bool:
+    """A read of real, confidently recognised text that carries no cue of an identity document."""
+    return (read.confidence >= 50 and read.good_words >= 10 and len(read.text.strip()) >= 100
+            and not identity_hint(read.text))
+
+
+def _mrz_pending(text: str) -> bool:
+    """A passport page whose machine-readable zone is not (yet) a valid one: the targeted zone pass still has work to do."""
+    if not text or not (_MRZ_CUE.search(text) or text.count("<") >= 3):
+        return False
+    state = validators.find_mrz(text)
+    return state is None or not state.valid
+
+
+def _ocr_image(image: Image.Image, **kwargs) -> OCRRead:
+    """Read one page image (see ``_ocr_page``); a page found to lie sideways or upside down is read, and its renders are
+    made, turned upright, and the turn is reported in ``notes["rotation"]``."""
+    owned: list[Image.Image] = []
+    try:
+        return _ocr_page(image, owned=owned, **kwargs)
+    finally:
+        for extra in owned:
+            extra.close()
+
+
+def _ocr_page(image: Image.Image, *, command: str | None, languages: str, deadline: float,
+              render=None, dpi: int = OCR_BASE_DPI, render_color=None, hard_deadline: float | None = None,
+              need_more=None, fast: bool = False, release=None, owned: list | None = None,
+              memo: dict | None = None) -> OCRRead:
     """Read one page image, escalating only as far as the page needs.
+
+    ``memo`` (optional) is the page's own notebook across calls: the quick look stores its first read and what it found out
+    about the page's orientation, and the full read that follows starts from them instead of reading the page again.
 
     One fast pass is enough for a clean, well covered page. Otherwise the page is read again under
     other settings (orientation-aware layout, 300 dpi sparse text, sharpened, background-flattened,
@@ -677,13 +772,17 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
 
     def attempt(name: str, source: Image.Image, psm: int, resolution: int, *, frame: str = "page",
                 config: tuple[str, ...] = (), sparse: bool = False) -> OCRRead | None:
-        nonlocal best, best_name, problem, timed_out
+        nonlocal timed_out
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             timed_out = True
             return None
         options = {"config": config} if config else {}
         read = _tesseract(source, command, languages, remaining, psm=psm, dpi=resolution, **options)
+        return record(name, read, frame, sparse)
+
+    def record(name: str, read: OCRRead, frame: str = "page", sparse: bool = False) -> OCRRead:
+        nonlocal best, best_name, problem, timed_out
         tried.append(name)
         if not read.text.strip() and read.reason:
             problem = problem or read
@@ -699,12 +798,80 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
         return read
 
     started = time.monotonic()
-    first = attempt(f"base psm3 {dpi}dpi", image, 3, dpi)
+    turn = 0
+    oriented = False
+    remembered = memo is not None and memo.get("dpi") == dpi and memo.get("first") is not None and owned is not None
+    if remembered:
+        first = record(f"base psm3 {dpi}dpi", memo["first"])
+    else:
+        first = attempt(f"base psm3 {dpi}dpi", image, 3, dpi)
+        if memo is not None and first is not None and not timed_out:
+            memo.clear()
+            memo.update(dpi=dpi, first=first, turn=0, upright=None, oriented=False)
+
+    # Orientation. A sideways or upside-down scan reads as scattered fragments (or as clean text only by luck); one read per
+    # candidate turn, chosen from the first read's own evidence, finds the upright page, which then IS the page for every
+    # later step (the high-resolution renders, the machine-readable zone crop, the second engine) and whose turn is recorded
+    # for the sending step. A page that reads fine pays nothing; a page confirmed upright skips the ladder's turned reads.
+    plan: tuple[int, ...] = ()
+    if remembered:
+        oriented, turn = bool(memo["oriented"]), int(memo["turn"])
+        if turn:
+            image = _turn(image, turn)
+            owned.append(image)
+            best, best_name = OCRRead("", 0, "No readable text was found; the page is not confirmed blank."), ""
+            candidates.clear()
+            first = record(f"upright{turn} psm3 {dpi}dpi", memo["upright"])
+    elif first is not None and not timed_out and first.text.strip() and owned is not None:
+        plan, oriented = _orientation_plan(first, image.size)
+        if plan:
+            oriented = True
+            probe: OCRRead | None = None
+            probe_turn, probe_image = 0, None
+            for angle in plan:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.3:
+                    break
+                turned = _turn(image, angle)
+                read = _tesseract(turned, command, languages, remaining, psm=3, dpi=dpi)
+                tried.append(f"probe{angle} psm3 {dpi}dpi")
+                if read.retryable and "time limit" in read.reason:
+                    timed_out = True
+                if read.text.strip() and (probe is None or _better(read, probe)):
+                    if probe_image is not None:
+                        probe_image.close()
+                    probe, probe_turn, probe_image = read, angle, turned
+                else:
+                    turned.close()
+            if probe is not None:
+                if len(plan) == 2:   # sideways: the right turn is known, only its direction was in question
+                    adopt = probe.good_words >= 0.6 * first.good_words or probe.confidence >= first.confidence - 15
+                else:                # upside down: only a clearly better read moves the page
+                    adopt = probe.good_words >= max(5, 1.5 * first.good_words) and probe.confidence > first.confidence + 10
+                if adopt:
+                    turn, image = probe_turn, probe_image
+                    owned.append(probe_image)
+                    best, best_name = OCRRead("", 0, "No readable text was found; the page is not confirmed blank."), ""
+                    candidates.clear()
+                    first = record(f"upright{turn} psm3 {dpi}dpi", probe)
+                else:
+                    probe_image.close()
+        if memo is not None and "first" in memo:
+            memo.update(turn=turn, upright=first if turn else None, oriented=oriented)
+    if turn:   # the renders of the page that later steps ask for come out turned like the page the reads were made on
+        plain_render, plain_color = render, render_color
+        render = None if plain_render is None else (lambda resolution: _upright(plain_render(resolution), turn, release))
+        render_color = None if plain_color is None else (lambda resolution: _upright(plain_color(resolution), turn, release))
+    mrz_pending = first is not None and _mrz_pending(first.text)
+
+    def base_notes(extra: dict) -> dict:
+        return {**extra, **({"rotation": turn} if turn else {})}
+
     if fast and first is not None:
-        # The quick first look of a two-pass inspection: one Tesseract call, whatever it read. Pages that turn out
-        # unclassified are read again with the full ladder.
+        # The quick first look of a two-pass inspection: one Tesseract call (and the turn, when the page lay sideways),
+        # whatever it read. Pages that turn out unclassified are read again with the full ladder.
         first.setting, first.variants, first.raw_confidence = tried[0], list(tried), first.confidence
-        first.notes = {"engine": "tesseract", "stopped": "fast"}
+        first.notes = base_notes({"engine": "tesseract", "stopped": "fast"})
         return first
     small = bool(first and first.words >= 10 and 0 < first.text_height < _SMALL_TEXT_PX)
     covered = True
@@ -722,14 +889,20 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
         except Exception:
             decided = False
         needs_classification = not decided
-        if decided and not (_accepted(first) and not small and covered):
+        if decided and not mrz_pending and not (_accepted(first) and not small and covered):
             # Classified (or full of readable, plainly ordinary text) already: no other settings are tried.
             first.setting, first.variants, first.raw_confidence = tried[0], list(tried), first.confidence
-            first.notes = {"engine": "tesseract", "stopped": "classified"}
+            first.notes = base_notes({"engine": "tesseract", "stopped": "classified"})
             return first
-    if first and _accepted(first) and not small and covered and not needs_classification:
+        if not decided and not mrz_pending and covered and not small and _legible(first):
+            # Unclassified, but read cleanly and with no sign of a passport or an Aadhaar card (the other side of a passport,
+            # a letter, a form): other settings would only re-read the same words. The classifier takes it from its neighbours.
+            first.setting, first.variants, first.raw_confidence = tried[0], list(tried), first.confidence
+            first.notes = base_notes({"engine": "tesseract", "stopped": "legible"})
+            return first
+    if first and _accepted(first) and not small and covered and not needs_classification and not mrz_pending:
         first.setting, first.variants, first.raw_confidence = tried[0], list(tried), first.confidence
-        first.notes = {"engine": "tesseract"}
+        first.notes = base_notes({"engine": "tesseract"})
         return first
     if problem is not None and not best.text.strip() and not timed_out:
         return problem
@@ -831,7 +1004,7 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
         # Check orientation before expensive enhancements consume the page window. Sideways text can
         # produce zero words or several confident fragments; neither is evidence that it is upright.
         # Each attempt shares the original page deadline, and a classified/clear read stops the turns.
-        if not photo_like and not settled() and not timed_out:
+        if not photo_like and not settled() and not timed_out and not oriented:
             for angle in (90, 270, 180):
                 if timed_out or deadline - time.monotonic() <= 0.3:
                     break
@@ -934,7 +1107,7 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
         lines, _, text, _, _, _ = current()
         mrz_state = validators.find_mrz(text) if text else None
         if text and not timed_out and (mrz_state is None or not mrz_state.valid) \
-                and (_PASSPORT_HINT.search(text) or text.count("<") >= 3):
+                and (_MRZ_CUE.search(text) or text.count("<") >= 3):
             base = get_hi()
             if base is not None:
                 band = None
@@ -946,11 +1119,11 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                 crop = base.crop((0, int(top * base.height), base.width, int(bottom * base.height)))
                 opened.append(crop)
                 best_zone, best_checks = None, sum(mrz_state.checks.values()) if mrz_state is not None else -1
-                # Looks at the zone, best first: the second engine on the cropped strip (it reads these lines at full
-                # size), then Tesseract restricted to the MRZ alphabet, background-flattened and plain.
-                for label, psm, prep in (("rapid", 0, None),
-                                         ("flat", 6, enhance.cv_flatten if enhance.has_cv() else enhance.flatten_background),
-                                         ("plain", 11, None)):
+                # Looks at the zone, cheapest first: Tesseract restricted to the MRZ alphabet (a fraction of a second on the
+                # strip), background-flattened and plain, then the second engine (seconds) only when neither gave a valid zone.
+                for label, psm, prep in (("flat", 6, enhance.cv_flatten if enhance.has_cv() else enhance.flatten_background),
+                                         ("plain", 11, None),
+                                         ("rapid", 0, None)):
                     if timed_out or (label != "rapid" and time.monotonic() - special_start > SPECIAL_SECONDS):
                         break
                     if label == "rapid":
@@ -982,7 +1155,7 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
                     extra_lines.extend(best_zone)
                     notes["mrz_pass"] = True
         if text and not timed_out and not any(r.valid for r in validators.find_aadhaar_numbers(text)) \
-                and (_AADHAAR_HINT.search(text) or len(re.findall(r"(?<!\d)\d{4}(?!\d)", text)) >= 2) \
+                and (_AADHAAR_HINT.search(text) or len(re.findall(r"(?<!\d)(?!(?:19|20)\d\d)\d{4}(?!\d)", text)) >= 2) \
                 and time.monotonic() - special_start < SPECIAL_SECONDS + 1.0:
             base = get_hi()
             if base is not None:
@@ -1025,7 +1198,9 @@ def _ocr_image(image: Image.Image, *, command: str | None, languages: str, deadl
     result.variants = list(tried)
     result.raw_confidence = best.confidence
     orientation = re.match(r"rotate(90|180|270)\b", best_name)
-    if orientation:
+    if turn:
+        notes["rotation"] = turn
+    elif orientation:
         notes["rotation"] = int(orientation.group(1))
     result.notes = notes
     length = len(result.text.strip())
@@ -1210,6 +1385,8 @@ class _PageReader:
         self.boxes: dict[int, object] = {}
         # Per OCR'd page: how it was read (settings, confidence, flags). Numbers and booleans only.
         self.details: dict[int, dict] = {}
+        # Per page: what the quick look found out (its first read and the page's orientation), for the full read after it.
+        self.memos: dict[int, dict] = {}
 
     def _skipped(self, number: int, reason: str) -> InspectedPage:
         return InspectedPage(number, "unread", "unknown", "not_processed", "", reason=reason)
@@ -1365,7 +1542,7 @@ class _PageReader:
                 read = _ocr_image(image, command=self.command, languages=self.languages, deadline=window,
                                   render=render, dpi=dpi, render_color=render_color, hard_deadline=self.deadline,
                                   need_more=(lambda text: self.need_more(text, index)) if self.need_more else None,
-                                  fast=self.fast, release=release)
+                                  fast=self.fast, release=release, memo=self.memos.setdefault(index, {}))
                 if not read.retryable or time.monotonic() >= self.deadline:
                     break
                 if attempt == 1:
@@ -1521,6 +1698,7 @@ def inspect_document(
                     or (page.status == "read" and verdict.document_type == "unknown" and not kind_known(page.text))
                     or (page.status == "read" and verdict.inherited and identity_hint(page.text)
                         and verdict.document_type in ("passport", "aadhaar") and verdict.document_type not in proven)
+                    or (page.status == "read" and _mrz_pending(page.text))
                 )
             ]
             if on_first_pass is not None:
@@ -1533,6 +1711,8 @@ def inspect_document(
                 except Exception:  # an early start is a convenience; the full read goes on regardless
                     pass
             for index, page in zip(again, read_all(again)):
+                if page.status != "read" and pages[index].status == "read":
+                    continue   # the deeper look ran out of time or failed: what the quick look read stands
                 pages[index] = page
         if extra_languages:
             verdicts = classify_pages([p.text if p.status == "read" else "" for p in pages])
