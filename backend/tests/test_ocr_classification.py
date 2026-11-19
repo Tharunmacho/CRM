@@ -377,3 +377,131 @@ def test_an_exact_number_with_card_captions_still_makes_an_aadhaar_card():
 def test_a_lowercase_be_never_counts_as_the_b_e_degree():
     assert education_certificate("EXAMPLE COLLEGE\nThe students will be given their results later. It will be posted on the notice board of the college "
                                  "and the class will be told. Marks will be shown.") is False
+
+
+# ---------------------------------------------------------------------------------- training on real bundles (invented people)
+
+PLAIN_CV_FIRST = """TESTER SAMPLE
+SENIOR EXECUTIVE
+
+Profile ;-
+
+  Around 6+ Years of Experience in accounts payable and receivable in the manufacturing industry.
+  Excellent working knowledge of accounting software.
+
+Organizational Experience ;-
+
+Example Forgings Ltd, Sampletown from July 2019 to May 2026
+
+  In Payable & Receivable
+  Generating domestic and export sales invoices, stock transfer and e-way bills.
+  Manage and reconcile accounts payable and receivable to maintain accurate financial records.
+  Perform internal audits to ensure adherence to financial regulations.
+  Maintain organized financial documentations and records for audits and reviews.
+  Handle customer disputes by communicating with customers.
+  Assisted reviewing and reconciling financial statements at month-end.
+"""
+PLAIN_CV_SECOND = """  Interact with Internal Auditors in completing Audits.
+  Passing journal entries through accounting activities.
+  Maintaining petty cash
+
+ Skills & Abilities;-
+   Good communication skills        The ability to meet deadlines.
+
+ Educational Qualification- Software Proficiency;-
+   MBA aggregated with 65% of marks in the discipline of FINANCE at University of Sampleton (Part time)
+   B.Com aggregated with 70% of marks at Example Arts College
+"""
+PERSONAL_BLOCK = """PERSONAL DATA :-
+
+Father's Name           : SAMPLE SENIOR
+Date of Birth           : 15th MAY 1998
+Qualification           : B.Com., MBA
+Nationality             : INDIAN
+Religion                : HINDU
+Languages known         : English, Tamil
+Marital status          : Unmarried
+
+DECLRATION :-
+I hereby declare that the above mentioned information is correct up to my knowledge.
+"""
+CV_TAIL = """Sampletown-610001
+Tamilnadu, India
+                                     Declaration
+       I assure that the above details given are true to the best of my knowledge and belief
+Date:                                                                    yours truly
+
+Time                                                  (TESTER SAMPLE)
+"""
+PROJECT_LIST = """Project Details:
+ Alpha
+      o  Client Name : Example Air Force
+      o  Project Name: Example air base
+      o  About Project: Operation and maintenance
+ Beta Construction:
+      o Client Name: National Development Agency
+      o Project Name: Example Stadium
+      o About Project: Industrial project
+      o Project value: N/A
+"""
+COVID_CERT = """Ministry of Health & Family Welfare
+Government of India
+Certificate for COVID-19 Vaccination
+Issued in India by Ministry of Health & Family Welfare, Govt. of India
+Certificate ID 41028198500
+Beneficiary Details
+Beneficiary Name Tester Sample    Age 24    Gender Male
+ID Verified Aadhaar # XXXXXXXX1905
+Vaccination Status Fully Vaccinated (2 Doses)
+Vaccine Name COVISHIELD
+"""
+ACHIEVEMENT = """Example Learning Hub Pte Ltd
+An Accredited Training Provider
+Certificate of Achievement
+This certificate is hereby awarded to
+TESTER SAMPLE
+for successfully completing the course on Hot Work Safety Assessment
+held during April and May 2009 with a grade of Pass.
+The course covered the identification of hazards, the safe handling of equipment and the duties of an assessor on site.
+Chief Executive
+Course Director
+"""
+TRADE_CERT = """Roll No 0016 0809 1065 89
+GOVERNMENT OF INDIA
+MINISTRY OF SKILL DEVELOPMENT AND ENTREPRENEURSHIP
+NATIONAL COUNCIL FOR VOCATIONAL TRAINING
+NATIONAL TRADE CERTIFICATE
+Son/Wife/Daughter of SAMPLE SENIOR  Name TESTER SAMPLE
+is hereby awarded this Trade Certificate
+Date 14-Dec-2018   Member Secretary
+National Council For Vocational Training
+"""
+
+
+def test_a_cv_with_unusual_section_names_is_a_resume_and_carries_its_following_pages():
+    result = classify_pages([PLAIN_CV_FIRST, PLAIN_CV_SECOND, PERSONAL_BLOCK])
+    assert [page.document_type for page in result] == ["resume", "resume", "resume"]
+
+
+def test_the_personal_details_block_and_the_closing_declaration_of_a_cv_continue_the_resume_but_stand_alone_they_do_not():
+    assert classify_pages([PLAIN_CV_FIRST, CV_TAIL])[1].document_type == "resume"
+    assert classify_pages([PLAIN_CV_FIRST, PERSONAL_BLOCK])[1].document_type == "resume"
+    assert classify_pages([PERSONAL_BLOCK])[0].document_type == "unknown"
+    assert classify_pages([CV_TAIL])[0].document_type == "unknown"
+
+
+def test_a_list_of_labelled_projects_after_a_resume_page_continues_it():
+    assert classify_pages([PLAIN_CV_FIRST, PROJECT_LIST])[1].document_type == "resume"
+
+
+def test_a_covid_vaccination_certificate_is_neither_an_aadhaar_card_nor_a_passport_page_nor_inherited_from_one():
+    assert classify_page(COVID_CERT).document_type == "other"
+    assert classify_pages([COVID_CERT])[0].document_type == "other"
+
+
+def test_a_certificate_of_achievement_after_a_resume_page_is_not_taken_for_a_resume_page():
+    assert classify_pages([PLAIN_CV_FIRST, ACHIEVEMENT])[1].document_type != "resume"
+
+
+def test_a_national_trade_certificate_naming_the_government_of_india_is_not_an_aadhaar_card():
+    assert classify_page(TRADE_CERT).document_type != "aadhaar"

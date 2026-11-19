@@ -471,3 +471,153 @@ def test_an_unreadable_page_with_a_passport_zone_or_after_a_non_certificate_is_n
     zone = GIBBERISH + "\nP<INDDEMO<<RAHUL<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\nZ70001373IND9001015M3001012<<<<<<<<<<<<<<04"
     assert classify_kinds([INTERN_TRAINING, zone])[1].kind is None
     assert classify_kinds([MEDICAL, GIBBERISH])[1].kind is None
+
+
+# ---------------------------------------------------------------------------------- training / tuning on real bundles (invented people)
+
+WORKING_UNDER_ME = """C/A | M/s. Nova Partners & Co.
+CHARTERED ACCOUNTANTS
+Date: 02-06-2026
+It is here by confirmed that Mr Tester Sample S/o Mohd Sample R/o Example Town, Distt Sampleganj has been
+working under me as an Accountant from 1st July 2023 till date. I wish him good luck in future.
+For :- M/s Nova Partners & Co.
+Chartered Accountants.
+"""
+CONTINUES_AS = """Example Inspection Company Ltd.
+Dated : 15/07/2025
+TO WHOM IT MAY CONCERN
+Mr. TESTER SAMPLE, NDT Inspector with employee number 4411 and ITC Level II certification meeting our company requirements.
+Example Inspection Company hereby certify that Mr. Tester Sample to be continue as a company NDT Inspector since May 2024 to July 2025.
+Operation Manager
+"""
+DIPLOMA_AWARD = """Example Computer Education Centre
+Having duly examined
+TESTER SAMPLE
+Son/Daughter/Wife of SAMPLE SENIOR
+during 6 months of study on the specified curriculum
+and having found the candidate's performance to be GOOD
+have pleasure in recognising this attainment
+with the award of Diploma in Financial Accounting
+Given on the 12th day of MAR 2015 at EXAMPLEPUR
+Centre Director          Secretary
+"""
+PROFICIENCY = """Certificate of Proficiency
+CERT NO 123456
+This is to certify that Tester Sample
+Date of birth: 5 December 1997
+has demonstrated proficiency as a Painting Inspector Grade 2 in accordance with the requirements published in the document
+and amendments in force on the examination date.
+Date of issue 26 May 2026
+Issued by: Example Certification Ltd
+"""
+NDT_LEVEL = """EXAMPLE NDT SOLUTIONS
+NDT PERSONNEL CERTIFICATION
+This is to certify that TESTER SAMPLE has met the certification requirements and has demonstrated proficiency
+by qualifying certification examination and is hereby certified to NDT LEVEL II IN VISUAL TESTING
+Training course and examination conducted as per the written practice which meets SNT-TC-1A guidelines.
+Certificate No : EXN/VT/044     Certificate Issue Date 01.12.2025
+Examination Marks Obtained (%)  General 82.5   Specific 80   Practical 84
+"""
+SAFETY_COURSE = """EXAMPLE GULF SAFETY & SECURITY TRAINING CENTRE
+Certificate of Proficiency
+This is to certify that TESTER SAMPLE was successfully assessed against and met learning outcomes for
+BASIC FIRST AID AND CPR   Date of issue: Nov. 16, 2025   Expiry date: 15.Nov.2027
+Cert. No.: 918tUjg7B
+"""
+TRAINING_PROGRAMME = """File No: EXT/CQC/21/0001
+EXAMPLE TRAINING & INSPECTION CENTRE AN ISO 9001:2015 CERTIFIED
+CERTIFICATE
+This is to certify that Mr. TESTER SAMPLE
+has succes sfully completed the training program in Welding Inspection,
+Welding techniques, Application, Inspection & Safety as WELDING QA/QC
+Principal Director
+"""
+APOSTILLE_DEGREE = """GOVERNMENT OF INDIA APOSTILLE (Convention de La Haye du 5 octobre 1961)
+This public document DEGREE has been signed by REGISTRAR acting in the capacity of VICE CHANCELLOR
+bears the seal of the Sub Divisional Magistrate, NEW DELHI
+Certified at NEW DELHI, INDIA 17 Mar 2022   MINISTRY OF EXTERNAL AFFAIRS
+"""
+SUBJECT_MARKS = """CONSOLIDATED STATEMENT OF GRADES
+ENGLISH 72
+MATHEMATICS 65
+PHYSICAL SCIENCES 70
+ENGINEERING MECHANICS 61
+ENGINEERING DRAWING 80
+MAXIMUM MARKS = 100    PASSING MINIMUM = 35 MARKS
+"""
+DECLARED_PASSED = """National Institute of Labour Education & Management
+THE SIX MONTH DIPLOMA IN ENVIRONMENT
+with Registration No. EP 16 has been declared passed in the prescribed examination
+held in April 2007 conducted by the Institute.
+Executive Council of the Institute
+"""
+VERIFICATION_REPORT = """VERIFICATION SUMMARY
+EDUCATION   PROVIDED DETAILS   VERIFICATION RESULTS
+ISSUING AUTHORITY   Example University   VERIFIED CORRECT
+DOCUMENT TYPE   Bachelor of Engineering - Civil Engineering   VERIFIED CORRECT
+EMPLOYMENT   Example Builders   VERIFIED CORRECT
+"""
+MAIL_THREAD = """Thanks and Regards
+Sample Person
+Mob. 0500000000
+This email has been classified as Company General Use on 11/25/2019 8:24 AM
+Subject: FW: CV TESTER SAMPLE ENGINEER
+Importance: High
+I already forwarded to the department for their review and approval. Please send your review of the CV by tomorrow.
+Regards, Sample
+"""
+GARBLED_OFFER = """EXAMPLE INTERNATIONAL COMPANY
+KUWAIT
+JgB OFFHR LETTHR
+&AME                  TESTER SAMPLE
+PSSITION TITLH        ENVIRONMENTAL SUPERVISOR
+&A$IC SALARY          KD 450.000/-
+TAKH HOMH $ALARY PER MONTH   KD 505.000/-
+& considered as accepted by the employee upon signing this offer
+This job offer is valid only for 30 days.
+"""
+
+
+def test_a_letter_confirming_that_a_person_has_been_working_under_me_is_an_experience_letter():
+    guess = classify_kind(WORKING_UNDER_ME)
+    assert guess.kind == "experience_certificate"
+
+
+def test_a_letter_certifying_that_a_person_continues_as_an_employee_is_an_experience_letter():
+    assert classify_kind(CONTINUES_AS).kind == "experience_certificate"
+
+
+def test_a_diploma_a_centre_awards_after_examining_the_student_is_an_education_certificate():
+    assert classify_kind(DIPLOMA_AWARD).kind == "education_certificate"
+
+
+def test_a_certificate_of_proficiency_and_a_training_programme_certificate_are_education_certificates():
+    assert classify_kind(PROFICIENCY).kind == "education_certificate"
+    assert classify_kind(TRAINING_PROGRAMME).kind == "education_certificate"
+
+
+def test_safety_courses_and_ndt_personnel_certification_are_not_education_certificates():
+    assert classify_kind(SAFETY_COURSE).kind is None
+    assert classify_kind(NDT_LEVEL).kind is None
+
+
+def test_an_apostille_on_a_degree_and_a_marks_sheet_of_subjects_are_education_certificates():
+    assert classify_kind(APOSTILLE_DEGREE).kind == "education_certificate"
+    assert classify_kind(SUBJECT_MARKS).kind == "education_certificate"
+    assert classify_kind(DECLARED_PASSED).kind == "education_certificate"
+
+
+def test_a_verification_report_quoting_degrees_and_employers_is_no_certificate():
+    assert classify_kind(VERIFICATION_REPORT).kind is None
+
+
+def test_a_review_of_a_cv_in_a_mail_thread_is_not_a_google_review_but_a_real_one_is():
+    assert classify_kind(MAIL_THREAD).kind != "google_review"
+    review = ("Google Maps  Local Guide  Tester Sample  4 stars  2 weeks ago  Great place to work, friendly managers and clean rooms. "
+              "Posted publicly on Google. Write a review.")
+    assert classify_kind(review).kind == "google_review"
+
+
+def test_a_garbled_job_offer_that_is_accepted_by_signing_it_is_a_signed_offer():
+    guess = classify_kind(GARBLED_OFFER)
+    assert guess.kind == "signed_offer" and guess.confidence >= 0.7

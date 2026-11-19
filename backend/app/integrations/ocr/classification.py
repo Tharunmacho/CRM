@@ -44,7 +44,9 @@ _ROLE = re.compile(
     r"steel[\s-]+fixer|bar[\s-]+bender|reinforcement[\s-]+fixer)s?\b", re.I,
 )
 _WORK = re.compile(r"\b(?:managed|installed|maintained|operated|developed|supervised|"
-                   r"responsible|inspected|repaired|fabricated|coordinated|welding)\b", re.I)
+                   r"responsible|inspected|repaired|fabricated|coordinated|welding|"
+                   r"ensure|ensuring|prepare|prepared|conduct|conducted|perform|performed|monitor|monitored|handle|handled|"
+                   r"coordinate|identify|interpret|calibrate|evaluate|implemented|reviewed|assisted|checked|reported)\b", re.I)
 _HEADINGS = (
     "career objective", "objective", "professional summary", "profile summary",
     "work experience", "professional experience", "employment history",
@@ -56,6 +58,13 @@ _HEADINGS = (
     "equipment handled", "site experience", "passport details", "visa status", "career summary",
     "professional profile", "strengths", "achievements", "hobbies", "interests", "training", "summary",
     "experience", "key projects", "safety training", "core competencies", "academic qualifications", "software skills",
+    # How other CVs name the same sections.
+    "profile", "working experience", "organizational experience", "organisational experience", "project details",
+    "academic credentials", "academic profile", "academic background", "educational background", "educational qualification",
+    "software proficiency", "technical proficiency", "computer skills", "professional skills", "personal skills",
+    "skills & abilities", "skills and abilities", "personal snippets", "employment details",
+    "professional qualification", "professional qualifications", "work profile", "job profile", "area of interest",
+    "areas of interest", "other skills", "personal strengths",
 )
 _HEADING_RE = re.compile(
     r"^\s*(" + "|".join(re.escape(h) for h in sorted(_HEADINGS, key=len, reverse=True))
@@ -83,6 +92,34 @@ _RECRUITMENT_FORM_FIELDS = (
 )
 
 
+# The personal-details block at the end of a CV (father's name, date of birth, nationality, marital status ...): a page with four of
+# these labels is that block. A passport's own back page and an Aadhaar card are told apart by their own evidence.
+_PERSONAL_LABELS = (
+    re.compile(r"\bfather['\u2019]?s?\s+name\b", re.I), re.compile(r"\bmother['\u2019]?s?\s+name\b", re.I),
+    re.compile(r"\b(?:date\s+of\s+birth|d\.?o\.?b)\b", re.I), re.compile(r"\bnationality\b", re.I),
+    re.compile(r"\bmarital\s+status\b", re.I), re.compile(r"\breligion\b", re.I),
+    re.compile(r"\blanguages?\s+(?:known|spoken)\b", re.I), re.compile(r"\b(?:permanent\s+)?address\b", re.I),
+    re.compile(r"\bsex\b|\bgender\b", re.I), re.compile(r"\bblood\s+group\b", re.I),
+)
+# "I hereby declare that the above information is true to the best of my knowledge": the last lines of a CV.
+_CV_DECLARATION = re.compile(
+    r"\b(?:above|foregoing)\W+(?:\w+\W+){0,4}(?:true|correct)\W+(?:to|up\W+to)\W+(?:the\W+)?best\W+of\W+my\W+knowledge", re.I)
+# A list of projects or posts, one labelled field per line.
+_PROJECT_LABELS = (
+    re.compile(r"\bclient(?:\s+name)?\s*[:\-]", re.I), re.compile(r"\bproject(?:\s+name)?\s*[:\-]", re.I),
+    re.compile(r"\babout\s+project\s*[:\-]", re.I), re.compile(r"\bproject\s+(?:value|cost|duration|location)\s*[:\-]", re.I),
+    re.compile(r"\b(?:role|position|designation)\s*[:\-]", re.I), re.compile(r"\bduration\s*[:\-]", re.I),
+)
+
+
+def _personal_block(text: str) -> bool:
+    return sum(bool(pattern.search(text)) for pattern in _PERSONAL_LABELS) >= 4
+
+
+def _project_list(text: str) -> bool:
+    return sum(len(pattern.findall(text)) for pattern in _PROJECT_LABELS) >= 4
+
+
 def _recruitment_form(text: str) -> bool:
     matches = [bool(pattern.search(text)) for pattern in _RECRUITMENT_FORM_FIELDS]
     # Require several labels, including two specifically about recruitment or
@@ -105,6 +142,13 @@ def _headings_in(text: str) -> set[str]:
         if len(head) <= 40:
             key = " ".join(re.sub(r"[^a-z&\s]", " ", head.lower()).split())
             if key in _HEADING_SET:
+                found.add(key)
+                continue
+        # "Educational Qualification- Software Proficiency": the first part, up to the dash, is a heading of its own.
+        dashed = re.split(r"\s*[-\u2013\u2014]+\s*(?=\S)", head, maxsplit=1)
+        if len(dashed) == 2 and len(dashed[0]) <= 40:
+            key = " ".join(re.sub(r"[^a-z&\s]", " ", dashed[0].lower()).split())
+            if key in _HEADING_SET and " " in key:
                 found.add(key)
                 continue
         # Spaced out words ("W O R K  E X P E R I E N C E"): compare with the spaces removed.
@@ -131,8 +175,12 @@ _OTHER = re.compile(
     r"achievement|participation)|experience\s+certificate|service\s+certificate|"
     r"to\s+whom\s+it\s+may\s+concern|relieving\s+letter|tax\s+invoice|"
     r"invoice\s+(?:no|number)|payment\s+receipt|hall\s+ticket|admit\s+card|"
-    r"unique\s+identification\s+authority)\b", re.I,
+    r"unique\s+identification\s+authority|certificate\s+(?:is\s+)?hereby\s+award\w*|hereby\s+awarded\s+to|"
+    r"(?:is\s+)?a\s+certificate\s+awarded|certificate\s+awarded\s+to|certificate\s+of\s+attendance)\b", re.I,
 )
+# A COVID-19 vaccination certificate names the holder's Aadhaar (masked) and the Government of India: it is not an identity card.
+_VACCINATION = re.compile(r"\bcertificate\s+for\s+covid|\bvaccination\s+certificate\b|\bcovid\W{0,3}19\W+vaccination\b|\bcowin\b|"
+                          r"\bbeneficiary\s+(?:details|name|reference)\b", re.I)
 # Gulf and Indian CVs list a licence or an Emirates ID in their personal details, so these words only count against a
 # page that has no resume structure of its own (see _supporting_marker).
 _OTHER_ID = re.compile(
@@ -316,7 +364,7 @@ def _aadhaar_structure(text: str) -> bool:
         or _AADHAAR_ENROLMENT.search(text)
         or (_AADHAAR_BRAND.search(text) and _AADHAAR_ISSUER.search(text))
         # The card's heading can be lost to OCR: the issuer with the grouped number is still the card.
-        or (_AADHAAR_ISSUER.search(text) and _aadhaar_number(text))
+        or (_AADHAAR_ISSUER.search(text) and _aadhaar_number(text) and not _EDU_STRONG.search(text))
     )
 
 
@@ -358,6 +406,9 @@ def _signals(text: str) -> tuple[bool, bool, bool, int]:
         or (len(headings) >= 2)
         or (len(set(_WORK.findall(text.lower()))) >= 2 and bool(_ROLE.search(text)))
         or _labelled_work_period(text)
+        or _personal_block(text)
+        or _project_list(text)
+        or bool(_CV_DECLARATION.search(text) and (len(headings) >= 1 or len(text.strip()) <= 900))
     )
     return seed, continuation, titled, len(headings)
 
@@ -377,14 +428,14 @@ def _supporting_marker(text: str) -> bool:
     """Wording of a certificate, invoice or identity document. A licence or ID-card word is only weak evidence: a
     resume's personal-details block states one. It counts against a page with little resume structure, and against
     a structured page only when several of those words crowd it."""
-    if _OTHER.search(text) or (
+    if _OTHER.search(text) or _VACCINATION.search(text) or (
         _SITE_BADGE_ROLE.search(text) and sum(bool(pattern.search(text)) for pattern in _SITE_BADGE_FIELDS) >= 3
     ):
         return True
     weak = {re.sub(r"\s+", " ", m.group(0).lower()) for m in _OTHER_ID.finditer(text)}
     if not weak:
         return False
-    strength = _structure_strength(text)
+    strength = _structure_strength(text) + (2 if _personal_block(text) else 0)
     if strength >= 5:
         return False
     return len(weak) >= 3 if strength >= 3 else True
@@ -406,7 +457,8 @@ _EDU_STRONG = re.compile(
     r"\b(?:hereby\s+makes?\s+known|(?:has\s+been\s+)?admitted\s+to\s+the\s+degree|degree\s+certificate|provisional\s+(?:degree\s+)?certificate|"
     r"consolidated\s+mark|statement\s+of\s+marks|mark\s*sheet|marks?\s+(?:memo|card)|school\s+leaving\s+certificate|"
     r"convocation|transfer\s+certificate|diploma\s+certificate|secondary\s+school\s+certificate|"
-    r"higher\s+secondary\s+(?:course\s+)?(?:certificate|examination)|statement\s+of\s+grades)\b", re.I)
+    r"higher\s+secondary\s+(?:course\s+)?(?:certificate|examination)|statement\s+of\s+grades|"
+    r"(?:national\s+)?trade\s+certificate|having\s+duly\s+examined)\b", re.I)
 _EDU_BODY = re.compile(r"\b(?:university|college|polytechnic|institute\s+of\s+technology|board\s+of\s+(?:secondary|higher|school|technical)|"
                        r"directorate\s+of\s+(?:government\s+)?examinations?)\b", re.I)
 _EDU_AWARD = re.compile(r"\b(?:bachelor\s+of|master\s+of|diploma\s+in|doctor\s+of|b\.?\s?tech|m\.?\s?tech|sslc|hsc)\b", re.I)
@@ -536,6 +588,8 @@ def classify_page(text: str) -> PageClassification:
     evidence = _evidence(text)
     passport = _is_passport(text) or evidence["passport"] or (not seed and _passport_loose(text))
     aadhaar = _is_aadhaar(text)
+    if _VACCINATION.search(text) and not seed and not _mrz(text):
+        passport = aadhaar = False
     # A valid Aadhaar number alone is not card evidence on a résumé, passport, certificate or invoice:
     # unrelated long numbers can pass the checksum. Genuine Aadhaar structure still allows a mixed page above.
     if not aadhaar and evidence["aadhaar"] and not seed and not passport and not _supporting_marker(text) \

@@ -104,6 +104,7 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
         _sig("contract period", 1, ph("contract period", "period of contract", "duration of contract")),
         _sig("probation", 1, ph("probation")),
         _sig("offer valid", 1, ph("offer is valid", "this offer")),
+        _sig("signing this offer", 2, ph("signing this offer", "considered as accepted", "take home salary", "upon signing")),
     ),
     "visa": (
         _sig("evisa", 3, ph("e visa", "electronic visa", "evisa")),
@@ -235,6 +236,18 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
                                         "admitted to the degree", "awarded the degree", "diploma certificate", "national trade certificate",
                                         "marks statement", "memorandum of marks", "grade sheet", "syndicate of the", "provisional degree",
                                         "course completion certificate")),
+        # A diploma or a certificate of proficiency from a training centre or institute (a trade, a software course, an inspector's grade).
+        _sig("proficiency title", 3, ph("certificate of proficiency", "demonstrated proficiency", "qualification certificate",
+                                        "certificate of competency", "certificate of competence")),
+        _sig("diploma award", 3, ph("having duly examined", "duly examined", "has pleasure in recognising", "has pleasure in recognizing")),
+        _sig("attainment", 2, ph("this attainment", "award of diploma", "award of the diploma")),
+        _sig("training programme", 4, r"\bcertify\W+that\W+[\s\S]{0,80}\bsucces\w*\W*(?:\w+\W+)?completed\W+the\W+(?:\w+\W+){0,2}training\W+program"),
+        _sig("awarded", 1, r"\b(?:is|are|was|been)\W+awarded\b"),
+        _sig("certificate number", 2, ph("cert no", "certificate no", "certificate number", "cert number")),
+        _sig("apostille", 3, r"\bapostille\b[\s\S]{0,400}\b(?:degree|university|diploma|chancellor|registrar)\b"),
+        _sig("university officer", 1, r"\b(?:vice\W+)?chancellor\b|\bregistrar\b|\bcontroller\W+of\W+examinations\b"),
+        _sig("subjects", 2, r"(?:\b(?:mathematics|physics|chemistry|english|economics|biology|tamil|hindi|science|engineering\W+drawing|"
+                            r"engineering\W+mechanics|computer\W+(?:science|programming))\b[\s\S]*?){4}"),
         _sig("university exam", 3, r"\buniversity\b[\s\S]{0,500}\b(?:examination|semester|marks|degree|bachelor|master)\b"),
         _sig("board", 3, ph("secondary education examination", "pre university", "higher secondary", "senior secondary", "board of secondary",
                             "board of school", "board of technical", "board of intermediate", "examination board", "technical education",
@@ -242,8 +255,9 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
         _sig("sslc", 3, r"\bs\W?s\W?l\W?c\b|\bhsc\b|\bssc\b|\bpuc\b|\bi\W?t\W?i\b\W+(?:certificate|trade)"),
         _sig("register", 2, ph("register no", "registration no", "roll no", "seat no", "reg no", "enrolment no", "enrollment no")),
         _sig("marks", 2, ph("marks obtained", "total marks", "max marks", "maximum marks", "marks in words", "grade points")),
-        _sig("passed exam", 2, r"\b(?:has|have)\W+(?:successfully\W+)?(?:passed|completed|qualified)\b[\s\S]{0,80}\bexamination\b|\bpassed\W+(?:the\W+)?(?:\w+\W+){0,3}examination\b"),
-        _sig("institution", 1, r"\b(?:university|college|polytechnic|institute|school)\b"),
+        _sig("passed exam", 2, r"\b(?:has|have)\W+(?:successfully\W+)?(?:passed|completed|qualified)\b[\s\S]{0,80}\bexamination\b|\bpassed\W+(?:the\W+)?(?:\w+\W+){0,3}examination\b"
+                               r"|\b(?:declared|been)\W+passed\W+(?:\w+\W+){0,8}examination\b"),
+        _sig("institution", 1, r"\b(?:university|college|polytechnic|institute|school|academy|training\W+cent(?:re|er))\b"),
         _sig("award", 1, r"\b(?:bachelor|master)\W+of\b|\bdiploma\W+in\b|\bb\W?tech\b|\bm\W?tech\b|\bb\W?com\b|\bb\W?sc\b|\bm\W?sc\b|\bmba\b"),
         _sig("class", 1, r"\b(?:first|second|third)\W+class\b|\bdistinction\b|\bcgpa\b"),
         _sig("result date", 1, ph("date of result", "month year", "year of passing", "date of issue")),
@@ -254,14 +268,15 @@ _SIGNALS: dict[str, tuple[tuple[str, int, "re.Pattern[str]"], ...]] = {
                                        "certificate of employment", "employment verification", "employment letter",
                                        "work experience certificate")),
         _sig("to whom", 2, ph("to whom it may concern", "to whomsoever it may concern", "to whom so ever it may concern", "to whom soever it may concern")),
-        _sig("certify employment", 3, r"\bcertify\W+that\W+[\s\S]{0,250}\b(?:worked|working|employed|serving|served|associated|joined|employee)\b"),
+        _sig("certify employment", 3, r"\b(?:certify|confirm\w*)\W+that\W+[\s\S]{0,250}\b(?:worked|working|employed|serving|served|associated|joined|employee|continue[sd]?|continuing)\b"),
         _sig("has worked", 2, r"\b(?:has|have|had)\W+(?:been\W+)?(?:worked|working|served|serving)\b"),
+        _sig("under me", 2, r"\b(?:work(?:ed|ing)|serv(?:ed|ing))\W+under\W+(?:me|my|the\W+undersigned)\b"),
         _sig("designation", 1, ph("designation", "designated as")),
         _sig("joined", 1, ph("date of joining", "joined on", "joined the company", "joined us", "joined as")),
         _sig("was employed", 2, r"\b(?:was|is|has\W+been|had\W+been)\W+(?:employed|working|associated|engaged)\W+(?:with|in|at|by|as)\b"),
         _sig("worked with us", 2, r"\bworked\W+(?:with|for|in|as|at)\W+(?:us|our|the\W+company|m/s)\b|\bworked\W+as\b"),
         _sig("capacity", 2, ph("in the capacity of", "in the capacity as", "in the position of", "in the role of")),
-        _sig("conduct", 1, r"\b(?:his|her)\W+(?:conduct|character|performance|work)\W+(?:was|is|has|during)\b|\bwish\W+(?:him|her)\W+(?:all|success|the\W+best)"),
+        _sig("conduct", 1, r"\b(?:his|her)\W+(?:conduct|character|performance|work)\W+(?:was|is|has|during)\b|\bwish\W+(?:him|her)\W+(?:all|success|the\W+best|good\W+luck)|\bgood\W+luck\W+(?:in|for)\W+(?:the\W+)?(?:his|her)?\W*future"),
         _sig("leaving", 2, ph("date of leaving", "last working day", "relieved from", "resigned", "relieved of his", "relieved of her")),
         _sig("issued at request", 2, ph("issued at his request", "issued at her request", "issued on his request", "issued upon his request")),
         _sig("period", 1, r"\bfrom\W+\d{1,2}\W{0,3}[a-z0-9]{2,9}\W{0,3}\d{2,4}\W+(?:to|till|until)\W+\d{1,2}\W{0,3}[a-z0-9]{2,9}\W{0,3}\d{2,4}"),
@@ -317,11 +332,29 @@ def _normalise(text: str) -> str:
     return _SPACED.sub(lambda match: match.group(0).replace(" ", ""), text)
 
 
+# Courses on safety, first aid, fire fighting, survival or seafarer training, and an inspector's personnel certification (NDT level II),
+# are certificates of attendance or competence (Other), never the education certificates the generic "training centre / proficiency"
+# wording would make them.
+_SAFETY_TOPIC = re.compile(r"\b(?:(?:health\W+(?:and|&)\W+)?safety\W+(?:course|training|induction|awareness|assessor)|safety\W+(?:and|&)\W+security|h2s|opito|bosiet|huet|first\W+aid|fire\W+(?:fighting|prevention)|cpr|confined\W+space|hot\W+work|survival|osha|nebosh|iosh|"
+                           r"rescue|scaffold\w*|seafarers?|stcw|maritime|snt\W?tc|personnel\W+certification|ndt\W+level)\b", re.I)
+_SAFETY_VETOED = {"proficiency title", "training programme", "awarded", "institution", "certificate number"}
+# A background-verification or audit report quotes degrees and employers; it is none of the certificates it reports on.
+_VERIFICATION_REPORT = re.compile(r"\bverification\W+(?:summary|results?|report)\b|\bverified\W+correct\b|\bbackground\W+(?:check|verification)\b", re.I)
+
+
 def _scores(text: str) -> dict[str, tuple[int, list[str], bool]]:
     """kind -> (score, names of the signals that matched, whether one of them is strong)."""
     out: dict[str, tuple[int, list[str], bool]] = {}
+    safety = bool(_SAFETY_TOPIC.search(text))
+    report = bool(_VERIFICATION_REPORT.search(text))
     for kind, signals in _SIGNALS.items():
-        hits = [(name, weight) for name, weight, pattern in signals if pattern.search(text)]
+        if report and kind in {"education_certificate", "experience_certificate"}:
+            out[kind] = (0, [], False)
+            continue
+        hits = [(name, weight) for name, weight, pattern in signals if pattern.search(text)
+                and not (safety and kind == "education_certificate" and name in _SAFETY_VETOED)]
+        if kind == "google_review" and not re.search(r"\bgoogle\b|★|⭐|\bstars?\b", text, re.I):
+            hits = []
         out[kind] = (sum(w for _, w in hits), [n for n, _ in hits], any(w >= STRONG for _, w in hits))
     return out
 
