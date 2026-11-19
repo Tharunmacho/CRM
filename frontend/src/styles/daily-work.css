@@ -38,7 +38,7 @@
 .dw .tk-table-wrap { min-width: 0; overflow-x: auto; }
 .dw .tk-table-wrap:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .dw-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; line-height: 1.4; color: var(--text-main); }
-.dw-table :is(th, td) { padding: 6px 5px; text-align: center; vertical-align: middle; overflow-wrap: anywhere; }
+.dw-table :is(th, td) { padding: 6px 5px; text-align: center; vertical-align: middle; overflow-wrap: break-word; }
 .dw-table :is(th, td).is-left { text-align: left; }
 .dw-table :is(th, td).is-left:not(.is-actions) { padding-inline: 8px 6px; }
 .dw-table :is(th, td).is-left[data-label='REMARKS']:not(.is-actions) { padding-inline: 5px; }
@@ -68,13 +68,13 @@
    It sits on the scroll wrapper (.tk-table-wrap), so it stays whole when the table scrolls sideways; a table without a wrapper carries it itself.
    Only where it is a table (the panel is over 760px wide); below that each row is a card with its own single var(--table-line) border. */
 @container dw (min-width: 1080px) {
-  .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 16px; }
+  .dw .tk-table-wrap { box-sizing: border-box; overflow-x: auto; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 0; }
   .dw .tk-table-wrap .dw-table thead th { border-top-width: 0; }
   .dw .dw-table:where(:not(.tk-table-wrap .dw-table)) { box-sizing: border-box; border-collapse: separate; border-spacing: 0; border: var(--table-frame-width) solid var(--table-line-strong); border-radius: 16px; overflow: hidden; }
 }
 /* one frame, never two: from 1100px wide (a panel over 760px) the panel gives up its own border around the framed table; as a card list
    (a phone) the panel's own single 1px border is the card border, the same var(--table-line) */
-.dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border: var(--table-line-width) solid var(--table-line); }
+.dw-panel:has(> .dw-scroll, > .tk-table-wrap) { border: var(--table-line-width) solid var(--table-line); border-radius: 0; }
 /* ONE set of edges: from 1360px (the table is a table, the cards are in rows) the panels that hold the recruiter cards, My day or a table frame
    have no chrome of their own (no border, no fill, no padding around the content), so the heading row, the cards and the table frame all start
    and end on the page's content edges, 16px apart (margin-bottom of .dw-panel), with the same 16px radius. Narrower, a panel is the card. */
@@ -105,7 +105,7 @@
 
 /* cell text */
 .dw-cell-strong { display: block; max-width: 100%; font-weight: 600; line-height: 1.3; color: var(--text-main); }
-.dw-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.dw-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: break-word; }
 .dw-none { display: block; color: var(--text-light); }
 .dw-table td:not(.is-left) > .dw-none { text-align: center; }
 .dw-row.is-done .dw-cell-strong { color: inherit; }
@@ -123,7 +123,7 @@
 .dw .record-identity > div { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; text-align: left; }
 .dw .record-identity p { margin: 0; }
 .dw .record-identity > .record-avatar { display: none; flex: none; width: 32px; height: 32px; font-size: 11.5px; }
-.dw .record-name { max-width: none; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; line-height: 1.3; }
+.dw .record-name { max-width: none; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: break-word; font-size: 13px; font-weight: 600; line-height: 1.3; }
 .dw .record-detail { max-width: 100%; margin: 0; overflow: hidden; display: flex; font-size: 11px; line-height: 1.3; }
 .dw .record-detail .cid-main { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: 5px; background: var(--tint-2); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--text-muted); }
 /* recruiter: the first name (the avatar is for the narrow cards); the full name is the tooltip */
@@ -158,7 +158,7 @@
 
 /* remarks: a dropdown over a one-line status (the read-only view is the remark as plain text) */
 .dw-remark { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.dw-remark-last { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; line-height: 1.3; color: var(--text-muted); }
+.dw-remark-last { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: break-word; font-size: 12px; line-height: 1.3; color: var(--text-muted); }
 .dw-remark-last.is-lead { display: block; -webkit-line-clamp: unset; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 /* The dropdown is one line (36px, 44px on phones) with a one-line status under it that always keeps its height, so a row never changes size
  * when it says Saving / Saved / Custom remark / an error. The current remark is its value, ellipsised with the full text in the cell's tooltip. */

@@ -95,7 +95,7 @@ export function DailyTable({ groups, zone, supervisor, staffName, canWork, onOpe
   const bands = groups.length > 1 || groups[0]?.tone === 'done'
   return (
     <ScrollEdges>
-      <table className="dw-table dw-main" aria-label="Daily candidates" style={{ minWidth: layout.minWidth }}>
+      <table className="dw-table dw-main" aria-label="Daily candidates">
         <colgroup>{columns.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left', c.key === 'actions' && 'is-actions')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>

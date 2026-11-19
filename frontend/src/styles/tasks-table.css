@@ -20,9 +20,8 @@
  * Everything that sets the table's metrics lives inside the container query: below 1080px a candidate is a card (daily-work.css).
  * The long selector prefix is deliberate: it out-ranks the shared .dw-table rules, which the Follow-up and Reports tables still use.
  */
-/* The Tasks screen draws its table the way it always did: NO outer frame and a faint line under each row (the owner asked for the borders to go
-   here first). The blue header, the fit and the alignment below are unchanged. */
-.dw { --table-frame-width: 0px; --table-line: var(--border-main); --table-line-strong: var(--border-main); }
+/* The approved Tasks look: a THIN (1px) outer border with SQUARE corners, a faint line under each row, no column lines. */
+.dw { --table-frame-width: 1px; --table-line: var(--border-main); --table-line-strong: var(--border-control); }
 
 @container dw (min-width: 1080px) {
   :root .dw .tw-table.dw-table.dw-main { --tw-pad-l: 10px; --tw-pad-r: 10px; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.35; }
@@ -32,7 +31,7 @@
   :root .dw .tw-table.dw-table.dw-main thead th:not(:last-child) { border-right: var(--table-line-width) solid var(--table-header-line); }
 
   /* ---- body: rows of at least 60px that grow with a second line, vertically centred, one padding, a visible var(--table-line) line under EVERY row (the last one too), no column lines ---- */
-  :root .dw .tw-table.dw-table.dw-main tbody td { height: 60px; padding: 8px var(--tw-pad-r) 8px var(--tw-pad-l); border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
+  :root .dw .tw-table.dw-table.dw-main tbody td { height: 60px; padding: 8px var(--tw-pad-r) 8px var(--tw-pad-l); border: 0; border-bottom: var(--table-line-width) solid var(--table-line); text-align: left; vertical-align: middle; overflow-wrap: break-word; }
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
   :root .dw .tw-table.dw-table.dw-main .dw-row:hover > td.is-actions { background: color-mix(in srgb, var(--primary) 4%, var(--bg-card)); }
 
@@ -43,8 +42,8 @@
   /* text columns: wrap onto a second line, and only after two lines an ellipsis (the full text is always the tooltip) */
   .dw .tw-table .dw-cell-strong { font-weight: 500; line-height: 1.35; }
   .dw .tw-table .dw-clamp { -webkit-line-clamp: 3; }
-  .dw .tw-table .record-name { font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-  .dw .tw-table .tk-owner-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 500; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+  .dw .tw-table .record-name { font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: break-word; }
+  .dw .tw-table .tk-owner-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 500; line-height: 1.35; white-space: normal; overflow-wrap: break-word; text-overflow: clip; }
   .dw .tw-table .dw-none { text-align: left; }
 
   /* DOC: the date as calm tabular text (it may wrap to "19 Nov / 2026"); the empty state is a quiet primary text-button with a calendar icon, 32px tall, no underline */
@@ -74,7 +73,7 @@
   .dw .tw-table .dw-remark .custom-select-trigger { height: 36px !important; min-height: 36px !important; padding: 0 8px; font-size: 12px; }
   .dw .tw-table .dw-remark-add input { min-height: 36px; }
   /* the select's value (the current remark) wraps onto a second line inside the 36px control before it is cut */
-  .dw .tw-table .dw-remark .custom-select-trigger > span:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 11.5px; line-height: 14px; text-align: left; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+  .dw .tw-table .dw-remark .custom-select-trigger > span:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 11.5px; line-height: 14px; text-align: left; text-overflow: clip; white-space: normal; overflow-wrap: break-word; }
   .dw .tw-table .dw-remark .custom-select-trigger[data-placeholder] > span:first-child { display: block; white-space: nowrap; text-overflow: ellipsis; }
   .dw .tw-table .dw-stage-text b { font-weight: 700; }
 

@@ -25,7 +25,7 @@ export function FollowUpTable({ items, now, supervisor, staffName, canWork, onOp
   const layout = columnLayout(columns)
   return (
     <ScrollEdges label="Follow-up candidates, scroll sideways for more columns">
-      <table className="dw-table dw-main dw-follow" aria-label="Follow-up candidates" style={{ minWidth: layout.minWidth }}>
+      <table className="dw-table dw-main dw-follow" aria-label="Follow-up candidates">
         <colgroup>{columns.map((c) => <col key={c.key} style={{ width: layout.share(c) }} />)}</colgroup>
         <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={cn('left' in c && 'is-left', c.key === 'actions' && 'is-actions')}>{'quiet' in c ? <span className="sr-only">{c.title}</span> : c.title}</th>)}</tr></thead>
         <tbody>

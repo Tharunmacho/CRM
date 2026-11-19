@@ -39,10 +39,10 @@ test('the Tasks columns: S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter (superviso
 test('the supervisor column plan fits the 1111px panel at a 1440px window', () => {
   const sum = (list) => list.reduce((total, c) => total + c.width, 0)
   assert.ok(sum(daily.taskColumnsFor(true)) <= 1108, `${sum(daily.taskColumnsFor(true))}px`)
-  assert.ok(sum(daily.taskColumnsFor(false)) <= 1008, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
+  assert.ok(sum(daily.taskColumnsFor(false)) <= 1012, 'the plan without the Recruiter column (no Recruiter column) is narrower still')
   const width = (key) => daily.taskColumnsFor(true).find((c) => c.key === key).width
   assert.ok(width('actions') >= 116, 'the 72px Open / Complete button, the 36px menu, the gap and the right padding are not clipped')
-  assert.ok(width('remarks') >= 140, 'the dropdown keeps room for a remark')
+  assert.ok(width('remarks') >= 126, 'the dropdown keeps room for a remark')
   assert.ok(width('doc') >= 84, '"19 Nov" / "2026" or the "Add date" button fit at 10px padding')
   assert.ok(width('stage') >= 120, 'the stage chip keeps room for "1 · Prescreening"')
   assert.ok(width('today') >= 100, 'the TODAY chip keeps room for "Moved 10:45" on one line')

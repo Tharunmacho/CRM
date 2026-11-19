@@ -100,11 +100,11 @@ test('table-theme.css (.tb-blue): the same lines as the shared DataTable', async
   assert.doesNotMatch(css, FAINT)
 })
 
-test('Tasks: the table is framed (on its scroll box, 16px radius), every row has the 1px line, no column lines, the header edge is strong', async () => {
+test('Tasks: the table is framed (on its scroll box, a thin square frame), every row has the 1px line, no column lines, the header edge is strong', async () => {
   const work = await read('styles/daily-work.css')
   const frame = rule(work, '  .dw .tk-table-wrap {')
   assert.match(frame, /border: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
-  assert.match(frame, /border-radius: 16px/)
+  assert.match(frame, /border-radius: 0/)
   assert.match(work, /@container dw \(min-width: 1080px\) \{\n\s+\.dw \.tk-table-wrap \{/, 'only where it is a table (a panel of 1080px or more), under that the rows are cards')
   assert.match(work, /\.dw-table thead th \{[^}]*border-bottom: var\(--table-frame-width\) solid var\(--table-line-strong\)/)
   const tasks = await read('styles/tasks-table.css')
@@ -116,7 +116,7 @@ test('Tasks: the table is framed (on its scroll box, 16px radius), every row has
   assert.match(tasks, /thead th:not\(:last-child\) \{ border-right: var\(--table-line-width\) solid var\(--table-header-line\); \}/)
   assert.doesNotMatch(tasks, /border-bottom: 1px solid var\(--border-control\)/)
   // the panel around the framed table keeps one border in the same colour as cards; from 1360px it has no chrome at all, so the heading, the cards and the frame share the page's edges
-  assert.match(work, /\.dw-panel:has\(> \.dw-scroll, > \.tk-table-wrap\) \{ border: var\(--table-line-width\) solid var\(--table-line\); \}/)
+  assert.match(work, /\.dw-panel:has\(> \.dw-scroll, > \.tk-table-wrap\) \{ border: var\(--table-line-width\) solid var\(--table-line\); border-radius: 0; \}/)
   assert.match(work, /@media \(min-width: 1360px\) \{\n\s+\.dw-panel:is\(\.dwb-board, \.dwr-myday, :has\(> \.dw-scroll, > \.tk-table-wrap\)\) \{ overflow: visible; border-width: 0; border-radius: 0; background: transparent; \}/)
   // the Reports people tables (.dwr) share .dw-table: their row lines are the token, and they have no column lines in the body either
   assert.match(work, /\.dw-table td \{ border-bottom: var\(--table-line-width\) solid var\(--table-line\); \}/)

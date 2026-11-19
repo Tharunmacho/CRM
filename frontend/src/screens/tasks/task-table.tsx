@@ -12,7 +12,7 @@ import {
 /**
  * One list for every recruiter's candidates, with what happened to each of them today. The columns and their widths are
  * TASK_LIST_COLUMNS in the daily-work model (S NO, DOC, CLIENT, JOB, CANDIDATE, Recruiter, AGENCY, STAGE, TODAY, REMARKS, actions): the widths add
- * up to 1108px for a supervisor (1004px for a recruiter) and are used as percentages, so the table always fills its panel (1111px at a 1440px
+ * up to 1108px for a supervisor (1008px for a recruiter) and are used as percentages, so the table always fills its panel (1111px at a 1440px
  * window with the sidebar open) and never scrolls sideways; under 1080px of panel width the list is a stack of cards instead. Text wraps to two
  * lines (the full text is the tooltip) instead of being cut with an ellipsis. The look is src/styles/tasks-table.css.
  */
