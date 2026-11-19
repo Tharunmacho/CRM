@@ -15,7 +15,7 @@
 .jobs-simple .js-salary { font-variant-numeric: tabular-nums; }
 .jobs-simple .js-salary b { white-space: normal; overflow-wrap: anywhere; }
 @media (min-width: 1280px) {
-  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 13%; min-width: 8.5rem; }
+  :root:root .jobs-simple .js-jobs-table .ui-data-table.is-grid :is(th, td).ui-actions-cell { width: 12rem; min-width: 12rem; }   /* edit + delete + Open need about 155px plus padding: a narrower cell clipped the Open button */
 }
 
 /* A job just saved: a soft tint that fades, always next to the job itself. */
