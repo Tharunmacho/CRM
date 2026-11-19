@@ -6,7 +6,7 @@ import { RecordIdentity } from '@/shared/ui/workspace'
 import { countryCell, nothingYet, rowAction, taskColumnsFor, todayChips, type TaskRow } from '@/features/daily-work/daily-work-model'
 import { OwnerTag } from './task-identity'
 import {
-  CandidateIds, ClientCountryCell, DocCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
+  ClientCountryCell, DocCell, PositionCellView, RemarkCell, RowMenu, ScrollEdges, StageCell, columnLayout,
 } from './daily-table'
 
 /**
@@ -51,7 +51,7 @@ export function TaskTable({ rows, zone, supervisor, staffName, canWork, onOpen, 
                 {supervisor && <td data-label="Recruiter" className="is-left">{name ? <OwnerTag name={name} /> : <span className="dw-none">—</span>}</td>}
                 <td data-label="JOB" className={cn('is-left', !row.position && 'is-empty')}><PositionCellView item={row} /></td>
                 <td data-label="CLIENT / COUNTRY" className={cn('is-left', !row.client && noCountry && 'is-empty')}><ClientCountryCell item={row} /></td>
-                <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={row.candidate} detail={<CandidateIds item={row} />} /></td>
+                <td data-label="CANDIDATE NAME" className="is-left"><RecordIdentity name={row.candidate} /></td>
                 <td data-label="STAGE"><StageCell item={row} /></td>
                 <td data-label="TODAY" className="is-left">
                   <span className="tw-today">
