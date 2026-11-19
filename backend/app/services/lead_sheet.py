@@ -22,6 +22,7 @@ from app.db.models import (Attachment, AuditEntry, Candidate, Lead, LeadActivity
                            LEAD_STATUSES)
 from app.services import lead_followups, lead_matching, lead_parsing as lp
 from app.services.candidate_search import agency_midnight, literal_contains, search_terms
+from app.core.roles import is_admin_level
 
 STATUS_LABELS = {
     "new": "Not contacted", "contacted": "Contacted", "interested": "Interested", "resume_requested": "Resume requested",
@@ -63,9 +64,9 @@ def daily_work_gate(db: Session, user: User, now: datetime | None = None) -> dic
 def lead_work_refusal(db: Session, lead: Lead, user: User, gate: dict | None = None) -> HTTPException | None:
     """Why `user` may not work this lead (call, edit, convert, link, upload a resume), or None.
 
-    Admin works any lead. Managers and staff work only the leads assigned to them (no daily-task lock).
+    Admin and MD work any lead. Staff work only the leads assigned to them (no daily-task lock).
     """
-    if user.role == Role.admin:
+    if is_admin_level(user):
         return None
     if lead.owner_id != user.id:  # same answer as the detail view: a lead that is not yours does not exist for you (no owner name)
         return fail(404, "not_found", "This lead was not found.")
@@ -225,9 +226,20 @@ def _csv_param(value) -> list[str]:
     return items
 
 
+def _facet_values(value) -> list[str]:
+    """The campaign / form / job / country / platform values of a filter, lower-cased. A name may itself hold a comma (`Qatar, Kitchen`),
+    so every value is matched as the whole text AND (to keep the documented comma-separated list) as its comma-separated parts."""
+    wanted: list[str] = []
+    for part in (value if isinstance(value, (list, tuple)) else [value]):
+        whole = " ".join(str(part or "").split())
+        if whole:
+            wanted.append(whole.lower())
+    return list(dict.fromkeys(wanted + [p.lower() for p in _csv_param(value)]))
+
+
 def sees_all_leads(user: User) -> bool:
-    """Only an admin sees every lead (and assigns them). Managers and staff see only the leads assigned to them."""
-    return user.role == Role.admin
+    """Only an admin or MD sees every lead (and assigns them). Staff see only the leads assigned to them."""
+    return is_admin_level(user)
 
 
 def visible_leads(user: User):
@@ -236,7 +248,7 @@ def visible_leads(user: User):
 
 
 def ensure_can_see_lead(lead: Lead, user: User) -> None:
-    """A lead not assigned to a manager/staff member does not exist for them (404, so its existence is not revealed)."""
+    """A lead not assigned to a staff member does not exist for them (404, so its existence is not revealed)."""
     if not sees_all_leads(user) and lead.owner_id != user.id:
         raise fail(404, "not_found", "This lead was not found.")
 
@@ -244,7 +256,7 @@ def ensure_can_see_lead(lead: Lead, user: User) -> None:
 def apply_filters(query, owner, has_resume, user: User, f: dict):
     """The list/export/assign filters (all optional, AND-ed). `f` holds the snake_case query parameters.
 
-    Always narrowed to the leads `user` may see: managers and staff only ever get the leads assigned to them."""
+    Always narrowed to the leads `user` may see: staff only ever get the leads assigned to them."""
     query = query.where(visible_leads(user))
     # `uploaded` (default) = when the lead was imported into the CRM; `created` = the platform's own time, else the import time.
     date_field = (f.get("date_field") or "uploaded").strip().lower()
@@ -283,9 +295,9 @@ def apply_filters(query, owner, has_resume, user: User, f: dict):
         query = query.where(Lead.status.in_(statuses))
     for key, column in (("campaign", Lead.campaign_name), ("form", Lead.form_name), ("position", Lead.position_applied),
                         ("country", Lead.country_interest), ("platform", Lead.platform)):
-        values = _csv_param(f.get(key))
+        values = _facet_values(f.get(key))
         if values:
-            query = query.where(func.lower(column).in_([v.lower() for v in values]))
+            query = query.where(func.lower(column).in_(values))
     who = (f.get("owner") or "").strip()
     if who in ("unassigned", "none"):  # the Lead sheet's "Unassigned" choice sends `none`
         query = query.where(Lead.owner_id.is_(None))
@@ -462,7 +474,7 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
     if scope not in ("mine", "all"):
         raise fail(422, "invalid_request", "scope must be mine or all.")
     if not sees_all_leads(user):
-        scope = "mine"  # managers and staff count only the leads assigned to them
+        scope = "mine"  # staff count only the leads assigned to them
     from app.services.daily_work import agency_today
     from app.services.candidate_search import agency_midnight as midnight
     today_start = midnight(agency_today(datetime.now(timezone.utc)).isoformat(), "Today")
@@ -510,7 +522,7 @@ def summary(db: Session, user: User, scope: str | None = None) -> dict:
 
 
 def facets(db: Session, user: User) -> dict:
-    # Filter choices come only from the leads the viewer may see (managers and staff: their own).
+    # Filter choices come only from the leads the viewer may see (staff: their own).
     rows = db.execute(text(
         "WITH v AS (SELECT * FROM crm_leads WHERE :everyone OR owner_id = :me) "
         "SELECT 'campaign' AS k, campaign_name AS v, NULL AS id, count(*) FROM v WHERE campaign_name IS NOT NULL GROUP BY campaign_name "
@@ -787,7 +799,7 @@ def convert_lead(db: Session, user: User, lead_id: str, overrides: dict, resume:
         raise fail(409, "resume_required", "Get this person's resume first. A lead becomes a candidate only once the resume is received.")
     verified_job_id = lead_resume_check.require_verified(db, user, lead, resume, resume_check_id, overrides)
     assign_to = None
-    if user.role == Role.admin:  # only the admin picks the recipient; a manager's conversion stays with the manager
+    if is_admin_level(user):  # only an admin or MD picks the recipient; a recruiter's conversion stays with the recruiter
         wanted = overrides.get("assignTo") or lead.owner_id
         if wanted:
             try:

@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.core.deps import require_role
+from app.core.deps import require_role, require_admin_level
 from app.db.models import Role, User
 from app.db.session import get_db
 from app.services import candidate_merge
@@ -22,7 +22,7 @@ class MergeIn(BaseModel):
 
 @router.post("/{source_id}/merge-into/{target_id}")
 def merge_into(source_id: str, target_id: str, background: BackgroundTasks, response: Response, body: MergeIn | None = None,
-               db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+               db: Session = Depends(get_db), user: User = Depends(require_admin_level())) -> dict:
     """Move everything worth keeping from the duplicate `source_id` onto the existing `target_id`, then remove the duplicate.
 
     Same permission as the admin candidate delete. `{"dryRun": true}` answers what would move, be skipped or refuse, and changes nothing.

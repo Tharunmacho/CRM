@@ -222,16 +222,21 @@ Use separate event types for assignment, escalation, missed updates and private 
 
 The backend is authoritative; hidden navigation is only a usability measure. The PRD roles on pp. 1–2 require the following distinctions:
 
-| Action | Admin | Manager | Staff |
+The role stored as `manager` is called **MD** everywhere a person reads it. An MD has exactly the same access as an Admin: every screen, setting, report, export, invoice, user-management action and admin-only endpoint. The code asks one question for every Admin privilege, `is_admin_level` (`backend/app/core/roles.py`, `frontend/src/shared/model/role-labels.ts`), which is true for `admin` and `manager`; the labels live in one table on each side. The only place MD and Admin differ is the safeguard that the system must always keep at least one real Admin: the last active Admin cannot be demoted or deactivated, and nobody can turn off or change their own role.
+
+| Action | Admin | MD | Staff |
 | --- | --- | --- | --- |
-| Connect/remove sources; user management; reopen completed stage | Yes | No | No |
+| Connect/remove sources; user management; reopen completed stage | Yes | Yes | No |
 | Create clients/designations/orders; map/unmap; see all Data Bank candidates | Yes | Yes | Yes |
 | Work candidate stages | Any | Any | Own candidates |
 | Reassign candidates/tasks; receive escalation and missed-update alerts | Yes | Yes | No |
 | Receive automatic candidate assignment | No | No | Eligible Staff only |
 | Reports | All staff | All staff | Own numbers |
 | Personal private to-dos | Yes | Yes | No |
-| Data Bank Excel export | Yes | No | No |
+| Data Bank Excel export | Yes | Yes | No |
+| Delete a Recruiter's account (never an Admin, an MD or yourself) | Yes | Yes | No |
+
+**Deleting a Recruiter** (`DELETE /api/users/{id}`, Admin and MD only). The login is removed for good - password, phone, sessions and email (the address is free again) - and the person leaves every list and picker, but their `auth_users` row stays as a tombstone named "<name> (former user)" with the reserved email `deleted-<id>@deleted.invalid`, because about thirty history tables point at it (most with NOT NULL, no-cascade foreign keys): audit entries, remarks, stage records, attachments, attendance and invoices keep their link and their name. Nothing is lost silently: the caller must choose a recruiter to take the person's candidates, open tasks and leads (the same transfer as deactivating a recruiter), or leave them unassigned (the Data Bank's unassign rule: a deployed, mapped or in-stage candidate cannot be left without a recruiter, and the request is refused with the reason). Their notifications, private to-dos, goal overrides, client allocations and auto-assign membership are removed. It is one transaction with a `Deleted user` audit entry. There is no schema change.
 
 Report export permissions should follow report scope; the PRD separately restricts **Data Bank** export to Admin. Apply server-side ownership checks to call outcomes, remarks, uploads and other mutations consistently. Preserve legitimate all-candidate Data Bank visibility while enforcing private to-dos and report scopes. Do not infer that all Data Bank access authorizes all edits.
 

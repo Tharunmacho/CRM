@@ -152,7 +152,7 @@ def test_staff_scope_and_admin_reasoned_correction(workspace):
             activity.attendance_report(db,user,START.date(),'UTC','other',at=START)
         assert forbidden.value.status_code==403
         with pytest.raises(HTTPException):
-            activity.correct_session(db,manager,first.id,START,START+timedelta(minutes=50),'Wrong approver',at=START+timedelta(hours=3))
+            activity.correct_session(db,user,first.id,START,START+timedelta(minutes=50),'Wrong approver',at=START+timedelta(hours=3))   # a recruiter may not correct
         with pytest.raises(HTTPException) as overlap:
             activity.correct_session(db,admin,first.id,START,START+timedelta(hours=2,minutes=1),'Overlap',at=START+timedelta(hours=3))
         assert overlap.value.status_code==409

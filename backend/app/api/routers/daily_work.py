@@ -7,12 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.core.deps import current_user, require_role
-from app.db.models import AuditEntry, DailyGoal, Role, User
+from app.core.deps import current_user, require_role, require_admin_level
+from app.db.models import AuditEntry, DailyGoal, Role, User, not_deleted_user
 from app.db.session import get_db
 from app.services import daily_work, tasks_export
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
+from app.core.roles import is_admin_level
 
 # Both lists read candidates, placements (with their order, company, client and job title), stage history, open tasks, task
 # remarks and the recruiter roster. A change to any of those drops the memo at once; the time limit covers what no hook can see
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/api", tags=["daily-work"])
 
 def _who(user: User, staff: str | None):
     """Whose candidates the caller may read: (supervisor, owner ids or a select of them for the rows, select of every recruiter or None)."""
-    supervisor = user.role in (Role.admin, Role.manager)
+    supervisor = is_admin_level(user)
     if supervisor:
         everyone = select(User.id).where(User.role == Role.staff)
         return supervisor, [staff] if staff not in (None, "all") else everyone, everyone
@@ -40,7 +41,7 @@ def _read(db: Session, user: User, staff: str | None, counts_of, rows_of):
     if supervisor:
         counts, roster, fetched = daily_work.read_together(
             db, lambda s: counts_of(s, everyone),
-            lambda s: list(s.execute(select(User.id, User.name, User.active).where(User.role == Role.staff).order_by(User.name, User.id)).all()),
+            lambda s: list(s.execute(select(User.id, User.name, User.active).where(User.role == Role.staff, not_deleted_user()).order_by(User.name, User.id)).all()),
             lambda s: rows_of(s, selector))
         if staff not in (None, "all") and staff not in {r.id for r in roster}:
             raise HTTPException(404, "Recruiter not found")
@@ -57,7 +58,7 @@ def daily_work_today(staff: str | None = None, db: Session = Depends(get_db), us
     """
     Today's candidates. A recruiter gets their own candidates that still have prescreening to do (new, in process or needs review,
     with no application yet or one at stage 1; no daily cap, slots or deadlines): the ones still to work first, then "done today".
-    Admin and Manager get every recruiter's, or one recruiter's for `staff=<id>`, plus a per-recruiter count (to work, done today).
+    Admin and MD get every recruiter's, or one recruiter's for `staff=<id>`, plus a per-recruiter count (to work, done today).
     A read only: nothing is allocated.
     """
     # Every open tab refetches when a task or candidate changes; tabs of the same person (or a second supervisor) share one build.
@@ -87,7 +88,7 @@ def follow_up(staff: str | None = None, db: Session = Depends(get_db), user: Use
     """
     Follow-up: the candidates a recruiter owns whose application is active at stage 2 to 11 (still going forward), stalest first.
     A closed application (a negative exit) or a deployed one (it shows on Travelled) is not listed. Same scoping as `/daily-work`:
-    a recruiter sees their own, admin and manager everyone's or `staff=<id>`'s, with a per-recruiter count. A read only.
+    a recruiter sees their own, admin and MD everyone's or `staff=<id>`'s, with a per-recruiter count. A read only.
     """
     return cached(("follow-up", scope_of(db), user.id, user.role.value, staff), WORK_TOPICS, WORK_SECONDS, lambda: _follow_up(db, user, staff))
 
@@ -112,7 +113,7 @@ def tasks_export_file(format: Literal["xlsx"] = "xlsx", staff: str | None = None
     """
     The Tasks table as an Excel file (`tasks-<agency day>.xlsx`, sheet "Tasks"): S.No, DOC, Recruiter, Job, Client, Country, Candidate,
     Care ID, Agency, Advance, Stage, Today, Remark; one row per candidate in the order the screen lists them. `staff=<userId|all>` and
-    the permissions are those of `GET /api/daily-work`: admin and manager any recruiter or all, a recruiter only themself.
+    the permissions are those of `GET /api/daily-work`: admin and MD any recruiter or all, a recruiter only themself.
     """
     daily = daily_work_today(staff, db, user)
     follow = follow_up(staff, db, user)
@@ -174,11 +175,11 @@ def _goals_json(goals: dict) -> dict:
 
 
 @router.get("/daily-goals")
-def daily_goals(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
+def daily_goals(db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     """The agency defaults, and for every recruiter the goals in force and which ones are their own override."""
     # The roster and the (few) goal rows are independent: one round trip for both (every caller has already committed its change).
     staff, rows = parallel_reads(
-        db, lambda session: list(session.execute(select(User.id, User.name, User.active).where(User.role == Role.staff).order_by(User.name, User.id)).all()),
+        db, lambda session: list(session.execute(select(User.id, User.name, User.active).where(User.role == Role.staff, not_deleted_user()).order_by(User.name, User.id)).all()),
         lambda session: session.execute(select(DailyGoal.user_id, DailyGoal.metric, DailyGoal.target, DailyGoal.morning_target)).all())
     goals = daily_work.goals_from_rows(rows, [s.id for s in staff] + ["__agency__"])
     return {
@@ -189,14 +190,14 @@ def daily_goals(db: Session = Depends(get_db), user: User = Depends(require_role
 
 
 @router.put("/daily-goals/default")
-def set_default_goals(body: GoalIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def set_default_goals(body: GoalIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     _apply(db, None, body, user)
     db.commit()
     return daily_goals(db, user)["default"]
 
 
 @router.put("/daily-goals/staff/{staff_id}")
-def set_staff_goals(staff_id: str, body: GoalIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def set_staff_goals(staff_id: str, body: GoalIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     person = db.get(User, staff_id)
     if person is None or person.role != Role.staff:
         raise HTTPException(404, "Recruiter not found")
@@ -206,7 +207,7 @@ def set_staff_goals(staff_id: str, body: GoalIn, db: Session = Depends(get_db), 
 
 
 @router.delete("/daily-goals/staff/{staff_id}")
-def reset_staff_goals(staff_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def reset_staff_goals(staff_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     """Remove the person's own goals so the agency defaults apply again."""
     person = db.get(User, staff_id)
     if person is None or person.role != Role.staff:

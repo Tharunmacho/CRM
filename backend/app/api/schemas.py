@@ -37,6 +37,8 @@ class UserOut(Wire):
     active: bool
     receives_auto_assign: bool
     on_leave: bool
+    # A removed account kept only so history shows a name; screens list people without it.
+    deleted: bool = False
 
 
 class StaffContactOut(Wire):
@@ -62,7 +64,7 @@ class ClientOut(Wire):
     notes: str | None = None
     status: str
     staff_contacts: list[StaffContactOut] = []
-    # CRM users (active staff or manager) who look after this client; filled by the snapshot / endpoints, not a column.
+    # CRM users (active staff or MD) who look after this client; filled by the snapshot / endpoints, not a column.
     staff_ids: list[str] = []
 
 
@@ -79,6 +81,7 @@ class ReferenceAgencyOut(Wire):
     notes: str | None = None
     specialisations: list[str] = []
     preferred_countries: list[str] = []
+    active_agency: bool = False
     created_at: datetime | None = None
 
 

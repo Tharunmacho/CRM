@@ -1,6 +1,6 @@
 """Campaign performance of the Lead sheet: one row per campaign (with its forms) from ONE set-based statement.
 
-Contract: docs/workflows/lead-sheet-contract.md ("Campaigns"). Admin and manager see every lead; a staff member sees only the
+Contract: docs/workflows/lead-sheet-contract.md ("Campaigns"). Admin and MD see every lead; a staff member sees only the
 leads assigned to them, so their counts are their own work. All rates are percentages with one decimal (0 to 100).
 
 Definitions (per campaign, or per campaign and form):
@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.models import Role, User
+from app.core.roles import is_admin_level
 
 MAX_CAMPAIGNS = 500
 TOP = 3
@@ -102,7 +103,7 @@ def campaigns(db: Session, user: User, now: datetime | None = None) -> dict:
     from app.services.candidate_search import agency_midnight
     now = now or datetime.now(timezone.utc)
     today = agency_midnight(agency_today(now).isoformat(), "Today")
-    everyone = user.role == Role.admin  # managers and staff: only the leads assigned to them
+    everyone = is_admin_level(user)  # staff: only the leads assigned to them
     rows = db.execute(_SQL, {"everyone": everyone, "me": user.id, "today": today, "week": today - timedelta(days=6)}).all()
 
     leaves: dict[tuple, dict] = {}

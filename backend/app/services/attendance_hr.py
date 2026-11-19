@@ -21,12 +21,13 @@ from app.db.models import (
     AssignmentPointer, AttendanceAdjustment, AttendanceCalendarDay,
     AttendanceCoverItem, AttendanceDutyPlan, AttendanceHRRequest,
     AttendanceWeeklyOff, AttendanceWorkTiming, AuditEntry, Candidate,
-    Notification, Role, StaffAttendanceSession, Task, TaskEvent, User,
+    Notification, Role, StaffAttendanceSession, Task, TaskEvent, User, not_deleted_user,
 )
 from app.services.attendance_policy import AttendancePolicy, attendance_overview, calculate_day, calculate_month, local_day, shift_bounds
 from app.services.attendance_policy_types import AttendanceStatus, Shift
 from app.services.attendance_availability import unavailable_staff_ids
 from app.services.parallel_reads import parallel_reads
+from app.core.roles import ADMIN_LEVEL_ROLES, is_admin_level
 
 EMPLOYEE_ROLES = (Role.staff, Role.manager)
 LEAVE_KINDS = {"paid_leave", "unpaid_leave"}
@@ -48,7 +49,7 @@ def policy_json():
     return {"workMinutes": 480, "breakMinutes": 60, "monthlyPaidLeaveDays": 1,
             "monthlyGraceMinutes": p.monthly_paid_minutes, "monthlyPermissionOccasions": p.monthly_paid_occasions,
             "warningMinutes": p.warning_minutes, "missingPunchDeadlineDays": p.missing_punch_deadline_days,
-            "flexMinutes": p.flex_minutes, "approvalRoles": {"manager": "Manager or Admin", "admin": "Admin"},
+            "flexMinutes": p.flex_minutes, "approvalRoles": {"manager": "MD or Admin", "admin": "Admin"},
             "coverageBasis": "first_check_in_to_last_check_out_less_break"}
 
 
@@ -81,9 +82,9 @@ def _lock(db, actor=None):
 
 
 def _visible(actor, employee):
-    if employee.role not in EMPLOYEE_ROLES:
+    if employee.role not in EMPLOYEE_ROLES or employee.deleted:
         return False
-    return actor.role == Role.admin or actor.id == employee.id or (actor.role == Role.manager and employee.role == Role.staff)
+    return is_admin_level(actor) or actor.id == employee.id
 
 
 def _employee(db, actor, user_id, *, manage=False, active=False):
@@ -91,18 +92,16 @@ def _employee(db, actor, user_id, *, manage=False, active=False):
     if person is None or not _visible(actor, person) or (active and not person.active):
         raise HTTPException(404, "Attendance employee not found")
     if manage and (actor.role == Role.staff or actor.id == person.id):
-        raise HTTPException(403, "A different Manager or Admin must make this attendance change")
+        raise HTTPException(403, "A different MD or Admin must make this attendance change")
     return person
 
 
 def _people(db, actor, staff_id=None):
     if staff_id:
         return [_employee(db, actor, staff_id)]
-    statement = select(User).where(User.role.in_(EMPLOYEE_ROLES))
+    statement = select(User).where(User.role.in_(EMPLOYEE_ROLES), not_deleted_user())
     if actor.role == Role.staff:
         statement = statement.where(User.id == actor.id)
-    elif actor.role == Role.manager:
-        statement = statement.where(or_(User.role == Role.staff, User.id == actor.id))
     return list(db.scalars(statement.order_by(User.name, User.id)))
 
 
@@ -324,7 +323,7 @@ def month_report(db, actor, year, month, staff_id=None, *, at=None):
         output.append({"userId": person.id, "name": person.name, "role": person.role.value, "active": person.active,
                        "trackingStart": tracking_start, "days": days, "summary": summary})
     return {"year": year, "month": month, "timezone": p.timezone_name, "canManage": actor.role != Role.staff,
-            "canCorrect": actor.role == Role.admin, "policy": policy_json(), "staff": output}
+            "canCorrect": is_admin_level(actor), "policy": policy_json(), "staff": output}
 
 
 def required_stages(row):
@@ -335,10 +334,8 @@ def _decision_stages(actor, employee, row):
     if not actor.active or actor.id == employee.id or row.status != "pending":
         return []
     allowed = []
-    if actor.role == Role.admin or (actor.role == Role.manager and employee.role == Role.staff):
-        allowed.append("manager")
-    if actor.role == Role.admin:
-        allowed.append("admin")
+    if is_admin_level(actor):  # an MD holds both approval stages, like an admin
+        allowed.extend(["manager", "admin"])
     return [stage for stage in required_stages(row) if stage in allowed and not (row.approvals or {}).get(stage, {}).get("approved")]
 
 
@@ -379,7 +376,7 @@ def request_report(db, actor, year, month, staff_id=None):
 
 
 def _cover_colleagues(db, employee, day=None):
-    # DCRM candidate/task owners are Staff; a Manager also nominates a Staff
+    # DCRM candidate/task owners are Staff; an MD also nominates a Staff
     # colleague, as in the reference. A supervisor role is not an assignee role.
     people = list(db.scalars(select(User).where(User.active.is_(True), User.role == Role.staff, User.id != employee.id,
                                                User.on_leave.is_(False)).order_by(User.name, User.id)))
@@ -396,7 +393,7 @@ def _check_cover(db, employee, cover_id, day):
 
 def _notify_approvers(db, row):
     person = db.get(User, row.user_id)
-    for user in db.scalars(select(User).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))):
+    for user in db.scalars(select(User).where(User.active.is_(True), User.role.in_(ADMIN_LEVEL_ROLES))):
         if _decision_stages(user, person, row):
             _notify(db, user.id, "Attendance approval needed", f"{person.name}: {row.kind.replace('_', ' ')} on {row.attendance_date}")
 
@@ -498,8 +495,8 @@ def decide_request(db, actor, request_id, body, *, at=None):
     if not stages:
         raise HTTPException(403 if row.status == "pending" else 409, "You cannot approve this request right now")
     if body.get("emergencyOverride"):
-        if actor.role != Role.admin:
-            raise HTTPException(403, "Only an admin can allow an extra permission")
+        if not is_admin_level(actor):
+            raise HTTPException(403, "Only an admin or MD can allow an extra permission")
         if row.kind not in {"late", "early_exit"} or not body["approved"]:
             raise HTTPException(422, "An extra permission only applies when you approve coming in late or leaving early")
     at = at or utcnow()
@@ -512,7 +509,7 @@ def decide_request(db, actor, request_id, body, *, at=None):
     for stage in stages:
         approvals[stage] = record
     row.approvals = approvals
-    row.emergency_override = row.emergency_override or (actor.role == Role.admin and body.get("emergencyOverride", False))
+    row.emergency_override = row.emergency_override or (is_admin_level(actor) and body.get("emergencyOverride", False))
     row.updated_at = at
     if not body["approved"]:
         row.status = "rejected"
@@ -669,12 +666,12 @@ def save_calendar_day(db, actor, body, *, at=None):
     _lock(db, actor)
     person = _employee(db, actor, body["userId"], manage=True)
     # Pay-changing direct entries require the finance-equivalent Admin authority.
-    if body["status"] in {"PL", "UL"} and actor.role != Role.admin:
-        raise HTTPException(403, "Admin approval is required for paid or unpaid leave")
+    if body["status"] in {"PL", "UL"} and not is_admin_level(actor):
+        raise HTTPException(403, "Admin or MD approval is required for paid or unpaid leave")
     existing = db.scalar(select(AttendanceCalendarDay).where(AttendanceCalendarDay.user_id == person.id,
         AttendanceCalendarDay.attendance_date == as_date(body["date"])))
-    if existing and existing.status in {"PL", "UL"} and actor.role != Role.admin:
-        raise HTTPException(403, "Only Admin can replace an approved leave calendar entry")
+    if existing and existing.status in {"PL", "UL"} and not is_admin_level(actor):
+        raise HTTPException(403, "Only an Admin or MD can replace an approved leave calendar entry")
     row = _calendar(db, actor, person, as_date(body["date"]), body["status"], body["reason"].strip())
     return {"id": row.id, "status": row.status, "convertedFromPaidLeave": row.converted_from_paid_leave}
 
@@ -685,8 +682,8 @@ def create_adjustment(db, actor, body, *, at=None):
     at = at or utcnow()
     day = as_date(body["date"])
     kind = body["kind"]
-    if kind == "status_override" and actor.role != Role.admin:
-        raise HTTPException(403, "Only Admin can override an attendance status")
+    if kind == "status_override" and not is_admin_level(actor):
+        raise HTTPException(403, "Only an Admin or MD can override an attendance status")
     if kind == "time_recovery" and body.get("minutes", 0) <= 0:
         raise HTTPException(422, "Enter the recovered minutes")
     if kind == "status_override" and not body.get("status"):

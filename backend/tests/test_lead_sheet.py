@@ -302,10 +302,9 @@ def test_batch_history_detail_report_and_revert(env):
     env.db.commit()
     reverted = env.client.delete(f"/api/leads/batches/{first_batch}").json()
     assert reverted == {"deleted": 4, "kept": 1}
-    act_as(env, "manager")
-    assert env.client.delete(f"/api/leads/batches/{second['batchId']}").status_code == 403
-    assert env.client.get(f"/api/leads/batches/{second['batchId']}/report.csv").status_code == 403, "import reports hold every row: admin only"
-    assert env.client.get("/api/leads/batches").status_code == 403
+    act_as(env, "manager")   # an MD sees the import history and its reports exactly as an admin does
+    assert env.client.get(f"/api/leads/batches/{second['batchId']}/report.csv").status_code == 200
+    assert env.client.get("/api/leads/batches").status_code == 200
     act_as(env, "a")
     assert env.client.get(f"/api/leads/batches/{second['batchId']}/report.csv").status_code == 403
     assert env.client.get("/api/leads/batches").status_code == 403
@@ -351,7 +350,7 @@ def test_search_covers_owner_notes_and_ad_names(env):
 
 # ------------------------------------------------------------------ working a lead
 
-def test_staff_work_only_their_own_leads_admin_and_manager_any(env):
+def test_staff_work_only_their_own_leads_admin_and_md_any(env):
     imported(env, meta_rows(0, 4))
     leads_ = env.db.scalars(select(m.Lead).order_by(m.Lead.import_row)).all()
     env.db.execute(text("UPDATE crm_leads SET owner_id = 'a' WHERE id = :i"), {"i": leads_[0].id})
@@ -372,33 +371,32 @@ def test_staff_work_only_their_own_leads_admin_and_manager_any(env):
     assert env.client.post(f"/api/leads/{mine}/call", json={"outcome": "bogus"}).status_code == 422
     act_as(env, "admin")
     assert env.client.post(f"/api/leads/{theirs}/call", json={"outcome": "no_answer"}).status_code == 200
-    act_as(env, "manager")  # a manager works only the leads assigned to them
-    assert env.client.post(f"/api/leads/{theirs}/call", json={"outcome": "no_answer"}).status_code == 404
-    env.db.execute(text("UPDATE crm_leads SET owner_id = 'manager' WHERE id = :i"), {"i": nobody})
-    env.db.commit()
+    act_as(env, "manager")  # an MD works any lead, assigned to someone else or to nobody, exactly like an admin
+    assert env.client.post(f"/api/leads/{theirs}/call", json={"outcome": "no_answer"}).status_code == 200
     assert env.client.post(f"/api/leads/{nobody}/call", json={"outcome": "no_answer"}).status_code == 200
 
 
-def test_managers_and_staff_see_only_leads_assigned_to_them(env):
+def test_staff_see_only_leads_assigned_to_them_while_admin_and_md_see_every_lead(env):
     imported(env, meta_rows(0, 5))
     leads_ = env.db.scalars(select(m.Lead).order_by(m.Lead.import_row)).all()
     env.db.execute(text("UPDATE crm_leads SET owner_id = NULL"))
     for lead, owner in zip(leads_, ("a", "a", "b", "manager")):  # the fifth stays unassigned
         env.db.execute(text("UPDATE crm_leads SET owner_id = :o WHERE id = :i"), {"o": owner, "i": lead.id})
     env.db.commit()
-    expected = {"admin": 5, "manager": 1, "a": 2, "b": 1}
+    expected = {"admin": 5, "manager": 5, "a": 2, "b": 1}
     for who, total in expected.items():
+        everyone = who in ("admin", "manager")   # an MD sees whatever an admin sees
         act_as(env, who)
         listing = env.client.get("/api/leads", params={"page_size": 50}).json()
         assert listing["total"] == total, who
-        assert all(item["ownerId"] == who for item in listing["items"]) or who == "admin"
-        assert env.client.get("/api/leads", params={"owner": "none"}).json()["total"] == (1 if who == "admin" else 0)
+        assert all(item["ownerId"] == who for item in listing["items"]) or everyone
+        assert env.client.get("/api/leads", params={"owner": "none"}).json()["total"] == (1 if everyone else 0)
         summary = env.client.get("/api/leads/summary", params={"scope": "all"}).json()
-        assert summary["total"] == total and summary["unassigned"] == (1 if who == "admin" else 0), who
+        assert summary["total"] == total and summary["unassigned"] == (1 if everyone else 0), who
         owners = {o["id"] for o in env.client.get("/api/leads/facets").json()["owners"]}
-        assert owners == ({"a", "b", "manager"} if who == "admin" else {who}), who
+        assert owners == ({"a", "b", "manager"} if everyone else {who}), who
     act_as(env, "manager")
-    assert env.client.get(f"/api/leads/{leads_[0].id}").status_code == 404
+    assert env.client.get(f"/api/leads/{leads_[0].id}").status_code == 200
     assert env.client.get(f"/api/leads/{leads_[3].id}").status_code == 200
 
 
@@ -458,11 +456,10 @@ def test_assign_ids_auto_filter_and_permissions(env):
     ids = [row[0] for row in env.db.execute(text("SELECT id FROM crm_leads ORDER BY import_row"))]
     act_as(env, "a")
     assert env.client.post("/api/leads/assign", json={"ids": ids[:2], "ownerId": "a"}).status_code == 403
-    act_as(env, "manager")  # only the admin hands leads out
-    assert env.client.post("/api/leads/assign", json={"ids": ids[:2], "ownerId": "a"}).status_code == 403
-    act_as(env, "admin")
+    act_as(env, "manager")  # an MD hands leads out exactly as an admin does
     one =env.client.post("/api/leads/assign", json={"ids": ids[:2], "ownerId": "a"}).json()
     assert one["assigned"] == 2 and one["owners"] == [{"id": "a", "name": "Asha", "count": 2}]
+    act_as(env, "admin")
     again = env.client.post("/api/leads/assign", json={"ids": ids[:2], "ownerId": "a"}).json()
     assert (again["assigned"], again["skipped"]) == (0, 2)
     spread = env.client.post("/api/leads/assign", json={"filter": {"owner": "unassigned"}, "ownerId": "auto"}).json()
@@ -497,9 +494,9 @@ def test_summary_counts_by_scope(env):
     assert (widened["scope"], widened["total"], widened["unassigned"]) == ("mine", 10, 0), "staff cannot widen the summary"
     act_as(env, "b")
     assert env.client.get("/api/leads/summary").json()["total"] == 0
-    act_as(env, "manager")  # a manager counts only the leads assigned to them too
+    act_as(env, "manager")  # an MD counts every lead, like an admin
     managed = env.client.get("/api/leads/summary", params={"scope": "all"}).json()
-    assert (managed["scope"], managed["total"], managed["unassigned"]) == ("mine", 0, 0)
+    assert (managed["scope"], managed["total"], managed["unassigned"]) == ("all", 14, 4)
     assert env.client.get("/api/leads/summary", params={"scope": "bogus"}).status_code == 422
 
 
@@ -511,18 +508,18 @@ def test_resume_upload_to_a_lead_sets_status_and_follows_permissions(env):
     send = lambda who, name="resume.pdf", slot="resume": (act_as(env, who), env.client.post(
         "/api/files", data={"entity_type": "lead", "entity_id": lead_id, "slot": slot}, files={"file": (name, PDF, "application/pdf")}))[1]
     assert send("b").status_code == 404
-    assert send("manager").status_code == 404, "a manager works only the leads assigned to them"
     assert send("a", slot="passport").status_code == 422
     sent = send("a")
     assert sent.status_code == 201 and sent.json()["version"] == 1
     assert send("admin").json()["version"] == 2
-    for outsider in ("b", "manager"):  # the lead's files follow the lead: not shown to those it is not assigned to
+    assert send("manager").json()["version"] == 3, "an MD adds a resume to any lead, like an admin"
+    for outsider in ("b",):  # the lead's files follow the lead: not shown to those it is not assigned to
         act_as(env, outsider)
         assert env.client.get("/api/files", params={"entity_type": "lead", "entity_id": lead_id}).status_code == 404, outsider
     act_as(env, "a")
     detail = env.client.get(f"/api/leads/{lead_id}").json()
     assert detail["status"] == "resume_received" and detail["hasResume"] and detail["resumeReceivedAt"]
-    assert detail["resume"]["version"] == 2 and detail["resume"]["url"].startswith("/api/files/")
+    assert detail["resume"]["version"] == 3 and detail["resume"]["url"].startswith("/api/files/")
     assert env.client.get(detail["resume"]["url"]).content == PDF
     assert any(a["kind"] == "resume" for a in detail["activities"])
     assert env.client.get("/api/leads", params={"has_resume": "true"}).json()["total"] == 1
@@ -604,8 +601,8 @@ def test_convert_refuses_an_existing_candidate_and_link_connects_it(env):
 def test_convert_needs_a_phone_and_admin_gets_the_leads_owner(env):
     imported(env, [lead_row(4, phone_number="")], assign_to="a")
     lead_id = first_lead(env)["id"]
-    act_as(env, "manager")  # the lead is Asha's: a manager does not even see it
-    assert convert_with_resume(env, lead_id, overrides={"phone": "9000000044"}).status_code == 404
+    act_as(env, "manager")  # the lead is Asha's: an MD sees it, like an admin
+    assert env.client.get(f"/api/leads/{lead_id}").status_code == 200
     act_as(env, "admin")
     needs = convert_with_resume(env, lead_id)
     assert needs.status_code == 422 and "phone" in needs.json()["detail"]["message"].lower()
@@ -668,14 +665,13 @@ def test_gate_never_locks_anyone_and_ownership_still_applies(env):
     assert env.client.post(f"/api/leads/{lead_id}/call", json={"outcome": "answered"}).status_code == 200
     act_as(env, "admin")
     assert env.client.post(f"/api/leads/{lead_id}/call", json={"outcome": "no_answer"}).status_code == 200
-    # without the lock, ownership is what refuses: another person's lead is simply not found (staff and manager alike)
+    # without the lock, ownership is what refuses: another person's lead is simply not found (staff only: an MD works any lead)
     other = env.db.scalars(select(m.Lead).where(m.Lead.id != lead_id)).first()
     env.db.execute(text("UPDATE crm_leads SET owner_id = 'b' WHERE id = :i"), {"i": other.id}); env.db.commit()
     act_as(env, "a")
     assert env.client.post(f"/api/leads/{other.id}/call", json={"outcome": "answered"}).json()["detail"]["code"] == "not_found"
-    act_as(env, "manager")
-    refused = env.client.post(f"/api/leads/{other.id}/call", json={"outcome": "answered"})
-    assert refused.status_code == 404 and refused.json()["detail"]["code"] == "not_found"
+    act_as(env, "manager")   # an MD works any lead, like an admin
+    assert env.client.post(f"/api/leads/{other.id}/call", json={"outcome": "answered"}).status_code == 200
 
 
 # ------------------------------------------------------------------ export
@@ -697,16 +693,16 @@ def test_export_is_supervisor_only_filtered_and_formula_safe(env):
     with zipfile.ZipFile(io.BytesIO(book.content)) as z:
         sheet = z.read("xl/worksheets/sheet1.xml").decode()
     assert "<f>" not in sheet and "t=\"inlineStr\"" in sheet and "Test Lead 00001" in sheet
-    # a manager's export holds only the leads assigned to that manager
+    # an MD exports every lead, exactly the file an admin gets
     env.db.execute(text("UPDATE crm_leads SET owner_id = 'manager' WHERE external_id = '1795000000000002'")); env.db.commit()
     act_as(env, "manager")
     managed = env.client.get("/api/leads/export.csv", params={"q": "@example.test"})
     assert managed.status_code == 200
     rows = list(csv.reader(io.StringIO(managed.content.decode("utf-8-sig"))))
-    assert len(rows) == 2 and rows[1][rows[0].index("Name")] == "'=cmd|' /C calc'!A0"
+    assert len(rows) == 4
     with zipfile.ZipFile(io.BytesIO(env.client.get("/api/leads/export.xlsx").content)) as z:
         sheet = z.read("xl/worksheets/sheet1.xml").decode()
-    assert "Test Lead 00001" not in sheet and "SUM(1)" not in sheet.upper()
+    assert "Test Lead 00001" in sheet
 
 
 # ------------------------------------------------------------------ live updates and migration

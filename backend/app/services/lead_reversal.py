@@ -8,13 +8,14 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Application, ApplicationFeedback, Attachment, AuditEntry, Candidate, CandidateInvoice, DailyWorkItem, DocumentPersonGroup, EmailIngestionJob, Lead, LeadActivity, MailMessage, Remark, Role, Task, TaskEvent, TaskKind, User, WhatsAppConversation, WhatsAppMessage
 from app.services import lead_followups, lead_matching, lead_sheet
+from app.core.roles import is_admin_level
 
 ACTION = "Moved candidate back to lead"
 
 
 def _admin(user):
-    if user.role != Role.admin:
-        raise HTTPException(403, "Only an admin can move a candidate back to the Lead sheet.")
+    if not is_admin_level(user):
+        raise HTTPException(403, "Only an admin or MD can move a candidate back to the Lead sheet.")
 
 
 def _check(db: Session, lead: Lead, candidate: Candidate | None):

@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.core.config import get_settings
 from app.services import agency_settings, client_routing
 from app.services.desk_snapshot import read_snapshot
@@ -72,6 +72,7 @@ from app.api.schemas import (
     TodoOut,
     UserOut,
 )
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api", tags=["data"])
 
@@ -428,7 +429,7 @@ class ClientIn(MasterInput):
     status: Literal["active", "inactive"] = "active"
     # The client's own team. On PUT, a list that is sent replaces the saved one; one that is left out keeps it.
     staffContacts: list[StaffContactIn] = Field(default_factory=list, max_length=MAX_STAFF_CONTACTS)
-    # CRM users (active, role staff or manager) who look after this client. Same PUT rule as staffContacts.
+    # CRM users (active, role staff or MD) who look after this client. Same PUT rule as staffContacts.
     staffIds: list[str] = Field(default_factory=list, max_length=500)
 
     @field_validator("staffIds")
@@ -510,7 +511,7 @@ def _master_values(body: MasterInput):
                "ageRequirement": "age_requirement", "genderRequirement": "gender_requirement",
                "educationRequirement": "education_requirement",
                "staffContacts": "staff_contacts", "agencyName": "agency_name",
-               "preferredCountries": "preferred_countries"}
+               "preferredCountries": "preferred_countries", "activeAgency": "active_agency"}
     return {aliases.get(key, key): value for key, value in body.model_dump(exclude={"company", "staffIds"}).items()}
 
 
@@ -557,7 +558,7 @@ ALLOCATABLE_ROLES = (Role.staff, Role.manager)
 
 
 def _checked_staff_ids(db: Session, ids: list[str]) -> list[str]:
-    """The CRM users a client may be allocated to: active accounts whose role is staff or manager. One statement."""
+    """The CRM users a client may be allocated to: active accounts whose role is staff or MD. One statement."""
     if not ids:
         return []
     found = {person.id: person for person in db.execute(
@@ -570,9 +571,9 @@ def _checked_staff_ids(db: Session, ids: list[str]) -> list[str]:
         elif not person.active:
             problems.append(f"{person.name} is deactivated, so they cannot be allocated.")
         elif person.role not in ALLOCATABLE_ROLES:
-            problems.append(f"{person.name} is an {person.role.value}; only recruiters or managers can be allocated.")
+            problems.append(f"{person.name} is an {person.role.value}; only recruiters or MDs can be allocated.")
     if problems:
-        raise HTTPException(422, {"message": "Choose active recruiters or managers to allocate.",
+        raise HTTPException(422, {"message": "Choose active recruiters or MDs to allocate.",
                                   "errors": [{"field": "staffIds", "message": message} for message in problems]})
     return list(ids)
 
@@ -685,7 +686,7 @@ def update_designation(designation_id: str, body: DesignationIn, db: Session = D
 
 
 @router.delete("/designations/{designation_id}", status_code=204)
-def delete_designation(designation_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
+def delete_designation(designation_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     row = _master_row(db, Designation, designation_id)
     if db.scalar(select(Order.id).where(Order.designation_id == row.id).limit(1)):
         raise HTTPException(409, "This job title is used by orders, so it cannot be deleted")
@@ -837,13 +838,13 @@ def _delete_orders(db: Session, order_ids: list[str]) -> None:
         db.execute(delete(Order).where(Order.id.in_(order_ids)))
 
 
-ADMIN_OR_MANAGER = require_role(Role.admin, Role.manager)
+ADMIN_LEVEL = require_admin_level()
 
 
 @router.delete("/orders/{order_id}")
 def delete_order(order_id: str, background: BackgroundTasks,
                  withdraw_applications: bool = Query(False, alias="withdrawApplications"),
-                 db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+                 db: Session = Depends(get_db), user: User = Depends(require_admin_level())) -> dict:
     """
     Admin only. A job (order) with no candidates on it is simply deleted. A job with candidates is deleted only when the
     admin confirms with `?withdrawApplications=true`: its candidate applications (stages, tasks and stage documents) are
@@ -935,7 +936,7 @@ def delete_order(order_id: str, background: BackgroundTasks,
 
 
 @router.delete("/companies/{company_id}")
-def delete_company(company_id: str, db: Session = Depends(get_db), user: User = Depends(ADMIN_OR_MANAGER)) -> dict:
+def delete_company(company_id: str, db: Session = Depends(get_db), user: User = Depends(ADMIN_LEVEL)) -> dict:
     # Uploads lock this same parent; document checks cannot race a committed upload.
     company = _master_row(db, Company, company_id)
 
@@ -960,7 +961,7 @@ def delete_company(company_id: str, db: Session = Depends(get_db), user: User = 
 
 
 @router.delete("/clients/{client_id}")
-def delete_client(client_id: str, db: Session = Depends(get_db), user: User = Depends(ADMIN_OR_MANAGER)) -> dict:
+def delete_client(client_id: str, db: Session = Depends(get_db), user: User = Depends(ADMIN_LEVEL)) -> dict:
     client = _master_row(db, Client, client_id)
 
     company_ids = list(db.scalars(select(Company.id).where(Company.client_id == client.id).order_by(Company.id).with_for_update()))
@@ -1114,7 +1115,7 @@ class TodoIn(BaseModel):
 
 
 @router.post("/todos", status_code=status.HTTP_201_CREATED)
-def create_todo(body: TodoIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
+def create_todo(body: TodoIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())) -> dict:
     row = TodoItem(
         owner_id=user.id,
         title=body.title.strip(),
@@ -1137,7 +1138,7 @@ class TodoCompletionIn(BaseModel):
 
 
 @router.patch("/todos/{todo_id}")
-def toggle_todo(todo_id: str, body: TodoIn | TodoCompletionIn | None = None, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
+def toggle_todo(todo_id: str, body: TodoIn | TodoCompletionIn | None = None, db: Session = Depends(get_db), user: User = Depends(require_admin_level())) -> dict:
     row = db.scalar(select(TodoItem).where(TodoItem.id == todo_id).with_for_update())
     if row is None or row.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "To-do not found")
@@ -1158,7 +1159,7 @@ def toggle_todo(todo_id: str, body: TodoIn | TodoCompletionIn | None = None, db:
 
 
 @router.delete("/todos/{todo_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-def delete_todo(todo_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
+def delete_todo(todo_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     row = db.get(TodoItem, todo_id)
     if row is not None and row.owner_id == user.id:
         db.add(AuditEntry(actor_id=user.id, action="Deleted personal to-do", entity_type="todo", entity_id=row.id, target=row.title))
@@ -1178,14 +1179,14 @@ class ReassignIn(BaseModel):
 
 
 @router.post("/candidates/reassign")
-def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+def reassign(body: ReassignIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())) -> dict:
     reason = body.reason.strip()
     if not reason:
         raise HTTPException(422, "Give a reason for moving these candidates to another person")
     restart_reason = (body.restartReason or "").strip()
     if body.restartClock:
-        if user.role != Role.admin:
-            raise HTTPException(403, "Only an admin can restart the 48-hour timer when moving candidates")
+        if not is_admin_level(user):
+            raise HTTPException(403, "Only an admin or MD can restart the 48-hour timer when moving candidates")
         if len(restart_reason) < 3:
             raise HTTPException(422, "Give a reason for restarting the 48-hour timer")
     from app.api.routers.candidates import ensure_assignable, lock_assignment_cursor
@@ -1274,32 +1275,11 @@ class UnassignIn(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
-def unassign_refusals(db: Session, candidates: list[Candidate]) -> dict[str, str]:
-    """{candidate id: why this candidate must stay with their recruiter (work is under way on an order)}; the others may be freed.
-
-    Two statements for the whole selection, not three per candidate."""
-    ids = [c.id for c in candidates if c.status != CandidateStatus.deployed]
-    mapped: dict[str, str] = {}
-    staged: set[str] = set()
-    if ids:
-        for candidate_id, ref in db.execute(select(Application.candidate_id, Order.ref).join(Order, Application.order_id == Order.id).where(
-                Application.candidate_id.in_(ids), Application.status == ApplicationStatus.active).order_by(Order.ref)):
-            mapped.setdefault(candidate_id, ref)
-        staged = set(db.scalars(select(Task.candidate_id).where(
-            Task.candidate_id.in_(ids), Task.kind != TaskKind.initial_call, Task.completed_at.is_(None), Task.cancelled_at.is_(None)).distinct()))
-    out: dict[str, str] = {}
-    for c in candidates:
-        if c.status == CandidateStatus.deployed:
-            out[c.id] = "is deployed and stays with their recruiter"
-        elif c.id in mapped:
-            out[c.id] = f"is mapped to {mapped[c.id]}: reassign them to another recruiter instead"
-        elif c.id in staged:
-            out[c.id] = "has open stage work: reassign them to another recruiter instead"
-    return out
+from app.services.candidate_unassign import unassign_candidates, unassign_refusals  # noqa: E402,F401  (unassign_refusals is re-exported)
 
 
 @router.post("/candidates/unassign")
-def unassign(body: UnassignIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+def unassign(body: UnassignIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())) -> dict:
     """Admin only: take candidates back from their recruiter (owner none). They are waiting for a recruiter again ("Not assigned",
     and the admin's "Assign waiting candidates").
 
@@ -1315,44 +1295,9 @@ def unassign(body: UnassignIn, db: Session = Depends(get_db), user: User = Depen
     if len(candidates) != len(ids):
         raise HTTPException(404, "One or more candidates no longer exist")
     reason = (body.reason or "").strip() or f"Allocation removed by {user.name}"
-    todo, refused, already = [], [], 0
-    reasons = unassign_refusals(db, [c for c in candidates if c.owner_id is not None])
-    for c in candidates:
-        if c.owner_id is None:
-            already += 1
-        elif c.id in reasons:
-            refused.append({"id": c.id, "name": c.name, "reason": f"{c.name} {reasons[c.id]}."})
-        else:
-            todo.append(c)
+    result = unassign_candidates(db, user, candidates, reason, body.reason)
+    todo, refused, already = result["freed"], result["refused"], result["already"]
     if refused and not todo:
         raise HTTPException(409, refused[0]["reason"] if len(refused) == 1 else f"{len(refused)} candidates cannot be unassigned. {refused[0]['reason']}")
-    from app.services.application_form import sync_follow_up_todo
-    now = datetime.now(timezone.utc)
-    previous_owners = {c.id: c.owner_id for c in todo}
-    for c in todo:
-        previous = c.owner_id
-        c.owner_id = None
-        db.add(AuditEntry(actor_id=user.id, action="Candidate unassigned", target=c.name, entity_type="candidate", entity_id=c.id, at=now,
-                          meta={"fromUserId": previous, "toUserId": None, "reason": reason}))
-        if c.next_follow_up_date:
-            sync_follow_up_todo(db, c)  # the reminder belonged to the old recruiter
-    open_tasks = list(db.scalars(select(Task).where(Task.candidate_id.in_([c.id for c in todo]), Task.completed_at.is_(None), Task.cancelled_at.is_(None))
-                                 .order_by(Task.id).with_for_update())) if todo else []
-    touched: set[str] = set()  # tasks whose SLA history (remarks, events) must survive: cancelled, never deleted
-    if open_tasks:
-        task_ids = [t.id for t in open_tasks]
-        touched |= set(db.scalars(select(Remark.task_id).where(Remark.task_id.in_(task_ids))))
-        touched |= set(db.scalars(select(TaskEvent.task_id).where(TaskEvent.task_id.in_(task_ids))))
-    called = {c.id for c in todo if c.call_recorded_at}
-    for task in open_tasks:
-        if task.id in touched or task.candidate_id in called or task.escalated or task.escalated_at:
-            task.cancelled_at = now
-        else:
-            db.delete(task)  # truly untouched: a fresh one starts when the candidate is assigned again
-    if todo:
-        db.add(AuditEntry(actor_id=user.id, action="Unassigned candidates", target=f"{len(todo)} candidates", entity_type="candidate",
-                          meta={"candidateIds": [c.id for c in todo], "reason": reason}))
-    from app.services.assignment_notifications import notify_candidates_unassigned
-    notify_candidates_unassigned(db, [(c.id, c.name, previous_owners[c.id]) for c in todo], actor_id=user.id, actor_name=user.name, reason=body.reason)
     db.commit()
     return {"count": len(todo), "unassigned": len(todo), "alreadyUnassigned": already, "refused": refused}

@@ -1,6 +1,6 @@
-"""Invoices, the agreed fee, CGST/SGST and receipts belong to the admin alone.
+"""Invoices, the agreed fee, CGST/SGST and receipts belong to the admin and the MD (stored as `manager`) alone.
 
-A recruiter (role staff) or a manager gets a calm 403 from every invoice endpoint and finds no invoice, fee, tax figure,
+A recruiter (role staff) gets a calm 403 from every invoice endpoint and finds no invoice, fee, tax figure,
 invoice number or invoice file link in any other payload; the automatic invoice after an air-ticket upload keeps working
 whoever uploads the ticket. Disposable PostgreSQL and synthetic documents only.
 """
@@ -19,8 +19,9 @@ from test_candidate_invoices import admin, billing, configure, fee, read
 from test_database_naming import schema_database
 from test_document_extraction import pdf
 
-DENIED = "Only the admin can see or change invoices."
-OUTSIDERS = (("staff", Role.staff), ("other", Role.staff), ("manager", Role.manager))
+DENIED = "Only an admin or MD can see or change invoices."
+OUTSIDERS = (("staff", Role.staff), ("other", Role.staff))
+INSIDERS = (("admin", Role.admin), ("manager", Role.manager))   # an MD holds every privilege an admin holds
 
 
 @pytest.fixture
@@ -46,7 +47,7 @@ def test_the_message_is_one_calm_sentence():
     assert INVOICE_DENIED == DENIED
 
 
-def test_every_invoice_endpoint_answers_403_to_recruiters_and_managers_and_works_for_the_admin(access):
+def test_every_invoice_endpoint_answers_403_to_recruiters_and_works_for_the_admin_and_the_md(access):
     app, data = issued(access)
     as_user(access, "admin", Role.admin)
     receipt = {"amount": "500.00", "date": "2026-01-02", "method": "cash", "reference": "R1", "note": "", "idempotencyKey": "receipt-0001"}
@@ -74,9 +75,13 @@ def test_every_invoice_endpoint_answers_403_to_recruiters_and_managers_and_works
             assert response.json()["detail"] == DENIED, (user_id, method, path)
             # No fee, tax or number rides along with the refusal.
             assert "CI/26-27" not in response.text and "1800" not in response.text
-    as_user(access, "admin", Role.admin)
-    for method, path, body in calls[:6]:
-        assert access.client.request(method, path, json=body).status_code == 200, (method, path)
+    for user_id, role in INSIDERS:
+        as_user(access, user_id, role)
+        for method, path, body in calls[:6]:
+            status = access.client.request(method, path, json=body).status_code
+            # The admin's own writes just bumped the lock versions, so the MD's repeat of the same body may meet a 409 conflict:
+            # what matters is that it is never a 403 and that the reads answer 200.
+            assert status == 200 or (user_id == "manager" and method != "GET" and status == 409), (user_id, method, path, status)
     # Nothing was changed by the refused calls.
     with access.sessions() as db:
         assert len(db.scalars(select(CandidateInvoice)).all()) == 1
@@ -94,7 +99,7 @@ def test_the_automatic_invoice_is_issued_whoever_uploads_the_ticket(access):
         assert db.scalar(select(CandidateInvoice.issued_by)) == "manager"
 
 
-def test_the_application_form_carries_no_invoice_for_recruiters_and_managers(access):
+def test_the_application_form_carries_no_invoice_for_recruiters(access):
     app, data = issued(access)
     attachment_id = data["invoice"]["downloadUrl"].rsplit("/", 1)[-1]
     for user_id, role in OUTSIDERS[::2]:
@@ -109,6 +114,8 @@ def test_the_application_form_carries_no_invoice_for_recruiters_and_managers(acc
         for secret in ("CI/26-27/001", attachment_id, "11800", "1800.00", "CGST", "SGST"):
             assert secret not in text, (user_id, secret)
         assert "invoice" not in text.lower(), user_id
+    as_user(access, "manager", Role.manager)   # an MD sees the invoice exactly as an admin does
+    assert "invoice" in form(access, applicationId=app)["documentOrder"]
     as_user(access, "admin", Role.admin)
     payload = form(access, applicationId=app)
     assert payload["documents"]["invoice"]["uploaded"] and payload["documents"]["invoice"]["current"]["url"].endswith(attachment_id)
@@ -156,7 +163,7 @@ def test_the_invoice_file_is_not_downloadable_listable_or_uploadable_by_others(a
     assert "invoice" in [row["slot"] for row in listing.json()]
 
 
-def test_candidate_detail_has_no_invoice_document_for_recruiters_and_managers(access):
+def test_candidate_detail_has_no_invoice_document_for_recruiters(access):
     issued(access)
     with access.sessions() as db:
         db.add(Attachment(id="old-invoice", entity_type="candidate", entity_id="candidate", slot="invoice", version=1,
@@ -192,7 +199,7 @@ def test_the_record_export_leaves_invoice_files_and_gaps_to_the_admin(access):
 
 def test_the_travelled_checklist_does_not_list_the_invoice_for_others(access):
     from app.api.routers import travelled
-    for user_id, role, shown in (("admin", Role.admin, True), ("manager", Role.manager, False), ("staff", Role.staff, False)):
+    for user_id, role, shown in (("admin", Role.admin, True), ("manager", Role.manager, True), ("staff", Role.staff, False)):
         as_user(access, user_id, role)
         rows = [{"candidateId": "candidate"}]
         with access.sessions() as db:

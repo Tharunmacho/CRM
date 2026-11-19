@@ -7,7 +7,7 @@ who has to act on it (see ``assignment_notifications``): there are no copies of 
   shown
     * ``candidate_assigned``  a candidate newly handed to the recipient (by an admin, by intake, by a transfer)
     * ``candidate_removed``   a candidate moved away from the recipient to somebody else
-    * ``candidate_waiting``   a candidate nobody could take: for the admins and managers to assign
+    * ``candidate_waiting``   a candidate nobody could take: for the admins and MDs to assign
     * ``candidate_request``   a recruiter asks the admins for a candidate
     * ``task_assigned`` / ``task_removed``   the same for a task that moved on its own
     * ``lead_assignment`` / ``lead_removed`` leads handed to / taken from the recipient

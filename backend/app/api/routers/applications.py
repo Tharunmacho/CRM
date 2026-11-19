@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import Wire
 from app.core.config import get_settings
-from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate, require_role
+from app.core.deps import current_user, ensure_can_work, ensure_can_work_candidate, require_role, require_admin_level
 from app.db.session import get_db
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Attachment, AuditEntry,
@@ -535,7 +535,7 @@ def complete_stage(application_id: str, body: CompleteIn,
 
 @router.post("/{application_id}/reopen", response_model=CompleteOut)
 def reopen_stage(application_id: str, body: ReopenIn, db: Session = Depends(get_db),
-                 user: User = Depends(require_role(Role.admin))):
+                 user: User = Depends(require_admin_level())):
     reason = body.reason.strip()
     if not reason:
         raise HTTPException(422, "Please give a reason for reopening a completed stage.")

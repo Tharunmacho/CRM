@@ -8,11 +8,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.services.parallel_reads import parallel_reads
-from app.db.models import (AuditEntry, Role, Session as LoginSession,
+from app.db.models import (AuditEntry, Role, Session as LoginSession, not_deleted_user,
                            StaffAttendanceRequest as AttendanceRequest,
                            StaffAttendanceSession as Attendance,
                            StaffPresenceClient as PresenceClient,
                            StaffPresenceInterval as Presence, User)
+from app.core.roles import is_admin_level
 
 HEARTBEAT_SECONDS = 30
 OFFLINE_AFTER_SECONDS = 90
@@ -120,16 +121,10 @@ def staff_summary(user, attendance, presence, start, end, at):
 def attendance_report(db, user, day, agency_timezone, staff_id=None, *, at=None):
     at = at or utcnow()
     start, end = bounds(day, agency_timezone)
-    team = user.role in (Role.admin, Role.manager)
+    team = is_admin_level(user)
     if not team and staff_id and staff_id != user.id:
         raise HTTPException(403, "You can view only your own attendance")
     people = select(User).where(or_(User.role.in_([Role.staff, Role.manager]), User.id.in_(select(Attendance.user_id))))
-    if user.role == Role.manager:
-        people = people.where(or_(User.role == Role.staff, User.id == user.id))
-        if staff_id and staff_id != user.id:
-            target = db.get(User, staff_id)
-            if target is None or target.role != Role.staff:
-                raise HTTPException(403, "Managers can view Recruiters and their own attendance")
     if not team: people = people.where(User.id == user.id)
     elif staff_id: people = people.where(User.id == staff_id)
     # The shift and presence reads filter on the same people query, so all three can run at once.
@@ -271,7 +266,7 @@ def close_user_presence(db, user_id, *, at=None):
 
 def correct_session(db, actor, session_id, checked_in_at, checked_out_at, reason, *, at=None):
     at = at or utcnow()
-    if actor.role != Role.admin: raise HTTPException(403, "Only Admin can correct attendance")
+    if not is_admin_level(actor): raise HTTPException(403, "Only an Admin or MD can correct attendance")
     row = db.get(Attendance, session_id)
     if row is None: raise HTTPException(404, "Attendance session not found")
     # Same owner lock ordering as check-in/check-out; historical inactive users may be corrected.

@@ -34,9 +34,9 @@ def saved_candidate_id(jobs):
 def ensure_intake_candidate_access(candidate, user):
     """Whoever saved the candidate from this upload may read the saved result back (a retry after a lost
     response, a reopened draft). Nothing here changes the candidate, so having added it is enough; every
-    write (documents, merge, edits) needs the assigned recruiter, a manager or an admin."""
+    write (documents, merge, edits) needs the assigned recruiter, an MD or an admin."""
     if user.role == Role.staff and candidate.owner_id != user.id and candidate.created_by != user.id:
-        raise HTTPException(403, "Only the person who added the candidate, the assigned recruiter, a manager or an admin can open this saved candidate.")
+        raise HTTPException(403, "Only the person who added the candidate, the assigned recruiter, an MD or an admin can open this saved candidate.")
 
 
 def saved_candidate(db, jobs, user):
@@ -45,7 +45,7 @@ def saved_candidate(db, jobs, user):
         return None
     candidate = db.get(Candidate, identifier)
     if candidate is None:
-        raise HTTPException(409, "The saved candidate is no longer there. Ask a manager or admin to check this upload.")
+        raise HTTPException(409, "The saved candidate is no longer there. Ask an MD or admin to check this upload.")
     ensure_intake_candidate_access(candidate, user)
     return candidate
 

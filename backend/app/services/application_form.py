@@ -36,6 +36,7 @@ from app.services.reading_notes import plain_issues, plain_notes, review_reasons
 from app.services.document_status import ACTION as DOCUMENT_STATUS_ACTION, latest_statement, manual_document_statuses, read_manual_document_statuses, statuses_by_candidate
 from app.services.response_cache import cached, scope_of
 from app.services.document_identity import rejected_expression
+from app.core.roles import is_admin_level
 
 # Document slots of the form, in the order shown (docs/workflows/application-form-v2-contract.md section 2):
 # (slot, label, hint, required from this stage on (None: see `always`), always counted, read by OCR, several files allowed)
@@ -135,7 +136,7 @@ def _iso(value) -> str | None:
 # ------------------------------------------------------------------ permissions
 
 def can_edit(user: User, candidate) -> bool:
-    return user.role in (Role.admin, Role.manager) or (user.role == Role.staff and candidate.owner_id == user.id)
+    return is_admin_level(user) or (user.role == Role.staff and candidate.owner_id == user.id)
 
 
 def ensure_can_edit(user: User, candidate) -> None:
@@ -575,7 +576,7 @@ def build_form(db: Session, candidate_id: str, user: User, *, application_id: st
     """Everything the form shows, in two parallel rounds of reads.
 
     The Invoice slot, its tracking row and its place in the deployment checklist exist only for the admin; for a recruiter
-    or manager the payload carries no invoice, fee, tax figure, invoice number or invoice file link at all.
+    or MD the payload carries no invoice, fee, tax figure, invoice number or invoice file link at all.
     """
     show_invoice = can_see_invoices(user)
     def read_candidate(session):

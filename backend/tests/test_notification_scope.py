@@ -118,18 +118,18 @@ def test_staff_request_reaches_only_the_admins_and_the_bell_shows_who_asked(env)
     env.db.expire_all()
     response = env.client.post("/api/candidates/c1/request-allocation")
     assert response.status_code == 200, response.text
-    assert response.json()["notified"] == 2
+    assert response.json()["notified"] == 3
     messages = env.listener.messages()
     assert len(messages) == 1
     body = messages[0]
     assert "notifications" in body["t"]
-    assert body["u"]["notifications"] == ["admin", "admin2"]  # owner-scoped: named recipients only
+    assert body["u"]["notifications"] == ["admin", "admin2", "manager"]  # owner-scoped: named recipients only (the MD is admin-level)
     assert "Asha" not in json.dumps(body) and "Person One" not in json.dumps(body)  # opaque ids and topic names only
     for admin in ("admin", "admin2"):
         assert "notifications" in visible_to(body, "admin", admin)["topics"]
     assert "notifications" not in (visible_to(body, "staff", "a") or {}).get("topics", [])
     assert "notifications" not in (visible_to(body, "staff", "b") or {}).get("topics", [])
-    assert "notifications" not in (visible_to(body, "manager", "manager") or {}).get("topics", [])
+    assert "notifications" in visible_to(body, "manager", "manager")["topics"]   # an MD is told, like an admin
     # The admin's bell lists it, with the requester's name and a link to the candidate.
     env.who["id"] = "admin"
     env.db.expire_all()
@@ -139,4 +139,4 @@ def test_staff_request_reaches_only_the_admins_and_the_bell_shows_who_asked(env)
     assert rows[0]["detail"] == ("Asha asked you to assign Person One (REF-1) to them. The candidate is with Ravi now. "
                                  "Open the candidate to assign a recruiter.")
     assert rows[0]["linkTo"] == "/candidates/c1/application" and rows[0]["read"] is False
-    assert listed(env, "a") == set() and listed(env, "manager") == set()
+    assert listed(env, "a") == set() and listed(env, "manager") == listed(env, "admin")   # the MD's bell lists it too

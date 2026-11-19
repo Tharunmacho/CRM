@@ -170,6 +170,7 @@ def test_session_check_reads_persisted_account_in_one_query(
                 "active": True,
                 "receivesAutoAssign": False,
                 "onLeave": True,
+                "deleted": False,
             }
         }
     else:

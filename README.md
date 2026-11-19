@@ -179,7 +179,7 @@ On Linux/macOS use `npm` and `backend/.venv/bin/python` for installation. The ro
 
 After revision `0006_domain_table_names`, accounts, assigned roles, activation status and Argon2id password hashes live in PostgreSQL's `auth_users` table, and sign-ins live in `auth_sessions`. Login reads the saved account and creates a database session; it has no default-account fallback. Startup initializes only `workflow_assignment_cursor`, preserving existing users and its current position. Deleted accounts stay deleted, disabled accounts stay disabled, and changed passwords survive restarts. The former account seed, seed-password environment overrides, legacy account SQL and unused frontend demo accounts have been removed.
 
-For a new empty database, create accounts explicitly from `backend/` after migrations. The role must be one of the CRM's supported roles (`admin`, `manager`, `staff`); each account's assigned role is stored in the database.
+For a new empty database, create accounts explicitly from `backend/` after migrations. The role must be one of the CRM's supported roles (`admin`, `md` (stored as `manager`, shown as MD, same access as an Admin), `staff`); each account's assigned role is stored in the database.
 
 ```powershell
 Set-Location M:\crm\backend
@@ -242,7 +242,7 @@ Run the complete backend from `backend/` with `python -m app.runtime`. It always
 
 ## Recruiter attendance and activity
 
-Recruiters and Manager can check in/out from the shell and Attendance page. The monthly workspace adds the confirmed reference rules for duty hours, grace, paid leave, weekly offs, permissions, staged approvals, extra OT, roster and durable leave cover. Admin handles financial approval in the existing three-role model. Raw clock records and Recruiters browser presence remain separate. Logout stops presence without silently checking out. See [attendance policy](docs/attendance.md) for calculations, permissions and explicit limits.
+Recruiters and MD can check in/out from the shell and Attendance page. The monthly workspace adds the confirmed reference rules for duty hours, grace, paid leave, weekly offs, permissions, staged approvals, extra OT, roster and durable leave cover. Admin handles financial approval in the existing three-role model. Raw clock records and Recruiters browser presence remain separate. Logout stops presence without silently checking out. See [attendance policy](docs/attendance.md) for calculations, permissions and explicit limits.
 
 ## Build and verification
 

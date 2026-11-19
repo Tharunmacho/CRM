@@ -7,7 +7,7 @@ and ordered exactly like `taskRows` in frontend/src/features/daily-work/daily-wo
 ones with a stage waiting, then the furthest along; a candidate in both lists appears once, from the daily list).
 
 * DOC: the placement's date of commencement as DD-MMM-YYYY text (blank when none).
-* Agency: the candidate's referral agency, as the client tracker's Ref column (`agency_display_expression`).
+* Agency: the row's `agency` (the client tracker's Ref column, `agency_display_expression`, read in the rows' own statement).
 * Advance: the client tracker's Advance cell (`advance_text.advance_cell` over the stage-8 record); blank when none.
 * Stage: "Stage 9 - Visa arrival + Google review", or "Initial call" before a stage starts.
 * Today: "Called 10:45" / "Stage moved 10:45" (agency clock) when that happened today, else blank. Writing a remark is not listed here.
@@ -20,11 +20,10 @@ from datetime import date, datetime
 
 from sqlalchemy import select
 
-from app.db.models import ApplicationStage, Candidate, User
+from app.db.models import ApplicationStage, User
 from app.domain.stages import TOTAL_STAGES, stage_by_no
 from app.services import agency_settings, daily_work, lead_xlsx
 from app.services.advance_text import advance_cell
-from app.services.agency_display import agency_display_expression
 
 COLUMNS = ("S.No", "DOC", "Recruiter", "Job", "Client", "Country", "Candidate", "Care ID", "Agency", "Advance", "Stage", "Today", "Remark")
 SHEET_NAME = "Tasks"
@@ -86,24 +85,22 @@ def stage_text(stage: int | None) -> str:
     return f"Stage {stage} - {stage_by_no(stage).title}"
 
 
-def read_extras(db, rows: list[dict]) -> tuple[dict, dict, dict, str]:
-    """(agency by candidate id, stage-8 facts by application id, recruiter name by id, default advance currency): four statements, one round."""
-    candidate_ids = [r["candidateId"] for r in rows]
+def read_extras(db, rows: list[dict]) -> tuple[dict, dict, str]:
+    """(stage-8 facts by application id, recruiter name by id, default advance currency): three statements, one round."""
     application_ids = [r["applicationId"] for r in rows if r.get("applicationId")]
     owner_ids = sorted({r["ownerId"] for r in rows if r.get("ownerId")})
-    agencies, facts, owners, currency = daily_work.read_together(
+    facts, owners, currency = daily_work.read_together(
         db,
-        lambda s: dict(s.execute(select(Candidate.id, agency_display_expression()).where(Candidate.id.in_(candidate_ids))).all()) if candidate_ids else {},
         lambda s: daily_work.stage_facts(s.execute(daily_work.stage_facts_query(ApplicationStage.application_id.in_(application_ids))).all()) if application_ids else {},
         lambda s: dict(s.execute(select(User.id, User.name).where(User.id.in_(owner_ids))).all()) if owner_ids else {},
         lambda s: agency_settings.default_advance_currency(s))
-    return agencies, facts, owners, currency
+    return facts, owners, currency
 
 
 def table(db, daily: list[dict], follow: list[dict], today: str) -> list[list]:
     """The header and one list per task row."""
     rows = merge_rows(daily, follow, today)
-    agencies, facts, owners, currency = read_extras(db, rows)
+    facts, owners, currency = read_extras(db, rows)
 
     def cell(value):
         return "".join(ch for ch in value if ord(ch) >= 32 or ch in "\t\n\r") if isinstance(value, str) else value
@@ -114,7 +111,7 @@ def table(db, daily: list[dict], follow: list[dict], today: str) -> list[list]:
         out.append([cell(v) for v in (
             number, doc_text(row.get("commencementDate")), owners.get(row.get("ownerId")) or "", row.get("position") or "",
             row.get("client") or "", row.get("country") or "", row.get("candidate") or "", row.get("candidateCareId") or "",
-            agencies.get(row["candidateId"]) or "", advance_cell(facts.get(row.get("applicationId")), currency) or "",
+            row.get("agency") or "", advance_cell(facts.get(row.get("applicationId")), currency) or "",
             stage_text(row.get("stage")), today_text(row), remark.strip())])
     return out
 

@@ -35,6 +35,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import Pool
 
+from app.core.roles import ADMIN_LEVEL_VALUES
+
 log = logging.getLogger("uvicorn.error")
 
 CHANNEL = "crm_changes"
@@ -149,7 +151,7 @@ CLIENT_TOPICS = frozenset({
     "reference_agencies", "feedback", "daily_report",
 })
 # Only supervisors get entity ids; a recruiter's stream carries topic names alone.
-ID_ROLES = frozenset({"admin", "manager"})
+ID_ROLES = ADMIN_LEVEL_VALUES  # admin and MD (stored as "manager")
 # Candidate ids touched through related tables, so an open profile knows its candidate moved.
 _CANDIDATE_LINKS = {"crm_applications": "candidate_id", "workflow_tasks": "candidate_id", "crm_candidate_invoices": "candidate_id"}
 # These records invalidate screens but their own ids are neither candidate nor document ids.
@@ -289,7 +291,7 @@ def visible_to(payload: dict, role: str, user_id: str) -> dict | None:
     """The part of a NOTIFY payload this user may receive, in the shape the browser gets; None when nothing.
 
     - Personal topics (to-dos, notifications) go only to the owner when the writer named one.
-    - Entity ids are for admin/manager (lead ids for the admin only); a recruiter's event is topic names only.
+    - Entity ids are for admin/MD; a recruiter's event is topic names only.
     - `users` goes to every role because every role's workspace shows colleagues' names (owners, assignees);
       withholding it would leave a renamed or added colleague stale for staff. It carries no data.
     - Control topics never leave the server.
@@ -306,8 +308,8 @@ def visible_to(payload: dict, role: str, user_id: str) -> dict | None:
         return None
     event_body: dict = {"topics": topics, "at": payload.get("at")}
     if role in ID_ROLES and payload.get("ids"):
-        # Lead ids are the admin's alone: a manager sees only their own leads, so the topic goes out and the client refetches.
-        shown = {topic: found for topic, found in payload["ids"].items() if topic in topics and (topic != "leads" or role == "admin")}
+        # Lead ids go to everyone who sees every lead (admin and MD); a recruiter gets the topic and refetches.
+        shown = {topic: found for topic, found in payload["ids"].items() if topic in topics and (topic != "leads" or role in ADMIN_LEVEL_VALUES)}
         if shown:
             event_body["ids"] = shown
     return event_body

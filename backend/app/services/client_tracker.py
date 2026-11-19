@@ -16,7 +16,7 @@ It is the Excel sheet the clients ask for, built only from what the CRM already 
 
 Which placements: status active (any stage, a candidate mapped to an order and still at the initial call included) and deployed
 (unless left out). Closed placements (rejected, declined, not travelling...) never appear. A recruiter sees the placements they own;
-admin and manager see all (the rule of the travelled report).
+admin and MD see all (the rule of the travelled report).
 
 Cost: the placements, the stage-8 / stage-11 records, the newest remarks and the agency's default currency are independent reads,
 run side by side: one round trip whatever the number of rows. Filters and the S.No numbering are

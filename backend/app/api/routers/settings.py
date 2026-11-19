@@ -14,14 +14,14 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AgencySettings, AuditEntry, Currency, Designation, JobCategory, Role, User
 from app.db.session import get_db
 from app.services import agency_settings as agency
 from app.services.response_cache import cached, scope_of
 
 router = APIRouter(prefix="/api/settings", tags=["Agency settings"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 
 NOT_INSTALLED = "Agency settings are not available yet. Ask your administrator to apply the latest database update."
 IN_USE = "This currency is used by existing orders. Mark it inactive instead."

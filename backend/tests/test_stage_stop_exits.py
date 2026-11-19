@@ -77,14 +77,12 @@ def test_a_stopping_exit_at_every_stage_closes_the_application(workflow, stage, 
     next_id = mapped(env, order="other-order")
     with env.sessions() as db:
         assert db.get(Application, next_id).current_stage == 1
-    # Only the admin can reopen it; the recruiter cannot.
+    # Only an admin-level user (Admin or MD) can reopen it; the recruiter cannot.
     body = {"stage": stage, "reason": "Closed by mistake", "lock_version": version(env, app_id)}
     with env.sessions() as db:
         db.get(Application, next_id).status = ApplicationStatus.closed
         db.commit()
     env.actor = SimpleNamespace(id="staff", role=Role.staff)
-    assert env.client.post(f"/api/applications/{app_id}/reopen", json=body).status_code == 403
-    env.actor = SimpleNamespace(id="manager", role=Role.manager)
     assert env.client.post(f"/api/applications/{app_id}/reopen", json=body).status_code == 403
     env.actor = SimpleNamespace(id="admin", role=Role.admin)
     reopened = env.client.post(f"/api/applications/{app_id}/reopen", json=body)

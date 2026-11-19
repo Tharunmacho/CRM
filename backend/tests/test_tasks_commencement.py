@@ -315,14 +315,39 @@ def test_the_admin_adds_renames_reorders_switches_off_and_sees_all(desk):
     assert actions.count("Added remark template") == 2 and "Updated remark template" in actions and "Switched off remark template" in actions and "Switched on remark template" in actions
 
 
-def test_only_the_admin_may_change_the_templates(desk):
+def test_only_admin_level_users_may_change_the_templates(desk):
+    """A recruiter never may. (Admin-level is `require_role(Role.admin)`: the admin, and the MD stored as `manager` since core.deps counts one.)"""
     template = get(desk, "asha", "/api/remark-templates").json()["items"][0]
-    for user in ("asha", "manager"):
+    for user in ("asha",):
         as_user(desk, user)
         assert desk.client.post("/api/remark-templates", json={"text": "Not allowed"}).status_code == 403
         assert desk.client.patch(f"/api/remark-templates/{template['id']}", json={"active": False}).status_code == 403
         assert desk.client.delete(f"/api/remark-templates/{template['id']}").status_code == 403
     assert [i["text"] for i in get(desk, "asha", "/api/remark-templates").json()["items"]] == SEVEN
+
+
+# ------------------------------------------------------------------ the agency of every row
+
+def test_every_row_carries_the_trackers_agency_text_from_the_rows_own_statement(desk):
+    with desk.sessions() as db:
+        db.add_all([
+            Candidate(id="e1", ref="CND-e1", name="Email Agency", phone="9100000101", source=Source.email, source_detail="  Lotus Overseas ", owner_id="asha",
+                      care_id="CI-101", created_at=TUESDAY - timedelta(days=20)),
+            Candidate(id="e2", ref="CND-e2", name="Bulk Imported", phone="9100000102", source=Source.email, source_detail="Bulk import", owner_id="asha",
+                      care_id="CI-102", created_at=TUESDAY - timedelta(days=20)),
+            Candidate(id="e3", ref="CND-e3", name="Machine Source", phone="9100000103", source=Source.walk_in, source_detail=None, owner_id="asha",
+                      care_id="CI-103", created_at=TUESDAY - timedelta(days=20))])
+        db.execute(text("UPDATE crm_candidates SET source = 'email', source_detail = 'Gulf Link' WHERE id = 'c2'"))   # a placement in Follow-up
+        db.commit()
+    daily = {i["candidateId"]: i for i in get(desk, "asha", "/api/daily-work").json()["items"]}
+    assert daily["c1"]["agency"] == "Sigma Agency"                  # a referral
+    assert daily["e1"]["agency"] == "Lotus Overseas"                # arrived by email, then got an agency: the old row showed nothing
+    assert daily["e2"]["agency"] is None and daily["e3"]["agency"] is None and daily["c3"]["agency"] is None   # "Bulk import" is provenance, not an agency
+    follow = {i["candidateId"]: i for i in get(desk, "asha", "/api/follow-up").json()["items"]}
+    assert follow["c2"]["agency"] == "Gulf Link" and follow["c5"]["agency"] is None
+    rows = sheet(get(desk, "asha", "/api/daily-work/export?format=xlsx"))[1]
+    assert {r[6]: r[8] for r in rows[1:]} == {"Bina Example": "Gulf Link", "Anil Sample": "Sigma Agency", "Email Agency": "Lotus Overseas",
+                                            "Bulk Imported": "", "Machine Source": "", "Esha Made-up": "", "Chandra Invented": ""}
 
 
 # ------------------------------------------------------------------ the Excel
@@ -422,5 +447,5 @@ def test_the_excel_costs_a_few_statements_whatever_the_number_of_rows(desk):
                              designations=["Mason"], care_id=f"CI-9{n:02}", created_at=TUESDAY - timedelta(days=5)))
         db.commit()
     many = statements()
-    assert len(many) <= len(few) <= 17, [sql[:70] for sql in many]
+    assert len(many) <= len(few) <= 16, [sql[:70] for sql in many]
     assert not any(sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for sql in many)

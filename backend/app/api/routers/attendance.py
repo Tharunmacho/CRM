@@ -7,7 +7,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.core.security import SESSION_COOKIE
 from app.db.models import Role, User
 from app.db.session import get_db
@@ -100,7 +100,7 @@ def check_out(body: CheckOut, db: Session = Depends(get_db), user: User = Depend
 
 
 @router.patch("/attendance/sessions/{session_id}")
-def correct(session_id: str, body: Correction, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def correct(session_id: str, body: Correction, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     row = activity.correct_session(db, user, session_id, body.checkedInAt, body.checkedOutAt, body.reason)
     db.commit()
     return {"id": row.id, "checkedInAt": row.checked_in_at, "checkedOutAt": row.checked_out_at, "correctionReason": row.correction_reason}

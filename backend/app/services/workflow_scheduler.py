@@ -7,6 +7,7 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import get_settings
+from app.core.roles import ADMIN_LEVEL_ROLES
 from app.db.models import Candidate, Notification, Remark, Role, Task, TaskEvent, TodoItem, User, WorkflowSettings
 
 
@@ -61,7 +62,7 @@ def deliver_due_todos(db, *, now=None):
 def scan_daily_work_only(db, *, now=None, agency_timezone=None):
     """The daily-work clean-up pass between the 15-minute task scans (the daily list itself is computed live); the caller commits."""
     from app.services.daily_work import scan_daily_work
-    supervisors = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
+    supervisors = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_(ADMIN_LEVEL_ROLES))))
     return scan_daily_work(db, supervisors, now=now or datetime.now(timezone.utc), tz=agency_timezone)
 
 
@@ -71,7 +72,7 @@ def scan_workflow(db, *, now=None, agency_timezone=None):
     if not db.scalar(text("SELECT pg_try_advisory_xact_lock(724681930119)")):
         return {"busy": True}
     config = settings_row(db)
-    supervisors = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))))
+    supervisors = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_(ADMIN_LEVEL_ROLES))))
     names = dict(db.execute(select(Candidate.id, Candidate.name)).all())
     owner_names = dict(db.execute(select(User.id, User.name)).all())
     counts = {"escalations": 0, "reminders": 0, "missedUpdates": 0, "todos": 0}
@@ -94,7 +95,7 @@ def scan_workflow(db, *, now=None, agency_timezone=None):
             task.escalated, task.escalated_at = True, now
         counts["escalations" if kind == "escalation" else "reminders"] += 1
         overdue = max(0, int((now - due).total_seconds() // 3600))
-        # PRD role table: only Admin and Manager receive 48-hour escalations; Staff do not
+        # PRD role table: only Admin and MD receive 48-hour escalations; Staff do not
         # (the owner still sees the task overdue in Tasks / Dashboard).
         notify(db, supervisors, "escalation",
                "Task overdue" if kind == "escalation" else "Overdue task reminder",

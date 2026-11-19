@@ -21,6 +21,7 @@ from app.services import application_form, document_storage
 from app.services.invoice_access import INVOICE_SLOT, can_see_invoices
 from app.services.parallel_reads import parallel_reads
 from app.services.report_exports import stage_name, xlsx_rows
+from app.core.roles import is_admin_level
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 CHUNK_BYTES = 64 * 1024
@@ -103,7 +104,7 @@ def load_inspection(db: Session, candidate_id: str, user: User, *, application_i
     if not can_see_invoices(user):
         scope = scope & (Attachment.slot != "invoice")  # invoice PDFs are the admin's, also in the record package
     task_scope = [Task.candidate_id == candidate_id]
-    if user.role not in (Role.admin, Role.manager):
+    if not is_admin_level(user):
         task_scope.append(Task.owner_id == user.id)
     form = application_form.build_form(db, candidate_id, user, application_id=application_id, order_id=order_id)
     if application_id and order_id and form["application"]["orderId"] != order_id:
@@ -216,7 +217,7 @@ def workbook(inspection: Inspection, listing: dict | None = None) -> bytes:
         ("About", [["Field", "Value"], ["Candidate", candidate.name], ["Care India ID", candidate.care_id or candidate.ref],
                    ["Generated at (UTC)", listing["generatedAt"]], ["Scope", listing["scope"]], ["Document policy", listing["filePolicy"]],
                    ["Document status", "Attached files and explicit manual confirmations are identified separately. A manual confirmation does not create a downloadable file. The ZIP verifies every included file can be read."],
-                   ["Task visibility", "Task history includes tasks visible to the exporting user: all candidate tasks for managers and administrators, or the recruiter's own tasks."],
+                   ["Task visibility", "Task history includes tasks visible to the exporting user: all candidate tasks for MDs and administrators, or the recruiter's own tasks."],
                    ["Missing before deployment", ", ".join(item["label"] for item in listing["missingRequiredBeforeDeployment"])]]),
         ("Personal", [["Field", "Value"], *details({**{key: value for key, value in form["candidate"].items() if key not in ("canEdit", "ref")},   # people quote the Care India ID, not the CND reference
                     **form["personal"], "createdAt": plain(candidate.created_at)})]),

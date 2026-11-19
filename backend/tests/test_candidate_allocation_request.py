@@ -121,12 +121,12 @@ def requests_logged(env, candidate_id):
                                                           m.AuditEntry.entity_id == candidate_id)))
 
 
-def test_a_staff_request_notifies_every_active_admin_and_is_audited(env):
+def test_a_staff_request_notifies_every_active_admin_and_md_and_is_audited(env):
     response = env.client.post("/api/candidates/theirs/request-allocation")
     assert response.status_code == 200, response.text
-    assert response.json() == {"requested": True, "alreadyRequested": False, "notified": 2}
+    assert response.json() == {"requested": True, "alreadyRequested": False, "notified": 3}
     rows = notices(env)
-    assert [row.user_id for row in rows] == ["admin", "admin2"]  # not the manager, the inactive admin or the requester
+    assert [row.user_id for row in rows] == ["admin", "admin2", "manager"]  # the MD is admin-level; not the inactive admin or the requester
     assert all(row.title == "A recruiter is asking for a candidate" and row.link_to == "/candidates/theirs/application" and not row.read
                for row in rows)
     # The label carries the Care India ID (allocated on insert) and the CND reference.
@@ -148,7 +148,7 @@ def test_a_repeat_request_within_a_day_is_answered_without_new_notices(env):
     again = env.client.post("/api/candidates/theirs/request-allocation")
     assert again.status_code == 200
     assert again.json() == {"requested": True, "alreadyRequested": True, "notified": 0}
-    assert len(notices(env)) == 2 and len(requests_logged(env, "theirs")) == 1
+    assert len(notices(env)) == 3 and len(requests_logged(env, "theirs")) == 1
 
 
 def test_a_request_is_allowed_again_after_a_day_and_people_and_candidates_are_independent(env):
@@ -182,8 +182,8 @@ def test_an_unknown_candidate_is_a_404(env):
     assert notices(env) == []
 
 
-def test_with_no_active_admin_nothing_is_recorded_and_a_later_request_goes_through(env):
-    env.db.execute(m.User.__table__.update().where(m.User.role == m.Role.admin).values(active=False))
+def test_with_no_active_admin_or_md_nothing_is_recorded_and_a_later_request_goes_through(env):
+    env.db.execute(m.User.__table__.update().where(m.User.role.in_([m.Role.admin, m.Role.manager])).values(active=False))
     env.db.commit()
     act_as(env, "a")
     response = env.client.post("/api/candidates/theirs/request-allocation")

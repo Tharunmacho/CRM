@@ -9,7 +9,7 @@ Each row also says how many of the mandatory documents are on file (`documents`)
 often lack some (education certificate, Google review...), and the owner wants to see that at a glance. One more statement reads
 the documents of every listed candidate together, so the screen costs two round trips, never one per row.
 
-Who sees what follows the other reports: admin and manager see every placement, staff only the placements they are the
+Who sees what follows the other reports: admin and MD see every placement, staff only the placements they are the
 recruiter of.
 """
 from __future__ import annotations

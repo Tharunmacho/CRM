@@ -407,13 +407,14 @@ def test_both_on_an_order_is_refused_with_the_orders_named(env):
     assert "ORD-1" in response.json()["detail"] and "ORD-2" in response.json()["detail"]
 
 
-def test_only_an_admin_may_merge(env):
+def test_only_admin_level_roles_may_merge(env):
     seed_pair(env)
     before = snapshot(env)
-    for who in ("manager", "staff"):
-        assert merge(env, who=who).status_code == 403
-        assert merge(env, who=who, dryRun=True).status_code == 403
+    assert merge(env, who="staff").status_code == 403
+    assert merge(env, who="staff", dryRun=True).status_code == 403
     assert snapshot(env) == before
+    # An MD (stored as `manager`) holds every privilege an admin holds: the preview is allowed for them too.
+    assert merge(env, who="manager", dryRun=True).status_code != 403
 
 
 def test_an_unknown_candidate_is_not_found(env):

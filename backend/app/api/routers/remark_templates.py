@@ -17,12 +17,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, RemarkTemplate, Role, User
 from app.db.session import get_db
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api/remark-templates", tags=["remark-templates"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 
 MAX_LENGTH = 120
 DUPLICATE = "A remark template with this text already exists."
@@ -75,7 +76,7 @@ def _locked(db: Session, template_id: str) -> RemarkTemplate:
 
 @router.get("")
 def list_templates(all: bool = False, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    everything = bool(all) and user.role == Role.admin   # anyone else always gets the active ones only
+    everything = bool(all) and is_admin_level(user)   # anyone else always gets the active ones only
 
     query = select(RemarkTemplate).order_by(RemarkTemplate.sort_order, RemarkTemplate.created_at, RemarkTemplate.id)
     if not everything:

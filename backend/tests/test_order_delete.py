@@ -86,8 +86,13 @@ def test_admin_deletes_a_job_with_no_candidates(env):
     assert entry.meta == {"applications": 0, "candidates": [], "documents": 0}
 
 
-@pytest.mark.parametrize("who", ["manager", "staff"])
-def test_only_an_admin_can_delete_a_job(env, who):
+def test_an_md_can_delete_a_job_like_an_admin(env):
+    assert env.http("manager").delete("/api/orders/o1").status_code == 200
+    assert env.db.get(m.Order, "o1") is None
+
+
+@pytest.mark.parametrize("who", ["staff"])
+def test_only_admin_level_roles_can_delete_a_job(env, who):
     assert env.http(who).delete("/api/orders/o1").status_code == 403
     assert env.http(who).delete("/api/orders/o1?withdrawApplications=true").status_code == 403
     assert env.db.get(m.Order, "o1") is not None and count(env.db, m.AuditEntry) == 0

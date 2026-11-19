@@ -20,6 +20,7 @@ from app.core.config import get_settings
 from app.db.models import AuditEntry, Lead, LEAD_STATUSES, Notification, Role, User
 from app.services import lead_followups, lead_sheet
 from app.services.lead_sheet import STATUS_LABELS, fail
+from app.core.roles import is_admin_level
 
 log = logging.getLogger("uvicorn.error")
 
@@ -50,7 +51,7 @@ def clean_filter(raw: dict | None) -> dict:
     out: dict = {}
     for key in FILTER_KEYS:
         value = raw.get(key)
-        if key in ("has_resume", "matched_candidate") and isinstance(value, str):
+        if key in ("has_resume", "matched_candidate", "uploaded_today") and isinstance(value, str):
             value = {"true": True, "false": False}.get(value.lower())
         out[key] = value
     out["q"] = str(out["q"] or "")[:500]
@@ -80,7 +81,7 @@ def resolve(db: Session, user: User, ids: list[str] | None, filt: dict | None, *
         raise fail(422, "invalid_request", "Choose the leads (ids) or give a filter.")
     filt = clean_filter(filt)
     if not lead_sheet.sees_all_leads(user):
-        filt["owner"] = "me"  # a manager's or recruiter's selection never reaches beyond their own leads
+        filt["owner"] = "me"  # a recruiter's selection never reaches beyond their own leads
     base, owner, has_resume = lead_sheet._base_query()
     statement = (lead_sheet.apply_filters(base, owner, has_resume, user, filt)
                  .with_only_columns(Lead.id, Lead.status, Lead.owner_id, Lead.candidate_id)
@@ -123,13 +124,13 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
     Returns the result dict, or (xlsx bytes, lead count) for `export`. The caller commits.
     """
     action = body["action"]
-    supervisor = user.role in (Role.admin, Role.manager)
-    if action == "delete" and user.role != Role.admin:
-        raise fail(403, "forbidden_role", "Only an admin can delete leads.")
-    if action == "assign" and user.role != Role.admin:
-        raise fail(403, "forbidden_role", "Only the admin can assign leads.")
+    supervisor = is_admin_level(user)
+    if action == "delete" and not is_admin_level(user):
+        raise fail(403, "forbidden_role", "Only an admin or MD can delete leads.")
+    if action == "assign" and not is_admin_level(user):
+        raise fail(403, "forbidden_role", "Only an admin or MD can assign leads.")
     if action == "export" and not supervisor:
-        raise fail(403, "forbidden_role", "Only a manager or an admin can export leads.")
+        raise fail(403, "forbidden_role", "Only an admin or MD can export leads.")
 
     target_status = "not_interested" if action == "not_interested" else body.get("status")
     owner_id = body.get("ownerId")
@@ -157,7 +158,7 @@ def run(db: Session, user: User, body: dict) -> dict | tuple[bytes, int]:
 
     requested = len(set(body["ids"])) if body.get("ids") else len(rows)
     missing = max(0, requested - len(rows)) if body.get("ids") else 0
-    # Managers and staff never see leads that are not theirs: a selected id that did not resolve is "not yours" to them.
+    # Staff never see leads that are not theirs: a selected id that did not resolve is "not yours" to them.
     skipped = {"gone": missing} if lead_sheet.sees_all_leads(user) else {"not_yours": missing}
     if action in ("status", "not_interested"):
         result = _change_status(db, user, rows, target_status, skipped)
@@ -315,7 +316,7 @@ def export_selected(db: Session, user: User, body: dict) -> tuple[bytes, int]:
         ids = list(dict.fromkeys(body["ids"]))
         if len(ids) > BULK_LIMIT:
             raise too_many(len(ids))
-        # ids that are not the caller's own never resolve (a manager's export holds only their leads; X-Lead-Count says how many)
+        # ids that are not the caller's own never resolve (a recruiter's export holds only their leads; X-Lead-Count says how many)
         query = query.where(Lead.id == any_(literal(ids, ARRAY(String))), lead_sheet.visible_leads(user))
     elif body.get("filter") is not None:
         filt = clean_filter(body["filter"])

@@ -180,4 +180,4 @@ def test_candidate_owner_drilldown_and_export_use_same_exact_filter(workspace):
     assert {row.findall("{*}c")[2].find("{*}is/{*}t").text for row in rows[1:]} == {"Candidate one", "Candidate two"}
     workspace.client.cookies.set(SESSION_COOKIE, "session-manager")
     assert workspace.client.get("/api/candidates?staff=staff").status_code == 200
-    assert workspace.client.get("/api/candidates/export?staff=staff").status_code == 403
+    assert workspace.client.get("/api/candidates/export?staff=staff").status_code == 200, "the Data Bank export is for admin and MD alike"

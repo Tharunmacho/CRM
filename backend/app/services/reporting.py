@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy import JSON, func, or_, select
 
 from app.core.config import get_settings
+from app.core.roles import is_admin_level
 from app.db import models as m
 from app.domain.stages import STAGES as WORKFLOW_STAGES
 
@@ -132,8 +133,8 @@ def read_reporting_data(db, filters: Filters | None = None, zone=None):
 
 
 def sees_team(user):
-    """Admin and manager see the whole team on the dashboard; staff only their own work."""
-    return value(user.role) in ("admin", "manager")
+    """Admin and MD see the whole team on the dashboard; staff only their own work."""
+    return is_admin_level(user)
 
 
 OVERVIEW_STAGES = (4, 5, 9, 10, 11)  # stage 4 feeds "selected"; 5, 9, 10, 11 feed the pipeline overview cards
@@ -142,7 +143,7 @@ OVERVIEW_STAGES = (4, 5, 9, 10, 11)  # stage 4 feeds "selected"; 5, 9, 10, 11 fe
 def read_dashboard_data(db, user, staff_id=None, zone=None, now=None):
     """One fresh projection of operational data, excluding historical report input."""
     if not sees_team(user) and staff_id not in (None, user.id):
-        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
+        raise HTTPException(403, "Only an admin or MD can change which recruiter the dashboard shows.")
     scope = staff_id if sees_team(user) else user.id
     zone = zone or get_settings().agency_timezone
     today = aware(now or datetime.now(timezone.utc)).astimezone(ZoneInfo(zone)).date()
@@ -242,7 +243,7 @@ def pipeline_overview(data, apps, candidates, now):
     """The dashboard's four pipeline cards: offer letter, visa, departure and idle placements.
 
     One definition for every role: `apps` is already limited to the viewer's scope (the staff member's own
-    candidates, or the team / the chosen person for admin and manager). Stage records that were reopened never
+    candidates, or the team / the chosen person for admin and MD). Stage records that were reopened never
     count. Per card the headline `current` is the number of ACTIVE placements waiting right now; the other
     numbers are history. Idle uses the weekly staff report's own rule (an active placement with no stage
     completed for STUCK_DAYS or more; one that never completed a stage is measured from when it was created), so
@@ -542,9 +543,9 @@ def report_data(data, user, filters: Filters, zone=None, now=None):
 
 
 def dashboard_data(data, user, staff_id=None, zone=None, now=None):
-    """Admin and manager see the team (optionally one person); staff land on their own workload."""
+    """Admin and MD see the team (optionally one person); staff land on their own workload."""
     if not sees_team(user) and staff_id not in (None, user.id):
-        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
+        raise HTTPException(403, "Only an admin or MD can change which recruiter the dashboard shows.")
     scope = staff_id if sees_team(user) else user.id
     now = aware(now or datetime.now(timezone.utc))
     zone = zone or get_settings().agency_timezone

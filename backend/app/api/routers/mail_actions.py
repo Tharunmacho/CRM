@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import Attachment, AuditEntry, Candidate, EmailIngestionJob, MailAccount, MailAttachment, MailMessage, MailReply, Role, User
 from app.db.session import get_db, transaction_session
 from app.integrations.mail.base import MailAdapterError
@@ -22,7 +22,7 @@ from app.services.document_storage import file_response
 from app.services.attachment_preview import PreviewUnavailable, build_preview
 
 router = APIRouter(tags=["inbox"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 
 
 @router.post("/accounts/{account_id}/disconnect")

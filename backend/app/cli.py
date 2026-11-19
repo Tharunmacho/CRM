@@ -22,6 +22,7 @@ import warnings
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
+from app.core.roles import parse_role, role_label
 from app.core.security import hash_password
 from app.db.models import Role, Session as SessionRow, User
 from app.db.session import SessionLocal
@@ -128,7 +129,7 @@ def list_users() -> int:
     print(f"{'EMAIL'.ljust(width)}  ROLE      ACTIVE  PASSWORD SET")
     for u in users:
         print(
-            f"{u.email.ljust(width)}  {u.role.value:<8}  "
+            f"{u.email.ljust(width)}  {role_label(u):<8}  "
             f"{'yes' if u.active else 'no':<6}  {'yes' if u.password_hash else 'NO'}"
         )
     return 0
@@ -188,7 +189,8 @@ def main() -> int:
     create = sub.add_parser("create-user", help="Create an account with a prompted password")
     create.add_argument("email")
     create.add_argument("--name", required=True)
-    create.add_argument("--role", required=True, choices=[role.value for role in Role])
+    create.add_argument("--role", required=True, type=str.lower, choices=[*(role.value for role in Role), "md"],
+                        help="admin, md (stored as MD) or staff")
 
     sp = sub.add_parser("set-password", help="Set a user's password")
     sp.add_argument("email")
@@ -211,7 +213,7 @@ def main() -> int:
     if args.command == "backfill-lead-matches":
         return backfill_lead_matches(args.dry_run)
     if args.command == "create-user":
-        return create_user(args.email, args.name, Role(args.role))
+        return create_user(args.email, args.name, parse_role(args.role))
     if args.command == "set-password":
         return set_password(args.email)
     if args.command == "backfill-application-forms":

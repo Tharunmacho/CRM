@@ -9,8 +9,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.roles import is_admin_level, is_real_admin
 from app.core.security import hash_password
-from app.db.models import AssignmentPointer, AuditEntry, Candidate, Role, Session as LoginSession, Task, TaskEvent, User
+from app.db.models import (AssignmentPointer, AuditEntry, Base, Candidate, Lead, Role, Session as LoginSession, Task, TaskEvent, User,
+                           deleted_user_email)
 
 
 log = logging.getLogger(__name__)
@@ -40,14 +42,14 @@ def _directory(db: Session, actor: User) -> list[User]:
     db.scalar(select(AssignmentPointer).where(AssignmentPointer.id == 1).with_for_update())
     users = list(db.scalars(select(User).order_by(User.id).with_for_update().execution_options(populate_existing=True)))
     current = next((row for row in users if row.id == actor.id), None)
-    if current is None or not current.active or current.role != Role.admin:
-        raise HTTPException(403, 'Only an active admin can manage accounts.')
+    if current is None or not current.active or not is_admin_level(current):
+        raise HTTPException(403, 'Only an active admin or MD can manage accounts.')
     return users
 
 
 def _find(users: list[User], user_id: str) -> User:
     row = next((user for user in users if user.id == user_id), None)
-    if row is None:
+    if row is None or row.deleted:  # a deleted account is gone for every screen and action
         raise HTTPException(404, 'User not found.')
     return row
 
@@ -144,11 +146,12 @@ def update_user(db: Session, actor: User, user_id: str, values: dict) -> User:
     target_id = values.pop('reassign_to_user_id', None)
     next_active = values.get('active', user.active)
     next_role = values.get('role', user.role)
-    loses_admin = user.role == Role.admin and (not next_active or next_role != Role.admin)
-    if loses_admin and sum(row.active and row.role == Role.admin for row in users) <= 1:
+    # The system must always keep one real Admin: only role `admin` counts here, never an MD.
+    loses_admin = is_real_admin(user) and (not next_active or not is_real_admin(next_role))
+    if loses_admin and sum(row.active and is_real_admin(row) for row in users) <= 1:
         raise HTTPException(409, 'There must always be at least one active admin. This account has to stay active as an admin.')
-    if user.id == actor.id and (not next_active or next_role != Role.admin):
-        raise HTTPException(409, 'You cannot turn off your own account or remove your own admin role.')
+    if user.id == actor.id and (not next_active or next_role != user.role):
+        raise HTTPException(409, 'You cannot turn off your own account or change your own role.')
     if 'email' in values:
         _check_email(users, values['email'], user.id)
     if next_role != Role.staff:
@@ -198,3 +201,119 @@ def force_logout(db: Session, actor: User, user_id: str) -> dict:
     _audit(db, actor, user, 'Sessions revoked', {'revokedSessions': count})
     _commit(db)
     return {'revokedSessions': count}
+
+
+# ------------------------------------------------------------------ delete
+
+FORMER_USER = ' (former user)'
+
+
+def _count(db: Session, statement) -> int:
+    return db.scalar(statement) or 0
+
+
+def delete_summary(db: Session, user_id: str) -> dict:
+    """What deleting this person would move: their candidates, open tasks and leads (for the dialog and the checks)."""
+    open_tasks = select(func.count()).select_from(Task).where(Task.owner_id == user_id, Task.completed_at.is_(None), Task.cancelled_at.is_(None))
+    return {'candidates': _count(db, select(func.count()).select_from(Candidate).where(Candidate.owner_id == user_id)),
+            'openTasks': _count(db, open_tasks),
+            'leads': _count(db, select(func.count()).select_from(Lead).where(Lead.owner_id == user_id))}
+
+
+def delete_user(db: Session, actor: User, user_id: str, reassign_to: str | None = None, leave_unassigned: bool = False) -> dict:
+    """Delete a Recruiter's account, for good as far as sign-in goes, without damaging a single history row.
+
+    The login is removed (password, phone, sessions, email) and the person disappears from every list, but the auth_users row stays
+    as a tombstone named "<name> (former user)": audit entries, remarks, stage records, attachments, attendance and invoices keep
+    pointing at it and keep showing the name. Their candidates, open tasks and leads are never lost or silently moved: the caller
+    chooses a recruiter to take them (`reassign_to`, the same transfer as deactivating a recruiter) or `leave_unassigned` (the
+    Data Bank's unassign rule: a candidate that is deployed, mapped to an order or in stage work cannot be left without a recruiter).
+    One transaction; nothing is changed when anything is refused."""
+    users = _directory(db, actor)
+    person = _find(users, user_id)
+    if person.id == actor.id:
+        raise HTTPException(409, 'You cannot delete your own account.')
+    if person.role != Role.staff:
+        raise HTTPException(409, 'Only Recruiter accounts can be deleted. An Admin or MD account can be deactivated instead; '
+                                 'change the role to Recruiter first if it really has to go.')
+    if reassign_to and leave_unassigned:
+        raise HTTPException(422, 'Choose one: give their work to a recruiter, or leave it unassigned.')
+    owned = delete_summary(db, person.id)
+    has_work = bool(owned['candidates'] or owned['openTasks'] or owned['leads'])
+    if has_work and not reassign_to and not leave_unassigned:
+        raise HTTPException(422, "Choose who takes over this person's candidates, open tasks and leads, or leave them unassigned.")
+
+    original_name, original_email = person.name, person.email
+    recipient = None
+    ownership_changes: list = []
+    task_only_changes: list = []
+    transfer: dict = {'candidates': 0, 'tasks': 0}
+    cancelled_tasks = 0
+    if reassign_to:
+        recipient = _find(users, reassign_to)
+        from app.services.attendance_availability import unavailable_staff_ids
+        if recipient.id == person.id or not recipient.active or recipient.role != Role.staff or recipient.on_leave or recipient.id in unavailable_staff_ids(db):
+            raise HTTPException(422, 'Choose a different active recruiter who is not on leave.')
+        transfer, ownership_changes, task_only_changes = _transfer(db, actor, person, users, reassign_to)
+    elif owned['candidates'] or owned['openTasks']:
+        from app.api.routers.candidates import lock_assignment_cursor
+        from app.services.candidate_unassign import unassign_candidates
+        lock_assignment_cursor(db)
+        mine = list(db.scalars(select(Candidate).where(Candidate.owner_id == person.id).order_by(Candidate.id).with_for_update()))
+        result = unassign_candidates(db, actor, mine, f'Account of {original_name} deleted by {actor.name}', None)
+        if result['refused']:
+            db.rollback()
+            first = result['refused'][0]['reason']
+            more = f' (and {len(result["refused"]) - 1} more)' if len(result['refused']) > 1 else ''
+            raise HTTPException(409, f'{len(result["refused"])} candidate(s) cannot be left without a recruiter: {first}{more} '
+                                     'Choose a recruiter to take them over, or deactivate the account instead.')
+        transfer = {'candidates': len(result['freed']), 'tasks': 0}
+        # Open tasks that were not tied to a candidate they owned are cancelled, never deleted: their history stays.
+        now = datetime.now(timezone.utc)
+        for task in db.scalars(select(Task).where(Task.owner_id == person.id, Task.completed_at.is_(None), Task.cancelled_at.is_(None)).order_by(Task.id).with_for_update()):
+            task.cancelled_at = now
+            cancelled_tasks += 1
+
+    leads = owned['leads']
+    if leads:
+        from app.services import lead_sheet
+        lead_ids = list(db.scalars(select(Lead.id).where(Lead.owner_id == person.id).order_by(Lead.id)))
+        lead_sheet.apply_owner_changes(db, actor, {recipient.id if recipient else None: lead_ids},
+                                       {recipient.id: recipient.name} if recipient else {}, bulk=True)
+
+    if ownership_changes or task_only_changes:
+        from app.services.assignment_notifications import notify_assignment_changes, notify_task_assignment_changes
+        how = f"because {original_name}'s account was deleted"
+        notify_assignment_changes(db, ownership_changes, actor_id=actor.id, actor_name=actor.name, how=how, users=users)
+        notify_task_assignment_changes(db, task_only_changes, actor_id=actor.id, actor_name=actor.name, how=how, users=users)
+
+    # The login, and everything that only made sense while the person could sign in.
+    revoked = _revoke(db, person)
+    tables = Base.metadata.tables
+    for name, column in (('system_notifications', 'user_id'), ('personal_todos', 'owner_id'), ('email_oauth_states', 'user_id'),
+                         ('crm_client_staff', 'user_id'), ('workflow_daily_goals', 'user_id'), ('staff_presence_clients', 'user_id')):
+        if name in tables:
+            db.execute(delete(tables[name]).where(tables[name].c[column] == person.id))
+    cursor = tables.get('workflow_assignment_cursor')
+    if cursor is not None:
+        db.execute(cursor.update().where(cursor.c.last_user_id == person.id).values(last_user_id=None))
+    person.name = original_name[:160 - len(FORMER_USER)] + FORMER_USER
+    person.email = deleted_user_email(person.id)
+    person.phone = None
+    person.password_hash = None
+    person.active = False
+    person.receives_auto_assign = False
+    person.on_leave = False
+
+    mode = 'reassign' if recipient else ('unassign' if has_work else 'nothing to move')
+    summary = {'candidates': transfer.get('candidates', 0), 'tasks': transfer.get('tasks', 0), 'cancelledTasks': cancelled_tasks,
+               'leads': leads, 'revokedSessions': revoked, 'toUserId': recipient.id if recipient else None,
+               'toName': recipient.name if recipient else None, 'mode': mode,
+               'originalName': original_name, 'originalEmail': original_email}
+    db.add(AuditEntry(actor_id=actor.id, action='Deleted user', target=original_name, entity_type='user', entity_id=person.id, meta=summary))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, 'This account cannot be deleted because other records still depend on it. Deactivate it instead.')
+    return summary

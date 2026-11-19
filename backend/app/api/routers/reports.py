@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
+from app.core.roles import is_admin_level
 from app.db.models import Role, User
 from app.db.session import get_db
 from app.services.encoded_response import Encoded
@@ -49,7 +50,7 @@ def authorized_report(db, user, filters):
 # captures "staff-weekly".
 @router.get("/staff-weekly")
 def staff_weekly_report(request: Request, from_date: date | None = None, to_date: date | None = None,
-                        user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)):
+                        user: User = Depends(require_admin_level()), db: Session = Depends(get_db)):
     zone = get_settings().agency_timezone
     return cached(("staff-weekly", scope_of(db), from_date, to_date, zone), LEAD_REPORT_TOPICS, REPORT_SECONDS,
                   lambda: Encoded.of(staff_weekly.build_report(db, from_date, to_date, zone))).response(request)
@@ -57,7 +58,7 @@ def staff_weekly_report(request: Request, from_date: date | None = None, to_date
 
 @router.get("/staff-weekly/export")
 def staff_weekly_export_file(format: Literal["xlsx", "csv"], from_date: date | None = None, to_date: date | None = None,
-                             user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)):
+                             user: User = Depends(require_admin_level()), db: Session = Depends(get_db)):
     data = staff_weekly.build_report(db, from_date, to_date, get_settings().agency_timezone)
     payload = staff_weekly_export.xlsx(data) if format == "xlsx" else staff_weekly_export.csv_bytes(data)
     mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if format == "xlsx" else "text/csv; charset=utf-8"
@@ -69,7 +70,7 @@ def staff_weekly_export_file(format: Literal["xlsx", "csv"], from_date: date | N
 
 @router.get("/staff-weekly/{staff_id}")
 def staff_weekly_detail(staff_id: str, from_date: date | None = None, to_date: date | None = None,
-                        user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)):
+                        user: User = Depends(require_admin_level()), db: Session = Depends(get_db)):
     data = staff_weekly.build_report(db, from_date, to_date, get_settings().agency_timezone, staff_id=staff_id, with_candidates=True)
     if not data["staff"]:
         raise HTTPException(404, "Recruiter not found.")
@@ -77,7 +78,7 @@ def staff_weekly_detail(staff_id: str, from_date: date | None = None, to_date: d
 
 
 # The client tracker: every placement in progress (and the travelled ones) grouped by client, in the sheet the clients ask for.
-# Without `format` it answers the rows as JSON for the Reports screen's preview; with xlsx or csv it is the download. Admin and manager
+# Without `format` it answers the rows as JSON for the Reports screen's preview; with xlsx or csv it is the download. Admin and MD
 # see every placement, a recruiter the ones they own; the fee and receipts behind the Advance column are the admin's alone.
 @router.get("/client-tracker")
 def client_tracker_report(format: Literal["xlsx", "csv"] | None = None, wanted: client_tracker.Filters = Depends(client_tracker.query_filters),
@@ -115,8 +116,8 @@ def export_report(report: str, format: Literal["xlsx", "pdf"], filters: Filters 
 
 @dashboard_router.get("")
 def dashboard(request: Request, staff_id: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if user.role not in ("admin", "manager") and staff_id not in (None, "", user.id):
-        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
+    if not is_admin_level(user) and staff_id not in (None, "", user.id):
+        raise HTTPException(403, "Only an admin or MD can change which recruiter the dashboard shows.")
     zone = get_settings().agency_timezone
 
     def build() -> Encoded:
@@ -139,8 +140,8 @@ def dashboard_lead_list(card: Literal["newToday", "notContacted", "followUpsDue"
                         period: Literal["week", "month", "quarter", "year", "all"] = "month", staff_id: str | None = None,
                         user: User = Depends(current_user), db: Session = Depends(get_db)):
     """The few leads behind one dashboard lead card. Same scope rule as the dashboard itself: staff see their own leads."""
-    if user.role not in ("admin", "manager") and staff_id not in (None, "", user.id):
-        raise HTTPException(403, "Only admins and managers can change which recruiter the dashboard shows.")
+    if not is_admin_level(user) and staff_id not in (None, "", user.id):
+        raise HTTPException(403, "Only an admin or MD can change which recruiter the dashboard shows.")
     zone = get_settings().agency_timezone
     now = datetime.now(ZoneInfo(zone))
     key = ("dashboard-leads", scope_of(db), user.id, user.role.value, staff_id or None, card, period, zone)

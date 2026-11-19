@@ -24,10 +24,11 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import Role, User
 from app.db.session import get_db
 from app.services import bulk_candidate_import as bulk, duplicate_pages
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api/candidate-import", tags=["candidate-import"])
 logger = logging.getLogger(__name__)
@@ -124,8 +125,8 @@ class SpecIn(BaseModel):
 
 
 def _own(user: User) -> User | None:
-    """A staff member or manager imports for themselves, like adding a candidate by hand; only the admin may choose the recruiter."""
-    return user if user.role != Role.admin else None
+    """A staff member or MD imports for themselves, like adding a candidate by hand; only the admin may choose the recruiter."""
+    return user if not is_admin_level(user) else None
 
 
 def _row_values(row: dict) -> dict:
@@ -703,9 +704,9 @@ READING_DONE = ("completed", "attached")
 
 
 def _may_work(candidate, user: User) -> bool:
-    """In-memory twin of `app.core.deps.ensure_can_work_candidate` (same rule, no query): admin and manager may work any candidate,
+    """In-memory twin of `app.core.deps.ensure_can_work_candidate` (same rule, no query): admin and MD may work any candidate,
     anyone else only the candidate they own. Kept equal by a matrix test; a refusal is a `continue` here, never an error."""
-    if user.role in (Role.admin, Role.manager):
+    if is_admin_level(user):
         return True
     return candidate.owner_id is not None and candidate.owner_id == user.id
 
@@ -922,7 +923,7 @@ def read_pending(candidate_id: str, db: Session = Depends(get_db), user: User = 
       request, and the pieces are filed in their own fields and read. `sorting` is how many files were queued (left out when none).
 
     Safe to call again and from two screens at once: the candidate row is locked, so a file is never queued twice. Only a person who may
-    work this candidate (the owner, a manager or an admin, exactly like read-again) changes anything: anyone else gets 200 with
+    work this candidate (the owner, an MD or an admin, exactly like read-again) changes anything: anyone else gets 200 with
     `allowed: false` and nothing is queued. An unknown candidate is 404."""
     from sqlalchemy import select
     from app.db.models import Candidate
@@ -942,7 +943,7 @@ def read_pending(candidate_id: str, db: Session = Depends(get_db), user: User = 
             "changed": bool(work["queued"] or pieces or sorting), **({"sorting": sorting} if sorting else {})}
 
 
-# ------------------------------------------------------------------ the one-off sweep of the Data Bank (admin / manager)
+# ------------------------------------------------------------------ the one-off sweep of the Data Bank (admin / MD)
 
 class ResortIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -955,9 +956,9 @@ class ResortIn(BaseModel):
 
 @candidate_reading_router.post("/resort")
 def resort_stored(body: ResortIn | None = None, db: Session = Depends(get_db),
-                  user: User = Depends(require_role(Role.admin, Role.manager))) -> dict:
+                  user: User = Depends(require_admin_level())) -> dict:
     """Sweep the Data Bank once: queue the sorting of stored combined files (see `resort_bundles`) for up to `RESORT_SWEEP_CANDIDATES`
-    (25) candidates per call. Admin and manager only. The pages are read by the reading worker afterwards, never in this request.
+    (25) candidates per call. Admin and MD only. The pages are read by the reading worker afterwards, never in this request.
 
     Body (all optional): `candidateIds` (default: the next candidates that still have an unsorted stored file, in a stable order, so
     calling again walks through the whole Data Bank) and `alsoRead` (default false). Idempotent: a file is queued once, ever, so a second

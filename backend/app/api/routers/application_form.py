@@ -177,7 +177,7 @@ def save_assignment(candidate_id: str, body: AssignmentIn, response: Response, o
 def add_feedback(candidate_id: str, body: FeedbackIn, response: Response, orderId: str | None = Query(default=None, max_length=36),
                  applicationId: str | None = Query(default=None, max_length=36),
                  db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    """A recruiter's note on why something takes time. Owner, admin and manager. Answers the whole form."""
+    """A recruiter's note on why something takes time. Owner, admin and MD. Answers the whole form."""
     _no_store(response)
     shown = body.applicationId or applicationId
     with applications_router._mutation(db):

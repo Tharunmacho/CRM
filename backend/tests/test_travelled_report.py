@@ -399,10 +399,12 @@ def test_relationships_and_document_counts_do_not_query_per_candidate(env):
     assert len(statements) == 2
 
 
-def test_the_invoice_is_not_a_required_document_for_recruiters_and_managers(env):
+def test_the_invoice_is_a_required_document_for_admin_and_md_but_not_for_recruiters(env):
     admin_rows = get(env)["rows"]
     assert all(row["documents"]["required"] == 11 for row in admin_rows)
-    for actor in (SimpleNamespace(id="manager", role=Role.manager), SimpleNamespace(id="staff", role=Role.staff)):
+    env.actor = SimpleNamespace(id="manager", role=Role.manager)   # an MD sees the invoice exactly as an admin does
+    assert all(row["documents"]["required"] == 11 for row in get(env)["rows"])
+    for actor in (SimpleNamespace(id="staff", role=Role.staff),):
         env.actor = actor
         rows = get(env)["rows"]
         assert rows and all(row["documents"]["required"] == 10 and "Invoice" not in row["documents"]["missing"] for row in rows)

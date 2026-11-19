@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, load_only
 
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, EmailIngestionJob, MailAccount, MailAttachment, MailMessage, Role, User
 from app.db.session import get_db
 from app.integrations.mail.imap import (
@@ -33,6 +33,7 @@ from app.api.routers.mail_accounts import router as accounts_router
 from app.api.routers.inbox_ingested import router as ingested_router
 from app.services.inbox_ingested import intake_counts_columns
 from app.services.mail_storage import storage_identity
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
 router.include_router(actions_router)
@@ -40,8 +41,8 @@ router.include_router(zoho_router)
 router.include_router(compose_router)
 router.include_router(accounts_router)
 router.include_router(ingested_router)
-admin = require_role(Role.admin)
-supervisor = require_role(Role.admin, Role.manager)
+admin = require_admin_level()
+supervisor = require_admin_level()
 
 
 class ConnectIn(BaseModel):
@@ -203,7 +204,7 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
     messages = [row[0] for row in page]
     bodies = {row[0].id: row[1] or "" for row in page}
     # Administrators configure accounts; other roles never receive credential names/values.
-    configured = configs() if user.role == Role.admin else {}
+    configured = configs() if is_admin_level(user) else {}
     accounts = [row[0] for row in account_rows]
     heartbeat = max((a.worker_seen_at for a in accounts if not a.disconnected_at and a.worker_seen_at), default=None)
     extraction_heartbeat = max((a.extraction_seen_at for a in accounts if not a.disconnected_at and a.extraction_seen_at), default=None)
@@ -219,8 +220,8 @@ def inbox(db: Session = Depends(get_db), user: User = Depends(current_user),
     return {
         "intake": intake,  # the dashboard's Inbox card: candidates created by email, jobs to review, connected mailboxes
         "accounts": [account_out(account, configured, counts, row[1]) for account, row in zip(accounts, account_rows)],
-        "availableAccounts": list(configured) if user.role == Role.admin else [],
-        "providers": mail_providers.readiness(get_settings()) if user.role == Role.admin else [],
+        "availableAccounts": list(configured) if is_admin_level(user) else [],
+        "providers": mail_providers.readiness(get_settings()) if is_admin_level(user) else [],
         "total": total, "offset": offset, "limit": limit, "hasMore": offset + len(messages) < total,
         "scope": scope,
         "messages": [{
@@ -322,8 +323,8 @@ def unread_count(db: Session = Depends(get_db), user: User = Depends(current_use
 
 @router.get("/attention")
 def attention(db: Session = Depends(get_db), user: User = Depends(supervisor)):
-    """Failed or needs-review intake across email, WhatsApp and manual uploads (admin retries, manager reads)."""
-    # Retry rights differ by person (an admin may retry; a manager only reads; manual uploads are the uploader's), so the
+    """Failed or needs-review intake across email, WhatsApp and manual uploads (admin and MD retry)."""
+    # Retry rights differ by person (an admin or MD may retry; manual uploads are the uploader's), so the
     # key holds the user. Nobody ever receives an answer built for another account.
     return cached(("inbox-attention", scope_of(db), user.id, user.role.value), ATTENTION_TOPICS, SUMMARY_SECONDS,
                   lambda: attention_list(db, user))

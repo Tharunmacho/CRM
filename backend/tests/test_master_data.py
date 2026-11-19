@@ -429,11 +429,8 @@ def test_only_admin_or_manager_may_delete_client_chain_records(desk, kind):
     with desk.sessions() as db:
         assert db.get(Client, contact['id']) and db.get(Company, company['id']) and db.get(Order, order['id'])
     desk.actor = SimpleNamespace(id='manager', role=Role.manager)
-    # A job (order) is deleted by an admin only.
-    assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == (403 if kind == 'orders' else 200)
-    if kind == 'orders':
-        desk.actor = SimpleNamespace(id='admin', role=Role.admin)
-        assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == 200
+    # A job (order) is deleted by an admin or an MD, exactly like the other records of the chain.
+    assert desk.client.delete(f'/api/{kind}/{identifier}').status_code == 200
 
 
 def test_deleting_a_client_is_audited_and_names_the_candidate_that_blocks_it(desk):

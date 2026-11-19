@@ -31,7 +31,7 @@ from app.services.candidate_identity import normalize_phone
 MAX_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 2000
 MAX_COLUMNS = 50
-FIELDS = ("name", "agencyName", "phone", "email", "place", "address", "state", "notes")
+FIELDS = ("name", "agencyName", "phone", "email", "place", "address", "state", "notes", "activeAgency")
 STATUSES = ("create", "add_contact", "duplicate", "conflict", "invalid", "section")
 ALIASES = {
     "name": ("name", "contact", "contact name", "contact person", "person", "person name", "agent name", "reference name"),
@@ -42,7 +42,10 @@ ALIASES = {
     "address": ("address", "postal address", "full address"),
     "state": ("state", "province"),
     "notes": ("notes", "note", "remarks", "remark"),
+    # yes/no/true/false/1/0/active/inactive; read by ReferenceAgencyIn. Only a new agency takes it: saved agencies are never changed by an import.
+    "activeAgency": ("active", "active agency", "agency active", "is active", "active status", "very active"),
 }
+COLUMNS = {"agencyName": "agency_name", "activeAgency": "active_agency"}
 SECTION_PLACES = {"trichy": "Trichy", "madurai": "Madurai", "otherplaces": "Other Places"}
 
 
@@ -308,7 +311,7 @@ def confirm(db, user, parsed: dict) -> dict:
         for item in plans:
             values = item["values"]
             if item["status"] == "create":
-                row = ReferenceAgency(id=str(uuid4()), **{("agency_name" if key == "agencyName" else key): value for key, value in values.items()},
+                row = ReferenceAgency(id=str(uuid4()), **{COLUMNS.get(key, key): value for key, value in values.items()},
                                       staff_contacts=[], specialisations=[], preferred_countries=[])
                 db.add(row)
                 by_id[f"new:{item['rowNumber']}"] = row

@@ -45,6 +45,7 @@ from app.services import agency_settings
 from app.services import form_extraction as fx
 from app.services.candidate_identity import merge_ocr_data, normalize_email, normalize_passport, normalize_phone
 from app.services.candidate_review import UNNAMED
+from app.core.roles import is_admin_level
 
 logger = logging.getLogger(__name__)
 
@@ -421,7 +422,7 @@ def merge_candidate(db: Session, actor: User, source_id: str, target_id: str, *,
     merge that already worked answers `alreadyMerged`. `background` receives the removal of the source's leftover stored files (run after
     the response); without one they are removed here, after the commit.
     """
-    if actor.role is not Role.admin:
+    if not is_admin_level(actor):
         raise HTTPException(403, "Your role does not allow this action")
     if source_id == target_id:
         refusals = [_refusal("same_candidate", "Choose two different candidates: a candidate cannot be merged into itself.")]

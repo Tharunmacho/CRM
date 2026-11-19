@@ -1,4 +1,4 @@
-"""Who may work a candidate: the assigned recruiter, a manager or an admin; every other staff member can only look.
+"""Who may work a candidate: the assigned recruiter, an MD (stored as `manager`) or an admin; every other staff member can only look.
 
 Covers the rule at each door (details, documents, initial call, stages, application form, order matching), the
 uploader becoming the owner, the admin's recruiter choice, duplicate handling and reassignment.
@@ -71,7 +71,7 @@ def add_candidate(env, who="a", phone="9000000001", **extra):
 def refused(response, owner="Asha"):
     assert response.status_code == 403, response.text
     detail = response.json()["detail"]
-    assert f"assigned to {owner}" in detail and "Only they, a manager or an admin can work on it" in detail
+    assert f"assigned to {owner}" in detail and "Only they, an MD or an admin can work on it" in detail
 
 
 # --------------------------------------------------------------------------- uploader becomes owner
@@ -97,20 +97,24 @@ def test_staff_cannot_name_another_recruiter_but_may_name_themselves(env):
     assert own.status_code == 201 and own.json()["ownerId"] == "a"
 
 
-def test_only_the_admin_keeps_the_recruiter_choice(env):
+def test_only_admin_level_roles_keep_the_recruiter_choice(env):
     automatic = add_candidate(env, "admin", "9000000003")
     assert automatic["ownerId"] == "a"  # strict round-robin: the first eligible recruiter
     assert add_candidate(env, "admin", "9000000004")["ownerId"] == "b"
     chosen = add_candidate(env, "admin", "9000000005", assign_to="a")
     assert chosen["ownerId"] == "a"
-    # A manager adds a candidate like a recruiter does: it is theirs, they cannot hand it to someone else.
-    act_as(env, "manager")
+    # A recruiter adds a candidate: it is theirs, they cannot hand it to someone else.
+    act_as(env, "a")
     other = env.client.post("/api/candidates", json={"name": "X", "phone": "9000000006", "assign_to": "b"})
-    assert other.status_code == 403 and "Only the admin" in other.json()["detail"]
-    own = add_candidate(env, "manager", "9000000008")
-    assert own["ownerId"] == "manager" and env.db.get(m.Candidate, own["id"]).created_by == "manager"
-    # The round-robin did not move for the explicit choice or the manager's own add: the next automatic one follows the last automatic one.
-    assert add_candidate(env, "admin", "9000000007")["ownerId"] == "a"
+    assert other.status_code == 403 and "Only an admin or MD" in other.json()["detail"]
+    own = add_candidate(env, "a", "9000000008")
+    assert own["ownerId"] == "a" and env.db.get(m.Candidate, own["id"]).created_by == "a"
+    # An MD holds every privilege an admin holds: they may name the recruiter, and without a choice the next free recruiter gets it.
+    named = add_candidate(env, "manager", "9000000010", assign_to="b")
+    assert named["ownerId"] == "b" and env.db.get(m.Candidate, named["id"]).created_by == "manager"
+    # The round-robin did not move for an explicit choice or a recruiter's own add: the next automatic one follows the last automatic one.
+    assert add_candidate(env, "manager", "9000000011")["ownerId"] == "a"
+    assert add_candidate(env, "admin", "9000000007")["ownerId"] == "b"
     act_as(env, "admin")
     for bad in ("away", "manager", "missing"):
         response = env.client.post("/api/candidates", json={"name": "Y", "phone": "9000000099", "assign_to": bad})
@@ -241,8 +245,8 @@ def test_admin_reassignment_moves_the_work_the_notices_and_the_reminder(env):
     link = f"/candidates/{cid}"
     assert env.db.scalar(select(m.TodoItem.owner_id).where(m.TodoItem.link_to == link)) == "a"
 
-    # Only the admin hands a candidate over: staff and managers cannot.
-    for who in ("b", "manager"):
+    # Only admin-level roles hand a candidate over: a recruiter cannot.
+    for who in ("b",):
         act_as(env, who)
         assert env.client.post("/api/candidates/reassign", json={"candidateIds": [cid], "toUserId": "b", "reason": "Mine"}).status_code == 403, who
     act_as(env, "admin")
@@ -268,13 +272,13 @@ def test_admin_reassignment_moves_the_work_the_notices_and_the_reminder(env):
     assert env.client.post(f"/api/candidates/{cid}/call", json={"called": True, "interested": "yes"}).status_code == 200
 
 
-def test_bulk_reassignment_is_the_admins_alone_and_moves_every_candidate(env):
+def test_bulk_reassignment_is_admin_level_only_and_moves_every_candidate(env):
     ids = [add_candidate(env, "a", f"90000001{n:02d}")["id"] for n in range(3)]
-    act_as(env, "manager")
+    act_as(env, "b")
     assert env.client.post("/api/candidates/reassign", json={"candidateIds": ids, "toUserId": "b", "reason": "Cover"}).status_code == 403
     env.db.expire_all()
     assert {env.db.get(m.Candidate, i).owner_id for i in ids} == {"a"}
-    act_as(env, "admin")
+    act_as(env, "manager")   # an MD reassigns exactly as an admin does
     assert env.client.post("/api/candidates/reassign", json={"candidateIds": ids, "toUserId": "b", "reason": "Cover"}).status_code == 200
     env.db.expire_all()
     assert {env.db.get(m.Candidate, i).owner_id for i in ids} == {"b"}

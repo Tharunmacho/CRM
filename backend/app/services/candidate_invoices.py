@@ -17,6 +17,7 @@ from app.core.deps import ensure_can_work_candidate
 from app.db.models import Application, ApplicationStatus, Attachment, AuditEntry, Candidate, CandidateInvoice, Company, Designation, InvoiceSettings, Order, Role
 from app.services import document_storage, invoice_pdf
 from app.services.invoice_access import ensure_can_see_invoices
+from app.core.roles import is_admin_level
 
 logger = logging.getLogger(__name__)
 TEMPLATE = {
@@ -66,7 +67,7 @@ def settings_state(db, user) -> dict:
     ensure_can_see_invoices(user)
     row = db.get(InvoiceSettings, 1)
     gaps = missing_settings(row)
-    return {"canEdit": user.role == Role.admin, "configured": not gaps, "missing": gaps,
+    return {"canEdit": is_admin_level(user), "configured": not gaps, "missing": gaps,
             "settings": settings_values(row), "lockVersion": row.lock_version if row else 0}
 
 

@@ -11,13 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import Wire
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, Lead, Role, User
 from app.db.session import get_db
 from app.services import agency_settings, lead_campaigns, lead_sheet, lead_templates
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
-admin_only = require_role(Role.admin)
+admin_only = require_admin_level()
 
 
 @router.get("/campaigns")

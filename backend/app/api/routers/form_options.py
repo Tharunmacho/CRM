@@ -11,14 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, FormOption, Role, User
 from app.db.session import get_db
 from app.services import form_options as service
 from app.services.response_cache import cached, scope_of
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api/form-options", tags=["form-options"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 
 
 def _clean(value: str | None) -> str | None:
@@ -78,8 +79,8 @@ def _get(db: Session, option_id: str) -> FormOption:
 def read_options(request: Request, response: Response, includeInactive: bool = Query(default=False),
                  db: Session = Depends(get_db), user: User = Depends(current_user)):
     """Every active option grouped by category (an administrator may ask for the hidden ones too). ETag-friendly."""
-    if includeInactive and user.role != Role.admin:
-        raise HTTPException(403, "Only an administrator can list hidden options.")
+    if includeInactive and not is_admin_level(user):
+        raise HTTPException(403, "Only an admin or MD can list hidden options.")
     # The lists change only when an administrator edits them (topic "form_options"), so building the payload and its
     # ETag is done once per change rather than on every page load. The same for every user: nothing here is personal.
     payload, tag = cached(("form-options", scope_of(db), includeInactive), ("form_options",), 300,

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from app.core.roles import ADMIN_LEVEL_ROLES
 from app.db.models import Candidate, Notification, Role, User
 
 # What the reassign dialog writes when the admin typed nothing; it is not a reason worth showing.
@@ -208,7 +209,7 @@ def notify_new_candidate(db, candidate, owner, *, actor_id=None, actor_name=None
     """A candidate created by a person or by intake (`channel` = 'email' / 'WhatsApp').
 
     With an owner: only the owner is told (nobody tells the person who created it about their own action; admins get no
-    copy). With no owner: the admins and managers are told it is waiting for them to assign (again not the creator)."""
+    copy). With no owner: the admins and MDs are told it is waiting for them to assign (again not the creator)."""
     label = candidate_label(candidate.name, getattr(candidate, "care_id", None), getattr(candidate, "ref", None))
     link = CANDIDATES.link(candidate.id)
     if owner is not None:
@@ -223,7 +224,7 @@ def notify_new_candidate(db, candidate, owner, *, actor_id=None, actor_name=None
         db.add(Notification(user_id=owner.id, kind=CANDIDATES.assigned_kind, title=CANDIDATES.assigned_title, detail=body, link_to=link))
         return 1
     came = f"arrived by {channel}" if channel else (f"was added by {actor_name}" if actor_name else "was added")
-    recipients = db.scalars(select(User.id).where(User.active.is_(True), User.role.in_([Role.admin, Role.manager]))).all()
+    recipients = db.scalars(select(User.id).where(User.active.is_(True), User.role.in_(ADMIN_LEVEL_ROLES))).all()
     count = 0
     for recipient in sorted(set(recipients) - {actor_id}):
         db.add(Notification(user_id=recipient, kind="candidate_waiting", title="Candidate waiting for a recruiter",

@@ -26,47 +26,42 @@ def ids_of(env):
 
 # ------------------------------------------------------------------ 1. export by ids
 
-def test_a_manager_exports_only_their_own_leads_even_when_the_ids_name_others(env):
+def test_an_md_exports_every_lead_like_an_admin_and_a_recruiter_cannot_export(env):
     imported(env, [lead_row(n) for n in range(1, 4)], assign_to="a")
     ids = ids_of(env)
     own_one(env, ids[0])
     act_as(env, "manager")
-    mixed = bulk(env, action="export", ids=ids)
-    assert mixed.status_code == 200 and mixed.headers["X-Lead-Count"] == "1", "the other two leads never reach a manager's workbook"
-    others = bulk(env, action="export", ids=ids[1:])
-    assert others.status_code == 422, "nothing of theirs matched: the same answer as an id that does not exist"
-    assert bulk(env, action="export", ids=ids[1:] + ["no-such-lead"]).status_code == 422
-    act_as(env, "admin")
-    assert bulk(env, action="export", ids=ids).headers["X-Lead-Count"] == "3"
+    everything = bulk(env, action="export", ids=ids)
+    assert everything.status_code == 200 and everything.headers["X-Lead-Count"] == "3", "an MD's workbook holds every lead"
+    assert bulk(env, action="export", ids=ids[1:]).headers["X-Lead-Count"] == "2"
+    act_as(env, "a")
+    assert bulk(env, action="export", ids=ids).status_code == 403
 
 
 # ------------------------------------------------------------------ 2. the importer is not a way to assign
 
-def test_a_manager_cannot_assign_through_the_importer_but_may_import(env):
+def test_a_recruiter_cannot_assign_through_the_importer_but_an_md_can(env):
     data = meta_export([lead_row(1), lead_row(2)])
-    act_as(env, "manager")
+    act_as(env, "b")
     for assign in ("a", "auto"):
         refused = env.client.post("/api/leads/import", files={"file": ("leads.csv", data, "text/csv")}, data={"dry_run": "false", "assign_to": assign})
-        assert refused.status_code == 403 and refused.json()["detail"]["code"] == "forbidden_role", assign
+        assert refused.status_code == 403, assign   # a recruiter cannot upload at all, let alone assign
     env.db.rollback()
     assert env.db.scalar(text("SELECT count(*) FROM crm_leads")) == 0
-    done = env.client.post("/api/leads/import", files={"file": ("leads.csv", data, "text/csv")}, data={"dry_run": "false"})
-    assert done.status_code == 200 and done.json()["rowsNew"] == 2
+    act_as(env, "manager")   # an MD hands leads out exactly as an admin does
+    done = env.client.post("/api/leads/import", files={"file": ("leads.csv", data, "text/csv")}, data={"dry_run": "false", "assign_to": "a"})
+    assert done.status_code == 200 and done.json()["rowsNew"] == 2 and done.json()["assignedTo"] == "a"
 
 
-def test_import_responses_do_not_tell_a_manager_which_lead_or_batch_matched(env):
+def test_import_responses_tell_an_md_which_lead_and_batch_matched_like_an_admin(env):
     first = imported(env, [lead_row(1), lead_row(2)], assign_to="a")  # the admin's upload
     data = meta_export([lead_row(1), lead_row(3)])
     act_as(env, "manager")
     other = env.client.post("/api/leads/import", files={"file": ("leads.csv", data, "text/csv")}, data={"dry_run": "true"}).json()
-    assert other["rowsDuplicate"] == 1 and [d["scope"] for d in other["duplicates"]] == ["database"]
-    assert other["duplicates"][0]["existingLeadId"] is None
+    assert other["rowsDuplicate"] == 1 and other["duplicates"][0]["existingLeadId"]
     same = env.client.post("/api/leads/import", files={"file": ("leads.csv", meta_export([lead_row(1), lead_row(2)]), "text/csv")}, data={"dry_run": "true"}).json()
-    assert same["sameFileBefore"] == {"batchId": None, "uploadedAt": None, "rowsNew": None}, "a match is reported, not whose or when"
-    assert first["batchId"] not in str(same)
+    assert same["sameFileBefore"]["batchId"] == first["batchId"]
     act_as(env, "admin")
-    mine = env.client.post("/api/leads/import", files={"file": ("leads.csv", data, "text/csv")}, data={"dry_run": "true"}).json()
-    assert mine["duplicates"][0]["existingLeadId"]
     admin_same = env.client.post("/api/leads/import", files={"file": ("leads.csv", meta_export([lead_row(1), lead_row(2)]), "text/csv")}, data={"dry_run": "true"}).json()
     assert admin_same["sameFileBefore"]["batchId"] == first["batchId"]
 
@@ -78,7 +73,7 @@ def test_a_lead_that_is_not_yours_is_not_found_and_names_nobody(env):
     ids = ids_of(env)
     env.db.execute(text("UPDATE crm_leads SET owner_id = NULL WHERE id = :i"), {"i": ids[1]})
     env.db.commit()
-    for who in ("a", "manager"):
+    for who in ("a",):   # an MD works and sees every lead, like an admin
         act_as(env, who)
         for lead_id in ids:
             for response in (env.client.post(f"/api/leads/{lead_id}/call", json={"outcome": "answered"}),
@@ -90,14 +85,14 @@ def test_a_lead_that_is_not_yours_is_not_found_and_names_nobody(env):
 
 # ------------------------------------------------------------------ candidates follow the lead rule: only the admin hands them out
 
-def test_a_manager_converting_a_lead_cannot_pick_the_recruiter(env):
+def test_an_md_converting_a_lead_picks_the_recruiter_like_an_admin(env):
     imported(env, [lead_row(1)], assign_to="a")
     lead_id = ids_of(env)[0]
     own_one(env, lead_id)
     act_as(env, "manager")
     done = convert_with_resume(env, lead_id, overrides={"assignTo": "b"})
     assert done.status_code == 200, done.text
-    assert done.json()["candidate"]["ownerId"] == "manager"
+    assert done.json()["candidate"]["ownerId"] == "b"
 
 
 # ------------------------------------------------------------------ 4, 5, 6. phones

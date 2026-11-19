@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AuditEntry, Role
 from app.services.lead_sheet import fail
+from app.core.roles import is_admin_level
 
 ACTION = "Permanently deleted lead upload"
 LOCK_PREFIX = "crm-lead-resume:"
@@ -21,8 +22,8 @@ log = logging.getLogger(__name__)
 
 
 def _admin(user):
-    if user.role != Role.admin:
-        raise fail(403, "admin_required", "Only an administrator can permanently delete an upload.")
+    if not is_admin_level(user):
+        raise fail(403, "admin_required", "Only an admin or MD can permanently delete an upload.")
 
 
 @contextmanager

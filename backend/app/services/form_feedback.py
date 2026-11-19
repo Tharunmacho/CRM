@@ -17,6 +17,7 @@ from app.db.models import (
     Application, ApplicationFeedback, ApplicationStatus, AuditEntry, Candidate, Notification, Role, User,
 )
 from app.domain.stages import stage_by_no
+from app.core.roles import ADMIN_LEVEL_ROLES, is_admin_level
 
 KINDS = ("update", "delay", "issue", "client", "candidate")
 REASONS = {
@@ -24,7 +25,7 @@ REASONS = {
     "waiting_documents": "Waiting for documents", "waiting_visa": "Waiting for the visa",
     "waiting_payment": "Waiting for a payment", "other": "Other",
 }
-NOTIFY_KINDS = ("delay", "issue")  # these tell the admins and managers
+NOTIFY_KINDS = ("delay", "issue")  # these tell the admins and MDs
 EDIT_WINDOW = timedelta(minutes=15)
 LIMIT_HOURS = 48
 MAX_ITEMS = 50
@@ -54,7 +55,7 @@ def within_window(created_at: datetime, now: datetime | None = None) -> bool:
 
 def can_change(user: User, author_id: str | None, created_at: datetime, now: datetime | None = None) -> bool:
     """Admin may delete any note; everyone else only their own, within 15 minutes of writing it."""
-    return user.role == Role.admin or (author_id == user.id and within_window(created_at, now))
+    return is_admin_level(user) or (author_id == user.id and within_window(created_at, now))
 
 
 def stage_clock(application, tasks: list, stage_rows: list, items: list, now: datetime) -> dict | None:
@@ -126,17 +127,17 @@ def _application(db: Session, candidate_id: str, application_id: str | None) -> 
 
 
 def _notify(db: Session, user: User, candidate, row: ApplicationFeedback) -> None:
-    """Delay and issue notes tell every active admin and manager (not the writer)."""
+    """Delay and issue notes tell every active admin and MD (not the writer)."""
     label = "Delay" if row.kind == "delay" else "Issue"
     reason = REASONS.get(row.reason or "")
     detail = f"{user.name}: " + (f"{reason}. " if reason else "") + row.body[:200]
-    for person in db.scalars(select(User).where(User.active.is_(True), User.role.in_((Role.admin, Role.manager)), User.id != user.id)):
+    for person in db.scalars(select(User).where(User.active.is_(True), User.role.in_(ADMIN_LEVEL_ROLES), User.id != user.id)):
         db.add(Notification(user_id=person.id, kind="feedback", title=f"{label} noted for {candidate.name}", detail=detail,
                             link_to=f"/candidates/{candidate.id}/application"))
 
 
 def create(db: Session, user: User, candidate_id: str, *, kind: str, reason: str | None, body: str, application_id: str | None) -> ApplicationFeedback:
-    """Add a note in the caller's transaction (the caller commits). Owner, admin and manager only."""
+    """Add a note in the caller's transaction (the caller commits). Owner, admin and MD only."""
     from app.core.deps import ensure_can_work_candidate
     candidate = db.get(Candidate, candidate_id)
     if candidate is None:
@@ -182,9 +183,9 @@ def edit(db: Session, user: User, candidate_id: str, feedback_id: str, *, kind: 
 def delete(db: Session, user: User, candidate_id: str, feedback_id: str) -> None:
     row = _own(db, candidate_id, feedback_id)
     if not can_change(user, row.author_id, row.created_at):
-        if user.role != Role.admin and row.author_id == user.id:
-            raise HTTPException(403, "A note can be deleted for 15 minutes after it is written. Ask an admin to remove it.")
-        raise HTTPException(403, "Only the person who wrote a note, or an admin, can delete it.")
+        if not is_admin_level(user) and row.author_id == user.id:
+            raise HTTPException(403, "A note can be deleted for 15 minutes after it is written. Ask an admin or MD to remove it.")
+        raise HTTPException(403, "Only the person who wrote a note, an admin or an MD, can delete it.")
     candidate = db.get(Candidate, candidate_id)
     db.add(AuditEntry(actor_id=user.id, action="Application form: feedback deleted", target=candidate.name if candidate else None,
                       entity_type="candidate", entity_id=candidate_id,

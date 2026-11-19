@@ -1,7 +1,7 @@
 """A person's correction of where one page of a scan belongs ("this page is a medical report, not Other").
 
 Small and safe on purpose:
-  * only the person who uploaded the file, a manager or an admin (and, for a file already on a candidate, anyone who may work that
+  * only the person who uploaded the file, an MD or an admin (and, for a file already on a candidate, anyone who may work that
     candidate); the page must exist in the job's own stored file; the same correction twice changes nothing (idempotent);
   * nothing is read in the request: a saved candidate's page is cut out and filed in the chosen field (a resume / passport / Aadhaar page
     is queued for the reader); a file not yet attached has the page's kind changed in its saved reading, so it is filed that way when the
@@ -24,6 +24,7 @@ from app.db.models import Attachment, AuditEntry, Candidate, DocumentExtractionJ
 from app.services import bulk_candidate_import as bulk
 from app.services import page_sort
 from app.services.document_storage import read_bytes
+from app.core.roles import is_admin_level
 
 IDENTITY = ("resume", "passport", "aadhaar")
 
@@ -38,7 +39,7 @@ def _job(db, job_id: str, user) -> DocumentExtractionJob:
     job = db.scalar(select(DocumentExtractionJob).options(undefer(DocumentExtractionJob.state), undefer(DocumentExtractionJob.result),
                                                           undefer(DocumentExtractionJob.draft))
                     .where(DocumentExtractionJob.id == job_id).with_for_update())
-    if job is None or job.kind == "resort" or (job.owner_id != user.id and user.role not in (Role.admin, Role.manager)):
+    if job is None or job.kind == "resort" or (job.owner_id != user.id and not is_admin_level(user)):
         raise HTTPException(404, "Document intake not found")
     return job
 

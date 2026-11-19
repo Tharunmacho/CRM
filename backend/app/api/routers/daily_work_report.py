@@ -9,7 +9,7 @@ previousUntil are null, period.partial false, period.allTime true), series by we
 "month"), compliance null.
 
 (1) GET /api/reports/daily-work?from=&to=&staff=<userId|all>&client=<companyId|all>
-    defaults from = to = today; more than 366 days -> 422; from after to -> 422. Admin/manager: everyone, `staff` narrows.
+    defaults from = to = today; more than 366 days -> 422; from after to -> 422. Admin/MD: everyone, `staff` narrows.
     A recruiter (role staff): scope "self", staff = [themselves], compliance null; naming someone else -> 403.
     {"period": {"from","to","days","previousFrom","previousTo","bucket": "day"|"week"},
      "generatedAt": ISO, "scope": "team"|"self",

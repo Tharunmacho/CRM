@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import and_, func, select
 
-from app.db.models import AttendanceCalendarDay, Candidate, Remark, Role, Task, TaskKind, User
+from app.db.models import AttendanceCalendarDay, Candidate, Remark, Role, Task, TaskKind, User, not_deleted_user
 
 
 def directory_period(today: date, from_date: date | None, to_date: date | None):
@@ -45,7 +45,7 @@ def _identity_query(today):
     # Deliberately select public identity fields, never credentials or session data.
     return select(User.id, User.name, User.email, User.phone, User.role, User.active,
                   User.receives_auto_assign, User.on_leave, leave.c.status.label("approved_leave")).outerjoin(
-        leave, leave.c.user_id == User.id).order_by(func.lower(User.name), User.id)
+        leave, leave.c.user_id == User.id).where(not_deleted_user()).order_by(func.lower(User.name), User.id)
 
 
 def _identity(row):

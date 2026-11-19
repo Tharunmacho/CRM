@@ -109,9 +109,9 @@ def test_attention_memo_is_per_account_and_a_new_failure_replaces_it(intake, api
     admin_first = api.get("/api/inbox/attention").json()
     assert admin_first["canRetry"] is True and admin_first["items"][0]["retryable"] is True
 
-    api.as_user("poll-manager")  # same data, different rights: must not receive the admin's entry
+    api.as_user("poll-manager")  # an MD holds the admin's rights; a failed email is retried by any admin-level role
     manager = api.get("/api/inbox/attention").json()
-    assert manager["canRetry"] is False and manager["items"][0]["retryable"] is False
+    assert manager["canRetry"] is True and manager["items"][0]["retryable"] is True
 
     api.as_user("poll-staff")  # no rights at all, even though an answer is kept for others
     assert api.get("/api/inbox/attention").status_code == 403
@@ -130,8 +130,8 @@ def test_inbox_health_is_admin_only_even_when_an_answer_is_kept(intake, api):
     assert first.status_code == 200
     _, statements = statements_for(intake, api, "/api/inbox/health")
     assert_select_budget(statements, 1)
-    api.as_user("poll-manager")
-    assert api.get("/api/inbox/health").status_code == 403
+    api.as_user("poll-manager")   # an MD may read the mailbox health, like an admin
+    assert api.get("/api/inbox/health").status_code == 200
     api.as_user("poll-staff")
     assert api.get("/api/inbox/health").status_code == 403
 
@@ -165,7 +165,9 @@ def test_whatsapp_health_is_admin_only_kept_and_current(intake, api):
     assert first.status_code == 200 and first.json()["counts"]["failed"] == 1
     _, statements = statements_for(intake, api, "/api/whatsapp/health")
     assert_select_budget(statements, 1)
-    api.as_user("poll-manager")
+    api.as_user("poll-manager")   # an MD may read the WhatsApp health, like an admin
+    assert api.get("/api/whatsapp/health").status_code == 200
+    api.as_user("poll-staff")
     assert api.get("/api/whatsapp/health").status_code == 403
     api.as_user("admin")
     add_whatsapp(intake, "two", "failed")

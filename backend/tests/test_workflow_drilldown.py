@@ -66,8 +66,6 @@ def test_reassignment_requires_reason_and_preserves_closed_task_owner(workspace,
     assert history_client.post('/api/candidates/reassign', json={**payload, 'reason': '  '}).status_code == 422
     history_client.cookies.set(SESSION_COOKIE, 'history-owner')
     assert history_client.post('/api/candidates/reassign', json={**payload, 'reason': 'Staff cannot reassign'}).status_code == 403
-    history_client.cookies.set(SESSION_COOKIE, 'history-manager')
-    assert history_client.post('/api/candidates/reassign', json={**payload, 'reason': 'Only the admin assigns candidates'}).status_code == 403
     history_client.cookies.set(SESSION_COOKIE, 'history-admin')
     response = history_client.post('/api/candidates/reassign', json={**payload, 'reason': '  Rebalance recruitment work  '})
     assert response.status_code == 200, response.text
@@ -237,15 +235,11 @@ def test_reassignment_restarts_clock_only_when_admin_chooses(workspace):
         assert audit.meta["reason"] == "Employer asked for more time"
 
 
-def test_reassignment_clock_restart_is_admin_only_and_needs_a_reason(workspace):
+def test_reassignment_clock_restart_needs_a_reason(workspace):   # an MD may restart it like an admin, so only the reason is checked
     from fastapi import HTTPException
     with workspace() as db:
         task = add_task(db, due_at=NOW - timedelta(hours=3))
         deadline = task.due_at
-        with pytest.raises(HTTPException) as denied:
-            reassign(ReassignIn(candidateIds=["candidate"], toUserId="other", reason="Cover workload",
-                                restartClock=True, restartReason="Needs more time"), db, db.get(User, "manager"))
-        assert denied.value.status_code == 403
         with pytest.raises(HTTPException) as missing:
             reassign(ReassignIn(candidateIds=["candidate"], toUserId="other", reason="Cover workload", restartClock=True), db, db.get(User, "admin"))
         assert missing.value.status_code == 422

@@ -83,14 +83,69 @@ def assigned_work(env):
         db.commit()
 
 
-def test_all_account_routes_require_admin(env):
-    for role in ['staff', 'manager']:
-        env.client.cookies.set(SESSION_COOKIE, 'session-' + role)
-        for method, path, payload in [('get', '/api/users', None), ('post', '/api/users', {}),
-                ('patch', '/api/users/staff', {}), ('post', '/api/users/staff/password', {'password': 'new-test-password'}),
-                ('post', '/api/users/staff/force-logout', None), ('get', '/api/users/staff/audit', None)]:
-            response = getattr(env.client, method)(path, **({'json': payload} if payload is not None else {}))
-            assert response.status_code == 403
+ACCOUNT_ROUTES = [('get', '/api/users', None), ('post', '/api/users', {}),
+                  ('patch', '/api/users/staff', {}), ('post', '/api/users/staff/password', {'password': 'new-test-password'}),
+                  ('post', '/api/users/staff/force-logout', None), ('get', '/api/users/staff/audit', None)]
+
+
+def test_all_account_routes_require_admin_level(env):
+    # A recruiter is refused everywhere; an MD (stored as `manager`) has every account route an admin has.
+    env.client.cookies.set(SESSION_COOKIE, 'session-staff')
+    for method, path, payload in ACCOUNT_ROUTES:
+        response = getattr(env.client, method)(path, **({'json': payload} if payload is not None else {}))
+        assert response.status_code == 403
+    env.client.cookies.set(SESSION_COOKIE, 'session-manager')
+    for method, path, payload in ACCOUNT_ROUTES:
+        response = getattr(env.client, method)(path, **({'json': payload} if payload is not None else {}))
+        assert response.status_code not in (401, 403), (method, path, response.status_code)
+    assert env.client.get('/api/users').json()[0]['id']
+
+
+def act_as_md(env):
+    env.client.cookies.set(SESSION_COOKIE, 'session-manager')
+
+
+def test_an_md_creates_and_edits_accounts_and_may_name_the_role_md(env):
+    act_as_md(env)
+    created = env.client.post('/api/users', json={'name': 'New Admin', 'email': 'new.admin@example.test', 'role': 'admin', 'password': 'a-long-password'})
+    assert created.status_code == 201 and created.json()['role'] == 'admin'
+    for number, word in enumerate(('md', 'MD', 'manager')):
+        made = env.client.post('/api/users', json={'name': 'Meera ' + word, 'email': f'meera.{number}@example.test', 'role': word, 'password': 'a-long-password'})
+        assert made.status_code == 201 and made.json()['role'] == 'manager', word
+    assert env.client.patch('/api/users/staff', json={'role': 'md', 'reassignToUserId': 'receiver'}).json()['role'] == 'manager'
+    assert env.client.post('/api/users', json={'name': 'X', 'email': 'x@example.test', 'role': 'owner', 'password': 'a-long-password'}).status_code == 422
+    with env.factory() as db:
+        assert db.get(User, created.json()['id']).role == Role.admin
+
+
+def test_an_md_cannot_remove_the_last_real_admin_but_can_when_another_exists(env):
+    act_as_md(env)
+    # 'admin' is the only active real admin: the MD may not demote or deactivate them.
+    assert env.client.patch('/api/users/admin', json={'role': 'manager'}).status_code == 409
+    assert env.client.patch('/api/users/admin', json={'active': False}).status_code == 409
+    # Another admin (made by the MD) makes the first one removable, exactly as for an admin.
+    assert env.client.post('/api/users', json={'name': 'Second', 'email': 'second@example.test', 'role': 'admin', 'password': 'a-long-password'}).status_code == 201
+    assert env.client.patch('/api/users/admin', json={'role': 'staff'}).status_code == 200
+
+
+def test_an_md_is_an_ordinary_target_for_admin_and_md_but_cannot_change_or_switch_off_themselves(env):
+    act_as_md(env)
+    assert env.client.patch('/api/users/manager', json={'role': 'staff'}).status_code == 409
+    assert env.client.patch('/api/users/manager', json={'active': False}).status_code == 409
+    assert env.client.patch('/api/users/manager', json={'name': 'Renamed MD'}).status_code == 200   # a plain edit of oneself is fine
+    # An admin demotes or deactivates an MD under the same rules as anyone else.
+    env.client.cookies.set(SESSION_COOKIE, 'session-admin')
+    assert env.client.patch('/api/users/manager', json={'role': 'staff'}).status_code == 200
+    assert env.client.patch('/api/users/manager', json={'role': 'md'}).status_code == 200
+    assert env.client.patch('/api/users/manager', json={'active': False}).status_code == 200
+
+
+def test_the_audit_history_keeps_the_stored_role_value_for_the_screen_to_label(env):
+    act_as_md(env)
+    env.client.patch('/api/users/receiver', json={'role': 'md'})
+    items = env.client.get('/api/users/receiver/audit').json()['items']
+    changes = [item['meta']['changes']['role'] for item in items if item['meta'].get('changes', {}).get('role')]
+    assert changes and changes[0]['after'] == 'manager'
 
 
 def test_create_is_persistent_normalized_and_never_returns_or_audits_password(env):

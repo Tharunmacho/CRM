@@ -259,7 +259,7 @@ candidate). Returns `{ "deleted": n, "kept": m }`. The batch row stays (marked `
 | --- | --- |
 | `q` | case-insensitive; comma-separated terms must **all** match; each term is a substring of name, phone digits (a phone typed with spaces/+ also works), e-mail, city, state, position, country interest, campaign, ad, ad set, form, owner name, notes, status (label or key) |
 | `status` | one or more (repeat the param or comma-separate) |
-| `campaign`, `form`, `position`, `country`, `platform` | exact (case-insensitive) match on the stored value; comma-separate for several |
+| `campaign`, `form`, `position`, `country`, `platform` | exact (case-insensitive) match on the stored value; comma-separate for several. A stored value that itself contains a comma (`Qatar, Kitchen (Doha)`) also matches as the whole text |
 | `owner` | `me`, `unassigned`, or a user id |
 | `created_from`, `created_to` | `YYYY-MM-DD` Asia/Kolkata calendar days (both included), on the date chosen by `date_field` |
 | `date_field` | which date `created_from` / `created_to` use: `uploaded` (default; `created_at`, when the lead was imported into the CRM) or `created` (the platform's own `createdTime`, else the upload time when the sheet had none). Anything else is `422` |

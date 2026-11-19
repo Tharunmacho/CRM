@@ -13,6 +13,7 @@ from app.db.models import (
 )
 from app.services import mail_providers
 from app.services.parallel_reads import parallel_reads
+from app.core.roles import is_admin_level
 
 ATTENTION_STATUSES = ("failed", "needs_review")
 ATTENTION_LIMIT = 20
@@ -116,13 +117,13 @@ def _manual_items(db: Session, user: User) -> list[dict]:
         "files": [row.filename], "reason": _reason(row.last_error, row.status),
         "attempts": row.attempts, "updatedAt": row.updated_at, "candidateId": row.candidate_id,
         # Manual uploads are owner-scoped: the OCR retry route only accepts the uploader.
-        "retryable": user.role == Role.admin and row.owner_id == user.id and row.kind in MANUAL_RETRY_KINDS,
+        "retryable": is_admin_level(user) and row.owner_id == user.id and row.kind in MANUAL_RETRY_KINDS,
     } for row in rows]
 
 
 def attention_list(db: Session, user: User) -> dict:
     """Most recent failed or needs-review intake from email, WhatsApp and manual uploads."""
-    can_retry = user.role == Role.admin
+    can_retry = is_admin_level(user)
 
     def counts(session):
         # The three totals are one statement (three scalar subqueries), not three round trips.

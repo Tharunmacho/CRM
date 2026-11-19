@@ -86,7 +86,12 @@ def test_preview_is_readonly_and_deletion_removes_only_owned_upload_with_confirm
     assert len(observed)==1
 
 
-@pytest.mark.parametrize("role",["manager","a"])
+def test_an_md_can_preview_a_deletion_like_an_admin(env):
+    batch=make_batch(env);act_as(env,"manager")
+    assert env.client.get(f"/api/leads/batches/{batch}/deletion-preview").status_code==200
+
+
+@pytest.mark.parametrize("role",["a"])
 def test_non_admin_cannot_preview_or_delete(env,role):
     batch=make_batch(env);state=preview(env,batch);act_as(env,role)
     assert env.client.get(f"/api/leads/batches/{batch}/deletion-preview").status_code==403

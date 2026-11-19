@@ -12,7 +12,7 @@ from pydantic import ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.api.schemas import Wire
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import Role, User
 from app.db.session import get_db
 from app.services import lead_bulk
@@ -57,7 +57,7 @@ def bulk(body: BulkBody, db: Session = Depends(get_db), user: User = Depends(cur
 
 
 @router.delete("/{lead_id}")
-def delete_lead(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def delete_lead(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     """Admin only. Refused (409 `lead_linked`) for a converted / linked lead. Anyone in a later upload is added again."""
     try:
         result = lead_bulk.delete_one(db, user, lead_id)

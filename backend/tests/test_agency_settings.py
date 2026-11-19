@@ -223,12 +223,18 @@ def test_singleton_and_code_rules_are_enforced_by_the_database(desk):
 
 # ------------------------------------------------------------------ permissions and validation
 
-def test_everyone_signed_in_reads_but_only_an_admin_writes(desk):
+def test_an_md_writes_the_agency_settings_like_an_admin(desk):
+    desk.sign_in("manager")
+    assert put(desk).status_code == 200
+    assert desk.client.post("/api/settings/currencies", json={"code": "BGN", "name": "Lev"}).status_code != 403
+
+
+def test_everyone_signed_in_reads_but_only_admin_level_roles_write(desk):
     for who in ("staff", "manager", "admin"):
         desk.sign_in(who)
         body = desk.client.get("/api/settings").json()
         assert body["name"] == OLD_NAME and body["timezone"] == "Asia/Kolkata" and body["slaHours"] == 48 and body["editable"] is True
-    for who in ("staff", "manager"):
+    for who in ("staff",):
         desk.sign_in(who)
         assert put(desk).status_code == 403
         assert desk.client.post("/api/settings/currencies", json={"code": "BGN", "name": "Lev"}).status_code == 403

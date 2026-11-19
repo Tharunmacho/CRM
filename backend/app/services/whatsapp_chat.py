@@ -15,6 +15,7 @@ from app.db.models import (AuditEntry, Candidate, Role, User, WhatsAppChannel, W
 from app.integrations import whatsapp as provider
 from app.services.candidate_identity import normalize_phone
 from app.services.document_storage import read_bytes
+from app.core.roles import is_admin_level
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -48,7 +49,7 @@ def _channel(db, phone_id, settings=None, *, sending=False):
 def _send_permission(db, conversation, actor):
     if actor is None or not actor.active:
         return False, "An active employee account is required."
-    if actor.role in (Role.admin, Role.manager): return True, None
+    if is_admin_level(actor): return True, None
     candidate = db.scalar(select(Candidate).options(load_only(Candidate.id, Candidate.owner_id)).where(Candidate.id == conversation.candidate_id)) if conversation.candidate_id else None
     if actor.role == Role.staff and candidate and candidate.owner_id == actor.id: return True, None
     return False, "A supervisor or the linked candidate's current recruiter can send messages."
@@ -63,7 +64,7 @@ def window(conversation, at=None):
 def conversation_json(db, row, actor, settings=None, *, at=None, candidate=None, channel=None):
     candidate = candidate or (db.scalar(select(Candidate).options(load_only(Candidate.id, Candidate.ref, Candidate.care_id, Candidate.name, Candidate.owner_id)).where(Candidate.id == row.candidate_id)) if row.candidate_id else None)
     channel = channel or _channel(db, row.phone_number_id)
-    can_send = bool(actor.active and (actor.role in (Role.admin, Role.manager) or
+    can_send = bool(actor.active and (is_admin_level(actor) or
         (actor.role == Role.staff and candidate and candidate.owner_id == actor.id)))
     reason = None if can_send else "A supervisor or the linked candidate's current recruiter can send messages."
     connected = channel.enabled and (settings is None or (settings.whatsapp_enabled and
@@ -85,9 +86,9 @@ def open_conversation(db, phone_id, number, *, candidate_id=None, actor=None):
         WhatsAppConversation.peer_number == number))
     if actor and actor.role == Role.staff:
         if not existing or not _send_permission(db, existing, actor)[0]:
-            raise HTTPException(403, "Ask a manager or admin to link this conversation to your candidate first.")
-    if candidate_id and (not actor or actor.role not in (Role.admin, Role.manager)):
-        raise HTTPException(403, "Only a manager or admin can link a candidate to a conversation.")
+            raise HTTPException(403, "Ask an MD or admin to link this conversation to your candidate first.")
+    if candidate_id and (not actor or not is_admin_level(actor)):
+        raise HTTPException(403, "Only an MD or admin can link a candidate to a conversation.")
     if candidate_id and db.scalar(select(Candidate.id).where(Candidate.id == candidate_id)) is None: raise HTTPException(404, "Candidate not found")
     if existing:
         if candidate_id and existing.candidate_id != candidate_id:

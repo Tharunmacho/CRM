@@ -155,8 +155,9 @@ def test_admin_unassigns_a_lead_and_only_the_admin_sees_it_afterwards(env):
     assert notice.user_id == "a"
     # Visibility: the admin finds it under "Unassigned"; the old owner and everyone else no longer see it.
     assert visible_to(env, "admin", owner="none") == {ids[0]}
-    assert visible_to(env, "a") == set(ids[1:]) and visible_to(env, "b") == set() and visible_to(env, "manager") == set()
-    for who in ("a", "b", "manager"):
+    assert visible_to(env, "a") == set(ids[1:]) and visible_to(env, "b") == set()
+    assert visible_to(env, "manager", owner="none") == {ids[0]}, "an MD finds it under Unassigned exactly like an admin"
+    for who in ("a", "b"):
         act_as(env, who)
         assert env.client.get(f"/api/leads/{ids[0]}").status_code == 404, who
     # Doing it again is a skip, not an error; and the admin can hand it out again.
@@ -179,9 +180,9 @@ def test_unassign_by_filter_skips_converted_leads(env):
     assert {env.db.get(m.Lead, i).owner_id for i in ids[:2]} == {None}
 
 
-def test_only_the_admin_can_reallocate_or_unassign_leads(env):
+def test_only_admin_level_roles_can_reallocate_or_unassign_leads(env):
     ids = make_leads(env, 1)
-    for who in ("manager", "a", "b"):
+    for who in ("a", "b"):
         act_as(env, who)
         for owner in ("none", "b"):
             assert env.client.post("/api/leads/assign", json={"ids": ids, "ownerId": owner}).status_code == 403, (who, owner)
@@ -340,10 +341,19 @@ def test_a_candidate_with_work_on_an_order_cannot_be_unassigned(env):
     assert reassign(env, [mapped.id], "b").status_code == 200
 
 
-def test_only_the_admin_can_unassign_candidates(env):
+def test_an_md_can_unassign_candidates_like_an_admin(env):
     candidate = add_candidate(env, 1)
     env.db.commit()
-    for who in ("manager", "a", "b"):
+    act_as(env, "manager")
+    assert env.client.post("/api/candidates/unassign", json={"candidateIds": [candidate.id]}).status_code == 200
+    env.db.expire_all()
+    assert env.db.get(m.Candidate, candidate.id).owner_id is None
+
+
+def test_only_admin_level_roles_can_unassign_candidates(env):
+    candidate = add_candidate(env, 1)
+    env.db.commit()
+    for who in ("a", "b"):
         act_as(env, who)
         assert env.client.post("/api/candidates/unassign", json={"candidateIds": [candidate.id]}).status_code == 403, who
     env.db.expire_all()
@@ -387,11 +397,14 @@ def test_unassign_checks_a_whole_selection_in_a_fixed_number_of_statements(env):
     assert len(seen) < 25, f"{len(seen)} statements for 8 candidates"
 
 
-def test_a_manager_cannot_reassign_or_sweep_candidates(env):
+def test_a_recruiter_cannot_reassign_or_sweep_candidates_but_an_md_can(env):
     candidate = add_candidate(env, 1)
     env.db.commit()
-    act_as(env, "manager")
+    act_as(env, "a")
     assert reassign(env, [candidate.id], "b").status_code == 403
     assert env.client.post("/api/candidates/assign-waiting").status_code == 403
     env.db.expire_all()
     assert env.db.get(m.Candidate, candidate.id).owner_id == "a"
+    act_as(env, "manager")
+    assert reassign(env, [candidate.id], "b").status_code == 200
+    assert env.client.post("/api/candidates/assign-waiting").status_code == 200

@@ -29,7 +29,7 @@ candidate goes back to the Data Bank (status not interested, or needs review kep
 happened too: no row (not even a ticked "Done today" one), and they are in no count (per-recruiter cards, sidebar badge, Today / Overall
 figures); only the Data Bank has them (see `_parked`). A later "yes" call or a new mapping takes them back to the ordinary rules. A rejection
 (not the candidate's own no) stays on the list as before.
-One row per candidate. Admin and manager read every recruiter's lists (optionally one recruiter) with per-recruiter counts.
+One row per candidate. Admin and MD read every recruiter's lists (optionally one recruiter) with per-recruiter counts.
 
 Follow-up order: oldest last update first so stale candidates surface. The last update is the latest of the last stage completed,
 the last remark written on the placement's tasks, the last draft saved and the placement's creation. One row per active placement.
@@ -53,6 +53,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.core.config import get_settings
 from app.services.advance_text import advance_status
+from app.services.agency_display import agency_display_expression
 from app.services.parallel_reads import _SLOTS
 from app.db.models import (
     Application, ApplicationStage, ApplicationStatus, Candidate, CandidateStatus, Client, ClosureReason, Company, DailyGoal, Designation,
@@ -221,7 +222,8 @@ def summarise(counts: list[tuple[int, int]]) -> dict:
 
 
 def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
-    """The list's rows (candidate, waiting since, done at) for these recruiters (ids, or a select of ids), in list order.
+    """The list's rows (candidate, waiting since, done at, agency) for these recruiters (ids, or a select of ids), in list order.
+    `agency` is the tracker's agency text (`agency_display_expression`), None when the candidate has none.
 
     One statement. `load_rows` turns them into the screen's dicts. See the module docstring for the order."""
     now = now or datetime.now(timezone.utc)
@@ -229,7 +231,7 @@ def fetch_rows(db, owner_ids, *, now: datetime | None = None, tz=None) -> list:
     inner = (select(Candidate.id.label("cid"), _waiting_since().label("waiting_since"), _done_at(start, end).label("done_at"))
              .where(Candidate.owner_id.in_(owner_ids), _on_list(start, end)).subquery("w"))
     return db.execute(
-        select(Candidate, inner.c.waiting_since, inner.c.done_at)
+        select(Candidate, inner.c.waiting_since, inner.c.done_at, agency_display_expression().label("agency"))
         .join(inner, inner.c.cid == Candidate.id)
         .order_by(inner.c.done_at.is_not(None), inner.c.done_at.desc().nulls_last(), inner.c.waiting_since.is_(None),
                   inner.c.waiting_since.asc().nulls_last(), Candidate.created_at.desc(), Candidate.id)
@@ -471,7 +473,7 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
         remark_tasks[cand.id] = (stage_tasks.get(placement[0].id) if placement else None) or call_tasks.get(cand.id)
     remarks = _remarks(db, sorted({t for t in remark_tasks.values() if t}))
     out = []
-    for cand, waiting, finished in rows:
+    for cand, waiting, finished, agency in rows:
         placement = chosen[cand.id]
         app, order, company, client, designation = placement if placement else (None, None, None, None, None)
         stage_no = app.current_stage if app else None
@@ -485,7 +487,7 @@ def load_rows(db, owner_ids, *, now: datetime | None = None, tz=None, parallel: 
             "waiting": waiting is not None,
             "status": "done" if finished is not None else "open", "completedAt": finished,
             **placement_fields(order, company, client, designation, cand),
-            "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id,
+            "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None,
             "orderRef": order.ref if order else None, **payment_fields(app, facts),
             "referral": {"source": cand.source.value, "label": SOURCE_LABELS.get(cand.source.value, "Other"),
                          "detail": cand.source_detail if cand.source == Source.referral else None},
@@ -512,7 +514,7 @@ def follow_up_counts(db, owner_ids) -> dict[str, int]:
 
 
 def fetch_follow_up(db, owner_ids) -> list:
-    """(application, candidate, order, company, client, designation, last update, last stage finished) for these recruiters, stalest first. One statement."""
+    """(application, candidate, order, company, client, designation, last update, last stage finished, agency) for these recruiters, stalest first. One statement."""
     stage_at = (select(func.max(ApplicationStage.completed_at)).where(ApplicationStage.application_id == Application.id)
                 .correlate(Application).scalar_subquery())
     remark_at = (select(func.max(Remark.created_at)).select_from(Remark).join(Task, Task.id == Remark.task_id)
@@ -523,7 +525,7 @@ def fetch_follow_up(db, owner_ids) -> list:
                                                                       ApplicationStage.reopened_reason.is_(None))
                 .correlate(Application).scalar_subquery().label("stage_moved_at"))
     return db.execute(
-        select(Application, Candidate, Order, Company, Client, Designation, last, moved_at)
+        select(Application, Candidate, Order, Company, Client, Designation, last, moved_at, agency_display_expression().label("agency"))
         .join(Candidate, Candidate.id == Application.candidate_id).join(Order, Order.id == Application.order_id)
         .join(Company, Company.id == Order.company_id).join(Client, Client.id == Company.client_id)
         .join(Designation, Designation.id == Order.designation_id)
@@ -556,13 +558,13 @@ def load_follow_up(db, owner_ids, *, fetched: list | None = None, parallel: bool
         open_task.setdefault(application_id, task_id)
     facts = stage_facts(fact_rows)
     out = []
-    for app, cand, order, company, client, designation, last_update, moved_at in rows:
+    for app, cand, order, company, client, designation, last_update, moved_at, agency in rows:
         out.append({
             "id": app.id, "applicationId": app.id, "taskId": open_task.get(app.id), "candidateId": cand.id, "ownerId": cand.owner_id,
             "commencementDate": app.commencement_date.isoformat() if app.commencement_date else None,
             "stage": app.current_stage, "lastUpdateAt": last_update, "stageMovedAt": moved_at,
             **placement_fields(order, company, client, designation, cand),
-            "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "orderRef": order.ref,
+            "candidate": cand.name, "candidateRef": cand.ref, "candidateCareId": cand.care_id, "agency": agency or None, "orderRef": order.ref,
             **payment_fields(app, facts), "remark": latest.get(app.id),
         })
     return out

@@ -14,7 +14,7 @@ Both run inside the caller's transaction and the callers already hold the assign
 (`lock_assignment_cursor`), so two candidates arriving together cannot both be counted against the same load.
 "Load" is the number of candidates a person owns; ties go to the lowest name, then the lowest id. An admin's own
 reassignment is never revisited: neither rule runs again after the application exists or the candidate has been created.
-Allocated people who are deactivated, not staff/manager, on leave or absent today are skipped.
+Allocated people who are deactivated, not staff/MD, on leave or absent today are skipped.
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def allocated_ids_for_order(db, order_id: str) -> tuple[list[str], str | None]:
 
 
 def _available(db, user_ids) -> list[User]:
-    """Allocated people who can take a candidate today: active staff/manager, not on leave, not absent."""
+    """Allocated people who can take a candidate today: active staff/MD, not on leave, not absent."""
     if not user_ids:
         return []
     from app.services.attendance_availability import unavailable_staff_ids

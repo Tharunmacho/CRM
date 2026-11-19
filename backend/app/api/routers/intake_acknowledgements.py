@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, IntakeAcknowledgement, IntakeAcknowledgementSettings, Role, WhatsAppSendAttempt
 from app.db.session import get_db
 from app.services.agency_settings import default_acknowledgement
@@ -16,7 +16,7 @@ from app.services.intake_acknowledgements import (TEMPLATE_VALUES, attempt_out, 
 from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(prefix="/api/intake-acknowledgements", tags=["Intake acknowledgements"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 SourceKind = Literal["email", "whatsapp"]
 
 

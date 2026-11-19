@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.routers.candidates import lock_assignment_cursor
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, Candidate, Role, User, WhatsAppChannel, WhatsAppMessage
 from app.db.session import get_db
 from app.integrations.whatsapp import missing_settings, verify_signature
@@ -23,9 +23,10 @@ from app.services.whatsapp_intake import attach_original, receive_payload
 from app.services.whatsapp_chat import record_inbound_payload, reconcile_payload
 from app.services.parallel_reads import parallel_reads
 from app.services.response_cache import cached, scope_of
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 
 
 def receive_chat_payload(db, payload, settings):
@@ -96,8 +97,8 @@ def inbox(q: str = "", page: int = Query(1, ge=1), page_size: int = Query(20, ge
         lambda session: list(session.scalars(select(WhatsAppChannel))),
         lambda session: source_summaries(session, "whatsapp", on_page),
     )
-    return {"configured": settings.whatsapp_enabled and not missing_settings(settings), "missingSettings": missing_settings(settings) if user.role == Role.admin else [],
-        "enabled": settings.whatsapp_enabled, "configuredPhoneNumberId": settings.whatsapp_phone_number_id if user.role == Role.admin else None,
+    return {"configured": settings.whatsapp_enabled and not missing_settings(settings), "missingSettings": missing_settings(settings) if is_admin_level(user) else [],
+        "enabled": settings.whatsapp_enabled, "configuredPhoneNumberId": settings.whatsapp_phone_number_id if is_admin_level(user) else None,
         "webhookPath": "/api/whatsapp/webhook", "total": total, "page": page, "pageSize": page_size,
         "channels": [{"id": row.phone_number_id, "displayNumber": row.display_number, "enabled": row.enabled, "autoIngest": row.auto_ingest,
                       "lastReceivedAt": row.last_received_at, "workerSeenAt": row.worker_seen_at, "lastError": row.last_error} for row in channels],

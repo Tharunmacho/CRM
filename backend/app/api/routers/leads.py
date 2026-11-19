@@ -2,7 +2,7 @@
 
 Contract: docs/workflows/lead-sheet-contract.md. Import/parse rules: app/services/lead_parsing.py and lead_import.py;
 workflow rules: app/services/lead_sheet.py. Reads are open to every signed-in user; working a lead is the assigned staff
-member's (after the daily tasks) or a manager's / admin's.
+member's (after the daily tasks) or an MD's / admin's.
 """
 from __future__ import annotations
 
@@ -15,16 +15,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.api.schemas import Wire
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, Role, User
 from app.db.session import get_db
 from app.services import lead_import, lead_parsing, lead_report, lead_sheet
 from app.services.response_cache import cached, scope_of
 from app.services.lead_sheet import fail
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
-supervisors = require_role(Role.admin, Role.manager)
-admin_only = require_role(Role.admin)  # import history, reports and assigning: the admin hands out and oversees all leads
+supervisors = require_admin_level()
+admin_only = require_admin_level()  # import history, reports and assigning: the admin hands out and oversees all leads
 
 
 def lead_filters(q: str = Query(default="", max_length=500), status: list[str] = Query(default=[]), campaign: list[str] = Query(default=[]),
@@ -48,8 +49,8 @@ def import_leads(file: UploadFile = File(...), dry_run: bool = Form(False), mapp
                  assignee_ids: str | None = Form(None),
                  campaign_label: str | None = Form(None), fill_empty: bool = Form(False), source: Literal["meta_ads", "other"] = Form("meta_ads"),
                  db: Session = Depends(get_db), user: User = Depends(supervisors)):
-    if ((assign_to or "").strip() or (assignee_ids or "").strip()) and user.role != Role.admin:
-        raise fail(403, "forbidden_role", "Only the admin can assign leads. Upload without choosing a person.")
+    if ((assign_to or "").strip() or (assignee_ids or "").strip()) and not is_admin_level(user):
+        raise fail(403, "forbidden_role", "Only an admin or MD can assign leads. Upload without choosing a person.")
     recruiters = None
     if (assignee_ids or "").strip():
         try:
@@ -110,14 +111,14 @@ def batch_report_excel(batch_id: str, db: Session = Depends(get_db), user: User 
 
 
 @router.delete("/batches/{batch_id}")
-def batch_revert(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def batch_revert(batch_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     result = lead_sheet.revert_batch(db, user, batch_id)
     db.commit()
     return result
 
 
 @router.get("/batches/{batch_id}/deletion-preview")
-def batch_deletion_preview(batch_id: str, response: Response, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def batch_deletion_preview(batch_id: str, response: Response, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     from app.services import lead_upload_delete
     response.headers["Cache-Control"] = "private, no-store"
     return lead_upload_delete.preview(db, user, batch_id)
@@ -132,7 +133,7 @@ class PermanentBatchDeletion(BaseModel):
 
 @router.delete("/batches/{batch_id}/permanent")
 def batch_delete_permanently(batch_id: str, body: PermanentBatchDeletion, background: BackgroundTasks,
-                             db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+                             db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     from app.services import lead_upload_delete
     try:
         result, keys = lead_upload_delete.remove(db, user, batch_id, body.previewToken, body.expectedLeadCount, body.confirm)
@@ -321,14 +322,14 @@ class UnconvertBody(Wire):
 
 
 @router.get("/{lead_id}/unconvert-check")
-def unconvert_check(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def unconvert_check(lead_id: str, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     from app.services import lead_reversal
     return lead_reversal.check(db, user, lead_id)
 
 
 @router.post("/{lead_id}/unconvert")
 def unconvert(lead_id: str, body: UnconvertBody, background: BackgroundTasks, db: Session = Depends(get_db),
-              user: User = Depends(require_role(Role.admin))):
+              user: User = Depends(require_admin_level())):
     from app.services import lead_reversal
     return lead_reversal.reverse(db, user, lead_id, body.candidate_id, body.reason, background)
 

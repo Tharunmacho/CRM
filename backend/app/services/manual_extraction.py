@@ -785,7 +785,7 @@ def attach_original(db, user, identifier, candidate_id, settings, *, original_on
     if candidate is None:
         raise HTTPException(404, "Candidate not found")
     job = owned_job(db, identifier, user.id, lock=True)
-    # Adding files is work on the candidate: the assigned recruiter, a manager or an admin. Having entered the
+    # Adding files is work on the candidate: the assigned recruiter, an MD or an admin. Having entered the
     # candidate, or an earlier merge, no longer counts once an admin has given it to someone else.
     from app.core.deps import ensure_can_work_candidate
     ensure_can_work_candidate(candidate, user, db)

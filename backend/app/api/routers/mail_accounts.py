@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.deps import require_role
+from app.core.deps import require_role, require_admin_level
 from app.core.security import SESSION_COOKIE
 from app.db.models import AuditEntry, MailAccount, Role, User
 from app.db.session import get_db, writes_on_get
@@ -28,7 +28,7 @@ from app.services.mail_providers import CustomServer, LABELS
 from app.services.mail_storage import storage_identity
 
 router = APIRouter(tags=["inbox"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 
 # Zoho and generic IMAP mailboxes share one credential model, so an address can move
 # between them (for example a custom domain hosted on Zoho) without losing its cursor.

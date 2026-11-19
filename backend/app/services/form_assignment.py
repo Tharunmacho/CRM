@@ -20,6 +20,7 @@ from app.db.models import (
     Role, Source, User,
 )
 from app.services.agency_display import MACHINE_SOURCE_DETAIL_PATTERN
+from app.core.roles import is_admin_level
 
 SOURCE_LABELS = {"email": "Email", "whatsapp": "WhatsApp", "walk_in": "Walk-in", "referral": "Referral", "other": "Other"}
 SOURCE_ORDER = ("whatsapp", "email", "walk_in", "referral", "other")
@@ -30,9 +31,9 @@ SOURCE_DETAIL_LIMIT = 255
 
 
 def can_change(user: User, candidate) -> dict:
-    """What THIS user may change. Job, source and agency follow the application form's edit rule; the recruiter is the admin only."""
-    editable = user.role in (Role.admin, Role.manager) or (user.role == Role.staff and candidate.owner_id == user.id)
-    return {"job": editable, "source": editable, "agency": editable, "recruiter": user.role == Role.admin}
+    """What THIS user may change. Job, source and agency follow the application form's edit rule; the recruiter is admin-level (admin and MD) only."""
+    editable = is_admin_level(user) or (user.role == Role.staff and candidate.owner_id == user.id)
+    return {"job": editable, "source": editable, "agency": editable, "recruiter": is_admin_level(user)}
 
 
 # ------------------------------------------------------------------ reads (run in the form's parallel round)
@@ -60,7 +61,7 @@ def read_job_options(session: Session, candidate_id: str) -> list:
 
 def read_agencies(session: Session) -> list:
     return list(session.execute(select(ReferenceAgency.id, ReferenceAgency.agency_name, ReferenceAgency.name)
-                                .order_by(ReferenceAgency.agency_name, ReferenceAgency.id)).all())
+                                .order_by(ReferenceAgency.active_agency.desc(), ReferenceAgency.agency_name, ReferenceAgency.id)).all())
 
 
 def read_recruiters(session: Session) -> list:
@@ -128,9 +129,9 @@ def _recruiter(db: Session, user_id: str) -> User:
     from app.services.attendance_availability import unavailable_staff_ids
     target = db.get(User, user_id) if user_id else None
     if target is None or not target.active or target.role not in RECRUITER_ROLES or target.on_leave:
-        raise HTTPException(422, "Choose an active recruiter or manager who is not on leave.")
+        raise HTTPException(422, "Choose an active recruiter or MD who is not on leave.")
     if target.role == Role.staff and target.id in unavailable_staff_ids(db):
-        raise HTTPException(422, "Choose an active recruiter or manager who is not on leave.")
+        raise HTTPException(422, "Choose an active recruiter or MD who is not on leave.")
     return target
 
 
@@ -160,8 +161,8 @@ def apply(db: Session, user: User, candidate_id: str, fields: dict) -> dict:
 
     if db.get(Candidate, candidate_id) is None:
         raise HTTPException(404, "Candidate not found")
-    if "recruiterId" in fields and user.role != Role.admin:
-        raise HTTPException(403, "Only the admin can change the recruiter.")
+    if "recruiterId" in fields and not is_admin_level(user):
+        raise HTTPException(403, "Only an admin or MD can change the recruiter.")
     changed: list[str] = []
     shown: str | None = None
     wants_job = "orderId" in fields

@@ -424,7 +424,9 @@ def test_goal_settings_still_work_but_no_longer_shape_the_daily_list(desk):
     as_user(desk, "manager")
     table = desk.client.get("/api/daily-goals").json()
     assert table["default"] == {"candidates": 5, "morning": 3, "evening": 2, "forwardedToClient": 2, "stageMoves": 5}  # seeded rows
-    assert desk.client.put("/api/daily-goals/default", json={"candidates": 4, "morning": 1}).status_code == 403  # admin only
+    assert desk.client.put("/api/daily-goals/default", json={"candidates": 4, "morning": 1}).status_code == 200  # an MD (stored as manager) is admin-level
+    as_user(desk, "staff")
+    assert desk.client.put("/api/daily-goals/default", json={"candidates": 4, "morning": 1}).status_code == 403  # a recruiter is refused
     as_user(desk, "admin")
     assert desk.client.put("/api/daily-goals/default", json={"candidates": 2, "morning": 3}).status_code == 422
     assert desk.client.put("/api/daily-goals/default", json={}).status_code == 422

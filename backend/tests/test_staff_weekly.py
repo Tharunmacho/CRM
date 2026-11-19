@@ -540,9 +540,12 @@ def api(desk, monkeypatch):
         yield SimpleNamespace(client=client, actor=actor, desk=desk)
 
 
-def test_only_the_admin_can_open_the_report_or_export(api):
+def test_only_admin_and_md_can_open_the_report_or_export(api):
     seed_attendance(api.desk)
-    for role, user in ((Role.manager, "manager"), (Role.staff, "asha")):
+    api.actor.id, api.actor.role = "manager", Role.manager   # an MD gets the same report an admin gets
+    for url in ("/api/reports/staff-weekly", "/api/reports/staff-weekly/asha", "/api/reports/staff-weekly/export?format=csv"):
+        assert api.client.get(url).status_code == 200, url
+    for role, user in ((Role.staff, "asha"),):
         api.actor.id, api.actor.role = user, role
         for url in ("/api/reports/staff-weekly", "/api/reports/staff-weekly/asha", "/api/reports/staff-weekly/export?format=csv"):
             assert api.client.get(url).status_code == 403, (role, url)

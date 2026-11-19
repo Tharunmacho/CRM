@@ -5,13 +5,13 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.deps import require_role
+from app.core.deps import require_role, require_admin_level
 from app.db.models import Role, User
 from app.db.session import get_db
 from app.services import staff_directory as directory
 
 router = APIRouter(prefix="/api/staff-directory", tags=["staff-directory"])
-supervisor = require_role(Role.admin, Role.manager)
+supervisor = require_admin_level()
 
 
 @router.get("/availability")

@@ -1,6 +1,6 @@
-"""One rule for money on a candidate: only the admin sees or changes the service fee, CGST/SGST, invoices and receipts.
+"""One rule for money on a candidate: only an admin or MD sees or changes the service fee, CGST/SGST, invoices and receipts.
 
-Recruiters and managers never receive these figures, the invoice number or the invoice PDF. The server is the source of
+Recruiters never receive these figures, the invoice number or the invoice PDF. The server is the source of
 truth; the screen only mirrors it (capability `view_invoices`). Issuing an invoice after an air-ticket upload is a
 server-side automation that runs whoever uploaded the ticket, so it does not use these checks.
 """
@@ -8,13 +8,14 @@ from fastapi import Depends, HTTPException, status
 
 from app.core.deps import current_user
 from app.db.models import Role, User
+from app.core.roles import is_admin_level
 
-INVOICE_DENIED = "Only the admin can see or change invoices."
+INVOICE_DENIED = "Only an admin or MD can see or change invoices."
 INVOICE_SLOT = "invoice"
 
 
 def can_see_invoices(user: User | None) -> bool:
-    return user is not None and user.role == Role.admin
+    return user is not None and is_admin_level(user)
 
 
 def ensure_can_see_invoices(user: User | None) -> None:

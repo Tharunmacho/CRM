@@ -509,7 +509,7 @@ def test_explicit_agency_takes_precedence_over_an_import_label(desk, registered)
     assert assignment(desk)["agency"] == {"id": "agency" if registered else None, "name": "Bulk import"}
 
 
-def test_recruiter_changes_are_for_the_admin_only(desk):
+def test_recruiter_changes_are_for_admin_level_roles_only(desk):
     app_id = mapped(desk)
     refused = put_assignment(desk, {"recruiterId": "other"})
     assert refused.status_code == 403
@@ -529,9 +529,9 @@ def test_recruiter_changes_are_for_the_admin_only(desk):
                                                                        Task.completed_at.is_(None), Task.cancelled_at.is_(None))) >= 1
         assert db.scalar(select(func.count()).select_from(Notification).where(Notification.user_id == "other")) >= 1
         assert db.scalar(select(func.count()).select_from(AuditEntry).where(AuditEntry.entity_id == "candidate", AuditEntry.action.like("%eassign%"))) >= 1
-    as_user(desk, "manager", Role.manager)
-    assert put_assignment(desk, {"recruiterId": "staff"}).status_code == 403  # a manager works candidates but does not hand them out
-    assert assignment(desk)["can"]["recruiter"] is False and assignment(desk)["options"]["recruiters"] == []
+    as_user(desk, "manager", Role.manager)   # an MD is admin-level: they hand candidates out exactly like an admin
+    assert assignment(desk)["can"]["recruiter"] is True and assignment(desk)["options"]["recruiters"]
+    assert put_assignment(desk, {"recruiterId": "staff"}).status_code == 200
     as_user(desk, "admin", Role.admin)
     assert put_assignment(desk, {"recruiterId": "staff"}).status_code == 200
     with desk.sessions() as db:
@@ -658,9 +658,11 @@ def test_staff_can_delete_or_edit_their_own_note_only_for_fifteen_minutes_and_ad
     assert mine["canEdit"] is True and mine["canDelete"] is True
     edited = desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Fixed note"})
     assert edited.status_code == 200 and edited.json()["feedback"]["items"][0]["body"] == "Fixed note"
-    as_user(desk, "manager", Role.manager)  # nobody else may touch it
+    as_user(desk, "other", Role.staff)  # no other recruiter may touch it
     assert desk.client.delete(url() + f"/feedback/{mine['id']}").status_code == 403
     assert desk.client.put(url() + f"/feedback/{mine['id']}", json={"body": "Hijack"}).status_code == 403
+    as_user(desk, "manager", Role.manager)   # an MD may delete any note, like an admin
+    assert form(desk)["feedback"]["items"][0]["canDelete"] is True
     as_user(desk, "staff", Role.staff)
 
     age_note(desk, mine["id"], 14)

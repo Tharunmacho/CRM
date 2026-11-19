@@ -87,7 +87,7 @@ class TimestampMixin:
 
 class Role(str, enum.Enum):
     admin = "admin"
-    manager = "manager"
+    manager = "manager"  # shown as "MD" everywhere (app/core/roles.py); the stored value never changes
     staff = "staff"
 
 
@@ -195,6 +195,26 @@ class User(Base, PkMixin, TimestampMixin):
     )
     on_leave: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
+    @property
+    def deleted(self) -> bool:
+        """True for a removed account: the login is gone, the row stays only so history keeps a name (see `deleted_user_clause`)."""
+        return (self.email or "").endswith("@" + DELETED_EMAIL_DOMAIN)
+
+
+# A deleted user keeps their auth_users row (some thirty history tables point at it and most of those foreign keys are NOT NULL), but
+# loses the login: password, phone, sessions, and the email, which becomes `deleted-<id>@deleted.invalid` and frees the real address.
+# No schema change: "deleted" is that reserved, unroutable domain. Everything that lists people filters it with `not_deleted_user()`.
+DELETED_EMAIL_DOMAIN = "deleted.invalid"
+
+
+def deleted_user_email(user_id: str) -> str:
+    return f"deleted-{user_id}@{DELETED_EMAIL_DOMAIN}"
+
+
+def not_deleted_user():
+    """SQL condition: the account has not been deleted."""
+    return ~User.email.like(f"%@{DELETED_EMAIL_DOMAIN}")
+
 
 class Session(Base, PkMixin):
     """Own the sessions so an admin can force a logout and read a user's activity."""
@@ -253,7 +273,7 @@ class Client(Base, PkMixin, TimestampMixin):
 
 
 class ClientStaff(Base):
-    """A CRM user (staff or manager) who looks after a client end to end. Candidates for the client's orders are routed to them."""
+    """A CRM user (staff or MD) who looks after a client end to end. Candidates for the client's orders are routed to them."""
 
     __tablename__ = "crm_client_staff"
     __table_args__ = {
@@ -286,6 +306,8 @@ class ReferenceAgency(Base, PkMixin, TimestampMixin):
     # Migration 0033: fixed-set selections, validated by the API. Older rows and older writers leave them as [].
     specialisations: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     preferred_countries: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # Migration 0047: "very active at present", marked by the owner. Active agencies are listed first. Existing rows read false.
+    active_agency: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class Company(Base, PkMixin, TimestampMixin):

@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import (AuditEntry, Candidate, Role, User, WhatsAppChannel, WhatsAppConversation,
     WhatsAppMessage, WhatsAppSendAttempt, WhatsAppTemplate)
 from app.db.session import get_db, writes_on_get
@@ -19,9 +19,10 @@ from app.integrations import whatsapp as provider
 from app.services import whatsapp_chat as chat
 from app.services.parallel_reads import parallel_reads
 from app.services.document_storage import file_response, put_bytes
+from app.core.roles import is_admin_level
 
 router = APIRouter(prefix="/api/whatsapp", tags=["WhatsApp chat"])
-supervisor = require_role(Role.admin, Role.manager)
+supervisor = require_admin_level()
 
 
 class OpenIn(BaseModel):
@@ -76,7 +77,7 @@ def conversations(response: Response, q: str = Query("", max_length=200), page: 
     )
     response.headers["Cache-Control"] = "private, no-store"
     return {"configured": settings.whatsapp_enabled and not provider.missing_settings(settings), "enabled": settings.whatsapp_enabled,
-        "missingSettings": provider.missing_settings(settings) if user.role == Role.admin else [], "page": page, "pageSize": page_size,
+        "missingSettings": provider.missing_settings(settings) if is_admin_level(user) else [], "page": page, "pageSize": page_size,
         "total": total, "conversations": [chat.conversation_json(db, row, user, settings, candidate=candidate, channel=channel) for row, candidate, channel in rows]}
 
 
@@ -222,7 +223,7 @@ def recover_send(conversation_id: str, request_key: str, response: Response, db:
     conversation = chat.get_conversation(db, conversation_id)
     row = db.scalar(select(WhatsAppSendAttempt).where(WhatsAppSendAttempt.conversation_id == conversation_id, WhatsAppSendAttempt.request_key == request_key))
     if row is None: raise HTTPException(404, "Send request not found")
-    if row.sender_user_id != user.id and user.role not in (Role.admin, Role.manager):
+    if row.sender_user_id != user.id and not is_admin_level(user):
         raise HTTPException(403, "You can only retry messages that you sent yourself.")
     response.headers["Cache-Control"] = "private, no-store"
     return {"message": chat.outbound_json(row)}
@@ -272,11 +273,11 @@ def templates(phone_number_id: str | None = None, db: Session = Depends(get_db),
     phone_id = phone_number_id or get_settings().whatsapp_phone_number_id
     rows = db.scalars(select(WhatsAppTemplate).where(WhatsAppTemplate.phone_number_id == phone_id)
         .order_by(WhatsAppTemplate.name, WhatsAppTemplate.language).limit(2000))
-    return {"templates": [chat.template_description(row) for row in rows], "canSync": user.role == Role.admin}
+    return {"templates": [chat.template_description(row) for row in rows], "canSync": is_admin_level(user)}
 
 
 @router.post("/templates/sync")
-def sync_templates(body: SyncIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def sync_templates(body: SyncIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     settings = get_settings()
     if body.phoneNumberId != settings.whatsapp_phone_number_id: raise HTTPException(409, "Choose the WhatsApp number that is set up for this CRM.")
     try: result = chat.sync_templates(db, settings)

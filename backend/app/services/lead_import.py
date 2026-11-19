@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import Lead, LeadBatch, Notification, Role, User
 from app.services import lead_parsing as lp
+from app.core.roles import is_admin_level
 
 LOOKUP_CHUNK = 5000
 INSERT_CHUNK = 1000
@@ -139,7 +140,7 @@ class RecruiterChoiceError(ValueError):
 def resolve_recruiters(db: Session, recruiter_ids: list[str]) -> list[User]:
     """The chosen recruiters in a stable order (account creation, then id), each one an active recruiter who is not on leave.
 
-    Refuses an empty list, the same person twice, an unknown id, a manager or admin, an inactive account and anyone on leave
+    Refuses an empty list, the same person twice, an unknown id, an MD or admin, an inactive account and anyone on leave
     (the leave flag or today's attendance), naming the person so the admin knows who to untick."""
     from app.services.attendance_availability import unavailable_staff_ids
     cleaned = [str(i).strip() for i in recruiter_ids if str(i).strip()]
@@ -232,7 +233,7 @@ def preview_summary(table, columns) -> dict:
 
 def _same_file_out(row, user: User) -> dict:
     """Only the admin (or the uploader) sees which earlier batch held this file and when; anyone else just learns that one exists."""
-    if user.role == Role.admin or row[3] == user.id:
+    if is_admin_level(user) or row[3] == user.id:
         return {"batchId": row[0], "uploadedAt": row[1].isoformat(), "rowsNew": row[2]}
     return {"batchId": None, "uploadedAt": None, "rowsNew": None}
 
@@ -372,7 +373,7 @@ def run_import(db: Session, user: User, data: bytes, file_name: str, *, dry_run:
         "invalid": invalid[:REPORT_RETURNED], "invalidTruncated": len(invalid) > REPORT_RETURNED,
         "assignedTo": assigned_to, "assignedCount": len(fresh) if assigned_to else 0, "assignedOwners": assigned_owners,
     }
-    if user.role != Role.admin:  # a manager learns THAT a stored lead matched, never which one (they see only their own leads)
+    if not is_admin_level(user):  # a recruiter learns THAT a stored lead matched, never which one (they see only their own leads)
         result["duplicates"] = [{**d, "existingLeadId": None} for d in result["duplicates"]]
     if dry_run:
         by_number = dict(rows)

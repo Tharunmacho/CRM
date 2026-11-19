@@ -17,6 +17,7 @@ from app.api.schemas import (
 )
 from app.services.document_reading import pending_expression
 from app.services.document_identity import rejected_expression
+from app.core.roles import ADMIN_LEVEL_ROLES
 from app.db.models import (
     AgencySettings, Application, ApplicationStage, Attachment, Candidate, Client, ClientStaff, Company,
     Currency, Designation, JobCategory, Notification, Order, Remark, Role, Task, TodoItem, User,
@@ -37,7 +38,7 @@ def _fields(model, schema, *extra):
 def client_staff_ids():
     """Each client's allocated CRM users as a JSON array of ids, in one correlated aggregate (no per-row query).
 
-    Only people who can still work the client's candidates count: an active staff or manager account. A user who was
+    Only people who can still work the client's candidates count: an active staff or MD account. A user who was
     deleted has no link left (ON DELETE CASCADE); one who was deactivated or made an admin simply stops being listed.
     """
     found = (
@@ -63,7 +64,7 @@ def _rows(name: str, statement: Select, *ordering):
 
 
 def snapshot_statement(user_id: str, *, compact: bool = False, settings: bool = True, categories: bool = True) -> Select:
-    supervisor = select(User.role.in_([Role.admin, Role.manager])).where(User.id == user_id).scalar_subquery()
+    supervisor = select(User.role.in_(ADMIN_LEVEL_ROLES)).where(User.id == user_id).scalar_subquery()
     owned_candidates = select(Candidate.id).where(Candidate.owner_id == user_id)
     visible_tasks = or_(supervisor, Task.owner_id == user_id)
     visible_applications = or_(supervisor, Application.candidate_id.in_(owned_candidates))

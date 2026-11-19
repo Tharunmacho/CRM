@@ -207,9 +207,12 @@ def test_only_admin_may_retry_and_only_retryable_rows_are_flagged(intake, desk):
     assert can_retry is True
     assert retryable == {ok: True, unreceivable: False, off_job: False, wa_ok: True, wa_nomedia: False,
                          mine: True, theirs: False, attachment: False}
+    # An MD holds every privilege an admin holds, so the retry flags are the admin's, except that a manual upload is retried
+    # only by whoever uploaded it (the OCR retry route accepts the uploader alone): none of these were uploaded by the MD.
     can_retry, retryable = flags("attention-manager")
-    assert can_retry is False and set(retryable) == {ok, unreceivable, off_job, wa_ok, wa_nomedia, mine, theirs, attachment}
-    assert not any(retryable.values())
+    assert can_retry is True and set(retryable) == {ok, unreceivable, off_job, wa_ok, wa_nomedia, mine, theirs, attachment}
+    assert retryable == {ok: True, unreceivable: False, off_job: False, wa_ok: True, wa_nomedia: False,
+                         mine: False, theirs: False, attachment: False}
 
     desk.as_user("attention-staff")
     assert desk.get("/api/inbox/attention").status_code == 403

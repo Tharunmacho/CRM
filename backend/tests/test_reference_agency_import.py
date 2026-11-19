@@ -335,3 +335,91 @@ def test_migration_is_additive_repeatable_and_keeps_existing_values(schema_datab
         assert conn.scalar(text("SELECT place FROM crm_reference_agencies WHERE id='old'")) == "Trichy"
     _migrate(schema_database, "0035_invoice_payments", downgrade=True)
     assert "place" not in {column["name"] for column in inspect(schema_database).get_columns("crm_reference_agencies")}
+
+
+# ------------------------------------------------------------------------------------------------ the "Active agency" flag
+
+def test_active_agency_defaults_to_no_round_trips_and_a_put_without_it_keeps_it(env):
+    plain = create(env, name="Plain", agencyName="Plain Agency")
+    assert plain["activeAgency"] is False
+    active = create(env, name="Busy", agencyName="Busy Agency", activeAgency=True)
+    assert active["activeAgency"] is True and env.db.get(ReferenceAgency, active["id"]).active_agency is True
+    path = "/api/reference-agencies/" + active["id"]
+    kept = env.client.put(path, json={"name": "Busy", "agencyName": "Busy Agency Ltd"})  # an older form never names the flag
+    assert kept.status_code == 200 and kept.json()["activeAgency"] is True
+    off = env.client.put(path, json={"name": "Busy", "agencyName": "Busy Agency Ltd", "activeAgency": False})
+    assert off.json()["activeAgency"] is False
+    on = env.client.put("/api/reference-agencies/" + plain["id"], json={"name": "Plain", "agencyName": "Plain Agency", "activeAgency": True})
+    assert on.json()["activeAgency"] is True
+    changes = env.db.scalars(select(AuditEntry).where(AuditEntry.entity_id == active["id"]).order_by(AuditEntry.at)).all()
+    assert any(entry.meta["changes"].get("active_agency") == {"from": True, "to": False} for entry in changes)
+
+
+@pytest.mark.parametrize("bad", ["maybe", [], {}, 2])
+def test_active_agency_must_be_a_yes_or_no(env, bad):
+    assert env.client.post("/api/reference-agencies", json={"name": "N", "agencyName": "A", "activeAgency": bad}).status_code == 422
+    assert env.db.scalar(select(func.count()).select_from(ReferenceAgency)) == 0
+
+
+def test_list_puts_active_agencies_first_then_newest_first_and_the_picker_follows(env):
+    from app.services.form_assignment import read_agencies
+    oldest = create(env, name="A", agencyName="Alpha")
+    busy_old = create(env, name="B", agencyName="Bravo", activeAgency=True)
+    newest = create(env, name="C", agencyName="Charlie")
+    busy_new = create(env, name="D", agencyName="Delta", activeAgency=True)
+    listed = [item["id"] for item in env.client.get("/api/reference-agencies").json()["items"]]
+    assert listed == [busy_new["id"], busy_old["id"], newest["id"], oldest["id"]]
+    assert [row.agency_name for row in read_agencies(env.db)] == ["Bravo", "Delta", "Alpha", "Charlie"]  # active first, then by name
+    env.client.put("/api/reference-agencies/" + oldest["id"], json={"name": "A", "agencyName": "Alpha", "activeAgency": True})
+    assert [item["agencyName"] for item in env.client.get("/api/reference-agencies").json()["items"]][:3] == ["Delta", "Bravo", "Alpha"]
+
+
+def test_import_reads_an_optional_active_column_and_only_new_agencies_take_it(env):
+    sheet = ("Agency,Contact,Active\nNorth,Alex,Yes\nSouth,Blair,no\nEast,Casey,TRUE\nWest,Devon,inactive\n"
+             "Hill,Eli,1\nLake,Fay,0\nRiver,Gil,Active\nTown,Hal,\n").encode()
+    preview = upload(env, sheet)
+    assert preview["mapping"]["activeAgency"] == 2
+    assert [row["values"]["activeAgency"] for row in preview["rows"]] == [True, False, True, False, True, False, True, False]
+    result = upload(env, sheet, confirm=preview)
+    assert result["created"] == 8
+    saved = {item["agencyName"]: item["activeAgency"] for item in result["items"]}
+    assert saved == {"North": True, "South": False, "East": True, "West": False, "Hill": True, "Lake": False, "River": True, "Town": False}
+    # A sheet with no Active column creates not-active agencies.
+    plain = upload(env, b"Agency,Contact\nOasis,Ira\n")
+    assert plain["rows"][0]["values"]["activeAgency"] is False
+    assert upload(env, b"Agency,Contact\nOasis,Ira\n", confirm=plain)["items"][0]["activeAgency"] is False
+    # A repeated agency with a different Active value is not changed by an import.
+    again = upload(env, b"Agency,Contact,Active\nNorth,Alex,No\n")
+    assert again["counts"]["duplicate"] == 1
+    upload(env, b"Agency,Contact,Active\nNorth,Alex,No\n", confirm=again)
+    assert env.db.scalar(select(ReferenceAgency.active_agency).where(ReferenceAgency.agency_name == "North")) is True
+
+
+def test_import_marks_an_unreadable_active_cell_invalid_without_stopping_the_rest(env):
+    preview = upload(env, b"Agency,Contact,Active\nNorth,Alex,maybe\nSouth,Blair,yes\n")
+    assert preview["counts"]["invalid"] == 1 and preview["counts"]["create"] == 1
+    assert "yes or no" in preview["rows"][0]["message"]
+    assert upload(env, b"Agency,Contact,Active\nNorth,Alex,maybe\nSouth,Blair,yes\n", confirm=preview)["created"] == 1
+
+
+def test_active_flag_migration_is_additive_repeatable_and_reversible(schema_database):
+    _migrate(schema_database, "0046_doc_remark_templates")
+    assert "active_agency" not in {column["name"] for column in inspect(schema_database).get_columns("crm_reference_agencies")}
+    with schema_database.begin() as conn:
+        conn.execute(text("INSERT INTO crm_reference_agencies (id,name,agency_name) VALUES ('old','Alex','North Agency')"))
+    _migrate(schema_database, "head")
+    columns = {column["name"]: column for column in inspect(schema_database).get_columns("crm_reference_agencies")}
+    assert columns["active_agency"]["nullable"] is False and columns["active_agency"]["comment"]
+    with schema_database.begin() as conn:
+        assert conn.scalar(text("SELECT active_agency FROM crm_reference_agencies WHERE id='old'")) is False  # existing agencies: not active
+        # An older writer that does not name the column still inserts.
+        conn.execute(text("INSERT INTO crm_reference_agencies (id,name,agency_name,staff_contacts) VALUES ('older','B','Agency','[]')"))
+        conn.execute(text("UPDATE crm_reference_agencies SET active_agency = true WHERE id='old'"))
+        conn.execute(text("UPDATE alembic_version SET version_num='0046_doc_remark_templates'"))
+    _migrate(schema_database, "head")  # running it twice keeps what was marked
+    with schema_database.connect() as conn:
+        assert conn.scalar(text("SELECT active_agency FROM crm_reference_agencies WHERE id='old'")) is True
+        assert conn.scalar(text("SELECT active_agency FROM crm_reference_agencies WHERE id='older'")) is False
+    _migrate(schema_database, "0046_doc_remark_templates", downgrade=True)
+    assert "active_agency" not in {column["name"] for column in inspect(schema_database).get_columns("crm_reference_agencies")}
+    _migrate(schema_database, "head")

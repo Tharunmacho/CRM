@@ -21,6 +21,7 @@ from app.integrations.ocr.person_split import page_identity, propose_groups
 from app.services.candidate_identity import (enrich_empty, identity_matches, merge_ocr_data, name_relation,
     normalize_candidate_values, normalize_phone, normalize_email, normalize_passport)
 from app.services.document_storage import put_bytes, read_bytes
+from app.core.roles import is_admin_level
 
 MAX_PAGES = 120
 KINDS = {"resume", "passport", "aadhaar", "photo", "education", "experience", "source_bundle"}
@@ -184,8 +185,8 @@ def _source_records(db, source_type, source_id, user):
 
 
 def prepare_bundle(db, source_type, source_id, user):
-    if source_type != "manual" and user.role != Role.admin:
-        raise HTTPException(403, "Only Admin can resolve a shared email or WhatsApp intake.")
+    if source_type != "manual" and not is_admin_level(user):
+        raise HTTPException(403, "Only an Admin or MD can resolve a shared email or WhatsApp intake.")
     from app.api.routers.candidates import lock_assignment_cursor
     # Matches candidate create/merge and automatic intake. No candidate can commit
     # between checking the source and durably reserving it for reviewed splitting.
@@ -313,8 +314,8 @@ def validate_selections(bundle, groups, ignored, *, complete=False):
 
 def save_review(db, identifier, user, revision, groups, ignored):
     bundle = get_bundle(db, identifier, user, lock=True)
-    if bundle.source_type != "manual" and user.role != Role.admin:
-        raise HTTPException(403, "Only Admin can resolve a shared email or WhatsApp intake.")
+    if bundle.source_type != "manual" and not is_admin_level(user):
+        raise HTTPException(403, "Only an Admin or MD can resolve a shared email or WhatsApp intake.")
     if bundle.status != "review" or bundle.revision != revision:
         raise HTTPException(409, "This review was changed or is already finished. Reload it before you make changes.")
     validate_selections(bundle, groups, ignored)
@@ -426,8 +427,8 @@ def extract_groups(db, identifier, user, revision, settings):
     """
     from app.services.document_extraction import ExtractionPending, extract_selected_pages
     bundle = get_bundle(db, identifier, user)
-    if bundle.source_type != "manual" and user.role != Role.admin:
-        raise HTTPException(403, "Only Admin can resolve a shared email or WhatsApp intake.")
+    if bundle.source_type != "manual" and not is_admin_level(user):
+        raise HTTPException(403, "Only an Admin or MD can resolve a shared email or WhatsApp intake.")
     if bundle.status != "review" or bundle.revision != revision or not bundle.sources:
         return
     groups = [(group.id, deepcopy(group.pages)) for group in groups_for(db, bundle)]
@@ -622,8 +623,8 @@ def commit_review(db, identifier, user, revision, decisions, settings):
     from app.core.deps import candidate_work_refusal
     pointer = lock_assignment_cursor(db)
     bundle = get_bundle(db, identifier, user, lock=True)
-    if bundle.source_type != "manual" and user.role != Role.admin:
-        raise HTTPException(403, "Only Admin can resolve a shared email or WhatsApp intake.")
+    if bundle.source_type != "manual" and not is_admin_level(user):
+        raise HTTPException(403, "Only an Admin or MD can resolve a shared email or WhatsApp intake.")
     if bundle.status == "completed":
         return bundle_out(db, bundle)
     if bundle.status != "review" or bundle.revision != revision:
@@ -739,7 +740,7 @@ def commit_review(db, identifier, user, revision, decisions, settings):
                 started = now()
                 db.add(Task(kind=TaskKind.initial_call, title="Initial call: confirm interest", candidate_id=candidate.id,
                     owner_id=owner.id, created_at=started, sla_started_at=started, due_at=started + timedelta(hours=48)))
-            # The owner is told it is theirs (unless they made it); only a waiting candidate alerts admins and managers.
+            # The owner is told it is theirs (unless they made it); only a waiting candidate alerts admins and MDs.
             from app.services.assignment_notifications import notify_new_candidate
             notify_new_candidate(db, candidate, owner, actor_id=user.id, actor_name=user.name)
         _attach_group(db, bundle, group, candidate, user, settings)

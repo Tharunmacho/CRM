@@ -82,6 +82,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Date, String, and_, case, cast, exists, func, literal, or_, select, text, union_all, update
 from sqlalchemy.orm import aliased
 
+from app.core.roles import ROLE_LABELS
 from app.db import models as m
 from app.db.models import LEAD_STATUSES
 from app.domain.stages import STAGES, TOTAL_STAGES
@@ -95,7 +96,7 @@ ALL_TIME_FLOOR = date(2000, 1, 1)
 ALL_TIME_MONTHLY_AFTER_DAYS = 730   # "Total" spanning more than about two years is drawn one point per month
 SUBMIT_ACTION = "Daily report submitted"
 NOTE_MAX = 500
-ROLE_NAMES = {"staff": "Recruiter", "manager": "Manager", "admin": "Admin"}   # what the export shows in its Role column
+ROLE_NAMES = ROLE_LABELS   # what the export shows in its Role column: Admin, MD, Recruiter
 BY_CLIENT_MAX = 50              # clients listed in `byClient`; the rest are rolled up as "Other clients"
 HISTORY_EXPORT_MAX = 5000
 # The figures a day-close snapshot holds (and the history shows).

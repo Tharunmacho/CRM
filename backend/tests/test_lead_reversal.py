@@ -75,12 +75,19 @@ def test_untouched_conversion_task_can_be_removed_but_started_work_blocks(env, w
     assert undo(env, lid, cid).status_code == 409
 
 
-@pytest.mark.parametrize("who", ["a", "b", "manager"])
-def test_reversal_removes_candidate_so_only_admin_can_use_it(env, who):
+@pytest.mark.parametrize("who", ["a", "b"])
+def test_reversal_removes_candidate_so_only_admin_level_roles_can_use_it(env, who):
     lid, cid = converted(env)
     act_as(env, who)
     assert env.client.get(f"/api/leads/{lid}/unconvert-check").status_code == 403
     assert undo(env, lid, cid).status_code == 403
+
+
+def test_an_md_can_use_the_reversal_like_an_admin(env):
+    lid, cid = converted(env)
+    act_as(env, "manager")
+    assert env.client.get(f"/api/leads/{lid}/unconvert-check").status_code == 200
+    assert undo(env, lid, cid).status_code != 403
 
 
 def test_existing_candidate_link_cannot_be_reversed_as_a_deletion(env):

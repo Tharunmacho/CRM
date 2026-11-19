@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import NotificationOut, TaskOut
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, Notification, Role, Task, TaskEvent, User, WorkflowSettings
 from app.db.session import get_db
 from app.services.notification_scope import visible_notifications
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api", tags=["workflow"])
 
 
 @router.get("/workflow/settings")
-def workflow_settings(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin, Role.manager))):
+def workflow_settings(db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     # Reading the row is one statement; it is only created (an idempotent insert) the first time.
     config = db.scalar(select(WorkflowSettings).where(WorkflowSettings.id == 1)) or settings_row(db)
     result = {"escalationRepeatHours": config.escalation_repeat_hours,
@@ -33,7 +33,7 @@ class SettingsIn(BaseModel):
 
 
 @router.patch("/workflow/settings")
-def update_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def update_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     config = settings_row(db)
     config.escalation_repeat_hours, config.updated_by = body.escalationRepeatHours, user.id
     db.add(AuditEntry(actor_id=user.id, action="Changed escalation reminders", entity_type="workflow_settings", entity_id="1", meta=body.model_dump()))
@@ -47,7 +47,7 @@ class ResetIn(BaseModel):
 
 
 @router.post("/tasks/{task_id}/reset-sla")
-def reset_sla(task_id: str, body: ResetIn, db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def reset_sla(task_id: str, body: ResetIn, db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     task = db.scalar(select(Task).where(Task.id == task_id).with_for_update())
     if task is None:
         raise HTTPException(404, "Task not found")
@@ -62,7 +62,7 @@ def reset_sla(task_id: str, body: ResetIn, db: Session = Depends(get_db), user: 
 
 @router.get("/tasks/missed-updates")
 def missed_updates(day: date, staff: str | None = None, db: Session = Depends(get_db),
-                   user: User = Depends(require_role(Role.admin, Role.manager))):
+                   user: User = Depends(require_admin_level())):
     query = select(TaskEvent.task_id).where(
         TaskEvent.kind == "missed_update", TaskEvent.meta["agencyDate"].astext == day.isoformat())
     if staff and staff != "all":

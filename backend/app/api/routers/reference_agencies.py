@@ -46,6 +46,23 @@ class ReferenceAgencyIn(MasterInput):
     staffContacts: list[StaffContactIn] = Field(default_factory=list, max_length=MAX_STAFF_CONTACTS)
     specialisations: list[Specialisation] = Field(default_factory=list, max_length=len(SPECIALISATIONS) * 2)
     preferredCountries: list[PreferredCountry] = Field(default_factory=list, max_length=len(PREFERRED_COUNTRIES) * 2)
+    # "Very active at present". Active agencies are listed first. A PUT that does not mention it keeps the saved value.
+    activeAgency: bool = False
+
+    @field_validator("activeAgency", mode="before")
+    @classmethod
+    def active_flag(cls, value):
+        """A real boolean from the form; from a spreadsheet cell also yes/no, true/false, 1/0, active/inactive. Blank means no."""
+        if value is None:
+            return False
+        if isinstance(value, str):
+            word = re.sub(r"\s+", " ", value).strip().casefold()
+            if word in ("", "no", "n", "false", "f", "0", "inactive", "not active", "off"):
+                return False
+            if word in ("yes", "y", "true", "t", "1", "active", "on"):
+                return True
+            raise ValueError("Active agency: use yes or no.")
+        return value
 
     @field_validator("name", "agencyName", "phone", "email", "place", "address", "state", "notes", mode="before")
     @classmethod
@@ -86,8 +103,9 @@ class ReferenceAgencyIn(MasterInput):
 
 @router.get("")
 def list_reference_agencies(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict:
-    """Every reference agency, newest first."""
-    rows = db.scalars(select(ReferenceAgency).order_by(ReferenceAgency.created_at.desc(), ReferenceAgency.id.desc())).all()
+    """Every reference agency: the active ones first, then the others; each group newest first."""
+    rows = db.scalars(select(ReferenceAgency).order_by(ReferenceAgency.active_agency.desc(), ReferenceAgency.created_at.desc(),
+                                                       ReferenceAgency.id.desc())).all()
     return {"items": [ReferenceAgencyOut.model_validate(row).model_dump(by_alias=True, mode="json") for row in rows]}
 
 
@@ -122,6 +140,8 @@ def update_reference_agency(agency_id: str, body: ReferenceAgencyIn, db: Session
     for field in ("place", "notes"):
         if field not in body.model_fields_set:
             setattr(body, field, getattr(row, field))  # Older forms do not clear unrepresented fields.
+    if "activeAgency" not in body.model_fields_set:
+        body.activeAgency = row.active_agency  # Nor do they switch the active mark off.
     return _master_save(db, user, row, body, "reference_agency", ReferenceAgencyOut)
 
 

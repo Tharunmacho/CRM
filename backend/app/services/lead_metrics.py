@@ -5,7 +5,7 @@ per person, and both are cheap to repeat because the callers sit behind the resp
 Definitions live here so the dashboard, the report, the Excel export and the tests agree (docs/workflows/02-dashboard.md,
 17-reports.md, lead-sheet-contract.md):
 
-  Dashboard (role scoped like the rest of the page: staff their own leads, admin/manager the team or the chosen person)
+  Dashboard (role scoped like the rest of the page: staff their own leads, admin/MD the team or the chosen person)
     newToday         leads UPLOADED (stored in the CRM) in the last 24 hours, a rolling window: `created_at`, never the ad platform's own
                      created time, so a sheet of older leads uploaded just now still counts
     notContacted     assigned, status still `new` and never called (same rule as the Lead sheet's "Not contacted")
@@ -13,7 +13,7 @@ Definitions live here so the dashboard, the report, the Excel export and the tes
     resumesReceived  leads sitting at `resume_received` (waiting to be converted)
     converted        leads converted to Data Bank candidates, by period (last 7/30/90 days, this year, all time)
     conversionPercent  converted leads / leads that were ever assigned, over the same scope
-    unassigned       open leads nobody owns yet (admin and manager only; always the global number)
+    unassigned       open leads nobody owns yet (admin and MD only; always the global number)
 
   Weekly report (per staff member, selected period; leads are credited to their current owner, calls to who logged them)
     assigned         leads assigned to the person during the period
@@ -36,6 +36,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 
+from app.core.roles import is_admin_level
+
 log = logging.getLogger(__name__)
 
 CLOSED = "('converted','not_interested','invalid','wrong_number')"
@@ -50,8 +52,8 @@ def _value(raw):
 
 
 def sees_team(user) -> bool:
-    """Lead numbers of everybody: admin only. Managers and staff count only the leads assigned to them."""
-    return _value(user.role) == "admin"
+    """Lead numbers of everybody: admin and MD. Staff count only the leads assigned to them."""
+    return is_admin_level(user)
 
 
 def _aware(moment: datetime) -> datetime:
@@ -82,7 +84,7 @@ def _windows(now: datetime, zone: str) -> dict:
 
 
 def dashboard_scope(user, staff_id):
-    """Whose leads the dashboard counts: None = everybody (admin/manager without a chosen person)."""
+    """Whose leads the dashboard counts: None = everybody (admin/MD without a chosen person)."""
     return staff_id if sees_team(user) else user.id
 
 
@@ -133,7 +135,7 @@ def dashboard_leads(db, user, staff_id, zone: str, now: datetime) -> dict | None
         "converted": {"week": n[9], "month": n[10], "quarter": n[11], "year": n[12], "all": n[13]},
         "total": total, "assigned": assigned, "open": open_total, "convertedTotal": converted_total,
         "conversionPercent": percent(converted_total, assigned),
-        # The manager's to-do: the number is global on purpose (an unassigned lead belongs to nobody's list).
+        # The admin/MD to-do: the number is global on purpose (an unassigned lead belongs to nobody's list).
         "unassigned": unassigned if team else None,
     }
 

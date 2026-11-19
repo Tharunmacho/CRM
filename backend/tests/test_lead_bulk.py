@@ -175,7 +175,7 @@ def test_undo_is_a_patch_with_the_previous_status_and_logs_both(env):
     assert summaries == ["Status changed from Not contacted to Not interested", "Status changed from Not interested to Not contacted"]
 
 
-def test_staff_and_managers_may_only_change_the_status_of_their_own_leads(env):
+def test_staff_may_only_change_the_status_of_their_own_leads_and_an_md_reaches_every_lead(env):
     imported(env, meta_rows(0, 4), assign_to="a")
     imported(env, meta_rows(4, 6), assign_to="b")
     imported(env, meta_rows(6, 7))
@@ -197,16 +197,12 @@ def test_staff_and_managers_may_only_change_the_status_of_their_own_leads(env):
     daily_item(env, "a", days_ago=1, key="bulk-late")
     unlocked = bulk(env, action="status", status="contacted", ids=mine)
     assert unlocked.status_code == 200 and unlocked.json()["updated"] == 4, unlocked.text
-    # a manager, like staff, changes only the leads assigned to them, by ids or by filter
+    # an MD has everything an admin has: every lead, by ids or by filter, with nothing skipped as "not yours"
     act_as(env, "manager")
-    none_mine = bulk(env, action="status", status="interested", ids=ids)
-    assert none_mine.status_code == 422 and none_mine.json()["detail"]["code"] == "invalid_request", "none of these leads exist for the manager"
-    env.db.execute(text("UPDATE crm_leads SET owner_id = 'manager' WHERE id = :i"), {"i": mine[0]}); env.db.commit()
-    one = bulk(env, action="status", status="interested", ids=ids).json()
-    assert one["updated"] == 1 and {r["code"]: r["count"] for r in one["skippedReasons"]} == {"not_yours": 6}
-    assert bulk(env, action="status", status="not_interested", filter={}, expectedCount=1).json()["updated"] == 1
-    assert bulk(env, action="delete", ids=ids).status_code == 403, "delete is admin only"
-    act_as(env, "admin")  # the admin reaches every lead
+    everything = bulk(env, action="status", status="interested", ids=ids)
+    assert everything.status_code == 200 and everything.json()["updated"] == 7 and everything.json()["skippedReasons"] == []
+    assert bulk(env, action="status", status="not_interested", filter={}, expectedCount=7).json()["updated"] == 7
+    act_as(env, "admin")  # the admin reaches every lead too
     assert bulk(env, action="status", status="resume_requested", ids=ids).json()["updated"] == 7
 
 
@@ -280,9 +276,10 @@ def test_delete_one_is_admin_only_refuses_linked_leads_and_audits(env):
     env.client.patch(f"/api/leads/{first}", json={"notes": "called twice"})
     assert env.client.post("/api/files", data={"entity_type": "lead", "entity_id": first, "slot": "resume"}, files={"file": ("cv.pdf", PDF, "application/pdf")}).status_code == 201
     name = env.db.scalar(select(m.Lead.name).where(m.Lead.id == first))
-    for who in ("manager", "a"):
-        act_as(env, who)
-        assert env.client.delete(f"/api/leads/{first}").status_code == 403, who
+    act_as(env, "a")
+    assert env.client.delete(f"/api/leads/{first}").status_code == 403
+    act_as(env, "manager")   # an MD may delete a lead like an admin (the linked lead is refused for the same reason as for an admin)
+    assert env.client.delete(f"/api/leads/{second}").status_code == 409
     act_as(env, "admin")
     linked = env.client.delete(f"/api/leads/{second}")
     assert linked.status_code == 409 and linked.json()["detail"]["code"] == "lead_linked"
@@ -519,16 +516,18 @@ def test_a_bad_choice_of_recruiters_is_refused_in_plain_english_and_changes_noth
     assert env.db.scalar(select(func.count()).select_from(m.Notification).where(m.Notification.kind == "lead_assignment")) == 0
 
 
-def test_only_the_admin_may_share_leads_between_recruiters(env):
+def test_only_admin_level_roles_may_share_leads_between_recruiters(env):
     add_recruiters(env, "c")
     imported(env, meta_rows(0, 4))
     ids = all_ids(env)
-    for who in ("manager", "a"):
-        act_as(env, who)
-        assert bulk(env, action="assign", ids=ids, assigneeIds=["a", "b"]).status_code == 403, who
-        assert env.client.post("/api/leads/assign", json={"ids": ids, "assigneeIds": ["a", "b"]}).status_code == 403, who
-    act_as(env, "admin")
+    act_as(env, "a")
+    assert bulk(env, action="assign", ids=ids, assigneeIds=["a", "b"]).status_code == 403
+    assert env.client.post("/api/leads/assign", json={"ids": ids, "assigneeIds": ["a", "b"]}).status_code == 403
     assert owner_counts(env) == {}
+    act_as(env, "manager")   # an MD shares leads exactly as an admin does
+    assert bulk(env, action="assign", ids=ids, assigneeIds=["a", "b"]).status_code == 200
+    assert owner_counts(env) == {"a": 2, "b": 2}
+    act_as(env, "admin")
 
 
 def test_assign_endpoint_shares_leads_equally_and_by_filter(env):
@@ -579,7 +578,7 @@ def test_upload_import_with_several_recruiters_refuses_a_bad_choice_and_stores_n
     assert attempt(meta_rows(0, 3), assignee_ids=jsonlib.dumps(["a", "b"]), assign_to="c").status_code == 422
     env.db.rollback()
     assert env.db.scalar(select(func.count()).select_from(m.Lead)) == 0
-    act_as(env, "manager")
+    act_as(env, "a")
     assert attempt(meta_rows(0, 3), assignee_ids=jsonlib.dumps(["a", "b"])).status_code == 403
     act_as(env, "admin")
     single = imported(env, meta_rows(0, 3), assignee_ids=jsonlib.dumps(["b"]))

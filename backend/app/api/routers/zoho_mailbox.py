@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routers.mail_accounts import account_summary, save_password_account
 from app.core.config import get_settings
-from app.core.deps import current_user, require_role
+from app.core.deps import current_user, require_role, require_admin_level
 from app.db.models import AuditEntry, MailAccount, MailAttachment, MailMessage, Role, User
 from app.db.session import get_db, writes_on_get
 from app.integrations.mail.imap import provider_message_id
@@ -22,7 +22,7 @@ from app.services.mailbox_sync import persist_messages, message_out
 from app.services.parallel_reads import parallel_reads
 
 router = APIRouter(tags=["inbox"])
-admin = require_role(Role.admin)
+admin = require_admin_level()
 
 
 def audit(db, user, action, entity_id, detail):

@@ -141,8 +141,15 @@ def test_admin_deletes_candidate_with_closed_history_documents_and_tasks(env):
     assert seeded.shared.exists() and seeded.kept.exists()
 
 
-@pytest.mark.parametrize("who", ["manager", "staff"])
-def test_only_admin_can_delete(env, who):
+def test_an_md_can_delete_a_candidate_like_an_admin(env):
+    cid = candidate(env.db, "md-delete")
+    env.db.commit()
+    assert env.http("manager").delete(f"/api/candidates/{cid}").status_code == 200
+    assert env.db.get(m.Candidate, cid) is None
+
+
+@pytest.mark.parametrize("who", ["staff"])
+def test_only_admin_level_roles_can_delete(env, who):
     cid = candidate(env.db, "x")
     env.db.commit()
     response = env.http(who).delete(f"/api/candidates/{cid}")
@@ -221,8 +228,8 @@ def test_withdraw_flag_never_overrides_invoice_history(env):
     assert env.db.get(m.Candidate, cid) is not None and env.db.get(m.Application, "a-live") is not None
 
 
-@pytest.mark.parametrize("who", ["manager", "staff"])
-def test_only_admin_can_withdraw_and_delete(env, who):
+@pytest.mark.parametrize("who", ["staff"])
+def test_only_admin_level_roles_can_withdraw_and_delete(env, who):
     cid = candidate(env.db, "x")
     application(env.db, "a-live", cid, "o1", m.ApplicationStatus.active)
     env.db.commit()

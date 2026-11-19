@@ -99,10 +99,8 @@ def test_leave_cover_then_staged_approval_and_quota(workspace):
             hr.decide_request(db, db.get(User, "admin"), result["id"], {"approved": True, "reason": "Too soon"}, at=NOW)
         db.rollback()
         hr.respond_cover(db, db.get(User, "other"), result["id"], {"accepted": True}, at=NOW); db.commit()
-        partial = hr.decide_request(db, db.get(User, "manager"), result["id"], {"approved": True, "reason": "Manager approved"}, at=NOW)
-        db.commit()
-        assert partial["status"] == "pending" and list(partial["approvals"]) == ["manager"]
-        final = hr.decide_request(db, db.get(User, "admin"), result["id"], {"approved": True, "reason": "Admin approved"}, at=NOW)
+        # An MD holds both approval stages, exactly as an admin does: one decision settles a paid-leave request.
+        final = hr.decide_request(db, db.get(User, "manager"), result["id"], {"approved": True, "reason": "MD approved"}, at=NOW)
         db.commit()
         assert final["status"] == "approved" and set(final["approvals"]) == {"manager", "admin"}
         second = approve_leave(db, date(2026, 10, 22))
@@ -133,10 +131,8 @@ def test_request_replay_conflicting_payload_and_own_approvals(workspace):
         with pytest.raises(HTTPException):
             hr.decide_request(db, db.get(User, "manager"), result["id"], {"approved": True, "reason": "Cannot self approve"}, at=NOW)
         db.rollback()
-        with pytest.raises(HTTPException):
-            hr.decide_request(db, db.get(User, "manager2"), result["id"], {"approved": True, "reason": "Another manager cannot approve"}, at=NOW)
-        db.rollback()
-        approved = hr.decide_request(db, db.get(User, "admin"), result["id"], {"approved": True, "reason": "Admin approved"}, at=NOW)
+        # Another MD is admin-level, so they may decide it (and, holding both stages, settle it).
+        approved = hr.decide_request(db, db.get(User, "manager2"), result["id"], {"approved": True, "reason": "Another MD approved"}, at=NOW)
         assert approved["status"] == "approved"
 
 
@@ -231,19 +227,20 @@ def test_weekly_off_cutoff_rotation_and_duty_plan_is_one_day(workspace):
         assert hr._day(db, owner, date(2026, 10, 30), NOW + timedelta(days=12), hr.policy())["status"] == "A"
 
 
-def test_roster_and_settings_scope_no_manager_self_changes_or_other_manager_reads(workspace):
+def test_md_has_the_admin_roster_but_cannot_change_their_own_attendance(workspace):
     with workspace() as db:
         manager = db.get(User, "manager")
         settings = hr.settings_report(db, manager, 2026, 10, at=NOW)
-        assert {row["id"] for row in settings["employees"]} == {"owner", "other", "manager"}
+        # An MD sees every employee, another MD included, exactly like an admin.
+        assert {row["id"] for row in settings["employees"]} == {"owner", "other", "manager", "manager2"}
         assert {row["id"] for row in settings["coverColleagues"]} == {"owner", "other"}
-        with pytest.raises(HTTPException):
-            hr.month_report(db, manager, 2026, 10, "manager2", at=NOW)
-        with pytest.raises(HTTPException):
+        assert hr.month_report(db, manager, 2026, 10, "manager2", at=NOW)["staff"][0]["userId"] == "manager2"
+        with pytest.raises(HTTPException):   # but nobody changes their own record: a different MD or Admin must
             hr.save_work_timing(db, manager, {"userId": "manager", "effectiveFrom": NOW.date(), "shift": {}, "reason": "Own shift change"})
         db.rollback()
-        with pytest.raises(HTTPException):
-            hr.save_calendar_day(db, manager, {"userId": "owner", "date": NOW.date(), "status": "PL", "reason": "Finance required"})
+        # Paid or unpaid leave on the calendar needs Admin-level authority, which an MD has.
+        saved = hr.save_calendar_day(db, manager, {"userId": "owner", "date": NOW.date(), "status": "PL", "reason": "Finance required"})
+        assert saved["status"] == "PL"
 
 
 def test_monthly_tracking_boundary_inactive_cutoff_and_overnight_shift(workspace):
@@ -282,7 +279,7 @@ def test_adjustment_is_audited_status_only_and_permissions_enforced(workspace):
         add_shift(db, hours=7)
         values = {"userId": "owner", "date": NOW.date(), "kind": "status_override", "status": "P", "reason": "Documented status correction"}
         with pytest.raises(HTTPException):
-            hr.create_adjustment(db, db.get(User, "manager"), values, at=NOW + timedelta(days=1))
+            hr.create_adjustment(db, db.get(User, "owner"), values, at=NOW + timedelta(days=1))   # a recruiter cannot
         db.rollback()
         hr.create_adjustment(db, db.get(User, "admin"), values, at=NOW + timedelta(days=1)); db.commit()
         result = hr.month_report(db, db.get(User, "admin"), 2026, 10, "owner", at=NOW + timedelta(days=1))["staff"][0]["days"][0]
@@ -309,7 +306,7 @@ def test_api_role_scope_manager_clock_and_schema_validation(workspace, monkeypat
     response = client.post("/api/attendance/check-in", json={"requestKey": str(uuid4())})
     assert response.status_code == 200 and response.json()["attendance"]["status"] == "checked_in"
     assert client.post("/api/presence/heartbeat", json={"clientId": str(uuid4()), "sequence": 1, "visible": True}).status_code == 403
-    assert client.get("/api/attendance/month?year=2026&month=10&staffId=manager2").status_code == 404
+    assert client.get("/api/attendance/month?year=2026&month=10&staffId=manager2").status_code == 200   # an MD reads any employee, like an admin
     role[0] = "admin"
     assert client.post("/api/attendance/check-in", json={"requestKey": str(uuid4())}).status_code == 403
     assert client.post("/api/attendance/duty-plans", json={"userId": "owner", "date": "2026-10-21", "reason": "Invalid break",
@@ -324,9 +321,8 @@ def test_assignment_availability_uses_final_calendar_and_agency_day(workspace):
         result, _ = request(db)
         assert unavailable_staff_ids(db, at=NOW) == set()
         hr.respond_cover(db, db.get(User, "other"), result["id"], {"accepted": True}); db.commit()
-        hr.decide_request(db, db.get(User, "manager"), result["id"], {"approved": True, "reason": "Manager stage"}, at=NOW); db.commit()
-        assert unavailable_staff_ids(db, at=NOW) == set()
-        hr.decide_request(db, db.get(User, "admin"), result["id"], {"approved": True, "reason": "Final approval"}, at=NOW); db.commit()
+        assert unavailable_staff_ids(db, at=NOW) == set()   # accepted cover alone does not make anyone unavailable
+        hr.decide_request(db, db.get(User, "manager"), result["id"], {"approved": True, "reason": "MD approval holds both stages"}, at=NOW); db.commit()
         assert unavailable_staff_ids(db, at=NOW) == {"owner"}
         assert unavailable_staff_ids(db, at=datetime(2026, 10, 20, 18, 30, tzinfo=timezone.utc)) == {"owner"}
         assert unavailable_staff_ids(db, at=datetime(2026, 10, 20, 18, 29, tzinfo=timezone.utc)) == set()
@@ -420,17 +416,17 @@ def test_manual_on_leave_prevents_automatic_cover_return(workspace):
         assert db.get(Candidate, "candidate").owner_id == "other"
 
 
-def test_only_admin_can_approve_a_reasoned_emergency_permission_exception(workspace):
+def test_only_admin_level_roles_can_approve_a_reasoned_emergency_permission_exception(workspace):
     with workspace() as db:
         requested, _ = request(db, kind="late", minutes=30)
         decision = {"approved": True, "reason": "Documented emergency requires another occasion", "emergencyOverride": True}
         with pytest.raises(HTTPException) as exc:
-            hr.decide_request(db, db.get(User, "manager"), requested["id"], decision, at=NOW)
-        assert exc.value.status_code == 403
+            hr.decide_request(db, db.get(User, "other"), requested["id"], decision, at=NOW)   # a recruiter cannot (no decision stage at all)
+        assert exc.value.status_code in (403, 404)
         db.rollback()
         row = db.get(AttendanceHRRequest, requested["id"])
         assert not row.emergency_override and row.status == "pending" and not row.approvals
-        result = hr.decide_request(db, db.get(User, "admin"), requested["id"], decision, at=NOW)
+        result = hr.decide_request(db, db.get(User, "manager"), requested["id"], decision, at=NOW)   # an MD can, like an admin
         db.commit()
         assert result["emergencyOverride"] and result["status"] == "approved"
         history = hr.request_report(db, db.get(User, "owner"), 2026, 10)["requests"][0]

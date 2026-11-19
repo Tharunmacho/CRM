@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.services import document_storage
-from app.core.deps import candidate_work_refusal, current_user, ensure_can_work_candidate, require_role
+from app.core.deps import candidate_work_refusal, current_user, ensure_can_work_candidate, require_role, require_admin_level
 from app.integrations.ocr.mapping import resume_text_from
 from app.services import client_routing
 from app.services import form_extraction as form_fx
@@ -64,6 +64,7 @@ from app.db.models import (
     WhatsAppMessage,
     WhatsAppSendAttempt,
 )
+from app.core.roles import ADMIN_LEVEL_ROLES, is_admin_level
 
 router = APIRouter(prefix="/api/candidates", tags=["candidates"])
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ def candidate_position_groups(response: Response, filters: Search = Depends(cand
 
 
 @router.get("/export")
-def candidate_export(filters: Search = Depends(candidate_filters), db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def candidate_export(filters: Search = Depends(candidate_filters), db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     return Response(export_candidates(db, filters), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": 'attachment; filename="candidate-data-bank.xlsx"', "Cache-Control": "private, no-store"})
 
@@ -145,7 +146,7 @@ def candidate_pool_counts(response: Response, staff: str | None = Query(default=
 
 
 @router.post("/assign-waiting")
-def assign_waiting(db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))):
+def assign_waiting(db: Session = Depends(get_db), user: User = Depends(require_admin_level())):
     """Give every owner-less candidate to the next eligible recruiter (round-robin).
 
     Intake leaves a candidate unassigned when nobody is eligible; this is the sweep that
@@ -480,7 +481,7 @@ class CandidateOut(Wire):
 
 
 class CandidateCreate(CandidateIn):
-    # Admin and manager may name the recruiter right away; empty means "the next free recruiter".
+    # Admin and MD may name the recruiter right away; empty means "the next free recruiter".
     # A staff member's own entry always goes to that staff member, so this is refused for them.
     assign_to: str | None = Field(default=None, max_length=36)
 
@@ -626,15 +627,15 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, refusal)
 
     # Who gets the candidate. A staff member who adds a candidate works it: it is assigned to them and the
-    # round-robin is left alone (a manager's add works the same way). Only the admin may name a recruiter, or leave it to the next free one.
+    # round-robin is left alone (an MD, being admin-level, follows the admin path below). Only an admin or MD may name a recruiter, or leave it to the next free one.
     requested = getattr(body, "assign_to", None)
     # Client staff routing (see services/client_routing.py): a designation that an open order of a client with allocated staff
-    # asks for goes to the least-loaded of that staff. An admin's or manager's explicit choice always wins.
+    # asks for goes to the least-loaded of that staff. An admin's or MD's explicit choice always wins.
     if defer_assignment:
         owner = None
-    elif user.role != Role.admin:  # only the admin hands a candidate to someone else; a manager's or recruiter's own add is theirs
+    elif not is_admin_level(user):  # only an admin or MD hands a candidate to someone else; a recruiter's own add is theirs
         if requested and requested != user.id:
-            raise HTTPException(403, "A candidate you add is assigned to you. Only the admin can choose another recruiter.")
+            raise HTTPException(403, "A candidate you add is assigned to you. Only an admin or MD can choose another recruiter.")
         owner = client_routing.route_new_candidate(db, body.designations, keep_user_id=user.id) or user
     elif requested:
         owner = ensure_assignable(db, requested)
@@ -713,7 +714,7 @@ def create_candidate_record(body: CandidateCreate, db: Session, user: User, *, c
         db.flush()
         task_id = task.id
 
-    # The owner is told the candidate is theirs (not when they made it themselves); admins and managers hear only about a
+    # The owner is told the candidate is theirs (not when they made it themselves); admins and MDs hear only about a
     # candidate nobody could take. The person who created it is never notified of their own action.
     from app.services.assignment_notifications import notify_new_candidate
     notify_new_candidate(db, candidate, owner, actor_id=user.id, actor_name=user.name)
@@ -755,7 +756,7 @@ def candidate_ocr(
     sections. Fetched on its own because the bootstrap carries every candidate and
     never needs it. A candidate entered by hand has none, which is an empty object.
 
-    Admin, manager and the candidate's owner get the stored payload exactly. For anyone
+    Admin, MD and the candidate's owner get the stored payload exactly. For anyone
     else the Aadhaar number, VID and enrolment id (also where they occur in the Aadhaar
     page text) keep only their last four digits. Documents
     of a kind beyond the first are under `additional_documents` as `{kind: raw, "_source": {...}}`.
@@ -768,7 +769,7 @@ def candidate_ocr(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
     response.headers["Cache-Control"] = "private, no-store"
     stored = candidate.ocr_data or {}
-    if user.role in {Role.admin, Role.manager} or (candidate.owner_id and candidate.owner_id == user.id):
+    if is_admin_level(user) or (candidate.owner_id and candidate.owner_id == user.id):
         return stored
     return mask_aadhaar_identifiers(stored)
 
@@ -875,7 +876,7 @@ def request_allocation(candidate_id: str, db: Session = Depends(get_db), user: U
         AuditEntry.entity_type == "candidate", AuditEntry.entity_id == candidate.id, AuditEntry.at >= since).limit(1))
     if already:
         return {"requested": True, "alreadyRequested": True, "notified": 0}
-    admins = list(db.scalars(select(User.id).where(User.active.is_(True), User.role == Role.admin).order_by(User.id)))
+    admins = list(db.scalars(select(User.id).where(User.active.is_(True), User.role.in_(ADMIN_LEVEL_ROLES)).order_by(User.id)))
     if not admins:  # nothing is written, so a request made once an admin exists is not answered "already requested"
         raise HTTPException(503, "No admin is available to receive requests right now. Try again later.")
     hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -904,7 +905,7 @@ def merge_candidate(candidate_id: str, body: CandidateIn, db: Session = Depends(
     if not candidate:
         raise HTTPException(404, "Candidate not found.")
     # Combining adds documents and fills empty fields of someone's candidate, so it is work on that
-    # candidate: the assigned recruiter, a manager or an admin. Anyone else is told who owns it.
+    # candidate: the assigned recruiter, an MD or an admin. Anyone else is told who owns it.
     ensure_can_work_candidate(candidate, user, db)
     intake_jobs = lock_intake_group(db, body.intake_group_id, user.id)
     recovered_id = saved_candidate_id(intake_jobs)
@@ -1106,7 +1107,7 @@ def _delete_candidate_rows(db: Session, candidate_id: str, *, audit_id: str, act
 @router.delete("/{candidate_id}")
 def delete_candidate(candidate_id: str, background: BackgroundTasks,
                      withdraw_from_orders: bool = Query(False, alias="withdrawFromOrders"),
-                     db: Session = Depends(get_db), user: User = Depends(require_role(Role.admin))) -> dict:
+                     db: Session = Depends(get_db), user: User = Depends(require_admin_level())) -> dict:
     # `?withdrawFromOrders=true` is the admin's explicit "take them off the order(s) and delete" confirmation: a candidate
     # on an ACTIVE order is then deleted too. Without it (the default) such a candidate is refused. A deployed placement
     # and any invoice/payment history are kept on record either way.

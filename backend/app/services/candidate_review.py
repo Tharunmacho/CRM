@@ -167,7 +167,7 @@ def start_initial_call(db, candidate, owner_id: str, at: datetime) -> bool:
 def notify_candidate_received(db, candidate, owner, *, channel: str, kind: str | None = None, results) -> None:
     """Receipt notices for a candidate created by intake, plus the review marker and the
     best-effort WhatsApp conversation link. The owner is told it was assigned to them; only a candidate nobody
-    could take alerts the admins and managers. (`kind` is accepted for older callers and ignored.)"""
+    could take alerts the admins and MDs. (`kind` is accepted for older callers and ignored.)"""
     record_review_flag(db, candidate, ocr_warning=has_extraction_warnings(results))
     from app.services.assignment_notifications import notify_new_candidate
     notify_new_candidate(db, candidate, owner, channel=channel)
